@@ -250,19 +250,19 @@ agents secrets create prod-stripe
 agents secrets add prod-stripe STRIPE_SECRET_KEY     # Prompts, stores in Keychain
 agents secrets add prod-stripe TEST_CARD --value "4242..."
 
-# Injected at run time. The YAML on disk has only refs.
+# Injected at run time. Bundle definitions live in the Keychain, not on disk.
 agents run claude "charge a test card" --secrets prod-stripe
 ```
 
 <p align="center">
-  <img src="assets/secrets.svg" alt="How agents-cli secrets work: stripe.yml holds a pointer, the macOS Keychain holds the value, agents-cli resolves at runtime and injects the env into the child process" width="100%" />
+  <img src="assets/secrets.svg" alt="How agents-cli secrets work: bundle definitions live in the macOS Keychain alongside their values, agents-cli resolves at runtime and injects the env into the child process" width="100%" />
 </p>
 
 Merge order: profile env < `--secrets` < `--env K=V`. A missing keychain item aborts before the child starts.
 
 ### Cross-machine sync via iCloud Keychain
 
-Pass `--icloud-sync` when creating a bundle and the values are written to the iCloud-synced keychain. Sign into the same iCloud account on another Mac (with iCloud Keychain enabled) and the values appear there within seconds — no copy-paste, no `.env` files emailed to yourself, no shared secret stores.
+Pass `--icloud-sync` when creating a bundle and both the bundle definition and its values are written to the iCloud-synced keychain. Sign into the same iCloud account on another Mac (with iCloud Keychain enabled) and the bundle appears there within seconds — no copy-paste, no `.env` files emailed to yourself, no shared secret stores.
 
 ```bash
 # On laptop:
@@ -270,13 +270,13 @@ agents secrets create npm-tokens --icloud-sync
 agents secrets add npm-tokens NPM_TOKEN          # value lives in iCloud Keychain
 
 # On another Mac (same iCloud account):
-agents secrets add npm-tokens NPM_TOKEN          # the value is already there;
-                                                 # you only need the bundle YAML locally
+agents secrets list                              # npm-tokens is already there;
+agents run claude "..." --secrets npm-tokens     # injects NPM_TOKEN automatically
 ```
 
-Under the hood, `--icloud-sync` routes writes through a notarized helper app (`AgentsKeychain.app`) that holds the entitlement macOS requires for `kSecAttrSynchronizable`. Bundles without `--icloud-sync` use `/usr/bin/security` and stay device-local.
+Under the hood, `--icloud-sync` routes writes through a notarized helper app (`AgentsKeychain.app`) that holds the entitlement macOS requires for `kSecAttrSynchronizable`. Bundles without `--icloud-sync` stay device-local.
 
-Bundle YAML files (`~/.agents/secrets/*.yml`) are not synced — only the secret values. Push the YAMLs across machines via `agents repo push` if you want full bundle definitions to follow.
+Bundle definitions sync via iCloud Keychain too — no `agents repo push` needed for secrets, no recreate step on each Mac. Nothing about secrets ever lives in plaintext on disk.
 
 ---
 

@@ -1,19 +1,30 @@
 /**
  * Secret bundles -- named sets of keychain-backed environment variables.
  *
- * Each bundle is a YAML file in ~/.agents/secrets/ declaring key names.
- * Values live in the macOS Keychain and are injected into the agent's
- * environment at spawn time via `agents run --secrets <bundle>`.
+ * Bundle metadata (name, description, vars map) is stored in the macOS
+ * Keychain as a JSON blob under `agents-cli.bundles.<name>`. Bundles created
+ * with `--icloud-sync` write the metadata to the iCloud-synced keychain so
+ * the full bundle definition (not just secret values) propagates across
+ * the user's Macs. Nothing about secrets ever lives in plaintext on disk.
+ *
+ * Secret values keep their old layout: one keychain item per key under
+ * `agents-cli.secrets.<bundle>.<key>`, sync-state matching the bundle's
+ * `icloud_sync` flag.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { getSecretsDir, getUserSecretsDir } from '../state.js';
+import { getUserSecretsDir } from '../state.js';
 import {
+  deleteKeychainToken,
+  getKeychainToken,
+  hasKeychainToken,
+  listKeychainItems,
   parseBundleValue,
   resolveRef,
   secretsKeychainItem,
+  setKeychainToken,
   type BundleValue,
   type SecretRef,
 } from './index.js';
@@ -23,13 +34,14 @@ export interface SecretsBundle {
   name: string;
   description?: string;
   allow_exec?: boolean;
-  /** When true, keychain-backed values are stored in iCloud Keychain so they sync across the user's Macs. */
+  /** When true, keychain-backed values and bundle metadata sync via iCloud Keychain. */
   icloud_sync?: boolean;
   vars: Record<string, BundleValue>;
 }
 
 const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,48}$/i;
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const BUNDLE_META_PREFIX = 'agents-cli.bundles.';
 
 /** Validate a bundle name against the allowed pattern. Throws on invalid input. */
 export function validateBundleName(name: string): void {
@@ -44,32 +56,34 @@ export function validateEnvKey(key: string): void {
   }
 }
 
-function bundlePath(name: string): string {
-  // Check user dir first (for reads), write to user dir
-  const userPath = path.join(getUserSecretsDir(), `${name}.yml`);
-  if (fs.existsSync(userPath)) return userPath;
-  const systemPath = path.join(getSecretsDir(), `${name}.yml`);
-  if (fs.existsSync(systemPath)) return systemPath;
-  return userPath; // default write location
+function bundleMetaItem(name: string): string {
+  return BUNDLE_META_PREFIX + name;
 }
 
 export function bundleExists(name: string): boolean {
-  return fs.existsSync(bundlePath(name));
+  validateBundleName(name);
+  return hasKeychainToken(bundleMetaItem(name));
 }
 
 export function readBundle(name: string): SecretsBundle {
   validateBundleName(name);
-  const file = bundlePath(name);
-  if (!fs.existsSync(file)) {
+  let json: string;
+  try {
+    json = getKeychainToken(bundleMetaItem(name));
+  } catch {
     throw new Error(`Secrets bundle '${name}' not found.`);
   }
-  const raw = fs.readFileSync(file, 'utf-8');
-  const parsed = yaml.parse(raw) as Partial<SecretsBundle>;
+  let parsed: Partial<SecretsBundle>;
+  try {
+    parsed = JSON.parse(json) as Partial<SecretsBundle>;
+  } catch {
+    throw new Error(`Bundle '${name}' is malformed.`);
+  }
   if (!parsed || typeof parsed !== 'object') {
     throw new Error(`Bundle '${name}' is malformed.`);
   }
   const bundle: SecretsBundle = {
-    name: parsed.name || name,
+    name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
     icloud_sync: Boolean(parsed.icloud_sync),
@@ -86,46 +100,40 @@ export function writeBundle(bundle: SecretsBundle): void {
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);
   }
-  const dir = getUserSecretsDir();
-  fs.mkdirSync(dir, { recursive: true });
-  const body = yaml.stringify({
-    name: bundle.name,
+  const payload = {
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
     icloud_sync: bundle.icloud_sync ? true : undefined,
     vars: bundle.vars,
-  });
-  const file = bundlePath(bundle.name);
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, body, 'utf-8');
-  fs.renameSync(tmp, file);
+  };
+  const json = JSON.stringify(payload);
+  setKeychainToken(bundleMetaItem(bundle.name), json, Boolean(bundle.icloud_sync));
 }
 
 export function deleteBundle(name: string): boolean {
   validateBundleName(name);
-  const file = bundlePath(name);
-  if (!fs.existsSync(file)) return false;
-  fs.unlinkSync(file);
-  return true;
+  return deleteKeychainToken(bundleMetaItem(name));
 }
 
 export function listBundles(): SecretsBundle[] {
-  const seen = new Set<string>();
-  const bundles: SecretsBundle[] = [];
-  for (const dir of [getUserSecretsDir(), getSecretsDir()]) {
-    if (!fs.existsSync(dir)) continue;
-    for (const entry of fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'))) {
-      const name = entry.replace(/\.(yml|yaml)$/, '');
-      if (seen.has(name)) continue;
-      seen.add(name);
-      try {
-        bundles.push(readBundle(name));
-      } catch {
-        // Skip malformed bundles; surfaced via `agents secrets view <name>`.
-      }
+  let services: string[];
+  try {
+    services = listKeychainItems(BUNDLE_META_PREFIX);
+  } catch {
+    return [];
+  }
+  const names = services
+    .map((s) => s.slice(BUNDLE_META_PREFIX.length))
+    .filter((n) => BUNDLE_NAME_PATTERN.test(n));
+  const out: SecretsBundle[] = [];
+  for (const name of names) {
+    try {
+      out.push(readBundle(name));
+    } catch {
+      // Skip malformed bundles; surfaced via `agents secrets view <name>`.
     }
   }
-  return bundles.sort((a, b) => a.name.localeCompare(b.name));
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Classify each var for UI rendering.
@@ -179,7 +187,7 @@ export function resolveBundleEnv(bundle: SecretsBundle): Record<string, string> 
   return env;
 }
 
-// Build a keychain ref expression from a bundle+key pair, for storage in YAML.
+// Build a keychain ref expression from a bundle+key pair, for storage in the bundle metadata.
 export function keychainRef(key: string): string {
   return `keychain:${key}`;
 }
@@ -218,6 +226,58 @@ export function parseDotenv(content: string): Record<string, string> {
     }
   }
   return out;
+}
+
+/**
+ * One-shot migration: move legacy `~/.agents/secrets/<name>.yml` definitions
+ * into the keychain. Idempotent — re-runs after the dir is gone are no-ops.
+ * Called eagerly at the top of every `agents secrets` subcommand. Skipped on
+ * the latency-sensitive `agents run` path.
+ */
+export function migrateLegacyBundles(): void {
+  const dir = getUserSecretsDir();
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  const ymls = entries.filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
+  if (ymls.length === 0) {
+    try { fs.rmdirSync(dir); } catch { /* not empty or already gone */ }
+    return;
+  }
+  let migrated = 0;
+  for (const entry of ymls) {
+    const file = path.join(dir, entry);
+    const name = entry.replace(/\.(yml|yaml)$/, '');
+    try {
+      validateBundleName(name);
+      const raw = fs.readFileSync(file, 'utf-8');
+      const parsed = yaml.parse(raw) as Partial<SecretsBundle> | null;
+      if (!parsed || typeof parsed !== 'object') {
+        continue;
+      }
+      const bundle: SecretsBundle = {
+        name,
+        description: parsed.description,
+        allow_exec: Boolean(parsed.allow_exec),
+        icloud_sync: Boolean(parsed.icloud_sync),
+        vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
+      };
+      writeBundle(bundle);
+      fs.unlinkSync(file);
+      migrated++;
+    } catch {
+      // Leave malformed YAMLs in place so the user can inspect them.
+    }
+  }
+  try {
+    if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+  } catch { /* ignore */ }
+  if (migrated > 0) {
+    console.log(`Migrated ${migrated} legacy bundle${migrated === 1 ? '' : 's'} from ~/.agents/secrets/ into keychain.`);
+  }
 }
 
 export type { SecretRef };

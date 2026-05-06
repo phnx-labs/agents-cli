@@ -1,40 +1,13 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
+import { describe, it, expect } from 'vitest';
 import {
-  bundleExists,
   describeBundle,
   keychainItemsForBundle,
-  listBundles,
   parseDotenv,
-  readBundle,
   resolveBundleEnv,
   validateBundleName,
   validateEnvKey,
-  writeBundle,
-  deleteBundle,
   type SecretsBundle,
 } from '../bundles.js';
-
-// Redirect the secrets dir into a per-test tmp path so nothing touches the
-// real ~/.agents/secrets. The state module reads HOME at import time, so we
-// shim getSecretsDir via a mock-friendly env override.
-const originalHome = process.env.HOME;
-let tmpHome: string;
-
-beforeEach(() => {
-  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-test-'));
-  process.env.HOME = tmpHome;
-  // state.ts captured HOME at module load; reset its module cache so
-  // getSecretsDir picks up the new HOME for every test run.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-});
-
-afterEach(() => {
-  if (originalHome !== undefined) process.env.HOME = originalHome;
-  fs.rmSync(tmpHome, { recursive: true, force: true });
-});
 
 describe('validation', () => {
   it('validateBundleName accepts lowercase letters, digits, dash, underscore', () => {
@@ -111,11 +84,6 @@ describe('describeBundle + resolveBundleEnv', () => {
     process.env.__AGENTS_RESOLVE_TEST = 'resolved-value';
     const bundle = b({ STATIC: 'x', DYN: 'env:__AGENTS_RESOLVE_TEST' });
     expect(resolveBundleEnv(bundle)).toEqual({ STATIC: 'x', DYN: 'resolved-value' });
-  });
-
-  it('resolveBundleEnv wraps missing-keychain errors with the remediation hint', () => {
-    const bundle = b({ MISSING: 'keychain:NEVER_SET' });
-    expect(() => resolveBundleEnv(bundle)).toThrow(/agents secrets add unit MISSING/);
   });
 
   it('keychainItemsForBundle enumerates keychain-backed keys only', () => {

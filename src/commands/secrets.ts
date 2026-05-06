@@ -16,6 +16,7 @@ import {
   keychainItemsForBundle,
   keychainRef,
   listBundles,
+  migrateLegacyBundles,
   parseDotenv,
   readBundle,
   validateBundleName,
@@ -165,6 +166,7 @@ export function registerSecretsCommands(program: Command): void {
   const cmd = program
     .command('secrets')
     .description('Named bundles of env variables backed by macOS Keychain (with optional iCloud sync). Inject into agents via `agents run --secrets <name>`.')
+    .hook('preAction', () => { migrateLegacyBundles(); })
     .addHelpText('after', `
 Workflow:
   Bundles are containers; secrets are the variables inside them. Create a
@@ -325,7 +327,7 @@ Examples:
   cmd
     .command('add [bundle] [key]')
     .description('Add a variable to a bundle. Defaults to keychain-backed; pass --value for literal, --env/--file/--exec for refs.')
-    .option('--value <v>', 'Store as a plaintext literal in the YAML (non-sensitive values only)')
+    .option('--value <v>', 'Store as a plaintext literal in the bundle (non-sensitive values only)')
     .option('--value-stdin', 'Read the value from stdin (stored in keychain unless combined with --value)')
     .option('--env <VAR>', 'Store as an env: ref that reads from the parent process.env at run time')
     .option('--file <path>', 'Store as a file: ref that reads from a file at run time')
@@ -397,7 +399,7 @@ Examples:
   cmd
     .command('remove [bundle] [key]')
     .description('Remove a key from the bundle. Purges the keychain item if the ref was keychain:. Use --keep-secret to retain it.')
-    .option('--keep-secret', 'Leave the keychain item in place after removing the YAML ref')
+    .option('--keep-secret', 'Leave the keychain item in place after removing the ref from the bundle')
     .action(async (bundleName: string | undefined, key: string | undefined, opts: { keepSecret?: boolean }) => {
       try {
         const resolvedBundleName = bundleName ?? (await pickBundleName('remove from'));
@@ -429,7 +431,7 @@ Examples:
   cmd
     .command('delete [name]')
     .description('Delete a bundle and purge all its keychain items (use --keep-secrets to retain them).')
-    .option('--keep-secrets', 'Leave keychain items in place after deleting the bundle file')
+    .option('--keep-secrets', 'Leave keychain items in place after deleting the bundle')
     .option('-y, --yes', 'Skip the confirmation prompt')
     .action(async (name: string | undefined, opts: { keepSecrets?: boolean; yes?: boolean }) => {
       try {
@@ -476,7 +478,7 @@ Examples:
     .command('import [bundle]')
     .description('Import keys from a .env file into a bundle. By default every key is stored in keychain.')
     .requiredOption('--from <path>', 'Path to a .env file')
-    .option('--all-plaintext', 'Store every imported value as a YAML literal (skip keychain prompts)')
+    .option('--all-plaintext', 'Store every imported value as a literal in the bundle metadata (skip keychain item creation)')
     .option('--force', 'Overwrite an existing key in the bundle')
     .action(async (bundleName: string | undefined, opts: { from: string; allPlaintext?: boolean; force?: boolean }) => {
       try {
