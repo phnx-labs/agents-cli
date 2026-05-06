@@ -43,7 +43,6 @@ const SYSTEM_LEGACY_MEMORY_DIR = path.join(SYSTEM_AGENTS_DIR, 'memory');
 const SYSTEM_MCP_DIR = path.join(SYSTEM_AGENTS_DIR, 'mcp');
 const SYSTEM_PERMISSIONS_DIR = path.join(SYSTEM_AGENTS_DIR, 'permissions');
 const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
-const SYSTEM_SECRETS_DIR = path.join(SYSTEM_AGENTS_DIR, 'secrets');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
 const SYSTEM_INSTRUCTIONS_FILE = path.join(SYSTEM_AGENTS_DIR, 'instructions.md');
@@ -204,9 +203,6 @@ export function getPermissionsDir(): string { return SYSTEM_PERMISSIONS_DIR; }
 /** Path to subagent definition directories — system repo. */
 export function getSubagentsDir(): string { return SYSTEM_SUBAGENTS_DIR; }
 
-/** Path to encrypted secret bundles — system repo. */
-export function getSecretsDir(): string { return SYSTEM_SECRETS_DIR; }
-
 /** Path to ~/.agents-system/promptcuts.yaml. */
 export function getPromptcutsPath(): string { return SYSTEM_PROMPTCUTS_FILE; }
 
@@ -225,7 +221,6 @@ export function getSystemRulesDir(): string { return SYSTEM_RULES_DIR; }
 export function getSystemMcpDir(): string { return SYSTEM_MCP_DIR; }
 export function getSystemPermissionsDir(): string { return SYSTEM_PERMISSIONS_DIR; }
 export function getSystemSubagentsDir(): string { return SYSTEM_SUBAGENTS_DIR; }
-export function getSystemSecretsDir(): string { return SYSTEM_SECRETS_DIR; }
 export function getSystemPromptcutsPath(): string { return SYSTEM_PROMPTCUTS_FILE; }
 
 // ─── User resource getters ────────────────────────────────────────────────────

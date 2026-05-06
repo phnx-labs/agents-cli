@@ -13,9 +13,9 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { getUserSecretsDir } from '../state.js';
 import {
   deleteKeychainToken,
   getKeychainToken,
@@ -340,54 +340,59 @@ export function parseDotenv(content: string): Record<string, string> {
 }
 
 /**
- * One-shot migration: move legacy `~/.agents/secrets/<name>.yml` definitions
- * into the keychain. Idempotent — re-runs after the dir is gone are no-ops.
- * Called eagerly at the top of every `agents secrets` subcommand. Skipped on
- * the latency-sensitive `agents run` path.
+ * One-shot migration: move legacy YAML bundles into the keychain. Scans both
+ * `~/.agents/secrets/` and `~/.agents-system/secrets/` — past versions of the
+ * CLI sometimes wrote bundles into the system repo even though that's never
+ * been a legitimate location. After migration the directories are removed so
+ * the system repo never carries a `secrets/` subdir again.
+ *
+ * Idempotent: re-runs after the dirs are gone are no-ops. Called eagerly at
+ * the top of every `agents secrets` subcommand. Skipped on the latency-
+ * sensitive `agents run` path.
  */
 export function migrateLegacyBundles(): void {
-  const dir = getUserSecretsDir();
-  let entries: string[];
-  try {
-    entries = fs.readdirSync(dir);
-  } catch {
-    return;
-  }
-  const ymls = entries.filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
-  if (ymls.length === 0) {
-    try { fs.rmdirSync(dir); } catch { /* not empty or already gone */ }
-    return;
-  }
+  const home = os.homedir();
+  const dirs = [
+    path.join(home, '.agents', 'secrets'),
+    path.join(home, '.agents-system', 'secrets'),
+  ];
   let migrated = 0;
-  for (const entry of ymls) {
-    const file = path.join(dir, entry);
-    const name = entry.replace(/\.(yml|yaml)$/, '');
+  for (const dir of dirs) {
+    let entries: string[];
     try {
-      validateBundleName(name);
-      const raw = fs.readFileSync(file, 'utf-8');
-      const parsed = yaml.parse(raw) as Partial<SecretsBundle> | null;
-      if (!parsed || typeof parsed !== 'object') {
-        continue;
-      }
-      const bundle: SecretsBundle = {
-        name,
-        description: parsed.description,
-        allow_exec: Boolean(parsed.allow_exec),
-        icloud_sync: Boolean(parsed.icloud_sync),
-        vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
-      };
-      writeBundle(bundle);
-      fs.unlinkSync(file);
-      migrated++;
+      entries = fs.readdirSync(dir);
     } catch {
-      // Leave malformed YAMLs in place so the user can inspect them.
+      continue;
     }
+    const ymls = entries.filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
+    for (const entry of ymls) {
+      const file = path.join(dir, entry);
+      const name = entry.replace(/\.(yml|yaml)$/, '');
+      try {
+        validateBundleName(name);
+        const raw = fs.readFileSync(file, 'utf-8');
+        const parsed = yaml.parse(raw) as Partial<SecretsBundle> | null;
+        if (!parsed || typeof parsed !== 'object') continue;
+        const bundle: SecretsBundle = {
+          name,
+          description: parsed.description,
+          allow_exec: Boolean(parsed.allow_exec),
+          icloud_sync: Boolean(parsed.icloud_sync),
+          vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
+        };
+        writeBundle(bundle);
+        fs.unlinkSync(file);
+        migrated++;
+      } catch {
+        // Leave malformed YAMLs in place so the user can inspect them.
+      }
+    }
+    try {
+      if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+    } catch { /* not empty or already gone */ }
   }
-  try {
-    if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
-  } catch { /* ignore */ }
   if (migrated > 0) {
-    console.log(`Migrated ${migrated} legacy bundle${migrated === 1 ? '' : 's'} from ~/.agents/secrets/ into keychain.`);
+    console.log(`Migrated ${migrated} legacy bundle${migrated === 1 ? '' : 's'} into keychain.`);
   }
 }
 
