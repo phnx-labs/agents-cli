@@ -110,12 +110,24 @@ export function setKeychainBackendForTest(b: KeychainBackend | null): KeychainBa
   return prev;
 }
 
+// Backend routing: non-sync items go through /usr/bin/security so they share
+// an ACL identity with items created by previous CLI versions (no prompts on
+// existing data). Sync items must go through the signed .app — only the .app
+// holds the keychain-access-groups entitlement macOS requires for
+// kSecAttrSynchronizable. Enumeration also goes through the .app because the
+// security CLI doesn't expose listing by service prefix.
+
 /** Check if a keychain item exists (macOS only). */
 export function hasKeychainToken(item: string, sync = false): boolean {
   if (backend) return backend.has(item, sync);
   assertMacOS();
-  const bin = ensureKeychainHelper();
-  return spawnSync(bin, ['has', item, os.userInfo().username], {
+  if (sync) {
+    const bin = ensureKeychainHelper();
+    return spawnSync(bin, ['has', item, os.userInfo().username], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).status === 0;
+  }
+  return spawnSync('security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   }).status === 0;
 }
@@ -124,14 +136,28 @@ export function hasKeychainToken(item: string, sync = false): boolean {
 export function getKeychainToken(item: string, sync = false): string {
   if (backend) return backend.get(item, sync);
   assertMacOS();
-  const bin = ensureKeychainHelper();
-  const result = spawnSync(bin, ['get', item, os.userInfo().username], {
+  if (sync) {
+    const bin = ensureKeychainHelper();
+    const result = spawnSync(bin, ['get', item, os.userInfo().username], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (result.status === 1) throw new Error(`Keychain item '${item}' not found.`);
+    if (result.status !== 0) {
+      const msg = result.stderr?.toString().trim();
+      throw new Error(msg || `Failed to read keychain item '${item}'.`);
+    }
+    const token = result.stdout?.toString().trim();
+    if (!token) throw new Error(`Keychain item '${item}' exists but is empty.`);
+    return token;
+  }
+  const result = spawnSync('security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (result.status === 1) throw new Error(`Keychain item '${item}' not found.`);
+  if (result.status === 44) throw new Error(`Keychain item '${item}' not found.`);
   if (result.status !== 0) {
-    const msg = result.stderr?.toString().trim();
-    throw new Error(msg || `Failed to read keychain item '${item}'.`);
+    const stderr = result.stderr?.toString() || '';
+    if (/could not be found/i.test(stderr)) throw new Error(`Keychain item '${item}' not found.`);
+    throw new Error(`Failed to read keychain item '${item}': ${stderr.trim() || `exit ${result.status}`}`);
   }
   const token = result.stdout?.toString().trim();
   if (!token) throw new Error(`Keychain item '${item}' exists but is empty.`);
@@ -145,17 +171,27 @@ export function setKeychainToken(item: string, value: string, sync = false): voi
   if (!value || !value.trim()) throw new Error('Secret value is empty.');
   if (/[\r\n]/.test(value)) throw new Error('Secret value contains newlines, which are not supported.');
 
-  const bin = ensureKeychainHelper();
-  const args = sync
-    ? ['set', item, os.userInfo().username]
-    : ['set', item, os.userInfo().username, 'nosync'];
-  const result = spawnSync(bin, args, {
-    input: value,
+  if (sync) {
+    const bin = ensureKeychainHelper();
+    const result = spawnSync(bin, ['set', item, os.userInfo().username], {
+      input: value,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    if (result.status !== 0) {
+      const msg = result.stderr?.toString().trim();
+      throw new Error(msg || `Failed to write keychain item '${item}'.`);
+    }
+    return;
+  }
+  // `security -i` keeps the value out of argv (and `ps`).
+  const user = os.userInfo().username;
+  const cmd = `add-generic-password -a ${quoteForSecurityCli(user)} -s ${quoteForSecurityCli(item)} -w ${quoteForSecurityCli(value)} -U\n`;
+  const result = spawnSync('security', ['-i'], {
+    input: cmd,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   if (result.status !== 0) {
-    const msg = result.stderr?.toString().trim();
-    throw new Error(msg || `Failed to write keychain item '${item}'.`);
+    throw new Error(`Failed to write keychain item '${item}' (exit ${result.status}).`);
   }
 }
 
@@ -163,10 +199,19 @@ export function setKeychainToken(item: string, value: string, sync = false): voi
 export function deleteKeychainToken(item: string, sync = false): boolean {
   if (backend) return backend.delete(item, sync);
   assertMacOS();
-  const bin = ensureKeychainHelper();
-  return spawnSync(bin, ['delete', item, os.userInfo().username], {
+  if (sync) {
+    const bin = ensureKeychainHelper();
+    return spawnSync(bin, ['delete', item, os.userInfo().username], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).status === 0;
+  }
+  return spawnSync('security', ['delete-generic-password', '-a', os.userInfo().username, '-s', item], {
     stdio: ['ignore', 'pipe', 'pipe'],
   }).status === 0;
+}
+
+function quoteForSecurityCli(s: string): string {
+  return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
 /** Enumerate keychain item service names whose name starts with the given prefix. */
