@@ -29,6 +29,29 @@ import {
   type SecretRef,
 } from './index.js';
 
+/** Allowed values for a secret's `type` metadata field. */
+export const SECRET_TYPES = [
+  'api-key',
+  'token',
+  'password',
+  'url',
+  'database-url',
+  'ssh-key',
+  'certificate',
+  'webhook',
+  'note',
+] as const;
+export type SecretType = typeof SECRET_TYPES[number];
+
+/** Per-secret metadata. All fields optional; absent ones omitted at write time. */
+export interface VarMeta {
+  type?: SecretType;
+  /** ISO date 'YYYY-MM-DD'. Always future-dated at write time. */
+  expires?: string;
+  /** Singular freeform note. */
+  note?: string;
+}
+
 /** A named set of environment variable definitions backed by various secret providers. */
 export interface SecretsBundle {
   name: string;
@@ -37,6 +60,8 @@ export interface SecretsBundle {
   /** When true, keychain-backed values and bundle metadata sync via iCloud Keychain. */
   icloud_sync?: boolean;
   vars: Record<string, BundleValue>;
+  /** Optional per-var metadata, keyed by var name (parallel to `vars`). */
+  meta?: Record<string, VarMeta>;
 }
 
 const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,48}$/i;
@@ -53,6 +78,29 @@ export function validateBundleName(name: string): void {
 export function validateEnvKey(key: string): void {
   if (!ENV_KEY_PATTERN.test(key)) {
     throw new Error(`Invalid environment variable name '${key}'. Must match [A-Za-z_][A-Za-z0-9_]*.`);
+  }
+}
+
+/** Assert that `t` is one of the known SECRET_TYPES. Throws with the allowed list otherwise. */
+export function validateSecretType(t: string): asserts t is SecretType {
+  if (!(SECRET_TYPES as readonly string[]).includes(t)) {
+    throw new Error(`Invalid type '${t}'. One of: ${SECRET_TYPES.join(', ')}.`);
+  }
+}
+
+/**
+ * Validate an `expires` value. Accepts strict 'YYYY-MM-DD' only and rejects
+ * any date <= now. We compare against end-of-day UTC for the chosen date so
+ * "today" is treated as past (per spec).
+ */
+export function validateExpiresFutureDated(iso: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    throw new Error(`Invalid --expires '${iso}'. Use YYYY-MM-DD.`);
+  }
+  const target = new Date(iso + 'T23:59:59Z');
+  if (Number.isNaN(target.getTime())) throw new Error(`Invalid --expires date '${iso}'.`);
+  if (target.getTime() <= Date.now()) {
+    throw new Error(`--expires must be future-dated. Got '${iso}'.`);
   }
 }
 
@@ -89,6 +137,9 @@ export function readBundle(name: string): SecretsBundle {
     icloud_sync: Boolean(parsed.icloud_sync),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
+  if (parsed.meta && typeof parsed.meta === 'object') {
+    bundle.meta = parsed.meta;
+  }
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);
   }
@@ -100,11 +151,26 @@ export function writeBundle(bundle: SecretsBundle): void {
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);
   }
+  // Strip empty/all-undefined meta entries so the JSON stays tidy.
+  let meta: Record<string, VarMeta> | undefined;
+  if (bundle.meta) {
+    for (const [key, m] of Object.entries(bundle.meta)) {
+      const cleaned: VarMeta = {};
+      if (m.type) cleaned.type = m.type;
+      if (m.expires) cleaned.expires = m.expires;
+      if (m.note) cleaned.note = m.note;
+      if (Object.keys(cleaned).length > 0) {
+        if (!meta) meta = {};
+        meta[key] = cleaned;
+      }
+    }
+  }
   const payload = {
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
     icloud_sync: bundle.icloud_sync ? true : undefined,
     vars: bundle.vars,
+    meta,
   };
   const json = JSON.stringify(payload);
   setKeychainToken(bundleMetaItem(bundle.name), json, Boolean(bundle.icloud_sync));
@@ -190,6 +256,51 @@ export function resolveBundleEnv(bundle: SecretsBundle): Record<string, string> 
 // Build a keychain ref expression from a bundle+key pair, for storage in the bundle metadata.
 export function keychainRef(key: string): string {
   return `keychain:${key}`;
+}
+
+/** Options for rotateBundleSecret. */
+export interface RotateOptions {
+  /** New plaintext value to write into keychain (replaces the old one). */
+  newValue: string;
+  /** When true, drop existing meta for this key. Mutually exclusive with `meta`. */
+  clearMeta?: boolean;
+  /** Patch to merge into existing meta. Undefined fields preserve current values. */
+  meta?: Partial<VarMeta>;
+}
+
+/**
+ * Rotate a keychain-backed secret in `bundle`. Errors if `key` is not present
+ * in the bundle (use `add` to introduce a new key). Preserves existing meta
+ * unless `clearMeta` or a `meta` patch is supplied.
+ */
+export function rotateBundleSecret(bundle: SecretsBundle, key: string, opts: RotateOptions): void {
+  validateBundleName(bundle.name);
+  validateEnvKey(key);
+  if (!(key in bundle.vars)) {
+    throw new Error(`Key '${key}' not in bundle '${bundle.name}'. Use 'agents secrets add' to add a new key.`);
+  }
+  const raw = bundle.vars[key];
+  // We only rotate keychain-backed values. Literals/refs aren't "secrets" in
+  // the same sense — pivot the user back to add/remove.
+  if (typeof raw !== 'string' || !raw.startsWith('keychain:')) {
+    throw new Error(`Key '${key}' in bundle '${bundle.name}' is not keychain-backed; cannot rotate.`);
+  }
+  const shortId = raw.slice('keychain:'.length);
+  const item = secretsKeychainItem(bundle.name, shortId);
+  setKeychainToken(item, opts.newValue, bundle.icloud_sync);
+
+  if (opts.clearMeta) {
+    if (bundle.meta) delete bundle.meta[key];
+  } else if (opts.meta && Object.keys(opts.meta).length > 0) {
+    if (!bundle.meta) bundle.meta = {};
+    const current = bundle.meta[key] ?? {};
+    const patched: VarMeta = { ...current };
+    if (opts.meta.type !== undefined) patched.type = opts.meta.type;
+    if (opts.meta.expires !== undefined) patched.expires = opts.meta.expires;
+    if (opts.meta.note !== undefined) patched.note = opts.meta.note;
+    bundle.meta[key] = patched;
+  }
+  writeBundle(bundle);
 }
 
 // Iterate all keychain-backed keys in a bundle for cleanup on rm/unset.
