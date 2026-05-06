@@ -76,11 +76,18 @@ export function getProjectRunStrategy(agent: AgentId, startPath: string): RunStr
   return null;
 }
 
-/** Resolve the configured strategy: project agents.yaml, then ~/.agents-system/agents.yaml, then pinned. */
+/**
+ * Resolve the configured strategy. Lookup order:
+ *   1. project-local agents.yaml (nearest to `startPath`)
+ *   2. ~/.agents-system/agents.yaml
+ *   3. default: `available` (use the pinned default version when healthy,
+ *      otherwise fall through to a healthy account so a single rate-limited
+ *      account doesn't block the run).
+ */
 export function getConfiguredRunStrategy(agent: AgentId, startPath: string = process.cwd()): RunStrategy {
   return getProjectRunStrategy(agent, startPath)
     ?? normalizeRunStrategy(readMeta().run?.[agent]?.strategy)
-    ?? 'pinned';
+    ?? 'available';
 }
 
 /** Persist the global run strategy used by bare `agents run <agent>`. */
