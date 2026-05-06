@@ -21,6 +21,7 @@ import {
   listBundles,
   migrateLegacyBundles,
   readBundle,
+  rotateBundleSecret,
   writeBundle,
   type SecretsBundle,
 } from '../bundles.js';
@@ -143,6 +144,95 @@ describe('deleteBundle', () => {
     expect(deleteBundle('doomed')).toBe(true);
     expect(deleteBundle('doomed')).toBe(false);
     expect(bundleExists('doomed')).toBe(false);
+  });
+});
+
+describe('rotateBundleSecret', () => {
+  it('replaces the keychain value when bundle and key both exist', () => {
+    writeBundle({
+      name: 'rot',
+      vars: { API: 'keychain:API' },
+    });
+    // Seed the underlying keychain item directly via the backend store.
+    store.set('agents-cli.secrets.rot.API', { value: 'old', sync: false });
+
+    const bundle = readBundle('rot');
+    rotateBundleSecret(bundle, 'API', { newValue: 'new' });
+
+    expect(store.get('agents-cli.secrets.rot.API')?.value).toBe('new');
+  });
+
+  it('preserves existing meta when no meta patch is passed', () => {
+    writeBundle({
+      name: 'rot-meta',
+      vars: { API: 'keychain:API' },
+      meta: { API: { type: 'api-key', note: 'original note', expires: '2099-12-31' } },
+    });
+    store.set('agents-cli.secrets.rot-meta.API', { value: 'old', sync: false });
+
+    const bundle = readBundle('rot-meta');
+    rotateBundleSecret(bundle, 'API', { newValue: 'new' });
+
+    const after = readBundle('rot-meta');
+    expect(after.meta?.API).toEqual({
+      type: 'api-key',
+      note: 'original note',
+      expires: '2099-12-31',
+    });
+  });
+
+  it('merges a meta patch over existing meta', () => {
+    writeBundle({
+      name: 'rot-patch',
+      vars: { API: 'keychain:API' },
+      meta: { API: { type: 'api-key', note: 'old note' } },
+    });
+    store.set('agents-cli.secrets.rot-patch.API', { value: 'old', sync: false });
+
+    const bundle = readBundle('rot-patch');
+    rotateBundleSecret(bundle, 'API', {
+      newValue: 'new',
+      meta: { note: 'rotated' },
+    });
+
+    const after = readBundle('rot-patch');
+    expect(after.meta?.API).toEqual({ type: 'api-key', note: 'rotated' });
+  });
+
+  it('errors when the key does not exist', () => {
+    writeBundle({ name: 'rot-missing', vars: { OTHER: 'literal' } });
+    const bundle = readBundle('rot-missing');
+    expect(() => rotateBundleSecret(bundle, 'NOPE', { newValue: 'x' })).toThrow(
+      /Key 'NOPE' not in bundle 'rot-missing'/,
+    );
+  });
+
+  it('errors when the key is not keychain-backed', () => {
+    writeBundle({ name: 'rot-lit', vars: { LIT: 'plain' } });
+    const bundle = readBundle('rot-lit');
+    expect(() => rotateBundleSecret(bundle, 'LIT', { newValue: 'x' })).toThrow(
+      /not keychain-backed/,
+    );
+  });
+
+  it('clearMeta wipes only the rotated key, leaving other keys meta intact', () => {
+    writeBundle({
+      name: 'rot-clear',
+      vars: { A: 'keychain:A', B: 'keychain:B' },
+      meta: {
+        A: { type: 'api-key', note: 'goes away' },
+        B: { type: 'token', note: 'stays' },
+      },
+    });
+    store.set('agents-cli.secrets.rot-clear.A', { value: 'a-old', sync: false });
+    store.set('agents-cli.secrets.rot-clear.B', { value: 'b-old', sync: false });
+
+    const bundle = readBundle('rot-clear');
+    rotateBundleSecret(bundle, 'A', { newValue: 'a-new', clearMeta: true });
+
+    const after = readBundle('rot-clear');
+    expect(after.meta?.A).toBeUndefined();
+    expect(after.meta?.B).toEqual({ type: 'token', note: 'stays' });
   });
 });
 
