@@ -23,12 +23,6 @@ process.on('SIGINT', () => process.exit(130));
 // (e.g. `agents sessions | head`, or when stdout is captured by another process).
 process.on('SIGPIPE', () => {});
 
-// Suppress the Node.js ExperimentalWarning for node:sqlite (it's stable enough for our use).
-process.on('warning', (warning) => {
-  if (warning.name === 'ExperimentalWarning' && warning.message.includes('SQLite')) return;
-  process.stderr.write(`${warning.name}: ${warning.message}\n`);
-});
-
 // Get version from package.json
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = path.join(__dirname, '..', 'package.json');
