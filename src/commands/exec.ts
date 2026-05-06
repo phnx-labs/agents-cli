@@ -52,7 +52,7 @@ interface ExecCommandActionOptions {
   verbose?: boolean;
   timeout?: string;
   fallback?: string;
-  rotate?: boolean;
+  balanced?: boolean;
   strategy?: string;
   acp?: boolean;
 }
@@ -62,12 +62,12 @@ function isValidAgent(agent: string): agent is AgentId {
   return VALID_AGENTS.includes(agent);
 }
 
-/** Build a one-line banner describing which version the rotation picked. */
-function formatRotationBanner(result: RotateResult): string {
+/** Build a one-line banner describing which version the strategy picked. */
+function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): string {
   const { picked, healthy, excluded } = result;
   const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
-  return `[agents] rotation picked ${label} (${ratio})`;
+  return `[agents] ${verb} picked ${label} (${ratio})`;
 }
 
 /** Register the `agents run <agent> [prompt]` command. */
@@ -108,12 +108,12 @@ export function registerRunCommand(program: Command): void {
       'Comma-separated agents to try on rate-limit failure. Each entry accepts an optional @version pin (e.g., codex@0.116.0,gemini). The primary runs first; if it exits with a rate-limit error, the next agent picks up via /continue handoff.',
     )
     .option(
-      '-r, --rotate',
-      'Shortcut for --strategy rotate. Ignored when @version is pinned.',
+      '-b, --balanced',
+      'Shortcut for --strategy balanced. Ignored when @version is pinned.',
     )
     .option(
       '--strategy <strategy>',
-      'Version/account selection strategy: pinned | available | rotate. Defaults to run.<agent>.strategy, then pinned.',
+      'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then pinned. (Legacy `rotate` accepted as alias for `balanced`.)',
     )
     .option(
       '--acp',
@@ -128,18 +128,20 @@ Run strategy:
   pinned     Use the workspace/global pinned version from agents.yaml.
   available  Use the pinned version if it has usage available; otherwise switch
              to another signed-in version with usage available.
-  rotate     Pick the signed-in account with usage available and the most
-             headroom; last-active breaks ties.
+  balanced   Distribute traffic across healthy accounts using weighted random
+             by remaining capacity — fresher accounts get more, near-exhausted
+             ones get less. Avoids bursting any single account.
   Configure with run.<agent>.strategy in agents.yaml, or override with
-  --strategy. --rotate is kept as a shortcut for --strategy rotate.
+  --strategy. --balanced is kept as a shortcut for --strategy balanced.
+  Legacy "rotate" is accepted as an alias for "balanced".
   Ignored when @version is pinned, when a profile is used, or with --fallback.
 
 Examples:
   # Interactive with the pinned default version
   agents run claude
 
-  # Interactive, rotate to the least-used healthy account
-  agents run claude --strategy rotate
+  # Interactive, distribute load across healthy accounts
+  agents run claude --strategy balanced
 
   # Headless, switch away from the pinned version when usage is unavailable
   agents run claude "summarize recent git commits" --mode plan --strategy available
@@ -207,15 +209,15 @@ Examples:
         console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
         process.exit(1);
       }
-      if (options.rotate && explicitStrategy && explicitStrategy !== 'rotate') {
-        console.error(chalk.red('--rotate conflicts with --strategy. Use one strategy override.'));
+      if (options.balanced && explicitStrategy && explicitStrategy !== 'balanced') {
+        console.error(chalk.red('--balanced conflicts with --strategy. Use one strategy override.'));
         process.exit(1);
       }
-      const strategy = options.rotate ? 'rotate' : explicitStrategy ?? configuredStrategy;
+      const strategy = options.balanced ? 'balanced' : explicitStrategy ?? configuredStrategy;
 
       // Strategy only applies to bare agent invocations. Explicit @version,
       // profiles, and fallback chains already define their execution target.
-      if (strategy !== 'pinned' || options.rotate || explicitStrategy) {
+      if (strategy !== 'pinned' || options.balanced || explicitStrategy) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
@@ -228,9 +230,7 @@ Examples:
             if (resolved.version) {
               version = resolved.version;
               if (resolved.rotation) {
-                const banner = strategy === 'available'
-                  ? formatRotationBanner(resolved.rotation).replace('rotation picked', 'available picked')
-                  : formatRotationBanner(resolved.rotation);
+                const banner = formatRotationBanner(resolved.rotation, strategy);
                 process.stderr.write(chalk.gray(banner + '\n'));
               }
             } else {

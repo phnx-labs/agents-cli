@@ -39,13 +39,19 @@ export interface RotateResult {
   excluded: RotateCandidate[];
 }
 
-export const RUN_STRATEGIES: RunStrategy[] = ['pinned', 'available', 'rotate'];
+export const RUN_STRATEGIES: RunStrategy[] = ['pinned', 'available', 'balanced'];
 
-/** Return a run strategy when the input is valid, otherwise null. */
+/**
+ * Return a run strategy when the input is valid, otherwise null.
+ *
+ * `'rotate'` is accepted as a deprecated alias for `'balanced'` so old yaml
+ * configs and `--strategy rotate` invocations keep working. The legacy alias
+ * normalizes to `'balanced'` and uses the weighted-random algorithm.
+ */
 export function normalizeRunStrategy(value: unknown): RunStrategy | null {
-  return typeof value === 'string' && RUN_STRATEGIES.includes(value as RunStrategy)
-    ? value as RunStrategy
-    : null;
+  if (typeof value !== 'string') return null;
+  if (value === 'rotate') return 'balanced';
+  return RUN_STRATEGIES.includes(value as RunStrategy) ? value as RunStrategy : null;
 }
 
 /** Read project-local run strategy from the nearest agents.yaml, if present. */
@@ -149,23 +155,29 @@ function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate
 }
 
 /**
- * Pure selection: given a set of candidates, return the best one for the
- * next run. Kept separate from I/O so it can be unit-tested with fixtures.
+ * Pick a healthy candidate using weighted random by remaining capacity.
  *
- * Eligibility: signed in (email present) and not out of credits.
- * Dedupe: when multiple versions share an email (same Anthropic account
- * installed under several agent versions), collapse to one candidate per
- * email — the least-recently-active version. Without this, two parallel
- * pods could "rotate" to different versions but hit the same account and
- * both 429 against the same Anthropic quota.
- * Primary order: lowest live usage utilization wins. Least-recently-active is
- * the tie-breaker when usage is equal or unavailable. Never-used versions sort
- * oldest so fresh installs are tried before recently-used ones.
- * Tie-break: random — when two candidates share a `lastActive` timestamp
- * (common when N pods read the same snapshot), distribute across them so
- * parallel callers fan out instead of all picking the same version.
+ * Each healthy candidate gets weight = max(1, 100 - usedPercent) where
+ * usedPercent is the highest-utilized non-session window (week / sonnet_week
+ * for Claude). An account at 10% used gets weight 90; one at 90% used gets
+ * weight 10 — so the fresher account is 9× more likely to be picked. Over N
+ * calls, traffic distributes across healthy accounts proportional to their
+ * headroom, with no stampede on the lowest-usage one. Stateless — parallel
+ * callers naturally fan out via the random roll.
+ *
+ * Eligibility: signed in (email present), auth valid, and usage available
+ * (any non-session window strictly under 100%, or local flag not exhausted
+ * when no live snapshot exists).
+ *
+ * Dedupe: when multiple versions share an email, collapse to one candidate
+ * per email (the least-recently-active version). Prevents two parallel pods
+ * from "balancing" to different versions but hitting the same Anthropic
+ * account and both 429ing.
+ *
+ * Returns null if no candidate is eligible — callers fall back to the pinned
+ * version so behavior stays predictable.
  */
-export function pickRotateCandidate(candidates: RotateCandidate[]): RotateResult | null {
+export function pickBalancedCandidate(candidates: RotateCandidate[]): RotateResult | null {
   const healthy: RotateCandidate[] = [];
   const excluded: RotateCandidate[] = [];
   for (const c of candidates) {
@@ -184,7 +196,31 @@ export function pickRotateCandidate(candidates: RotateCandidate[]): RotateResult
     if (!deduped.has(c)) excluded.push(c);
   }
 
-  return { picked: sorted[0], healthy: sorted, excluded };
+  const picked = weightedRandomByCapacity(sorted);
+  return { picked, healthy: sorted, excluded };
+}
+
+/**
+ * Pick one candidate from `sorted` using weights proportional to remaining
+ * routing capacity. Floor each weight at 1 so a near-exhausted-but-still-
+ * eligible candidate can still be picked occasionally. When usage is unknown
+ * (no live snapshot), treat the candidate as full-capacity (weight 100) — we
+ * have no signal to deprioritize it.
+ */
+function weightedRandomByCapacity(sorted: RotateCandidate[]): RotateCandidate {
+  const weights = sorted.map((c) => {
+    const used = getRoutingUsedPercent(c.usageSnapshot);
+    if (used === null) return 100;
+    return Math.max(1, 100 - used);
+  });
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  if (total <= 0) return sorted[0];
+  let roll = Math.random() * total;
+  for (let i = 0; i < sorted.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return sorted[i];
+  }
+  return sorted[sorted.length - 1];
 }
 
 /**
@@ -261,20 +297,18 @@ async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> 
 }
 
 /**
- * Rotate across installed versions of an agent and pick the best one for the
- * next run. "Best" means: signed in, usage available, and lowest usage
- * utilization, with least-recently-active as a tie-breaker.
+ * Pick a healthy version for `agent` using weighted random by remaining
+ * capacity. See `pickBalancedCandidate` for algorithm details.
  *
- * No external state: rotation and health are both read off per-version
- * AccountInfo — the same data `agents view` already surfaces. `lastActive`
- * advances naturally after each run, so the cursor is self-maintaining.
+ * No external state — health and capacity are both read off per-version
+ * AccountInfo (same data `agents view` surfaces). The weighted random roll
+ * keeps parallel callers fanned out without rotation files or locks.
  *
- * Returns null if no installed version is eligible (either nothing installed
- * or every account is exhausted / not signed in). Callers fall back to the
+ * Returns null if no installed version is eligible. Callers fall back to the
  * global default so behavior stays predictable — we never refuse to run.
  */
-export async function selectRotateVersion(agent: AgentId): Promise<RotateResult | null> {
-  return pickRotateCandidate(await collectRunCandidates(agent));
+export async function selectBalancedVersion(agent: AgentId): Promise<RotateResult | null> {
+  return pickBalancedCandidate(await collectRunCandidates(agent));
 }
 
 /** Select the configured version if available, otherwise another available version. */
@@ -327,17 +361,21 @@ export async function resolveRunVersion(agent: AgentId, strategy: RunStrategy, c
 
   const rotation = strategy === 'available'
     ? await selectAvailableVersion(agent, fallback)
-    : await selectRotateVersion(agent);
+    : await selectBalancedVersion(agent);
 
   if (rotation) {
-    // If another process just picked the same version (within 60s), try the
-    // next healthy candidate to distribute load across accounts.
-    const recentPick = readRotationStamp(agent);
-    if (recentPick === rotation.picked.version && rotation.healthy.length > 1) {
-      const alt = rotation.healthy.find(c => c.version !== recentPick);
-      if (alt) rotation.picked = alt;
+    // `available` is sticky to the pinned default when healthy. Use the 60s
+    // anti-collision stamp to nudge parallel callers off the same version.
+    // `balanced` doesn't need this — its weighted random roll already
+    // distributes naturally across healthy accounts.
+    if (strategy === 'available') {
+      const recentPick = readRotationStamp(agent);
+      if (recentPick === rotation.picked.version && rotation.healthy.length > 1) {
+        const alt = rotation.healthy.find(c => c.version !== recentPick);
+        if (alt) rotation.picked = alt;
+      }
+      recordRotationPick(agent, rotation.picked.version);
     }
-    recordRotationPick(agent, rotation.picked.version);
     return { version: rotation.picked.version, rotation };
   }
 

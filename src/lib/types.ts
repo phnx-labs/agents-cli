@@ -10,7 +10,7 @@
 export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'roo';
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
-export type RunStrategy = 'pinned' | 'available' | 'rotate';
+export type RunStrategy = 'pinned' | 'available' | 'balanced';
 
 /** Preview features that users can opt into via `agents beta`. */
 export type BetaFeatureName = 'drive' | 'factory';
