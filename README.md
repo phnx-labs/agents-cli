@@ -278,6 +278,16 @@ Under the hood, `--icloud-sync` routes writes through a notarized helper app (`A
 
 Bundle definitions sync via iCloud Keychain too — no `agents repo push` needed for secrets, no recreate step on each Mac. Nothing about secrets ever lives in plaintext on disk.
 
+### Per-secret metadata and rotation
+
+Tag each secret with `--type`, `--expires`, and `--note` so the bundle is self-documenting. `--expires` is always future-dated (`YYYY-MM-DD`); past or same-day values are rejected. Use `agents secrets rotate <bundle> <key>` to refresh a credential — `add` only creates new keys, `rotate` replaces the value and preserves metadata unless overridden.
+
+```bash
+agents secrets add prod STRIPE_API_KEY --type api-key --expires 2027-01-15 --note "Live key, owner: payments-team"
+agents secrets rotate prod STRIPE_API_KEY --note "rotated after suspected leak"
+agents secrets list   # EXPIRING column flags secrets due in the next 30 days
+```
+
 ---
 
 ## Routines

@@ -19,10 +19,14 @@ import {
   migrateLegacyBundles,
   parseDotenv,
   readBundle,
+  rotateBundleSecret,
   validateBundleName,
   validateEnvKey,
+  validateExpiresFutureDated,
+  validateSecretType,
   writeBundle,
   type SecretsBundle,
+  type VarMeta,
 } from '../lib/secrets/bundles.js';
 import {
   deleteKeychainToken,
@@ -139,7 +143,11 @@ function renderBundleRow(b: SecretsBundle): string {
   const entries = describeBundle(b);
   const keys = entries.length;
   const sensitive = entries.filter((e) => e.kind === 'keychain').length;
-  return `${chalk.cyan(b.name.padEnd(20))} ${String(keys).padEnd(6)} ${chalk.yellow(String(sensitive).padEnd(10))} ${chalk.gray(b.description || '')}`;
+  const expiring = countExpiringSoon(b.meta);
+  const expiringCol = expiring > 0
+    ? chalk.yellow(String(expiring).padEnd(10))
+    : ''.padEnd(10);
+  return `${chalk.cyan(b.name.padEnd(20))} ${String(keys).padEnd(6)} ${chalk.yellow(String(sensitive).padEnd(10))} ${expiringCol} ${chalk.gray(b.description || '')}`;
 }
 
 /** Colorize a variable source kind (literal, keychain, env, file, exec). */
@@ -159,6 +167,92 @@ function redact(value: string, reveal: boolean): string {
   if (reveal) return value;
   if (!value) return '';
   return '*'.repeat(Math.min(value.length, 8));
+}
+
+/**
+ * Build a VarMeta patch from CLI flags. Validates each provided field. Returns
+ * undefined if no meta flag was passed (so callers know to skip meta updates).
+ *
+ * `--note -` reads the note from stdin so users can pass long/multi-line notes
+ * without shell-escaping. It's mutually exclusive with `--value-stdin`; both
+ * trying to consume stdin would race and silently corrupt one or the other.
+ */
+function buildMetaPatch(
+  raw: { type?: string; expires?: string; note?: string; valueStdin?: boolean },
+): Partial<VarMeta> | undefined {
+  if (raw.type === undefined && raw.expires === undefined && raw.note === undefined) {
+    return undefined;
+  }
+  const patch: Partial<VarMeta> = {};
+  if (raw.type !== undefined) {
+    validateSecretType(raw.type);
+    patch.type = raw.type;
+  }
+  if (raw.expires !== undefined) {
+    validateExpiresFutureDated(raw.expires);
+    patch.expires = raw.expires;
+  }
+  if (raw.note !== undefined) {
+    if (raw.note === '-') {
+      if (raw.valueStdin) {
+        throw new Error('--note - and --value-stdin both want stdin; only one can read it.');
+      }
+      const fromStdin = readStdinSync();
+      if (!fromStdin) throw new Error('No note received on stdin.');
+      patch.note = fromStdin;
+    } else {
+      patch.note = raw.note;
+    }
+  }
+  return patch;
+}
+
+/** Whole days from now until midnight-UTC of the given ISO date. Negative if past. */
+function daysUntil(iso: string): number {
+  const target = new Date(iso + 'T23:59:59Z').getTime();
+  const now = Date.now();
+  return Math.floor((target - now) / (24 * 60 * 60 * 1000));
+}
+
+/** Render the meta line under a var, indented. Returns empty string if nothing to show. */
+function renderMetaLine(meta: VarMeta | undefined, reveal: boolean): string {
+  if (!meta) return '';
+  const parts: string[] = [];
+  if (meta.type) parts.push(`type: ${meta.type}`);
+  if (meta.expires) {
+    const days = daysUntil(meta.expires);
+    const tail = `(in ${days} days)`;
+    let colored: string;
+    if (days < 0) {
+      colored = chalk.red(`expires: ${meta.expires} ${tail}`);
+    } else if (days < 30) {
+      colored = chalk.yellow(`expires: ${meta.expires} ${tail}`);
+    } else {
+      colored = chalk.gray(`expires: ${meta.expires} ${tail}`);
+    }
+    parts.push(colored);
+  }
+  if (meta.note) {
+    let note = meta.note;
+    if (!reveal && note.length > 80) {
+      note = note.slice(0, 79) + '\u2026';
+    }
+    parts.push(`note: ${note}`);
+  }
+  if (parts.length === 0) return '';
+  return `    ${parts.join('  ')}`;
+}
+
+/** Count entries in `meta` whose `expires` falls in the next 30 days. */
+function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
+  if (!meta) return 0;
+  let n = 0;
+  for (const m of Object.values(meta)) {
+    if (!m.expires) continue;
+    const d = daysUntil(m.expires);
+    if (d >= 0 && d < 30) n++;
+  }
+  return n;
 }
 
 /** Register the `agents secrets` command tree. */
@@ -191,6 +285,12 @@ Examples:
   # Add a literal (non-sensitive) value
   agents secrets add prod LOG_LEVEL --value info
 
+  # Add with metadata
+  agents secrets add prod STRIPE_API_KEY --type api-key --expires 2027-01-15 --note "Live key, owner: payments-team"
+
+  # Rotate a key (replaces the value, preserves metadata unless overridden)
+  agents secrets rotate prod STRIPE_API_KEY
+
   # Import an entire .env file straight into keychain
   agents secrets import prod --from .env.prod
 
@@ -215,7 +315,7 @@ Examples:
 
   registerCommandGroups(cmd, [
     { title: 'Bundle commands', names: ['list', 'view', 'create', 'delete'] },
-    { title: 'Secret commands', names: ['add', 'remove', 'import', 'export'] },
+    { title: 'Secret commands', names: ['add', 'rotate', 'remove', 'import', 'export'] },
   ]);
 
   cmd
@@ -229,7 +329,7 @@ Examples:
         console.log(chalk.gray('Try: agents secrets create <name>'));
         return;
       }
-      console.log(chalk.bold(`${'NAME'.padEnd(20)} ${'KEYS'.padEnd(6)} ${'SENSITIVE'.padEnd(10)} DESCRIPTION`));
+      console.log(chalk.bold(`${'NAME'.padEnd(20)} ${'KEYS'.padEnd(6)} ${'SENSITIVE'.padEnd(10)} ${'EXPIRING'.padEnd(10)} DESCRIPTION`));
       for (const b of bundles) {
         console.log(renderBundleRow(b));
       }
@@ -284,6 +384,8 @@ Examples:
           } else {
             console.log(`  ${chalk.cyan(e.key.padEnd(28))} ${kindLabel(e.kind).padEnd(18)} ${e.detail}`);
           }
+          const metaLine = renderMetaLine(bundle.meta?.[e.key], reveal);
+          if (metaLine) console.log(metaLine);
         }
       } catch (err) {
         if (isPromptCancelled(err)) return;
@@ -332,30 +434,47 @@ Examples:
     .option('--env <VAR>', 'Store as an env: ref that reads from the parent process.env at run time')
     .option('--file <path>', 'Store as a file: ref that reads from a file at run time')
     .option('--exec <cmd>', 'Store as an exec: ref that runs a command at run time (requires allow_exec)')
+    .option('--type <kind>', 'Tag this secret with a type (api-key, token, password, url, database-url, ssh-key, certificate, webhook, note)')
+    .option('--expires <YYYY-MM-DD>', 'Mark when this secret expires (must be future-dated)')
+    .option('--note <text>', 'Attach a freeform note. Pass `-` to read from stdin (mutually exclusive with --value-stdin).')
     .action(async (bundleName: string | undefined, key: string | undefined, opts: {
       value?: string;
       valueStdin?: boolean;
       env?: string;
       file?: string;
       exec?: string;
+      type?: string;
+      expires?: string;
+      note?: string;
     }) => {
       try {
         const resolvedBundleName = bundleName ?? (await pickBundleName('add to'));
         const bundle = readBundle(resolvedBundleName);
         const resolvedKey = key ?? (await promptKeyName(resolvedBundleName));
         validateEnvKey(resolvedKey);
+        if (resolvedKey in bundle.vars) {
+          throw new Error(`Key '${resolvedKey}' already exists in bundle '${resolvedBundleName}'. Use 'agents secrets rotate' to refresh it.`);
+        }
         const sources = [opts.value !== undefined, Boolean(opts.env), Boolean(opts.file), Boolean(opts.exec)].filter(Boolean).length;
         if (sources > 1) {
           throw new Error('Pick one of: --value, --env, --file, --exec.');
         }
+        const metaPatch = buildMetaPatch(opts);
+        const applyMeta = () => {
+          if (!metaPatch) return;
+          if (!bundle.meta) bundle.meta = {};
+          bundle.meta[resolvedKey] = { ...(bundle.meta[resolvedKey] ?? {}), ...metaPatch };
+        };
         if (opts.env) {
           bundle.vars[resolvedKey] = `env:${opts.env}`;
+          applyMeta();
           writeBundle(bundle);
           console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} -> env:${opts.env}`));
           return;
         }
         if (opts.file) {
           bundle.vars[resolvedKey] = `file:${opts.file}`;
+          applyMeta();
           writeBundle(bundle);
           console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} -> file:${opts.file}`));
           return;
@@ -365,12 +484,14 @@ Examples:
             throw new Error(`Bundle '${resolvedBundleName}' does not allow exec refs. Re-create with --allow-exec.`);
           }
           bundle.vars[resolvedKey] = `exec:${opts.exec}`;
+          applyMeta();
           writeBundle(bundle);
           console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} -> exec:${opts.exec}`));
           return;
         }
         if (opts.value !== undefined) {
           bundle.vars[resolvedKey] = { value: opts.value };
+          applyMeta();
           writeBundle(bundle);
           console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} = <literal>`));
           return;
@@ -386,9 +507,74 @@ Examples:
         const item = secretsKeychainItem(resolvedBundleName, resolvedKey);
         setKeychainToken(item, secretValue, bundle.icloud_sync);
         bundle.vars[resolvedKey] = keychainRef(resolvedKey);
+        applyMeta();
         writeBundle(bundle);
         const where = bundle.icloud_sync ? 'iCloud Keychain' : 'keychain';
         console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} stored in ${where} (${item}).`));
+      } catch (err) {
+        if (isPromptCancelled(err)) return;
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('rotate [bundle] [key]')
+    .description('Rotate an existing keychain-backed secret (replaces the value, preserves metadata unless overridden).')
+    .option('--value <v>', 'New value (non-secret cases). Prompts interactively if omitted.')
+    .option('--value-stdin', 'Read the new value from stdin (stored in keychain unless combined with --value)')
+    .option('--type <kind>', 'Update the type metadata (api-key, token, password, url, database-url, ssh-key, certificate, webhook, note)')
+    .option('--expires <YYYY-MM-DD>', 'Update the expiration date (must be future-dated)')
+    .option('--note <text>', 'Update the note. Pass `-` to read from stdin (mutually exclusive with --value-stdin).')
+    .option('--clear-meta', 'Wipe all metadata for this key while rotating')
+    .addHelpText('after', `
+Examples:
+  # Rotate the value, preserve all metadata
+  agents secrets rotate prod STRIPE_API_KEY
+
+  # Rotate with a metadata refresh
+  agents secrets rotate prod STRIPE_API_KEY --type api-key --expires 2027-01-15 --note "rotated after employee offboarding"
+`)
+    .action(async (bundleName: string | undefined, key: string | undefined, opts: {
+      value?: string;
+      valueStdin?: boolean;
+      type?: string;
+      expires?: string;
+      note?: string;
+      clearMeta?: boolean;
+    }) => {
+      try {
+        const resolvedBundleName = bundleName ?? (await pickBundleName('rotate in'));
+        const bundle = readBundle(resolvedBundleName);
+        const resolvedKey = key ?? (await pickKey(bundle, 'rotate'));
+        if (!(resolvedKey in bundle.vars)) {
+          throw new Error(`Key '${resolvedKey}' not in bundle '${resolvedBundleName}'. Use 'agents secrets add' to add a new key.`);
+        }
+        const raw = bundle.vars[resolvedKey];
+        if (typeof raw !== 'string' || !raw.startsWith('keychain:')) {
+          throw new Error(`Key '${resolvedKey}' in bundle '${resolvedBundleName}' is not keychain-backed; cannot rotate.`);
+        }
+        const metaPatch = buildMetaPatch(opts);
+        if (opts.clearMeta && metaPatch) {
+          throw new Error('--clear-meta and --type/--expires/--note are mutually exclusive.');
+        }
+        // Resolve the new value: --value > --value-stdin > prompt.
+        let newValue: string;
+        if (opts.value !== undefined) {
+          newValue = opts.value;
+        } else if (opts.valueStdin) {
+          newValue = readStdinSync();
+          if (!newValue) throw new Error('No value received on stdin.');
+        } else {
+          newValue = await promptForSecret(`Enter new value for ${resolvedBundleName}.${resolvedKey}`);
+        }
+        rotateBundleSecret(bundle, resolvedKey, {
+          newValue,
+          clearMeta: opts.clearMeta,
+          meta: metaPatch,
+        });
+        const where = bundle.icloud_sync ? 'iCloud Keychain' : 'keychain';
+        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} rotated in ${where}.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
