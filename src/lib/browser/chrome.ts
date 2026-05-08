@@ -19,6 +19,7 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     chromium: ['/Applications/Chromium.app/Contents/MacOS/Chromium'],
     brave: ['/Applications/Brave Browser.app/Contents/MacOS/Brave Browser'],
     edge: ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'],
+    custom: [],
   },
   linux: {
     chrome: ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'],
@@ -26,6 +27,7 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     chromium: ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium'],
     brave: ['/usr/bin/brave-browser', '/usr/bin/brave'],
     edge: ['/usr/bin/microsoft-edge'],
+    custom: [],
   },
   win32: {
     chrome: [
@@ -40,11 +42,23 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     edge: [
       'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     ],
+    custom: [],
   },
 };
 
 
-export function findBrowserPath(browserType: BrowserType): string {
+export function findBrowserPath(browserType: BrowserType, customBinary?: string): string {
+  if (customBinary) {
+    if (!fs.existsSync(customBinary)) {
+      throw new Error(`Custom binary not found: ${customBinary}`);
+    }
+    return customBinary;
+  }
+
+  if (browserType === 'custom') {
+    throw new Error('browser: custom requires a binary path in the profile');
+  }
+
   const platform = os.platform();
   const platformPaths = BROWSER_PATHS[platform];
   if (!platformPaths) {
@@ -72,9 +86,10 @@ export async function launchBrowser(
   browserType: BrowserType,
   port: number,
   options: ChromeOptions = {},
-  secrets?: string
+  secrets?: string,
+  customBinary?: string
 ): Promise<LaunchResult> {
-  const browserPath = findBrowserPath(browserType);
+  const browserPath = findBrowserPath(browserType, customBinary);
 
   const runtimeDir = getProfileRuntimeDir(profileName);
   const userDataDir = path.join(runtimeDir, 'chrome-data');

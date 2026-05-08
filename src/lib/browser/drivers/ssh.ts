@@ -27,7 +27,7 @@ export async function connectSSH(
   const localPort = allocatePort();
 
   try {
-    await ensureRemoteBrowser(user, host, profile.browser, remotePort);
+    await ensureRemoteBrowser(user, host, profile.browser, remotePort, profile.binary);
   } catch {
     // Browser may already be running, continue
   }
@@ -130,7 +130,8 @@ async function ensureRemoteBrowser(
   user: string,
   host: string,
   browserType: string,
-  port: number
+  port: number,
+  customBinary?: string
 ): Promise<void> {
   const browserPaths: Record<string, string> = {
     chrome: '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome',
@@ -140,9 +141,16 @@ async function ensureRemoteBrowser(
     edge: '/Applications/Microsoft\\ Edge.app/Contents/MacOS/Microsoft\\ Edge',
   };
 
-  const browserPath = browserPaths[browserType];
-  if (!browserPath) {
-    throw new Error(`Unknown browser type: ${browserType}`);
+  let browserPath: string;
+  if (customBinary) {
+    browserPath = customBinary.replace(/ /g, '\\ ');
+  } else if (browserType === 'custom') {
+    throw new Error('browser: custom requires a binary path in the profile');
+  } else {
+    browserPath = browserPaths[browserType];
+    if (!browserPath) {
+      throw new Error(`Unknown browser type: ${browserType}`);
+    }
   }
 
   const remoteCmd = `${browserPath} --remote-debugging-port=${port} '--remote-allow-origins=*' --disable-background-timer-throttling --user-data-dir=/tmp/agents-browser-${port} </dev/null >/dev/null 2>&1 &`;

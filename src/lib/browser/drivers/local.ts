@@ -33,7 +33,8 @@ export async function connectLocal(
       profile.browser,
       newPort,
       profile.chrome,
-      profile.secrets
+      profile.secrets,
+      profile.binary
     );
     const cdp = new CDPClient();
     await cdp.connect(wsUrl);
