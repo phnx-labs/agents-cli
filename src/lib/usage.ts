@@ -17,6 +17,11 @@ import chalk from 'chalk';
 
 import type { AccountInfo } from './agents.js';
 import { walkForFiles } from './fs-walk.js';
+import {
+  getKeychainToken,
+  setKeychainToken,
+  deleteKeychainToken,
+} from './secrets/index.js';
 import { getAgentsDir } from './state.js';
 import type { AgentId } from './types.js';
 
@@ -537,29 +542,16 @@ function normalizeClaudeWindow(
   };
 }
 
-let warnedNonDarwin = false;
-
-/** Load Claude OAuth credentials from the macOS Keychain. */
+/** Load Claude OAuth credentials from the system keychain/keyring. */
 export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredentials | null> {
-  if (process.platform !== 'darwin') {
-    if (!warnedNonDarwin && process.stderr.isTTY) {
-      process.stderr.write('[agents] Usage tracking requires macOS Keychain. Skipped on this platform.\n');
-      warnedNonDarwin = true;
-    }
+  // Windows not yet supported
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
     return null;
   }
 
   try {
-    const account = os.userInfo().username;
-    const { stdout } = await execFileAsync('security', [
-      'find-generic-password',
-      '-a',
-      account,
-      '-s',
-      // Managed Claude homes must stay pinned to their own service name.
-      getClaudeKeychainService(home),
-      '-w',
-    ]);
+    const service = getClaudeKeychainService(home);
+    const stdout = getKeychainToken(service);
 
     const payload = JSON.parse(stdout.trim()) as ClaudeKeychainPayload;
     if (typeof payload?.claudeAiOauth?.accessToken !== 'string') return null;
@@ -576,32 +568,25 @@ export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredent
 }
 
 /**
- * Save Claude OAuth credentials to the macOS Keychain.
+ * Save Claude OAuth credentials to the system keychain/keyring.
  * Reads the existing payload, merges the new OAuth fields, and writes back.
  */
 async function saveClaudeOauth(
   home: string | undefined,
   credentials: ClaudeOauthCredentials
 ): Promise<boolean> {
-  if (process.platform !== 'darwin') {
+  // Windows not yet supported
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
     return false;
   }
 
   try {
-    const account = os.userInfo().username;
     const service = getClaudeKeychainService(home);
 
     // Read existing payload to preserve other fields
     let existingPayload: ClaudeKeychainPayload = {};
     try {
-      const { stdout } = await execFileAsync('security', [
-        'find-generic-password',
-        '-a',
-        account,
-        '-s',
-        service,
-        '-w',
-      ]);
+      const stdout = getKeychainToken(service);
       existingPayload = JSON.parse(stdout.trim()) as ClaudeKeychainPayload;
     } catch {
       // No existing entry, start fresh
@@ -621,30 +606,14 @@ async function saveClaudeOauth(
 
     const payloadJson = JSON.stringify(newPayload);
 
-    // Delete existing entry first (security add-generic-password -U can fail)
+    // Delete existing entry first, then add updated entry
     try {
-      await execFileAsync('security', [
-        'delete-generic-password',
-        '-a',
-        account,
-        '-s',
-        service,
-      ]);
+      deleteKeychainToken(service);
     } catch {
       // Entry might not exist, ignore
     }
 
-    // Add updated entry
-    await execFileAsync('security', [
-      'add-generic-password',
-      '-a',
-      account,
-      '-s',
-      service,
-      '-w',
-      payloadJson,
-    ]);
-
+    setKeychainToken(service, payloadJson);
     return true;
   } catch {
     return false;

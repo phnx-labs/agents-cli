@@ -1,11 +1,14 @@
 /**
- * macOS Keychain integration for secure credential storage.
+ * Cross-platform secure credential storage.
  *
- * All reads/writes go through a signed Swift helper (keychain-helper.swift)
- * compiled into AgentsKeychain.app. The .app embeds a provisioning profile
- * that grants the application-identifier + keychain-access-groups entitlement
- * macOS requires for kSecAttrSynchronizable writes (iCloud Keychain).
- * For device-local writes the helper is invoked with the `nosync` arg.
+ * macOS: Uses Keychain via signed Swift helper (AgentsKeychain.app) or `security` CLI.
+ * Linux: Uses libsecret (GNOME Keyring) via `secret-tool` CLI.
+ * Windows: Not yet supported.
+ *
+ * The .app embeds a provisioning profile that grants the application-identifier
+ * + keychain-access-groups entitlement macOS requires for kSecAttrSynchronizable
+ * writes (iCloud Keychain). For device-local writes the helper is invoked with
+ * the `nosync` arg.
  */
 
 import { fileURLToPath } from 'url';
@@ -13,6 +16,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { linuxBackend } from './linux.js';
 
 const SERVICE_PREFIX = 'agents-cli';
 
@@ -52,10 +56,21 @@ export function serializeRef(ref: SecretRef): string {
   return `${ref.provider}:${ref.value}`;
 }
 
-function assertMacOS(): void {
-  if (process.platform !== 'darwin') {
-    throw new Error('Keychain-based secrets require macOS. On Linux, use environment variables or .env files instead. Native Linux credential store support is planned.');
+function assertSupportedPlatform(): void {
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+    throw new Error(
+      'Secure credential storage requires macOS or Linux. ' +
+      'On Windows, use environment variables or .env files instead.'
+    );
   }
+}
+
+function isLinux(): boolean {
+  return process.platform === 'linux';
+}
+
+function isMacOS(): boolean {
+  return process.platform === 'darwin';
 }
 
 /** Build the keychain item name for a profile provider token. */
@@ -117,11 +132,12 @@ export function setKeychainBackendForTest(b: KeychainBackend | null): KeychainBa
 // kSecAttrSynchronizable. Enumeration also goes through the .app because the
 // security CLI doesn't expose listing by service prefix.
 
-/** Check if a keychain item exists (macOS only). */
+/** Check if a keychain/keyring item exists. */
 export function hasKeychainToken(item: string, sync = false): boolean {
   if (backend) return backend.has(item, sync);
-  assertMacOS();
-  // Try security first (no prompts for local items), fall back to binary for synced items.
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.has(item, sync);
+  // macOS: Try security first (no prompts for local items), fall back to binary for synced items.
   if (spawnSync('security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   }).status === 0) return true;
@@ -132,11 +148,12 @@ export function hasKeychainToken(item: string, sync = false): boolean {
   }).status === 0;
 }
 
-/** Retrieve a secret value from the macOS Keychain. Throws if not found. */
+/** Retrieve a secret value from the keychain/keyring. Throws if not found. */
 export function getKeychainToken(item: string, sync = false): string {
   if (backend) return backend.get(item, sync);
-  assertMacOS();
-  // Try security first (no prompts for local items)
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.get(item, sync);
+  // macOS: Try security first (no prompts for local items)
   const secResult = spawnSync('security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -159,13 +176,16 @@ export function getKeychainToken(item: string, sync = false): string {
   return token;
 }
 
-/** Store or update a secret value in the macOS Keychain. iCloud-synced when sync=true. */
+/** Store or update a secret value in the keychain/keyring. iCloud-synced when sync=true (macOS only). */
 export function setKeychainToken(item: string, value: string, sync = false): void {
   if (backend) { backend.set(item, value, sync); return; }
-  assertMacOS();
+  assertSupportedPlatform();
   if (!value || !value.trim()) throw new Error('Secret value is empty.');
   if (/[\r\n]/.test(value)) throw new Error('Secret value contains newlines, which are not supported.');
 
+  if (isLinux()) { linuxBackend.set(item, value, sync); return; }
+
+  // macOS path
   if (sync) {
     const bin = ensureKeychainHelper();
     const result = spawnSync(bin, ['set', item, os.userInfo().username], {
@@ -190,10 +210,12 @@ export function setKeychainToken(item: string, value: string, sync = false): voi
   }
 }
 
-/** Delete a keychain item. Returns true if it existed. */
+/** Delete a keychain/keyring item. Returns true if it existed. */
 export function deleteKeychainToken(item: string, sync = false): boolean {
   if (backend) return backend.delete(item, sync);
-  assertMacOS();
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.delete(item, sync);
+  // macOS path
   if (sync) {
     const bin = ensureKeychainHelper();
     return spawnSync(bin, ['delete', item, os.userInfo().username], {
@@ -209,10 +231,12 @@ function quoteForSecurityCli(s: string): string {
   return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
-/** Enumerate keychain item service names whose name starts with the given prefix. */
+/** Enumerate keychain/keyring item names starting with the given prefix. */
 export function listKeychainItems(prefix: string): string[] {
   if (backend) return backend.list(prefix);
-  assertMacOS();
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.list(prefix);
+  // macOS path
   const bin = ensureKeychainHelper();
   const result = spawnSync(bin, ['list', prefix], {
     stdio: ['ignore', 'pipe', 'pipe'],
