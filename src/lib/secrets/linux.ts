@@ -119,8 +119,8 @@ export function deleteSecretToolToken(item: string): boolean {
   ], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  // secret-tool clear returns 0 even if item didn't exist
-  // We check if it existed first
+  // secret-tool clear returns 0 whether the item existed or not.
+  // This matches the macOS behavior where delete is idempotent.
   return result.status === 0;
 }
 

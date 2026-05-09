@@ -182,6 +182,7 @@ export function setKeychainToken(item: string, value: string, sync = false): voi
   assertSupportedPlatform();
   if (!value || !value.trim()) throw new Error('Secret value is empty.');
   if (/[\r\n]/.test(value)) throw new Error('Secret value contains newlines, which are not supported.');
+  if (/[\x00=]/.test(item)) throw new Error('Secret item name contains invalid characters.');
 
   if (isLinux()) { linuxBackend.set(item, value, sync); return; }
 
