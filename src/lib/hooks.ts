@@ -676,12 +676,12 @@ export function listCentralHooks(): HookEntry[] {
 export function parseHookManifest(): Record<string, ManifestHook> {
   const merged: Record<string, ManifestHook> = {};
 
-  // System layer: standalone hooks.yaml (npm-shipped, separate repo).
-  const systemPath = path.join(getAgentsDir(), 'hooks.yaml');
+  // System layer: hooks: section of agents.yaml (npm-shipped, separate repo).
+  const systemPath = path.join(getSystemAgentsDir(), 'agents.yaml');
   if (fs.existsSync(systemPath)) {
     try {
-      const parsed = yaml.parse(fs.readFileSync(systemPath, 'utf-8')) as Record<string, ManifestHook> | null;
-      if (parsed) for (const [name, def] of Object.entries(parsed)) merged[name] = def;
+      const meta = yaml.parse(fs.readFileSync(systemPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
+      if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) merged[name] = def;
     } catch { /* skip unreadable manifest */ }
   }
 
