@@ -56,6 +56,7 @@ import {
   removeShim,
 } from '../lib/shims.js';
 import { getAgentResources, listResources } from '../lib/resources.js';
+import { WORKFLOW_CAPABLE_AGENTS } from '../lib/workflows.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts } from '../lib/state.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
@@ -427,6 +428,7 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
             if (result.permissions) synced.push('permissions');
             if (result.mcp.length > 0) synced.push('mcp');
             if (result.plugins.length > 0) synced.push('plugins');
+            if (result.workflows.length > 0) synced.push('workflows');
 
             if (synced.length > 0) {
               console.log(chalk.green(`\nSynced to ${agentLabel(filterAgentId)}@${defaultVersion}: ${synced.join(', ')}`));
@@ -545,6 +547,7 @@ async function showAgentResources(agentId: AgentId, requestedVersion: string): P
     mcp: ResourceWithSync[];
     memory: ResourceWithSync[];
     hooks: ResourceWithSync[];
+    workflows: ResourceWithSync[];
   }
 
   const resources = getAgentResources(agentId, {
@@ -576,6 +579,7 @@ async function showAgentResources(agentId: AgentId, requestedVersion: string): P
       ...r,
       syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'hooks', hooksSync),
     })),
+    workflows: resources.workflows.map(r => ({ name: r.name, path: r.path, scope: r.scope })),
   };
 
   spinner.stop();
@@ -667,6 +671,10 @@ async function showAgentResources(agentId: AgentId, requestedVersion: string): P
   }
 
   renderSection('MCP Servers', agentData.mcp);
+
+  if (WORKFLOW_CAPABLE_AGENTS.includes(agentId)) {
+    renderSection('Workflows', agentData.workflows);
+  }
 
   // Rules section with subrules breakdown
   function renderRulesSection(): void {
