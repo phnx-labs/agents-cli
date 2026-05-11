@@ -9,7 +9,7 @@ import * as os from 'os';
 import * as readline from 'readline';
 
 const HOME = os.homedir();
-const SHIMS_DIR = path.join(HOME, '.agents-system', 'shims');
+const SHIMS_DIR = path.join(HOME, '.agents', '.cache', 'shims');
 const SYSTEM_DIR = path.join(HOME, '.agents-system');
 const USER_DIR = path.join(HOME, '.agents');
 
@@ -111,7 +111,8 @@ const exportLine = shellName === 'fish'
   ? `fish_add_path ${SHIMS_DIR}`
   : `export PATH="${SHIMS_DIR}:$PATH"`;
 
-const ALIASES = ['sessions', 'teams'];
+// Shorthands that delegate to `agents <name>` — written unconditionally on install.
+const ALIASES = ['sessions', 'secrets', 'browser', 'pty', 'teams'];
 
 function writeAliasShims() {
   const written = [];
@@ -124,6 +125,27 @@ function writeAliasShims() {
   return written;
 }
 
+function getVersion() {
+  const pkgPath = new URL('../package.json', import.meta.url).pathname;
+  try {
+    return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version;
+  } catch { return null; }
+}
+
+function getChangelogSection(version) {
+  const changelogPath = new URL('../CHANGELOG.md', import.meta.url).pathname;
+  if (!fs.existsSync(changelogPath)) return null;
+  const lines = fs.readFileSync(changelogPath, 'utf-8').split('\n');
+  let inSection = false;
+  const section = [];
+  for (const line of lines) {
+    if (line.startsWith(`## ${version}`)) { inSection = true; continue; }
+    if (inSection && line.startsWith('## ')) break;
+    if (inSection) section.push(line);
+  }
+  return section.length ? section.join('\n').trim() : null;
+}
+
 function ask(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -134,33 +156,18 @@ function ask(question) {
   });
 }
 
-async function promptForAliases() {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) return 'skip';
-  console.log(`
-Install bare-command aliases for common subcommands?
-This creates ${ALIASES.map((n) => `\`${n}\``).join(', ')} as wrappers in ${SHIMS_DIR}
-so you can type \`sessions\` instead of \`agents sessions\`.
-
-  1) Let's do it
-  2) Skip this time
-  3) I'll do it manually if needed
-`);
-  const answer = await ask('Choose [1/2/3] (default 1): ');
-  if (answer === '' || answer === '1') return 'install';
-  if (answer === '3') return 'manual';
-  return 'skip';
+function isAlreadyConfigured(rcFile) {
+  if (!fs.existsSync(rcFile)) return false;
+  const content = fs.readFileSync(rcFile, 'utf-8');
+  // Accept either the new path or the legacy ~/.agents-system/shims path
+  return content.includes('.agents/.cache/shims') || content.includes('.agents-system/shims');
 }
 
 async function main() {
   // Opt-in: AGENTS_INIT_SHELL=1 npm install -g @phnx-labs/agents-cli
   if (process.env.AGENTS_INIT_SHELL === '1') {
     const rcFile = getShellRc();
-    let alreadyConfigured = false;
-    if (fs.existsSync(rcFile)) {
-      const content = fs.readFileSync(rcFile, 'utf-8');
-      alreadyConfigured = content.includes('.agents-system/shims');
-    }
-    if (!alreadyConfigured) {
+    if (!isAlreadyConfigured(rcFile)) {
       const addition = `\n# agents-cli: version switching for AI coding agents\n${exportLine}\n`;
       fs.mkdirSync(path.dirname(rcFile), { recursive: true });
       fs.appendFileSync(rcFile, addition);
@@ -169,53 +176,47 @@ async function main() {
     }
     writeAliasShims();
     console.log(`  Installed bare-command aliases: ${ALIASES.join(', ')}\n`);
-    return;
-  }
+  } else {
+    // Default: offer to auto-add shims to PATH (like homebrew does)
+    const rcFile = getShellRc();
 
-  // Default: offer to auto-add shims to PATH (like homebrew does)
-  const rcFile = getShellRc();
-  let alreadyConfigured = false;
-  if (fs.existsSync(rcFile)) {
-    const content = fs.readFileSync(rcFile, 'utf-8');
-    alreadyConfigured = content.includes('.agents-system/shims');
-  }
+    console.log(`\nagents-cli installed.`);
 
-  console.log(`\nagents-cli installed.`);
+    if (!isAlreadyConfigured(rcFile) && process.stdin.isTTY && process.stdout.isTTY) {
+      const answer = await ask(`\nAdd shims to PATH in ~/${path.basename(rcFile)}? [Y/n] `);
+      if (answer === '' || answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+        const addition = `\n# agents-cli: version switching for AI coding agents\n${exportLine}\n`;
+        fs.mkdirSync(path.dirname(rcFile), { recursive: true });
+        fs.appendFileSync(rcFile, addition);
+        console.log(`\n  Added ${SHIMS_DIR} to PATH in ${path.basename(rcFile)}`);
+        console.log(`  Restart your shell or run: source ~/${path.basename(rcFile)}\n`);
+      } else {
+        console.log(`
+To enable version-aware shims, add this to your shell config:
 
-  if (!alreadyConfigured && process.stdin.isTTY && process.stdout.isTTY) {
-    const answer = await ask(`\nAdd shims to PATH in ~/${path.basename(rcFile)}? [Y/n] `);
-    if (answer === '' || answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
-      const addition = `\n# agents-cli: version switching for AI coding agents\n${exportLine}\n`;
-      fs.mkdirSync(path.dirname(rcFile), { recursive: true });
-      fs.appendFileSync(rcFile, addition);
-      console.log(`\n  Added ${SHIMS_DIR} to PATH in ${path.basename(rcFile)}`);
-      console.log(`  Restart your shell or run: source ~/${path.basename(rcFile)}\n`);
-    } else {
+  ${exportLine}
+`);
+      }
+    } else if (!isAlreadyConfigured(rcFile)) {
       console.log(`
 To enable version-aware shims, add this to your shell config:
 
   ${exportLine}
 `);
     }
-  } else if (!alreadyConfigured) {
-    console.log(`
-To enable version-aware shims, add this to your shell config:
 
-  ${exportLine}
-`);
+    const written = writeAliasShims();
+    console.log(`  Installed shorthands: ${written.join(', ')}`);
   }
 
-  const choice = await promptForAliases();
-  if (choice === 'install') {
-    const written = writeAliasShims();
-    console.log(`\n  Installed aliases: ${written.join(', ')} (in ${SHIMS_DIR})`);
-    console.log(`  Make sure ${SHIMS_DIR} is on your PATH (see above).\n`);
-  } else if (choice === 'manual') {
-    console.log(`\n  To add aliases later, drop these in a directory on your PATH:`);
-    for (const name of ALIASES) {
-      console.log(`    ${name} -> exec agents ${name} "$@"`);
+  const version = getVersion();
+  if (version) {
+    const section = getChangelogSection(version);
+    if (section) {
+      console.log(`\nWhat's new in ${version}:\n`);
+      console.log(section);
+      console.log('');
     }
-    console.log('');
   }
 }
 
