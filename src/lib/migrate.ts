@@ -1204,6 +1204,61 @@ function warnSystemOrphans(): void {
   console.error(`~/.agents-system/ has unexpected entries (not part of the npm-shipped defaults): ${orphans.join(', ')}`);
 }
 
+const VERSION_RESOURCE_FLAT_KEYS = ['commands', 'skills', 'hooks', 'memory', 'subagents', 'plugins', 'workflows', 'permissions', 'mcp'] as const;
+
+/**
+ * Convert agents.yaml versions: entries from the old flat name-list format to
+ * the new pattern format. Flat entries are detected by checking whether all
+ * items in the array lack a ':' separator (plain names have no source prefix).
+ *
+ * The rulesPreset field is preserved. Flat resource lists are dropped — the
+ * next `agents sync` will write default patterns (system:* user:* project:*).
+ *
+ * Idempotent: entries already in pattern format are left untouched.
+ */
+function migrateVersionResourcesToPatterns(): void {
+  const metaFile = path.join(USER_DIR, 'agents.yaml');
+  if (!fs.existsSync(metaFile)) return;
+
+  let meta: Record<string, unknown>;
+  try {
+    const raw = fs.readFileSync(metaFile, 'utf-8');
+    meta = (yaml.parse(raw) as Record<string, unknown>) || {};
+  } catch { return; }
+
+  const versions = meta.versions as Record<string, Record<string, Record<string, unknown>>> | undefined;
+  if (!versions || typeof versions !== 'object') return;
+
+  let changed = false;
+  for (const agentVersions of Object.values(versions)) {
+    if (!agentVersions || typeof agentVersions !== 'object') continue;
+    for (const vr of Object.values(agentVersions)) {
+      if (!vr || typeof vr !== 'object') continue;
+      for (const key of VERSION_RESOURCE_FLAT_KEYS) {
+        const val = vr[key];
+        if (!Array.isArray(val) || val.length === 0) continue;
+        // Detect legacy: all items are plain names (no ':' separator)
+        if ((val as string[]).every(item => typeof item === 'string' && !item.includes(':'))) {
+          if (key === 'memory') {
+            // memory was a single-element array holding the preset name — move to rulesPreset
+            if ((val as string[]).length === 1 && !vr['rulesPreset']) {
+              vr['rulesPreset'] = (val as string[])[0];
+            }
+          }
+          delete vr[key];
+          changed = true;
+        }
+      }
+    }
+  }
+
+  if (changed) {
+    const META_HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agents-cli\n\n';
+    fs.writeFileSync(metaFile, META_HEADER + yaml.stringify(meta), 'utf-8');
+    console.error('Migrated agents.yaml versions: entries to pattern format');
+  }
+}
+
 /** Run all idempotent migrations. Safe to call multiple times. */
 export async function runMigration(): Promise<void> {
   migrateAgentsYaml();
@@ -1223,6 +1278,7 @@ export async function runMigration(): Promise<void> {
   cleanupEmptyTopLevelRuns();
   foldUserHooksYamlIntoAgentsYaml();
   foldBrowserProfilesIntoAgentsYaml();
+  migrateVersionResourcesToPatterns();
   // Bucket moves: collapse runtime state into ~/.agents/.history and ~/.agents/.cache.
   migrateRuntimeToHistory();
   migrateRuntimeToCache();

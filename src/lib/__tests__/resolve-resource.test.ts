@@ -66,6 +66,26 @@ describe('resolveResource', () => {
   });
 });
 
+describe('resolveResource with extra repos', () => {
+  it('labels extra repo resources with the alias, not "system"', () => {
+    const rushDir = path.join(tmpDir, 'rush', '.agents');
+    fs.mkdirSync(path.join(rushDir, 'commands'), { recursive: true });
+    fs.writeFileSync(path.join(rushDir, 'commands', 'rush-cmd.md'), 'rush');
+
+    vi.spyOn(state, 'getEnabledExtraRepos').mockReturnValue([
+      { alias: 'rush', dir: rushDir, url: 'https://example.com/rush' },
+    ]);
+
+    const resolved = resolveResource('commands', 'rush-cmd', tmpDir);
+
+    expect(resolved).toEqual({
+      name: 'rush-cmd',
+      path: path.join(rushDir, 'commands', 'rush-cmd.md'),
+      source: 'rush',
+    });
+  });
+});
+
 describe('listResources', () => {
   it('deduplicates by name while preserving project > user > system precedence', () => {
     fs.writeFileSync(path.join(systemAgentsDir, 'commands', 'shared.md'), 'system');

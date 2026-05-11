@@ -335,23 +335,31 @@ export interface ResolvedPackage {
 /** Categories of resources that can be synced into an agent version home. */
 export type ResourceType = 'commands' | 'skills' | 'hooks' | 'memory' | 'mcp' | 'permissions' | 'subagents' | 'plugins' | 'workflows';
 
-/** Map of resource names synced to a specific agent version, keyed by type. */
+/**
+ * A resource selection pattern stored in agents.yaml versions:
+ *   "system:*"      — all resources from ~/.agents-system/
+ *   "user:*"        — all resources from ~/.agents/
+ *   "rush:*"        — all resources from ~/.agents-rush/  (extra repo alias)
+ *   "project:*"     — all resources from .agents/ in the project root
+ *   "user:foo"      — specifically "foo" from ~/.agents/
+ *   "!user:temp"    — exclude "temp" from the user repo
+ */
+export type ResourcePattern = string;
+
+/** Sync specification for a specific agent@version, keyed by resource type. */
 export interface VersionResources {
-  commands?: string[];
-  skills?: string[];
-  hooks?: string[];
-  memory?: string[];
-  mcp?: string[];
-  permissions?: string[];
-  subagents?: string[];
-  plugins?: string[];
-  workflows?: string[];
   /**
-   * Active rule preset for this agent@version. The composer reads layered
-   * `rules.yaml` files and emits this preset's subrules as the agent's
-   * single instruction file. Absent/null means the literal "default" preset.
+   * Active rule preset. Absent/null means "default".
    */
   rulesPreset?: string;
+  skills?:      ResourcePattern[];
+  commands?:    ResourcePattern[];
+  hooks?:       ResourcePattern[];
+  subagents?:   ResourcePattern[];
+  plugins?:     ResourcePattern[];
+  workflows?:   ResourcePattern[];
+  permissions?: ResourcePattern[];
+  mcp?:         ResourcePattern[];
 }
 
 /** Manifest file (plugin.yaml) at the root of a plugin bundle. */

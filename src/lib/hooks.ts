@@ -15,18 +15,17 @@ import * as TOML from 'smol-toml';
 import { AGENTS, ALL_AGENT_IDS, HOOKS_CAPABLE_AGENTS } from './agents.js';
 import { supports, explainSkip } from './capabilities.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
-import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir } from './state.js';
+import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos } from './state.js';
 
 function getCentralHooksDir(): string { return getUserHooksDir(); }
 
 /**
- * Resolve a hook script's absolute path by checking the user dir first
- * (where `installHooksCentrally` lands new files) and falling back to the
- * system dir (where npm-shipped defaults live). Returns null if neither
- * exists. Mirrors the precedence used by `listCentralHooks`.
+ * Resolve a hook script's absolute path. Checks user dir first, then enabled
+ * extra repos in insertion order, then system dir. Returns null if not found.
  */
 function resolveHookScriptPath(script: string): string | null {
-  for (const root of [getUserAgentsDir(), getSystemAgentsDir()]) {
+  const extraDirs = getEnabledExtraRepos().map(e => e.dir);
+  for (const root of [getUserAgentsDir(), ...extraDirs, getSystemAgentsDir()]) {
     const candidate = path.join(root, 'hooks', script);
     if (fs.existsSync(candidate)) return candidate;
   }
@@ -35,14 +34,15 @@ function resolveHookScriptPath(script: string): string | null {
 
 /**
  * Prefixes used for stale-entry cleanup in agent settings files. A registered
- * hook command is considered "managed by us" if it lives under either
- * `~/.agents/hooks/` (user) or `~/.agents-system/hooks/` (system). Cleanup
- * filters use this list so leftover entries from either dir get garbage
- * collected on rewrite.
+ * hook command is considered "managed" if it lives under any known hooks dir
+ * (user, extra repos, or system). Entries from removed extra repos are also
+ * garbage-collected because they won't appear in this list any more.
  */
 function getManagedHookPrefixes(): string[] {
+  const extraDirs = getEnabledExtraRepos().map(e => e.dir);
   return [
     path.join(getUserAgentsDir(), 'hooks') + path.sep,
+    ...extraDirs.map(d => path.join(d, 'hooks') + path.sep),
     path.join(getSystemAgentsDir(), 'hooks') + path.sep,
   ];
 }

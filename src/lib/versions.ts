@@ -24,8 +24,9 @@ import chalk from 'chalk';
 import * as TOML from 'smol-toml';
 import { checkbox, select, confirm } from '@inquirer/prompts';
 import type { AgentId, VersionResources } from './types.js';
-import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, clearVersionResources, getVersionResources, recordVersionResources, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset } from './state.js';
-import { resolveResource } from './resources.js';
+import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, clearVersionResources, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset } from './state.js';
+import { defaultPatterns, expandPatterns } from './resource-patterns.js';
+import { resolveResource, listResources } from './resources.js';
 import { AGENTS, getAccountEmail, MCP_CAPABLE_AGENTS, COMMANDS_CAPABLE_AGENTS, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError } from './agents.js';
 import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, PERMISSIONS_CAPABLE_AGENTS, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
 import { installMcpServers, parseMcpServerConfig } from './mcp.js';
@@ -1609,6 +1610,81 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const extraRepos = getEnabledExtraRepos();
   const available = getAvailableResources(cwd);
 
+  // Write default resource selection patterns for this version (idempotent —
+  // only sets fields that aren't already present, preserving user edits).
+  {
+    const extraAliases = extraRepos.map(e => e.alias);
+    const allLayers = defaultPatterns(extraAliases);
+    const noProject = defaultPatterns(extraAliases, false);
+    ensureVersionResourcePatterns(agent, version, {
+      commands:    allLayers,
+      skills:      allLayers,
+      hooks:       noProject,     // hooks: no project layer (security)
+      subagents:   noProject,
+      plugins:     noProject,
+      workflows:   noProject,
+      permissions: ['system:*'],
+      mcp:         ['user:*'],
+    });
+  }
+
+  // If no explicit selection was passed, build one from the persisted resource
+  // patterns. This lets users customize agents.yaml to control which resources
+  // are synced (e.g. "skills: [system:brain-scan user:creative]").
+  // When patterns are the default (every layer wildcard), the expanded result
+  // equals the full available set — identical to the old behavior.
+  if (!selection) {
+    const vr = getVersionResources(agent, version);
+    if (vr) {
+      const patternSelection: ResourceSelection = {};
+
+      // Listable resource types: use listResources to get name→source maps.
+      const listableTypes: Array<['commands' | 'skills' | 'hooks' | 'subagents', 'commands' | 'skills' | 'hooks' | 'subagents']> = [
+        ['commands', 'commands'],
+        ['skills',   'skills'],
+        ['hooks',    'hooks'],
+        ['subagents','subagents'],
+      ];
+      for (const [type, kind] of listableTypes) {
+        const patterns = vr[type];
+        if (!Array.isArray(patterns) || patterns.length === 0) continue;
+        const sourceMap = new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
+        patternSelection[type] = expandPatterns(patterns, sourceMap);
+      }
+
+      // permissions: all groups are 'system' source.
+      if (Array.isArray(vr.permissions) && vr.permissions.length > 0) {
+        const permMap = new Map(available.permissions.map(n => [n, 'system' as const]));
+        patternSelection.permissions = expandPatterns(vr.permissions, permMap);
+      }
+
+      // mcp: all declared servers are 'user' source.
+      if (Array.isArray(vr.mcp) && vr.mcp.length > 0) {
+        const mcpMap = new Map(available.mcp.map(n => [n, 'user' as const]));
+        patternSelection.mcp = expandPatterns(vr.mcp, mcpMap);
+      }
+
+      // plugins: treat all as 'user' source for now.
+      if (Array.isArray(vr.plugins) && vr.plugins.length > 0) {
+        const pluginMap = new Map(available.plugins.map(n => [n, 'user' as const]));
+        patternSelection.plugins = expandPatterns(vr.plugins, pluginMap);
+      }
+
+      // workflows: treat all as 'user' source.
+      if (Array.isArray(vr.workflows) && vr.workflows.length > 0) {
+        const workflowMap = new Map(available.workflows.map(n => [n, 'user' as const]));
+        patternSelection.workflows = expandPatterns(vr.workflows, workflowMap);
+      }
+
+      // memory is not pattern-controlled (rulesPreset handles it) — always sync.
+      patternSelection.memory = 'all';
+
+      if (Object.keys(patternSelection).length > 0) {
+        selection = patternSelection;
+      }
+    }
+  }
+
   // Fast guard: skip the entire sync when no selection is active and nothing
   // has changed since the last full sync. Drops steady-state cost from ~16s
   // (unconditional file copies) to ~2ms (stat calls + manifest read).
@@ -1697,9 +1773,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       syncedCommands.push(cmd);
     }
     result.commands = syncedCommands.length > 0;
-    if (syncedCommands.length > 0) {
-      recordVersionResources(agent, version, 'commands', syncedCommands);
-    }
   }
 
   // Sync skills (skip if agent natively reads ~/.agents/skills/)
@@ -1730,9 +1803,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
         syncedSkills.push(skill);
       }
       result.skills = syncedSkills.length > 0;
-      if (syncedSkills.length > 0) {
-        recordVersionResources(agent, version, 'skills', syncedSkills);
-      }
     }
   }
 
@@ -1803,9 +1873,6 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
         }
 
         result.hooks = syncedHooks.length > 0;
-        if (syncedHooks.length > 0) {
-          recordVersionResources(agent, version, 'hooks', syncedHooks);
-        }
 
         // Register hooks into agent-native settings.json/hooks.json. Gemini
         // shipped hooks in 0.26.0; gate already passed above so this is safe.
@@ -1838,8 +1905,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       fs.writeFileSync(destFile, composed.content);
       result.memory.push(targetName);
 
-      // Track which preset materialized — surfaces in `agents rules list`.
-      recordVersionResources(agent, version, 'memory', [composed.preset]);
+      // rulesPreset is tracked separately via setActiveRulesPreset.
     } catch (err) {
       // No rules.yaml yet, or a typo'd preset name. Don't fail the whole sync —
       // just leave the agent without a synced rules file.
@@ -1889,9 +1955,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     if (builtPerms.allow.length > 0 || (builtPerms.deny && builtPerms.deny.length > 0)) {
       const permResult = applyPermsToVersion(agent, builtPerms, versionHome, true);
       result.permissions = permResult.success;
-      if (permResult.success) {
-        recordVersionResources(agent, version, 'permissions', permsToSync);
-      }
+      // permissions patterns already written via ensureVersionResourcePatterns above.
     }
   }
 
@@ -1905,9 +1969,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   if (mcpToSync.length > 0 && MCP_CAPABLE_AGENTS.includes(agent)) {
     const mcpResult = installMcpServers(agent, version, versionHome, mcpToSync, { cwd });
     result.mcp = mcpResult.applied;
-    if (mcpResult.applied.length > 0) {
-      recordVersionResources(agent, version, 'mcp', mcpResult.applied);
-    }
+    // mcp patterns already written via ensureVersionResourcePatterns above.
   }
 
   // Sync subagents (claude and openclaw only)
@@ -1942,9 +2004,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       } catch { /* resource sync failed for this item */ }
     }
 
-    if (result.subagents.length > 0) {
-      recordVersionResources(agent, version, 'subagents', result.subagents);
-    }
+    // subagent patterns already written via ensureVersionResourcePatterns above.
   }
 
   // Sync plugins (claude and openclaw)
@@ -1970,9 +2030,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       }
     }
 
-    if (result.plugins.length > 0) {
-      recordVersionResources(agent, version, 'plugins', result.plugins);
-    }
+    // plugin patterns already written via ensureVersionResourcePatterns above.
   }
 
   // Sync workflows (claude only)
@@ -1994,9 +2052,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       } catch { /* resource sync failed for this item */ }
     }
 
-    if (result.workflows.length > 0) {
-      recordVersionResources(agent, version, 'workflows', result.workflows);
-    }
+    // workflow patterns already written via ensureVersionResourcePatterns above.
   }
 
   // Write manifest after a successful full sync so the next launch can skip this work.

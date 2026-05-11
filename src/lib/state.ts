@@ -632,26 +632,45 @@ export function getPackageLocalPath(source: string): string {
 
 // ─── Version resource tracking ────────────────────────────────────────────────
 
-import type { AgentId, ResourceType, VersionResources } from './types.js';
+import type { AgentId, ResourceType, VersionResources, ResourcePattern } from './types.js';
 
+/**
+ * @deprecated No-op. Use ensureVersionResourcePatterns instead.
+ * Kept for backward compat with command files that still call it.
+ */
 export function recordVersionResources(
+  _agent: AgentId,
+  _version: string,
+  _resourceType: ResourceType,
+  _resources: string[]
+): void {
+  // intentional no-op — tracking moved to pattern-based ensureVersionResourcePatterns
+}
+
+/**
+ * Write default resource selection patterns for an agent@version.
+ * Only writes each field when it is not already set, preserving user customization.
+ * Pass all resource types you want to initialize in one call to batch the write.
+ */
+export function ensureVersionResourcePatterns(
   agent: AgentId,
   version: string,
-  resourceType: ResourceType,
-  resources: string[]
+  updates: Partial<Record<Exclude<keyof VersionResources, 'rulesPreset'>, ResourcePattern[]>>
 ): void {
-  if (resources.length === 0) return;
-
   const meta = readMeta();
   if (!meta.versions) meta.versions = {};
   if (!meta.versions[agent]) meta.versions[agent] = {};
   if (!meta.versions[agent]![version]) meta.versions[agent]![version] = {};
 
-  const existing = meta.versions[agent]![version][resourceType] || [];
-  const merged = [...new Set([...existing, ...resources])];
-  meta.versions[agent]![version][resourceType] = merged;
-
-  writeMeta(meta);
+  const vr = meta.versions[agent]![version];
+  let changed = false;
+  for (const [type, patterns] of Object.entries(updates) as [Exclude<keyof VersionResources, 'rulesPreset'>, ResourcePattern[]][]) {
+    if (!vr[type] || (vr[type] as ResourcePattern[]).length === 0) {
+      (vr as Record<string, unknown>)[type] = patterns;
+      changed = true;
+    }
+  }
+  if (changed) writeMeta(meta);
 }
 
 export function getVersionResources(

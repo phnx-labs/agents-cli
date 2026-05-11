@@ -13,6 +13,8 @@ import { listInstalledHooksWithScope } from './hooks.js';
 import { listInstalledInstructionsWithScope } from './rules/rules.js';
 import { getEffectiveHome } from './versions.js';
 import { listMcpServerConfigs } from './mcp.js';
+import { WorkflowsHandler } from './resources/workflows.js';
+import { WORKFLOW_CAPABLE_AGENTS } from './workflows.js';
 import {
   getProjectAgentsDir,
   getUserAgentsDir,
@@ -39,7 +41,11 @@ export interface ResolvedResource {
   name: string;
   /** Absolute path to the resource file or directory. */
   path: string;
-  source: 'project' | 'user' | 'system';
+  /**
+   * Source layer: 'project' | 'user' | 'system' for built-in layers,
+   * or the alias name (e.g. 'rush') for extra repos registered in agents.yaml.
+   */
+  source: string;
 }
 
 /**
@@ -57,11 +63,11 @@ export function resolveResource(
   const projectDir = getProjectAgentsDir(cwd);
   const extraRepos = getEnabledExtraRepos();
 
-  const candidates: Array<[string, 'project' | 'user' | 'system']> = [
-    ...(projectDir ? [[path.join(projectDir, kind), 'project'] as [string, 'project']] : []),
+  const candidates: Array<[string, string]> = [
+    ...(projectDir ? [[path.join(projectDir, kind), 'project'] as [string, string]] : []),
     [path.join(getUserAgentsDir(), kind), 'user'],
     [path.join(getSystemAgentsDir(), kind), 'system'],
-    ...extraRepos.map((e): [string, 'system'] => [path.join(e.dir, kind), 'system']),
+    ...extraRepos.map((e): [string, string] => [path.join(e.dir, kind), e.alias]),
   ];
 
   for (const [dir, source] of candidates) {
@@ -99,11 +105,11 @@ export function listResources(
   const projectDir = getProjectAgentsDir(cwd);
   const extraRepos = getEnabledExtraRepos();
 
-  const roots: Array<[string, 'project' | 'user' | 'system']> = [
-    ...(projectDir ? [[path.join(projectDir, kind), 'project'] as [string, 'project']] : []),
+  const roots: Array<[string, string]> = [
+    ...(projectDir ? [[path.join(projectDir, kind), 'project'] as [string, string]] : []),
     [path.join(getUserAgentsDir(), kind), 'user'],
     [path.join(getSystemAgentsDir(), kind), 'system'],
-    ...extraRepos.map((e): [string, 'system'] => [path.join(e.dir, kind), 'system']),
+    ...extraRepos.map((e): [string, string] => [path.join(e.dir, kind), e.alias]),
   ];
 
   for (const [dir, source] of roots) {
@@ -157,6 +163,7 @@ export interface AgentResources {
   mcp: McpResourceEntry[];
   memory: ResourceEntry[];
   hooks: ResourceEntry[];
+  workflows: ResourceEntry[];
 }
 
 /** Options for resource discovery. */
@@ -251,6 +258,14 @@ export function getAgentResources(
     }
   }
 
+  // Workflows (claude only)
+  const workflows: ResourceEntry[] = [];
+  if (WORKFLOW_CAPABLE_AGENTS.includes(agentId as 'claude')) {
+    for (const w of WorkflowsHandler.listAll(agentId as 'claude', cwd)) {
+      workflows.push({ name: w.name, path: w.path, scope: w.layer === 'project' ? 'project' : 'user' });
+    }
+  }
+
   return {
     agentId,
     commands,
@@ -259,6 +274,7 @@ export function getAgentResources(
     mcp,
     memory,
     hooks,
+    workflows,
   };
 }
 
