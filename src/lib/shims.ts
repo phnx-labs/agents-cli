@@ -200,8 +200,10 @@ async function promptConflictStrategy(
  *        and capability flag `memoryImports` → `rulesImports`.
  *   v8 — versions moved from ~/.agents-system/versions to ~/.agents/versions
  *        (two-repo split: system = shipped defaults, user = operational state).
+ *   v9 — claude shim exports CLAUDE_CODE_OAUTH_TOKEN from per-version
+ *        .oauth_token file on Linux (keychain-less sandbox fallback).
  */
-export const SHIM_SCHEMA_VERSION = 9;
+export const SHIM_SCHEMA_VERSION = 10;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -220,6 +222,12 @@ export function generateShimScript(agent: AgentId): string {
 # selected version's config directory so switching versions also switches the
 # live Claude account.
 export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/${configDirName}"
+# On Linux sandboxes (no keychain), fall back to a per-version token file.
+# The env var always wins if already set; no-op on macOS.
+if [ "\$(uname -s)" = "Linux" ] && [ -z "\${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "\$CLAUDE_CONFIG_DIR/.oauth_token" ]; then
+  CLAUDE_CODE_OAUTH_TOKEN=\$(cat "\$CLAUDE_CONFIG_DIR/.oauth_token")
+  export CLAUDE_CODE_OAUTH_TOKEN
+fi
 `
     : agent === 'codex'
       ? `
