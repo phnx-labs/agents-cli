@@ -35,6 +35,16 @@ import {
   secretsKeychainItem,
   setKeychainToken,
 } from '../lib/secrets/index.js';
+import {
+  assertOpAvailable,
+  createPasswordItem,
+  deleteItemByTitle,
+  extractSecrets,
+  itemExistsByTitle,
+  listItems,
+  listVaults,
+  type OpVault,
+} from '../lib/onepassword.js';
 import { registerCommandGroups } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
@@ -118,6 +128,22 @@ async function promptKeyName(bundleName: string): Promise<string> {
         return (err as Error).message;
       }
     },
+  });
+}
+
+/** Resolve a 1Password vault name — use the provided value, or prompt interactively. */
+async function resolveVault(vaultOpt: string | undefined): Promise<string> {
+  if (vaultOpt) return vaultOpt;
+  const vaults: OpVault[] = listVaults();
+  if (vaults.length === 0) throw new Error('No 1Password vaults found. Make sure you are signed in: op signin');
+  if (vaults.length === 1) return vaults[0].name;
+  if (!isInteractiveTerminal()) {
+    throw new Error(`Multiple vaults found. Pass --vault <name> (available: ${vaults.map((v) => v.name).join(', ')})`);
+  }
+  const { select } = await import('@inquirer/prompts');
+  return await select({
+    message: 'Which 1Password vault?',
+    choices: vaults.map((v) => ({ name: v.name, value: v.name })),
   });
 }
 
@@ -293,6 +319,13 @@ Examples:
 
   # Import an entire .env file straight into keychain
   agents secrets import prod --from .env.prod
+
+  # Import secrets from a 1Password vault
+  agents secrets import prod --from-1password --vault "Rush Prod"
+
+  # Push a bundle back to 1Password (vault migration, backup)
+  agents secrets export prod --to-1password --vault "Rush Prod"
+  agents secrets export prod --to-1password --vault "Rush Prod" --force
 
   # See what's in a bundle (values masked)
   agents secrets view prod
@@ -675,34 +708,76 @@ Examples:
 
   cmd
     .command('import [bundle]')
-    .description('Import keys from a .env file into a bundle. By default every key is stored in keychain.')
-    .requiredOption('--from <path>', 'Path to a .env file')
+    .description('Import keys from a .env file or a 1Password vault into a bundle. By default every key is stored in keychain.')
+    .option('--from <path>', 'Path to a .env file')
+    .option('--from-1password', 'Import secrets from a 1Password vault (requires the op CLI)')
+    .option('--vault <name>', '1Password vault name (used with --from-1password)')
     .option('--all-plaintext', 'Store every imported value as a literal in the bundle metadata (skip keychain item creation)')
     .option('--force', 'Overwrite an existing key in the bundle')
-    .action(async (bundleName: string | undefined, opts: { from: string; allPlaintext?: boolean; force?: boolean }) => {
+    .action(async (bundleName: string | undefined, opts: {
+      from?: string;
+      from1password?: boolean;
+      vault?: string;
+      allPlaintext?: boolean;
+      force?: boolean;
+    }) => {
       try {
+        if (!opts.from && !opts.from1password) {
+          throw new Error('Pass --from <path> to import a .env file, or --from-1password to import from a 1Password vault.');
+        }
+        if (opts.from && opts.from1password) {
+          throw new Error('--from and --from-1password are mutually exclusive.');
+        }
+
         const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
         const bundle = readBundle(resolvedBundleName);
-        const raw = fs.readFileSync(opts.from, 'utf-8');
-        const pairs = parseDotenv(raw);
         let added = 0;
         let skipped = 0;
-        for (const [key, value] of Object.entries(pairs)) {
-          if (!opts.force && key in bundle.vars) {
-            skipped++;
-            continue;
+
+        if (opts.from1password) {
+          assertOpAvailable();
+          const vault = await resolveVault(opts.vault);
+          const items = listItems(vault);
+          const { secrets, skipped: opSkipped } = extractSecrets(items, vault);
+          for (const { envKey, value } of secrets) {
+            if (!opts.force && envKey in bundle.vars) {
+              skipped++;
+              continue;
+            }
+            if (opts.allPlaintext) {
+              bundle.vars[envKey] = { value };
+            } else {
+              const item = secretsKeychainItem(resolvedBundleName, envKey);
+              setKeychainToken(item, value, bundle.icloud_sync);
+              bundle.vars[envKey] = keychainRef(envKey);
+            }
+            added++;
           }
-          if (opts.allPlaintext) {
-            bundle.vars[key] = { value };
-          } else {
-            const item = secretsKeychainItem(resolvedBundleName, key);
-            setKeychainToken(item, value, bundle.icloud_sync);
-            bundle.vars[key] = keychainRef(key);
+          writeBundle(bundle);
+          if (opSkipped.length) {
+            console.log(chalk.yellow(`Skipped ${opSkipped.length} item(s) with no importable fields.`));
           }
-          added++;
+          console.log(chalk.green(`Imported ${added} key(s) from 1Password vault '${vault}'${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
+        } else {
+          const raw = fs.readFileSync(opts.from!, 'utf-8');
+          const pairs = parseDotenv(raw);
+          for (const [key, value] of Object.entries(pairs)) {
+            if (!opts.force && key in bundle.vars) {
+              skipped++;
+              continue;
+            }
+            if (opts.allPlaintext) {
+              bundle.vars[key] = { value };
+            } else {
+              const item = secretsKeychainItem(resolvedBundleName, key);
+              setKeychainToken(item, value, bundle.icloud_sync);
+              bundle.vars[key] = keychainRef(key);
+            }
+            added++;
+          }
+          writeBundle(bundle);
+          console.log(chalk.green(`Imported ${added} key(s)${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
         }
-        writeBundle(bundle);
-        console.log(chalk.green(`Imported ${added} key(s)${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
@@ -712,13 +787,52 @@ Examples:
 
   cmd
     .command('export [bundle]')
-    .description('Resolve a bundle and print KEY=VALUE lines (for `eval "$(agents secrets export prod)"`). Refuses on a TTY unless --plaintext.')
-    .option('--plaintext', 'Acknowledge that the resolved values will be printed in the clear')
-    .action(async (bundleName: string | undefined, opts: { plaintext?: boolean }) => {
+    .description('Resolve a bundle and print KEY=VALUE lines, or push it to a 1Password vault with --to-1password.')
+    .option('--plaintext', 'Acknowledge that the resolved values will be printed in the clear (shell export mode)')
+    .option('--to-1password', 'Push every key in the bundle as a PASSWORD item in a 1Password vault')
+    .option('--vault <name>', '1Password vault name (used with --to-1password)')
+    .option('--force', 'Overwrite existing 1Password items (used with --to-1password)')
+    .action(async (bundleName: string | undefined, opts: {
+      plaintext?: boolean;
+      to1password?: boolean;
+      vault?: string;
+      force?: boolean;
+    }) => {
       try {
         const { resolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
         const bundle = readBundle(resolvedBundleName);
+
+        if (opts.to1password) {
+          assertOpAvailable();
+          const vault = await resolveVault(opts.vault);
+          const env = resolveBundleEnv(bundle);
+          let created = 0;
+          let overwritten = 0;
+          let skipped = 0;
+          for (const [key, value] of Object.entries(env)) {
+            const exists = itemExistsByTitle(key, vault);
+            if (exists) {
+              if (!opts.force) {
+                skipped++;
+                continue;
+              }
+              deleteItemByTitle(key, vault);
+              createPasswordItem(key, value, vault);
+              overwritten++;
+            } else {
+              createPasswordItem(key, value, vault);
+              created++;
+            }
+          }
+          const parts: string[] = [];
+          if (created) parts.push(`${created} created`);
+          if (overwritten) parts.push(`${overwritten} overwritten`);
+          if (skipped) parts.push(`${skipped} skipped (already exist, pass --force)`);
+          console.log(chalk.green(`Exported to 1Password vault '${vault}': ${parts.join(', ')}.`));
+          return;
+        }
+
         if (isInteractiveTerminal() && !opts.plaintext) {
           console.error(chalk.red('export to a TTY requires --plaintext (prevents shoulder-surfing).'));
           process.exit(1);
