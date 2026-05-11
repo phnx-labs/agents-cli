@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { checkbox, input } from '@inquirer/prompts';
+import { input } from '@inquirer/prompts';
 
 import { PLUGINS_CAPABLE_AGENTS, agentLabel } from '../lib/agents.js';
 import type { AgentId, DiscoveredPlugin, PluginManifest } from '../lib/types.js';
