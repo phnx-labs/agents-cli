@@ -820,7 +820,26 @@ async function mergeSqliteDb(src: string, dest: string): Promise<void> {
       const tables = db.prepare<{ name: string }>(
         `SELECT name FROM src.sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`,
       ).all() as Array<{ name: string }>;
+      // FTS5 virtual tables maintain shadow tables (<name>_data, _idx, _content,
+      // _docsize, _config) with internal segids/pgnos that MUST stay consistent.
+      // Row-merging shadow tables across two DBs corrupts the index. Skip them
+      // here — the indexer reconstructs FTS content on the next scan.
+      const ftsVirtuals = new Set<string>(
+        (db.prepare<{ name: string }>(
+          `SELECT name FROM src.sqlite_master WHERE type='table' AND sql LIKE '%fts5%'`,
+        ).all() as Array<{ name: string }>).map((r) => r.name),
+      );
+      const ftsShadowSuffixes = ['_data', '_idx', '_content', '_docsize', '_config'];
+      const isFtsShadow = (name: string): boolean => {
+        for (const v of ftsVirtuals) {
+          for (const suf of ftsShadowSuffixes) {
+            if (name === `${v}${suf}`) return true;
+          }
+        }
+        return false;
+      };
       for (const { name } of tables) {
+        if (ftsVirtuals.has(name) || isFtsShadow(name)) continue;
         try {
           const row = db.prepare<{ sql: string }>(
             `SELECT sql FROM src.sqlite_master WHERE type='table' AND name = ?`,
