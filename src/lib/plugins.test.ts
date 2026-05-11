@@ -264,7 +264,7 @@ describe('loadUserConfig / saveUserConfig', () => {
     expect(config).toEqual({});
   });
 
-  it('saveUserConfig writes valid JSON, loadUserConfig reads it back', () => {
+  it('saveUserConfig writes valid JSON, loadUserConfig reads it back', async () => {
     // Write directly to the expected path (using the real getPluginsDir would
     // touch real FS state, so we test the round-trip via save then load).
     // This is an integration test against the real FS path.
@@ -353,7 +353,7 @@ describe('syncPluginMcp (via syncPluginToVersion)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('merges .mcp.json servers into settings.json with plugin name prefix', () => {
+  it('merges .mcp.json servers into settings.json with plugin name prefix', async () => {
     const pluginRoot = path.join(tmpDir, 'plugin');
     fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
     fs.writeFileSync(
@@ -417,7 +417,7 @@ describe('syncPluginSettings (via syncPluginToVersion)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('merges non-permission keys from plugin settings.json non-destructively', () => {
+  it('merges non-permission keys from plugin settings.json non-destructively', async () => {
     const pluginRoot = path.join(tmpDir, 'plugin');
     fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
     fs.writeFileSync(
@@ -480,7 +480,7 @@ describe('removePluginFromVersion', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('removes namespaced MCP servers from settings.json', () => {
+  it('removes namespaced MCP servers from settings.json', async () => {
     const { removePluginFromVersion: remove } = await import('./plugins.js');
     const pluginRoot = path.join(tmpDir, 'plugin');
     const versionHome = path.join(tmpDir, 'home');
@@ -505,7 +505,7 @@ describe('removePluginFromVersion', () => {
     expect(settings.mcpServers['other-server']).toBeDefined();
   });
 
-  it('removes namespaced command files from commands dir', () => {
+  it('removes namespaced command files from commands dir', async () => {
     const { removePluginFromVersion: remove } = await import('./plugins.js');
     const { AGENTS } = await import('./agents.js');
 
