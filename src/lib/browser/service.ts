@@ -25,6 +25,7 @@ import {
 } from './types.js';
 import { getRefs, resolveRefToCoords, type RefOpts, type RefNode } from './refs.js';
 import { clickAtCoords, hoverAtCoords, scrollAtCoords, typeText, pressKey, focusNode } from './input.js';
+import { typeEditorText } from './editor.js';
 import { emit } from '../events.js';
 
 interface ProfileConnection {
@@ -545,7 +546,7 @@ export class BrowserService {
     await clickAtCoords(conn.cdp, sessionId, x, y);
   }
 
-  async type(taskId: string, ref: number, text: string, tabHint?: string): Promise<void> {
+  async type(taskId: string, ref: number, text: string, tabHint?: string, clear?: boolean): Promise<void> {
     const { conn, task } = await this.findTask(taskId);
     const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
     const cdpTargetId = this.getCdpTargetId(task, shortId);
@@ -556,10 +557,14 @@ export class BrowserService {
     const { nodeMap } = await getRefs(conn.cdp, sessionId, { interactive: false, limit: 1000 });
     const node = nodeMap.get(ref);
     if (!node) throw new Error(`Ref ${ref} not found`);
-    if (node.backendNodeId) {
-      await focusNode(conn.cdp, sessionId, node.backendNodeId);
+    if (node.editor) {
+      await typeEditorText(conn.cdp, sessionId, node, text, clear);
+    } else {
+      if (node.backendNodeId) {
+        await focusNode(conn.cdp, sessionId, node.backendNodeId);
+      }
+      await typeText(conn.cdp, sessionId, text);
     }
-    await typeText(conn.cdp, sessionId, text);
   }
 
   async press(taskId: string, key: string, tabHint?: string): Promise<void> {

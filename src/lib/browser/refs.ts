@@ -21,6 +21,47 @@ export interface RefNode {
   name: string;
   attrs: string[];
   backendNodeId?: number;
+  editor?: string;
+}
+
+const EDITOR_DETECT_FN = `(function() {
+  let el = this;
+  for (let i = 0; i < 5; i++) {
+    if (!el || el === document.documentElement) break;
+    if (el.hasAttribute && el.hasAttribute('data-lexical-editor')) return 'lexical';
+    if (el.classList && el.classList.contains('ProseMirror')) return 'prosemirror';
+    if (el.hasAttribute && el.hasAttribute('data-slate-editor')) return 'slate';
+    if (el.classList && Array.from(el.classList).some(function(c) { return /^DraftEditor-/.test(c); })) return 'draft';
+    if (el.classList && el.classList.contains('ql-editor')) return 'quill';
+    if (el.classList && el.classList.contains('ck-editor__editable')) return 'ckeditor5';
+    if (el.tagName === 'TRIX-EDITOR') return 'trix';
+    el = el.parentElement;
+  }
+  return null;
+})`;
+
+async function detectEditorForNode(
+  cdp: CDPClient,
+  sessionId: string,
+  backendNodeId: number
+): Promise<string | undefined> {
+  const { object } = await cdp.send<{ object: { objectId?: string } }>(
+    'DOM.resolveNode',
+    { backendNodeId },
+    sessionId
+  );
+  if (!object.objectId) return undefined;
+  const objectId = object.objectId;
+  try {
+    const { result } = await cdp.send<{ result: { value: string | null } }>(
+      'Runtime.callFunctionOn',
+      { objectId, functionDeclaration: EDITOR_DETECT_FN, returnByValue: true },
+      sessionId
+    );
+    return result.value ?? undefined;
+  } finally {
+    await cdp.send('Runtime.releaseObject', { objectId }, sessionId);
+  }
 }
 
 const INTERACTIVE_ROLES = new Set([
@@ -90,13 +131,20 @@ export async function getRefs(
       attrs,
       backendNodeId: node.backendDOMNodeId,
     };
+
+    if (role === 'textbox' && node.backendDOMNodeId) {
+      const editor = await detectEditorForNode(cdp, sessionId, node.backendDOMNodeId);
+      if (editor) refNode.editor = editor;
+    }
+
     nodeMap.set(ref, refNode);
 
     const attrStr = attrs.length > 0 ? ` [${attrs.join('] [')}]` : '';
+    const editorStr = refNode.editor ? ` [editor=${refNode.editor}]` : '';
     const nameStr = name ? ` "${truncate(name, 50)}"` : '';
     const line = compact
-      ? `${role}${nameStr} [ref=${ref}]${attrStr}`
-      : `- ${role}${nameStr} [ref=${ref}]${attrStr}`;
+      ? `${role}${nameStr} [ref=${ref}]${attrStr}${editorStr}`
+      : `- ${role}${nameStr} [ref=${ref}]${attrStr}${editorStr}`;
     lines.push(line);
   }
 

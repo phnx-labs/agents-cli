@@ -4,7 +4,7 @@ import * as path from 'path';
 import { getHelpersDir } from '../state.js';
 import { BrowserService } from './service.js';
 import { startDaemon } from '../daemon.js';
-import type { IPCRequest, IPCResponse } from './types.js';
+import type { IPCRequest, IPCResponse, RefNodeJson } from './types.js';
 
 const SOCKET_NAME = 'browser.sock';
 
@@ -205,11 +205,16 @@ export class BrowserIPCServer {
         if (!request.task) {
           return { ok: false, error: 'Task required' };
         }
-        const { refs } = await this.service.refs(request.task, request.tabId, {
+        const { refs, nodeMap } = await this.service.refs(request.task, request.tabId, {
           interactive: request.interactive ?? true,
           limit: request.limit ?? 500,
         });
-        return { ok: true, refs };
+        const nodes: RefNodeJson[] = Array.from(nodeMap.values()).map(n => {
+          const entry: RefNodeJson = { ref: n.ref, role: n.role, name: n.name, attrs: n.attrs };
+          if (n.editor !== undefined) entry.editor = n.editor;
+          return entry;
+        });
+        return { ok: true, refs, nodes };
       }
 
       case 'click': {
@@ -224,7 +229,7 @@ export class BrowserIPCServer {
         if (!request.task || request.ref === undefined || !request.text) {
           return { ok: false, error: 'Task, ref, and text required' };
         }
-        await this.service.type(request.task, request.ref, request.text, request.tabId);
+        await this.service.type(request.task, request.ref, request.text, request.tabId, request.clear);
         return { ok: true };
       }
 
