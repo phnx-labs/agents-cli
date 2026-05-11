@@ -40,6 +40,7 @@ import {
   type RotateResult,
 } from '../lib/rotate.js';
 import { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
+import { loadPluginManifest, syncPluginToVersion } from '../lib/plugins.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -230,6 +231,33 @@ Examples:
           : '';
         if (orchestratorBody && prompt !== undefined) {
           prompt = `${orchestratorBody}\n\n---\n\n${prompt}`;
+        }
+
+        // Sync workflow-scoped skills into the version home's skills dir.
+        const workflowSkillsDir = path.join(workflowDir, 'skills');
+        if (fs.existsSync(workflowSkillsDir)) {
+          const skillsTarget = path.join(claudeAgentsDir, '..', 'skills');
+          fs.mkdirSync(skillsTarget, { recursive: true });
+          for (const entry of fs.readdirSync(workflowSkillsDir, { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue;
+            fs.cpSync(path.join(workflowSkillsDir, entry.name), path.join(skillsTarget, entry.name), { recursive: true });
+          }
+        }
+
+        // Sync workflow-scoped plugins into the version home.
+        const workflowPluginsDir = path.join(workflowDir, 'plugins');
+        if (fs.existsSync(workflowPluginsDir)) {
+          for (const entry of fs.readdirSync(workflowPluginsDir, { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue;
+            const pluginRoot = path.join(workflowPluginsDir, entry.name);
+            const manifest = loadPluginManifest(pluginRoot);
+            if (!manifest) continue;
+            syncPluginToVersion(
+              { name: manifest.name, root: pluginRoot, manifest, skills: [], hooks: [], scripts: [] },
+              'claude',
+              versionHome,
+            );
+          }
         }
 
         const subagentCount = fs.existsSync(subagentsDir)
