@@ -68,9 +68,13 @@ print(jwt.encode({'iat': int(time.time())-60, 'exp': int(time.time())+600, 'iss'
 
 # Parse flags
 PR_MODE=0
+LINEAR_TICKET=""
+POST_FILE="COMPLIANCE_AUDIT.md"   # default file the agent writes its report to
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pr) PR_MODE=1; shift ;;
+    --linear) LINEAR_TICKET="$2"; shift 2 ;;
+    --post-file) POST_FILE="$2"; shift 2 ;;
     --) shift; break ;;
     -*) die "unknown flag: $1" ;;
     *) break ;;
@@ -287,6 +291,26 @@ fi
 echo \"--- Running: $cmd ---\"
 $cmd
 "
+
+  # ---- Post-run: optionally post a report file to a Linear ticket ----
+  # Box has zero Linear access by design; the laptop fetches the file via
+  # crabbox run and calls linear update locally.
+  if [[ -n "$LINEAR_TICKET" ]]; then
+    echo "[linear] fetching $POST_FILE from box and posting to $LINEAR_TICKET"
+    local tmp_post="/tmp/sandbox-post-${TASK_ID}.md"
+    if [[ "$PR_MODE" == "1" ]]; then
+      remote_path="\$HOME/$workspace_dir/$POST_FILE"
+    else
+      remote_path="\$HOME/$workspace_dir/$POST_FILE"
+    fi
+    crabbox run --id "$box_id" --reclaim --capture-stdout "$tmp_post" -- bash -c "cat $remote_path" >/dev/null 2>&1
+    if [[ -s "$tmp_post" ]]; then
+      command -v linear >/dev/null && linear update "$LINEAR_TICKET" --comment "$(cat "$tmp_post")" \
+        || echo "warn: linear CLI not installed; report saved at $tmp_post"
+    else
+      echo "warn: $POST_FILE not found on box at $remote_path"
+    fi
+  fi
 }
 
 main "$@"
