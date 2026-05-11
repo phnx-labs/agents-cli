@@ -266,6 +266,15 @@ describe('non-interactive CLI usage', () => {
     writeLoggingManagedVersion(home, 'codex', '0.1.0', 'codex', logPath);
     writeLoggingManagedVersion(home, 'codex', '0.2.0', 'codex', logPath);
 
+    // Pre-register 'demo' in codex 0.2.0's MCP config so mcp remove can find it.
+    const versionHome02 = path.join(home, '.agents', '.history', 'versions', 'codex', '0.2.0', 'home');
+    const codexConfigDir = path.join(versionHome02, '.codex');
+    fs.mkdirSync(codexConfigDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(codexConfigDir, 'config.toml'),
+      '[mcp_servers]\n[mcp_servers.demo]\ncommand = "demo-server"\nargs = []\n',
+    );
+
     const result = runAgents(home, ['mcp', 'remove', 'demo', '--agents', 'codex@0.2.0']);
     const log = fs.readFileSync(logPath, 'utf-8');
 

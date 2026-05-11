@@ -5,11 +5,60 @@ import { tmpdir } from 'os';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
 
-const TEST_HOME = path.join(tmpdir(), 'agents-cli-browser-service-test');
-const TEST_AGENTS_DIR = path.join(TEST_HOME, '.agents');
+const { TEST_HOME, TEST_AGENTS_DIR, TEST_BROWSER_DIR } = vi.hoisted(() => {
+  const nodeOs = require('os');
+  const nodePath = require('path');
+  const testHome = nodePath.join(nodeOs.tmpdir(), 'agents-cli-browser-service-test');
+  const testAgentsDir = nodePath.join(testHome, '.agents');
+  return {
+    TEST_HOME: testHome,
+    TEST_AGENTS_DIR: testAgentsDir,
+    TEST_BROWSER_DIR: nodePath.join(testAgentsDir, 'browser'),
+  };
+});
 
 vi.spyOn(state, 'getUserAgentsDir').mockReturnValue(TEST_AGENTS_DIR);
 vi.spyOn(state, 'getAgentsDir').mockReturnValue(TEST_AGENTS_DIR);
+vi.spyOn(state, 'getBrowserRuntimeDir').mockReturnValue(TEST_BROWSER_DIR);
+
+// Mock profiles module so listProfiles, getProfile, and getProfileRuntimeDir use the test dir.
+vi.mock('./profiles.js', async (importOriginal) => {
+  const nodeFs = require('fs');
+  const nodePath = require('path');
+  const nodeYaml = require('yaml');
+  const nodeOs = require('os');
+  const testHome = nodePath.join(nodeOs.tmpdir(), 'agents-cli-browser-service-test');
+  const testAgentsDir = nodePath.join(testHome, '.agents');
+  const testBrowserDir = nodePath.join(testAgentsDir, 'browser');
+
+  function readProfileYaml(name: string) {
+    const profilePath = nodePath.join(testBrowserDir, 'profiles', `${name}.yaml`);
+    if (!nodeFs.existsSync(profilePath)) return null;
+    const raw = nodeYaml.parse(nodeFs.readFileSync(profilePath, 'utf-8')) as {
+      name: string;
+      browser: string;
+      endpoints: string[];
+    };
+    return { name: raw.name, browser: raw.browser, endpoints: raw.endpoints };
+  }
+
+  const actual = await importOriginal<typeof import('./profiles.js')>();
+  return {
+    ...actual,
+    getBrowserRuntimeDir: () => testBrowserDir,
+    getProfileRuntimeDir: (name: string) => nodePath.join(testBrowserDir, name),
+    listProfiles: async () => {
+      const profilesDir = nodePath.join(testBrowserDir, 'profiles');
+      if (!nodeFs.existsSync(profilesDir)) return [];
+      return nodeFs
+        .readdirSync(profilesDir)
+        .filter((f: string) => f.endsWith('.yaml'))
+        .map((f: string) => readProfileYaml(nodePath.basename(f, '.yaml')))
+        .filter(Boolean);
+    },
+    getProfile: async (name: string) => readProfileYaml(name),
+  };
+});
 
 const { BrowserService } = await import('./service.js');
 

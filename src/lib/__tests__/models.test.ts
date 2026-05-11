@@ -16,15 +16,14 @@ function pickInstalledVersion(agent: 'claude' | 'codex' | 'gemini' | 'opencode' 
   return chosen || versions[0] || null;
 }
 
-const claudeBundleVer = pickInstalledVersion('claude', (vs) =>
-  vs.find((v) => fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js')))
-);
-const claudeBinaryVer = pickInstalledVersion('claude', (vs) =>
-  vs.find((v) =>
-    fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')) &&
-    !fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'))
-  )
-);
+// Use explicit find (no fallback) so the variable is null when no matching version exists.
+const claudeBundleVer = listInstalledVersions('claude').find((v) =>
+  fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'))
+) ?? null;
+const claudeBinaryVer = listInstalledVersions('claude').find((v) =>
+  fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')) &&
+  !fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'))
+) ?? null;
 const codexVer = pickInstalledVersion('codex', () => undefined);
 const geminiVer = pickInstalledVersion('gemini', () => undefined);
 const opencodeVer = pickInstalledVersion('opencode', () => undefined);

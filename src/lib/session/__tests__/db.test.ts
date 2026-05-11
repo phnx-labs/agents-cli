@@ -7,14 +7,10 @@ const { TEST_HOME } = vi.hoisted(() => {
   const nodeOs = require('os');
   const nodeFs = require('fs');
   const nodePath = require('path');
-  return {
-    TEST_HOME: nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'agents-cli-db-test-')),
-  };
-});
-
-vi.mock('os', async () => {
-  const actual = await vi.importActual<typeof os>('os');
-  return { ...actual, homedir: () => TEST_HOME };
+  const testHome = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'agents-cli-db-test-'));
+  // Set before state.ts loads so its module-level HOME constant picks up the override.
+  process.env.HOME = testHome;
+  return { TEST_HOME: testHome };
 });
 
 // Import AFTER the mock so db.ts captures TEST_HOME as its base dir.

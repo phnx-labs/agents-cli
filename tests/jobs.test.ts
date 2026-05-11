@@ -12,6 +12,8 @@ vi.mock('../src/lib/state.js', () => ({
   get getRoutinesDir() { return () => join(hoistedState.TEST_DIR, 'routines'); },
   get getRunsDir() { return () => join(hoistedState.TEST_DIR, 'runs'); },
   get getUserAgentsDir() { return () => hoistedState.TEST_DIR; },
+  get getCliVersionCachePath() { return () => join(hoistedState.TEST_DIR, '.cli-version-cache.json'); },
+  get ensureAgentsDir() { return () => {}; },
 }));
 
 import {

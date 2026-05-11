@@ -66,6 +66,7 @@ vi.mock('../src/lib/state.js', () => {
     get getVersionResources() { return () => null; },
     get getActiveRulesPreset() { return () => 'default'; },
     get setActiveRulesPreset() { return () => {}; },
+    get getCliVersionCachePath() { return () => path.join(hoistedState.AGENTS_DIR, '.cli-version-cache.json'); },
   };
 });
 
@@ -99,6 +100,7 @@ vi.mock('../src/lib/permissions.js', () => ({
   buildPermissionsFromGroups: () => ({ allow: [], deny: [] }),
   CODEX_RULES_FILENAME: '.codex.rules',
   getActivePermissionSetName: () => null,
+  getActivePermissionPresetName: () => null,
   readPermissionSetRecipe: () => null,
   PERMISSION_SET_ENV_VAR: 'AGENTS_PERMISSION_SET',
 }));

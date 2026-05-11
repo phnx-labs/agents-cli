@@ -54,7 +54,7 @@ function runDiff(cwd: string, agent: string, version: string, kinds?: string[]):
 }
 
 function makeVersionHome(agent: string, version: string): string {
-  const home = path.join(systemDir, 'versions', agent, version, 'home');
+  const home = path.join(userDir, '.history', 'versions', agent, version, 'home');
   const configDir = path.join(home, `.${agent}`);
   fs.mkdirSync(path.join(configDir, 'commands'), { recursive: true });
   fs.mkdirSync(path.join(configDir, 'skills'), { recursive: true });

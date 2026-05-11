@@ -289,7 +289,8 @@ describe('generateGeminiConfig', () => {
 
 describe('symlinkAllowedDirs', () => {
   const overlayHome = join(TEST_DIR, 'symlink-overlay');
-  const realDir = join(process.cwd(), '.agents-cli-test-symlink-target');
+  // Must be inside homedir() so symlinkAllowedDirs treats it as HOME-relative.
+  const realDir = join(homedir(), '.agents-cli-test-symlink-target');
 
   beforeEach(() => {
     mkdirSync(overlayHome, { recursive: true });
@@ -318,7 +319,7 @@ describe('symlinkAllowedDirs', () => {
   });
 
   it('creates parent dirs for nested paths', () => {
-    const nestedDir = join(process.cwd(), '.agents-cli-test-symlink-target', 'nested');
+    const nestedDir = join(homedir(), '.agents-cli-test-symlink-target', 'nested');
     mkdirSync(nestedDir, { recursive: true });
 
     symlinkAllowedDirs(overlayHome, [nestedDir]);

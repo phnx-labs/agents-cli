@@ -1,4 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { execSync } from 'child_process';
+
+const claudeInPath = (() => {
+  try { execSync('which claude', { stdio: 'ignore' }); return true; } catch { return false; }
+})();
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { mkdtempSync, rmSync } from 'fs';
@@ -227,7 +232,7 @@ describe('AgentProcess: remoteSessionId extraction', () => {
   });
 
   // --- dependency graph ---
-  describe('dependency graph (--after)', () => {
+  describe.skipIf(!claudeInPath)('dependency graph (--after)', () => {
     // Each of these makes a fresh tmpBase so they don't see each other's teams.
     function freshBase(): string {
       return mkdtempSync(path.join(tmpdir(), 'teams-deps-'));

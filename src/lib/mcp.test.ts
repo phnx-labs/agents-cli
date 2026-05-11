@@ -14,7 +14,7 @@ function makeTempHome(): string {
 }
 
 function writeVersionBinary(home: string, agent: string, version: string, command: string): string {
-  const binary = path.join(home, '.agents-system', 'versions', agent, version, 'node_modules', '.bin', command);
+  const binary = path.join(home, '.agents', '.history', 'versions', agent, version, 'node_modules', '.bin', command);
   fs.mkdirSync(path.dirname(binary), { recursive: true });
   fs.writeFileSync(
     binary,
@@ -60,7 +60,7 @@ describe('MCP sync execution', () => {
     );
 
     const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
-    const versionHome = path.join(home, '.agents-system', 'versions', 'codex', version, 'home');
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'codex', version, 'home');
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
       import { installMcpServers } from ${JSON.stringify(moduleUrl)};
       const result = installMcpServers('codex', ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});

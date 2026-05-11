@@ -63,8 +63,8 @@ describe('parseHookManifest layering', () => {
 
   it('returns system manifest when only system file exists', () => {
     fs.writeFileSync(
-      path.join(SYSTEM_DIR, 'hooks.yaml'),
-      'sys-hook:\n  script: a.sh\n  events: [Stop]\n',
+      path.join(SYSTEM_DIR, 'agents.yaml'),
+      'hooks:\n  sys-hook:\n    script: a.sh\n    events: [Stop]\n',
       'utf-8'
     );
     const out = parseHookManifest();
@@ -83,8 +83,8 @@ describe('parseHookManifest layering', () => {
 
   it('merges both manifests when names do not collide', () => {
     fs.writeFileSync(
-      path.join(SYSTEM_DIR, 'hooks.yaml'),
-      'sys-hook:\n  script: s.sh\n  events: [Stop]\n',
+      path.join(SYSTEM_DIR, 'agents.yaml'),
+      'hooks:\n  sys-hook:\n    script: s.sh\n    events: [Stop]\n',
       'utf-8'
     );
     fs.writeFileSync(
@@ -100,8 +100,8 @@ describe('parseHookManifest layering', () => {
 
   it('user entry overrides system entry of the same name', () => {
     fs.writeFileSync(
-      path.join(SYSTEM_DIR, 'hooks.yaml'),
-      'shared:\n  script: system.sh\n  events: [Stop]\n  timeout: 5\n',
+      path.join(SYSTEM_DIR, 'agents.yaml'),
+      'hooks:\n  shared:\n    script: system.sh\n    events: [Stop]\n    timeout: 5\n',
       'utf-8'
     );
     fs.writeFileSync(
@@ -117,8 +117,8 @@ describe('parseHookManifest layering', () => {
 
   it('enabled: false in user entry disables a system-shipped hook by name', () => {
     fs.writeFileSync(
-      path.join(SYSTEM_DIR, 'hooks.yaml'),
-      'enforced:\n  script: enforce.sh\n  events: [Stop]\n',
+      path.join(SYSTEM_DIR, 'agents.yaml'),
+      'hooks:\n  enforced:\n    script: enforce.sh\n    events: [Stop]\n',
       'utf-8'
     );
     fs.writeFileSync(

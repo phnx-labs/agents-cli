@@ -19,14 +19,10 @@ const { TEST_HOME } = vi.hoisted(() => {
   const nodeOs = require('os');
   const nodeFs = require('fs');
   const nodePath = require('path');
-  return {
-    TEST_HOME: nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'agents-teams-registry-test-')),
-  };
-});
-
-vi.mock('os', async () => {
-  const actual = await vi.importActual<typeof import('os')>('os');
-  return { ...actual, homedir: () => TEST_HOME };
+  const testHome = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'agents-teams-registry-test-'));
+  // Set before state.ts loads so its module-level HOME constant picks up the override.
+  process.env.HOME = testHome;
+  return { TEST_HOME: testHome };
 });
 
 // Import AFTER the mock so persistence.ts captures TEST_HOME as its root.
@@ -55,7 +51,7 @@ describe('teams registry concurrency', () => {
   it('serializes 5 concurrent createTeam calls so all land', async () => {
     const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
     const results = await Promise.allSettled(
-      names.map((n) => createTeam(n, `desc-${n}`))
+      names.map((n) => createTeam(n, { description: `desc-${n}` }))
     );
 
     // Every call must succeed — the lock guarantees no read-modify-write

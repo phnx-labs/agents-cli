@@ -20,14 +20,10 @@ const { TEST_HOME } = vi.hoisted(() => {
   const nodeOs = require('os');
   const nodeFs = require('fs');
   const nodePath = require('path');
-  return {
-    TEST_HOME: nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'agents-pty-server-test-')),
-  };
-});
-
-vi.mock('os', async () => {
-  const actual = await vi.importActual<typeof import('os')>('os');
-  return { ...actual, homedir: () => TEST_HOME };
+  const testHome = nodeFs.mkdtempSync(nodePath.join(nodeOs.tmpdir(), 'agents-pty-server-test-'));
+  // Set before state.ts loads so its module-level HOME constant picks up the override.
+  process.env.HOME = testHome;
+  return { TEST_HOME: testHome };
 });
 
 const { runPtyServer, captureProcessStartTime, getSocketPath } = await import('../pty-server.js');
@@ -35,7 +31,7 @@ const { runPtyServer, captureProcessStartTime, getSocketPath } = await import('.
 afterEach(async () => {
   // Belt-and-braces cleanup so a hanging server from one test doesn't
   // bleed into the next.
-  const sock = path.join(TEST_HOME, '.agents-system', 'helpers', 'pty', 'pty.sock');
+  const sock = path.join(TEST_HOME, '.agents', '.cache', 'helpers', 'pty', 'pty.sock');
   await fsp.rm(sock, { force: true });
 });
 
@@ -67,7 +63,7 @@ describe('PTY socket permission', () => {
     expect(mode.toString(8)).toBe('600');
 
     // Parent dir lockdown is also part of the fix — verify it landed at 0o700.
-    const parent = fs.statSync(path.join(TEST_HOME, '.agents-system'));
+    const parent = fs.statSync(path.join(TEST_HOME, '.agents', '.cache', 'helpers', 'pty'));
     expect((parent.mode & 0o777).toString(8)).toBe('700');
 
     // The server holds the loop open with `await new Promise(() => {})` —

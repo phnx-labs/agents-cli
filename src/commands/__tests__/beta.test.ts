@@ -17,13 +17,15 @@ function makeTempHome(): string {
 }
 
 function writeUpdateCache(home: string): void {
-  const agentsDir = path.join(home, '.agents-system');
-  fs.mkdirSync(agentsDir, { recursive: true });
+  const cacheDir = path.join(home, '.agents', '.cache');
+  fs.mkdirSync(cacheDir, { recursive: true });
   fs.writeFileSync(
-    path.join(agentsDir, '.update-check'),
+    path.join(cacheDir, '.update-check'),
     JSON.stringify({ lastCheck: Date.now(), latestVersion: packageJson.version }),
     'utf-8'
   );
+  // ensureInitialized() checks for ~/.agents-system/.git to confirm setup.
+  fs.mkdirSync(path.join(home, '.agents-system', '.git'), { recursive: true });
 }
 
 function runAgents(args: string[], home: string) {
@@ -33,6 +35,7 @@ function runAgents(args: string[], home: string) {
       ...process.env,
       HOME: home,
       AGENTS_SKIP_MIGRATION: '1',
+      NODE_NO_WARNINGS: '1',
     },
     encoding: 'utf-8',
   });

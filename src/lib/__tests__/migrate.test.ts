@@ -66,7 +66,8 @@ describe('runMigration', () => {
 
     expect(fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8')).toBe('user agents');
     expect(fs.readFileSync(path.join(userDir, 'teams', 'config.json'), 'utf-8')).toBe('{"existing":true}');
-    expect(fs.readFileSync(path.join(systemDir, 'agents.yaml'), 'utf-8')).toBe('system agents');
+    // migrateAgentsYaml intentionally deletes the system copy when the user copy already exists.
+    expect(fs.existsSync(path.join(systemDir, 'agents.yaml'))).toBe(false);
     expect(fs.readFileSync(path.join(systemDir, 'config.json'), 'utf-8')).toBe('{"new":true}');
   });
 

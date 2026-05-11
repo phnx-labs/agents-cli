@@ -22,6 +22,8 @@ function writeUpdateCache(tempHome: string): void {
     JSON.stringify({ lastCheck: Date.now(), latestVersion: packageJson.version }),
     'utf-8'
   );
+  // ensureInitialized() checks for ~/.agents-system/.git to confirm setup.
+  fs.mkdirSync(path.join(tempHome, '.agents-system', '.git'), { recursive: true });
 }
 
 function writeClaudeSession(
@@ -260,6 +262,7 @@ function runAgents(args: string[], cwd: string, home: string) {
       // legacy / synthetic state. The bootstrap-time migration would otherwise
       // move those into ~/.agents-system/, breaking workspace-scoped lookups.
       AGENTS_SKIP_MIGRATION: '1',
+      NODE_NO_WARNINGS: '1',
     },
     encoding: 'utf-8',
   });
