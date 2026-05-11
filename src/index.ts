@@ -107,7 +107,8 @@ Agent versions:
   add <agent>[@version]           Install an agent CLI (e.g. agents add codex)
   remove <agent>[@version]        Uninstall a version
   use <agent>@<version>           Set the default version
-  prune [target]                  Remove orphan resources (commands/skills/hooks) and/or older duplicate version installs
+  prune [target]                  Remove orphan resources and older duplicate version installs (targets: commands, sessions, runs, trash)
+  trash                           Inspect and restore soft-deleted version directories
   view [agent[@version]]          List versions, or inspect one in detail
 
 Agent configuration (synced across versions):
@@ -116,7 +117,7 @@ Agent configuration (synced across versions):
   skills                          Knowledge packs (SKILL.md + supporting files)
   mcp                             MCP servers (stdio or HTTP)
   permissions                     Allow/deny rules for tool calls
-  hooks                           Shell scripts that run on agent events
+  hooks                           Shell scripts that run on agent events (hooks.yaml in agents.yaml)
   subagents                       Named sub-agent definitions
   plugins                         Bundles of skills, hooks, and scripts
 
@@ -124,19 +125,30 @@ Packages:
   search <query>                  Find MCP servers and skills in registries
   install <pkg>                   Install from registry (mcp:name, skill:user/repo)
 
-Run agents:
+Run and dispatch:
   run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
-  sessions                        Browse and replay past runs
+  sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
+  browser                         Automate a browser — navigate, click, screenshot, console, network
+  pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
-Credentials:
+Credentials and profiles:
   profiles                        Bundles of (host CLI, endpoint, model, auth)
-  secrets                         Keychain-backed env bundles injected at spawn
+  secrets                         Keychain-backed env bundles; use 'secrets exec <bundle> -- <cmd>' to inject into a subprocess
 
-Helpers:
-  beta                            Enable preview features like drive and factory
-  pty                             Drive interactive terminal programs (REPLs, TUIs)
+Diagnostics:
+  doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence
+  usage [agent]                   Show rate-limit and quota usage per agent
+
+Config sync:
+  drive                           Sync session history across machines via rsync
+  pull                            Clone or pull the system repo at ~/.agents-system/
+  repo init --path <dir>          Scaffold your own editable repo from a template
+  repo add <path|gh:user/repo>    Merge an extra repo after the system repo
+
+Beta features:
+  beta                            Enable preview features (factory, drive, and more)
 
 Automation tips:
   Pass explicit names/IDs         Avoid pickers: agents sessions <id> --markdown
@@ -144,11 +156,6 @@ Automation tips:
   Use --names for central items   e.g. agents commands add --names review-pr,debug
   Use agent@version targets       e.g. --agents claude@2.1.79,codex@default
   Non-TTY shells apply defaults   Omitted required selections fail with a plain hint
-
-Config sync (portable setup via git):
-  pull                            Clone or pull the system repo at ~/.agents-system/
-  repo init --path <dir>          Scaffold your own editable repo from a template
-  repo add <path|gh:user/repo>    Merge an extra repo after the system repo
 
 Options:
   -V, --version                   Show version number

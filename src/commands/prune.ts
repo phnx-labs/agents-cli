@@ -471,11 +471,17 @@ Examples:
   # Full sweep: orphan resources + duplicate versions for current defaults
   agents prune
 
+  # Preview what a full sweep would remove
+  agents prune --dry-run
+
   # Just orphan skills
   agents prune skills
 
   # Just version dedup
   agents prune versions
+
+  # Deduplicate versions for one agent only
+  agents prune claude
 
   # Sweep every installed version's orphans, not only the defaults
   agents prune --all
