@@ -10,18 +10,28 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { checkbox } from '@inquirer/prompts';
+import { checkbox, input } from '@inquirer/prompts';
 
-import { AGENTS, PLUGINS_CAPABLE_AGENTS, agentLabel } from '../lib/agents.js';
-import type { AgentId } from '../lib/types.js';
-import { discoverPlugins, getPlugin, pluginSupportsAgent, removePluginFromVersion } from '../lib/plugins.js';
+import { PLUGINS_CAPABLE_AGENTS, agentLabel } from '../lib/agents.js';
+import type { AgentId, DiscoveredPlugin, PluginManifest } from '../lib/types.js';
+import {
+  discoverPlugins,
+  getPlugin,
+  pluginSupportsAgent,
+  removePluginFromVersion,
+  isPluginSynced,
+  installPlugin,
+  updatePlugin,
+  loadUserConfig,
+  saveUserConfig,
+  checkPluginDependencies,
+} from '../lib/plugins.js';
 import {
   listInstalledVersions,
   syncResourcesToVersion,
   getGlobalDefault,
   getVersionHomePath,
 } from '../lib/versions.js';
-import { isPluginSynced } from '../lib/plugins.js';
 import {
   isPromptCancelled,
   isInteractiveTerminal,
@@ -31,7 +41,6 @@ import {
   type RemovalTarget,
 } from './utils.js';
 import { itemPicker } from '../lib/picker.js';
-import type { DiscoveredPlugin } from '../lib/types.js';
 import {
   showResourceList,
   buildTargetsSection,
@@ -354,25 +363,51 @@ Examples:
       }
 
       let totalSkills = 0;
+      let totalCommands = 0;
+      let totalAgentDefs = 0;
       let totalHooks = 0;
       let totalPerms = 0;
+      let totalMcp = 0;
       let versionsTouched = 0;
 
       for (const target of selectedTargets) {
         const versionHome = getVersionHomePath(target.agent as AgentId, target.version);
         const r = removePluginFromVersion(name, resolvedRoot, target.agent as AgentId, versionHome);
-        if (r.skills.length > 0 || r.hooks.length > 0 || r.permissions > 0) {
+        const anyRemoved =
+          r.skills.length > 0 || r.commands.length > 0 || r.agentDefs.length > 0 ||
+          r.bin.length > 0 || r.hooks.length > 0 || r.permissions > 0 || r.mcp > 0;
+        if (anyRemoved) {
           versionsTouched += 1;
           totalSkills += r.skills.length;
+          totalCommands += r.commands.length;
+          totalAgentDefs += r.agentDefs.length;
           totalHooks += r.hooks.length;
           totalPerms += r.permissions;
-          console.log(`  ${chalk.red('-')} ${target.label}: ${r.skills.length} skill(s), ${r.hooks.length} hook(s), ${r.permissions} perm(s)`);
+          totalMcp += r.mcp;
+          const parts = [
+            r.skills.length > 0 ? `${r.skills.length} skill(s)` : null,
+            r.commands.length > 0 ? `${r.commands.length} command(s)` : null,
+            r.agentDefs.length > 0 ? `${r.agentDefs.length} agent def(s)` : null,
+            r.hooks.length > 0 ? `${r.hooks.length} hook(s)` : null,
+            r.permissions > 0 ? `${r.permissions} perm(s)` : null,
+            r.mcp > 0 ? `${r.mcp} MCP server(s)` : null,
+          ].filter(Boolean);
+          console.log(`  ${chalk.red('-')} ${target.label}: ${parts.join(', ')}`);
         }
       }
 
+      const summary = [
+        totalSkills > 0 ? `${totalSkills} skills` : null,
+        totalCommands > 0 ? `${totalCommands} commands` : null,
+        totalAgentDefs > 0 ? `${totalAgentDefs} agent defs` : null,
+        totalHooks > 0 ? `${totalHooks} hooks` : null,
+        totalPerms > 0 ? `${totalPerms} permissions` : null,
+        totalMcp > 0 ? `${totalMcp} MCP servers` : null,
+      ].filter(Boolean).join(', ') || 'nothing';
+
       console.log(
         chalk.green(
-          `\nUnsynced ${name} from ${versionsTouched} version(s) — ${totalSkills} skills, ${totalHooks} hooks, ${totalPerms} permissions`
+          `\nUnsynced ${name} from ${versionsTouched} version(s) — ${summary}`
         )
       );
 
@@ -388,6 +423,171 @@ Examples:
         console.log(chalk.gray(`Kept source at ${formatPath(pluginRoot)}`));
       }
     });
+
+  // agents plugins install <spec>
+  pluginsCmd
+    .command('install <spec>')
+    .description('Install a plugin from a git URL or local path (format: name@source or source)')
+    .addHelpText('after', `
+Examples:
+  # Install from a git URL
+  agents plugins install my-plugin@https://github.com/user/my-plugin.git
+
+  # Install from a local path
+  agents plugins install /path/to/plugin
+
+  # Named install from a local path
+  agents plugins install rush-toolkit@~/Projects/rush-toolkit
+`)
+    .action(async (spec: string) => {
+      console.log(chalk.gray(`Installing plugin from: ${spec}`));
+
+      let name: string;
+      let root: string;
+      try {
+        const result = await installPlugin(spec);
+        name = result.name;
+        root = result.root;
+      } catch (err) {
+        console.log(chalk.red(`Install failed: ${(err as Error).message}`));
+        process.exit(1);
+      }
+
+      const plugin = getPlugin(name);
+      if (!plugin) {
+        console.log(chalk.red(`Installed but could not load plugin '${name}'`));
+        process.exit(1);
+      }
+
+      // Check dependencies
+      const missingDeps = checkPluginDependencies(plugin.manifest);
+      if (missingDeps.length > 0) {
+        console.log(chalk.yellow(`Warning: missing dependencies: ${missingDeps.join(', ')}`));
+        console.log(chalk.gray('Install them with: agents plugins install <name>@<source>'));
+      }
+
+      // Prompt for userConfig fields
+      if (plugin.manifest.userConfig && plugin.manifest.userConfig.length > 0 && isInteractiveTerminal()) {
+        const existingConfig = loadUserConfig(name);
+        const newConfig = await promptUserConfig(plugin.manifest, existingConfig);
+        if (Object.keys(newConfig).length > 0) {
+          saveUserConfig(name, { ...existingConfig, ...newConfig });
+          console.log(chalk.gray('User config saved.'));
+        }
+      }
+
+      // Sync to all supported installed versions
+      console.log();
+      let synced = 0;
+      for (const agentId of PLUGINS_CAPABLE_AGENTS) {
+        if (!pluginSupportsAgent(plugin, agentId)) continue;
+        const versions = listInstalledVersions(agentId);
+        if (versions.length === 0) continue;
+
+        const defaultVer = getGlobalDefault(agentId);
+        const targetVersions = defaultVer ? [defaultVer] : [versions[versions.length - 1]];
+
+        for (const version of targetVersions) {
+          const syncResult = syncResourcesToVersion(agentId, version, { plugins: [name] });
+          if (syncResult.plugins.length > 0) {
+            console.log(chalk.green(`  Synced to ${agentLabel(agentId)}@${version}`));
+            synced++;
+          }
+        }
+      }
+
+      if (synced === 0) {
+        console.log(chalk.gray('  No supported agent versions installed — run "agents use <agent>@<version>" to sync.'));
+      }
+
+      console.log(chalk.bold(`\nInstalled ${plugin.name} v${plugin.manifest.version} to ${formatPath(root)}`));
+    });
+
+  // agents plugins update [name]
+  pluginsCmd
+    .command('update [name]')
+    .description('Re-pull a plugin from its original source and re-sync to all versions')
+    .addHelpText('after', `
+Examples:
+  # Update a specific plugin
+  agents plugins update rush-toolkit
+
+  # Update all plugins
+  agents plugins update
+`)
+    .action(async (nameArg?: string) => {
+      const plugins = nameArg ? [getPlugin(nameArg)].filter(Boolean) as DiscoveredPlugin[] : discoverPlugins();
+
+      if (nameArg && plugins.length === 0) {
+        console.log(chalk.red(`Plugin '${nameArg}' not found`));
+        process.exit(1);
+      }
+
+      if (plugins.length === 0) {
+        console.log(chalk.gray('No plugins installed.'));
+        return;
+      }
+
+      for (const plugin of plugins) {
+        process.stdout.write(`Updating ${plugin.name}... `);
+        const result = await updatePlugin(plugin.name);
+        if (!result.success) {
+          console.log(chalk.red(`failed — ${result.error || 'unknown error'}`));
+          continue;
+        }
+        console.log(chalk.green('done'));
+
+        // Re-sync to all supported installed versions
+        for (const agentId of PLUGINS_CAPABLE_AGENTS) {
+          if (!pluginSupportsAgent(plugin, agentId)) continue;
+          const versions = listInstalledVersions(agentId);
+          const defaultVer = getGlobalDefault(agentId);
+          const targetVersions = defaultVer ? [defaultVer] : versions.slice(-1);
+
+          for (const version of targetVersions) {
+            const syncResult = syncResourcesToVersion(agentId, version, { plugins: [plugin.name] });
+            if (syncResult.plugins.length > 0) {
+              console.log(chalk.gray(`  Re-synced to ${agentLabel(agentId)}@${version}`));
+            }
+          }
+        }
+      }
+    });
+}
+
+/**
+ * Prompt for missing or empty userConfig fields interactively.
+ * Only prompts for fields not already present in existingConfig.
+ */
+async function promptUserConfig(
+  manifest: PluginManifest,
+  existingConfig: Record<string, string> = {}
+): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  const fields = manifest.userConfig || [];
+
+  for (const field of fields) {
+    if (existingConfig[field.key] !== undefined) continue;
+
+    const defaultValue = field.default ?? '';
+    try {
+      const value = await input({
+        message: field.description + (field.required ? ' (required)' : ' (optional)'),
+        default: defaultValue || undefined,
+        required: field.required ?? false,
+      });
+      if (value) {
+        result[field.key] = value;
+      } else if (defaultValue) {
+        result[field.key] = defaultValue;
+      }
+    } catch (err) {
+      if (isPromptCancelled(err)) break;
+      throw err;
+    }
+  }
+
+  return result;
 }
 
 /** Convert discovered plugins into rows suitable for the resource list view. */
