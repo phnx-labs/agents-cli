@@ -26,7 +26,7 @@ import * as yaml from 'yaml';
 import type { Meta, RegistryType } from './types.js';
 import { SEEDED_REGISTRIES } from './types.js';
 
-const HOME = os.homedir();
+const HOME = process.env.HOME ?? os.homedir();
 
 // ─── Root directories ─────────────────────────────────────────────────────────
 

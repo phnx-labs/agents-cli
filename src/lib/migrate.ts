@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
 
-const HOME = os.homedir();
+const HOME = process.env.HOME ?? os.homedir();
 const SYSTEM_DIR = path.join(HOME, '.agents-system');
 const USER_DIR = path.join(HOME, '.agents');
 const HISTORY_DIR = path.join(USER_DIR, '.history');
