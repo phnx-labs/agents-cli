@@ -362,12 +362,24 @@ export interface VersionResources {
   mcp?:         ResourcePattern[];
 }
 
-/** Manifest file (plugin.yaml) at the root of a plugin bundle. */
+/** A userConfig field declared in a plugin manifest. */
+export interface PluginUserConfigField {
+  key: string;
+  description: string;
+  required?: boolean;
+  default?: string;
+}
+
+/** Manifest file (plugin.json) at the root of a plugin bundle. */
 export interface PluginManifest {
   name: string;
   description: string;
   version: string;
   agents?: AgentId[];
+  /** Interactive config fields prompted at install time. Values stored in .user-config.json. */
+  userConfig?: PluginUserConfigField[];
+  /** Other plugin names this plugin depends on. Missing deps produce a warning. */
+  dependencies?: string[];
 }
 
 /** A plugin found on disk with its parsed manifest and resource inventory. */
@@ -378,6 +390,16 @@ export interface DiscoveredPlugin {
   skills: string[];
   hooks: string[];
   scripts: string[];
+  /** Slash-command .md files in the plugin's commands/ directory (names without extension). */
+  commands: string[];
+  /** Subagent .md files in the plugin's agents/ directory (names without extension). */
+  agentDefs: string[];
+  /** Executable files in the plugin's bin/ directory. */
+  bin: string[];
+  /** Whether the plugin root contains a .mcp.json file. */
+  hasMcp: boolean;
+  /** Whether the plugin root contains a settings.json with non-permission keys to merge. */
+  hasSettings: boolean;
 }
 
 /** Frontmatter fields parsed from a subagent's agent.md file. */
