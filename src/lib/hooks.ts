@@ -736,16 +736,28 @@ export function registerHooksToSettings(
   }
 
   const overrideRoots = agentsDirOverride ? [agentsDirOverride] : null;
+  // Scripts are copied into the version home during sync — prefer that stable
+  // local path so registered commands don't break when source dirs change.
+  const localHooksDir = !overrideRoots
+    ? path.join(versionHome, `.${agentId}`, AGENTS[agentId].hooksDir)
+    : null;
   const resolveScript = (script: string): string | null => {
     if (overrideRoots) {
       const candidate = path.join(overrideRoots[0], 'hooks', script);
       return fs.existsSync(candidate) ? candidate : null;
     }
+    if (localHooksDir) {
+      const local = path.join(localHooksDir, script);
+      if (fs.existsSync(local)) return local;
+    }
     return resolveHookScriptPath(script);
   };
   const managedPrefixes = overrideRoots
     ? [path.join(overrideRoots[0], 'hooks') + path.sep]
-    : getManagedHookPrefixes();
+    : [
+        ...getManagedHookPrefixes(),
+        ...(localHooksDir ? [localHooksDir + path.sep] : []),
+      ];
 
   if (agentId === 'claude') {
     return registerHooksForClaude(versionHome, manifest, resolveScript, managedPrefixes);
