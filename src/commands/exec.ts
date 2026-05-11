@@ -21,6 +21,7 @@ import {
 } from '../lib/exec.js';
 import type { AgentId } from '../lib/types.js';
 import { profileExists, resolveProfileForRun } from '../lib/profiles.js';
+import { getInstalledSubagent, installSubagentToAgent } from '../lib/subagents.js';
 import { readBundle, resolveBundleEnv, describeBundle } from '../lib/secrets/bundles.js';
 import {
   getConfiguredRunStrategy,
@@ -29,7 +30,9 @@ import {
   RUN_STRATEGIES,
   type RotateResult,
 } from '../lib/rotate.js';
-import { getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
+import { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const VALID_AGENTS = Object.keys(AGENT_COMMANDS);
 
@@ -189,6 +192,40 @@ Examples:
           console.error(chalk.red((err as Error).message));
           process.exit(1);
         }
+      } else if (getInstalledSubagent(rawAgent)) {
+        // Workflow: a named subagent directory with AGENT.md acts as an
+        // orchestrator. Co-located subagents/ subdirectories are wired into
+        // ~/.claude/agents/ so Claude's Agent tool can discover them.
+        const workflow = getInstalledSubagent(rawAgent)!;
+        agent = 'claude';
+
+        // Resolve the version we'll actually run so we wire subagents into
+        // the right version home.
+        const resolvedVersion = resolveVersionAlias('claude', version);
+        const versionHome = getVersionHomePath('claude', resolvedVersion ?? getGlobalDefault('claude') ?? '');
+
+        // Install nested subagents into the claude version home.
+        const subSubagentsDir = path.join(workflow.path, 'subagents');
+        if (fs.existsSync(subSubagentsDir)) {
+          for (const entry of fs.readdirSync(subSubagentsDir, { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue;
+            const subPath = path.join(subSubagentsDir, entry.name);
+            if (!fs.existsSync(path.join(subPath, 'AGENT.md'))) continue;
+            installSubagentToAgent(subPath, entry.name, 'claude', versionHome);
+          }
+        }
+
+        // Prepend the orchestrator's instructions to the user prompt so Claude
+        // runs in its workflow role from the first turn.
+        const orchestratorBody = workflow.files
+          .filter(f => f === 'AGENT.md')
+          .map(f => fs.readFileSync(path.join(workflow.path, f), 'utf-8').replace(/^---[\s\S]*?---\n/, '').trim())
+          [0] ?? '';
+        if (orchestratorBody && prompt !== undefined) {
+          prompt = `${orchestratorBody}\n\n---\n\n${prompt}`;
+        }
+
+        process.stderr.write(chalk.gray(`Workflow '${rawAgent}' → claude (${workflow.files.length} files)\n`));
       } else {
         console.error(chalk.red(`Unknown agent: ${rawAgent}`));
         console.error(chalk.gray(`Available agents: ${VALID_AGENTS.join(', ')}`));
