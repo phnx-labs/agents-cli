@@ -1,12 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-# sandbox.sh - Run commands on a remote crabbox VM with worktree isolation
-# Usage: ./scripts/sandbox.sh [command...]
-# Default: run this repo's test suite
+# sandbox.sh - Run commands on a remote crabbox VM
 #
-# Each invocation gets its own git worktree for parallel isolation.
-# Set TASK_ID to reuse a specific worktree across calls.
+# Modes:
+#   ./sandbox.sh <cmd>          rsync local tree -> box, run cmd (test mode)
+#   ./sandbox.sh --pr <cmd>     clone repo on box from GitHub via cached
+#                               bare mirror, branch off main, run cmd
+#                               (PR-authoring mode; works on a real branch
+#                                so `gh pr create` works)
+#
+# Set TASK_ID to reuse a specific workspace across calls.
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_NAME="$(basename "$REPO_ROOT")"
@@ -61,6 +65,32 @@ print(jwt.encode({'iat': int(time.time())-60, 'exp': int(time.time())+600, 'iss'
 
   [[ -n "$token" ]] && echo "$token"
 }
+
+# Parse flags
+PR_MODE=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pr) PR_MODE=1; shift ;;
+    --) shift; break ;;
+    -*) die "unknown flag: $1" ;;
+    *) break ;;
+  esac
+done
+
+# In PR mode, detect upstream and target the token at THIS repo's installation.
+# UPSTREAM env var lets you override the auto-detected origin (useful for testing
+# against repos other than the one sandbox.sh lives in).
+UPSTREAM="${UPSTREAM:-}"
+REPO_SLUG=""
+if [[ "$PR_MODE" == "1" ]]; then
+  if [[ -z "$UPSTREAM" ]]; then
+    UPSTREAM=$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null \
+      | sed -E 's|^git@github.com:|https://github.com/|; s|\.git$||')
+  fi
+  [[ -n "$UPSTREAM" ]] || die "could not detect upstream origin in $REPO_ROOT (set UPSTREAM=... to override)"
+  REPO_SLUG="${UPSTREAM#https://github.com/}"
+  export TOKEN_REPO="$REPO_SLUG"
+fi
 
 GITHUB_TOKEN=$(generate_github_token || true)
 [[ -n "$GITHUB_TOKEN" ]] || echo "warn: failed to generate GitHub App token (private repos won't clone)" >&2
@@ -184,39 +214,76 @@ main() {
     cmd="$*"
   fi
 
-  # Isolated workspace path on remote
+  # Isolated workspace path on remote (under $HOME so it survives rsync prune)
   workspace_dir="workspaces/${REPO_NAME}-${TASK_ID}"
 
-  # Sync local repo to remote, then copy to isolated workspace
-  # Pass tokens to remote for private repo and Claude access
-  crabbox run --id "$box_id" -- bash -c "
+  crabbox run --id "$box_id" --reclaim -- bash -c "
 export GITHUB_TOKEN='${GITHUB_TOKEN:-}'
 export CLAUDE_CODE_OAUTH_TOKEN='${CLAUDE_CODE_OAUTH_TOKEN:-}'
+export PR_MODE='${PR_MODE}'
+export UPSTREAM='${UPSTREAM:-}'
+export REPO_SLUG='${REPO_SLUG:-}'
 $(bootstrap_remote)
 
 REPO_DIR=\"\$(pwd)\"
-WORKSPACE_DIR=\"\$REPO_DIR/../$workspace_dir\"
+WORKSPACE_DIR=\"\$HOME/$workspace_dir\"
 
-# Create isolated workspace
-if [[ ! -d \"\$WORKSPACE_DIR\" ]]; then
-  echo \"Creating workspace: $workspace_dir\"
+if [[ \"\$PR_MODE\" == \"1\" ]]; then
+  # ---- PR mode: clone from GitHub via cached bare mirror ----
+  [[ -n \"\$UPSTREAM\" && -n \"\$GITHUB_TOKEN\" ]] || { echo 'PR mode requires UPSTREAM and GITHUB_TOKEN' >&2; exit 1; }
+
+  CACHE_DIR=\"\$HOME/.cache/git-cache\"
+  CACHE_KEY=\$(echo -n \"\$UPSTREAM\" | sha256sum | cut -c1-12)
+  MIRROR=\"\$CACHE_DIR/\$CACHE_KEY.git\"
+  CLONE_URL=\"https://x-access-token:\${GITHUB_TOKEN}@github.com/\${REPO_SLUG}.git\"
+
+  mkdir -p \"\$CACHE_DIR\"
+
+  if [[ ! -d \"\$MIRROR\" ]]; then
+    echo \"[mirror] cold clone: \$UPSTREAM\"
+    t0=\$(date +%s)
+    git clone --mirror \"\$CLONE_URL\" \"\$MIRROR\" 2>&1 | tail -3
+    echo \"[mirror] cold clone took \$((\$(date +%s)-t0))s\"
+  else
+    echo \"[mirror] warm fetch\"
+    t0=\$(date +%s)
+    git -C \"\$MIRROR\" remote set-url origin \"\$CLONE_URL\"
+    git -C \"\$MIRROR\" fetch --prune origin 2>&1 | tail -3
+    echo \"[mirror] warm fetch took \$((\$(date +%s)-t0))s\"
+  fi
+
+  if [[ ! -d \"\$WORKSPACE_DIR/.git\" ]]; then
+    echo \"[workspace] clone --reference\"
+    rm -rf \"\$WORKSPACE_DIR\"
+    mkdir -p \"\$(dirname \"\$WORKSPACE_DIR\")\"
+    t0=\$(date +%s)
+    git clone --reference \"\$MIRROR\" \"\$CLONE_URL\" \"\$WORKSPACE_DIR\"
+    echo \"[workspace] clone took \$((\$(date +%s)-t0))s\"
+  fi
+
+  cd \"\$WORKSPACE_DIR\"
+  git remote set-url origin \"\$CLONE_URL\"
+  DEFAULT_BRANCH=\$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|origin/||')
+  [[ -n \"\$DEFAULT_BRANCH\" ]] || DEFAULT_BRANCH=main
+  git fetch --prune origin \"\$DEFAULT_BRANCH\" 2>&1 | tail -1
+  git reset --hard \"origin/\$DEFAULT_BRANCH\"
+  git clean -fdx -e node_modules -e .bun
+  git checkout -B \"task-${TASK_ID}\" \"origin/\$DEFAULT_BRANCH\"
+  echo \"Working in: \$(pwd) on branch task-${TASK_ID} (base: \$DEFAULT_BRANCH)\"
+else
+  # ---- Test mode: rsync local tree, blank git for tests that need one ----
   mkdir -p \"\$WORKSPACE_DIR\"
+  rsync -a --delete --exclude='node_modules' --exclude='.bun' \
+    \"\$REPO_DIR/\" \"\$WORKSPACE_DIR/\"
+  cd \"\$WORKSPACE_DIR\"
+  if [[ ! -d .git ]]; then
+    git init -q
+    git add -A
+    git commit -q -m 'initial' 2>/dev/null || true
+  fi
+  echo \"Working in: \$(pwd)\"
 fi
 
-# Sync from crabbox's rsync target to isolated workspace
-rsync -a --delete --exclude='node_modules' --exclude='.bun' \
-  \"\$REPO_DIR/\" \"\$WORKSPACE_DIR/\"
-
-cd \"\$WORKSPACE_DIR\"
-
-# Initialize git for tests that need it
-if [[ ! -d .git ]]; then
-  git init -q
-  git add -A
-  git commit -q -m 'initial' 2>/dev/null || true
-fi
-
-echo \"Working in: \$(pwd)\"
 echo \"--- Running: $cmd ---\"
 $cmd
 "
