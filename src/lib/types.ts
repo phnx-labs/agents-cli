@@ -333,7 +333,7 @@ export interface ResolvedPackage {
 }
 
 /** Categories of resources that can be synced into an agent version home. */
-export type ResourceType = 'commands' | 'skills' | 'hooks' | 'memory' | 'mcp' | 'permissions' | 'subagents' | 'plugins';
+export type ResourceType = 'commands' | 'skills' | 'hooks' | 'memory' | 'mcp' | 'permissions' | 'subagents' | 'plugins' | 'workflows';
 
 /** Map of resource names synced to a specific agent version, keyed by type. */
 export interface VersionResources {
@@ -345,6 +345,7 @@ export interface VersionResources {
   permissions?: string[];
   subagents?: string[];
   plugins?: string[];
+  workflows?: string[];
   /**
    * Active rule preset for this agent@version. The composer reads layered
    * `rules.yaml` files and emits this preset's subrules as the agent's

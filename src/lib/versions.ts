@@ -32,6 +32,7 @@ import { installMcpServers, parseMcpServerConfig } from './mcp.js';
 import { markdownToToml } from './convert.js';
 import { createVersionedAlias, removeVersionedAlias, switchConfigSymlink, getConfigSymlinkVersion, ensureClaudeInsideSymlink } from './shims.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw, SUBAGENT_CAPABLE_AGENTS } from './subagents.js';
+import { WORKFLOW_CAPABLE_AGENTS, listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks.js';
 import { supports, explainSkip } from './capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills } from './plugins.js';
@@ -69,6 +70,7 @@ export interface ResourceSelection {
   permissions?: string[] | 'all';
   subagents?: string[] | 'all';
   plugins?: string[] | 'all';
+  workflows?: string[] | 'all';
 }
 
 /**
@@ -88,6 +90,7 @@ export interface AvailableResources {
   permissions: string[];
   subagents: string[];
   plugins: string[];
+  workflows: string[];
   promptcuts: boolean;
 }
 
@@ -104,6 +107,7 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
     permissions: [],
     subagents: [],
     plugins: [],
+    workflows: [],
     promptcuts: false,
   };
 
@@ -230,6 +234,20 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
   }
   result.subagents = Array.from(subagentNames);
 
+  // Workflows (directories with WORKFLOW.md)
+  const workflowNames = new Set<string>();
+  for (const { base } of resourceBases) {
+    const workflowsDir = path.join(base, 'workflows');
+    if (!fs.existsSync(workflowsDir)) continue;
+    const names = fs.readdirSync(workflowsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && fs.existsSync(path.join(workflowsDir, d.name, 'WORKFLOW.md')))
+      .map(d => d.name);
+    for (const name of names) {
+      workflowNames.add(name);
+    }
+  }
+  result.workflows = Array.from(workflowNames);
+
   // Plugins (directories with .claude-plugin/plugin.json)
   const allPlugins = discoverPlugins();
   result.plugins = allPlugins.map(p => p.name);
@@ -291,6 +309,7 @@ export function getActuallySyncedResources(agent: AgentId, version: string, opti
     permissions: [],
     subagents: [],
     plugins: [],
+    workflows: [],
     promptcuts: false,
   };
 
@@ -495,6 +514,16 @@ export function getActuallySyncedResources(agent: AgentId, version: string, opti
     }
   }
 
+  // Workflows - check {versionHome}/workflows/ for synced workflow directories
+  if (WORKFLOW_CAPABLE_AGENTS.includes(agent)) {
+    const workflowsDir = path.join(versionHome, 'workflows');
+    if (fs.existsSync(workflowsDir)) {
+      result.workflows = fs.readdirSync(workflowsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && fs.existsSync(path.join(workflowsDir, d.name, 'WORKFLOW.md')))
+        .map(d => d.name);
+    }
+  }
+
   return result;
 }
 
@@ -520,6 +549,7 @@ export function getNewResources(
     permissions: available.permissions.filter(p => !actuallySynced.permissions.includes(p)),
     subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s)),
     plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p)),
+    workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w)),
     // Promptcuts aren't version-scoped — the hook reads ~/.agents/promptcuts.yaml
     // directly, so there is never a "new" per-version state to reconcile.
     promptcuts: false,
@@ -537,6 +567,7 @@ export function hasNewResources(diff: AvailableResources, agent?: AgentId, versi
   const permsApply = agent ? supports(agent, 'allowlist', version).ok : true;
   const subagentsApply = agent ? SUBAGENT_CAPABLE_AGENTS.includes(agent) : true;
   const pluginsApply = agent ? supports(agent, 'plugins', version).ok : true;
+  const workflowsApply = agent ? WORKFLOW_CAPABLE_AGENTS.includes(agent) : true;
   return (
     (diff.commands.length > 0 && commandsApply) ||
     diff.skills.length > 0 ||
@@ -545,7 +576,8 @@ export function hasNewResources(diff: AvailableResources, agent?: AgentId, versi
     (diff.mcp.length > 0 && mcpApply) ||
     (diff.permissions.length > 0 && permsApply) ||
     (diff.subagents.length > 0 && subagentsApply) ||
-    (diff.plugins.length > 0 && pluginsApply)
+    (diff.plugins.length > 0 && pluginsApply) ||
+    (diff.workflows.length > 0 && workflowsApply)
   );
 }
 
@@ -580,6 +612,9 @@ function buildNewResourcesSummary(newResources: AvailableResources, agent: Agent
   }
   if (newResources.plugins.length > 0 && PLUGINS_CAPABLE_AGENTS.includes(agent)) {
     parts.push(`${newResources.plugins.length} plugin${newResources.plugins.length === 1 ? '' : 's'}`);
+  }
+  if (newResources.workflows.length > 0 && WORKFLOW_CAPABLE_AGENTS.includes(agent)) {
+    parts.push(`${newResources.workflows.length} workflow${newResources.workflows.length === 1 ? '' : 's'}`);
   }
 
   return parts.join(', ');
@@ -631,6 +666,7 @@ export async function promptNewResourceSelection(
     if (newResources.permissions.length > 0 && PERMISSIONS_CAPABLE_AGENTS.includes(agent)) selection.permissions = newResources.permissions;
     if (newResources.subagents.length > 0 && SUBAGENT_CAPABLE_AGENTS.includes(agent)) selection.subagents = newResources.subagents;
     if (newResources.plugins.length > 0 && PLUGINS_CAPABLE_AGENTS.includes(agent)) selection.plugins = newResources.plugins;
+    if (newResources.workflows.length > 0 && WORKFLOW_CAPABLE_AGENTS.includes(agent)) selection.workflows = newResources.workflows;
     return selection;
   }
 
@@ -707,6 +743,14 @@ export async function promptNewResourceSelection(
       }),
     });
     if (selected.length > 0) selection.plugins = selected;
+  }
+
+  if (newResources.workflows.length > 0 && WORKFLOW_CAPABLE_AGENTS.includes(agent)) {
+    const selected = await checkbox({
+      message: 'Select new workflows to sync:',
+      choices: newResources.workflows.map(w => ({ name: w, value: w, checked: true })),
+    });
+    if (selected.length > 0) selection.workflows = selected;
   }
 
   return selection;
@@ -1380,6 +1424,7 @@ export interface SyncResult {
   mcp: string[];
   subagents: string[];
   plugins: string[];
+  workflows: string[];
 }
 
 /** Diff between central ~/.agents/ resources and what is synced to a version home. */
@@ -1555,7 +1600,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   const agentDir = path.join(versionHome, `.${agent}`);
   fs.mkdirSync(agentDir, { recursive: true });
 
-  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [] };
+  const result: SyncResult = { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [] };
   const cwd = options.cwd || process.cwd();
   const projectAgentsDir = options.projectDir || getProjectAgentsDir(cwd);
   const userAgentsDir = getUserAgentsDir();
@@ -1570,7 +1615,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   if (!selection && !options.force) {
     const manifest = loadSyncManifest(agent, version);
     if (manifest && !isSyncStale(manifest, available, agent, version, cwd)) {
-      return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [] };
+      return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [] };
     }
   }
 
@@ -1927,6 +1972,30 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
     if (result.plugins.length > 0) {
       recordVersionResources(agent, version, 'plugins', result.plugins);
+    }
+  }
+
+  // Sync workflows (claude only)
+  const workflowsToSync = selection
+    ? resolveSelection(selection.workflows, available.workflows)
+    : (WORKFLOW_CAPABLE_AGENTS.includes(agent) ? available.workflows : []);
+
+  if (workflowsToSync.length > 0 && WORKFLOW_CAPABLE_AGENTS.includes(agent)) {
+    const allWorkflows = listInstalledWorkflows();
+
+    for (const name of workflowsToSync) {
+      const workflow = allWorkflows.get(name);
+      if (!workflow) continue;
+      try {
+        const syncResult = syncWorkflowToVersion(workflow.path, name, agent, versionHome);
+        if (syncResult.success) {
+          result.workflows.push(name);
+        }
+      } catch { /* resource sync failed for this item */ }
+    }
+
+    if (result.workflows.length > 0) {
+      recordVersionResources(agent, version, 'workflows', result.workflows);
     }
   }
 

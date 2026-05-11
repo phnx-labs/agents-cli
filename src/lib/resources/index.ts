@@ -15,6 +15,7 @@ export { RulesHandler, type RuleItem } from './rules.js';
 export { McpHandler, getMcpConfigPath, type McpItem } from './mcp.js';
 export { PermissionsHandler, type PermissionItem } from './permissions.js';
 export { SubagentsHandler, subagentsHandler, type SubagentItem } from './subagents.js';
+export { WorkflowsHandler, type WorkflowItem } from './workflows.js';
 
 import { commandsHandler } from './commands.js';
 import { HooksHandler } from './hooks.js';
@@ -23,6 +24,7 @@ import { RulesHandler } from './rules.js';
 import { McpHandler } from './mcp.js';
 import { PermissionsHandler } from './permissions.js';
 import { subagentsHandler } from './subagents.js';
+import { WorkflowsHandler } from './workflows.js';
 import type { ResourceKind, ResourceHandler } from './types.js';
 
 /** All resource handlers keyed by kind. */
@@ -40,6 +42,8 @@ export const handlers = {
   permissions: PermissionsHandler,
   subagent: subagentsHandler,
   subagents: subagentsHandler,
+  workflow: WorkflowsHandler,
+  workflows: WorkflowsHandler,
 } as const;
 
 /** Get a handler by resource kind. */
@@ -59,6 +63,8 @@ export function getHandler(kind: ResourceKind): ResourceHandler<unknown> | null 
       return PermissionsHandler;
     case 'subagent':
       return subagentsHandler;
+    case 'workflow':
+      return WorkflowsHandler;
     default:
       return null;
   }
@@ -73,4 +79,5 @@ export const RESOURCE_KINDS: ResourceKind[] = [
   'mcp',
   'permission',
   'subagent',
+  'workflow',
 ];

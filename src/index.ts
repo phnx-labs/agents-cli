@@ -52,6 +52,7 @@ import { registerTrashCommands } from './commands/trash.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerSubagentsCommands } from './commands/subagents.js';
 import { registerPluginsCommands } from './commands/plugins.js';
+import { registerWorkflowsCommands } from './commands/workflows.js';
 import { registerSyncCommand } from './commands/sync.js';
 import { registerRefreshRulesCommand } from './commands/refresh-rules.js';
 import { registerDriveCommands } from './commands/drive.js';
@@ -493,6 +494,7 @@ program
 registerMcpCommands(program);
 registerSubagentsCommands(program);
 registerPluginsCommands(program);
+registerWorkflowsCommands(program);
 registerVersionsCommands(program);
 registerPackagesCommands(program);
 registerDaemonCommands(program);

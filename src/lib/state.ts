@@ -51,6 +51,7 @@ const SYSTEM_RULES_DIR = path.join(SYSTEM_AGENTS_DIR, 'rules');
 const SYSTEM_MCP_DIR = path.join(SYSTEM_AGENTS_DIR, 'mcp');
 const SYSTEM_PERMISSIONS_DIR = path.join(SYSTEM_AGENTS_DIR, 'permissions');
 const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
+const SYSTEM_WORKFLOWS_DIR = path.join(SYSTEM_AGENTS_DIR, 'workflows');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
 const SYSTEM_INSTRUCTIONS_FILE = path.join(SYSTEM_AGENTS_DIR, 'instructions.md');
@@ -106,6 +107,7 @@ const USER_RULES_DIR = path.join(USER_AGENTS_DIR, 'rules');
 const USER_MCP_DIR = path.join(USER_AGENTS_DIR, 'mcp');
 const USER_PERMISSIONS_DIR = path.join(USER_AGENTS_DIR, 'permissions');
 const USER_SUBAGENTS_DIR = path.join(USER_AGENTS_DIR, 'subagents');
+const USER_WORKFLOWS_DIR = path.join(USER_AGENTS_DIR, 'workflows');
 const USER_SECRETS_DIR = path.join(USER_AGENTS_DIR, 'secrets');
 const USER_PROMPTCUTS_FILE = path.join(USER_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 
@@ -276,6 +278,9 @@ export function getUserRulesDir(): string { return USER_RULES_DIR; }
 export function getUserMcpDir(): string { return USER_MCP_DIR; }
 export function getUserPermissionsDir(): string { return USER_PERMISSIONS_DIR; }
 export function getUserSubagentsDir(): string { return USER_SUBAGENTS_DIR; }
+
+export function getSystemWorkflowsDir(): string { return SYSTEM_WORKFLOWS_DIR; }
+export function getUserWorkflowsDir(): string { return USER_WORKFLOWS_DIR; }
 export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
 export function getUserPromptcutsPath(): string { return USER_PROMPTCUTS_FILE; }
 
@@ -391,6 +396,7 @@ export function getTrashPluginsDir(): string { return path.join(TRASH_DIR, 'plug
 
 /** Path to soft-deleted subagents (~/.agents/trash/subagents/). */
 export function getTrashSubagentsDir(): string { return path.join(TRASH_DIR, 'subagents'); }
+export function getTrashWorkflowsDir(): string { return path.join(TRASH_DIR, 'workflows'); }
 
 /**
  * Path to a single user-level extra DotAgent repo clone (~/.agents-<alias>/).
