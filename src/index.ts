@@ -67,10 +67,11 @@ import { applyGlobalHelpConventions } from './lib/help.js';
 import { isPromptCancelled } from './commands/utils.js';
 import { getAgentsDir } from './lib/state.js';
 import { AGENTS } from './lib/agents.js';
-import { getGlobalDefault } from './lib/versions.js';
+import { getGlobalDefault, listInstalledVersions } from './lib/versions.js';
 import {
   addShimsToPath,
   ensureShimCurrent,
+  ensureVersionedAliasCurrent,
   getPathShadowingExecutable,
   getPathSetupInstructions,
   hasAliasShadowingShim,
@@ -368,6 +369,12 @@ async function maybeBootstrapShimIntegration(requestedCommand: string | undefine
     const status = ensureShimCurrent(agent);
     if (status !== 'current') {
       createdOrUpdated.push(`${status === 'created' ? 'Created' : 'Updated'} ${AGENTS[agent].cliCommand} shim`);
+    }
+    for (const version of listInstalledVersions(agent)) {
+      const aliasStatus = ensureVersionedAliasCurrent(agent, version);
+      if (aliasStatus !== 'current') {
+        createdOrUpdated.push(`${aliasStatus === 'created' ? 'Created' : 'Updated'} ${AGENTS[agent].cliCommand}@${version} alias`);
+      }
     }
   }
   for (const notice of createdOrUpdated) {
