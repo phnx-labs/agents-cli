@@ -28,32 +28,42 @@ command -v crabbox >/dev/null || die "crabbox not installed"
 eval "$(agents secrets export hetzner.com 2>/dev/null)" || die "Failed to load hetzner.com secrets"
 export HCLOUD_TOKEN
 
-# Generate GitHub App token for private repo access
+# Generate GitHub App token for private repo access.
+# Resolves the installation ID dynamically from a target repo so the script
+# works regardless of whether the App is installed on a user or an org.
+# TOKEN_REPO env var (default: muqsitnawaz/.agents) picks which installation.
 generate_github_token() {
-  # Load GitHub App credentials (APP_PRIVATE_KEY is the actual key content)
   eval "$(agents secrets export github.com 2>/dev/null)" || return 1
+  [[ -n "${APP_ID:-}" && -n "${APP_PRIVATE_KEY:-}" ]] || return 1
 
-  [[ -n "${APP_ID:-}" && -n "${APP_PRIVATE_KEY:-}" && -n "${APP_INSTALLATION_ID:-}" ]] || return 1
+  local target_repo="${TOKEN_REPO:-muqsitnawaz/.agents}"
+  local jwt installation_id token
 
-  # Generate JWT (valid 10 min) - key content passed via env var
-  local jwt token
-  jwt=$(APP_PRIVATE_KEY="$APP_PRIVATE_KEY" python3 -c "
+  jwt=$(APP_PRIVATE_KEY="$APP_PRIVATE_KEY" /usr/bin/python3 -c "
 import jwt, time, os
 key = os.environ['APP_PRIVATE_KEY']
 print(jwt.encode({'iat': int(time.time())-60, 'exp': int(time.time())+600, 'iss': '$APP_ID'}, key, 'RS256'))
 " 2>/dev/null) || return 1
 
-  # Exchange JWT for installation token (valid 1 hour)
+  installation_id=$(curl -sf \
+    -H "Authorization: Bearer $jwt" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${target_repo}/installation" | \
+    /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)
+
+  [[ -n "$installation_id" ]] || return 1
+
   token=$(curl -s -X POST \
     -H "Authorization: Bearer $jwt" \
     -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/app/installations/$APP_INSTALLATION_ID/access_tokens" | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+    "https://api.github.com/app/installations/${installation_id}/access_tokens" | \
+    /usr/bin/python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 
   [[ -n "$token" ]] && echo "$token"
 }
 
 GITHUB_TOKEN=$(generate_github_token || true)
+[[ -n "$GITHUB_TOKEN" ]] || echo "warn: failed to generate GitHub App token (private repos won't clone)" >&2
 
 # Load Claude token for running agents on sandbox
 eval "$(agents secrets export anthropic.com 2>/dev/null)" || true
@@ -92,14 +102,38 @@ if ! command -v make &>/dev/null; then
   sudo apt-get update -qq && sudo apt-get install -y -qq build-essential unzip
 fi
 
+# GitHub CLI (gh) — used by agents to open PRs, query issues, etc.
+if ! command -v gh &>/dev/null; then
+  echo "Installing gh..."
+  sudo mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | \
+    sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+  sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | \
+    sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+  sudo apt-get update -qq && sudo apt-get install -y -qq gh
+fi
+
 # Git identity for tests
 git config --global user.email 2>/dev/null || git config --global user.email "ci@crabbox.local"
 git config --global user.name 2>/dev/null || git config --global user.name "Crabbox CI"
 
 # GitHub token for private repos (passed from local via env)
 if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  # Remove ALL stale x-access-token rewrites (each previous run added a new
+  # section with the token embedded in the section name — they accumulate
+  # and git picks one nondeterministically).
+  git config --global --get-regexp '^url\.https://x-access-token:.*@github\.com/\.insteadof$' 2>/dev/null \
+    | awk '{print $1}' \
+    | sed 's/\.insteadof$//' \
+    | sort -u \
+    | while read -r section; do
+        git config --global --remove-section "$section" 2>/dev/null || true
+      done
   git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
   git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+  # gh CLI looks at GH_TOKEN/GITHUB_TOKEN — set both so `gh pr create` etc. work
+  export GH_TOKEN="$GITHUB_TOKEN"
   echo "GitHub App token configured for private repos"
 fi
 
@@ -109,15 +143,20 @@ if ! command -v agents &>/dev/null; then
   sudo npm install -g @phnx-labs/agents-cli 2>/dev/null || true
 fi
 if command -v agents &>/dev/null; then
-  # Setup agents-cli if not already configured (agents pull -y is non-interactive)
+  # First-time setup: clones ~/.agents-system (public) and provisions ~/.agents
   if [[ ! -d ~/.agents-system ]]; then
     echo "Setting up agents-cli..."
-    agents pull -y 2>/dev/null || true
+    agents setup 2>&1 | tail -3 || true
+  fi
+  # Put agents shims on PATH so installed CLIs (claude, codex, etc.) are reachable
+  export PATH="$HOME/.agents/.cache/shims:$PATH"
+  if ! grep -q '\.agents/\.cache/shims' ~/.bashrc 2>/dev/null; then
+    echo 'export PATH="$HOME/.agents/.cache/shims:$PATH"' >> ~/.bashrc
   fi
   # Install Claude Code if not present
   if ! command -v claude &>/dev/null; then
     echo "Installing Claude Code via agents-cli..."
-    agents add claude 2>/dev/null || true
+    agents add claude 2>&1 | tail -3 || true
   fi
 fi
 
