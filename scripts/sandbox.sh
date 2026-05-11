@@ -106,11 +106,19 @@ fi
 # agents-cli + coding agents (for running agents in sandbox)
 if ! command -v agents &>/dev/null; then
   echo "Installing agents-cli..."
-  npm install -g @phnx-labs/agents-cli 2>/dev/null || true
+  sudo npm install -g @phnx-labs/agents-cli 2>/dev/null || true
 fi
-if ! command -v claude &>/dev/null && command -v agents &>/dev/null; then
-  echo "Installing Claude Code via agents-cli..."
-  agents add claude 2>/dev/null || true
+if command -v agents &>/dev/null; then
+  # Setup agents-cli if not already configured (agents pull -y is non-interactive)
+  if [[ ! -d ~/.agents-system ]]; then
+    echo "Setting up agents-cli..."
+    agents pull -y 2>/dev/null || true
+  fi
+  # Install Claude Code if not present
+  if ! command -v claude &>/dev/null; then
+    echo "Installing Claude Code via agents-cli..."
+    agents add claude 2>/dev/null || true
+  fi
 fi
 
 # Claude Code auth (passed from local via env)
