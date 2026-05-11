@@ -41,11 +41,22 @@ function registerProfilesCommands(browser: Command): void {
         return;
       }
 
-      console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'ENDPOINTS');
-      console.log('-'.repeat(72));
-      for (const p of allProfiles) {
-        const endpoints = p.endpoints.join(', ');
-        console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + endpoints);
+      const hasDescriptions = allProfiles.some(p => p.description);
+      if (hasDescriptions) {
+        console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'DESCRIPTION'.padEnd(38) + 'ENDPOINTS');
+        console.log('-'.repeat(92));
+        for (const p of allProfiles) {
+          const endpoints = p.endpoints.join(', ');
+          const desc = (p.description ?? '').slice(0, 36).padEnd(38);
+          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + desc + endpoints);
+        }
+      } else {
+        console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'ENDPOINTS');
+        console.log('-'.repeat(72));
+        for (const p of allProfiles) {
+          const endpoints = p.endpoints.join(', ');
+          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + endpoints);
+        }
       }
     });
 
