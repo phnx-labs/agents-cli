@@ -19,7 +19,6 @@ import { DEFAULT_REGISTRIES } from '../src/lib/types.js';
 
 // Test fixtures directory
 const FIXTURES_DIR = join(tmpdir(), 'agents-cli-test-fixtures');
-const ORIGINAL_HOME = process.env.HOME;
 
 describe('parsePackageIdentifier', () => {
   it('parses mcp: prefix', () => {

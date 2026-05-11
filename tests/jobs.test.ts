@@ -1,7 +1,19 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { existsSync, mkdirSync, rmSync, writeFileSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import type { JobConfig, RunMeta } from '../src/lib/routines.js';
+
+const hoistedState = vi.hoisted(() => ({
+  TEST_DIR: '',
+}));
+
+vi.mock('../src/lib/state.js', () => ({
+  get getRoutinesDir() { return () => join(hoistedState.TEST_DIR, 'routines'); },
+  get getRunsDir() { return () => join(hoistedState.TEST_DIR, 'runs'); },
+  get getUserAgentsDir() { return () => hoistedState.TEST_DIR; },
+}));
+
 import {
   validateJob,
   parseTimeout,
@@ -20,7 +32,6 @@ import {
   getRunDir,
 } from '../src/lib/routines.js';
 import { getRoutinesDir, getRunsDir } from '../src/lib/state.js';
-import type { JobConfig, RunMeta } from '../src/lib/routines.js';
 
 const PREFIX = '_test_jobs_';
 
@@ -38,28 +49,14 @@ function makeConfig(overrides: Partial<JobConfig> = {}): JobConfig {
   };
 }
 
-function cleanupTestJobs() {
-  const jobsDir = getRoutinesDir();
-  const runsDir = getRunsDir();
-  try {
-    const fs = require('fs');
-    const files = fs.readdirSync(jobsDir);
-    for (const f of files) {
-      if (f.startsWith(PREFIX)) {
-        fs.unlinkSync(join(jobsDir, f));
-      }
-    }
-    const runDirs = fs.readdirSync(runsDir);
-    for (const d of runDirs) {
-      if (d.startsWith(PREFIX)) {
-        fs.rmSync(join(runsDir, d), { recursive: true, force: true });
-      }
-    }
-  } catch {}
-}
+beforeEach(() => {
+  hoistedState.TEST_DIR = mkdtempSync(join(tmpdir(), 'agents-cli-jobs-'));
+  mkdirSync(join(hoistedState.TEST_DIR, 'routines'), { recursive: true });
+  mkdirSync(join(hoistedState.TEST_DIR, 'runs'), { recursive: true });
+});
 
 afterEach(() => {
-  cleanupTestJobs();
+  rmSync(hoistedState.TEST_DIR, { recursive: true, force: true });
 });
 
 describe('validateJob', () => {

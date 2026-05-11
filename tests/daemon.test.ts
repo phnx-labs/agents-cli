@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { existsSync, writeFileSync, unlinkSync, mkdirSync, rmSync } from 'fs';
+import { mkdirSync, rmSync, mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as state from '../src/lib/state.js';
 
-const TEST_AGENTS_DIR = join(tmpdir(), 'agents-cli-daemon-test');
+let TEST_ROOT: string;
+let TEST_DAEMON_DIR: string;
 
-vi.spyOn(state, 'getAgentsDir').mockReturnValue(TEST_AGENTS_DIR);
+vi.spyOn(state, 'getDaemonDir').mockImplementation(() => TEST_DAEMON_DIR);
 
 import {
   readDaemonPid,
@@ -19,21 +20,15 @@ import {
   generateSystemdUnit,
 } from '../src/lib/daemon.js';
 
-function cleanupDaemonFiles() {
-  try {
-    rmSync(TEST_AGENTS_DIR, { recursive: true, force: true });
-  } catch {}
-  mkdirSync(TEST_AGENTS_DIR, { recursive: true });
-}
-
 beforeEach(() => {
-  cleanupDaemonFiles();
+  TEST_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-daemon-'));
+  TEST_DAEMON_DIR = join(TEST_ROOT, 'daemon');
+  mkdirSync(TEST_DAEMON_DIR, { recursive: true });
+  mkdirSync(join(TEST_ROOT, 'routines'), { recursive: true });
 });
 
 afterEach(() => {
-  try {
-    rmSync(TEST_AGENTS_DIR, { recursive: true, force: true });
-  } catch {}
+  rmSync(TEST_ROOT, { recursive: true, force: true });
 });
 
 describe('PID management', () => {
@@ -57,9 +52,7 @@ describe('PID management', () => {
   });
 
   it('returns null for invalid PID content', () => {
-    const daemonDir = join(TEST_AGENTS_DIR, 'helpers', 'daemon');
-    mkdirSync(daemonDir, { recursive: true });
-    writeFileSync(join(daemonDir, 'daemon.pid'), 'not-a-number', 'utf-8');
+    writeFileSync(join(TEST_DAEMON_DIR, 'daemon.pid'), 'not-a-number', 'utf-8');
     expect(readDaemonPid()).toBeNull();
   });
 });
