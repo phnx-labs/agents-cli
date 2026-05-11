@@ -60,7 +60,7 @@ export function convertDenyToCodexRules(deny: string[]): string | null {
 /**
  * Ensure central permissions directory exists.
  */
-export function ensurePermissionsDir(): void {
+function ensurePermissionsDir(): void {
   const dir = getUserPermissionsDir();
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -333,7 +333,7 @@ export function listInstalledPermissions(): InstalledPermission[] {
 /**
  * Get a specific permission set by name. Searches user dir first, then system.
  */
-export function getPermissionSet(name: string): InstalledPermission | null {
+function getPermissionSet(name: string): InstalledPermission | null {
   for (const dir of [getUserPermissionsDir(), getPermissionsDir()]) {
     for (const ext of ['.yml', '.yaml']) {
       const filePath = safeJoin(dir, name + ext);
@@ -572,7 +572,7 @@ function stripJsonComments(content: string): string {
 /**
  * Read Claude's current permissions from settings.json.
  */
-export function readClaudePermissions(
+function readClaudePermissions(
   scope: 'user' | 'project' = 'user',
   cwd?: string,
   options?: { home?: string }
@@ -606,7 +606,7 @@ export function readClaudePermissions(
 /**
  * Read OpenCode's current permissions from opencode.jsonc.
  */
-export function readOpenCodePermissions(
+function readOpenCodePermissions(
   scope: 'user' | 'project' = 'user',
   cwd?: string,
   options?: { home?: string }
@@ -639,7 +639,7 @@ export function readOpenCodePermissions(
 /**
  * Read Codex's current permissions from config.toml.
  */
-export function readCodexPermissions(
+function readCodexPermissions(
   scope: 'user' | 'project' = 'user',
   cwd?: string,
   options?: { home?: string }
@@ -754,7 +754,7 @@ export function applyClaudePermissions(
 /**
  * Apply a permission set to OpenCode's opencode.jsonc.
  */
-export function applyOpenCodePermissions(
+function applyOpenCodePermissions(
   set: PermissionSet,
   scope: 'user' | 'project' = 'user',
   cwd?: string,
@@ -804,7 +804,7 @@ export function applyOpenCodePermissions(
 /**
  * Apply a permission set to Codex's config.toml.
  */
-export function applyCodexPermissions(
+function applyCodexPermissions(
   set: PermissionSet,
   scope: 'user' | 'project' = 'user',
   cwd?: string,
@@ -865,7 +865,7 @@ export function applyCodexPermissions(
 /**
  * Apply a permission set to an agent (global config).
  */
-export function applyPermissionsToAgent(
+function applyPermissionsToAgent(
   agentId: AgentId,
   set: PermissionSet,
   scope: 'user' | 'project' = 'user',
@@ -1071,7 +1071,7 @@ export function codexToCanonical(perms: CodexPermissions): PermissionSet {
 /**
  * Export agent's current permissions to canonical format.
  */
-export function exportAgentPermissions(
+function exportAgentPermissions(
   agentId: AgentId,
   scope: 'user' | 'project' = 'user',
   cwd?: string
@@ -1181,7 +1181,7 @@ export function exportPermissionsFromPath(filePath: string): PermissionSet | nul
 /**
  * Save a permission set to central storage.
  */
-export function savePermissionSet(set: PermissionSet): { success: boolean; error?: string } {
+function savePermissionSet(set: PermissionSet): { success: boolean; error?: string } {
   ensurePermissionsDir();
   const filePath = safeJoin(getUserPermissionsDir(), set.name + '.yml');
 

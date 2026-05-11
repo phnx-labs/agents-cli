@@ -60,7 +60,7 @@ export interface ConflictInfo {
  * Detect conflicting files between source and destination directories.
  * Returns list of filenames that exist in both locations (excluding symlinks in dest).
  */
-export function detectConflicts(src: string, dest: string, prefix = ''): string[] {
+function detectConflicts(src: string, dest: string, prefix = ''): string[] {
   const conflicts: string[] = [];
 
   if (!fs.existsSync(src) || !fs.existsSync(dest)) {
@@ -114,7 +114,7 @@ export function detectConflicts(src: string, dest: string, prefix = ''): string[
 /**
  * Prompt user for conflict resolution strategy.
  */
-export async function promptConflictStrategy(
+async function promptConflictStrategy(
   conflictInfos: ConflictInfo[]
 ): Promise<ConflictStrategy | null> {
   const totalConflicts = conflictInfos.reduce((sum, info) => sum + info.conflicts.length, 0);
@@ -599,7 +599,7 @@ function getVersionConfigPath(agent: AgentId, version: string): string {
  * Returns null if no migration is needed (already symlink or doesn't exist),
  * or ConflictInfo with the list of conflicting files.
  */
-export function detectMigrationConflicts(agent: AgentId, version: string): ConflictInfo | null {
+function detectMigrationConflicts(agent: AgentId, version: string): ConflictInfo | null {
   const configPath = getAgentConfigPath(agent);
   const versionConfigPath = getVersionConfigPath(agent, version);
 
@@ -908,7 +908,7 @@ export function ensureClaudeInsideSymlink(version: string): void {
  * Apply `ensureClaudeInsideSymlink` to every installed Claude version.
  * Safe to call repeatedly; per-version calls are idempotent.
  */
-export function ensureAllClaudeInsideSymlinks(): { migrated: string[]; errors: string[] } {
+function ensureAllClaudeInsideSymlinks(): { migrated: string[]; errors: string[] } {
   const versionsDir = getVersionsDir();
   const claudeVersionsDir = path.join(versionsDir, 'claude');
   const migrated: string[] = [];
@@ -1065,7 +1065,7 @@ export function shimExists(agent: AgentId): boolean {
  * Read the schema version embedded in an existing on-disk shim. Returns
  * `null` if the shim doesn't exist or has no version marker (pre-v2 shim).
  */
-export function readShimSchemaVersion(agent: AgentId): number | null {
+function readShimSchemaVersion(agent: AgentId): number | null {
   if (!shimExists(agent)) return null;
   try {
     const content = fs.readFileSync(getShimPath(agent), 'utf8');
@@ -1084,7 +1084,7 @@ export function readShimSchemaVersion(agent: AgentId): number | null {
  * False means either the shim is missing, is pre-v2 (no marker), or is an
  * older version that needs regeneration.
  */
-export function isShimCurrent(agent: AgentId): boolean {
+function isShimCurrent(agent: AgentId): boolean {
   const version = readShimSchemaVersion(agent);
   return version === SHIM_SCHEMA_VERSION;
 }
@@ -1426,7 +1426,7 @@ export function listAgentsWithInstalledVersions(): AgentId[] {
 /**
  * Create shims for all installed agents.
  */
-export function ensureAllShims(): void {
+function ensureAllShims(): void {
   const versionsDir = getVersionsDir();
   if (!fs.existsSync(versionsDir)) {
     return;
@@ -1463,7 +1463,7 @@ export interface ResourceDiff {
  * Compare resources between two versions.
  * Returns resources that exist in currentVersion but not in targetVersion.
  */
-export function compareVersionResources(
+function compareVersionResources(
   agent: AgentId,
   currentVersion: string,
   targetVersion: string
@@ -1564,7 +1564,7 @@ export function hasResourceDiff(diff: ResourceDiff): boolean {
  * Copy resources from one version to another.
  * Only copies resources listed in the diff (i.e., ones missing in target).
  */
-export function copyResourcesToVersion(
+function copyResourcesToVersion(
   agent: AgentId,
   fromVersion: string,
   toVersion: string,

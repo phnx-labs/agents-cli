@@ -57,7 +57,7 @@ export interface InstalledCommand {
 }
 
 /** Parse command metadata (name, description) from YAML frontmatter or TOML headers. */
-export function parseCommandMetadata(filePath: string): CommandMetadata | null {
+function parseCommandMetadata(filePath: string): CommandMetadata | null {
   if (!fs.existsSync(filePath)) {
     return null;
   }
@@ -97,7 +97,7 @@ export function parseCommandMetadata(filePath: string): CommandMetadata | null {
 }
 
 /** Validate command metadata, returning errors and warnings. */
-export function validateCommandMetadata(
+function validateCommandMetadata(
   metadata: CommandMetadata | null,
   commandName: string
 ): ValidationResult {
@@ -447,7 +447,7 @@ export function uninstallCommand(agentId: AgentId, commandName: string): boolean
 }
 
 /** List command names installed for an agent in the active version home. */
-export function listInstalledCommands(agentId: AgentId): string[] {
+function listInstalledCommands(agentId: AgentId): string[] {
   const agent = AGENTS[agentId];
   const home = getEffectiveHome(agentId);
   const commandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
@@ -465,7 +465,7 @@ export function listInstalledCommands(agentId: AgentId): string[] {
 /**
  * Check if a command exists for an agent.
  */
-export function commandExists(agentId: AgentId, commandName: string): boolean {
+function commandExists(agentId: AgentId, commandName: string): boolean {
   const agent = AGENTS[agentId];
   const home = getEffectiveHome(agentId);
   const commandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
@@ -485,7 +485,7 @@ function normalizeContent(content: string): string {
  * Check if installed command content matches source content.
  * Handles format conversion (markdown to TOML for Gemini).
  */
-export function commandContentMatches(
+function commandContentMatches(
   agentId: AgentId,
   commandName: string,
   sourcePath: string

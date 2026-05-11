@@ -22,7 +22,7 @@ describe('prune command', () => {
     const helpText = runCli(['--help']);
 
     expect(helpText).toContain('prune [target]');
-    expect(helpText).toContain('Remove orphan resources (commands/skills/hooks) and/or older duplicate version installs');
+    expect(helpText).toContain('Remove orphan resources and older duplicate version installs');
   });
 
   it('shows dedicated help for agents prune', () => {
