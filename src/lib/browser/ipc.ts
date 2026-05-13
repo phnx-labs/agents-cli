@@ -358,6 +358,20 @@ export class BrowserIPCServer {
         return { ok: true, downloadPath };
       }
 
+      case 'upload': {
+        if (!request.task || !request.files || request.files.length === 0) {
+          return { ok: false, error: 'Task and at least one file required' };
+        }
+        const result = await this.service.upload(request.task, request.files, {
+          ref: request.ref,
+          trigger: request.trigger,
+          mode: request.uploadMode,
+          tabHint: request.tabId,
+          timeout: request.timeout,
+        });
+        return { ok: true, uploadMode: result.mode };
+      }
+
       default:
         return { ok: false, error: `Unknown action: ${request.action}` };
     }

@@ -969,6 +969,55 @@ function registerTaskCommands(browser: Command): void {
       console.log('Scrolled');
     });
 
+  browser
+    .command('upload <task>')
+    .description('Upload file(s) — supports hidden file inputs, drag-drop targets, and OS chooser interception')
+    .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
+    .option('-r, --ref <n>', 'Ref of the upload target element (file input or drop zone)', (v) => parseInt(v, 10))
+    .option('--trigger <n>', 'Ref of a button that opens the OS file chooser (Pattern C)', (v) => parseInt(v, 10))
+    .option('-f, --file <path...>', 'Absolute path(s) to file(s) to upload (repeatable)')
+    .option('--drop', 'Force drag-drop pattern even if ref is an <input type=file>')
+    .option('--input', 'Force file-input pattern (DOM.setFileInputFiles)')
+    .option('--timeout <ms>', 'Timeout for chooser interception (Pattern C)', (v) => parseInt(v, 10))
+    .action(async (task: string, opts) => {
+      const files: string[] = opts.file ?? [];
+      if (files.length === 0) {
+        console.error('--file <path> is required (repeat for multiple files)');
+        process.exit(1);
+      }
+      if (opts.ref === undefined && opts.trigger === undefined) {
+        console.error('--ref <n> or --trigger <n> is required');
+        process.exit(1);
+      }
+      if (opts.drop && opts.input) {
+        console.error('--drop and --input are mutually exclusive');
+        process.exit(1);
+      }
+
+      let mode: 'auto' | 'input' | 'drop' | 'chooser' = 'auto';
+      if (opts.trigger !== undefined) mode = 'chooser';
+      else if (opts.drop) mode = 'drop';
+      else if (opts.input) mode = 'input';
+
+      const response = await sendIPCRequest({
+        action: 'upload',
+        task,
+        tabId: opts.tab,
+        ref: opts.ref,
+        trigger: opts.trigger,
+        files,
+        uploadMode: mode,
+        timeout: opts.timeout,
+      });
+
+      if (!response.ok) {
+        console.error(response.error);
+        process.exit(1);
+      }
+
+      console.log(`Uploaded ${files.length} file${files.length === 1 ? '' : 's'} (${response.uploadMode})`);
+    });
+
   // ─── Viewport & Device ───────────────────────────────────────────────────────
 
   const setCmd = browser.command('set').description('Set browser emulation options');

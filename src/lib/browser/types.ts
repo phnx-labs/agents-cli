@@ -105,7 +105,8 @@ export type IPCAction =
   | 'response-body'
   | 'wait'
   | 'set-download-path'
-  | 'wait-download';
+  | 'wait-download'
+  | 'upload';
 
 export interface IPCRequest {
   action: IPCAction;
@@ -144,6 +145,10 @@ export interface IPCRequest {
   timeout?: number;
   // Downloads
   downloadPath?: string;
+  // Upload
+  files?: string[];
+  trigger?: number;
+  uploadMode?: 'auto' | 'input' | 'drop' | 'chooser';
 }
 
 export interface IPCResponse {
@@ -171,6 +176,8 @@ export interface IPCResponse {
   downloadPath?: string;
   // Devices
   devices?: string[];
+  // Upload
+  uploadMode?: 'input' | 'drop' | 'chooser';
 }
 
 export interface ConsoleEntry {

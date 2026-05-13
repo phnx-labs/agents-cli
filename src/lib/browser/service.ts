@@ -26,8 +26,16 @@ import {
 import { getRefs, resolveRefToCoords, type RefOpts, type RefNode } from './refs.js';
 import { clickAtCoords, hoverAtCoords, scrollAtCoords, typeText, pressKey, focusNode } from './input.js';
 import { typeEditorText } from './editor.js';
+import {
+  detectUploadPattern,
+  uploadToDropTarget,
+  uploadToFileInput,
+  uploadViaFileChooser,
+} from './upload.js';
 import { emit } from '../events.js';
 import type { TargetFilter } from './types.js';
+
+export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
 
 /**
  * Parse a `targetFilter` string into its kind + value, or return `null`
@@ -716,6 +724,76 @@ export class BrowserService {
 
     const sessionId = await this.getSessionId(conn, target.targetId);
     await scrollAtCoords(conn.cdp, sessionId, atX ?? 0, atY ?? 0, deltaX, deltaY);
+  }
+
+  async upload(
+    taskId: string,
+    files: string[],
+    options: {
+      ref?: number;
+      trigger?: number;
+      mode?: UploadMode;
+      tabHint?: string;
+      timeout?: number;
+    }
+  ): Promise<{ mode: 'input' | 'drop' | 'chooser' }> {
+    const { conn, task } = await this.findTask(taskId);
+    const shortId = options.tabHint
+      ? await this.resolveTabHint(conn, task, options.tabHint)
+      : this.resolveCurrentTab(task);
+    const cdpTargetId = this.getCdpTargetId(task, shortId);
+    const target = await this.getTarget(conn, cdpTargetId);
+    if (!target) throw new Error(`Tab ${shortId} not found`);
+
+    const sessionId = await this.getSessionId(conn, target.targetId);
+    // Match the user-facing ref numbering from `agents browser refs` (which
+    // defaults to interactive=true). The other action helpers in this file
+    // use interactive=false historically, but that produces ref numbers the
+    // user never sees — `--ref 1` then resolves to the RootWebArea instead of
+    // the first interactive element. Match the listing the user actually saw.
+    const { nodeMap } = await getRefs(conn.cdp, sessionId, { interactive: true, limit: 1000 });
+
+    const mode = options.mode ?? 'auto';
+
+    if (options.trigger !== undefined || mode === 'chooser') {
+      const ref = options.trigger ?? options.ref;
+      if (ref === undefined) {
+        throw new Error('chooser mode requires --trigger <ref> (or --ref) pointing at the button that opens the file dialog');
+      }
+      const node = nodeMap.get(ref);
+      if (!node) throw new Error(`Ref ${ref} not found`);
+      await uploadViaFileChooser(
+        conn.cdp,
+        sessionId,
+        { node, nodeMap },
+        files,
+        options.timeout
+      );
+      return { mode: 'chooser' };
+    }
+
+    if (options.ref === undefined) {
+      throw new Error('upload requires --ref <n> (target element) or --trigger <n> (button that opens chooser)');
+    }
+    const node = nodeMap.get(options.ref);
+    if (!node) throw new Error(`Ref ${options.ref} not found`);
+    if (!node.backendNodeId) throw new Error(`Ref ${options.ref} has no DOM node`);
+
+    let resolved: 'input' | 'drop';
+    if (mode === 'input') {
+      resolved = 'input';
+    } else if (mode === 'drop') {
+      resolved = 'drop';
+    } else {
+      resolved = await detectUploadPattern(conn.cdp, sessionId, node.backendNodeId);
+    }
+
+    if (resolved === 'input') {
+      await uploadToFileInput(conn.cdp, sessionId, node.backendNodeId, files);
+    } else {
+      await uploadToDropTarget(conn.cdp, sessionId, node.backendNodeId, files);
+    }
+    return { mode: resolved };
   }
 
   async status(profileName?: string): Promise<ProfileStatus[]> {
