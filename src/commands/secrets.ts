@@ -211,19 +211,26 @@ function renderBundleRow(b: SecretsBundle): string {
   const sync = b.icloud_sync ? chalk.cyan('icloud') : '';
   const expiringCount = countExpiringSoon(b.meta);
   const expiring = expiringCount > 0 ? chalk.yellow(String(expiringCount)) : chalk.gray('-');
-  const created = b.created_at ? relativeAge(b.created_at) : chalk.gray('-');
-  const updated = b.updated_at ? relativeAge(b.updated_at) : chalk.gray('-');
-  const used = b.last_used ? relativeAge(b.last_used) : chalk.gray('-');
-  return (
-    `${chalk.cyan(b.name.padEnd(18))} ` +
+  // Timestamp distinction:
+  //   "?"     -> legacy bundle, never written under the timestamping code.
+  //   "never" -> bundle has been written but the action never happened
+  //              (currently only used for USED — CREATED/UPDATED are always
+  //              set together by writeBundle).
+  //   <age>   -> real data.
+  const created = b.created_at ? relativeAge(b.created_at) : chalk.gray('?');
+  const updated = b.updated_at ? relativeAge(b.updated_at) : chalk.gray('?');
+  const used = b.last_used
+    ? relativeAge(b.last_used)
+    : (b.created_at ? chalk.gray('never') : chalk.gray('?'));
+  const head =
+    `${chalk.cyan(b.name.padEnd(20))} ` +
     `${String(keys).padEnd(5)} ` +
     `${padVisible(sync, 6)} ` +
     `${padVisible(expiring, 9)} ` +
     `${padVisible(created, 9)} ` +
     `${padVisible(updated, 9)} ` +
-    `${padVisible(used, 7)} ` +
-    `${chalk.gray(b.description || '')}`
-  );
+    `${padVisible(used, 7)}`;
+  return b.description ? `${head} ${chalk.gray(b.description)}` : head.trimEnd();
 }
 
 /** Colorize a variable source kind (literal, keychain, env, file, exec). */
@@ -426,7 +433,7 @@ Examples:
         return;
       }
       console.log(chalk.bold(
-        `${'NAME'.padEnd(18)} ${'KEYS'.padEnd(5)} ${'SYNC'.padEnd(6)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
+        `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'SYNC'.padEnd(6)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
       ));
       for (const b of bundles) {
         console.log(renderBundleRow(b));
