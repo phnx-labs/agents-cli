@@ -235,6 +235,18 @@ describe('parseTargetFilter', () => {
     expect(parseTargetFilter('')).toBeNull();
     expect(parseTargetFilter(undefined)).toBeNull();
   });
+
+  it('trims whitespace around the value (copy-paste safety)', async () => {
+    // `url: https://x` (space after colon) used to parse to value=' https://x',
+    // which silently never matched any real URL. Strip both sides.
+    const { parseTargetFilter } = await import('./service.js');
+    expect(parseTargetFilter('url: https://www.canva.com/ ')).toEqual({
+      kind: 'url',
+      value: 'https://www.canva.com/',
+    });
+    // Whitespace-only value is equivalent to empty value.
+    expect(parseTargetFilter('url:   ')).toBeNull();
+  });
 });
 
 describe('pickWindowTarget', () => {
@@ -316,5 +328,28 @@ describe('pickWindowTarget', () => {
     // Garbage filter should not crash; treat as if absent.
     const hit = pickWindowTarget(canvaTargets, 'not-a-valid-filter');
     expect(hit?.targetId).toBe('B351F950');
+  });
+
+  it('explicit filter, all matches invisible — returns first match (documented fallback)', async () => {
+    // If every match is invisible, the helper still returns *something* rather
+    // than `undefined`. The caller can decide to surface a warning if needed.
+    // Caught here so a future refactor doesn't accidentally drop the `?? matches[0]`.
+    const { pickWindowTarget } = await import('./service.js');
+    const invisibleMatches = [
+      {
+        targetId: 'BG1',
+        type: 'page',
+        url: 'https://www.canva.com/_desktop-background-service',
+        title: 'Desktop Background Service',
+      },
+      {
+        targetId: 'BG2',
+        type: 'page',
+        url: 'https://www.canva.com/_internal',
+        title: 'Internal',
+      },
+    ];
+    const hit = pickWindowTarget(invisibleMatches, 'url:canva.com');
+    expect(hit?.targetId).toBe('BG1');
   });
 });

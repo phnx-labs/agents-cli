@@ -42,7 +42,10 @@ export function parseTargetFilter(filter: string | undefined): TargetFilter | nu
   const idx = filter.indexOf(':');
   if (idx <= 0) return null;
   const kind = filter.slice(0, idx).trim().toLowerCase();
-  const value = filter.slice(idx + 1);
+  // Strip whitespace around the value so `url: https://x` (with a copy-pasted
+  // space after the colon) doesn't silently fail to match — `.includes(' x')`
+  // never hits a URL because URLs don't contain spaces.
+  const value = filter.slice(idx + 1).trim();
   if (kind !== 'url' && kind !== 'title') return null;
   if (!value) return null;
   return { kind, value };
@@ -1351,7 +1354,7 @@ export class BrowserService {
     if (parseTargetFilter(conn.targetFilter)) {
       const candidates = targetInfos
         .filter((t) => t.type === 'page')
-        .map((t) => `  - url=${t.url} title=${t.title ?? ''}`)
+        .map((t) => `  - url=${t.url ?? ''} title=${t.title ?? ''}`)
         .join('\n');
       throw new Error(
         `Target filter ${JSON.stringify(conn.targetFilter)} matched no page target.\n` +

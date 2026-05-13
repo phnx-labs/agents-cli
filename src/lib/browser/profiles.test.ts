@@ -14,9 +14,10 @@ vi.mock('./chrome.js', () => ({
   findBrowserPath: vi.fn(() => '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
 }));
 
-import { extractConfiguredPort, findFreeProfilePort } from './profiles.js';
+import { extractConfiguredPort, findFreeProfilePort, createProfile } from './profiles.js';
 import type { BrowserProfile } from './types.js';
-import { readMeta } from '../state.js';
+import type { BrowserProfileConfig } from '../types.js';
+import { readMeta, writeMeta } from '../state.js';
 import { execSync } from 'child_process';
 
 function profile(endpoints: string[]): BrowserProfile {
@@ -61,6 +62,69 @@ describe('extractConfiguredPort', () => {
     expect(
       extractConfiguredPort(profile(['cdp://localhost:9001', 'cdp://localhost:9002']))
     ).toBe(9001);
+  });
+});
+
+describe('profile YAML round-trip', () => {
+  // configToProfile / profileToConfig are internal, but createProfile calls
+  // writeMeta(config) and getProfile/listProfiles run configToProfile(config).
+  // Round-tripping through that pair is the production code path.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('preserves electron / binary / targetFilter through write -> read', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      // Persist exactly what createProfile passes — this mirrors disk YAML.
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+
+    const input: BrowserProfile = {
+      name: 'canva',
+      browser: 'custom',
+      binary: '/Applications/Canva.app/Contents/MacOS/Canva',
+      electron: true,
+      targetFilter: 'url:https://www.canva.com/',
+      endpoints: ['cdp://127.0.0.1:9201'],
+    };
+
+    await createProfile(input);
+
+    const stored = store.browser['canva'];
+    expect(stored.browser).toBe('custom');
+    expect(stored.binary).toBe('/Applications/Canva.app/Contents/MacOS/Canva');
+    expect(stored.electron).toBe(true);
+    expect(stored.targetFilter).toBe('url:https://www.canva.com/');
+
+    // And on the read side — configToProfile must not silently drop the field
+    // (regression guard: someone could remove it from configToProfile and the
+    // value would survive YAML but be undefined at runtime).
+    const { listProfiles } = await import('./profiles.js');
+    const [restored] = await listProfiles();
+    expect(restored.binary).toBe(input.binary);
+    expect(restored.electron).toBe(true);
+    expect(restored.targetFilter).toBe(input.targetFilter);
+  });
+
+  it('does not write electron/binary/targetFilter when they are unset', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+
+    await createProfile({
+      name: 'plain',
+      browser: 'chrome',
+      endpoints: ['cdp://127.0.0.1:9301'],
+    });
+
+    const stored = store.browser['plain'];
+    expect('binary' in stored).toBe(false);
+    expect('electron' in stored).toBe(false);
+    expect('targetFilter' in stored).toBe(false);
   });
 });
 

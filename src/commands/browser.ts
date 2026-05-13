@@ -13,6 +13,7 @@ import {
 } from '../lib/browser/profiles.js';
 import { findBrowserPath, getPortOccupant } from '../lib/browser/chrome.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
+import { parseTargetFilter } from '../lib/browser/service.js';
 import { sendIPCRequest } from '../lib/browser/ipc.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { isInteractiveTerminal } from './utils.js';
@@ -105,10 +106,17 @@ function registerProfilesCommands(browser: Command): void {
       }
 
       if (opts.targetFilter) {
-        const idx = String(opts.targetFilter).indexOf(':');
-        const kind = idx > 0 ? String(opts.targetFilter).slice(0, idx).toLowerCase() : '';
-        if (kind !== 'url' && kind !== 'title') {
-          console.error('--target-filter must be url:<substring> or title:<substring>');
+        // Route through the same parser the runtime uses so the CLI gate matches
+        // the runtime contract — `url:` (empty value) and `url: foo` (leading
+        // whitespace) both pass a naive `kind` check but produce a silent
+        // heuristic fallback at runtime.
+        const parsed = parseTargetFilter(String(opts.targetFilter));
+        if (!parsed) {
+          console.error('--target-filter must be url:<substring> or title:<substring> (non-empty value, no leading whitespace)');
+          process.exit(1);
+        }
+        if (!opts.electron) {
+          console.error('--target-filter requires --electron (the filter is only consulted on Electron profiles)');
           process.exit(1);
         }
       }

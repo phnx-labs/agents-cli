@@ -485,10 +485,11 @@ export interface BrowserProfileConfig {
   /**
    * Selects which CDP page target represents the visible UI when the
    * browser/app exposes more than one. Format: `url:<substring>` or
-   * `title:<substring>`. Required for Electron apps that ship hidden
+   * `title:<substring>`. Recommended for Electron apps that ship hidden
    * helper WebContents (background services, OAuth windows, file://
    * shells); without an explicit filter the connector falls back to a
    * skip-invisible heuristic before picking the first page target.
+   * Only consulted when `electron` is true.
    */
   targetFilter?: string;
   endpoints: string[];
