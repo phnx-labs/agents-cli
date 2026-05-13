@@ -66,7 +66,7 @@ import { registerUsageCommand } from './commands/usage.js';
 import { registerAliasCommand } from './commands/alias.js';
 import { registerBetaCommands } from './commands/beta.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
-import { isPromptCancelled } from './commands/utils.js';
+import { isInteractiveTerminal, isPromptCancelled } from './commands/utils.js';
 import { getAgentsDir } from './lib/state.js';
 import { AGENTS } from './lib/agents.js';
 import { getGlobalDefault, listInstalledVersions } from './lib/versions.js';
@@ -263,7 +263,7 @@ function saveUpdateCheck(latestVersion: string): void {
 
 /** Present an interactive upgrade prompt (TTY) or a one-line hint (non-TTY). */
 async function promptUpgrade(latestVersion: string): Promise<void> {
-  if (!process.stdout.isTTY) {
+  if (!isInteractiveTerminal()) {
     console.error(chalk.yellow(`Update available: ${VERSION} -> ${latestVersion}. Run: npm install -g @phnx-labs/agents-cli@latest`));
     return;
   }
@@ -334,6 +334,8 @@ function refreshUpdateCacheInBackground(): void {
 
 /** Check for available updates using the local cache. Triggers a background refresh if stale. */
 async function checkForUpdates(): Promise<void> {
+  if (process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE) return;
+
   const cache = readUpdateCache();
 
   // Kick off network refresh in background if stale. Does not block.

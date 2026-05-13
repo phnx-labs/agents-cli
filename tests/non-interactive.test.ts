@@ -76,16 +76,26 @@ function writeLocalPackageRepo(): string {
   return repo;
 }
 
-function runAgents(home: string, args: string[]) {
+function runAgents(home: string, args: string[], extraEnv: Record<string, string> = {}) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,
     env: {
       ...process.env,
       HOME: home,
       SHELL: '/bin/zsh',
+      ...extraEnv,
     },
     encoding: 'utf-8',
   });
+}
+
+function seedNewerUpdateCache(home: string, futureVersion: string): void {
+  const cacheDir = path.join(home, '.agents', '.cache');
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(cacheDir, '.update-check'),
+    JSON.stringify({ lastCheck: Date.now(), latestVersion: futureVersion }),
+  );
 }
 
 const tempHomes: string[] = [];
@@ -282,5 +292,28 @@ describe('non-interactive CLI usage', () => {
     expect(log).toContain(path.join(home, '.agents', '.history', 'versions', 'codex', '0.2.0', 'home'));
     expect(log).toContain('mcp remove demo');
     expect(log).not.toContain(path.join(home, '.agents', '.history', 'versions', 'codex', '0.1.0', 'home'));
+  });
+
+  it('AGENTS_CLI_DISABLE_AUTO_UPDATE skips the update check when a newer version is cached', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    seedNewerUpdateCache(home, '99.0.0');
+
+    const result = runAgents(home, ['view'], { AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' });
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(combined).not.toContain('Update available');
+  });
+
+  it('prints the non-TTY hint (not an interactive picker) when a newer version is cached', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    seedNewerUpdateCache(home, '99.0.0');
+
+    const result = runAgents(home, ['view']);
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(combined).toContain(`Update available: ${PACKAGE_VERSION.version} -> 99.0.0`);
+    expect(combined).not.toContain('Upgrade now');
   });
 });
