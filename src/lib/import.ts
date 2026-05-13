@@ -22,7 +22,7 @@ import * as path from 'path';
 import type { AgentId } from './types.js';
 import { AGENTS } from './agents.js';
 import { getVersionsDir } from './state.js';
-import { getVersionDir, setGlobalDefault } from './versions.js';
+import { setGlobalDefault } from './versions.js';
 import { ensureShimCurrent, switchHomeFileSymlinks } from './shims.js';
 
 export interface ImportConfigResult {
@@ -74,6 +74,21 @@ export async function importAgentConfig(
 }
 
 /**
+ * Agent metadata needed by importAgentBinary. Taking these as explicit
+ * inputs (rather than looking up AGENTS internally) decouples the symlink
+ * farm from the AGENTS registry, which keeps the function pure and avoids
+ * fragile coupling in test setups that stub `lib/agents.ts`.
+ */
+export interface AgentBinarySpec {
+  /** Agent id used in the marker package.json (`agents-{agentId}-{version}`). */
+  agentId: string;
+  /** npm package name (e.g. `openclaw`) — used as the `node_modules/<name>` dir. */
+  npmPackage: string;
+  /** Binary name on PATH (e.g. `openclaw`) — used as the `.bin/<name>` entry. */
+  cliCommand: string;
+}
+
+/**
  * Register an existing global npm package install under the managed version
  * path so the shim resolver finds it.
  *
@@ -86,17 +101,12 @@ export async function importAgentConfig(
  *     node_modules/.bin/{cliCommand} -> {binaryEntry}
  */
 export function importAgentBinary(
-  agentId: AgentId,
+  spec: AgentBinarySpec,
   version: string,
-  globalPath: string
+  globalPath: string,
+  versionDir: string
 ): ImportBinaryResult {
-  const agent = AGENTS[agentId];
-  if (!agent.npmPackage) {
-    return { success: false, error: `Agent "${agentId}" has no npm package` };
-  }
-
-  const versionDir = getVersionDir(agentId, version);
-  const binaryLink = path.join(versionDir, 'node_modules', '.bin', agent.cliCommand);
+  const binaryLink = path.join(versionDir, 'node_modules', '.bin', spec.cliCommand);
 
   // lstat — we want to detect the symlink itself, not follow it. fs.existsSync
   // can return false on dangling symlinks, which would incorrectly let us
@@ -127,14 +137,14 @@ export function importAgentBinary(
     if (typeof pkg.bin === 'string') {
       pkgBinEntry = pkg.bin;
     } else if (pkg.bin && typeof pkg.bin === 'object') {
-      pkgBinEntry = pkg.bin[agent.cliCommand] ?? Object.values(pkg.bin)[0] as string;
+      pkgBinEntry = pkg.bin[spec.cliCommand] ?? Object.values(pkg.bin)[0] as string;
     }
   } catch (err) {
     return { success: false, error: `Failed to read package.json: ${(err as Error).message}` };
   }
 
   if (!pkgBinEntry) {
-    return { success: false, error: `package.json has no bin entry for "${agent.cliCommand}"` };
+    return { success: false, error: `package.json has no bin entry for "${spec.cliCommand}"` };
   }
 
   const binaryTarget = path.resolve(globalPath, pkgBinEntry);
@@ -148,10 +158,10 @@ export function importAgentBinary(
 
     fs.writeFileSync(
       path.join(versionDir, 'package.json'),
-      JSON.stringify({ name: `agents-${agentId}-${version}`, version: '1.0.0', private: true, imported: true, from: globalPath }, null, 2)
+      JSON.stringify({ name: `agents-${spec.agentId}-${version}`, version: '1.0.0', private: true, imported: true, from: globalPath }, null, 2)
     );
 
-    const pkgLink = path.join(versionDir, 'node_modules', agent.npmPackage);
+    const pkgLink = path.join(versionDir, 'node_modules', spec.npmPackage);
     fs.mkdirSync(path.dirname(pkgLink), { recursive: true });
     if (!fs.existsSync(pkgLink)) {
       fs.symlinkSync(globalPath, pkgLink);

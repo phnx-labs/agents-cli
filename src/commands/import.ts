@@ -31,6 +31,7 @@ import { confirm } from '@inquirer/prompts';
 import type { AgentId } from '../lib/types.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { AGENTS, getCliPath, getCliVersion, agentLabel } from '../lib/agents.js';
+import { getVersionDir } from '../lib/versions.js';
 import {
   importAgentBinary,
   importAgentConfig,
@@ -128,8 +129,18 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     }
   }
 
+  if (!agent.npmPackage) {
+    console.error(chalk.red(`${agentLabel(agentId)} has no npm package metadata — cannot import.`));
+    process.exit(1);
+  }
+
   const binSpinner = ora('Registering binary...').start();
-  const binResult = importAgentBinary(agentId, version, globalPath);
+  const binResult = importAgentBinary(
+    { agentId, npmPackage: agent.npmPackage, cliCommand: agent.cliCommand },
+    version,
+    globalPath,
+    getVersionDir(agentId, version)
+  );
   if (binResult.success) {
     binSpinner.succeed('Binary registered');
   } else if (binResult.skipped) {
