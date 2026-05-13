@@ -540,11 +540,34 @@ export class BrowserService {
 
     const sessionId = await this.getSessionId(conn, target.targetId);
 
+    // `awaitPromise: true` lets callers write `evaluate '(async () => {...})()'`
+    // and get the resolved value back instead of a stringified Promise. This
+    // is essential for any flow that needs sub-step waits inside the page
+    // (e.g. driving a multi-step modal where each step needs React to settle
+    // before the next call). Without it, the shell-side workaround is to
+    // chain N separate `evaluate` calls with `sleep` between them, which
+    // races against the page's own state machine.
+    //
+    // `exceptionDetails` is surfaced as a thrown error so a rejected promise
+    // or a thrown error inside the expression doesn't silently return `undefined`.
     const result = (await conn.cdp.send(
       'Runtime.evaluate',
-      { expression, returnByValue: true },
+      { expression, returnByValue: true, awaitPromise: true },
       sessionId
-    )) as { result: { value: unknown } };
+    )) as {
+      result: { value: unknown };
+      exceptionDetails?: { text?: string; exception?: { description?: string; value?: unknown } };
+    };
+
+    if (result.exceptionDetails) {
+      const ex = result.exceptionDetails;
+      const msg =
+        ex.exception?.description ??
+        (typeof ex.exception?.value === 'string' ? ex.exception.value : undefined) ??
+        ex.text ??
+        'evaluate failed';
+      throw new Error(msg);
+    }
 
     return result.result.value;
   }
