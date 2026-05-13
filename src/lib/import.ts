@@ -98,7 +98,17 @@ export function importAgentBinary(
   const versionDir = getVersionDir(agentId, version);
   const binaryLink = path.join(versionDir, 'node_modules', '.bin', agent.cliCommand);
 
-  if (fs.existsSync(binaryLink)) {
+  // lstat — we want to detect the symlink itself, not follow it. fs.existsSync
+  // can return false on dangling symlinks, which would incorrectly let us
+  // proceed to symlinkSync below and throw EEXIST.
+  let alreadyExists = false;
+  try {
+    fs.lstatSync(binaryLink);
+    alreadyExists = true;
+  } catch {
+    /* not present */
+  }
+  if (alreadyExists) {
     return { success: false, skipped: true, error: `${version} already installed`, resolvedFromPath: globalPath };
   }
 
