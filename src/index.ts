@@ -42,6 +42,7 @@ import { registerRulesCommands } from './commands/rules.js';
 import { registerPermissionsCommands } from './commands/permissions.js';
 import { registerMcpCommands } from './commands/mcp.js';
 import { registerVersionsCommands } from './commands/versions.js';
+import { registerImportCommand } from './commands/import.js';
 import { registerPackagesCommands } from './commands/packages.js';
 import { registerDaemonCommands } from './commands/daemon.js';
 import { registerRoutinesCommands } from './commands/routines.js';
@@ -107,6 +108,7 @@ Quick start:
 
 Agent versions:
   add <agent>[@version]           Install an agent CLI (e.g. agents add codex)
+  import <agent>                  Adopt an existing global install (npm/homebrew) into agents-cli
   remove <agent>[@version]        Uninstall a version
   use <agent>@<version>           Set the default version
   prune [target]                  Remove orphan resources and older duplicate version installs (targets: commands, sessions, runs, trash)
@@ -496,6 +498,7 @@ registerSubagentsCommands(program);
 registerPluginsCommands(program);
 registerWorkflowsCommands(program);
 registerVersionsCommands(program);
+registerImportCommand(program);
 registerPackagesCommands(program);
 registerDaemonCommands(program);
 registerRoutinesCommands(program);

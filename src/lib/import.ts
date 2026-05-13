@@ -1,0 +1,185 @@
+/**
+ * Import existing unmanaged agent installations into agents-cli.
+ *
+ * Two flavors:
+ *
+ *  1. Config-only import — moves an agent's config dir (e.g. ~/.openclaw)
+ *     into the version structure and symlinks it back. Used by `agents setup`
+ *     on first-run when an agent was previously installed via npm/homebrew.
+ *
+ *  2. Full import — also registers an existing binary install (e.g. a global
+ *     `npm i -g openclaw`) under the managed version path so the shim
+ *     resolver can find it. This is what `agents import <agent>` does.
+ *
+ * The binary side never moves files. It creates a thin symlink farm under
+ * `~/.agents/.history/versions/<agent>/<version>/` pointing at the original
+ * global install, plus a package.json marker so `isVersionInstalled` returns
+ * true.
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import type { AgentId } from './types.js';
+import { AGENTS } from './agents.js';
+import { getVersionsDir } from './state.js';
+import { getVersionDir, setGlobalDefault } from './versions.js';
+import { ensureShimCurrent, switchHomeFileSymlinks } from './shims.js';
+
+export interface ImportConfigResult {
+  success: boolean;
+  skipped?: boolean;
+  error?: string;
+}
+
+export interface ImportBinaryResult {
+  success: boolean;
+  skipped?: boolean;
+  error?: string;
+  resolvedFromPath?: string;
+}
+
+/**
+ * Move an agent's config dir into the managed version structure and symlink it
+ * back to its original location.
+ *
+ * No-op (returns skipped=true) if the version's config dir is already created.
+ * Caller is expected to call `setGlobalDefault` separately when appropriate —
+ * we do it here too for backward compatibility with the existing setup flow.
+ */
+export async function importAgentConfig(
+  agentId: AgentId,
+  version: string
+): Promise<ImportConfigResult> {
+  const agent = AGENTS[agentId];
+  const configDir = agent.configDir;
+  const versionsDir = getVersionsDir();
+  const versionHome = path.join(versionsDir, agentId, version, 'home');
+  const versionConfigDir = path.join(versionHome, `.${agentId}`);
+
+  if (fs.existsSync(versionConfigDir)) {
+    return { success: false, skipped: true, error: `${version} already installed` };
+  }
+
+  try {
+    fs.mkdirSync(versionHome, { recursive: true });
+    fs.renameSync(configDir, versionConfigDir);
+    fs.symlinkSync(versionConfigDir, configDir);
+    setGlobalDefault(agentId, version);
+    switchHomeFileSymlinks(agentId, version);
+    ensureShimCurrent(agentId);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Register an existing global npm package install under the managed version
+ * path so the shim resolver finds it.
+ *
+ * Layout produced (everything is a symlink, nothing is copied):
+ *
+ *   {versionDir}/
+ *     package.json                          # marker so isVersionInstalled() is true
+ *     home/                                 # empty isolated $HOME for this version
+ *     node_modules/{npmPackage}    -> {globalPath}
+ *     node_modules/.bin/{cliCommand} -> {binaryEntry}
+ */
+export function importAgentBinary(
+  agentId: AgentId,
+  version: string,
+  globalPath: string
+): ImportBinaryResult {
+  const agent = AGENTS[agentId];
+  if (!agent.npmPackage) {
+    return { success: false, error: `Agent "${agentId}" has no npm package` };
+  }
+
+  const versionDir = getVersionDir(agentId, version);
+  const binaryLink = path.join(versionDir, 'node_modules', '.bin', agent.cliCommand);
+
+  if (fs.existsSync(binaryLink)) {
+    return { success: false, skipped: true, error: `${version} already installed`, resolvedFromPath: globalPath };
+  }
+
+  if (!fs.existsSync(globalPath)) {
+    return { success: false, error: `Path does not exist: ${globalPath}` };
+  }
+
+  const globalPkgJson = path.join(globalPath, 'package.json');
+  if (!fs.existsSync(globalPkgJson)) {
+    return { success: false, error: `Not an npm package (no package.json): ${globalPath}` };
+  }
+
+  let pkgBinEntry: string | undefined;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(globalPkgJson, 'utf8'));
+    if (typeof pkg.bin === 'string') {
+      pkgBinEntry = pkg.bin;
+    } else if (pkg.bin && typeof pkg.bin === 'object') {
+      pkgBinEntry = pkg.bin[agent.cliCommand] ?? Object.values(pkg.bin)[0] as string;
+    }
+  } catch (err) {
+    return { success: false, error: `Failed to read package.json: ${(err as Error).message}` };
+  }
+
+  if (!pkgBinEntry) {
+    return { success: false, error: `package.json has no bin entry for "${agent.cliCommand}"` };
+  }
+
+  const binaryTarget = path.resolve(globalPath, pkgBinEntry);
+  if (!fs.existsSync(binaryTarget)) {
+    return { success: false, error: `Binary entry missing: ${binaryTarget}` };
+  }
+
+  try {
+    fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
+    fs.mkdirSync(path.join(versionDir, 'node_modules', '.bin'), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(versionDir, 'package.json'),
+      JSON.stringify({ name: `agents-${agentId}-${version}`, version: '1.0.0', private: true, imported: true, from: globalPath }, null, 2)
+    );
+
+    const pkgLink = path.join(versionDir, 'node_modules', agent.npmPackage);
+    fs.mkdirSync(path.dirname(pkgLink), { recursive: true });
+    if (!fs.existsSync(pkgLink)) {
+      fs.symlinkSync(globalPath, pkgLink);
+    }
+
+    fs.symlinkSync(binaryTarget, binaryLink);
+
+    return { success: true, resolvedFromPath: globalPath };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Resolve the on-disk npm package directory for an agent's CLI binary by
+ * walking up from the binary, following any symlinks. Returns null if the
+ * package can't be identified.
+ *
+ * Handles the homebrew/global-npm pattern where:
+ *   /opt/homebrew/bin/{cli}  ->  ../lib/node_modules/{pkg}/dist/index.js
+ */
+export function resolvePackageDirFromBinary(binaryPath: string): string | null {
+  try {
+    let real = fs.realpathSync(binaryPath);
+    let dir = path.dirname(real);
+
+    // Walk up looking for the nearest package.json
+    for (let i = 0; i < 6; i++) {
+      const pkg = path.join(dir, 'package.json');
+      if (fs.existsSync(pkg)) {
+        return dir;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
