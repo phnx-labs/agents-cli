@@ -26,6 +26,7 @@ function configToProfile(name: string, config: BrowserProfileConfig): BrowserPro
     browser: config.browser,
     binary: config.binary,
     electron: config.electron,
+    targetFilter: config.targetFilter,
     endpoints: config.endpoints,
     chrome: config.chrome,
     secrets: config.secrets,
@@ -41,6 +42,7 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
   if (profile.description) config.description = profile.description;
   if (profile.binary) config.binary = profile.binary;
   if (profile.electron) config.electron = profile.electron;
+  if (profile.targetFilter) config.targetFilter = profile.targetFilter;
   if (profile.chrome) config.chrome = profile.chrome;
   if (profile.secrets) config.secrets = profile.secrets;
   if (profile.viewport) config.viewport = profile.viewport;

@@ -6,10 +6,21 @@ export interface BrowserProfile {
   browser: BrowserType;
   binary?: string;
   electron?: boolean;
+  /**
+   * `url:<substring>` or `title:<substring>`. Picks which CDP page target
+   * represents the visible UI for Electron apps with multiple WebContents.
+   */
+  targetFilter?: string;
   endpoints: string[];
   chrome?: ChromeOptions;
   secrets?: string;
   viewport?: { width: number; height: number; x?: number; y?: number };
+}
+
+/** Parsed form of `BrowserProfile.targetFilter`. */
+export interface TargetFilter {
+  kind: 'url' | 'title';
+  value: string;
 }
 
 export interface ChromeOptions {

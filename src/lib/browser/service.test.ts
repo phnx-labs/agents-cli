@@ -193,3 +193,128 @@ describe('BrowserService.status — disk reconciliation (Issue #6)', () => {
     expect(result[0].name).toBe('a');
   });
 });
+
+// -----------------------------------------------------------------------------
+// pickWindowTarget / parseTargetFilter
+//
+// These helpers exist because Electron apps frequently expose multiple
+// `type: 'page'` CDP targets per process: the visible window plus invisible
+// helpers (background services, OAuth windows, file:// shells). Without these,
+// `agents browser start` against an Electron app silently latches onto whatever
+// target is enumerated first by CDP — almost always wrong, with no signal to
+// the user other than blank screenshots.
+// -----------------------------------------------------------------------------
+describe('parseTargetFilter', () => {
+  it('parses url:<substring>', async () => {
+    const { parseTargetFilter } = await import('./service.js');
+    expect(parseTargetFilter('url:https://www.canva.com/')).toEqual({
+      kind: 'url',
+      value: 'https://www.canva.com/',
+    });
+  });
+
+  it('parses title:<substring>', async () => {
+    const { parseTargetFilter } = await import('./service.js');
+    expect(parseTargetFilter('title:Home - Canva')).toEqual({
+      kind: 'title',
+      value: 'Home - Canva',
+    });
+  });
+
+  it('treats kind as case-insensitive', async () => {
+    const { parseTargetFilter } = await import('./service.js');
+    expect(parseTargetFilter('URL:foo')?.kind).toBe('url');
+    expect(parseTargetFilter('Title:bar')?.kind).toBe('title');
+  });
+
+  it('returns null for unknown kind, missing colon, empty value, or undefined', async () => {
+    const { parseTargetFilter } = await import('./service.js');
+    expect(parseTargetFilter('hostname:foo')).toBeNull();
+    expect(parseTargetFilter('foobar')).toBeNull();
+    expect(parseTargetFilter('url:')).toBeNull();
+    expect(parseTargetFilter('')).toBeNull();
+    expect(parseTargetFilter(undefined)).toBeNull();
+  });
+});
+
+describe('pickWindowTarget', () => {
+  // Canonical Canva target list captured live against `:9201/json`.
+  // The first page is the invisible Desktop Background Service — the bug
+  // we're fixing is that the original `find(t.type === 'page')` returns
+  // this target and screenshots come back blank.
+  const canvaTargets = [
+    {
+      targetId: 'C1AEAD00',
+      type: 'page',
+      url: 'https://www.canva.com/_desktop-background-service',
+      title: 'Desktop Background Service',
+    },
+    {
+      targetId: 'B351F950',
+      type: 'page',
+      url: 'https://www.canva.com/',
+      title: 'Home - Canva',
+    },
+    {
+      targetId: 'FBBCAA2F',
+      type: 'page',
+      url: 'file:///Applications/Canva.app/Contents/Resources/app.asar/dist/index.dynamic_locale.html',
+      title: 'index.dynamic_locale.html',
+    },
+    { targetId: 'SW1', type: 'service_worker', url: 'https://www.canva.com/sw.js' },
+  ];
+
+  it('explicit url filter wins over enumeration order', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    const hit = pickWindowTarget(canvaTargets, 'url:https://www.canva.com/');
+    expect(hit?.targetId).toBe('B351F950');
+  });
+
+  it('explicit title filter wins over enumeration order', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    const hit = pickWindowTarget(canvaTargets, 'title:Home - Canva');
+    expect(hit?.targetId).toBe('B351F950');
+  });
+
+  it('substring match is case-insensitive on both haystack and needle', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    const hit = pickWindowTarget(canvaTargets, 'title:HOME');
+    expect(hit?.targetId).toBe('B351F950');
+  });
+
+  it('explicit filter that misses returns undefined — caller must surface the failure', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    // The caller (getOrCreateWindow) turns this into a thrown error listing
+    // the candidates. Returning undefined here keeps the helper pure.
+    expect(pickWindowTarget(canvaTargets, 'url:does-not-exist')).toBeUndefined();
+  });
+
+  it('with no filter, skips _desktop-background-service and file:// shells', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    const hit = pickWindowTarget(canvaTargets, undefined);
+    expect(hit?.targetId).toBe('B351F950');
+  });
+
+  it('with no filter and no visible candidate, falls back to first page target', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    const allInvisible = [
+      { targetId: 'A', type: 'page', url: 'about:blank' },
+      { targetId: 'B', type: 'page', url: 'file:///x' },
+    ];
+    const hit = pickWindowTarget(allInvisible, undefined);
+    expect(hit?.targetId).toBe('A');
+  });
+
+  it('returns undefined when no page targets exist at all', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    const workerOnly = [{ targetId: 'SW', type: 'service_worker', url: 'sw.js' }];
+    expect(pickWindowTarget(workerOnly, undefined)).toBeUndefined();
+  });
+
+  it('malformed filter falls back to heuristic instead of throwing', async () => {
+    const { pickWindowTarget } = await import('./service.js');
+    // Garbage filter should not crash; treat as if absent.
+    const hit = pickWindowTarget(canvaTargets, 'not-a-valid-filter');
+    expect(hit?.targetId).toBe('B351F950');
+  });
+});

@@ -67,7 +67,7 @@ function registerProfilesCommands(browser: Command): void {
       }
     });
 
-  const VALID_BROWSERS = ['chrome', 'comet', 'chromium', 'brave', 'edge'];
+  const VALID_BROWSERS = ['chrome', 'comet', 'chromium', 'brave', 'edge', 'custom'];
 
   profiles
     .command('create <name>')
@@ -79,6 +79,15 @@ function registerProfilesCommands(browser: Command): void {
     .option('--headless', 'Run in headless mode')
     .option('--window <WxH>', 'Window size, e.g. 1512x982')
     .option('--position <X,Y>', 'Window position on screen, e.g. 80,80')
+    .option('--binary <path>', 'Absolute path to the browser/app binary (required with --browser custom)')
+    .option(
+      '--electron',
+      'Treat this profile as an Electron desktop app: never call Target.createTarget; bind to the visible window using --target-filter or the skip-invisible heuristic'
+    )
+    .option(
+      '--target-filter <expr>',
+      'Pick the visible CDP page target when the app exposes more than one. Format: url:<substring> or title:<substring>'
+    )
     .action(async (name: string, opts) => {
       if (!/^[a-z][a-z0-9-]*$/.test(name)) {
         console.error('Profile name must be lowercase alphanumeric with hyphens');
@@ -88,6 +97,20 @@ function registerProfilesCommands(browser: Command): void {
       if (!VALID_BROWSERS.includes(opts.browser)) {
         console.error(`Invalid browser type. Must be one of: ${VALID_BROWSERS.join(', ')}`);
         process.exit(1);
+      }
+
+      if (opts.browser === 'custom' && !opts.binary) {
+        console.error('--browser custom requires --binary <path>');
+        process.exit(1);
+      }
+
+      if (opts.targetFilter) {
+        const idx = String(opts.targetFilter).indexOf(':');
+        const kind = idx > 0 ? String(opts.targetFilter).slice(0, idx).toLowerCase() : '';
+        if (kind !== 'url' && kind !== 'title') {
+          console.error('--target-filter must be url:<substring> or title:<substring>');
+          process.exit(1);
+        }
       }
 
       // Auto-assign a free port if no endpoint was provided
@@ -125,6 +148,9 @@ function registerProfilesCommands(browser: Command): void {
         name,
         description: opts.description,
         browser: opts.browser,
+        binary: opts.binary,
+        electron: opts.electron || undefined,
+        targetFilter: opts.targetFilter,
         endpoints,
         secrets: opts.secrets,
         chrome: opts.headless ? { headless: true } : undefined,
@@ -157,6 +183,9 @@ function registerProfilesCommands(browser: Command): void {
 
       console.log(`Name: ${profile.name}`);
       console.log(`Browser: ${profile.browser}`);
+      if (profile.binary) console.log(`Binary: ${profile.binary}`);
+      if (profile.electron) console.log(`Electron: true`);
+      if (profile.targetFilter) console.log(`Target filter: ${profile.targetFilter}`);
       if (profile.description) console.log(`Description: ${profile.description}`);
       console.log(`Endpoints:`);
       for (const e of profile.endpoints) {

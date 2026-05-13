@@ -87,12 +87,20 @@ browser profiles create cloud --browser chrome \
 
 ## "I need to automate an Electron app"
 
-Point to the binary:
+Three flags work together for Electron desktop apps:
 
 ```bash
-browser profiles create slack --browser custom \
-  --binary "/Applications/Slack.app/Contents/MacOS/Slack"
+browser profiles create canva --browser custom \
+  --binary "/Applications/Canva.app/Contents/MacOS/Canva" \
+  --electron \
+  --target-filter "url:https://www.canva.com/"
 ```
+
+- `--browser custom` plus `--binary` tells the launcher how to start the app with `--remote-debugging-port`.
+- `--electron` switches the runtime into single-window mode: tabs are never created with `Target.createTarget` (most production Electron apps reject it); navigation reuses the existing window.
+- `--target-filter` picks the visible WebContents. Electron apps frequently expose several `type: page` CDP targets — background services, OAuth windows, and `file://` shells — and the first one CDP returns is almost never the UI. Use `url:<substring>` or `title:<substring>`.
+
+Without `--target-filter`, a skip-invisible heuristic excludes `about:blank`, `file://`, and URLs matching `_desktop-background-service` / `_internal` / `_background`. That covers most apps; use the filter for the ones it doesn't.
 
 ## Common workflows
 
