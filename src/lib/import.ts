@@ -23,7 +23,7 @@ import type { AgentId } from './types.js';
 import { AGENTS } from './agents.js';
 import { getVersionsDir } from './state.js';
 import { setGlobalDefault } from './versions.js';
-import { ensureShimCurrent, switchHomeFileSymlinks } from './shims.js';
+import { createShim, createVersionedAlias, ensureShimCurrent, switchHomeFileSymlinks } from './shims.js';
 
 export interface ImportConfigResult {
   success: boolean;
@@ -40,11 +40,11 @@ export interface ImportBinaryResult {
 
 /**
  * Move an agent's config dir into the managed version structure and symlink it
- * back to its original location.
+ * back to its original location. Sets the imported version as the global
+ * default and refreshes the shim so the user's PATH lookup hits the managed
+ * version.
  *
  * No-op (returns skipped=true) if the version's config dir is already created.
- * Caller is expected to call `setGlobalDefault` separately when appropriate —
- * we do it here too for backward compatibility with the existing setup flow.
  */
 export async function importAgentConfig(
   agentId: AgentId,
@@ -71,6 +71,29 @@ export async function importAgentConfig(
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
+}
+
+/**
+ * Wire an imported version into the rest of the system so it behaves the same
+ * as a freshly installed version:
+ *
+ *   - registered as the global default in agents.yaml (so `agents view`
+ *     reports it correctly and resolvers find it),
+ *   - main shim refreshed (`~/.agents/.cache/shims/<cli>`),
+ *   - versioned alias created (`~/.agents/.cache/shims/<cli>@<version>`),
+ *   - home-file symlinks (CLAUDE.md / AGENTS.md / etc.) repointed at this
+ *     version's home dir.
+ *
+ * Without this, the binary-only import path would leave the version stranded:
+ * isVersionInstalled returns true, but the resolver never picks it. Safe to
+ * call multiple times — each underlying function is idempotent.
+ */
+export function finalizeImport(agentId: AgentId, version: string): void {
+  setGlobalDefault(agentId, version);
+  createShim(agentId);
+  createVersionedAlias(agentId, version);
+  switchHomeFileSymlinks(agentId, version);
+  ensureShimCurrent(agentId);
 }
 
 /**
@@ -137,14 +160,17 @@ export function importAgentBinary(
     if (typeof pkg.bin === 'string') {
       pkgBinEntry = pkg.bin;
     } else if (pkg.bin && typeof pkg.bin === 'object') {
-      pkgBinEntry = pkg.bin[spec.cliCommand] ?? Object.values(pkg.bin)[0] as string;
+      // Strict: only accept the exact cliCommand key. Multi-bin packages
+      // (e.g. @anthropic-ai/claude-code ships several bins) would otherwise
+      // silently get a wrong binary chosen by Object.values() ordering.
+      pkgBinEntry = pkg.bin[spec.cliCommand];
     }
   } catch (err) {
     return { success: false, error: `Failed to read package.json: ${(err as Error).message}` };
   }
 
   if (!pkgBinEntry) {
-    return { success: false, error: `package.json has no bin entry for "${spec.cliCommand}"` };
+    return { success: false, error: `package.json has no bin entry for "${spec.cliCommand}" — pass --from-path to a package that ships it` };
   }
 
   const binaryTarget = path.resolve(globalPath, pkgBinEntry);

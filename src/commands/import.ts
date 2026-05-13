@@ -33,6 +33,7 @@ import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { AGENTS, getCliPath, getCliVersion, agentLabel } from '../lib/agents.js';
 import { getVersionDir } from '../lib/versions.js';
 import {
+  finalizeImport,
   importAgentBinary,
   importAgentConfig,
   resolvePackageDirFromBinary,
@@ -58,6 +59,15 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   const agentId = agentArg;
   const agent = AGENTS[agentId];
 
+  // Reject agents that don't ship via npm before we spin up PATH lookups and
+  // prompts. cursor/kiro/goose/roo all have npmPackage='' and use custom
+  // install scripts — the symlink-farm import doesn't apply to them.
+  if (!agent.npmPackage) {
+    console.error(chalk.red(`${agentLabel(agentId)} doesn't install via npm — \`agents import\` only handles npm-style packages.`));
+    console.error(chalk.gray(`Use \`agents add ${agentId}\` to install via its native script.`));
+    process.exit(1);
+  }
+
   let globalPath: string | null = null;
 
   if (opts.fromPath) {
@@ -69,8 +79,12 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   } else {
     const binary = await getCliPath(agentId);
     if (!binary) {
+      // Use || (not ??) so empty-string npmPackage falls back to cliCommand.
+      // Defensive: agents with empty npmPackage are rejected above, but keep
+      // the operator correct in case that early check is ever relaxed.
+      const installName = agent.npmPackage || agent.cliCommand;
       console.error(chalk.red(`No "${agent.cliCommand}" found on PATH.`));
-      console.error(chalk.gray(`Install it first (e.g. \`npm i -g ${agent.npmPackage ?? agent.cliCommand}\`) or pass --from-path.`));
+      console.error(chalk.gray(`Install it first (e.g. \`npm i -g ${installName}\`) or pass --from-path.`));
       process.exit(1);
     }
     globalPath = resolvePackageDirFromBinary(binary);
@@ -89,7 +103,11 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     } catch {
       /* fall through */
     }
-    if (!version) {
+    // Only fall back to running the PATH binary's --version when we're
+    // auto-detecting. With --from-path, the PATH binary may belong to a
+    // different install entirely; reporting its version here would silently
+    // mis-attribute the imported version.
+    if (!version && !opts.fromPath) {
       const detected = await getCliVersion(agentId);
       version = detected ?? undefined;
     }
@@ -101,14 +119,18 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     process.exit(1);
   }
 
+  const versionDir = getVersionDir(agentId, version);
+
   console.log(chalk.bold(`\nImport ${agentLabel(agentId)} v${version}`));
   console.log(`  from: ${chalk.gray(globalPath)}`);
-  console.log(`  into: ${chalk.gray(`~/.agents/.history/versions/${agentId}/${version}/`)}`);
+  console.log(`  into: ${chalk.gray(versionDir)}`);
 
   const configDirExists = fs.existsSync(agent.configDir);
+  let configAlreadyManaged = false;
   if (configDirExists) {
     const stat = fs.lstatSync(agent.configDir);
     if (stat.isSymbolicLink()) {
+      configAlreadyManaged = true;
       console.log(`  config: ${chalk.gray(`${agent.configDir} (already managed — will skip)`)}`);
     } else {
       console.log(`  config: ${chalk.gray(`${agent.configDir} (will be moved into version home)`)}`);
@@ -119,7 +141,10 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
 
   if (!opts.yes && isInteractiveTerminal()) {
     console.log();
-    const proceed = await confirm({ message: 'Proceed?', default: true }).catch((err) => {
+    const proceed = await confirm({
+      message: `Import ${agentLabel(agentId)} v${version} into agents-cli?`,
+      default: true,
+    }).catch((err) => {
       if (isPromptCancelled(err)) return false;
       throw err;
     });
@@ -129,20 +154,33 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     }
   }
 
-  if (!agent.npmPackage) {
-    console.error(chalk.red(`${agentLabel(agentId)} has no npm package metadata — cannot import.`));
-    process.exit(1);
+  // Order: config first, then binary, then finalize. Config does the
+  // user-visible side effect (renaming ~/.<agent>/), so if it fails we don't
+  // want a stranded symlink farm. Binary registration is cheap and reversible
+  // — if it fails after config, the next `agents import` call retries cleanly.
+  const willImportConfig = configDirExists && !configAlreadyManaged;
+  if (willImportConfig) {
+    const cfgSpinner = ora(`Importing config dir for ${agentLabel(agentId)} v${version}...`).start();
+    const cfgResult = await importAgentConfig(agentId, version);
+    if (cfgResult.success) {
+      cfgSpinner.succeed(`Config imported (${agent.configDir} -> ${versionDir}/home/.${agentId})`);
+    } else if (cfgResult.skipped) {
+      cfgSpinner.warn(`Config: ${cfgResult.error}`);
+    } else {
+      cfgSpinner.fail(`Config: ${cfgResult.error}`);
+      process.exit(1);
+    }
   }
 
-  const binSpinner = ora('Registering binary...').start();
+  const binSpinner = ora(`Registering ${agentLabel(agentId)} v${version} binary...`).start();
   const binResult = importAgentBinary(
     { agentId, npmPackage: agent.npmPackage, cliCommand: agent.cliCommand },
     version,
     globalPath,
-    getVersionDir(agentId, version)
+    versionDir
   );
   if (binResult.success) {
-    binSpinner.succeed('Binary registered');
+    binSpinner.succeed(`Binary registered (${agent.cliCommand} -> ${globalPath})`);
   } else if (binResult.skipped) {
     binSpinner.warn(`Binary: ${binResult.error}`);
   } else {
@@ -150,20 +188,16 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     process.exit(1);
   }
 
-  if (configDirExists) {
-    const stat = fs.lstatSync(agent.configDir);
-    if (!stat.isSymbolicLink()) {
-      const cfgSpinner = ora('Importing config dir...').start();
-      const cfgResult = await importAgentConfig(agentId, version);
-      if (cfgResult.success) {
-        cfgSpinner.succeed('Config imported');
-      } else if (cfgResult.skipped) {
-        cfgSpinner.warn(`Config: ${cfgResult.error}`);
-      } else {
-        cfgSpinner.fail(`Config: ${cfgResult.error}`);
-        process.exit(1);
-      }
-    }
+  // Wire the imported version into the resolver: global default, main shim,
+  // versioned alias, home-file symlinks. Idempotent — safe to call even if
+  // importAgentConfig already set the global default.
+  const finalizeSpinner = ora(`Wiring ${agentLabel(agentId)} v${version} as the active version...`).start();
+  try {
+    finalizeImport(agentId, version);
+    finalizeSpinner.succeed(`${agentLabel(agentId)} v${version} set as default with shim + alias`);
+  } catch (err) {
+    finalizeSpinner.fail(`Finalize: ${(err as Error).message}`);
+    process.exit(1);
   }
 
   console.log();
@@ -176,8 +210,20 @@ export function registerImportCommand(program: Command): void {
     .command('import')
     .argument('<agent>', 'Agent id (e.g. openclaw, claude, codex)')
     .description('Import an existing unmanaged agent install into agents-cli')
-    .option('--version <version>', 'Pin a version label (otherwise read from package.json or --version output)')
+    .option('--version <version>', 'Pin a version label (otherwise read from package.json)')
     .option('--from-path <path>', 'Path to the npm package dir (otherwise auto-detected from PATH)')
     .option('-y, --yes', 'Skip the confirmation prompt')
+    .addHelpText('after', `
+Examples:
+  $ agents import openclaw                          Auto-detect via PATH
+  $ agents import openclaw --version 2026.3.8       Pin a version label
+  $ agents import openclaw --from-path /opt/homebrew/lib/node_modules/openclaw
+
+When to use:
+  When an agent CLI is already installed globally via npm or homebrew and you
+  want to bring it under agents-cli management without reinstalling. Creates a
+  symlink farm pointing at the existing install — nothing is copied or moved
+  (except the agent's config dir, which is moved into the version's home).
+`)
     .action(runImport);
 }

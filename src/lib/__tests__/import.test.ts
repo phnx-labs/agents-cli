@@ -159,6 +159,18 @@ describe('importAgentBinary', () => {
     expect(result.error).toMatch(/no bin entry/);
   });
 
+  it('fails strictly when bin object is missing the cliCommand key (no fallback)', () => {
+    // Multi-bin packages must NOT silently get a wrong bin chosen by
+    // Object.values()[0] ordering. Require an exact match on cliCommand.
+    const { pkgDir } = makeFakeNpmPkg(tmp, 'openclaw', '2026.3.8', 'openclaw', {
+      binEntry: { 'something-else': 'dist/other.js', 'helper': 'dist/helper.js' },
+    });
+
+    const result = importAgentBinary(OPENCLAW_SPEC, '2026.3.8', pkgDir, versionDir);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/no bin entry for "openclaw"/);
+  });
+
   it('fails when --from-path does not exist', () => {
     const result = importAgentBinary(OPENCLAW_SPEC, '2026.3.8', path.join(tmp, 'does-not-exist'), versionDir);
     expect(result.success).toBe(false);
