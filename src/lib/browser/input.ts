@@ -47,23 +47,17 @@ export async function scrollAtCoords(
   );
 }
 
+// `Input.insertText` is the CDP native text-insertion method. It dispatches a
+// real `beforeinput`/`input`/`textInput` sequence on the focused element, which
+// is what framework-controlled inputs (React, Vue, Solid, contenteditable
+// editors) actually listen for. Per-character `dispatchKeyEvent` only fires
+// `keydown`/`keyup` with no input event, so controlled inputs ignore it.
 export async function typeText(
   cdp: CDPClient,
   sessionId: string,
   text: string
 ): Promise<void> {
-  for (const char of text) {
-    await cdp.send(
-      'Input.dispatchKeyEvent',
-      { type: 'keyDown', text: char },
-      sessionId
-    );
-    await cdp.send(
-      'Input.dispatchKeyEvent',
-      { type: 'keyUp', text: char },
-      sessionId
-    );
-  }
+  await cdp.send('Input.insertText', { text }, sessionId);
 }
 
 const KEY_CODES: Record<string, { key: string; code: string; keyCode: number }> = {
@@ -117,10 +111,55 @@ export async function pressKey(
   );
 }
 
+const FOCUS_DESCENDANT_FN = `(function() {
+  const selector = 'input:not([disabled]):not([type=hidden]),textarea:not([disabled]),select:not([disabled]),[contenteditable=""],[contenteditable=true],[tabindex]:not([tabindex="-1"])';
+  const candidates = this.querySelectorAll(selector);
+  for (const el of candidates) {
+    el.focus();
+    if (document.activeElement === el) return true;
+  }
+  return false;
+})`;
+
+// `DOM.focus` only works on natively focusable elements. UIs that wrap real
+// inputs in styled containers (Slack composer, Linear comments, Notion blocks,
+// Canva pickers, MUI/Chakra/Mantine TextField) often expose the wrapper as the
+// accessible "ref" — focusing it throws "Element is not focusable". When that
+// happens, walk the subtree for the first focusable descendant.
 export async function focusNode(
   cdp: CDPClient,
   sessionId: string,
   backendNodeId: number
 ): Promise<void> {
-  await cdp.send('DOM.focus', { backendNodeId }, sessionId);
+  try {
+    await cdp.send('DOM.focus', { backendNodeId }, sessionId);
+    return;
+  } catch (err) {
+    const focused = await focusFirstFocusableDescendant(cdp, sessionId, backendNodeId);
+    if (!focused) throw err;
+  }
+}
+
+async function focusFirstFocusableDescendant(
+  cdp: CDPClient,
+  sessionId: string,
+  backendNodeId: number
+): Promise<boolean> {
+  const { object } = await cdp.send<{ object: { objectId?: string } }>(
+    'DOM.resolveNode',
+    { backendNodeId },
+    sessionId
+  );
+  if (!object.objectId) return false;
+  const objectId = object.objectId;
+  try {
+    const { result } = await cdp.send<{ result: { value: boolean } }>(
+      'Runtime.callFunctionOn',
+      { objectId, functionDeclaration: FOCUS_DESCENDANT_FN, returnByValue: true },
+      sessionId
+    );
+    return result.value === true;
+  } finally {
+    await cdp.send('Runtime.releaseObject', { objectId }, sessionId);
+  }
 }

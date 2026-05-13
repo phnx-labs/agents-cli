@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <body>
+    <!-- Mimics the Slack composer / Linear comment / MUI TextField pattern:
+         a styled wrapper div is what users click; the real input lives inside. -->
+    <div id="wrapper" style="padding: 8px; border: 1px solid #ccc;">
+      <input id="real" type="text" />
+    </div>
+
+    <!-- Controlled input: parent owns the value, sets it back from event.detail.
+         Mirrors how React's controlled inputs behave — `.value` assignments are
+         ignored, only `input` events propagate state changes upstream. -->
+    <input id="controlled" type="text" />
+    <div id="controlled-mirror"></div>
+
+    <script>
+      const controlled = document.getElementById("controlled");
+      const mirror = document.getElementById("controlled-mirror");
+      controlled.addEventListener("input", (e) => {
+        mirror.textContent = e.target.value;
+      });
+
+      // Track whether `input` and `beforeinput` events fire on the real input
+      // when typeText is called.
+      const real = document.getElementById("real");
+      window.__realEvents = [];
+      real.addEventListener("beforeinput", (e) => {
+        window.__realEvents.push({ type: "beforeinput", data: e.data });
+      });
+      real.addEventListener("input", (e) => {
+        window.__realEvents.push({ type: "input", value: e.target.value });
+      });
+    </script>
+  </body>
+</html>
