@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   bundleToEnvPrefix,
   describeBundle,
@@ -10,6 +10,16 @@ import {
   validateEnvKey,
   type SecretsBundle,
 } from '../bundles.js';
+
+// resolveBundleEnv stamps last_used via writeBundle. These tests construct
+// bundles inline (no test backend installed) so the stamp must be disabled to
+// keep them off the real keychain.
+const originalNoTrack = process.env.AGENTS_NO_USAGE_TRACK;
+beforeAll(() => { process.env.AGENTS_NO_USAGE_TRACK = '1'; });
+afterAll(() => {
+  if (originalNoTrack === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
+  else process.env.AGENTS_NO_USAGE_TRACK = originalNoTrack;
+});
 
 describe('validation', () => {
   it('validateBundleName accepts lowercase letters, digits, dash, underscore, dot', () => {

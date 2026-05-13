@@ -21,6 +21,7 @@ import {
   listBundles,
   migrateLegacyBundles,
   readBundle,
+  resolveBundleEnv,
   rotateBundleSecret,
   writeBundle,
   type SecretsBundle,
@@ -96,6 +97,88 @@ describe('writeBundle + readBundle round-trip', () => {
     expect(store.get('agents-cli.bundles.syncy')?.sync).toBe(true);
     writeBundle({ name: 'local', vars: {} });
     expect(store.get('agents-cli.bundles.local')?.sync).toBe(false);
+  });
+});
+
+describe('timestamps', () => {
+  it('writeBundle stamps created_at and updated_at on first write', () => {
+    const before = Date.now();
+    writeBundle({ name: 'ts-first', vars: {} });
+    const after = Date.now();
+    const got = readBundle('ts-first');
+    expect(got.created_at).toBeDefined();
+    expect(got.updated_at).toBeDefined();
+    const created = Date.parse(got.created_at!);
+    const updated = Date.parse(got.updated_at!);
+    expect(created).toBeGreaterThanOrEqual(before);
+    expect(created).toBeLessThanOrEqual(after);
+    expect(updated).toBe(created);
+  });
+
+  it('created_at is sticky across rewrites; updated_at advances', async () => {
+    writeBundle({ name: 'ts-sticky', vars: {} });
+    const first = readBundle('ts-sticky');
+    await new Promise((r) => setTimeout(r, 5));
+    writeBundle({ ...first, description: 'edited' });
+    const second = readBundle('ts-sticky');
+    expect(second.created_at).toBe(first.created_at);
+    expect(Date.parse(second.updated_at!)).toBeGreaterThan(Date.parse(first.updated_at!));
+  });
+
+  it('resolveBundleEnv stamps last_used', () => {
+    writeBundle({ name: 'used-1', vars: { A: 'x' } });
+    const bundle = readBundle('used-1');
+    expect(bundle.last_used).toBeUndefined();
+    resolveBundleEnv(bundle);
+    const after = readBundle('used-1');
+    expect(after.last_used).toBeDefined();
+    expect(Date.now() - Date.parse(after.last_used!)).toBeLessThan(1000);
+  });
+
+  it('last_used stamp is throttled within the window', () => {
+    writeBundle({ name: 'used-throttle', vars: { A: 'x' } });
+    const bundle = readBundle('used-throttle');
+    resolveBundleEnv(bundle);
+    const first = readBundle('used-throttle').last_used!;
+    // Second call inside the throttle window must not bump the stamp.
+    resolveBundleEnv(readBundle('used-throttle'));
+    const second = readBundle('used-throttle').last_used!;
+    expect(second).toBe(first);
+  });
+
+  it('AGENTS_NO_USAGE_TRACK disables the stamp', () => {
+    writeBundle({ name: 'used-disabled', vars: { A: 'x' } });
+    const prev = process.env.AGENTS_NO_USAGE_TRACK;
+    process.env.AGENTS_NO_USAGE_TRACK = '1';
+    try {
+      const bundle = readBundle('used-disabled');
+      resolveBundleEnv(bundle);
+      const after = readBundle('used-disabled');
+      expect(after.last_used).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
+      else process.env.AGENTS_NO_USAGE_TRACK = prev;
+    }
+  });
+
+  it('stamp failure does not break resolution', () => {
+    writeBundle({ name: 'used-flaky', vars: { LIT: 'value' } });
+    const bundle = readBundle('used-flaky');
+    // Force writeBundle to fail by swapping the backend mid-test.
+    const broken: KeychainBackend = {
+      has: () => false,
+      get: () => { throw new Error('boom'); },
+      set: () => { throw new Error('boom'); },
+      delete: () => false,
+      list: () => [],
+    };
+    const prevRestore = setKeychainBackendForTest(broken);
+    try {
+      const env = resolveBundleEnv(bundle);
+      expect(env).toEqual({ LIT: 'value' });
+    } finally {
+      setKeychainBackendForTest(prevRestore);
+    }
   });
 });
 

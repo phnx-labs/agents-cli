@@ -164,16 +164,66 @@ function readStdinSync(): string {
   return Buffer.concat(chunks).toString('utf-8').trim();
 }
 
+/** Strip ANSI escape sequences so padding can be computed on visible width. */
+function visibleWidth(s: string): number {
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\x1b\[[0-9;]*m/g, '').length;
+}
+
+/** padEnd that respects ANSI color codes (chalk-wrapped strings have invisible bytes). */
+function padVisible(s: string, n: number): string {
+  const w = visibleWidth(s);
+  if (w >= n) return s;
+  return s + ' '.repeat(n - w);
+}
+
+/** Render an ISO-8601 timestamp as a compact relative age: "now", "5m", "1h", "3d", "2w", "4mo", "1y". */
+function relativeAge(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '-';
+  const deltaMs = Date.now() - t;
+  if (deltaMs < 0) return 'now';
+  const sec = Math.floor(deltaMs / 1000);
+  if (sec < 60) return 'now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d`;
+  if (day < 30) return `${Math.floor(day / 7)}w`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}mo`;
+  return `${Math.floor(day / 365)}y`;
+}
+
+/** Long-form relative age for the `view` command. "now" stays as "now"; otherwise appends " ago". */
+function humanAge(iso: string): string {
+  const age = relativeAge(iso);
+  if (age === 'now' || age === '-') return age;
+  return `${age} ago`;
+}
+
 /** Format a single bundle as a table row for the `secrets list` output. */
 function renderBundleRow(b: SecretsBundle): string {
   const entries = describeBundle(b);
   const keys = entries.length;
-  const sensitive = entries.filter((e) => e.kind === 'keychain').length;
-  const expiring = countExpiringSoon(b.meta);
-  const expiringCol = expiring > 0
-    ? chalk.yellow(String(expiring).padEnd(10))
-    : ''.padEnd(10);
-  return `${chalk.cyan(b.name.padEnd(20))} ${String(keys).padEnd(6)} ${chalk.yellow(String(sensitive).padEnd(10))} ${expiringCol} ${chalk.gray(b.description || '')}`;
+  const sync = b.icloud_sync ? chalk.cyan('icloud') : '';
+  const expiringCount = countExpiringSoon(b.meta);
+  const expiring = expiringCount > 0 ? chalk.yellow(String(expiringCount)) : chalk.gray('-');
+  const created = b.created_at ? relativeAge(b.created_at) : chalk.gray('-');
+  const updated = b.updated_at ? relativeAge(b.updated_at) : chalk.gray('-');
+  const used = b.last_used ? relativeAge(b.last_used) : chalk.gray('-');
+  return (
+    `${chalk.cyan(b.name.padEnd(18))} ` +
+    `${String(keys).padEnd(5)} ` +
+    `${padVisible(sync, 6)} ` +
+    `${padVisible(expiring, 9)} ` +
+    `${padVisible(created, 9)} ` +
+    `${padVisible(updated, 9)} ` +
+    `${padVisible(used, 7)} ` +
+    `${chalk.gray(b.description || '')}`
+  );
 }
 
 /** Colorize a variable source kind (literal, keychain, env, file, exec). */
@@ -375,7 +425,9 @@ Examples:
         console.log(chalk.gray('Try: agents secrets create <name>'));
         return;
       }
-      console.log(chalk.bold(`${'NAME'.padEnd(20)} ${'KEYS'.padEnd(6)} ${'SENSITIVE'.padEnd(10)} ${'EXPIRING'.padEnd(10)} DESCRIPTION`));
+      console.log(chalk.bold(
+        `${'NAME'.padEnd(18)} ${'KEYS'.padEnd(5)} ${'SYNC'.padEnd(6)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
+      ));
       for (const b of bundles) {
         console.log(renderBundleRow(b));
       }
@@ -396,6 +448,9 @@ Examples:
         if (bundle.description) console.log(chalk.gray(bundle.description));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
         if (bundle.icloud_sync) console.log(chalk.cyan('icloud_sync: true'));
+        if (bundle.created_at) console.log(chalk.gray(`created_at: ${bundle.created_at} (${humanAge(bundle.created_at)})`));
+        if (bundle.updated_at) console.log(chalk.gray(`updated_at: ${bundle.updated_at} (${humanAge(bundle.updated_at)})`));
+        if (bundle.last_used) console.log(chalk.gray(`last_used:  ${bundle.last_used} (${humanAge(bundle.last_used)})`));
         console.log();
         if (entries.length === 0) {
           console.log(chalk.gray('(no keys)'));

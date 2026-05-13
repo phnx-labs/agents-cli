@@ -60,10 +60,19 @@ export interface SecretsBundle {
   allow_exec?: boolean;
   /** When true, keychain-backed values and bundle metadata sync via iCloud Keychain. */
   icloud_sync?: boolean;
+  /** ISO 8601 UTC timestamp. Set once on the first writeBundle() for a bundle. */
+  created_at?: string;
+  /** ISO 8601 UTC timestamp. Refreshed on every writeBundle(). */
+  updated_at?: string;
+  /** ISO 8601 UTC timestamp. Stamped by resolveBundleEnv (throttled). */
+  last_used?: string;
   vars: Record<string, BundleValue>;
   /** Optional per-var metadata, keyed by var name (parallel to `vars`). */
   meta?: Record<string, VarMeta>;
 }
+
+/** Minimum gap between last_used updates so the keychain isn't written on every secrets injection. */
+const LAST_USED_THROTTLE_MS = 60_000;
 
 const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9\-_.]{0,48}$/i;
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -152,6 +161,9 @@ export function readBundle(name: string): SecretsBundle {
     icloud_sync: Boolean(parsed.icloud_sync),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
+  if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
+  if (typeof parsed.updated_at === 'string') bundle.updated_at = parsed.updated_at;
+  if (typeof parsed.last_used === 'string') bundle.last_used = parsed.last_used;
   if (parsed.meta && typeof parsed.meta === 'object') {
     bundle.meta = parsed.meta;
   }
@@ -180,10 +192,19 @@ export function writeBundle(bundle: SecretsBundle): void {
       }
     }
   }
+  // Stamp timestamps on the bundle so callers see what got persisted. created_at
+  // is sticky — once set we never overwrite it, including on legacy bundles
+  // that already carry one. updated_at always advances.
+  const now = new Date().toISOString();
+  if (!bundle.created_at) bundle.created_at = now;
+  bundle.updated_at = now;
   const payload = {
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
     icloud_sync: bundle.icloud_sync ? true : undefined,
+    created_at: bundle.created_at,
+    updated_at: bundle.updated_at,
+    last_used: bundle.last_used,
     vars: bundle.vars,
     meta,
   };
@@ -242,11 +263,31 @@ export function describeBundle(bundle: SecretsBundle): BundleEntryInfo[] {
   return out;
 }
 
+// Bump `bundle.last_used` and persist the bundle, but no more than once per
+// throttle window so we don't pay a keychain write on every agent run. Failures
+// are swallowed — usage tracking is never allowed to break secret resolution.
+// Set AGENTS_NO_USAGE_TRACK=1 to disable the stamp entirely (used by tests).
+function stampLastUsed(bundle: SecretsBundle): void {
+  if (process.env.AGENTS_NO_USAGE_TRACK) return;
+  const nowMs = Date.now();
+  if (bundle.last_used) {
+    const prev = Date.parse(bundle.last_used);
+    if (Number.isFinite(prev) && nowMs - prev < LAST_USED_THROTTLE_MS) return;
+  }
+  try {
+    bundle.last_used = new Date(nowMs).toISOString();
+    writeBundle(bundle);
+  } catch {
+    // Swallow — telemetry must never block secret resolution.
+  }
+}
+
 // Walk the bundle and produce a flat env map. Keychain refs are translated via
 // the bundle-scoped naming scheme so two bundles with the same short ID never
 // collide. Throws on the first missing secret so `agents run` fails loudly
 // rather than silently injecting empty strings.
 export function resolveBundleEnv(bundle: SecretsBundle): Record<string, string> {
+  stampLastUsed(bundle);
   const env: Record<string, string> = {};
   for (const [key, raw] of Object.entries(bundle.vars)) {
     const parsed = parseBundleValue(raw);
