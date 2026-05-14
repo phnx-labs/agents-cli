@@ -44,25 +44,52 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
     return textArray.join('\n').replace(/^/gm, ' '.repeat(itemIndentWidth));
   }
 
-  let output = [`Usage: ${helper.commandUsage(cmd)}`, ''];
+  // Drop arguments flagged as hidden (deprecation / compat slots) from both
+  // the Usage line and the Arguments section. Commander v12's Argument lacks
+  // hideHelp(), so we read a custom `hidden` field that callers set directly.
+  const isHidden = (a: { hidden?: boolean }): boolean => a.hidden === true;
+  const registeredArgs = (cmd as unknown as { registeredArguments?: ReadonlyArray<{ name(): string; required: boolean; variadic: boolean; hidden?: boolean }> }).registeredArguments ?? [];
+
+  const parentNames: string[] = [];
+  for (let p = cmd.parent; p; p = p.parent) parentNames.unshift(p.name());
+  const parentPrefix = parentNames.length > 0 ? parentNames.join(' ') + ' ' : '';
+  const visibleArgTokens = registeredArgs
+    .filter((a) => !isHidden(a))
+    .map((a) => {
+      const n = a.name() + (a.variadic ? '...' : '');
+      return a.required ? `<${n}>` : `[${n}]`;
+    })
+    .join(' ');
+  // commander always exposes -h/--help, so every command effectively has options.
+  // Order matches commander's default: name [options] <args> [command].
+  const argsToken = visibleArgTokens ? ` ${visibleArgTokens}` : '';
+  const commandToken = cmd.commands.length > 0 ? ' [command]' : '';
+  const usageLine = `${parentPrefix}${cmd.name()} [options]${argsToken}${commandToken}`;
+  let output = [`Usage: ${usageLine}`, ''];
 
   const commandDescription = helper.commandDescription(cmd);
   if (commandDescription.length > 0) {
     output = output.concat([helper.wrap(commandDescription, helpWidth, 0), '']);
   }
 
-  const argumentList = helper.visibleArguments(cmd).map((argument) => {
-    return formatItem(helper.argumentTerm(argument), helper.argumentDescription(argument));
-  });
+  const argumentList = helper
+    .visibleArguments(cmd)
+    .filter((a) => !isHidden(a as { hidden?: boolean }))
+    .map((argument) => {
+      return formatItem(helper.argumentTerm(argument), helper.argumentDescription(argument));
+    });
   if (argumentList.length > 0) {
     output = output.concat(['Arguments:', formatList(argumentList), '']);
   }
 
   const visibleCommands = helper.visibleCommands(cmd);
   const subcommandTermNoAlias = (sub: Command): string => {
-    // Mirror commander's default subcommandTerm but drop the |alias suffix.
-    const argList = (sub as unknown as { registeredArguments?: ReadonlyArray<{ name(): string; required: boolean; variadic: boolean }> }).registeredArguments ?? [];
+    // Mirror commander's default subcommandTerm but drop the |alias suffix and
+    // skip arguments marked as hidden (Argument#hideHelp()), so deprecation /
+    // compatibility slots don't pollute the usage line.
+    const argList = (sub as unknown as { registeredArguments?: ReadonlyArray<{ name(): string; required: boolean; variadic: boolean; hidden?: boolean }> }).registeredArguments ?? [];
     const args = argList
+      .filter((a) => !a.hidden)
       .map((a) => {
         const n = a.name() + (a.variadic ? '...' : '');
         return a.required ? `<${n}>` : `[${n}]`;

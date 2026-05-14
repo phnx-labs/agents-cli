@@ -7,6 +7,7 @@ import {
   getBrowserRuntimeDir,
   listProfiles,
   extractConfiguredPort,
+  resolveEndpoint,
 } from './profiles.js';
 import { killChrome, getRunningChromeInfo, launchBrowser, allocatePort } from './chrome.js';
 import { connectLocal } from './drivers/local.js';
@@ -14,7 +15,7 @@ import { connectSSH } from './drivers/ssh.js';
 import {
   generateTaskId,
   generateShortId,
-  generateFunName,
+  generateTaskName,
   isValidTaskId,
   type Task,
   type TabInfo,
@@ -36,6 +37,35 @@ import { emit } from '../events.js';
 import type { TargetFilter } from './types.js';
 
 export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
+
+/**
+ * Read width/height from a JPEG buffer by walking SOF markers. Returns null
+ * if the buffer doesn't start with the JPEG SOI marker or no SOF segment is
+ * found. We use this on every screenshot so the CLI can surface the actual
+ * captured pixel dimensions (which differ from viewport size at non-1x DPR).
+ */
+function readPngDimensions(buf: Buffer): { width: number; height: number } | null {
+  // PNG signature (8 bytes) + IHDR chunk: length (4) + 'IHDR' (4) + width (4) + height (4)
+  if (buf.length < 24) return null;
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  for (let i = 0; i < 8; i++) if (buf[i] !== sig[i]) return null;
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+function readJpegDimensions(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let i = 2;
+  while (i + 9 < buf.length) {
+    if (buf[i] !== 0xff) return null;
+    const marker = buf[i + 1];
+    // SOF0–SOFn carry dimensions, except DHT (0xC4), JPG (0xC8), DAC (0xCC).
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+    }
+    i += 2 + buf.readUInt16BE(i + 2);
+  }
+  return null;
+}
 
 /**
  * Parse a `targetFilter` string into its kind + value, or return `null`
@@ -153,44 +183,67 @@ export class BrowserService {
 
   async start(
     profileName: string,
-    opts: { taskName?: string; url?: string } = {}
-  ): Promise<{ task: string; name: string; tabId?: string; windowId?: string }> {
+    opts: { taskName?: string; url?: string; endpointName?: string } = {}
+  ): Promise<{ task: string; name: string; tabId?: string; windowId?: string; profile: string }> {
     const profile = await getProfile(profileName);
     if (!profile) {
       throw new Error(`Profile "${profileName}" not found`);
     }
 
-    const taskName = opts.taskName || generateFunName();
+    // Pick the endpoint preset. Throws with the candidate list if the user
+    // passed an unknown name. The composite identifier `<profile>@<endpoint>`
+    // is what the connection map + per-profile runtime dirs are keyed on, so
+    // a single YAML profile can run at multiple endpoints concurrently.
+    const resolved = resolveEndpoint(profile, opts.endpointName);
+    const composite = `${profileName}@${resolved.name}`;
+    const effectiveProfile: BrowserProfile = {
+      ...profile,
+      name: composite,
+      binary: resolved.binary,
+      targetFilter: resolved.targetFilter,
+    };
+
+    let taskName: string;
+    if (opts.taskName) {
+      if (this.hasTaskNamed(opts.taskName)) {
+        throw new Error(
+          `Task "${opts.taskName}" already exists. Pick a different --task name or stop the existing one first.`
+        );
+      }
+      taskName = opts.taskName;
+    } else {
+      taskName = this.generateUniqueTaskName();
+    }
     const taskId = generateTaskId();
 
-    let conn = this.connections.get(profileName);
-    let effectiveProfileName = profileName;
+    let conn = this.connections.get(composite);
+    let effectiveProfileName = composite;
 
     if (conn && conn.electron && conn.tasks.size > 0) {
-      if (this.forkingProfiles.has(profileName)) {
-        while (this.forkingProfiles.has(profileName)) {
+      if (this.forkingProfiles.has(composite)) {
+        while (this.forkingProfiles.has(composite)) {
           await new Promise((r) => setTimeout(r, 50));
         }
-        const existingFork = this.findAvailableFork(profileName);
+        const existingFork = this.findAvailableFork(composite);
         if (existingFork) {
           conn = existingFork.conn;
           effectiveProfileName = existingFork.name;
         } else {
-          throw new Error(`Fork in progress but no available fork found for "${profileName}"`);
+          throw new Error(`Fork in progress but no available fork found for "${composite}"`);
         }
       } else {
-        this.forkingProfiles.add(profileName);
+        this.forkingProfiles.add(composite);
         try {
-          const { forkName, connection } = await this.forkElectronProfile(profile);
+          const { forkName, connection } = await this.forkElectronProfile(effectiveProfile);
           conn = connection;
           effectiveProfileName = forkName;
         } finally {
-          this.forkingProfiles.delete(profileName);
+          this.forkingProfiles.delete(composite);
         }
       }
     } else if (!conn) {
-      conn = await this.connectProfile(profile);
-      this.connections.set(profileName, conn);
+      conn = await this.connectProfile(effectiveProfile, resolved.target);
+      this.connections.set(composite, conn);
     }
 
     const task: Task = {
@@ -235,28 +288,7 @@ export class BrowserService {
       tabId = result.tabId;
     }
 
-    return { task: taskId, name: taskName, tabId };
-  }
-
-  /**
-   * Launch (or attach to) the profile's browser without creating a task. Used by
-   * `agents browser profiles launch <name>` so users can warm up the browser —
-   * including the first-run onboarding flow — before any automation starts.
-   */
-  async launchProfile(profileName: string): Promise<{ port: number; pid: number }> {
-    const profile = await getProfile(profileName);
-    if (!profile) {
-      throw new Error(`Profile "${profileName}" not found`);
-    }
-
-    let conn = this.connections.get(profileName);
-    if (!conn) {
-      conn = await this.connectProfile(profile);
-      this.connections.set(profileName, conn);
-    }
-
-    emit('browser.launch', { profile: profileName, task: '', pid: conn.pid });
-    return { port: conn.port, pid: conn.pid };
+    return { task: taskId, name: taskName, tabId, profile: effectiveProfileName };
   }
 
   async stop(taskName: string): Promise<{ ok: boolean; profile?: string }> {
@@ -587,8 +619,9 @@ export class BrowserService {
   async screenshot(
     taskId: string,
     tabHint?: string,
-    outputPath?: string
-  ): Promise<string> {
+    outputPath?: string,
+    quality: 'compressed' | 'raw' = 'compressed'
+  ): Promise<{ path: string; bytes: number; width: number; height: number }> {
     const { conn, task } = await this.findTask(taskId);
 
     const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
@@ -602,34 +635,237 @@ export class BrowserService {
 
     const sessionId = await this.getSessionId(conn, target.targetId);
 
-    const { data } = (await conn.cdp.send(
-      'Page.captureScreenshot',
-      { format: 'jpeg', quality: 70 },
-      sessionId
-    )) as { data: string };
+    let buffer: Buffer;
+    let extension: string;
 
-    let buffer = Buffer.from(data, 'base64');
+    if (quality === 'raw') {
+      // Pixel-faithful PNG, no downscale. For archived QA evidence where
+      // lossy JPEG would hide rendering bugs. Files run 0.5–3 MB.
+      const { data } = (await conn.cdp.send(
+        'Page.captureScreenshot',
+        { format: 'png' },
+        sessionId
+      )) as { data: string };
+      buffer = Buffer.from(data, 'base64');
+      extension = 'png';
+    } else {
+      // Default: JPEG quality 70, then iteratively downscale to keep the
+      // file under 100 KB so chat-injected screenshots stay token-cheap.
+      const { data } = (await conn.cdp.send(
+        'Page.captureScreenshot',
+        { format: 'jpeg', quality: 70 },
+        sessionId
+      )) as { data: string };
+      buffer = Buffer.from(data, 'base64');
 
-    const MAX_SIZE = 100 * 1024;
-    if (buffer.length > MAX_SIZE) {
-      let quality = 50;
-      while (buffer.length > MAX_SIZE && quality > 10) {
-        const { data: resized } = (await conn.cdp.send(
-          'Page.captureScreenshot',
-          { format: 'jpeg', quality },
-          sessionId
-        )) as { data: string };
-        buffer = Buffer.from(resized, 'base64');
-        quality -= 10;
+      const MAX_SIZE = 100 * 1024;
+      if (buffer.length > MAX_SIZE) {
+        let q = 50;
+        while (buffer.length > MAX_SIZE && q > 10) {
+          const { data: resized } = (await conn.cdp.send(
+            'Page.captureScreenshot',
+            { format: 'jpeg', quality: q },
+            sessionId
+          )) as { data: string };
+          buffer = Buffer.from(resized, 'base64');
+          q -= 10;
+        }
       }
+      extension = 'jpg';
     }
 
     const sessionsDir = path.join(getBrowserRuntimeDir(), 'sessions', task.name);
-    const finalPath = outputPath || path.join(sessionsDir, `${Date.now()}.jpg`);
+    const finalPath = outputPath || path.join(sessionsDir, `${Date.now()}.${extension}`);
     await fs.promises.mkdir(path.dirname(finalPath), { recursive: true });
     await fs.promises.writeFile(finalPath, buffer);
 
-    return finalPath;
+    const dims =
+      (extension === 'png' ? readPngDimensions(buffer) : readJpegDimensions(buffer)) ??
+      { width: 0, height: 0 };
+    return { path: finalPath, bytes: buffer.length, width: dims.width, height: dims.height };
+  }
+
+  // ─── Recording ──────────────────────────────────────────────────────────────
+  //
+  // CDP `Page.startScreencast` emits a JPEG frame per `everyNthFrame`. We pipe
+  // those frames into ffmpeg's stdin (image2pipe) and encode to a webm/vp9 file
+  // under `sessions/<task>/recordings/`. A background watcher enforces the
+  // duration + size caps so a forgotten recording can't fill the disk.
+  private recordings = new Map<string, {
+    outputPath: string;
+    startedAt: number;
+    fps: number;
+    maxBytes: number;
+    durationMs: number;
+    ffmpeg: import('child_process').ChildProcess;
+    sessionId: string;
+    conn: ProfileConnection;
+    frameHandler: (params: unknown) => void;
+    durationTimer: NodeJS.Timeout;
+    sizeCheckInterval: NodeJS.Timeout;
+    stopReason?: 'manual' | 'duration-cap' | 'size-cap';
+  }>();
+
+  async recordStart(
+    taskId: string,
+    tabHint?: string,
+    opts: { fps?: number; duration?: number; maxMb?: number } = {}
+  ): Promise<{ path: string; fps: number; durationCapSec: number; maxMb: number }> {
+    if (this.recordings.has(taskId)) {
+      throw new Error(`Task "${taskId}" is already recording. Call record stop first.`);
+    }
+
+    const { conn, task } = await this.findTask(taskId);
+    const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
+    const cdpTargetId = this.getCdpTargetId(task, shortId);
+    const target = await this.getTarget(conn, cdpTargetId);
+    if (!target) throw new Error(`Tab ${shortId} not found`);
+    const sessionId = await this.getSessionId(conn, target.targetId);
+
+    const fps = opts.fps ?? 5;
+    const durationSec = opts.duration ?? 60;
+    const maxMb = opts.maxMb ?? 25;
+    if (fps < 1 || fps > 30) throw new Error('--fps must be between 1 and 30');
+    if (durationSec < 1 || durationSec > 3600) throw new Error('--duration must be between 1 and 3600 seconds');
+    if (maxMb < 1 || maxMb > 500) throw new Error('--max-mb must be between 1 and 500');
+
+    const recordingsDir = path.join(getBrowserRuntimeDir(), 'sessions', task.name, 'recordings');
+    await fs.promises.mkdir(recordingsDir, { recursive: true });
+    const outputPath = path.join(recordingsDir, `${Date.now()}.webm`);
+
+    // Resolve ffmpeg lazily so non-recording paths don't pay the import cost.
+    const { spawn } = await import('child_process');
+    const ffmpeg = spawn(
+      'ffmpeg',
+      [
+        '-loglevel', 'error',
+        '-f', 'image2pipe',
+        '-framerate', String(fps),
+        '-i', '-',
+        '-c:v', 'libvpx-vp9',
+        '-b:v', '1M',
+        '-pix_fmt', 'yuv420p',
+        '-y',
+        outputPath,
+      ],
+      { stdio: ['pipe', 'ignore', 'pipe'] }
+    );
+    let ffmpegStderr = '';
+    ffmpeg.stderr?.on('data', (chunk) => { ffmpegStderr += chunk.toString(); });
+    ffmpeg.on('error', (err) => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        // ffmpeg is missing; surface a useful message via stop().
+        ffmpegStderr = 'ffmpeg not found on PATH — install via `brew install ffmpeg`';
+      }
+    });
+
+    // 30 fps is CDP's screencast cap; everyNthFrame = round(30/fps).
+    const everyNthFrame = Math.max(1, Math.round(30 / fps));
+    await conn.cdp.send(
+      'Page.startScreencast',
+      { format: 'jpeg', quality: 60, everyNthFrame },
+      sessionId
+    );
+
+    const frameHandler = (params: unknown) => {
+      const p = params as { data: string; sessionId: number };
+      try {
+        ffmpeg.stdin?.write(Buffer.from(p.data, 'base64'));
+      } catch {
+        // ffmpeg exited; ignore writes
+      }
+      // Must ack every frame or CDP stops sending.
+      conn.cdp.send('Page.screencastFrameAck', { sessionId: p.sessionId }, sessionId).catch(() => {});
+    };
+    conn.cdp.on('Page.screencastFrame', frameHandler);
+
+    const durationMs = durationSec * 1000;
+    const maxBytes = maxMb * 1024 * 1024;
+
+    const state = {
+      outputPath,
+      startedAt: Date.now(),
+      fps,
+      durationMs,
+      maxBytes,
+      ffmpeg,
+      sessionId,
+      conn,
+      frameHandler,
+      durationTimer: setTimeout(() => {
+        this.recordStop(taskId, 'duration-cap').catch(() => {});
+      }, durationMs),
+      sizeCheckInterval: setInterval(async () => {
+        try {
+          const st = await fs.promises.stat(outputPath);
+          if (st.size >= maxBytes) {
+            await this.recordStop(taskId, 'size-cap');
+          }
+        } catch {
+          // File may not exist yet
+        }
+      }, 1000),
+    };
+    this.recordings.set(taskId, state);
+
+    return { path: outputPath, fps, durationCapSec: durationSec, maxMb };
+  }
+
+  async recordStop(
+    taskId: string,
+    reason: 'manual' | 'duration-cap' | 'size-cap' = 'manual'
+  ): Promise<{ path: string; bytes: number; durationMs: number; reason: string }> {
+    const rec = this.recordings.get(taskId);
+    if (!rec) {
+      throw new Error(`Task "${taskId}" is not currently recording`);
+    }
+    if (rec.stopReason) {
+      // Already stopping (e.g. size-cap fired while user also called stop).
+      // Wait for in-flight finalize.
+      while (this.recordings.has(taskId)) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    }
+    rec.stopReason = reason;
+
+    clearTimeout(rec.durationTimer);
+    clearInterval(rec.sizeCheckInterval);
+    rec.conn.cdp.off('Page.screencastFrame', rec.frameHandler);
+
+    try {
+      await rec.conn.cdp.send('Page.stopScreencast', {}, rec.sessionId);
+    } catch {
+      // session may already be gone
+    }
+
+    // Close ffmpeg stdin so it flushes the output file cleanly.
+    await new Promise<void>((resolve) => {
+      rec.ffmpeg.on('exit', () => resolve());
+      try {
+        rec.ffmpeg.stdin?.end();
+      } catch {
+        resolve();
+      }
+      setTimeout(resolve, 5000); // Hard timeout if ffmpeg hangs
+    });
+
+    let bytes = 0;
+    try {
+      const st = await fs.promises.stat(rec.outputPath);
+      bytes = st.size;
+    } catch {
+      // ffmpeg may have failed; file missing
+    }
+    const durationMs = Date.now() - rec.startedAt;
+
+    this.recordings.delete(taskId);
+    return { path: rec.outputPath, bytes, durationMs, reason };
+  }
+
+  async recordStatus(taskId: string): Promise<{ recording: boolean; path?: string; elapsedMs?: number }> {
+    const rec = this.recordings.get(taskId);
+    if (!rec) return { recording: false };
+    return { recording: true, path: rec.outputPath, elapsedMs: Date.now() - rec.startedAt };
   }
 
   private refsCache = new Map<string, { refs: string; nodeMap: Map<number, RefNode>; ts: number }>();
@@ -1294,42 +1530,46 @@ export class BrowserService {
     return { forkName, connection };
   }
 
-  private async connectProfile(profile: BrowserProfile): Promise<ProfileConnection> {
-    const existingInfo = getRunningChromeInfo(profile.name);
+  /**
+   * Connect to a profile at a specific endpoint preset. The caller has
+   * already resolved the endpoint and built the `effectiveProfile` with
+   * the per-endpoint binary/targetFilter overrides applied; we just use it.
+   *
+   * `effectiveProfile.name` is the composite identifier (`<profile>@<endpoint>`)
+   * so per-endpoint pid/port files don't collide when the same app runs
+   * locally and remotely at the same time.
+   */
+  private async connectProfile(
+    effectiveProfile: BrowserProfile,
+    target: string
+  ): Promise<ProfileConnection> {
+    const existingInfo = getRunningChromeInfo(effectiveProfile.name);
 
     if (existingInfo) {
       const { wsUrl, browser } = await discoverBrowserWsUrl(existingInfo.port);
-      verifyBrowserIdentity(browser, profile.browser, existingInfo.port);
+      verifyBrowserIdentity(browser, effectiveProfile.browser, existingInfo.port);
       const cdp = new CDPClient();
       await cdp.connect(wsUrl);
       await this.enableDomains(cdp);
 
-      const tasks = this.loadTaskState(profile.name);
+      const tasks = this.loadTaskState(effectiveProfile.name);
 
       return {
         cdp,
         port: existingInfo.port,
         pid: existingInfo.pid,
-        electron: profile.electron,
-        targetFilter: profile.targetFilter,
+        electron: effectiveProfile.electron,
+        targetFilter: effectiveProfile.targetFilter,
         tasks,
         sessionCache: new Map(),
       };
     }
 
-    for (const endpoint of profile.endpoints) {
-      try {
-        const conn = await this.connectEndpoint(profile, endpoint);
-        if (conn) return conn;
-      } catch (err) {
-        if (err instanceof Error && err.message.startsWith('Browser identity mismatch')) {
-          throw err;
-        }
-        // Try next endpoint
-      }
+    const conn = await this.connectEndpoint(effectiveProfile, target);
+    if (!conn) {
+      throw new Error(`Could not connect to endpoint ${target} for profile "${effectiveProfile.name}"`);
     }
-
-    throw new Error(`Could not connect to any endpoint for profile "${profile.name}"`);
+    return conn;
   }
 
   private async connectEndpoint(
@@ -1452,6 +1692,21 @@ export class BrowserService {
     })) as { targetId: string };
     conn.windowId = result.targetId;
     return result.targetId;
+  }
+
+  private hasTaskNamed(name: string): boolean {
+    for (const conn of this.connections.values()) {
+      if (conn.tasks.has(name)) return true;
+    }
+    return false;
+  }
+
+  private generateUniqueTaskName(): string {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const candidate = generateTaskName();
+      if (!this.hasTaskNamed(candidate)) return candidate;
+    }
+    throw new Error('Could not generate unique task name after 8 attempts');
   }
 
   private async findTask(

@@ -86,6 +86,7 @@ export class BrowserIPCServer {
         const result = await this.service.start(request.profile, {
           taskName: request.taskName,
           url: request.url,
+          endpointName: request.endpoint,
         });
         return {
           ok: true,
@@ -93,14 +94,6 @@ export class BrowserIPCServer {
           tabId: result.tabId,
           windowTargetId: result.windowId,
         };
-      }
-
-      case 'launch-profile': {
-        if (!request.profile) {
-          return { ok: false, error: 'Profile required' };
-        }
-        const result = await this.service.launchProfile(request.profile);
-        return { ok: true, port: result.port, pid: result.pid };
       }
 
       case 'done': {
@@ -189,16 +182,41 @@ export class BrowserIPCServer {
         return { ok: true, result };
       }
 
+      case 'record-start': {
+        if (!request.task) return { ok: false, error: 'Task required' };
+        try {
+          const r = await this.service.recordStart(request.task, request.tabId, {
+            fps: request.fps,
+            duration: request.duration,
+            maxMb: request.maxMb,
+          });
+          return { ok: true, path: r.path, fps: r.fps, durationCapSec: r.durationCapSec, maxMb: r.maxMb };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+
+      case 'record-stop': {
+        if (!request.task) return { ok: false, error: 'Task required' };
+        try {
+          const r = await this.service.recordStop(request.task);
+          return { ok: true, path: r.path, bytes: r.bytes, durationMs: r.durationMs, stopReason: r.reason as 'manual' | 'duration-cap' | 'size-cap' };
+        } catch (err) {
+          return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+
       case 'screenshot': {
         if (!request.task) {
           return { ok: false, error: 'Task required' };
         }
-        const resultPath = await this.service.screenshot(
+        const shot = await this.service.screenshot(
           request.task,
           request.tabId,
-          request.path
+          request.path,
+          request.quality
         );
-        return { ok: true, path: resultPath };
+        return { ok: true, path: shot.path, bytes: shot.bytes, width: shot.width, height: shot.height };
       }
 
       case 'refs': {

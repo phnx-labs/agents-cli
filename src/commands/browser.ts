@@ -1,4 +1,14 @@
-import { Command } from 'commander';
+import { Command, Argument } from 'commander';
+
+// Hidden trailing positional we use to capture the deprecated `<task>` slot
+// without polluting `--help`. Required for backward compat during migration.
+// commander v12 Argument lacks `hideHelp()`; we set the field our custom
+// help formatter (src/lib/help.ts) already filters on.
+function hiddenLegacyArg(name = 'legacyArg'): Argument {
+  const arg = new Argument(`[${name}]`, 'deprecated — legacy task positional');
+  (arg as Argument & { hidden: boolean }).hidden = true;
+  return arg;
+}
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -9,14 +19,92 @@ import {
   getProfileRuntimeDir,
   extractConfiguredPort,
   findFreeProfilePort,
+  getEndpointPresets,
   type BrowserProfile,
 } from '../lib/browser/profiles.js';
 import { findBrowserPath, getPortOccupant } from '../lib/browser/chrome.js';
+import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
 import { sendIPCRequest } from '../lib/browser/ipc.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { isInteractiveTerminal } from './utils.js';
+import { registerCommandGroups } from '../lib/help.js';
+
+/**
+ * Resolve which browser task a command targets. Order:
+ *   1. `--task <name>` flag (explicit per-command override)
+ *   2. Legacy positional `<task>` arg (deprecated; emits a one-time warning)
+ *   3. `$AGENTS_BROWSER_TASK` (set once at the start of an agent run)
+ *
+ * Each agent process has its own environment, so the env-var path is safe for
+ * parallel agents — they can't see each other's value.
+ */
+let legacyTaskWarned = false;
+function warnLegacyTaskPositional(): void {
+  if (legacyTaskWarned) return;
+  legacyTaskWarned = true;
+  console.error(
+    'warning: passing <task> as a positional argument is deprecated. ' +
+      'Set AGENTS_BROWSER_TASK once per shell, or use --task <name> for a one-off override.'
+  );
+}
+
+function resolveTaskName(opts: { task?: string }, legacyTaskArg?: string): string {
+  if (opts.task) return opts.task;
+  if (legacyTaskArg !== undefined && legacyTaskArg !== '') {
+    warnLegacyTaskPositional();
+    return legacyTaskArg;
+  }
+  const fromEnv = process.env.AGENTS_BROWSER_TASK;
+  if (fromEnv) return fromEnv;
+  console.error(
+    'No task specified. Pass --task <name> or set AGENTS_BROWSER_TASK in your shell.'
+  );
+  console.error('Tip: T=$(agents browser start --profile <p>) && export AGENTS_BROWSER_TASK=$T');
+  process.exit(1);
+}
+
+/**
+ * Split positional args into (deprecated leading task, new-shape positionals).
+ *
+ * If exactly one more positional than the new shape expects is supplied, treat
+ * the first one as the deprecated `<task>` positional and shift the rest. Used
+ * to keep old `agents browser navigate <task> <url>` style invocations working
+ * during the migration to `--task <name>` / `$AGENTS_BROWSER_TASK`.
+ */
+function unpackPositionals(
+  rawArgs: ReadonlyArray<string | undefined>,
+  newPositionalCount: number,
+  opts: { task?: string }
+): { task: string; positionals: string[] } {
+  const defined = rawArgs.filter((a): a is string => a !== undefined);
+  if (defined.length === newPositionalCount + 1) {
+    return { task: resolveTaskName(opts, defined[0]), positionals: defined.slice(1) };
+  }
+  return { task: resolveTaskName(opts), positionals: defined };
+}
+
+// `-t` is taken by `--tab` on most commands, so `--task` is long-form only.
+// Agents normally set $AGENTS_BROWSER_TASK once and never type this flag.
+const TASK_OPTION_FLAG = '--task <name>';
+const TASK_OPTION_DESC = 'Task name (defaults to $AGENTS_BROWSER_TASK)';
+
+// Help groups — surfaces the actual mental model an agent follows
+// ("open a session / drive the page / capture evidence / rare extras")
+// instead of an alphabetical dump. Everything not listed falls into a
+// trailing "Other commands" section automatically.
+const BROWSER_HELP_GROUPS = [
+  { title: 'Session lifecycle', names: ['start', 'done', 'status'] },
+  {
+    title: 'Drive the page',
+    names: ['navigate', 'tabs', 'screenshot', 'evaluate', 'click', 'type', 'press', 'wait'],
+  },
+  {
+    title: 'Capture evidence',
+    names: ['console', 'errors', 'requests', 'responsebody', 'record'],
+  },
+] as const;
 
 export function registerBrowserCommand(program: Command): void {
   const browser = program
@@ -25,11 +113,13 @@ export function registerBrowserCommand(program: Command): void {
 
   registerProfilesCommands(browser);
   registerTaskCommands(browser);
+  registerCommandGroups(browser, BROWSER_HELP_GROUPS);
 }
 
 export function registerBrowserSubcommands(program: Command): void {
   registerProfilesCommands(program);
   registerTaskCommands(program);
+  registerCommandGroups(program, BROWSER_HELP_GROUPS);
 }
 
 function registerProfilesCommands(browser: Command): void {
@@ -54,7 +144,10 @@ function registerProfilesCommands(browser: Command): void {
         console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'DESCRIPTION'.padEnd(38) + 'ENDPOINTS');
         console.log('-'.repeat(92));
         for (const p of allProfiles) {
-          const endpoints = p.endpoints.join(', ');
+          const presets = getEndpointPresets(p);
+          const endpoints = Object.entries(presets)
+            .map(([name, ep]) => (name.startsWith('endpoint-') ? ep.target : `${name}=${ep.target}`))
+            .join(', ');
           const desc = (p.description ?? '').slice(0, 36).padEnd(38);
           console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + desc + endpoints);
         }
@@ -62,7 +155,10 @@ function registerProfilesCommands(browser: Command): void {
         console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'ENDPOINTS');
         console.log('-'.repeat(72));
         for (const p of allProfiles) {
-          const endpoints = p.endpoints.join(', ');
+          const presets = getEndpointPresets(p);
+          const endpoints = Object.entries(presets)
+            .map(([name, ep]) => (name.startsWith('endpoint-') ? ep.target : `${name}=${ep.target}`))
+            .join(', ');
           console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + endpoints);
         }
       }
@@ -78,7 +174,7 @@ function registerProfilesCommands(browser: Command): void {
     .option('-s, --secrets <bundle>', 'Secrets bundle to inject')
     .option('-d, --description <text>', 'Profile description')
     .option('--headless', 'Run in headless mode')
-    .option('--window <WxH>', 'Window size, e.g. 1512x982')
+    .option('--window <WxH>', `Window size in CSS pixels (default: ${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}, MacBook Pro 14")`)
     .option('--position <X,Y>', 'Window position on screen, e.g. 80,80')
     .option('--binary <path>', 'Absolute path to the browser/app binary (required with --browser custom)')
     .option(
@@ -128,15 +224,16 @@ function registerProfilesCommands(browser: Command): void {
         endpoints = [`cdp://127.0.0.1:${freePort}`];
       }
 
-      // Viewport is mandatory — default to 1512x982 if --window is not provided
+      // Viewport is mandatory — default to MacBook Pro 14" (1512x982) if
+      // --window is not provided. See lib/browser/devices.ts DEFAULT_VIEWPORT.
       let viewport: { width: number; height: number; x?: number; y?: number } = {
-        width: 1512,
-        height: 982,
+        width: DEFAULT_VIEWPORT.width,
+        height: DEFAULT_VIEWPORT.height,
       };
       if (opts.window) {
         const m = String(opts.window).match(/^(\d+)x(\d+)$/);
         if (!m) {
-          console.error('--window must be WxH, e.g. 1512x982');
+          console.error(`--window must be WxH, e.g. ${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}`);
           process.exit(1);
         }
         viewport.width = parseInt(m[1], 10);
@@ -195,9 +292,22 @@ function registerProfilesCommands(browser: Command): void {
       if (profile.electron) console.log(`Electron: true`);
       if (profile.targetFilter) console.log(`Target filter: ${profile.targetFilter}`);
       if (profile.description) console.log(`Description: ${profile.description}`);
-      console.log(`Endpoints:`);
-      for (const e of profile.endpoints) {
-        console.log(`  - ${e}`);
+      const presets = getEndpointPresets(profile);
+      const defaultName = profile.defaultEndpoint && presets[profile.defaultEndpoint]
+        ? profile.defaultEndpoint
+        : Object.keys(presets)[0];
+      console.log('Endpoints:');
+      for (const [presetName, preset] of Object.entries(presets)) {
+        const marker = presetName === defaultName ? ' (default)' : '';
+        const isLegacy = presetName.startsWith('endpoint-');
+        console.log(`  - ${isLegacy ? preset.target : `${presetName}: ${preset.target}`}${marker}`);
+        if (preset.binary) console.log(`      binary: ${preset.binary}`);
+        if (preset.targetFilter) console.log(`      targetFilter: ${preset.targetFilter}`);
+      }
+      if (profile.viewport) {
+        const v = profile.viewport;
+        const pos = v.x !== undefined && v.y !== undefined ? ` @ ${v.x},${v.y}` : '';
+        console.log(`Viewport: ${v.width}×${v.height}${pos}`);
       }
       if (profile.secrets) console.log(`Secrets: ${profile.secrets}`);
       if (profile.chrome?.headless) console.log(`Headless: true`);
@@ -209,28 +319,6 @@ function registerProfilesCommands(browser: Command): void {
     .action(async (name: string) => {
       await deleteProfile(name);
       console.log(`Deleted profile: ${name}`);
-    });
-
-  profiles
-    .command('launch <name>')
-    .description('Start (or attach to) the profile\'s browser without creating a task')
-    .action(async (name: string) => {
-      const profile = await getProfile(name);
-      if (!profile) {
-        console.error(`Profile "${name}" not found`);
-        process.exit(1);
-      }
-      const response = await sendIPCRequest({
-        action: 'launch-profile',
-        profile: name,
-      });
-      if (!response.ok) {
-        console.error(response.error);
-        process.exit(1);
-      }
-      const pidLabel = response.pid ? `pid ${response.pid}` : 'attached';
-      console.log(`Launched "${name}" on port ${response.port} (${pidLabel})`);
-      console.log(`Next: agents browser start --profile ${name} --url <url>`);
     });
 
   profiles
@@ -328,14 +416,20 @@ function registerProfilesCommands(browser: Command): void {
             checks.push({
               label: 'onboarding',
               ok: false,
-              detail: 'Local State is empty — run `agents browser profiles prime ' + name + '`',
+              detail:
+                'Local State is empty — run `agents browser start --profile ' +
+                name +
+                '` and finish any first-run screens before automating',
             });
           }
         } else {
           checks.push({
             label: 'onboarding',
             ok: false,
-            detail: 'Not primed yet — run `agents browser profiles prime ' + name + '`',
+            detail:
+              'Not initialized yet — run `agents browser start --profile ' +
+              name +
+              '` and finish any first-run screens before automating',
           });
         }
       }
@@ -348,33 +442,6 @@ function registerProfilesCommands(browser: Command): void {
       if (!allOk) process.exit(1);
     });
 
-  profiles
-    .command('prime <name>')
-    .description('Launch the profile so you can complete first-run onboarding interactively')
-    .action(async (name: string) => {
-      const profile = await getProfile(name);
-      if (!profile) {
-        console.error(`Profile "${name}" not found`);
-        process.exit(1);
-      }
-      const response = await sendIPCRequest({
-        action: 'launch-profile',
-        profile: name,
-      });
-      if (!response.ok) {
-        console.error(response.error);
-        process.exit(1);
-      }
-      const pidLabel = response.pid ? `pid ${response.pid}` : 'attached';
-      console.log(`Launched "${name}" on port ${response.port} (${pidLabel}).`);
-      console.log('');
-      console.log('Finish any first-run / onboarding screens in the browser window');
-      console.log('(welcome, profile setup, default-browser prompt, sign-in, etc.).');
-      console.log('Once you reach a normal browsing surface, this profile is primed');
-      console.log('— its user-data-dir persists across runs, so you only do this once.');
-      console.log('');
-      console.log(`Next: agents browser start --profile ${name} --url <url>`);
-    });
 }
 
 function registerTaskCommands(browser: Command): void {
@@ -382,14 +449,43 @@ function registerTaskCommands(browser: Command): void {
     .command('start')
     .description('Start a browser task with a profile')
     .requiredOption('-p, --profile <name>', 'Browser profile to use')
-    .option('-t, --task <name>', 'Task name (auto-generated if omitted)')
+    .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
+    .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
     .action(async (opts) => {
+      // Pre-check the profile locally so we fail fast with a helpful error
+      // instead of round-tripping a generic "Profile not found" through the daemon.
+      const profile = await getProfile(opts.profile);
+      if (!profile) {
+        console.error(`Profile "${opts.profile}" not found.`);
+        const all = await listProfiles();
+        if (all.length > 0) {
+          console.error(`Available profiles: ${all.map((p) => p.name).join(', ')}`);
+        }
+        console.error(
+          `Create one with: agents browser profiles create ${opts.profile} --browser <chrome|comet|chromium|brave|edge|custom>`
+        );
+        process.exit(1);
+      }
+
+      // Pre-check the endpoint name too — same fail-fast rationale.
+      if (opts.endpoint) {
+        const presets = getEndpointPresets(profile);
+        if (!presets[opts.endpoint]) {
+          console.error(
+            `Endpoint "${opts.endpoint}" not found on profile "${opts.profile}". ` +
+              `Available: ${Object.keys(presets).join(', ')}`
+          );
+          process.exit(1);
+        }
+      }
+
       const response = await sendIPCRequest({
         action: 'start',
         profile: opts.profile,
         taskName: opts.task,
         url: opts.url,
+        endpoint: opts.endpoint,
       });
 
       if (!response.ok) {
@@ -397,17 +493,28 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
+      // stdout: just the resolved name, one line, no decoration. Lets callers do:
+      //   export AGENTS_BROWSER_TASK=$(agents browser start --profile work)
+      console.log(response.task);
+
+      // stderr: human-friendly commentary so a TTY user still sees what happened.
+      // Shell substitution captures stdout only, so $(...) stays clean.
       if (opts.url && response.tabId) {
-        console.log(`Started task "${response.task}" with tab ${response.tabId}`);
+        console.error(`Started task "${response.task}" with tab ${response.tabId}`);
       } else {
-        console.log(`Started task "${response.task}"`);
+        console.error(`Started task "${response.task}"`);
       }
+      console.error(`Tip: export AGENTS_BROWSER_TASK=${response.task}`);
+      console.error('Try: agents browser screenshot | agents browser console --level error');
     });
 
   browser
-    .command('done <task>')
+    .command('done')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Complete a task and close its tabs')
-    .action(async (task: string) => {
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'done',
         task,
@@ -422,9 +529,12 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('stop <task>')
+    .command('stop')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Stop a browser task and close its tabs')
-    .action(async (task: string) => {
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'stop',
         task,
@@ -439,10 +549,14 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('navigate <task> <url>')
+    .command('navigate <url>')
+    .addArgument(hiddenLegacyArg('legacyUrl'))
     .description('Navigate current tab to URL (creates tab if none exist)')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-p, --profile <name>', 'Browser profile (optional if task is unique)')
-    .action(async (task: string, url: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [url] = positionals;
       const response = await sendIPCRequest({
         action: 'navigate',
         task,
@@ -462,10 +576,14 @@ function registerTaskCommands(browser: Command): void {
   const tab = browser.command('tab').description('Manage tabs');
 
   tab
-    .command('add <task> <url>')
+    .command('add <url>')
+    .addArgument(hiddenLegacyArg('legacyUrl'))
     .description('Open URL in new tab (becomes current)')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-p, --profile <name>', 'Browser profile')
-    .action(async (task: string, url: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [url] = positionals;
       const response = await sendIPCRequest({
         action: 'tab-add',
         task,
@@ -482,9 +600,13 @@ function registerTaskCommands(browser: Command): void {
     });
 
   tab
-    .command('focus <task> <tabId>')
+    .command('focus <tabId>')
+    .addArgument(hiddenLegacyArg('legacyTabId'))
     .description('Switch to tab (by ID, prefix, or URL substring)')
-    .action(async (task: string, tabId: string) => {
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [tabId] = positionals;
       const response = await sendIPCRequest({
         action: 'tab-focus',
         task,
@@ -500,9 +622,11 @@ function registerTaskCommands(browser: Command): void {
     });
 
   tab
-    .command('close <task> [tabId]')
+    .command('close [tabId]')
     .description('Close tab(s) — omit tabId to close all')
-    .action(async (task: string, tabId: string | undefined) => {
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .action(async (tabId: string | undefined, opts) => {
+      const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
         action: 'tab-close',
         task,
@@ -517,11 +641,13 @@ function registerTaskCommands(browser: Command): void {
       console.log(tabId ? `Closed tab ${tabId}` : `Closed all tabs for ${task}`);
     });
 
-  tab
-    .command('list <task>')
-    .description('List tabs for a task')
+  browser
+    .command('tabs')
+    .description('List tabs open for the current task')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('--json', 'Output machine-readable JSON')
-    .action(async (task: string, opts) => {
+    .action(async (opts) => {
+      const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
         action: 'tab-list',
         task,
@@ -556,15 +682,27 @@ function registerTaskCommands(browser: Command): void {
 
 
   browser
-    .command('screenshot <task> [tabId]')
-    .description('Take a screenshot')
-    .option('-o, --output <path>', 'Output path')
-    .action(async (task: string, tabId: string | undefined, opts) => {
+    .command('screenshot [tabId]')
+    .description('Take a screenshot — auto-saved per task; --output only needed when you want a specific path')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option('-o, --output <path>', 'Specific output path (otherwise auto-saved under sessions/<task>/)')
+    .option(
+      '-q, --quality <mode>',
+      'compressed (JPEG, capped at ~100 KB — default) or raw (PNG, pixel-faithful)',
+      'compressed'
+    )
+    .action(async (tabId: string | undefined, opts) => {
+      const task = resolveTaskName(opts);
+      if (opts.quality !== 'compressed' && opts.quality !== 'raw') {
+        console.error('--quality must be "compressed" or "raw"');
+        process.exit(1);
+      }
       const response = await sendIPCRequest({
         action: 'screenshot',
         task,
         tabId,
         path: opts.output,
+        quality: opts.quality,
       });
 
       if (!response.ok) {
@@ -572,14 +710,25 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
+      // stdout: just the path, so `P=$(agents browser screenshot)` works.
       console.log(response.path);
+
+      // stderr: human commentary with size + dimensions, so an agent can
+      // see at a glance what was captured without `ls -l && file` round-trips.
+      const size = humanizeBytes(response.bytes);
+      const dims = response.width && response.height ? `${response.width}×${response.height}` : 'unknown size';
+      console.error(`Saved screenshot to ${response.path} (${size}, ${dims})`);
     });
 
   browser
-    .command('evaluate <task> <expression>')
+    .command('evaluate <expression>')
+    .addArgument(hiddenLegacyArg('legacyExpression'))
     .description('Evaluate JavaScript in current tab')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .action(async (task: string, expression: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [expression] = positionals;
       const response = await sendIPCRequest({
         action: 'evaluate',
         task,
@@ -829,13 +978,16 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('refs <task>')
+    .command('refs')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Get DOM refs for interactive elements')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--all', 'Include non-interactive elements')
     .option('-l, --limit <n>', 'Max elements (default 500)', '500')
     .option('--json', 'Output machine-readable JSON')
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'refs',
         task,
@@ -862,10 +1014,14 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('click <task> <ref>')
+    .command('click <ref>')
+    .addArgument(hiddenLegacyArg('legacyRef'))
     .description('Click an element by ref')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .action(async (task: string, ref: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [ref] = positionals;
       const response = await sendIPCRequest({
         action: 'click',
         task,
@@ -882,11 +1038,15 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('type <task> <ref> <text>')
+    .command('type <ref> <text>')
+    .addArgument(hiddenLegacyArg('legacyText'))
     .description('Type text into an element by ref')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--clear', 'Clear editor content before typing')
-    .action(async (task: string, ref: string, text: string, opts) => {
+    .action(async (arg1: string, arg2: string, arg3: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2, arg3], 2, opts);
+      const [ref, text] = positionals;
       const response = await sendIPCRequest({
         action: 'type',
         task,
@@ -905,10 +1065,14 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('press <task> <key>')
+    .command('press <key>')
+    .addArgument(hiddenLegacyArg('legacyKey'))
     .description('Press a key (Enter, Tab, Escape, etc)')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .action(async (task: string, key: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [key] = positionals;
       const response = await sendIPCRequest({
         action: 'press',
         task,
@@ -925,10 +1089,14 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('hover <task> <ref>')
+    .command('hover <ref>')
+    .addArgument(hiddenLegacyArg('legacyRef'))
     .description('Hover over an element by ref')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .action(async (task: string, ref: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [ref] = positionals;
       const response = await sendIPCRequest({
         action: 'hover',
         task,
@@ -945,12 +1113,16 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('scroll <task> <deltaX> <deltaY>')
+    .command('scroll <deltaX> <deltaY>')
+    .addArgument(hiddenLegacyArg('legacyDeltaY'))
     .description('Scroll the page by pixel amount')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-x, --at-x <x>', 'X coordinate to dispatch scroll from (default 0)', parseInt)
     .option('-y, --at-y <y>', 'Y coordinate to dispatch scroll from (default 0)', parseInt)
-    .action(async (task: string, deltaX: string, deltaY: string, opts) => {
+    .action(async (arg1: string, arg2: string, arg3: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2, arg3], 2, opts);
+      const [deltaX, deltaY] = positionals;
       const response = await sendIPCRequest({
         action: 'scroll',
         task,
@@ -970,8 +1142,10 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('upload <task>')
+    .command('upload')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Upload file(s) — supports hidden file inputs, drag-drop targets, and OS chooser interception')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-r, --ref <n>', 'Ref of the upload target element (file input or drop zone)', (v) => parseInt(v, 10))
     .option('--trigger <n>', 'Ref of a button that opens the OS file chooser (Pattern C)', (v) => parseInt(v, 10))
@@ -979,7 +1153,8 @@ function registerTaskCommands(browser: Command): void {
     .option('--drop', 'Force drag-drop pattern even if ref is an <input type=file>')
     .option('--input', 'Force file-input pattern (DOM.setFileInputFiles)')
     .option('--timeout <ms>', 'Timeout for chooser interception (Pattern C)', (v) => parseInt(v, 10))
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const files: string[] = opts.file ?? [];
       if (files.length === 0) {
         console.error('--file <path> is required (repeat for multiple files)');
@@ -1023,12 +1198,16 @@ function registerTaskCommands(browser: Command): void {
   const setCmd = browser.command('set').description('Set browser emulation options');
 
   setCmd
-    .command('viewport <task> <width> <height>')
+    .command('viewport <width> <height>')
+    .addArgument(hiddenLegacyArg('legacyHeight'))
     .description('Set viewport size')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-m, --mobile', 'Enable mobile emulation')
     .option('-s, --scale <factor>', 'Device scale factor', parseFloat)
-    .action(async (task: string, width: string, height: string, opts) => {
+    .action(async (arg1: string, arg2: string, arg3: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2, arg3], 2, opts);
+      const [width, height] = positionals;
       const response = await sendIPCRequest({
         action: 'set-viewport',
         task,
@@ -1048,10 +1227,14 @@ function registerTaskCommands(browser: Command): void {
     });
 
   setCmd
-    .command('device <task> <device-name>')
+    .command('device <device-name>')
+    .addArgument(hiddenLegacyArg('legacyDeviceName'))
     .description('Emulate a device (iPhone 14, iPad, MacBook Pro)')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .action(async (task: string, deviceName: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [deviceName] = positionals;
       const response = await sendIPCRequest({
         action: 'set-device',
         task,
@@ -1081,12 +1264,15 @@ function registerTaskCommands(browser: Command): void {
   // ─── Console & Errors ────────────────────────────────────────────────────────
 
   browser
-    .command('console <task>')
+    .command('console')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Read console logs from a tab')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-l, --level <level>', 'Filter by level (log, info, warn, error)')
     .option('--clear', 'Clear logs after reading')
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'console',
         task,
@@ -1113,11 +1299,14 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('errors <task>')
+    .command('errors')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Read page errors from a tab')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--clear', 'Clear errors after reading')
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'errors',
         task,
@@ -1146,12 +1335,15 @@ function registerTaskCommands(browser: Command): void {
   // ─── Network ─────────────────────────────────────────────────────────────────
 
   browser
-    .command('requests <task>')
+    .command('requests')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Read captured network requests')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-f, --filter <text>', 'Filter URLs containing text')
     .option('--clear', 'Clear requests after reading')
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'requests',
         task,
@@ -1179,12 +1371,16 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('responsebody <task> <url-pattern>')
+    .command('responsebody <url-pattern>')
+    .addArgument(hiddenLegacyArg('legacyUrlPattern'))
     .description('Wait for and read a response body by URL pattern')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--timeout <ms>', 'Timeout in milliseconds', parseInt)
     .option('--max-chars <n>', 'Max characters to return', parseInt)
-    .action(async (task: string, urlPattern: string, opts) => {
+    .action(async (arg1: string, arg2: string | undefined, opts) => {
+      const { task, positionals } = unpackPositionals([arg1, arg2], 1, opts);
+      const [urlPattern] = positionals;
       const response = await sendIPCRequest({
         action: 'response-body',
         task,
@@ -1205,8 +1401,10 @@ function registerTaskCommands(browser: Command): void {
   // ─── Wait ────────────────────────────────────────────────────────────────────
 
   browser
-    .command('wait <task>')
+    .command('wait')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Wait for a condition')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--time <ms>', 'Wait for milliseconds')
     .option('--selector <css>', 'Wait for CSS selector to appear')
@@ -1214,7 +1412,8 @@ function registerTaskCommands(browser: Command): void {
     .option('--fn <js>', 'Wait for JS expression to return truthy')
     .option('--state <state>', 'Wait for load state (domcontentloaded, load, networkidle)')
     .option('--timeout <ms>', 'Timeout in milliseconds', parseInt)
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       let waitType: 'time' | 'selector' | 'url' | 'function' | 'load';
       let waitValue: string | number;
 
@@ -1258,11 +1457,14 @@ function registerTaskCommands(browser: Command): void {
   // ─── Downloads ───────────────────────────────────────────────────────────────
 
   browser
-    .command('download <task>')
+    .command('download')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Set download directory for a task')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .requiredOption('-p, --path <dir>', 'Download directory path')
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'set-download-path',
         task,
@@ -1278,11 +1480,65 @@ function registerTaskCommands(browser: Command): void {
       console.log(`Download path set to ${opts.path}`);
     });
 
+  // ─── Recording ─────────────────────────────────────────────────────────────
+
+  const record = browser.command('record').description('Record a video of the page');
+
+  record
+    .command('start')
+    .description('Start recording — auto-saved under sessions/<task>/recordings/. Bounded by --fps, --duration, --max-mb.')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
+    .option('--fps <n>', 'Frames per second (1–30, default 5)', (v) => parseInt(v, 10))
+    .option('--duration <sec>', 'Hard duration cap in seconds (default 60)', (v) => parseInt(v, 10))
+    .option('--max-mb <mb>', 'Stop when output exceeds this many MB (default 25)', (v) => parseInt(v, 10))
+    .action(async (opts) => {
+      const task = resolveTaskName(opts);
+      const response = await sendIPCRequest({
+        action: 'record-start',
+        task,
+        tabId: opts.tab,
+        fps: opts.fps,
+        duration: opts.duration,
+        maxMb: opts.maxMb,
+      });
+      if (!response.ok) {
+        console.error(response.error);
+        process.exit(1);
+      }
+      // stdout: path (for capture into a variable). stderr: human commentary.
+      console.log(response.path);
+      console.error(
+        `Recording task "${task}" at ${response.fps} fps (cap ${response.durationCapSec}s / ${response.maxMb} MB) → ${response.path}`
+      );
+      console.error('Stop with: agents browser record stop');
+    });
+
+  record
+    .command('stop')
+    .description('Stop an in-progress recording')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .action(async (opts) => {
+      const task = resolveTaskName(opts);
+      const response = await sendIPCRequest({ action: 'record-stop', task });
+      if (!response.ok) {
+        console.error(response.error);
+        process.exit(1);
+      }
+      console.log(response.path);
+      const size = humanizeBytes(response.bytes);
+      const seconds = ((response.durationMs ?? 0) / 1000).toFixed(1);
+      console.error(`Saved recording to ${response.path} (${size}, ${seconds}s, stopped: ${response.stopReason})`);
+    });
+
   browser
-    .command('waitdownload <task>')
+    .command('waitdownload')
+    .addArgument(hiddenLegacyArg('legacyTask'))
     .description('Wait for a download to complete')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('--timeout <ms>', 'Timeout in milliseconds', parseInt)
-    .action(async (task: string, opts) => {
+    .action(async (legacyTask: string | undefined, opts) => {
+      const { task } = unpackPositionals([legacyTask], 0, opts);
       const response = await sendIPCRequest({
         action: 'wait-download',
         task,
@@ -1310,6 +1566,13 @@ function formatAge(timestamp: number): string {
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   return `${hours}h ago`;
+}
+
+function humanizeBytes(n: number | undefined): string {
+  if (n === undefined) return 'unknown size';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatDuration(ms: number): string {

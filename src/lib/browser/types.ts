@@ -1,5 +1,21 @@
 export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | 'custom';
 
+/**
+ * A single named endpoint preset within a profile. Lets one profile cover
+ * the local + remote variants of the same app (e.g. Rush on this Mac vs.
+ * Rush on mac-mini) instead of forcing two parallel profiles.
+ *
+ * Per-endpoint overrides take precedence over profile-level fields.
+ */
+export interface EndpointPreset {
+  /** CDP URL — `cdp://host:port` or `ssh://host?port=N` */
+  target: string;
+  /** Override the profile-level binary (e.g. mac-mini has no local binary). */
+  binary?: string;
+  /** Override the profile-level targetFilter (Electron app builds may diverge). */
+  targetFilter?: string;
+}
+
 export interface BrowserProfile {
   name: string;
   description?: string;
@@ -11,7 +27,14 @@ export interface BrowserProfile {
    * represents the visible UI for Electron apps with multiple WebContents.
    */
   targetFilter?: string;
-  endpoints: string[];
+  /**
+   * Endpoint presets. Accepts two shapes for backward compatibility:
+   *   - Legacy: `string[]` of CDP URLs; first entry is the default.
+   *   - New:    `{ [presetName]: EndpointPreset }`, with optional `defaultEndpoint`.
+   * Normalize via `resolveEndpoint(profile, name?)` instead of reading directly.
+   */
+  endpoints: string[] | Record<string, EndpointPreset>;
+  defaultEndpoint?: string;
   chrome?: ChromeOptions;
   secrets?: string;
   viewport?: { width: number; height: number; x?: number; y?: number };
@@ -79,7 +102,8 @@ export interface HistoricalTask {
 
 export type IPCAction =
   | 'start'
-  | 'launch-profile'
+  | 'record-start'
+  | 'record-stop'
   | 'done'
   | 'stop'
   | 'status'
@@ -149,6 +173,27 @@ export interface IPCRequest {
   files?: string[];
   trigger?: number;
   uploadMode?: 'auto' | 'input' | 'drop' | 'chooser';
+  // Screenshot
+  quality?: 'compressed' | 'raw';
+  // Endpoint preset
+  endpoint?: string;
+  // Recording
+  fps?: number;
+  duration?: number;
+  maxMb?: number;
+}
+
+/** Subset of IPCResponse describing a recording start result. */
+export interface RecordStartFields {
+  fps?: number;
+  durationCapSec?: number;
+  maxMb?: number;
+}
+
+/** Subset of IPCResponse describing a recording stop result. */
+export interface RecordStopFields {
+  durationMs?: number;
+  stopReason?: 'manual' | 'duration-cap' | 'size-cap';
 }
 
 export interface IPCResponse {
@@ -162,10 +207,19 @@ export interface IPCResponse {
   history?: HistoricalTask[];
   result?: unknown;
   path?: string;
+  bytes?: number;
+  width?: number;
+  height?: number;
   refs?: string;
   nodes?: RefNodeJson[];
   port?: number;
   pid?: number;
+  // Recording
+  fps?: number;
+  durationCapSec?: number;
+  maxMb?: number;
+  durationMs?: number;
+  stopReason?: 'manual' | 'duration-cap' | 'size-cap';
   // Console/errors
   logs?: ConsoleEntry[];
   errors?: ErrorEntry[];
@@ -237,15 +291,36 @@ export function generateShortId(): string {
 const ADJECTIVES = [
   'swift', 'cosmic', 'jolly', 'quiet', 'bold', 'bright', 'calm', 'eager',
   'golden', 'happy', 'keen', 'lucky', 'noble', 'proud', 'quick', 'royal',
+  'silver', 'amber', 'crimson', 'misty', 'sunny', 'gentle', 'wild', 'brave',
+  'merry', 'sleek', 'wise', 'fierce', 'curious', 'humble', 'spry', 'witty',
 ];
 
 const NOUNS = [
   'falcon', 'comet', 'tiger', 'nebula', 'phoenix', 'river', 'summit', 'wave',
   'aurora', 'breeze', 'crystal', 'dragon', 'ember', 'forest', 'glacier', 'harbor',
+  'crab', 'otter', 'hawk', 'fox', 'wolf', 'panda', 'lynx', 'raven',
+  'meadow', 'canyon', 'valley', 'orchid', 'cedar', 'thistle', 'lotus', 'briar',
 ];
 
 export function generateFunName(): string {
   const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
   const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
   return `${adj}-${noun}`;
+}
+
+/**
+ * Auto-generated task name: `<adjective>-<noun>-<noun>-<hex8>`, e.g.
+ * `swift-crab-falcon-a3f92b1c`. Three English words make it memorable and
+ * easy to read; 32 bits of hex give every spawned task enough entropy that
+ * parallel agents never collide on the daemon side.
+ */
+export function generateTaskName(): string {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const noun1 = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  let noun2 = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  while (noun2 === noun1) {
+    noun2 = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  }
+  const hex8 = crypto.randomUUID().replace(/-/g, '').slice(0, 8);
+  return `${adj}-${noun1}-${noun2}-${hex8}`;
 }

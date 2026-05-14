@@ -498,7 +498,14 @@ export interface BrowserProfileConfig {
    * Only consulted when `electron` is true.
    */
   targetFilter?: string;
-  endpoints: string[];
+  /**
+   * Endpoint presets. Accepts two shapes for backward compatibility:
+   *   - Legacy: `string[]` of CDP URLs; first entry is the default.
+   *   - New:    `{ [presetName]: { target, binary?, targetFilter? } }`.
+   */
+  endpoints: string[] | Record<string, { target: string; binary?: string; targetFilter?: string }>;
+  /** Preset name to use when `--endpoint` is not passed to `start`. */
+  defaultEndpoint?: string;
   chrome?: {
     headless?: boolean;
     args?: string[];

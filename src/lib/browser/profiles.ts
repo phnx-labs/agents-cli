@@ -28,6 +28,7 @@ function configToProfile(name: string, config: BrowserProfileConfig): BrowserPro
     electron: config.electron,
     targetFilter: config.targetFilter,
     endpoints: config.endpoints,
+    defaultEndpoint: config.defaultEndpoint,
     chrome: config.chrome,
     secrets: config.secrets,
     viewport: config.viewport,
@@ -43,6 +44,7 @@ function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
   if (profile.binary) config.binary = profile.binary;
   if (profile.electron) config.electron = profile.electron;
   if (profile.targetFilter) config.targetFilter = profile.targetFilter;
+  if (profile.defaultEndpoint) config.defaultEndpoint = profile.defaultEndpoint;
   if (profile.chrome) config.chrome = profile.chrome;
   if (profile.secrets) config.secrets = profile.secrets;
   if (profile.viewport) config.viewport = profile.viewport;
@@ -144,12 +146,78 @@ export async function deleteProfile(name: string): Promise<void> {
 }
 
 /**
- * Extract the port intended by the profile's first endpoint.
+ * Resolve a profile's endpoint presets into a normalized map regardless of
+ * whether the YAML uses the legacy `string[]` shape or the new map shape.
+ * The legacy entries get auto-named `endpoint-0`, `endpoint-1`, ... .
+ */
+export function getEndpointPresets(
+  profile: BrowserProfile
+): Record<string, import('./types.js').EndpointPreset> {
+  if (Array.isArray(profile.endpoints)) {
+    const out: Record<string, import('./types.js').EndpointPreset> = {};
+    profile.endpoints.forEach((target, i) => {
+      out[`endpoint-${i}`] = { target };
+    });
+    return out;
+  }
+  return profile.endpoints;
+}
+
+/**
+ * Pick the endpoint preset to use. Order:
+ *   1. Explicit name passed in (errors if unknown)
+ *   2. `profile.defaultEndpoint` if set
+ *   3. First entry (preserves legacy string[] behavior)
+ *
+ * Returns the resolved name + the preset (with per-endpoint overrides
+ * already applied to binary / targetFilter), so callers don't have to
+ * remember the precedence rules.
+ */
+export function resolveEndpoint(
+  profile: BrowserProfile,
+  endpointName?: string
+): { name: string; target: string; binary?: string; targetFilter?: string } {
+  const presets = getEndpointPresets(profile);
+  const names = Object.keys(presets);
+  if (names.length === 0) {
+    throw new Error(`Profile "${profile.name}" has no endpoints configured`);
+  }
+
+  let chosenName: string;
+  if (endpointName) {
+    if (!presets[endpointName]) {
+      throw new Error(
+        `Endpoint "${endpointName}" not found on profile "${profile.name}". ` +
+          `Available: ${names.join(', ')}`
+      );
+    }
+    chosenName = endpointName;
+  } else if (profile.defaultEndpoint && presets[profile.defaultEndpoint]) {
+    chosenName = profile.defaultEndpoint;
+  } else {
+    chosenName = names[0];
+  }
+
+  const preset = presets[chosenName];
+  return {
+    name: chosenName,
+    target: preset.target,
+    binary: preset.binary ?? profile.binary,
+    targetFilter: preset.targetFilter ?? profile.targetFilter,
+  };
+}
+
+/**
+ * Extract the port intended by the profile's default endpoint.
  * Returns undefined for endpoint shapes that don't carry a port (e.g. ws:// without one).
  */
 export function extractConfiguredPort(profile: BrowserProfile): number | undefined {
-  const endpoint = profile.endpoints[0];
-  if (!endpoint) return undefined;
+  const presets = getEndpointPresets(profile);
+  const firstName = profile.defaultEndpoint && presets[profile.defaultEndpoint]
+    ? profile.defaultEndpoint
+    : Object.keys(presets)[0];
+  if (!firstName) return undefined;
+  const endpoint = presets[firstName].target;
   let url: URL;
   try {
     url = new URL(endpoint);

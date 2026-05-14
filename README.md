@@ -304,13 +304,20 @@ Give agents access to a real browser — no relay extension, no cloud service, n
 # Create an isolated profile for automation
 agents browser profiles create work --browser chrome
 
-# Start a task, navigate, interact
-agents browser start --profile work --task login-flow --url https://app.example.com
-agents browser refs login-flow              # Get interactive element refs
-agents browser click login-flow 42          # Click element ref 42
-agents browser type login-flow 15 "hello"   # Type into element ref 15
-agents browser screenshot login-flow        # Smart resizing, token-efficient
-agents browser done login-flow              # Close task's tabs when finished
+# Start a task once, then bind it to this shell — every later command picks it up.
+# `start` writes the resolved name (e.g. `swift-crab-falcon-a3f92b1c`) to stdout
+# and human-friendly commentary to stderr, so $(...) capture stays clean.
+export AGENTS_BROWSER_TASK=$(agents browser start --profile work --url https://app.example.com)
+agents browser refs                  # Get interactive element refs
+agents browser click 42              # Click element ref 42
+agents browser type 15 "hello"       # Type into element ref 15
+agents browser screenshot            # Smart resizing, token-efficient
+agents browser tabs                  # List tabs open for the current task
+agents browser tab focus tab123      # Switch focus to another tab
+agents browser done                  # Close task's tabs when finished
+
+# Need to address a different task in the same shell? Override per call:
+agents browser screenshot --task other-flow
 ```
 
 ### Why this works where Playwright fails

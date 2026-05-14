@@ -1,5 +1,17 @@
 import type { DeviceDescriptor } from './types.js';
 
+/**
+ * Default viewport for newly-created profiles. Matches Safari's logical
+ * resolution on a 14-inch MacBook Pro (M1/M2/M3 Pro/Max) — the most common
+ * shape this CLI sees in practice. Shared with the `MacBook Pro` device
+ * preset below so both surfaces agree.
+ */
+export const DEFAULT_VIEWPORT = {
+  width: 1512,
+  height: 982,
+  deviceScaleFactor: 2,
+} as const;
+
 export const DEVICES: Record<string, DeviceDescriptor> = {
   'iPhone 14': {
     width: 390,
@@ -14,9 +26,9 @@ export const DEVICES: Record<string, DeviceDescriptor> = {
     mobile: true,
   },
   'MacBook Pro': {
-    width: 1440,
-    height: 900,
-    deviceScaleFactor: 2,
+    width: DEFAULT_VIEWPORT.width,
+    height: DEFAULT_VIEWPORT.height,
+    deviceScaleFactor: DEFAULT_VIEWPORT.deviceScaleFactor,
     mobile: false,
   },
 };
