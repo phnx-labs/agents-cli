@@ -330,8 +330,9 @@ function registerProfilesCommands(browser: Command): void {
       // re-import into a freshly-created profile of the same name).
       let removed = 0;
       if (!opts.keepCache) {
-        for (const _ of listProfileCacheDirs(name)) removed++;
-        for (const dir of listProfileCacheDirs(name)) {
+        const cacheDirs = listProfileCacheDirs(name);
+        removed = cacheDirs.length;
+        for (const dir of cacheDirs) {
           // `removeProfileCache` operates by profile-name; for the
           // composite dirs we already have the absolute path. Use rmSync
           // directly so we don't depend on naming round-trips.

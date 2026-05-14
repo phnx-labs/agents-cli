@@ -15,6 +15,7 @@ import {
 import { killChrome, getRunningChromeInfo, launchBrowser, allocatePort } from './chrome.js';
 import { connectLocal } from './drivers/local.js';
 import { connectSSH } from './drivers/ssh.js';
+import { clearProfileRuntime } from './runtime-state.js';
 import {
   generateTaskId,
   generateShortId,
@@ -202,14 +203,6 @@ function expandHome(p: string): string {
   return p;
 }
 
-/** Remove the per-profile pid/port files (leaves chrome-data + tasks.json). */
-function clearProfileRuntimeFiles(profileName: string): void {
-  const runtimeDir = getProfileRuntimeDir(profileName);
-  for (const f of ['pid', 'port']) {
-    const fp = path.join(runtimeDir, f);
-    try { fs.unlinkSync(fp); } catch { /* not present */ }
-  }
-}
 
 /**
  * Probe a cached connection before reuse. A WebSocket can quietly transition
@@ -1779,7 +1772,7 @@ export class BrowserService {
         // or because the OS reused the pid for an unrelated process.
         // Wipe the stale runtime files and fall through to a fresh
         // connect against the profile's currently-configured endpoint.
-        clearProfileRuntimeFiles(effectiveProfile.name);
+        clearProfileRuntime(effectiveProfile.name);
       }
     }
 
