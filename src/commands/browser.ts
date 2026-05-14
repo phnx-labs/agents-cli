@@ -23,6 +23,11 @@ import {
   type BrowserProfile,
 } from '../lib/browser/profiles.js';
 import { findBrowserPath, getPortOccupant } from '../lib/browser/chrome.js';
+import {
+  listProfileCacheDirs,
+  removeProfileCache,
+  listAllProfileSnapshots,
+} from '../lib/browser/runtime-state.js';
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
@@ -315,10 +320,30 @@ function registerProfilesCommands(browser: Command): void {
 
   profiles
     .command('delete <name>')
-    .description('Delete a browser profile')
-    .action(async (name: string) => {
+    .description('Delete a browser profile (drops YAML config + all cached runtime dirs)')
+    .option('--keep-cache', "Leave ~/.agents/.cache/browser/<name>* dirs in place (don't wipe chrome-data)")
+    .action(async (name: string, opts: { keepCache?: boolean }) => {
       await deleteProfile(name);
-      console.log(`Deleted profile: ${name}`);
+      // The composite naming change introduced multiple cache dirs per
+      // profile (`<name>`, `<name>@endpoint-0`, …). Sweep them all unless
+      // the user explicitly wants the chrome-data preserved (e.g. for
+      // re-import into a freshly-created profile of the same name).
+      let removed = 0;
+      if (!opts.keepCache) {
+        for (const _ of listProfileCacheDirs(name)) removed++;
+        for (const dir of listProfileCacheDirs(name)) {
+          // `removeProfileCache` operates by profile-name; for the
+          // composite dirs we already have the absolute path. Use rmSync
+          // directly so we don't depend on naming round-trips.
+          try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+        }
+        // The canonical wipe also covers the legacy dir if present.
+        removeProfileCache(name);
+      }
+      console.log(
+        `Deleted profile: ${name}` +
+          (removed > 0 ? ` (and ${removed} cache dir${removed === 1 ? '' : 's'})` : '')
+      );
     });
 
   profiles
@@ -345,11 +370,29 @@ function registerProfilesCommands(browser: Command): void {
         });
       }
 
-      // 2. Configured port: free, or already serving the expected browser?
+      // 2. Configured port. For local cdp:// we check the local port. For
+      //    ssh:// the port lives on a remote host — doctor's previous
+      //    behavior was to lsof the LOCAL port number, which was both
+      //    misleading and arbitrary (after the SSH-binds-locally change
+      //    the local port now matches the remote, so a positive answer
+      //    is plausible; but doctor still shouldn't report on remote
+      //    state without an --remote-probe explicitly).
       const port = extractConfiguredPort(profile);
       let attachingToExistingBrowser = false;
+      const firstEndpointTarget = (() => {
+        const presets = getEndpointPresets(profile);
+        const first = Object.keys(presets)[0];
+        return first ? presets[first].target : undefined;
+      })();
+      const isSshEndpoint = firstEndpointTarget?.startsWith('ssh://') ?? false;
       if (port === undefined) {
         checks.push({ label: 'port', ok: true, detail: 'no port in endpoint' });
+      } else if (isSshEndpoint) {
+        checks.push({
+          label: 'port',
+          ok: true,
+          detail: `${port} (remote on ${firstEndpointTarget}) — skipping local check`,
+        });
       } else {
         const occupant = getPortOccupant(port);
         if (!occupant) {
@@ -531,10 +574,28 @@ function registerTaskCommands(browser: Command): void {
   browser
     .command('stop')
     .addArgument(hiddenLegacyArg('legacyTask'))
-    .description('Stop a browser task and close its tabs')
+    .description('Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option('-p, --profile <name>', 'Detach the whole profile (incl. composite "name@endpoint") instead of stopping a single task')
     .action(async (legacyTask: string | undefined, opts) => {
+      if (opts.profile) {
+        const response = await sendIPCRequest({
+          action: 'stop',
+          profile: opts.profile,
+        });
+        if (!response.ok) {
+          console.error(response.error);
+          process.exit(1);
+        }
+        console.log(`Stopped profile: ${opts.profile}`);
+        return;
+      }
+
       const { task } = unpackPositionals([legacyTask], 0, opts);
+      if (!task) {
+        console.error('Either --task or --profile is required.');
+        process.exit(1);
+      }
       const response = await sendIPCRequest({
         action: 'stop',
         task,
@@ -743,6 +804,80 @@ function registerTaskCommands(browser: Command): void {
 
       console.log(JSON.stringify(response.result, null, 2));
     });
+
+  browser
+    .command('ps')
+    .description('List every browser/electron/tunnel process agents has tracked (alive or stale) — works without the daemon')
+    .option('--json', 'Output machine-readable JSON')
+    .action((opts: { json?: boolean }) => {
+      const snapshots = listAllProfileSnapshots();
+      // Cross-check against what's actually listening locally so we can
+      // surface "port claimed by us but nothing is listening" (= leaked
+      // cache file) and "port listening but not in our records" (= someone
+      // else owns it; a new profile pointing here would collide).
+      const portOwners = new Map<number, { pid: number; command: string }>();
+      const conflicts: string[] = [];
+      for (const s of snapshots) {
+        const port = s.meta?.port;
+        if (!port) continue;
+        const occupant = getPortOccupant(port);
+        if (!occupant) {
+          if (s.pidAlive || s.tunnelAlive) {
+            conflicts.push(`${s.name}: port ${port} marked active but nothing is listening`);
+          }
+          continue;
+        }
+        const ourPid = s.meta?.tunnelPid && s.meta.kind === 'tunnel'
+          ? s.meta.tunnelPid
+          : s.meta?.pid;
+        if (ourPid && occupant.pid !== ourPid) {
+          conflicts.push(
+            `${s.name}: port ${port} listened on by ${occupant.command} (pid ${occupant.pid}) but our record says pid ${ourPid}`
+          );
+        }
+        portOwners.set(port, occupant);
+      }
+
+      if (opts.json) {
+        console.log(JSON.stringify({ snapshots, conflicts }, null, 2));
+        return;
+      }
+
+      if (snapshots.length === 0) {
+        console.log('No tracked browser state. Run `agents browser start --profile <name>` to spawn one.');
+        return;
+      }
+
+      console.log('PROFILE                                  KIND      PID    TUNNEL  PORT   ALIVE  TASKS  OWNER');
+      console.log('-----------------------------------------------------------------------------------------------');
+      for (const s of snapshots) {
+        const kind = s.meta?.kind ?? '-';
+        const pid = s.meta?.pid ?? '-';
+        const tunnelPid = s.meta?.tunnelPid ?? '-';
+        const port = s.meta?.port ?? '-';
+        const alive = aliveLabel(s);
+        const owner = s.meta?.daemonPid
+          ? `daemon${s.daemonAlive ? '' : '(dead)'}=${s.meta.daemonPid}`
+          : '-';
+        console.log(
+          `${s.name.padEnd(40)} ${String(kind).padEnd(9)} ${String(pid).padEnd(6)} ${String(tunnelPid).padEnd(7)} ${String(port).padEnd(6)} ${alive.padEnd(6)} ${String(s.taskCount).padEnd(6)} ${owner}`
+        );
+      }
+
+      if (conflicts.length > 0) {
+        console.log('');
+        console.log('Conflicts / leaks detected:');
+        for (const c of conflicts) console.log(`  - ${c}`);
+        console.log('');
+        console.log('Run `agents browser stop --profile <name>` to clean up a specific profile, or restart the daemon to trigger the orphan reaper.');
+      }
+    });
+
+  function aliveLabel(s: { pidAlive: boolean; tunnelAlive: boolean; meta: { kind?: string } | null }): string {
+    const k = s.meta?.kind;
+    if (k === 'tunnel') return s.tunnelAlive ? 'yes' : 'stale';
+    return s.pidAlive ? 'yes' : 'stale';
+  }
 
   browser
     .command('status')

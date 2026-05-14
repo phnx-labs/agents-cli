@@ -1,0 +1,221 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
+import {
+  writeProfileRuntime,
+  readProfileRuntime,
+  readProfileRuntimeMeta,
+  clearProfileRuntime,
+  removeProfileCache,
+  listProfileCacheDirs,
+  isProcessAlive,
+  reapOrphanedProcesses,
+} from './runtime-state.js';
+import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
+
+// `state.ts` resolves CACHE_DIR from HOME at module-load time, so we can't
+// redirect with process.env.HOME from a test. Instead each test uses a
+// random profile-name prefix; we track everything we touch and clean it
+// up in afterEach.
+let prefix: string;
+const created: string[] = [];
+
+function uniq(base: string): string {
+  const name = `${prefix}-${base}`;
+  created.push(name);
+  return name;
+}
+
+beforeEach(() => {
+  prefix = `tst-${crypto.randomBytes(6).toString('hex')}`;
+});
+
+afterEach(() => {
+  const root = getBrowserRuntimeDir();
+  for (const name of created) {
+    const dir = path.join(root, name);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+  created.length = 0;
+});
+
+describe('writeProfileRuntime + readProfileRuntime', () => {
+  it('round-trips pid/port/command for a live process', () => {
+    const name = uniq('p1');
+    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: 'node' });
+    const got = readProfileRuntime(name);
+    expect(got).toEqual({ pid: process.pid, port: 9222, command: 'node' });
+  });
+
+  it('returns null and removes files when the pid is dead', () => {
+    const name = uniq('p2');
+    writeProfileRuntime(name, { pid: 999999, port: 9222 });
+    const got = readProfileRuntime(name);
+    expect(got).toBeNull();
+    const dir = getProfileRuntimeDir(name);
+    expect(fs.existsSync(path.join(dir, 'pid'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'port'))).toBe(false);
+  });
+
+  it('returns null when the live pid runs a different command (pid-reuse defense)', () => {
+    const name = uniq('p3');
+    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: 'ImpossibleBrowserName' });
+    expect(readProfileRuntime(name)).toBeNull();
+  });
+
+  it('returns the runtime when pid:0 (attached to externally-launched browser)', () => {
+    const name = uniq('p4');
+    writeProfileRuntime(name, { pid: 0, port: 9222 });
+    expect(readProfileRuntime(name)).toEqual({ pid: 0, port: 9222 });
+  });
+
+  it('returns null when no files exist', () => {
+    expect(readProfileRuntime(uniq('never-written'))).toBeNull();
+  });
+});
+
+describe('clearProfileRuntime', () => {
+  it('removes pid/port/command but not chrome-data', () => {
+    const name = uniq('p5');
+    const dir = getProfileRuntimeDir(name);
+    fs.mkdirSync(path.join(dir, 'chrome-data'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'chrome-data', 'Local State'), '{}');
+    writeProfileRuntime(name, { pid: process.pid, port: 9222, command: 'node' });
+
+    clearProfileRuntime(name);
+
+    expect(fs.existsSync(path.join(dir, 'pid'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'port'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'command'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'chrome-data', 'Local State'))).toBe(true);
+  });
+
+  it('is a no-op when files are already gone', () => {
+    expect(() => clearProfileRuntime(uniq('does-not-exist'))).not.toThrow();
+  });
+});
+
+describe('removeProfileCache', () => {
+  it('removes the entire profile directory including chrome-data', () => {
+    const name = uniq('p6');
+    const dir = getProfileRuntimeDir(name);
+    fs.mkdirSync(path.join(dir, 'chrome-data'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'chrome-data', 'Local State'), '{}');
+
+    removeProfileCache(name);
+
+    expect(fs.existsSync(dir)).toBe(false);
+  });
+});
+
+describe('listProfileCacheDirs', () => {
+  it('matches the legacy non-composite dir AND every composite variant', () => {
+    const base = uniq('multi');
+    const root = getBrowserRuntimeDir();
+    fs.mkdirSync(path.join(root, base), { recursive: true });
+    fs.mkdirSync(path.join(root, `${base}@endpoint-0`), { recursive: true });
+    fs.mkdirSync(path.join(root, `${base}@remote`), { recursive: true });
+    created.push(`${base}@endpoint-0`, `${base}@remote`);
+
+    const found = listProfileCacheDirs(base).map((p) => path.basename(p)).sort();
+    expect(found).toEqual([base, `${base}@endpoint-0`, `${base}@remote`].sort());
+  });
+
+  it('returns an empty list when no matching dir exists', () => {
+    expect(listProfileCacheDirs(uniq('absent'))).toEqual([]);
+  });
+
+  it('does not match profiles whose names share a prefix', () => {
+    const base = uniq('exact');
+    const root = getBrowserRuntimeDir();
+    fs.mkdirSync(path.join(root, base), { recursive: true });
+    fs.mkdirSync(path.join(root, `${base}-other`), { recursive: true });
+    created.push(`${base}-other`);
+
+    const found = listProfileCacheDirs(base).map((p) => path.basename(p));
+    expect(found).toEqual([base]);
+  });
+});
+
+describe('readProfileRuntimeMeta', () => {
+  it('returns the full JSON record including daemonPid and spawnedAt', () => {
+    const name = uniq('meta');
+    writeProfileRuntime(name, {
+      pid: process.pid,
+      port: 9222,
+      command: 'node',
+      kind: 'browser',
+      userDataDir: '/tmp/nope',
+    });
+    const meta = readProfileRuntimeMeta(name);
+    expect(meta?.pid).toBe(process.pid);
+    expect(meta?.kind).toBe('browser');
+    expect(meta?.userDataDir).toBe('/tmp/nope');
+    expect(meta?.daemonPid).toBe(process.pid);
+    expect(typeof meta?.spawnedAt).toBe('number');
+  });
+
+  it('returns null when meta.json is missing', () => {
+    expect(readProfileRuntimeMeta(uniq('absent'))).toBeNull();
+  });
+});
+
+describe('reapOrphanedProcesses', () => {
+  it('leaves records owned by THIS daemon alone', () => {
+    const name = uniq('mine');
+    writeProfileRuntime(name, {
+      pid: 999999, // dead, but daemonPid is us so we skip
+      port: 9222,
+      command: 'node',
+    });
+    const result = reapOrphanedProcesses();
+    expect(result.reaped).toBe(0);
+    // Meta file still there:
+    expect(readProfileRuntimeMeta(name)).not.toBeNull();
+  });
+
+  it('reaps records whose daemonPid is dead', () => {
+    const name = uniq('orphan');
+    // Manually write a meta.json owned by a dead daemon pid.
+    const dir = getProfileRuntimeDir(name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'meta.json'),
+      JSON.stringify({
+        pid: 999998, // dead — kill is a no-op but cleanup must still happen
+        port: 9222,
+        command: 'node',
+        daemonPid: 999997, // also dead
+        spawnedAt: Date.now() - 10_000,
+      })
+    );
+
+    reapOrphanedProcesses();
+    // Cleanup should have removed the orphan's runtime files even if the
+    // recorded pid was already gone.
+    expect(readProfileRuntimeMeta(name)).toBeNull();
+  });
+});
+
+describe('isProcessAlive', () => {
+  it('returns true for the current process', () => {
+    expect(isProcessAlive(process.pid)).toBe(true);
+  });
+
+  it('returns true for the current process when command matches', () => {
+    expect(isProcessAlive(process.pid, 'node')).toBe(true);
+  });
+
+  it('returns false for the current process when command does NOT match', () => {
+    expect(isProcessAlive(process.pid, 'NotARealBinary123')).toBe(false);
+  });
+
+  it('returns true for pid 0 (sentinel for "attached, not owned")', () => {
+    expect(isProcessAlive(0)).toBe(true);
+  });
+
+  it('returns false for a definitely-dead pid', () => {
+    expect(isProcessAlive(999999)).toBe(false);
+  });
+});

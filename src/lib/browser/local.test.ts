@@ -51,7 +51,8 @@ describe('connectLocal', () => {
       9335, // must be the endpoint port, not any other port
       expect.anything(),
       undefined,
-      undefined
+      undefined,
+      false // isElectron defaults to false for chrome
     );
   });
 
@@ -98,5 +99,55 @@ describe('connectLocal', () => {
       /kill 1234/
     );
     expect(launchBrowser).not.toHaveBeenCalled();
+  });
+
+  // Regression: a `cdp://127.0.0.1:N` profile must not silently drive the
+  // remote browser sitting on the far end of an SSH tunnel. Verified before
+  // CDP connect — `verifyBrowserIdentity` only checks what comes back over
+  // the wire, so it happily accepts the remote browser's identity.
+  it('refuses to attach when an SSH tunnel holds the local port', async () => {
+    const profile = makeProfile({ browser: 'comet', endpoints: ['cdp://127.0.0.1:9200'] });
+
+    vi.mocked(getPortOccupant).mockReturnValue({ pid: 40117, command: 'ssh' });
+    // discoverBrowserWsUrl WOULD succeed (mac-mini's Comet/Chrome responds
+    // through the tunnel) — make sure we bail before we even ask.
+    vi.mocked(discoverBrowserWsUrl).mockResolvedValue({
+      wsUrl: 'ws://localhost:9200/devtools/browser/abc',
+      browser: 'chrome',
+    });
+
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+      /forwarding to a remote host/
+    );
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+      /kill 40117/
+    );
+    expect(discoverBrowserWsUrl).not.toHaveBeenCalled();
+    expect(launchBrowser).not.toHaveBeenCalled();
+  });
+
+  it('detects autossh and socat as tunnel processes too', async () => {
+    const profile = makeProfile({ endpoints: ['cdp://127.0.0.1:9200'] });
+
+    vi.mocked(getPortOccupant).mockReturnValue({ pid: 12, command: 'autossh' });
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+      /autossh.*forwarding to a remote host/s
+    );
+
+    vi.mocked(getPortOccupant).mockReturnValue({ pid: 34, command: 'socat' });
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+      /socat.*forwarding to a remote host/s
+    );
+  });
+
+  it('tunnel-process check is case-insensitive', async () => {
+    const profile = makeProfile({ endpoints: ['cdp://127.0.0.1:9200'] });
+
+    // Different platforms (or wrapped binaries) sometimes return "SSH" in
+    // upper-case from lsof. The guard must still catch it.
+    vi.mocked(getPortOccupant).mockReturnValue({ pid: 99, command: 'SSH' });
+    await expect(connectLocal('cdp://127.0.0.1:9200', profile)).rejects.toThrow(
+      /forwarding to a remote host/
+    );
   });
 });

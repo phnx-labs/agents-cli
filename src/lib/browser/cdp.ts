@@ -28,7 +28,15 @@ export class CDPClient {
     sessionId?: string
   ): Promise<T> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('CDP connection not open');
+      // Reached when the underlying browser was killed externally between
+      // the daemon establishing the connection and a CDP call going out.
+      // The service-layer healthcheck normally catches this on the next
+      // `start`, so seeing this in the wild means a request landed against
+      // an in-flight conn that just died — tell the user how to recover.
+      throw new Error(
+        'CDP connection not open — the browser was likely closed externally. ' +
+          'Run `agents browser stop --profile <name>` (or restart the daemon) and try again.'
+      );
     }
 
     const id = ++this.messageId;

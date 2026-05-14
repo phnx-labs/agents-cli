@@ -72,14 +72,39 @@ export async function getProfile(name: string): Promise<BrowserProfile | null> {
 }
 
 /**
- * Find a port in 9222–9399 that is not already claimed by another profile
- * and is not currently in use by any OS process.
+ * Compute the LOCAL port a profile will occupy at runtime:
+ *   - `cdp://127.0.0.1:N` → N (we listen on N directly)
+ *   - `ssh://host?port=N` → N (the SSH tunnel binds local N → remote N now)
+ *   - `ws[s]://`, `http[s]://` → undefined (we don't claim a local port)
+ *
+ * This is what callers should compare to detect collisions; the (host,
+ * port) tuple is no longer enough because SSH profiles do compete with
+ * cdp:// profiles for local ports under the new tunnel scheme.
+ */
+export function effectiveLocalPort(profile: BrowserProfile): number | undefined {
+  const presets = getEndpointPresets(profile);
+  const firstName = profile.defaultEndpoint && presets[profile.defaultEndpoint]
+    ? profile.defaultEndpoint
+    : Object.keys(presets)[0];
+  if (!firstName) return undefined;
+  const target = presets[firstName].target;
+  let url: URL;
+  try { url = new URL(target); } catch { return undefined; }
+  if (url.protocol !== 'cdp:' && url.protocol !== 'ssh:') return undefined;
+  return parseEndpointUrl(target)?.port;
+}
+
+/**
+ * Find a port in 9222–9399 that is not already claimed by ANY existing
+ * profile (cdp:// or ssh://) and is not in use by any OS process. The
+ * SSH change to bind locally on `?port=N` means we no longer get to
+ * skip remote profiles in this scan.
  */
 export async function findFreeProfilePort(): Promise<number> {
   const profiles = await listProfiles();
   const usedByProfile = new Set<number>();
   for (const p of profiles) {
-    const port = extractConfiguredPort(p);
+    const port = effectiveLocalPort(p);
     if (port !== undefined) usedByProfile.add(port);
   }
 
@@ -103,16 +128,21 @@ export async function createProfile(profile: BrowserProfile): Promise<void> {
     throw new Error(`Profile "${profile.name}" already exists`);
   }
 
-  // Check for port collision with existing profiles
-  const newPort = extractConfiguredPort(profile);
-  if (newPort !== undefined && meta.browser) {
+  // Collision check. Every CDP/SSH profile ends up listening on (or
+  // tunneling to) the same LOCAL port number as the one configured in the
+  // endpoint URL — SSH profiles now reuse `?port=N` locally so we no
+  // longer need to scope by host. Two profiles that would need the same
+  // local port can't both run at the same time.
+  const newLocal = effectiveLocalPort(profile);
+  if (newLocal !== undefined && meta.browser) {
     for (const [existingName, existingConfig] of Object.entries(meta.browser)) {
       const existingProfile = configToProfile(existingName, existingConfig);
-      const existingPort = extractConfiguredPort(existingProfile);
-      if (existingPort === newPort) {
+      const existingLocal = effectiveLocalPort(existingProfile);
+      if (existingLocal === newLocal) {
         throw new Error(
-          `Port ${newPort} is already used by profile "${existingName}". ` +
-            `Each profile must own a unique port. Use a different port or omit --endpoint to auto-assign.`
+          `Local port ${newLocal} is already used by profile "${existingName}". ` +
+            `Each profile must own a unique local port (SSH tunnels now bind ` +
+            `to their configured port locally too). Pick a different port.`
         );
       }
     }
@@ -212,24 +242,91 @@ export function resolveEndpoint(
 }
 
 /**
- * Extract the port intended by the profile's default endpoint.
+ * Extract the (host, port) pair intended by the profile's default endpoint.
  * Returns undefined for endpoint shapes that don't carry a port (e.g. ws:// without one).
+ *
+ * Ports are scoped by host: a `cdp://127.0.0.1:9222` profile (local Chrome on
+ * this machine) and an `ssh://mac-mini:9222` profile (Comet on mac-mini)
+ * point at different physical ports — the host disambiguates them.
+ *
+ * Accepts both `scheme://host:port` and `scheme://host?port=N` shapes (the
+ * latter is the documented form in `types.ts` for `ssh://`). Without this,
+ * `ssh://mac-mini?port=18805` would silently fall back to 9222 and every
+ * `?port=`-style SSH profile would collide on creation.
  */
-export function extractConfiguredPort(profile: BrowserProfile): number | undefined {
+export function extractConfiguredEndpoint(
+  profile: BrowserProfile
+): { host: string; port: number } | undefined {
   const presets = getEndpointPresets(profile);
   const firstName = profile.defaultEndpoint && presets[profile.defaultEndpoint]
     ? profile.defaultEndpoint
     : Object.keys(presets)[0];
   if (!firstName) return undefined;
-  const endpoint = presets[firstName].target;
+  return parseEndpointUrl(presets[firstName].target);
+}
+
+/**
+ * Shared endpoint parser used by both the collision-detection code path and
+ * the connection drivers. Returning a single normalized `(host, port)` here
+ * keeps `extractConfiguredEndpoint` and the SSH driver from drifting on URL
+ * conventions (which is how `?port=N` ended up being silently ignored).
+ */
+export function parseEndpointUrl(
+  endpoint: string
+): { host: string; port: number } | undefined {
   let url: URL;
   try {
     url = new URL(endpoint);
   } catch {
     return undefined;
   }
-  if (url.port) return parseInt(url.port, 10);
-  if (url.protocol === 'cdp:') return 9222;
-  // SSH endpoints tunnel to a remote port — they don't own a local port
+  const host = normalizeHost(url.hostname, url.protocol);
+  if (!host) return undefined;
+  const port = extractPortFromUrl(url);
+  if (port !== undefined) return { host, port };
+  // SSH endpoints tunnel to a remote port AND bind that same port locally,
+  // so they do "own" a local port — the host-scoped collision check used
+  // to disagree, but we want the local-port-scoped semantics now.
+  if (url.protocol === 'cdp:' || url.protocol === 'ssh:') return { host, port: 9222 };
   return undefined;
+}
+
+function extractPortFromUrl(url: URL): number | undefined {
+  if (url.port) {
+    const n = parseInt(url.port, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  // `scheme://host?port=N` — the form documented for SSH endpoints in
+  // `types.ts`. WHATWG URL parsing surfaces it via searchParams only.
+  const qp = url.searchParams.get('port');
+  if (qp) {
+    const n = parseInt(qp, 10);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+/**
+ * Extract the port intended by the profile's default endpoint.
+ * Returns undefined for endpoint shapes that don't carry a port (e.g. ws:// without one).
+ *
+ * Note: this loses the host dimension — for collision detection use
+ * `extractConfiguredEndpoint` instead, which returns the (host, port) pair.
+ */
+export function extractConfiguredPort(profile: BrowserProfile): number | undefined {
+  return extractConfiguredEndpoint(profile)?.port;
+}
+
+function normalizeHost(hostname: string, protocol: string): string | undefined {
+  if (!hostname) {
+    // cdp:// and ssh:// without an explicit host imply localhost.
+    if (protocol === 'cdp:' || protocol === 'ssh:') return '127.0.0.1';
+    return undefined;
+  }
+  if (hostname === 'localhost') return '127.0.0.1';
+  return hostname;
+}
+
+export function isLocalHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
 }

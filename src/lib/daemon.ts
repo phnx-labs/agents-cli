@@ -180,6 +180,23 @@ export async function runDaemon(): Promise<void> {
     log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
   }
 
+  // Before the BrowserService comes up, reap browser + tunnel processes
+  // spawned by previous daemons that are no longer alive. Without this,
+  // a daemon hard-crash (SIGKILL, OOM) would leak every browser and SSH
+  // tunnel it had open — and the next session would either hijack those
+  // (cdp:// profile silently driven via stale ssh tunnel) or fail to
+  // bind because the ports are still claimed.
+  try {
+    const { reapOrphanedProcesses } = await import('./browser/runtime-state.js');
+    const result = reapOrphanedProcesses();
+    if (result.reaped > 0) {
+      log('INFO', `Reaped ${result.reaped} orphan process(es) from prior daemon(s)`);
+      for (const d of result.details) log('INFO', `  ${d}`);
+    }
+  } catch (err) {
+    log('ERROR', `Orphan reaper failed: ${(err as Error).message}`);
+  }
+
   const browserService = new BrowserService();
   const browserIPC = new BrowserIPCServer(browserService);
   try {
@@ -270,6 +287,13 @@ WantedBy=default.target`;
 }
 
 function getAgentsBinPath(): string {
+  // Prefer the binary actively executing this code. `which agents` returns
+  // whatever happens to be first on PATH, which means a side-by-side dev
+  // build at ~/.local/bin would silently spawn the registry-installed
+  // daemon and run stale code. process.argv[1] is the absolute path of
+  // the JS entrypoint the user actually invoked.
+  const argv1 = process.argv[1];
+  if (argv1 && fs.existsSync(argv1)) return argv1;
   try {
     return execSync('which agents', { encoding: 'utf-8' }).trim();
   } catch {
@@ -313,13 +337,18 @@ function startDaemonLocked(): { pid: number | null; method: string } {
       try {
         execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
       } catch { /* not loaded, expected */ }
-      execFileSync('launchctl', ['load', plistPath], { encoding: 'utf-8' });
-
+      // launchctl prints `Load failed:` and exits 0 when the label is in a
+      // stuck state from a prior session — so a zero exit code isn't proof
+      // of success. If no pid materializes within the window, give up on
+      // launchd and fall through to a plain detached spawn.
+      execFileSync('launchctl', ['load', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
       const pid = waitForPid(3000);
-      return { pid, method: 'launchd' };
+      if (pid) return { pid, method: 'launchd' };
+      // launchctl claimed success but nothing ran. Fall through.
     } catch {
-      return startDetached();
+      // load threw — fall through to detached spawn
     }
+    return startDetached();
   }
 
   if (platform === 'linux') {

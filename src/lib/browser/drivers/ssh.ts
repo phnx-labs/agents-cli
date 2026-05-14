@@ -1,7 +1,9 @@
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, execSync, type ChildProcess } from 'child_process';
 import * as net from 'net';
 import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.js';
-import { allocatePort } from '../chrome.js';
+import { getPortOccupant } from '../chrome.js';
+import { parseEndpointUrl } from '../profiles.js';
+import { writeProfileRuntime, clearProfileRuntime } from '../runtime-state.js';
 import type { BrowserProfile } from '../types.js';
 
 export interface SSHConnection {
@@ -22,9 +24,34 @@ export async function connectSSH(
   }
 
   const user = url.username || process.env.USER || 'root';
-  const host = url.hostname;
-  const remotePort = url.port ? parseInt(url.port, 10) : 9222;
-  const localPort = allocatePort();
+  // Use the shared parser so the documented `ssh://host?port=N` form works
+  // identically to `ssh://host:N`. Previously `url.port` alone meant every
+  // `?port=`-style profile silently fell back to 9222.
+  const parsed = parseEndpointUrl(endpoint);
+  if (!parsed) {
+    throw new Error(`Could not extract host:port from SSH endpoint: ${endpoint}`);
+  }
+  const host = parsed.host;
+  const remotePort = parsed.port;
+
+  // Bind the tunnel to the SAME local port the user configured. Using an
+  // allocated port instead made `status` print confusing rows like
+  // `port 9200 (configured 10005)` and made it impossible to predict which
+  // local port a profile would land on. Now `ssh://host?port=N` => local N.
+  const localPort = remotePort;
+
+  // Preflight: if the local port is busy with something that isn't our
+  // own SSH tunnel for this very target, bail with a clear error. Letting
+  // ssh -L race ahead would either silently succeed (binding to a second
+  // port via fail-safe) or fail with cryptic stderr.
+  const occupant = getPortOccupant(localPort);
+  if (occupant && !isOwnTunnel(occupant.pid, host, remotePort)) {
+    throw new Error(
+      `Local port ${localPort} (needed for SSH tunnel to ${host}:${remotePort}) ` +
+        `is already in use by ${occupant.command} (pid ${occupant.pid}). ` +
+        `Either kill that process (\`kill ${occupant.pid}\`) or change the profile's port.`
+    );
+  }
 
   try {
     await ensureRemoteBrowser(user, host, profile.browser, remotePort, profile.binary);
@@ -32,7 +59,13 @@ export async function connectSSH(
     // Browser may already be running, continue
   }
 
-  let tunnel = await startSSHTunnel(user, host, localPort, remotePort);
+  let tunnel: ChildProcess;
+  if (occupant) {
+    // Reuse the existing tunnel rather than spawning a duplicate.
+    tunnel = { pid: occupant.pid, kill: () => { try { process.kill(occupant.pid); } catch { /* gone */ } } } as ChildProcess;
+  } else {
+    tunnel = await startSSHTunnel(user, host, localPort, remotePort);
+  }
 
   try {
     await waitForPort(localPort, 8000);
@@ -51,13 +84,29 @@ export async function connectSSH(
   const cdp = new CDPClient();
   await cdp.connect(wsUrl);
 
+  // Record the tunnel in the profile's runtime so a future daemon — or
+  // the orphan reaper after a crash — can find and clean it up. The
+  // `kind: 'tunnel'` flag distinguishes it from a locally-launched
+  // browser process.
+  const tunnelPid = tunnel.pid ?? 0;
+  if (tunnelPid > 0) {
+    writeProfileRuntime(profile.name, {
+      pid: 0,
+      port: localPort,
+      command: 'ssh',
+      kind: 'tunnel',
+      tunnelPid,
+    });
+  }
+
   return {
     cdp,
     port: localPort,
-    pid: tunnel.pid || 0,
+    pid: tunnelPid,
     cleanup: () => {
       cdp.close();
       tunnel.kill();
+      clearProfileRuntime(profile.name);
     },
   };
 }
@@ -214,4 +263,28 @@ function runSSHCommand(user: string, host: string, cmd: string): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Identify whether a pid listening on our target local port is an SSH
+ * tunnel WE would have spawned for `host:remotePort`. Used so that two
+ * agents-browser invocations of the same SSH profile share a tunnel
+ * rather than failing the second one with "port in use".
+ *
+ * Best-effort match against the ssh -L command line via `ps`. If we
+ * can't read the cmd or the args don't look like ours, treat as not-ours.
+ */
+function isOwnTunnel(pid: number, host: string, remotePort: number): boolean {
+  try {
+    const out = execSync(`ps -p ${pid} -o command=`, {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+    if (!out.startsWith('ssh')) return false;
+    if (!out.includes(host)) return false;
+    if (!out.includes(`:${remotePort}`) && !out.includes(`:127.0.0.1:${remotePort}`)) return false;
+    return true;
+  } catch {
+    return false;
+  }
 }

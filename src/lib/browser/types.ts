@@ -135,7 +135,8 @@ export type IPCAction =
   | 'set-download-path'
   | 'wait-download'
   | 'upload'
-  | 'getAppLogs';
+  | 'getAppLogs'
+  | 'version';
 
 export interface IPCRequest {
   action: IPCAction;
@@ -246,6 +247,12 @@ export interface IPCResponse {
   uploadMode?: 'input' | 'drop' | 'chooser';
   // App logs
   appLogs?: any[];
+  // Version handshake — daemon answers with the package version it was
+  // built from so the client can warn when the daemon is older than the
+  // caller (the failure mode that produced this whole patch series: a
+  // launchd-managed registry daemon silently serving old code to a
+  // dev-build CLI client).
+  version?: string;
 }
 
 export interface ConsoleEntry {

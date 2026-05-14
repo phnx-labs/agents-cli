@@ -4,6 +4,7 @@ import * as path from 'path';
 import { getHelpersDir } from '../state.js';
 import { BrowserService } from './service.js';
 import { startDaemon } from '../daemon.js';
+import { getCliVersion } from '../version.js';
 import type { IPCRequest, IPCResponse, RefNodeJson } from './types.js';
 
 const SOCKET_NAME = 'browser.sock';
@@ -79,6 +80,10 @@ export class BrowserIPCServer {
 
   private async handleRequest(request: IPCRequest): Promise<IPCResponse> {
     switch (request.action) {
+      case 'version': {
+        return { ok: true, version: getCliVersion() };
+      }
+
       case 'start': {
         if (!request.profile) {
           return { ok: false, error: 'Profile required' };
@@ -412,7 +417,45 @@ export class BrowserIPCServer {
   }
 }
 
+let versionCheckedThisProcess = false;
+
+/**
+ * Check the daemon's version against ours and warn loudly when they
+ * differ. Fires at most once per CLI process — successive calls in the
+ * same `agents browser ...` invocation are cheap. The whole reason this
+ * code exists: a launchd-managed registry daemon kept serving stale code
+ * to a dev-build CLI for an entire session and nothing surfaced it.
+ */
+async function maybeWarnVersionMismatch(): Promise<void> {
+  if (versionCheckedThisProcess) return;
+  versionCheckedThisProcess = true;
+  try {
+    const resp = await sendRawIPCRequest({ action: 'version' });
+    const daemon = resp.version;
+    const client = getCliVersion();
+    if (!daemon || daemon === 'unknown' || daemon === client) return;
+    process.stderr.write(
+      `\nwarning: browser daemon is on ${daemon} but this CLI is on ${client}.\n` +
+        `         Run \`agents daemon restart\` to load the current code.\n\n`
+    );
+  } catch {
+    // daemon might be an older build that doesn't speak 'version' — that's
+    // itself a hint, but a noisy one. Stay silent on this path.
+  }
+}
+
 export async function sendIPCRequest(request: IPCRequest): Promise<IPCResponse> {
+  const result = await sendRawIPCRequest(request);
+  // Run the version check after the user's request returns — keeps the
+  // critical path zero-overhead and ensures `start` doesn't get blocked
+  // on a daemon-restart warning that the user hasn't read yet.
+  if (request.action !== 'version') {
+    maybeWarnVersionMismatch().catch(() => {});
+  }
+  return result;
+}
+
+async function sendRawIPCRequest(request: IPCRequest): Promise<IPCResponse> {
   const socketPath = getSocketPath();
 
   if (!fs.existsSync(socketPath)) {

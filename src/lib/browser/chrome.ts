@@ -5,6 +5,7 @@ import * as os from 'os';
 import { getProfileRuntimeDir } from './profiles.js';
 import { discoverBrowserWsUrl } from './cdp.js';
 import { readBundle, resolveBundleEnv, bundleExists } from '../secrets/bundles.js';
+import { writeProfileRuntime, readProfileRuntime } from './runtime-state.js';
 import type { ChromeOptions } from './types.js';
 
 import type { BrowserType } from './types.js';
@@ -87,13 +88,31 @@ export async function launchBrowser(
   port: number,
   options: ChromeOptions = {},
   secrets?: string,
-  customBinary?: string
+  customBinary?: string,
+  // `electron: true` distinguishes Notion / VS Code-style apps from
+  // regular Chrome — purely informational, stored in meta.json so the
+  // orphan reaper and `agents browser status` can label processes.
+  isElectron: boolean = false
 ): Promise<LaunchResult> {
   const browserPath = findBrowserPath(browserType, customBinary);
 
   const runtimeDir = getProfileRuntimeDir(profileName);
   const userDataDir = path.join(runtimeDir, 'chrome-data');
   fs.mkdirSync(userDataDir, { recursive: true });
+
+  // First-launch seed: stamp the user-data-dir's Default/Preferences with
+  // the agents-cli profile name so Chromium's UI shows "<profile>" instead
+  // of its default "Person 1". Done only when the file doesn't exist —
+  // subsequent launches inherit whatever Chrome wrote in the meantime.
+  seedDefaultProfileName(userDataDir, profileName);
+
+  // Chromium on macOS coordinates instances via the SingletonLock file
+  // *inside* each user-data-dir. Direct binary spawn with a fresh
+  // --user-data-dir creates a fully independent process — the user's
+  // normal browser (running under their default user-data-dir) and our
+  // sandboxed one coexist as two real processes. The macOS Dock collapses
+  // them into one icon per .app bundle, which makes it look like a single
+  // instance, but `ps -ww` will show both.
 
   const viewport = options.viewport ?? { width: 1512, height: 982 };
   const args = [
@@ -103,6 +122,12 @@ export async function launchBrowser(
     '--disable-background-timer-throttling',
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
+    // First-run + default-browser modals block automation: when targetFilter
+    // matches by URL, the onboarding page (`chrome://welcome/`) isn't a
+    // match and start fails with "no page target". Suppress them.
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-features=DefaultBrowserSetting,ChromeWhatsNewUI',
     ...(options.headless ? ['--headless=new'] : []),
     `--window-size=${viewport.width},${viewport.height}`,
     ...(viewport.x !== undefined && viewport.y !== undefined
@@ -130,8 +155,13 @@ export async function launchBrowser(
   child.unref();
 
   const pid = child.pid!;
-  fs.writeFileSync(path.join(runtimeDir, 'pid'), String(pid));
-  fs.writeFileSync(path.join(runtimeDir, 'port'), String(port));
+  writeProfileRuntime(profileName, {
+    pid,
+    port,
+    command: path.basename(browserPath),
+    userDataDir,
+    kind: isElectron ? 'electron' : 'browser',
+  });
 
   let wsUrl: string | null = null;
   for (let i = 0; i < 30; i++) {
@@ -168,36 +198,32 @@ export function killChrome(pid: number): void {
 export function getRunningChromeInfo(
   profileName: string
 ): { pid: number; port: number } | null {
-  const runtimeDir = getProfileRuntimeDir(profileName);
-  const pidFile = path.join(runtimeDir, 'pid');
-  const portFile = path.join(runtimeDir, 'port');
-
-  if (!fs.existsSync(pidFile) || !fs.existsSync(portFile)) {
-    return null;
-  }
-
-  const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-  const port = parseInt(fs.readFileSync(portFile, 'utf-8').trim(), 10);
-
-  if (!isProcessRunning(pid)) {
-    fs.unlinkSync(pidFile);
-    fs.unlinkSync(portFile);
-    return null;
-  }
-
-  return { pid, port };
+  // Delegate to runtime-state, which auto-cleans stale files and verifies
+  // the live pid still runs the command we recorded — so a recycled pid
+  // doesn't masquerade as our browser.
+  const rt = readProfileRuntime(profileName);
+  if (!rt) return null;
+  return { pid: rt.pid, port: rt.port };
 }
 
-function isProcessRunning(pid: number): boolean {
+/**
+ * Stamp `<userDataDir>/Default/Preferences` with our profile name so
+ * Chrome's UI labels the window with the agents-cli name rather than the
+ * default "Person 1". Only writes when the file is absent (first launch).
+ * Best-effort: any I/O hiccup is silently ignored; missing the rename is
+ * cosmetic, not functional.
+ */
+function seedDefaultProfileName(userDataDir: string, profileName: string): void {
+  const defaultDir = path.join(userDataDir, 'Default');
+  const prefsPath = path.join(defaultDir, 'Preferences');
+  if (fs.existsSync(prefsPath)) return;
   try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err: any) {
-    // EPERM means the process exists but we lack permission to signal it —
-    // treat as alive. ESRCH means the process does not exist.
-    if (err && err.code === 'EPERM') return true;
-    return false;
-  }
+    fs.mkdirSync(defaultDir, { recursive: true });
+    fs.writeFileSync(
+      prefsPath,
+      JSON.stringify({ profile: { name: profileName } })
+    );
+  } catch { /* not critical */ }
 }
 
 function sleep(ms: number): Promise<void> {
