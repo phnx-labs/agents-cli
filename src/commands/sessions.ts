@@ -860,7 +860,7 @@ async function runCloudSessions(query: string | undefined, options: SessionsOpti
   const cachedSpinner = options.json ? null : ora('Fetching session...').start();
   let cachedPath: string;
   try {
-    cachedPath = await ensureCloudSessionCached(meta.id, meta.filePath);
+    cachedPath = await ensureCloudSessionCached(meta.id);
   } catch (err: any) {
     cachedSpinner?.stop();
     console.error(chalk.red(`Failed to fetch session: ${err?.message || err}`));

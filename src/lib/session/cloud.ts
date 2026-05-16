@@ -20,6 +20,7 @@ import { getCacheDir } from '../state.js';
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 const CLOUD_CACHE_DIR = path.join(getCacheDir(), 'cloud-runs');
+const CLOUD_EXECUTION_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
 interface UserYaml {
   session?: {
@@ -69,6 +70,27 @@ function agentToFormat(agent: string): SessionAgentId | null {
   return null;
 }
 
+export function assertContained(candidate: string, rootDir: string): string {
+  const root = path.resolve(rootDir);
+  const resolved = path.resolve(root, candidate);
+  if (!resolved.startsWith(root + path.sep)) {
+    throw new Error(`Path escapes cloud session cache: ${candidate}`);
+  }
+  return resolved;
+}
+
+export function validateCloudExecutionId(executionId: string): string {
+  if (!CLOUD_EXECUTION_ID_RE.test(executionId)) {
+    throw new Error(`Invalid cloud execution_id: ${JSON.stringify(executionId)}`);
+  }
+  return executionId;
+}
+
+function cachePathForExecution(executionId: string, agent: SessionAgentId): string {
+  const id = validateCloudExecutionId(executionId);
+  return assertContained(path.join(id, `session.${agent}.jsonl`), CLOUD_CACHE_DIR);
+}
+
 /**
  * List cloud executions the user has captured sessions for. Includes
  * completed + needs_review + failed; an empty session_path means capture
@@ -90,14 +112,14 @@ export async function discoverCloudSessions(options?: {
   for (const row of rows) {
     const agent = agentToFormat(row.agent);
     if (!agent) continue;
-    const id = row.execution_id;
+    const id = validateCloudExecutionId(row.execution_id);
     const timestamp = row.updated_at || row.created_at || new Date().toISOString();
     const project = row.repo_owner && row.repo_name ? `${row.repo_owner}/${row.repo_name}` : undefined;
 
     // filePath doubles as the sink path for the cached jsonl. parseSession
     // dispatches on detectAgent which recognizes the `session.<format>.jsonl`
     // suffix — so the local cache file name must preserve it.
-    const filePath = path.join(CLOUD_CACHE_DIR, id, `session.${agent}.jsonl`);
+    const filePath = cachePathForExecution(id, agent);
 
     out.push({
       id,
@@ -124,8 +146,10 @@ export async function ensureCloudSessionCached(
   executionId: string,
   destPath?: string,
 ): Promise<string> {
+  const id = validateCloudExecutionId(executionId);
+  const callerPath = destPath ? assertContained(destPath, CLOUD_CACHE_DIR) : undefined;
   const token = readToken();
-  const res = await api('GET', `/api/v1/cloud-runs/${encodeURIComponent(executionId)}/session.jsonl`, token);
+  const res = await api('GET', `/api/v1/cloud-runs/${encodeURIComponent(id)}/session.jsonl`, token);
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error(`session.jsonl fetch ${res.status}: ${body.slice(0, 200)}`);
@@ -135,7 +159,7 @@ export async function ensureCloudSessionCached(
     throw new Error(`Unknown X-Session-Format on cloud response: "${format}"`);
   }
 
-  const finalPath = destPath ?? path.join(CLOUD_CACHE_DIR, executionId, `session.${format}.jsonl`);
+  const finalPath = callerPath ?? cachePathForExecution(id, format as SessionAgentId);
   fs.mkdirSync(path.dirname(finalPath), { recursive: true });
   const body = Buffer.from(await res.arrayBuffer());
   fs.writeFileSync(finalPath, body);
@@ -144,7 +168,9 @@ export async function ensureCloudSessionCached(
 
 /** True if filePath points into the cloud session cache dir. */
 export function isCloudSessionPath(filePath: string): boolean {
-  return filePath.startsWith(CLOUD_CACHE_DIR);
+  const root = path.resolve(CLOUD_CACHE_DIR);
+  const resolved = path.resolve(filePath);
+  return resolved.startsWith(root + path.sep);
 }
 
 /** Extract execution_id from a cloud cache path. */
@@ -152,5 +178,9 @@ export function executionIdFromCloudPath(filePath: string): string | null {
   if (!isCloudSessionPath(filePath)) return null;
   const rel = path.relative(CLOUD_CACHE_DIR, filePath);
   const parts = rel.split(path.sep);
-  return parts[0] || null;
+  try {
+    return parts[0] ? validateCloudExecutionId(parts[0]) : null;
+  } catch {
+    return null;
+  }
 }
