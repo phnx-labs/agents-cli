@@ -38,6 +38,12 @@ export interface ImportBinaryResult {
   resolvedFromPath?: string;
 }
 
+const IMPORT_VERSION_RE = /^(?:latest|[A-Za-z0-9._+-]{1,64})$/;
+
+export function isValidImportVersion(version: string): boolean {
+  return IMPORT_VERSION_RE.test(version);
+}
+
 /**
  * Move an agent's config dir into the managed version structure and symlink it
  * back to its original location. Sets the imported version as the global
@@ -50,6 +56,10 @@ export async function importAgentConfig(
   agentId: AgentId,
   version: string
 ): Promise<ImportConfigResult> {
+  if (!isValidImportVersion(version)) {
+    return { success: false, error: `Invalid version: ${JSON.stringify(version)}` };
+  }
+
   const agent = AGENTS[agentId];
   const configDir = agent.configDir;
   const versionsDir = getVersionsDir();

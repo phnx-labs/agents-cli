@@ -36,6 +36,7 @@ import {
   finalizeImport,
   importAgentBinary,
   importAgentConfig,
+  isValidImportVersion,
   resolvePackageDirFromBinary,
 } from '../lib/import.js';
 import { isPromptCancelled, isInteractiveTerminal } from './utils.js';
@@ -116,6 +117,11 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   if (!version) {
     console.error(chalk.red(`Could not determine version for ${agentLabel(agentId)}.`));
     console.error(chalk.gray('Pass --version <version> explicitly.'));
+    process.exit(1);
+  }
+  if (!isValidImportVersion(version)) {
+    console.error(chalk.red(`Invalid version: ${version}`));
+    console.error(chalk.gray('Version must be "latest" or 1-64 letters, numbers, dots, underscores, plus signs, or hyphens.'));
     process.exit(1);
   }
 
