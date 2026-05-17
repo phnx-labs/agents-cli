@@ -23,11 +23,20 @@ function getCentralHooksDir(): string { return getUserHooksDir(); }
  * Resolve a hook script's absolute path. Checks user dir first, then enabled
  * extra repos in insertion order, then system dir. Returns null if not found.
  */
-function resolveHookScriptPath(script: string): string | null {
+function resolveContainedHookPath(hooksRoot: string, script: string): string | null {
+  const resolvedRoot = path.resolve(hooksRoot);
+  const candidate = path.join(hooksRoot, script);
+  const resolved = path.resolve(candidate);
+  if (!resolved.startsWith(resolvedRoot + path.sep)) return null;
+  if (!fs.existsSync(resolved)) return null;
+  return resolved;
+}
+
+export function resolveHookScriptPath(script: string): string | null {
   const extraDirs = getEnabledExtraRepos().map(e => e.dir);
   for (const root of [getUserAgentsDir(), ...extraDirs, getSystemAgentsDir()]) {
-    const candidate = path.join(root, 'hooks', script);
-    if (fs.existsSync(candidate)) return candidate;
+    const resolved = resolveContainedHookPath(path.join(root, 'hooks'), script);
+    if (resolved) return resolved;
   }
   return null;
 }
@@ -694,13 +703,17 @@ export function listCentralHooks(): HookEntry[] {
  */
 export function parseHookManifest(): Record<string, ManifestHook> {
   const merged: Record<string, ManifestHook> = {};
+  const systemHooks: Record<string, ManifestHook> = {};
 
   // System layer: hooks: section of agents.yaml (npm-shipped, separate repo).
   const systemPath = path.join(getSystemAgentsDir(), 'agents.yaml');
   if (fs.existsSync(systemPath)) {
     try {
       const meta = yaml.parse(fs.readFileSync(systemPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
-      if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) merged[name] = def;
+      if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) {
+        systemHooks[name] = def;
+        merged[name] = def;
+      }
     } catch { /* skip unreadable manifest */ }
   }
 
@@ -709,7 +722,15 @@ export function parseHookManifest(): Record<string, ManifestHook> {
   if (fs.existsSync(userMetaPath)) {
     try {
       const meta = yaml.parse(fs.readFileSync(userMetaPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
-      if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) merged[name] = def;
+      if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) {
+        if (systemHooks[name] && def.override !== true) {
+          const action = def.enabled === false ? 'disables' : 'shadows';
+          console.warn(
+            `[agents hooks] User-layer hook '${name}' ${action} system-shipped hook. Set 'override: true' to silence this warning.`,
+          );
+        }
+        merged[name] = def;
+      }
     } catch { /* skip unreadable meta */ }
   }
 
@@ -762,12 +783,11 @@ export function registerHooksToSettings(
     : null;
   const resolveScript = (script: string): string | null => {
     if (overrideRoots) {
-      const candidate = path.join(overrideRoots[0], 'hooks', script);
-      return fs.existsSync(candidate) ? candidate : null;
+      return resolveContainedHookPath(path.join(overrideRoots[0], 'hooks'), script);
     }
     if (localHooksDir) {
-      const local = path.join(localHooksDir, script);
-      if (fs.existsSync(local)) return local;
+      const local = resolveContainedHookPath(localHooksDir, script);
+      if (local) return local;
     }
     return resolveHookScriptPath(script);
   };

@@ -23,6 +23,7 @@ vi.mock('../state.js', () => ({
   get getSystemHooksDir() { return () => path.join(SYSTEM_DIR, 'hooks'); },
   get getUserHooksDir() { return () => path.join(USER_DIR, 'hooks'); },
   get getProjectAgentsDir() { return () => null; },
+  get getEnabledExtraRepos() { return () => []; },
 }));
 
 vi.mock('../agents.js', () => ({
@@ -54,6 +55,7 @@ describe('parseHookManifest layering', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     fs.rmSync(TEST_ROOT, { recursive: true, force: true });
   });
 
@@ -99,6 +101,7 @@ describe('parseHookManifest layering', () => {
   });
 
   it('user entry overrides system entry of the same name', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     fs.writeFileSync(
       path.join(SYSTEM_DIR, 'agents.yaml'),
       'hooks:\n  shared:\n    script: system.sh\n    events: [Stop]\n    timeout: 5\n',
@@ -113,9 +116,13 @@ describe('parseHookManifest layering', () => {
     expect(out['shared'].script).toBe('user.sh');
     expect(out['shared'].events).toEqual(['UserPromptSubmit']);
     expect(out['shared'].timeout).toBe(10);
+    expect(warn).toHaveBeenCalledWith(
+      "[agents hooks] User-layer hook 'shared' shadows system-shipped hook. Set 'override: true' to silence this warning.",
+    );
   });
 
   it('enabled: false in user entry disables a system-shipped hook by name', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     fs.writeFileSync(
       path.join(SYSTEM_DIR, 'agents.yaml'),
       'hooks:\n  enforced:\n    script: enforce.sh\n    events: [Stop]\n',
@@ -128,5 +135,25 @@ describe('parseHookManifest layering', () => {
     );
     const out = parseHookManifest();
     expect(out).not.toHaveProperty('enforced');
+    expect(warn).toHaveBeenCalledWith(
+      "[agents hooks] User-layer hook 'enforced' disables system-shipped hook. Set 'override: true' to silence this warning.",
+    );
+  });
+
+  it('override: true silences the user-layer shadow warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    fs.writeFileSync(
+      path.join(SYSTEM_DIR, 'agents.yaml'),
+      'hooks:\n  shared:\n    script: system.sh\n    events: [Stop]\n',
+      'utf-8'
+    );
+    fs.writeFileSync(
+      path.join(USER_DIR, 'agents.yaml'),
+      'hooks:\n  shared:\n    override: true\n    script: user.sh\n    events: [Stop]\n',
+      'utf-8'
+    );
+    const out = parseHookManifest();
+    expect(out['shared'].script).toBe('user.sh');
+    expect(warn).not.toHaveBeenCalled();
   });
 });

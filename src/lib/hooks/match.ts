@@ -55,6 +55,57 @@ function findProjectRoot(start: string): string | null {
   }
 }
 
+function maxGroupDepth(source: string): number {
+  let depth = 0;
+  let max = 0;
+  let escaped = false;
+  let inClass = false;
+
+  for (const ch of source) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '[') {
+      inClass = true;
+      continue;
+    }
+    if (ch === ']') {
+      inClass = false;
+      continue;
+    }
+    if (inClass) continue;
+    if (ch === '(') {
+      depth += 1;
+      max = Math.max(max, depth);
+    } else if (ch === ')' && depth > 0) {
+      depth -= 1;
+    }
+  }
+
+  return max;
+}
+
+export function isSafeHookRegex(source: string): boolean {
+  if (source.length > 200) return false;
+  if (maxGroupDepth(source) > 3) return false;
+  if (/\((?:\?:)?[^)]*[*+][?+*{,\d}]*[^)]*\)\s*(?:[+*]|\{\d*,?\d*\})/.test(source)) return false;
+  return true;
+}
+
+function compileHookRegex(source: string): RegExp | null {
+  if (!isSafeHookRegex(source)) return null;
+  try {
+    return new RegExp(source);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Decide whether a hook with the given match config should fire on this input.
  * Pure function — no side effects, no IO except git/cwd checks for predicates
@@ -75,12 +126,8 @@ export function shouldFire(matches: HookMatches | undefined, input: HookInput): 
 
   if (matches.prompt_matches !== undefined) {
     const prompt = input.prompt ?? '';
-    let re: RegExp;
-    try {
-      re = new RegExp(matches.prompt_matches);
-    } catch {
-      return false;
-    }
+    const re = compileHookRegex(matches.prompt_matches);
+    if (!re) return false;
     if (!re.test(prompt)) return false;
   }
 
@@ -97,12 +144,8 @@ export function shouldFire(matches: HookMatches | undefined, input: HookInput): 
       typeof input.tool_args === 'string'
         ? input.tool_args
         : JSON.stringify(input.tool_args ?? '');
-    let re: RegExp;
-    try {
-      re = new RegExp(matches.tool_args_match);
-    } catch {
-      return false;
-    }
+    const re = compileHookRegex(matches.tool_args_match);
+    if (!re) return false;
     if (!re.test(serialized)) return false;
   }
 

@@ -1,5 +1,25 @@
-import { describe, it, expect } from 'vitest';
-import { buildDispatchBody } from './rush.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { accountTokensFingerprint, buildDispatchBody, hasRushUploadConsent } from './rush.js';
+
+const ORIGINAL_UPLOAD_ENV = process.env.AGENTS_RUSH_UPLOAD_TOKENS;
+let tmpDir: string;
+
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-consent-test-'));
+  delete process.env.AGENTS_RUSH_UPLOAD_TOKENS;
+});
+
+afterEach(() => {
+  if (ORIGINAL_UPLOAD_ENV === undefined) {
+    delete process.env.AGENTS_RUSH_UPLOAD_TOKENS;
+  } else {
+    process.env.AGENTS_RUSH_UPLOAD_TOKENS = ORIGINAL_UPLOAD_ENV;
+  }
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 
 describe('buildDispatchBody', () => {
   it('single repo sends both singular fields and repos[] for back-compat', () => {
@@ -140,5 +160,33 @@ describe('buildDispatchBody', () => {
     });
     expect(body.strategy).toBe('balanced');
     expect(body.account_manifest).toBeUndefined();
+  });
+
+  it('treats Rush upload consent with a mismatched host as no consent', () => {
+    const fingerprint = accountTokensFingerprint([
+      { version: '2.1.110', credentials_json: '{"accessToken":"abc"}' },
+    ]);
+    const consentPath = path.join(tmpDir, 'rush-consent.json');
+    fs.writeFileSync(consentPath, JSON.stringify({
+      granted_at: '2026-05-16T00:00:00.000Z',
+      granted_by: 'flag',
+      host: 'other.example.com',
+      account_fingerprint: fingerprint,
+    }));
+
+    expect(hasRushUploadConsent(fingerprint, undefined, consentPath)).toBe(false);
+  });
+
+  it('treats old Rush upload consent files without host/account scope as no consent', () => {
+    const fingerprint = accountTokensFingerprint([
+      { version: '2.1.110', credentials_json: '{"accessToken":"abc"}' },
+    ]);
+    const consentPath = path.join(tmpDir, 'rush-consent.json');
+    fs.writeFileSync(consentPath, JSON.stringify({
+      granted_at: '2026-05-16T00:00:00.000Z',
+      granted_by: 'flag',
+    }));
+
+    expect(hasRushUploadConsent(fingerprint, undefined, consentPath)).toBe(false);
   });
 });
