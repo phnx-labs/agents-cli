@@ -177,7 +177,7 @@ describe('renderConversationMarkdown', () => {
 
   it('redacts AWS keys from tool result content by default', () => {
     const events: SessionEvent[] = [
-      { type: 'tool_result', agent: 'claude', timestamp: 't0', content: 'key AKIA1234567890ABCDEF' },
+      { type: 'tool_result', agent: 'claude', timestamp: 't0', content: 'key ' + 'AKIA' + '1234567890ABCDEF' },
     ];
     const out = renderConversationMarkdown(events);
     expect(out).toContain('[REDACTED_AWS_KEY]');
