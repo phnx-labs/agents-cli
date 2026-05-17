@@ -377,7 +377,7 @@ fi
 bold "Publishing $PHNX_PKG@$TARGET..."
 if $PHNX_TARGET_PUBLISHED; then
   yellow "$PHNX_PKG@$TARGET is already on the registry, skipping publish"
-elif ! npm publish --access=public; then
+elif ! npm publish --access=public --provenance; then
   red "publish failed for $PHNX_PKG"
   red "the version commit and tag remain locally; rerun: $0 $TARGET --apply"
   exit 1
@@ -392,7 +392,7 @@ if $SWARMIFY_TARGET_PUBLISHED; then
   yellow "$SWARMIFY_PKG@$TARGET is already on the registry, skipping publish"
 else
   pushd "$SHIM_TMP" >/dev/null
-  if ! npm publish --access=public; then
+  if ! npm publish --access=public --provenance; then
     red "publish failed for $SWARMIFY_PKG"
     red "$PHNX_PKG@$TARGET is published successfully."
     red "to retry the shim manually: rerun: $0 $TARGET --apply"

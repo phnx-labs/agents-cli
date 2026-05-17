@@ -78,7 +78,7 @@ if $SKIP_TESTS; then
 else
   dim "  Running tests"
   TEST_LOG=$(mktemp)
-  if ! bun test >"$TEST_LOG" 2>&1; then
+  if ! bun run test >"$TEST_LOG" 2>&1; then
     echo
     red "  Tests failed"
     cat "$TEST_LOG" >&2

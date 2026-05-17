@@ -28,6 +28,9 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "provenance": true
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/phnx-labs/agents-cli.git"
@@ -73,7 +76,7 @@
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "croner": "^9.0.0",
-    "diff": "^7.0.0",
+    "diff": "^8.0.3",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
     "node-pty": "1.1.0",

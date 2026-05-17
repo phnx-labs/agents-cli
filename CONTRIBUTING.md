@@ -9,10 +9,10 @@ git clone https://github.com/phnx-labs/agents-cli
 cd agents-cli
 bun install
 bun run build
-bun test
+bun run test
 ```
 
-Requires Node.js 18+ and Bun. The `pretest` script rebuilds native modules (`better-sqlite3`) if needed.
+Requires Node.js 22.5+ and Bun. SQLite support uses the built-in `bun:sqlite` and `node:sqlite` modules; there is no native module rebuild step.
 
 ## Project structure
 
@@ -41,7 +41,7 @@ Commands live in `src/commands/`, business logic in `src/lib/`. Tests are coloca
 
 1. **Build and test before submitting:**
    ```bash
-   bun run build && bun test
+   bun run build && bun run test
    ```
 
 2. **Keep PRs focused.** One feature or fix per PR. Don't bundle unrelated changes.

@@ -1,7 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, readFileSync, lstatSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
+
+const { TEST_REAL_HOME } = vi.hoisted(() => {
+  const os = require('os') as typeof import('os');
+  const path = require('path') as typeof import('path');
+  return { TEST_REAL_HOME: path.join(os.tmpdir(), 'agents-cli-sandbox-real-home') };
+});
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    homedir: () => TEST_REAL_HOME,
+  };
+});
+
 import {
   prepareJobHome,
   cleanJobHome,
@@ -299,7 +314,7 @@ describe('symlinkAllowedDirs', () => {
 
   afterEach(() => {
     rmSync(TEST_DIR, { recursive: true, force: true });
-    rmSync(realDir, { recursive: true, force: true });
+    rmSync(TEST_REAL_HOME, { recursive: true, force: true });
   });
 
   it('creates symlink for HOME-relative dirs', () => {

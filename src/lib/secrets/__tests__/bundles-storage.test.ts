@@ -10,11 +10,24 @@
  * itself. End-to-end Keychain wiring is verified via the e2e smoke run.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
+
+const { osMockState } = vi.hoisted(() => ({
+  osMockState: { homedir: '' },
+}));
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  return {
+    ...actual,
+    homedir: () => osMockState.homedir || actual.homedir(),
+  };
+});
+
 import {
   bundleExists,
   deleteBundle,
@@ -387,25 +400,19 @@ describe('renameBundle', () => {
 
 describe('migrateLegacyBundles', () => {
   let tmpHome: string;
-  let originalHome: string | undefined;
 
   beforeEach(() => {
-    originalHome = process.env.HOME;
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-mig-'));
-    process.env.HOME = tmpHome;
+    osMockState.homedir = tmpHome;
   });
 
   afterEach(() => {
-    if (originalHome !== undefined) process.env.HOME = originalHome;
+    osMockState.homedir = '';
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  // The state module captured HOME at import; getUserSecretsDir() returns the
-  // captured path. We can't re-import per test cheaply, so create the legacy
-  // dir at the captured path. Read it back and assert against state.
-  it('moves YAML bundle into keychain and unlinks the file', async () => {
-    const stateMod = await import('../../state.js');
-    const dir = stateMod.getUserSecretsDir();
+  it('moves YAML bundle into keychain and unlinks the file', () => {
+    const dir = path.join(tmpHome, '.agents', 'secrets');
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, 'legacy-bundle.yml');
     fs.writeFileSync(file, yaml.stringify({

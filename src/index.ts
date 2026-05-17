@@ -28,6 +28,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJsonPath = path.join(__dirname, '..', 'package.json');
 const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
 const VERSION = packageJson.version;
+const NPM_PACKAGE_NAME = '@phnx-labs/agents-cli';
+
+interface NpmPackageMetadata {
+  version: string;
+  integrity: string;
+}
 
 // Detect dev/working-tree builds and default the noisy startup steps off.
 // Three cases trip this:
@@ -285,10 +291,44 @@ function saveUpdateCheck(latestVersion: string): void {
   }
 }
 
+/** Fetch the exact latest npm version plus its registry integrity hash. */
+async function fetchLatestNpmPackageMetadata(timeoutMs = 5000): Promise<NpmPackageMetadata> {
+  const response = await fetch(`https://registry.npmjs.org/${NPM_PACKAGE_NAME}/latest`, {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!response.ok) {
+    throw new Error('Could not reach npm registry');
+  }
+
+  const data = await response.json() as {
+    version?: unknown;
+    dist?: { integrity?: unknown };
+  };
+  if (typeof data.version !== 'string' || typeof data.dist?.integrity !== 'string') {
+    throw new Error('npm registry response did not include version and integrity');
+  }
+
+  return { version: data.version, integrity: data.dist.integrity };
+}
+
+function printResolvedPackage(metadata: NpmPackageMetadata): void {
+  console.log(chalk.gray(`Resolved: ${NPM_PACKAGE_NAME}@${metadata.version}`));
+  console.log(chalk.gray(`Integrity: ${metadata.integrity}`));
+}
+
+async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<void> {
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+  const installArgs = ['install', '-g', '@phnx-labs/agents-cli', '--ignore-scripts'];
+  installArgs[2] = `${NPM_PACKAGE_NAME}@${metadata.version}`;
+  await execFileAsync('npm', installArgs);
+}
+
 /** Present an interactive upgrade prompt (TTY) or a one-line hint (non-TTY). */
 async function promptUpgrade(latestVersion: string): Promise<void> {
   if (!isInteractiveTerminal()) {
-    console.error(chalk.yellow(`Update available: ${VERSION} -> ${latestVersion}. Run: npm install -g @phnx-labs/agents-cli@latest`));
+    console.error(chalk.yellow(`Update available: ${VERSION} -> ${latestVersion}. Run: agents upgrade --yes`));
     return;
   }
 
@@ -317,14 +357,26 @@ async function promptUpgrade(latestVersion: string): Promise<void> {
   }
 
   if (answer === 'now') {
-    const { execFile, spawnSync } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
-    const spinner = ora('Upgrading...').start();
+    const { spawnSync } = await import('child_process');
+    let spinner = ora('Resolving package metadata...').start();
     try {
-      await execFileAsync('npm', ['install', '-g', '@phnx-labs/agents-cli@latest']);
-      spinner.succeed(`Upgraded to ${latestVersion}`);
-      await showWhatsNew(VERSION, latestVersion);
+      const metadata = await fetchLatestNpmPackageMetadata();
+      spinner.succeed(`Resolved ${NPM_PACKAGE_NAME}@${metadata.version}`);
+      printResolvedPackage(metadata);
+
+      const approved = await confirm({
+        message: `Install ${NPM_PACKAGE_NAME}@${metadata.version}?`,
+        default: false,
+      });
+      if (!approved) {
+        console.log(chalk.gray('Upgrade cancelled'));
+        return;
+      }
+
+      spinner = ora('Upgrading...').start();
+      await installResolvedPackage(metadata);
+      spinner.succeed(`Upgraded to ${metadata.version}`);
+      await showWhatsNew(VERSION, metadata.version);
       console.log();
       // Re-exec with new version and exit
       const result = spawnSync('agents', process.argv.slice(2), {
@@ -334,7 +386,7 @@ async function promptUpgrade(latestVersion: string): Promise<void> {
       process.exit(result.status ?? 0);
     } catch {
       spinner.fail('Upgrade failed');
-      console.log(chalk.gray('Run manually: npm install -g @phnx-labs/agents-cli@latest'));
+      console.log(chalk.gray('Run manually: agents upgrade --yes'));
     }
     console.log();
   }
@@ -575,19 +627,12 @@ for (const alias of ['jobs', 'cron']) {
 program
     .command('upgrade')
     .description('Upgrade agents-cli to the latest version')
-    .action(async () => {
-      const spinner = ora('Checking for updates...').start();
+    .option('-y, --yes', 'Install without an interactive confirmation prompt')
+    .action(async (options: { yes?: boolean }) => {
+      let spinner = ora('Checking for updates...').start();
       try {
-        const response = await fetch('https://registry.npmjs.org/@phnx-labs/agents-cli/latest', {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!response.ok) {
-          spinner.fail('Could not reach npm registry');
-          process.exit(1);
-        }
-
-        const data = (await response.json()) as { version: string };
-        const latestVersion = data.version;
+        const metadata = await fetchLatestNpmPackageMetadata();
+        const latestVersion = metadata.version;
 
         if (latestVersion === VERSION) {
           spinner.succeed(`Already on latest version (${VERSION})`);
@@ -599,16 +644,26 @@ program
           return;
         }
 
-        spinner.text = `Upgrading ${VERSION} -> ${latestVersion}...`;
-        const { execFile } = await import('child_process');
-        const { promisify } = await import('util');
-        const execFileAsync = promisify(execFile);
-        await execFileAsync('npm', ['install', '-g', '@phnx-labs/agents-cli@latest']);
+        spinner.succeed(`Resolved ${NPM_PACKAGE_NAME}@${latestVersion}`);
+        printResolvedPackage(metadata);
+        if (isInteractiveTerminal() && !options.yes) {
+          const approved = await confirm({
+            message: `Install ${NPM_PACKAGE_NAME}@${latestVersion}?`,
+            default: false,
+          });
+          if (!approved) {
+            console.log(chalk.gray('Upgrade cancelled'));
+            return;
+          }
+        }
+
+        spinner = ora(`Upgrading ${VERSION} -> ${latestVersion}...`).start();
+        await installResolvedPackage(metadata);
         spinner.succeed(`Upgraded to ${latestVersion}`);
         await showWhatsNew(VERSION, latestVersion);
       } catch (err) {
         spinner.fail('Upgrade failed');
-        console.log(chalk.gray('Run manually: npm install -g @phnx-labs/agents-cli@latest'));
+        console.log(chalk.gray('Run manually: agents upgrade --yes'));
       }
     });
 
