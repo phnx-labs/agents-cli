@@ -7,11 +7,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
+import { fileURLToPath } from 'url';
 
 const HOME = os.homedir();
 const SHIMS_DIR = path.join(HOME, '.agents', '.cache', 'shims');
 const SYSTEM_DIR = path.join(HOME, '.agents-system');
 const USER_DIR = path.join(HOME, '.agents');
+const AGENTS_BIN = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+
+function shellQuote(value) {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
 // For local installs, create directories and show a message
 const isGlobalInstall = process.env.npm_config_global || process.argv.includes('-g');
@@ -111,14 +117,14 @@ const exportLine = shellName === 'fish'
   ? `fish_add_path ${SHIMS_DIR}`
   : `export PATH="${SHIMS_DIR}:$PATH"`;
 
-// Shorthands that delegate to `agents <name>` — written unconditionally on install.
+// Shorthands that delegate to the installed agents-cli entrypoint.
 const ALIASES = ['sessions', 'secrets', 'browser', 'pty', 'teams'];
 
 function writeAliasShims() {
   const written = [];
   for (const name of ALIASES) {
     const target = path.join(SHIMS_DIR, name);
-    const script = `#!/bin/sh\nexec agents ${name} "$@"\n`;
+    const script = `#!/bin/sh\nAGENTS_BIN=${shellQuote(AGENTS_BIN)}\nif [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then\n  echo "agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN" >&2\n  exit 127\nfi\nexec "$AGENTS_BIN" ${name} "$@"\n`;
     fs.writeFileSync(target, script, { mode: 0o755 });
     written.push(name);
   }

@@ -373,12 +373,12 @@ describe('shims - generateShimScript', () => {
   test('includes project sync hook in shim', () => {
     const script = generateShimScript('claude');
     expect(script).toContain('find_project_agents_dir');
-    expect(script).toContain('agents sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR"');
+    expect(script).toContain('"$AGENTS_BIN" sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR"');
   });
 
   test('non-@-capable agents get a refresh-rules shim hook', () => {
     const script = generateShimScript('codex');
-    expect(script).toContain('agents refresh-rules --agent "$AGENT" --agent-version "$VERSION"');
+    expect(script).toContain('"$AGENTS_BIN" refresh-rules --agent "$AGENT" --agent-version "$VERSION"');
   });
 
   test('shim does not use --version flag, which collides with the top-level CLI version flag', () => {
@@ -394,9 +394,9 @@ describe('shims - generateShimScript', () => {
 
   test('@-capable agents do NOT get a refresh-rules shim hook', () => {
     const claudeScript = generateShimScript('claude');
-    expect(claudeScript).not.toContain('agents refresh-rules');
+    expect(claudeScript).not.toContain('refresh-rules');
     const geminiScript = generateShimScript('gemini');
-    expect(geminiScript).not.toContain('agents refresh-rules');
+    expect(geminiScript).not.toContain('refresh-rules');
   });
 
   test('scopes Claude keychain auth to the selected version config dir', () => {

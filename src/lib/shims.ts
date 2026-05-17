@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { fileURLToPath } from 'url';
 import { confirm, select } from '@inquirer/prompts';
 import type { AgentId } from './types.js';
 import { getShimsDir, getVersionsDir, getBackupsDir, ensureAgentsDir } from './state.js';
@@ -204,11 +205,21 @@ async function promptConflictStrategy(
  *        .oauth_token file on Linux (keychain-less sandbox fallback).
  *   v11 — when no default is set or the configured version is not installed,
  *         interactively propose the latest already-installed version.
+ *   v12 — helper calls inside generated shims use the absolute agents-cli
+ *         entrypoint instead of PATH-resolved `agents`.
  */
-export const SHIM_SCHEMA_VERSION = 11;
+export const SHIM_SCHEMA_VERSION = 12;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function getAgentsBinForGeneratedShim(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'index.js');
+}
 
 /**
  * Generate the full bash shim script for the given agent. The returned string
@@ -218,6 +229,7 @@ export function generateShimScript(agent: AgentId): string {
   const agentConfig = AGENTS[agent];
   const cliCommand = agentConfig.cliCommand;
   const configDirName = `.${agent}`;
+  const agentsBin = shellQuote(getAgentsBinForGeneratedShim());
   const managedEnv = agent === 'claude'
     ? `
 # Claude stores OAuth credentials in the macOS keychain. Scope them to the
@@ -249,7 +261,7 @@ export CODEX_HOME="$VERSION_DIR/home/${configDirName}"
 # Recompile rules if any rule/preset source has changed since last sync.
 # Fast-path check (~10-20ms) when nothing changed; full recompile only on
 # actual diff. Non-blocking failure — if the refresh errors, we still launch.
-agents refresh-rules --agent "$AGENT" --agent-version "$VERSION" --quiet 2>/dev/null || true
+"$AGENTS_BIN" refresh-rules --agent "$AGENT" --agent-version "$VERSION" --quiet 2>/dev/null || true
 `
     : '';
   const launchArgs = agent === 'codex' ? ' -c check_for_update_on_startup=false' : '';
@@ -261,8 +273,14 @@ agents refresh-rules --agent "$AGENT" --agent-version "$VERSION" --quiet 2>/dev/
 
 AGENTS_SYSTEM_DIR="$HOME/.agents-system"
 AGENTS_USER_DIR="$HOME/.agents"
+AGENTS_BIN=${agentsBin}
 AGENT="${agent}"
 CLI_COMMAND="${cliCommand}"
+
+if [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then
+  echo "agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN" >&2
+  exit 127
+fi
 
 # Find project agents.yaml walking up from cwd (skip $HOME/.agents-system/agents.yaml)
 find_project_version() {
@@ -358,7 +376,7 @@ if [ -z "$VERSION" ]; then
       read -r _ans </dev/tty
       case "$_ans" in
         ""|y|Y)
-          agents use "$AGENT" "$LATEST" >/dev/null 2>&1
+          "$AGENTS_BIN" use "$AGENT" "$LATEST" >/dev/null 2>&1
           VERSION="$LATEST"
           VERSION_SOURCE="default"
           ;;
@@ -399,7 +417,7 @@ if [ ! -x "$BINARY" ]; then
     }
 
     # Run install in background with spinner
-    agents add "$AGENT@$VERSION" --yes >/dev/null 2>&1 &
+    "$AGENTS_BIN" add "$AGENT@$VERSION" --yes >/dev/null 2>&1 &
     install_pid=$!
     spin $install_pid
     wait $install_pid
@@ -420,7 +438,7 @@ if [ ! -x "$BINARY" ]; then
         read -r _ans </dev/tty
         case "$_ans" in
           ""|y|Y)
-            agents use "$AGENT" "$LATEST" >/dev/null 2>&1
+            "$AGENTS_BIN" use "$AGENT" "$LATEST" >/dev/null 2>&1
             VERSION="$LATEST"
             VERSION_DIR="$AGENTS_USER_DIR/.history/versions/$AGENT/$VERSION"
             BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
@@ -445,7 +463,7 @@ fi
 # Sync project-scoped resources into version home if a project .agents/ is present
 PROJECT_AGENTS_DIR=$(find_project_agents_dir)
 if [ -n "$PROJECT_AGENTS_DIR" ]; then
-  agents sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR" --quiet >/dev/null 2>&1
+  "$AGENTS_BIN" sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR" --quiet >/dev/null 2>&1
 fi
 ${refreshRulesCall}${managedEnv}
 

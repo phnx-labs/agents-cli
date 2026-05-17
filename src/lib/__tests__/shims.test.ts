@@ -84,8 +84,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 11 (shim prompts to switch when configured version not installed)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(11);
+  it('is 12 (shim helper calls use an absolute agents-cli entrypoint)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(12);
   });
 });
 
@@ -205,7 +205,7 @@ describe('generateShimScript', () => {
     const script = generateShimScript('claude');
     expect(script).toContain('no default set for $AGENT');
     expect(script).toContain('Set as default and continue?');
-    expect(script).toContain('agents use "$AGENT" "$LATEST"');
+    expect(script).toContain('"$AGENTS_BIN" use "$AGENT" "$LATEST"');
   });
 
   it('proposes switching to latest installed when configured version is missing', () => {
@@ -223,5 +223,25 @@ describe('generateShimScript', () => {
   it('reads answer from /dev/tty not stdin so piped input does not trigger prompt', () => {
     const script = generateShimScript('claude');
     expect(script).toContain('read -r _ans </dev/tty');
+  });
+
+  it('uses an absolute agents-cli entrypoint for helper calls', () => {
+    const script = generateShimScript('codex');
+    const match = script.match(/^AGENTS_BIN='([^']+)'$/m);
+
+    expect(match).not.toBeNull();
+    expect(path.isAbsolute(match![1])).toBe(true);
+    expect(script).toContain('"$AGENTS_BIN" refresh-rules --agent "$AGENT" --agent-version "$VERSION"');
+    expect(script).toContain('"$AGENTS_BIN" use "$AGENT" "$LATEST"');
+    expect(script).toContain('"$AGENTS_BIN" add "$AGENT@$VERSION" --yes');
+    expect(script).toContain('"$AGENTS_BIN" sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR"');
+    expect(script).not.toMatch(/^\s*agents (refresh-rules|use|add|sync)\b/m);
+  });
+
+  it('fails clearly when the embedded agents-cli entrypoint is not executable', () => {
+    const script = generateShimScript('claude');
+    expect(script).toContain('if [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then');
+    expect(script).toContain('agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN');
+    expect(script).toContain('exit 127');
   });
 });
