@@ -12,7 +12,7 @@ bun run build
 bun test
 ```
 
-Requires Node.js 18+ and Bun. The `pretest` script rebuilds native modules (`better-sqlite3`) if needed.
+Requires Node.js 22.5+ and Bun. The `pretest` script rebuilds native modules (`better-sqlite3`) if needed.
 
 ## Project structure
 

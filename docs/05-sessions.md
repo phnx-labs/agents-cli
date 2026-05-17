@@ -26,7 +26,7 @@ agents sessions [query] [--json] [--since 1h] [--all]
            │
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  1. Open ~/.agents-system/sessions/sessions.db (cached connection)         │
+│  1. Open ~/.agents/.history/sessions/sessions.db (cached connection)       │
 │                                                                     │
 │  2. Parallel incremental scan per agent:                            │
 │     For each on-disk session file:                                  │

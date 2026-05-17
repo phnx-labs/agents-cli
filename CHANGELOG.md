@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.18.6
+
+**Claude**
+
+- Add auto permission mode support for Claude runs.
+- Remove a dead automatic mode flag from the Claude command template.
+
+**Teams**
+
+- Fix the cycle-detection test to accept running or failed teammate status.
+
 ## 1.18.5
 
 **Browser**

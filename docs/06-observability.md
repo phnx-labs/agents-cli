@@ -179,7 +179,7 @@ running process owns this session?" without re-parsing state.
 
 - **Sub-100ms read budgets.** Each `agents` invocation is a Node.js process
   spawn. Read the DB directly with `better-sqlite3` at
-  `~/.agents-system/sessions/sessions.db` — but you give up schema migration safety.
+  `~/.agents/.history/sessions/sessions.db` — but you give up schema migration safety.
 - **Push-based notifications.** The JSON sources are pull-only. For real-time
   events, tail the session JSONL files directly or use agent-native SDKs.
 - **Writing state.** Observability is read-only. To spawn agents, use

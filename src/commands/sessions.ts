@@ -1470,7 +1470,7 @@ function formatAbsoluteTime(isoTimestamp: string): string {
 }
 
 function padRight(s: string, width: number): string {
-  return s.length >= width ? s + ' ' : s + ' '.repeat(width - s.length);
+  return s.length >= width ? s : s + ' '.repeat(width - s.length);
 }
 
 function truncate(s: string, max: number): string {
