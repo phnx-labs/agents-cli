@@ -40,7 +40,7 @@
     "url": "https://github.com/phnx-labs/agents-cli/issues"
   },
   "scripts": {
-    "build": "tsc && rm -rf dist/lib/secrets/AgentsKeychain.app && cp -R bin/AgentsKeychain.app dist/lib/secrets/AgentsKeychain.app",
+    "build": "tsc && rm -rf dist/lib/secrets/AgentsKeychain.app && ([ \"$(uname)\" = \"Darwin\" ] && cp -R bin/AgentsKeychain.app dist/lib/secrets/AgentsKeychain.app || true)",
     "prepublishOnly": "npm run build",
     "postinstall": "node scripts/postinstall.js",
     "dev": "tsx src/index.ts",
