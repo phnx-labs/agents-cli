@@ -1,0 +1,6 @@
+[allowlist]
+description = "Test fixtures that contain fake secret patterns for testing redaction logic"
+paths = [
+  '''src/lib/session/__tests__/render\.test\.ts''',
+  '''src/lib/cloud/__tests__/.*''',
+]
