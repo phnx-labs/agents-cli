@@ -14,7 +14,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, truncate } from './events.js';
 
 /** Agent execution modes controlling tool access and autonomy level. */
-export type ExecMode = 'plan' | 'edit' | 'full';
+export type ExecMode = 'plan' | 'edit' | 'full' | 'auto';
 
 /** Reasoning effort levels passed to agents that support them. 'auto' defers to the agent's default. */
 export type ExecEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
@@ -123,6 +123,7 @@ export interface AgentCommandTemplate {
     plan: string[];
     edit: string[];
     full: string[];
+    auto?: string[];
   };
   jsonFlags?: string[];
   modelFlag?: string;
@@ -139,6 +140,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
       plan: ['--permission-mode', 'plan'],
       edit: ['--permission-mode', 'acceptEdits'],
       full: ['--dangerously-skip-permissions'],
+      auto: ['--permission-mode', 'auto'],
     },
     jsonFlags: ['--output-format', 'stream-json', '--verbose'],
     modelFlag: '--model',
@@ -283,8 +285,8 @@ export function buildExecCommand(options: ExecOptions): string[] {
     }
   }
 
-  // Add mode flags
-  const modeFlags = template.modeFlags[options.mode];
+  // Add mode flags. 'auto' is only defined for claude; other agents fall back to edit flags.
+  const modeFlags = template.modeFlags[options.mode] ?? template.modeFlags.edit;
   cmd.push(...modeFlags);
 
   // Add print/headless flags only when a prompt is provided. Without a prompt
