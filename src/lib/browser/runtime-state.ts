@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { getProfileRuntimeDir, getBrowserRuntimeDir } from './profiles.js';
 
 /**
@@ -290,7 +290,7 @@ export function reapOrphanedProcesses(): { reaped: number; details: string[] } {
 
 function matchesCommand(pid: number, expectedCommand: string): boolean {
   try {
-    const out = execSync(`ps -p ${pid} -o comm=`, {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();

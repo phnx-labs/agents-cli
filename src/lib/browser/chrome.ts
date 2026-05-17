@@ -1,4 +1,4 @@
-import { spawn, execSync } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -236,7 +236,7 @@ export function allocatePort(): number {
 
   for (let port = base; port < max; port++) {
     try {
-      execSync(`lsof -i :${port}`, { stdio: 'ignore' });
+      execFileSync('lsof', ['-i', `:${port}`], { stdio: 'ignore' });
     } catch {
       return port;
     }
@@ -257,7 +257,7 @@ export interface PortOccupant {
  */
 export function getPortOccupant(port: number): PortOccupant | null {
   try {
-    const out = execSync(`lsof -nP -iTCP:${port} -sTCP:LISTEN -Fpcn`, {
+    const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpcn'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     });

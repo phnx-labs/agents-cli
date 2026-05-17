@@ -42,7 +42,12 @@ vi.mock('./profiles.js', async (importOriginal) => {
   };
 });
 
-const { BrowserService, parseSinceUntil, readNewestMatchingFile } = await import('./service.js');
+const {
+  BrowserService,
+  parseSinceUntil,
+  readNewestMatchingFile,
+  readNewestMatchingRemoteFileCommand,
+} = await import('./service.js');
 
 function reset(): void {
   try {
@@ -122,6 +127,14 @@ describe('readNewestMatchingFile', () => {
     const out = readNewestMatchingFile(TEST_LOG_DIR, 'rush-app-', 2);
     const parsed = out.split('\n').filter(Boolean).map((l) => JSON.parse(l));
     expect(parsed).toEqual([{ n: 4 }, { n: 5 }]);
+  });
+});
+
+describe('readNewestMatchingRemoteFileCommand', () => {
+  it('shell-quotes the remote log directory before globbing', () => {
+    const cmd = readNewestMatchingRemoteFileCommand('/tmp/log dir', 'rush-app-', 25);
+    expect(cmd).toContain("'/tmp/log dir'/rush-app-*.jsonl");
+    expect(cmd).toContain('tail -n 25 "$latest"');
   });
 });
 

@@ -7,7 +7,7 @@
  * log output, reload (SIGHUP), and graceful shutdown are handled here.
  */
 
-import { spawn, execSync, execFileSync } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -295,7 +295,7 @@ function getAgentsBinPath(): string {
   const argv1 = process.argv[1];
   if (argv1 && fs.existsSync(argv1)) return argv1;
   try {
-    return execSync('which agents', { encoding: 'utf-8' }).trim();
+    return execFileSync('which', ['agents'], { encoding: 'utf-8' }).trim();
   } catch {
     return 'agents';
   }
@@ -360,9 +360,9 @@ function startDaemonLocked(): { pid: number | null; method: string } {
       }
       fs.writeFileSync(unitPath, generateSystemdUnit(), 'utf-8');
 
-      execSync('systemctl --user daemon-reload', { encoding: 'utf-8' });
-      execSync(`systemctl --user enable ${SYSTEMD_UNIT}`, { encoding: 'utf-8' });
-      execSync(`systemctl --user start ${SYSTEMD_UNIT}`, { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'enable', SYSTEMD_UNIT], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'start', SYSTEMD_UNIT], { encoding: 'utf-8' });
 
       const pid = waitForPid(3000);
       return { pid, method: 'systemd' };
@@ -421,8 +421,8 @@ export function stopDaemon(): boolean {
 
   if (platform === 'linux') {
     try {
-      execSync(`systemctl --user stop ${SYSTEMD_UNIT}`, { encoding: 'utf-8' });
-      execSync(`systemctl --user disable ${SYSTEMD_UNIT}`, { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'stop', SYSTEMD_UNIT], { encoding: 'utf-8' });
+      execFileSync('systemctl', ['--user', 'disable', SYSTEMD_UNIT], { encoding: 'utf-8' });
     } catch (err: any) {
       if (process.env.AGENTS_DEBUG) {
         console.error(`[debug] systemctl stop failed: ${err.message}`);
