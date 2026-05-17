@@ -23,6 +23,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
+import { randomBytes } from 'crypto';
+import lockfile from 'proper-lockfile';
 import type { Meta, RegistryType } from './types.js';
 import { SEEDED_REGISTRIES } from './types.js';
 
@@ -477,6 +479,77 @@ export function createDefaultMeta(): Meta {
 }
 
 let metaCache: { mtime: number; meta: Meta } | null = null;
+let metaLockDepth = 0;
+const META_LOCK_STALE_MS = 5_000;
+const META_LOCK_RETRIES = 5;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function ensureLockTarget(filePath: string, initialContent: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  if (fs.existsSync(filePath)) return;
+  try {
+    fs.writeFileSync(filePath, initialContent, { encoding: 'utf-8', flag: 'wx' });
+  } catch (err: any) {
+    if (err?.code !== 'EEXIST') throw err;
+  }
+}
+
+function atomicWriteFileSync(filePath: string, content: string): void {
+  const tmpPath = `${filePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
+  fs.writeFileSync(tmpPath, content, 'utf-8');
+  try {
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { fs.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
+    throw err;
+  }
+}
+
+function withMetaLock<T>(fn: () => T): T {
+  ensureAgentsDir();
+  if (metaLockDepth > 0) {
+    metaLockDepth++;
+    try {
+      return fn();
+    } finally {
+      metaLockDepth--;
+    }
+  }
+
+  ensureLockTarget(META_FILE, META_HEADER + yaml.stringify(createDefaultMeta()));
+  let release: (() => void) | null = null;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= META_LOCK_RETRIES; attempt++) {
+    try {
+      release = lockfile.lockSync(META_FILE, { stale: META_LOCK_STALE_MS });
+      break;
+    } catch (err) {
+      lastError = err;
+      if (attempt < META_LOCK_RETRIES) sleepSync(50 * (attempt + 1));
+    }
+  }
+  if (!release) {
+    const message = lastError instanceof Error ? lastError.message : String(lastError);
+    throw new Error(`Could not acquire lock for ${META_FILE}: ${message}`);
+  }
+
+  metaLockDepth = 1;
+  try {
+    return fn();
+  } finally {
+    metaLockDepth = 0;
+    release();
+  }
+}
+
+function writeMetaUnlocked(meta: Meta): void {
+  const content = META_HEADER + yaml.stringify(meta);
+  atomicWriteFileSync(META_FILE, content);
+  metaCache = null;
+}
 
 function applyRegistrySeeds(meta: Meta): boolean {
   const seeded = new Set(meta.seededPresets || []);
@@ -611,18 +684,19 @@ export function readMeta(): Meta {
 
 /** Serialize and write agents.yaml to the user repo, invalidating the in-memory cache. */
 export function writeMeta(meta: Meta): void {
-  ensureAgentsDir();
-  const content = META_HEADER + yaml.stringify(meta);
-  fs.writeFileSync(META_FILE, content, 'utf-8');
-  metaCache = null;
+  withMetaLock(() => writeMetaUnlocked(meta));
 }
 
-/** Shallow-merge updates into agents.yaml and return the new state. */
-export function updateMeta(updates: Partial<Meta>): Meta {
-  const meta = readMeta();
-  const newMeta = { ...meta, ...updates };
-  writeMeta(newMeta);
-  return newMeta;
+/** Update agents.yaml under lock and return the new state. */
+export function updateMeta(updates: Partial<Meta> | ((meta: Meta) => Meta)): Meta {
+  return withMetaLock(() => {
+    const meta = readMeta();
+    const newMeta = typeof updates === 'function'
+      ? updates(meta)
+      : { ...meta, ...updates };
+    writeMetaUnlocked(newMeta);
+    return newMeta;
+  });
 }
 
 /** Derive a filesystem-safe local clone path for a package source URL. */

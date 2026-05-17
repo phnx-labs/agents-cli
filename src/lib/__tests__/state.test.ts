@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { pathToFileURL } from 'url';
 
 import {
   getBackupsDir,
@@ -80,6 +81,47 @@ describe('readMeta merges agents.yaml from both repos', () => {
     return JSON.parse(result);
   }
 
+  function runStateScript(home: string, script: string): string {
+    return execFileSync('bun', ['-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home },
+      stdio: 'pipe',
+      encoding: 'utf8',
+    }).trim();
+  }
+
+  function runStateScriptWithNode(home: string, script: string): string {
+    return execFileSync('node', ['--import', 'tsx', '--input-type=module', '-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home },
+      stdio: 'pipe',
+      encoding: 'utf8',
+    }).trim();
+  }
+
+  function spawnStateScript(home: string, script: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('bun', ['-e', script], {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: home },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`state script exited ${code}\nstdout:\n${stdout}\nstderr:\n${stderr}`));
+      });
+    });
+  }
+
   beforeEach(() => {
     testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'state-test-'));
     userDir = path.join(testDir, '.agents');
@@ -137,5 +179,94 @@ describe('readMeta merges agents.yaml from both repos', () => {
     const agents = meta.agents as Record<string, string>;
 
     expect(agents.claude).toBe('2.0.0');
+  });
+
+  it('does not lose concurrent updateMeta callback writes', async () => {
+    const makeUpdate = (agent: string, version: string) => `
+      const { updateMeta } = await import(${JSON.stringify(modulePath)});
+      updateMeta((meta) => {
+        const block = new Int32Array(new SharedArrayBuffer(4));
+        Atomics.wait(block, 0, 0, 250);
+        return {
+          ...meta,
+          agents: {
+            ...(meta.agents ?? {}),
+            ${JSON.stringify(agent)}: ${JSON.stringify(version)},
+          },
+        };
+      });
+    `;
+
+    await Promise.all([
+      spawnStateScript(testDir, makeUpdate('claude', '1.0.0')),
+      spawnStateScript(testDir, makeUpdate('codex', '2.0.0')),
+    ]);
+
+    const meta = runReadMeta(testDir);
+    expect(meta.agents).toMatchObject({
+      claude: '1.0.0',
+      codex: '2.0.0',
+    });
+  });
+
+  it('keeps the original agents.yaml when rename fails after writing the temp file', () => {
+    const moduleUrl = pathToFileURL(modulePath).href;
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'agents:\n  claude: "1.0.0"\n',
+      'utf-8',
+    );
+
+    const output = runStateScriptWithNode(testDir, `
+      import fs from 'fs';
+      import path from 'path';
+      import { syncBuiltinESMExports } from 'module';
+
+      const target = path.join(process.env.HOME, '.agents', 'agents.yaml');
+      const originalRename = fs.renameSync;
+      fs.renameSync = (from, to) => {
+        if (to === target) throw new Error('simulated rename failure');
+        return originalRename(from, to);
+      };
+      syncBuiltinESMExports();
+
+      const { writeMeta } = await import(${JSON.stringify(moduleUrl)});
+      try {
+        writeMeta({ agents: { claude: '9.9.9' } });
+      } catch (err) {
+        console.log(String(err.message));
+      }
+      console.log(fs.readFileSync(target, 'utf-8'));
+    `);
+
+    expect(output).toContain('simulated rename failure');
+    expect(output).toContain('claude: "1.0.0"');
+    expect(output).not.toContain('9.9.9');
+    expect(fs.readdirSync(userDir).filter((entry) => entry.includes('.tmp-'))).toEqual([]);
+  });
+
+  it('breaks a stale agents.yaml lock older than five seconds', () => {
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'agents:\n  claude: "1.0.0"\n',
+      'utf-8',
+    );
+    fs.mkdirSync(path.join(userDir, 'agents.yaml.lock'));
+    const staleTime = new Date(Date.now() - 10_000);
+    fs.utimesSync(path.join(userDir, 'agents.yaml.lock'), staleTime, staleTime);
+
+    runStateScript(testDir, `
+      const { updateMeta } = await import(${JSON.stringify(modulePath)});
+      updateMeta((meta) => ({
+        ...meta,
+        agents: { ...(meta.agents ?? {}), codex: '2.0.0' },
+      }));
+    `);
+
+    const meta = runReadMeta(testDir);
+    expect(meta.agents).toMatchObject({
+      claude: '1.0.0',
+      codex: '2.0.0',
+    });
   });
 });
