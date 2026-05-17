@@ -27,6 +27,7 @@ import { loadClaudeOauth } from '../usage.js';
 import { selectBalancedVersion } from '../rotate.js';
 
 const PROXY_BASE = 'https://api.prix.dev';
+const PROXY_HOST = new URL(PROXY_BASE).host;
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 
 // Persistent consent record for uploading Claude OAuth blobs to Rush Cloud.
@@ -38,19 +39,32 @@ const RUSH_CONSENT_ENV = 'AGENTS_RUSH_UPLOAD_TOKENS';
 interface RushConsentFile {
   granted_at: string;
   granted_by: 'env' | 'flag' | 'manual';
+  host: string;
+  account_fingerprint: string;
 }
 
-export function hasRushUploadConsent(opts?: DispatchOptions): boolean {
+export function hasRushUploadConsent(accountFingerprint: string, opts?: DispatchOptions, consentPath = RUSH_CONSENT_PATH): boolean {
   if (process.env[RUSH_CONSENT_ENV] === '1') return true;
   const po = opts?.providerOptions as { uploadAccountTokens?: boolean } | undefined;
   if (po?.uploadAccountTokens === true) return true;
-  return fs.existsSync(RUSH_CONSENT_PATH);
+  try {
+    if (!fs.existsSync(consentPath)) return false;
+    const body = JSON.parse(fs.readFileSync(consentPath, 'utf-8')) as Partial<RushConsentFile>;
+    return body.host === PROXY_HOST && body.account_fingerprint === accountFingerprint;
+  } catch {
+    return false;
+  }
 }
 
-function recordRushUploadConsent(grantedBy: RushConsentFile['granted_by']): void {
+function recordRushUploadConsent(grantedBy: RushConsentFile['granted_by'], accountFingerprint: string): void {
   try {
     fs.mkdirSync(path.dirname(RUSH_CONSENT_PATH), { recursive: true });
-    const body: RushConsentFile = { granted_at: new Date().toISOString(), granted_by: grantedBy };
+    const body: RushConsentFile = {
+      granted_at: new Date().toISOString(),
+      granted_by: grantedBy,
+      host: PROXY_HOST,
+      account_fingerprint: accountFingerprint,
+    };
     fs.writeFileSync(RUSH_CONSENT_PATH, JSON.stringify(body, null, 2), { mode: 0o600 });
   } catch {
     // Non-fatal: consent persistence is a UX optimization, not a security
@@ -304,6 +318,11 @@ export async function buildAccountTokensPayload(
   return out;
 }
 
+export function accountTokensFingerprint(tokens: AccountTokenEntry[]): string {
+  const canonical = [...tokens].sort((a, b) => a.version.localeCompare(b.version));
+  return sha256(JSON.stringify(canonical));
+}
+
 /**
  * Build the POST body for /api/v1/cloud-runs. Exported so tests can verify
  * the back-compat shape (singular fields + repos[]) without needing real
@@ -459,11 +478,16 @@ export class RushCloudProvider implements CloudProvider {
       const errBody = await res.clone().text();
       const promptCode = parsePromptCode(errBody);
       if (promptCode === 'NEW_ACCOUNT' || promptCode === 'TOKEN_ROTATED') {
+        const accountTokens = await buildAccountTokensPayload(
+          accountManifest.versions.map((v) => v.version),
+        );
+        const accountFingerprint = accountTokensFingerprint(accountTokens);
+
         // Refuse to silently exfiltrate Claude OAuth credentials. The retry
         // path below reads accessToken+refreshToken from every installed
         // Claude version and POSTs them to api.prix.dev. That's an explicit
         // data-flow decision the user has to opt into.
-        if (!hasRushUploadConsent(options)) {
+        if (!hasRushUploadConsent(accountFingerprint, options)) {
           throw new Error(
             [
               `Rush Cloud asked to sync your Claude credentials (reason: ${promptCode.toLowerCase()}).`,
@@ -486,13 +510,7 @@ export class RushCloudProvider implements CloudProvider {
           process.env[RUSH_CONSENT_ENV] === '1' ? 'env'
             : (options.providerOptions as { uploadAccountTokens?: boolean } | undefined)?.uploadAccountTokens === true ? 'flag'
               : 'manual';
-        process.stderr.write(
-          `[rush] uploading Claude OAuth credentials to ${PROXY_BASE} (reason: ${promptCode.toLowerCase()}, consent: ${grantedBy})\n`,
-        );
-
-        const accountTokens = await buildAccountTokensPayload(
-          accountManifest.versions.map((v) => v.version),
-        );
+        process.stderr.write(`[rush] uploading ${accountTokens.length} account token(s) to ${PROXY_HOST}\n`);
         const retryBody = buildDispatchBody({
           agent: options.agent,
           prompt: options.prompt,
@@ -506,7 +524,7 @@ export class RushCloudProvider implements CloudProvider {
         // Persist consent on first successful upload so we don't re-prompt
         // every time tokens rotate.
         if (res.ok && grantedBy !== 'manual') {
-          recordRushUploadConsent(grantedBy);
+          recordRushUploadConsent(grantedBy, accountFingerprint);
         }
       }
     }

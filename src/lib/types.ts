@@ -115,6 +115,8 @@ export interface ManifestHook {
   agents?: AgentId[];
   /** Set to false in user hooks.yaml to disable a system-shipped hook. */
   enabled?: boolean;
+  /** Set true on user hooks that intentionally shadow system-shipped hooks. */
+  override?: boolean;
   /** Optional pre-filter predicates evaluated before invoking the script. */
   matches?: HookMatches;
 }

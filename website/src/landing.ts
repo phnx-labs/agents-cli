@@ -186,9 +186,10 @@ ul li code { background: #141414; border: 1px solid #222; padding: 1px 6px; bord
 <p>Unix pipe composition across different models. Each agent resolves to the project-pinned version, with the right skills and MCP servers already synced. Chain by strength, swap one for another, script them in CI — the interface stays the same.</p>
 
 <h2>Pin versions per project</h2>
-<pre><span class="dim">#</span> .agents-version
-claude 2.1.113
-codex  0.116.0</pre>
+<pre><span class="dim">#</span> agents.yaml
+agents:
+  claude: "2.1.113"
+  codex: "0.116.0"</pre>
 <p><code>cd</code> into the project and every <code>agents</code> call resolves to those versions automatically. Like <code>.nvmrc</code>, but for AI. Nobody else does this.</p>
 
 <h2>Install skills, MCP servers, and commands once</h2>
@@ -207,7 +208,7 @@ codex  0.116.0</pre>
 ├── memory/        <span class="dim"># agent instructions (AGENTS.md)</span>
 └── permissions/</pre>
 <p>
-<code>~/.agents/</code> is the canonical config source. Write your commands as markdown, your rules as <code>AGENTS.md</code>, your hooks as scripts — and <code>agents-cli</code> syncs them into each harness's native format: markdown for Claude and Gemini, TOML for Codex, <code>.cursorrules</code> for Cursor. One repo, every agent in sync. <a href="https://github.com/phnx-labs/agents-cli">Fork it</a> and push your own via <code>agents push</code>.
+<code>~/.agents/</code> is the canonical config source. Write your commands as markdown, your rules as <code>AGENTS.md</code>, your hooks as scripts — and <code>agents-cli</code> syncs them into each harness's native format: markdown for Claude and Gemini, TOML for Codex, <code>.cursorrules</code> for Cursor. One repo, every agent in sync. <a href="https://github.com/phnx-labs/agents-cli">Fork it</a> and push your own via <code>agents repo push</code>.
 </p>
 
 <h2>Why</h2>

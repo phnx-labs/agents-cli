@@ -137,7 +137,7 @@ export function registerVersionsCommands(program: Command): void {
   program
     .command('add <specs...>')
     .description('Download and install agent CLI versions. Enables subsidized API usage through managed binaries.')
-    .option('-p, --project', 'Lock this version to the current project directory only, stored in .agents/agents.yaml')
+    .option('-p, --project', 'Lock this version to the current project directory only, stored in project-root agents.yaml')
     .option('-y, --yes', 'Auto-accept defaults without prompting (useful for scripts and CI)')
     .addHelpText('after', `
 Examples:

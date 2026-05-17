@@ -7,7 +7,7 @@ vi.mock('../state.js', () => ({
 }));
 
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
 vi.mock('./chrome.js', () => ({
@@ -23,7 +23,7 @@ import {
 import type { BrowserProfile } from './types.js';
 import type { BrowserProfileConfig } from '../types.js';
 import { readMeta, writeMeta } from '../state.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 function profile(endpoints: string[]): BrowserProfile {
   return { name: 'test', browser: 'chrome', endpoints };
@@ -286,6 +286,56 @@ describe('profile YAML round-trip', () => {
     expect('electron' in stored).toBe(false);
     expect('targetFilter' in stored).toBe(false);
   });
+
+  it('allows spaces in browser binaries used by ssh endpoints', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+
+    await expect(
+      createProfile({
+        name: 'remote-comet',
+        browser: 'custom',
+        binary: '/Applications/Comet Beta.app/Contents/MacOS/Comet Beta',
+        endpoints: ['ssh://mac-mini:9222'],
+      })
+    ).resolves.toBeUndefined();
+    expect(store.browser['remote-comet'].binary).toBe('/Applications/Comet Beta.app/Contents/MacOS/Comet Beta');
+  });
+
+  it('rejects shell metacharacters in browser binaries used by ssh endpoints', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    await expect(
+      createProfile({
+        name: 'remote-bad',
+        browser: 'custom',
+        binary: '/Applications/Comet.app/Contents/MacOS/Comet; touch /tmp/pwned',
+        endpoints: ['ssh://mac-mini:9222'],
+      })
+    ).rejects.toThrow(/Remote browser binary contains shell metacharacters/);
+  });
+
+  it('rejects shell metacharacters in per-endpoint ssh binary overrides', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    await expect(
+      createProfile({
+        name: 'remote-bad-override',
+        browser: 'custom',
+        endpoints: {
+          remote: {
+            target: 'ssh://mac-mini:9222',
+            binary: '/Applications/Comet.app/Contents/MacOS/Comet && say bad',
+          },
+        },
+      })
+    ).rejects.toThrow(/Remote browser binary contains shell metacharacters/);
+  });
 });
 
 describe('findFreeProfilePort', () => {
@@ -303,8 +353,8 @@ describe('findFreeProfilePort', () => {
         'p4': { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9225'] },
       },
     } as any);
-    // All OS ports are free (execSync throws = nothing listening)
-    vi.mocked(execSync).mockImplementation(() => { throw new Error('no process'); });
+    // All OS ports are free (execFileSync throws = nothing listening)
+    vi.mocked(execFileSync).mockImplementation(() => { throw new Error('no process'); });
 
     const port = await findFreeProfilePort();
     expect(port).toBe(9226);
@@ -313,11 +363,10 @@ describe('findFreeProfilePort', () => {
   it('skips OS-in-use ports and returns first OS-free port', async () => {
     // No profiles
     vi.mocked(readMeta).mockReturnValue({ browser: {} } as any);
-    // 9222 is in use on the OS (execSync succeeds = something listening)
-    // 9223 is free (execSync throws)
-    vi.mocked(execSync).mockImplementation((_cmd: any) => {
-      const cmd = String(_cmd);
-      if (cmd.includes(':9222')) return '' as any;
+    // 9222 is in use on the OS (execFileSync succeeds = something listening)
+    // 9223 is free (execFileSync throws)
+    vi.mocked(execFileSync).mockImplementation((_cmd: any, args: any) => {
+      if (Array.isArray(args) && args.includes(':9222')) return '' as any;
       throw new Error('no process');
     });
 
@@ -334,7 +383,7 @@ describe('findFreeProfilePort', () => {
         'ssh-remote': { browser: 'comet', endpoints: ['ssh://mac-mini:9222'] },
       },
     } as any);
-    vi.mocked(execSync).mockImplementation(() => { throw new Error('no process'); });
+    vi.mocked(execFileSync).mockImplementation(() => { throw new Error('no process'); });
 
     const port = await findFreeProfilePort();
     expect(port).toBe(9223);

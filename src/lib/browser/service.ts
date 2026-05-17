@@ -14,7 +14,7 @@ import {
 } from './profiles.js';
 import { killChrome, getRunningChromeInfo, launchBrowser, allocatePort } from './chrome.js';
 import { connectLocal } from './drivers/local.js';
-import { connectSSH } from './drivers/ssh.js';
+import { connectSSH, shellQuote } from './drivers/ssh.js';
 import { clearProfileRuntime } from './runtime-state.js';
 import {
   generateTaskId,
@@ -176,6 +176,15 @@ async function execSSH(host: string, cmd: string): Promise<string> {
     maxBuffer: 10_000_000,
   });
   return stdout;
+}
+
+export function readNewestMatchingRemoteFileCommand(
+  dir: string,
+  prefix: string,
+  tailLines: number
+): string {
+  const glob = `${shellQuote(dir)}/${prefix}*.jsonl`;
+  return `latest=$(ls -1t ${glob} 2>/dev/null | head -1); if [ -n "$latest" ]; then tail -n ${tailLines} "$latest"; fi`;
 }
 
 export function readNewestMatchingFile(dir: string, prefix: string, tailLines: number): string {
@@ -1489,7 +1498,7 @@ export class BrowserService {
         if (profile.logHost) {
           return execSSH(
             profile.logHost,
-            `ls -1t ${logDir}/${prefix}*.jsonl 2>/dev/null | head -1 | xargs -r tail -n ${tailN}`
+            readNewestMatchingRemoteFileCommand(logDir, prefix, tailN)
           );
         }
         return readNewestMatchingFile(logDir, prefix, tailN);

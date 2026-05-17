@@ -174,6 +174,32 @@ describe('renderConversationMarkdown', () => {
     expect(out).toContain('```bash');
     expect(out).toContain('ls -la');
   });
+
+  it('redacts AWS keys from tool result content by default', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_result', agent: 'claude', timestamp: 't0', content: 'key ' + 'AKIA' + '1234567890ABCDEF' },
+    ];
+    const out = renderConversationMarkdown(events);
+    expect(out).toContain('[REDACTED_AWS_KEY]');
+    expect(out).not.toContain('AKIA1234567890ABCDEF');
+  });
+
+  it('redacts env token assignments in tool commands but leaves the command', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: 't0', tool: 'Bash', args: {}, command: 'TOKEN=abc123 deploy' },
+    ];
+    const out = renderConversationMarkdown(events);
+    expect(out).toContain('TOKEN=[REDACTED] deploy');
+    expect(out).not.toContain('TOKEN=abc123');
+  });
+
+  it('can render markdown without redaction when explicitly requested', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: 't0', tool: 'Bash', args: {}, command: 'TOKEN=abc123 deploy' },
+    ];
+    const out = renderConversationMarkdown(events, { redact: false });
+    expect(out).toContain('TOKEN=abc123 deploy');
+  });
 });
 
 // ── unwrapCommand ─────────────────────────────────────────────────────────────

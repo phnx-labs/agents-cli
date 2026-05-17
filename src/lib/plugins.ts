@@ -11,7 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import type { AgentId, DiscoveredPlugin, PluginManifest } from './types.js';
 import { getPluginsDir, getTrashPluginsDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
@@ -93,12 +93,30 @@ export function loadPluginManifest(pluginRoot: string): PluginManifest | null {
     const content = fs.readFileSync(manifestPath, 'utf-8');
     const parsed = JSON.parse(content) as PluginManifest;
     if (!parsed.name || !parsed.version) return null;
-    if (/[/\\]/.test(parsed.name) || parsed.name.includes('..') || parsed.name.includes('\0')) {
+    if (!validatePluginName(parsed.name)) {
       return null;
     }
     return parsed;
   } catch {
     return null;
+  }
+}
+
+export function validatePluginName(name: string): boolean {
+  return name.length > 0
+    && !/[/\\]/.test(name)
+    && !name.includes('..')
+    && !name.includes('\0');
+}
+
+export function assertPluginTargetContained(targetRoot: string, pluginsDir: string): void {
+  const resolvedPluginsDir = path.resolve(pluginsDir);
+  const resolvedTargetRoot = path.resolve(targetRoot);
+  if (
+    resolvedTargetRoot !== resolvedPluginsDir
+    && !resolvedTargetRoot.startsWith(`${resolvedPluginsDir}${path.sep}`)
+  ) {
+    throw new Error(`Plugin install target escapes plugins directory: ${targetRoot}`);
   }
 }
 
@@ -939,8 +957,12 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
       targetName = path.basename(resolvedSource).replace(/\.git$/, '');
     }
   }
+  if (!validatePluginName(targetName)) {
+    throw new Error(`Invalid plugin name: ${targetName}`);
+  }
 
   const targetRoot = path.join(pluginsDir, targetName);
+  assertPluginTargetContained(targetRoot, pluginsDir);
   const isNew = !fs.existsSync(targetRoot);
 
   if (isLocalPath) {
@@ -954,7 +976,7 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
     if (fs.existsSync(targetRoot)) {
       fs.rmSync(targetRoot, { recursive: true, force: true });
     }
-    execSync(`git clone --depth 1 ${JSON.stringify(resolvedSource)} ${JSON.stringify(targetRoot)}`, {
+    execFileSync('git', ['clone', '--depth', '1', resolvedSource, targetRoot], {
       stdio: 'pipe',
     });
   }
@@ -996,7 +1018,7 @@ export async function updatePlugin(name: string): Promise<{ success: boolean; er
 
   try {
     if (sourceInfo.isGit) {
-      execSync(`git -C ${JSON.stringify(plugin.root)} pull --ff-only`, { stdio: 'pipe' });
+      execFileSync('git', ['-C', plugin.root, 'pull', '--ff-only'], { stdio: 'pipe' });
     } else {
       const resolvedSource = sourceInfo.source.replace(/^~/, process.env.HOME || '~');
       if (!fs.existsSync(resolvedSource)) {

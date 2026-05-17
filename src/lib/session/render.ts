@@ -12,6 +12,7 @@ import type { SessionEvent } from './types.js';
 import { summarizeToolUse } from './parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
+import { redactSecrets } from '../redact.js';
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -843,8 +844,17 @@ export function filterEvents(events: SessionEvent[], opts: FilterOptions): Sessi
  * order so reasoning sits where it actually occurred relative to the assistant
  * reply.
  */
-export function renderConversationMarkdown(events: SessionEvent[]): string {
+export interface RenderConversationMarkdownOptions {
+  redact?: boolean;
+}
+
+export function renderConversationMarkdown(
+  events: SessionEvent[],
+  opts: RenderConversationMarkdownOptions = {},
+): string {
   const parts: string[] = [];
+  const shouldRedact = opts.redact !== false;
+  const sanitize = (text: string): string => shouldRedact ? redactSecrets(text) : text;
 
   for (const event of events) {
     if (event.type === 'message') {
@@ -858,7 +868,7 @@ export function renderConversationMarkdown(events: SessionEvent[]): string {
     } else if (event.type === 'tool_use') {
       const tool = event.tool || 'unknown';
       if (event.command) {
-        parts.push(`### Tool: ${tool}\n\n\`\`\`bash\n${event.command}\n\`\`\``);
+        parts.push(`### Tool: ${tool}\n\n\`\`\`bash\n${sanitize(event.command)}\n\`\`\``);
       } else if (event.path) {
         parts.push(`### Tool: ${tool}\n\n\`${shortenPathTrace(event.path)}\``);
       } else {
@@ -867,7 +877,8 @@ export function renderConversationMarkdown(events: SessionEvent[]): string {
       }
     } else if (event.type === 'tool_result') {
       if (event.content) {
-        const body = event.content.length > 2000 ? event.content.slice(0, 2000) + '\n…' : event.content;
+        const truncated = event.content.length > 2000 ? event.content.slice(0, 2000) + '\n…' : event.content;
+        const body = sanitize(truncated);
         parts.push(`### Tool Result\n\n\`\`\`\n${body}\n\`\`\``);
       }
     } else if (event.type === 'error') {

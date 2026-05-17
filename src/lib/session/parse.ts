@@ -8,7 +8,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import type { SessionAgentId, SessionEvent } from './types.js';
 
 /**
@@ -668,10 +668,12 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
       ORDER BY m.time_created ASC, p.time_created ASC;
     `.replace(/\n/g, ' ');
 
-    const out = execSync(
-      `sqlite3 -separator '|||' "${dbPath}"`,
-      { encoding: 'utf-8', input: query, stdio: ['pipe', 'pipe', 'ignore'], timeout: 10000 },
-    );
+    const out = execFileSync('sqlite3', ['-separator', '|||', dbPath, query], {
+      encoding: 'utf-8',
+      timeout: 10000,
+      maxBuffer: 32 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
 
     for (const line of out.split('\n')) {
       if (!line.trim()) continue;

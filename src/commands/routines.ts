@@ -654,10 +654,10 @@ Examples:
     .option('-f, --follow', 'Stream log output in real time (like tail -f)')
     .action(async (options) => {
       if (options.follow) {
-        const { exec: execCb } = await import('child_process');
+        const { spawn } = await import('child_process');
         const { getDaemonDir } = await import('../lib/state.js');
         const logPath = path.join(getDaemonDir(), 'logs.jsonl');
-        const child = execCb(`tail -f "${logPath}"`);
+        const child = spawn('tail', ['-f', logPath]);
         child.stdout?.pipe(process.stdout);
         child.stderr?.pipe(process.stderr);
         child.on('exit', () => process.exit(0));

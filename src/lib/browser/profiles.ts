@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import {
   getBrowserRuntimeDir as getBrowserRuntimeDirRoot,
   readMeta,
@@ -20,6 +20,7 @@ export function getProfileRuntimeDir(name: string): string {
 }
 
 function configToProfile(name: string, config: BrowserProfileConfig): BrowserProfile {
+  validateRemoteBrowserBinaries(config);
   return {
     name,
     description: config.description,
@@ -38,6 +39,7 @@ function configToProfile(name: string, config: BrowserProfileConfig): BrowserPro
 }
 
 function profileToConfig(profile: BrowserProfile): BrowserProfileConfig {
+  validateRemoteBrowserBinaries(profile);
   const config: BrowserProfileConfig = {
     browser: profile.browser,
     endpoints: profile.endpoints,
@@ -111,7 +113,7 @@ export async function findFreeProfilePort(): Promise<number> {
   for (let port = 9222; port <= 9399; port++) {
     if (usedByProfile.has(port)) continue;
     try {
-      execSync(`lsof -i :${port}`, { stdio: 'ignore' });
+      execFileSync('lsof', ['-i', `:${port}`], { stdio: 'ignore' });
       // lsof succeeded → something is listening → port is in use
     } catch {
       // lsof threw → nothing on this port → it's free
@@ -120,6 +122,40 @@ export async function findFreeProfilePort(): Promise<number> {
   }
 
   throw new Error('No available ports in range 9222-9399');
+}
+
+function validateRemoteBrowserBinaries(
+  profile: Pick<BrowserProfileConfig, 'binary' | 'endpoints'>
+): void {
+  if (!hasSshEndpoint(profile.endpoints)) return;
+  validateRemoteBrowserBinary(profile.binary);
+  if (!Array.isArray(profile.endpoints)) {
+    for (const preset of Object.values(profile.endpoints)) {
+      validateRemoteBrowserBinary(preset.binary);
+    }
+  }
+}
+
+function validateRemoteBrowserBinary(binary: string | undefined): void {
+  if (!binary) return;
+  if (/[\0\r\n;&|`$<>]/.test(binary)) {
+    throw new Error(
+      `Remote browser binary contains shell metacharacters: ${binary}`
+    );
+  }
+}
+
+function hasSshEndpoint(endpoints: BrowserProfileConfig['endpoints']): boolean {
+  const targets = Array.isArray(endpoints)
+    ? endpoints
+    : Object.values(endpoints).map((preset) => preset.target);
+  return targets.some((target) => {
+    try {
+      return new URL(target).protocol === 'ssh:';
+    } catch {
+      return false;
+    }
+  });
 }
 
 export async function createProfile(profile: BrowserProfile): Promise<void> {

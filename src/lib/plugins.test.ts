@@ -5,7 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import {
   loadPluginManifest,
@@ -16,6 +16,7 @@ import {
   loadUserConfig,
   saveUserConfig,
   checkPluginDependencies,
+  validatePluginName,
   parseInstallSpec,
 } from './plugins.js';
 import type { DiscoveredPlugin, PluginManifest } from './types.js';
@@ -268,21 +269,23 @@ describe('loadUserConfig / saveUserConfig', () => {
   });
 
   it('saveUserConfig writes valid JSON, loadUserConfig reads it back', async () => {
-    // Write directly to the expected path (using the real getPluginsDir would
-    // touch real FS state, so we test the round-trip via save then load).
-    // This is an integration test against the real FS path.
     const pluginName = `_test-plugin-${Date.now()}`;
     const testConfig = { api_key: 'abc123', region: 'eu-west-1' };
+    const pluginsDir = path.join(tmpDir, 'plugins');
 
-    saveUserConfig(pluginName, testConfig);
-    const loaded = loadUserConfig(pluginName);
-    expect(loaded).toEqual(testConfig);
-
-    // Cleanup
-    const { getPluginsDir } = await import('./state.js');
-    const pluginDir = path.join(getPluginsDir(), pluginName);
-    if (fs.existsSync(pluginDir)) {
-      fs.rmSync(pluginDir, { recursive: true, force: true });
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return { ...actual, getPluginsDir: () => pluginsDir };
+    });
+    try {
+      const { saveUserConfig: save, loadUserConfig: load } = await import('./plugins.js');
+      save(pluginName, testConfig);
+      const loaded = load(pluginName);
+      expect(loaded).toEqual(testConfig);
+    } finally {
+      vi.doUnmock('./state.js');
+      vi.resetModules();
     }
   });
 });
@@ -340,6 +343,73 @@ describe('parseInstallSpec', () => {
     const result = parseInstallSpec('rush-toolkit@~/Projects/rush-toolkit');
     expect(result.name).toBe('rush-toolkit');
     expect(result.source).toBe('~/Projects/rush-toolkit');
+  });
+});
+
+// ─── installPlugin validation ────────────────────────────────────────────────
+
+describe('installPlugin validation', () => {
+  let tmpDir: string;
+  let pluginsDir: string;
+  let execFileSyncMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+    pluginsDir = path.join(tmpDir, 'plugins');
+    execFileSyncMock = vi.fn();
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return { ...actual, getPluginsDir: () => pluginsDir };
+    });
+    vi.doMock('child_process', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('child_process')>();
+      return { ...actual, execFileSync: execFileSyncMock };
+    });
+  });
+
+  afterEach(() => {
+    vi.doUnmock('./state.js');
+    vi.doUnmock('child_process');
+    vi.resetModules();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it.each(['../etc', 'foo/bar', 'foo\\bar', '..', 'foo\\0bar', 'foo\0bar', ''])(
+    'rejects invalid plugin name %j',
+    (name) => {
+      expect(validatePluginName(name)).toBe(false);
+    }
+  );
+
+  it('accepts a simple plugin name', () => {
+    expect(validatePluginName('safe-plugin_1.0')).toBe(true);
+  });
+
+  it.each([
+    'evil; rm -rf /tmp/SHOULD_NOT_DELETE',
+    '$(touch /tmp/SHOULD_NOT_EXIST)',
+    '`touch /tmp/SHOULD_NOT_EXIST`',
+  ])('passes git clone input through execFileSync argv form: %s', async (source) => {
+    const { installPlugin } = await import('./plugins.js');
+
+    await expect(installPlugin(`safe@${source}`)).rejects.toThrow('Installed source has no valid .claude-plugin/plugin.json');
+
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      'git',
+      ['clone', '--depth', '1', source, path.join(pluginsDir, 'safe')],
+      { stdio: 'pipe' }
+    );
+  });
+
+  it('rejects path-traversal plugin names before copying a local source', async () => {
+    const sourceRoot = makePluginRoot(tmpDir, { name: 'safe' });
+    const { installPlugin } = await import('./plugins.js');
+
+    await expect(installPlugin(`../../foo@${sourceRoot}`)).rejects.toThrow('Invalid plugin name: ../../foo');
+
+    expect(fs.existsSync(path.resolve(pluginsDir, '../../foo'))).toBe(false);
+    expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 });
 

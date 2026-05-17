@@ -1,4 +1,4 @@
-import { spawn, execSync, type ChildProcess } from 'child_process';
+import { spawn, execFileSync, type ChildProcess } from 'child_process';
 import * as net from 'net';
 import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.js';
 import { getPortOccupant } from '../chrome.js';
@@ -11,6 +11,11 @@ export interface SSHConnection {
   port: number;
   pid: number;
   cleanup: () => void;
+}
+
+export function shellQuote(s: string): string {
+  if (/^[A-Za-z0-9_./:=@%+-]+$/.test(s)) return s;
+  return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
 export async function connectSSH(
@@ -189,16 +194,16 @@ async function ensureRemoteBrowser(
   customBinary?: string
 ): Promise<void> {
   const browserPaths: Record<string, string> = {
-    chrome: '/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome',
+    chrome: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     comet: '/Applications/Comet.app/Contents/MacOS/Comet',
     chromium: '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    brave: '/Applications/Brave\\ Browser.app/Contents/MacOS/Brave\\ Browser',
-    edge: '/Applications/Microsoft\\ Edge.app/Contents/MacOS/Microsoft\\ Edge',
+    brave: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+    edge: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   };
 
   let browserPath: string;
   if (customBinary) {
-    browserPath = customBinary.replace(/ /g, '\\ ');
+    browserPath = customBinary;
   } else if (browserType === 'custom') {
     throw new Error('browser: custom requires a binary path in the profile');
   } else {
@@ -208,7 +213,14 @@ async function ensureRemoteBrowser(
     }
   }
 
-  const remoteCmd = `${browserPath} --remote-debugging-port=${port} '--remote-allow-origins=*' --disable-background-timer-throttling --user-data-dir=/tmp/agents-browser-${port} </dev/null >/dev/null 2>&1 &`;
+  const remoteCmd = [
+    shellQuote(browserPath),
+    `--remote-debugging-port=${port}`,
+    shellQuote('--remote-allow-origins=*'),
+    '--disable-background-timer-throttling',
+    `--user-data-dir=/tmp/agents-browser-${port}`,
+    '</dev/null >/dev/null 2>&1 &',
+  ].join(' ');
 
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -240,7 +252,7 @@ export async function restartRemoteBrowser(
   customBinary?: string
 ): Promise<void> {
   // Kill any process using the remote debugging port
-  const killCmd = `lsof -ti :${port} | xargs kill -9 2>/dev/null || true`;
+  const killCmd = `pids=$(lsof -ti ${shellQuote(`:${port}`)} 2>/dev/null); [ -z "$pids" ] || kill -9 $pids 2>/dev/null || true`;
   await runSSHCommand(user, host, killCmd);
   await sleep(500);
   await ensureRemoteBrowser(user, host, browserType, port, customBinary);
@@ -276,7 +288,7 @@ function sleep(ms: number): Promise<void> {
  */
 function isOwnTunnel(pid: number, host: string, remotePort: number): boolean {
   try {
-    const out = execSync(`ps -p ${pid} -o command=`, {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).toString().trim();

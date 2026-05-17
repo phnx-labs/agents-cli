@@ -32,6 +32,9 @@ describe('shouldFire predicate evaluator', () => {
     it('skips on invalid regex', () => {
       expect(shouldFire({ prompt_matches: '[unclosed' }, { prompt: 'x' })).toBe(false);
     });
+    it('skips obviously catastrophic nested quantifier regexes', () => {
+      expect(shouldFire({ prompt_matches: '(.*?)+foo' }, { prompt: 'foo' })).toBe(false);
+    });
   });
 
   describe('tool_name', () => {

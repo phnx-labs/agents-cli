@@ -13,6 +13,7 @@ let tmpDir: string;
 
 function makeScript(name: string): string {
   const scriptPath = path.join(agentsDir, 'hooks', name);
+  fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
   fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
   fs.chmodSync(scriptPath, 0o755);
   return scriptPath;
@@ -232,6 +233,39 @@ describe('registerHooksToSettings - Codex', () => {
     const result = registerHooksToSettings('codex', versionHome, manifest, agentsDir);
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.errors[0]).toContain('missing-hook');
+  });
+
+  it('rejects hook scripts that resolve outside the hooks directory', () => {
+    const versionHome = makeVersionHome();
+    fs.writeFileSync(path.join(agentsDir, 'outside.sh'), '#!/bin/sh\necho outside\n', 'utf-8');
+
+    const manifest: Record<string, ManifestHook> = {
+      traversal: { script: '../outside.sh', events: ['UserPromptSubmit'] },
+    };
+
+    const result = registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+
+    expect(result.registered).toHaveLength(0);
+    expect(result.errors[0]).toContain('script not found');
+    expect(fs.existsSync(path.join(versionHome, '.codex', 'hooks.json'))).toBe(false);
+  });
+
+  it('resolves benign relative hook script names inside the hooks directory', () => {
+    const versionHome = makeVersionHome();
+    const scriptPath = makeScript('nested/on-prompt.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      benign: { script: 'nested/on-prompt.sh', events: ['UserPromptSubmit'] },
+    };
+
+    const result = registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('benign -> UserPromptSubmit');
+    const hooksJson = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.codex', 'hooks.json'), 'utf-8')
+    );
+    expect(hooksJson.hooks.UserPromptSubmit[0].hooks[0].command).toBe(scriptPath);
   });
 });
 

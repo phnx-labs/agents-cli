@@ -29,7 +29,7 @@
   <a href="https://github.com/NousResearch/hermes-agent" title="Hermes Agent"><img src="assets/harnesses/hermes.png" height="32" alt="Hermes Agent" /></a>
 </p>
 
-https://github.com/user-attachments/assets/cf0b2248-6672-4458-8027-b88525572f3e
+https://agents-cli.sh/demo.mp4
 
 ```bash
 npm install -g @phnx-labs/agents-cli
@@ -133,10 +133,10 @@ agents run claude "refactor auth module" --mode edit --fallback codex,gemini
 
 ```bash
 # Picks the signed-in account you haven't used recently.
-agents run claude "summarize recent commits" --rotate
+agents run claude "summarize recent commits" --strategy balanced
 ```
 
-`--rotate` cycles across installed versions of the same agent -- useful when you have multiple accounts and want to spread usage instead of burning through one.
+`--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one.
 
 ### Chain agents
 
@@ -156,7 +156,7 @@ agents run claude "review this diff" --acp --json
 
 `--acp` routes through the [Agent Client Protocol](https://agentclientprotocol.com/) so you get a unified event stream -- `agent_message_chunk`, `tool_call`, `plan_update`, `stop_reason` -- instead of writing a parser per CLI. File writes and shell commands flow through agents-cli, which means `--mode plan` becomes a real sandbox: the write RPC is denied, not just unused.
 
-Works today with claude, codex, gemini, cursor, opencode, openclaw. Other harnesses keep running on the direct-exec path.
+ACP adapters are documented for claude, codex, gemini, cursor, opencode, and openclaw. Other harnesses keep running on the direct-exec path.
 
 ---
 
@@ -181,7 +181,7 @@ agents sessions a1b2c3d4 --last 3 --include user
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 
-Backed by a SQLite + FTS5 index at `~/.agents-system/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](docs/05-sessions.md) for the schema and [docs/06-observability.md](docs/06-observability.md) for the consumption patterns.
+Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](docs/05-sessions.md) for the schema and [docs/06-observability.md](docs/06-observability.md) for the consumption patterns.
 
 ---
 
@@ -402,11 +402,11 @@ Merge order: profile env < `--secrets` < `--env K=V`. A missing keychain item ab
 
 ### Cross-machine sync via iCloud Keychain
 
-Pass `--icloud-sync` when creating a bundle and both the bundle definition and its values are written to the iCloud-synced keychain. Sign into the same iCloud account on another Mac (with iCloud Keychain enabled) and the bundle appears there within seconds — no copy-paste, no `.env` files emailed to yourself, no shared secret stores.
+Secret bundles sync through iCloud Keychain by default. Sign into the same iCloud account on another Mac (with iCloud Keychain enabled) and the bundle appears there within seconds — no copy-paste, no `.env` files emailed to yourself, no shared secret stores. Pass `--no-icloud-sync` when creating a bundle if it should stay device-local.
 
 ```bash
 # On laptop:
-agents secrets create npm-tokens --icloud-sync
+agents secrets create npm-tokens
 agents secrets add npm-tokens NPM_TOKEN          # value lives in iCloud Keychain
 
 # On another Mac (same iCloud account):
@@ -414,7 +414,7 @@ agents secrets list                              # npm-tokens is already there;
 agents run claude "..." --secrets npm-tokens     # injects NPM_TOKEN automatically
 ```
 
-Under the hood, `--icloud-sync` routes writes through a notarized helper app (`AgentsKeychain.app`) that holds the entitlement macOS requires for `kSecAttrSynchronizable`. Bundles without `--icloud-sync` stay device-local.
+Under the hood, synced bundles route writes through a notarized helper app (`AgentsKeychain.app`) that holds the entitlement macOS requires for `kSecAttrSynchronizable`. Bundles created with `--no-icloud-sync` stay device-local.
 
 Bundle definitions sync via iCloud Keychain too — no `agents repo push` needed for secrets, no recreate step on each Mac. Nothing about secrets ever lives in plaintext on disk.
 
@@ -467,7 +467,7 @@ A sidecar server holds sessions alive between CLI calls. `screen` renders via xt
 
 ```bash
 # New machine? One command.
-agents init
+agents setup
 
 # Installs CLIs, registers MCP servers, syncs skills/commands/rules/hooks,
 # sets up shims, configures defaults. Done.
@@ -489,6 +489,8 @@ Two repos with the same shape, different roles:
 **Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in.
 
 See [docs/00-concepts.md](docs/00-concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
+
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 
@@ -515,11 +517,11 @@ Extras clone into `~/.agents-system/.repos/<alias>/` and ship the same layout as
 
 ## Security & Privacy
 
-**Everything stays on your machine.** No telemetry, no cloud sync (unless you opt into iCloud Keychain for secrets), no phone-home. Here's exactly what `agents-cli` stores locally and why.
+**The CLI binary has no built-in telemetry or phone-home path.** Routine commands run locally; explicit features such as cloud dispatch and iCloud Keychain sync send only the data needed for the action you invoke. Here's exactly what `agents-cli` stores locally and why.
 
 ### Event log
 
-Every agent run, version install, browser launch, and secrets access is logged to `~/.agents/logs/events-YYYY-MM-DD.jsonl`. This gives you a complete record of what agents did on your machine.
+Every agent run, version install, browser launch, and secrets access is logged to `~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl`. This gives you a complete record of what agents did on your machine.
 
 ```bash
 # What gets logged (example event):
@@ -553,7 +555,7 @@ agents sessions "auth middleware"     # Full-text search across all agents
 agents sessions --agent claude --since 7d
 ```
 
-The index lives at `~/.agents/sessions/sessions.db` (SQLite + FTS5). Nothing leaves your machine. See [Sessions](#sessions-across-agents) for full usage.
+The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). Nothing leaves your machine. See [Sessions](#sessions-across-agents) for full usage.
 
 ### Secrets
 
@@ -564,14 +566,14 @@ agents secrets create my-keys
 agents secrets add my-keys API_KEY    # Prompts for value, stores in Keychain
 ```
 
-With `--icloud-sync`, secrets sync via iCloud Keychain to your other Macs. Without it, they stay device-local. See [Secrets](#secrets) for full usage.
+By default, secrets sync via iCloud Keychain to your other Macs. With `--no-icloud-sync`, they stay device-local. See [Secrets](#secrets) for full usage.
 
 ### Summary
 
 | Data | Location | Who can read | Opt out |
 |------|----------|--------------|---------|
-| Event log | `~/.agents/logs/` | You only (0600) | `AGENTS_DISABLE_EVENT_LOG=1` |
-| Session index | `~/.agents/sessions/` | You only | Delete the directory |
+| Event log | `~/.agents/.cache/logs/` | You only (0600) | `AGENTS_DISABLE_EVENT_LOG=1` |
+| Session index | `~/.agents/.history/sessions/` | You only | Delete the directory |
 | Secrets | macOS Keychain | You + apps you authorize | Don't use `agents secrets` |
 | Config | `~/.agents/` | You only | N/A |
 
@@ -629,19 +631,19 @@ Your choice. We hand off to the original CLI process — use your existing subsc
 
 ### Does it store my API keys or send telemetry?
 
-**No telemetry, no phone-home.** Everything stays local. API keys come from your shell environment or each agent CLI's existing auth.
+**No CLI telemetry or phone-home.** API keys come from your shell environment or each agent CLI's existing auth, and remote calls only happen when you invoke a feature that requires them, such as cloud dispatch.
 
-For full transparency: `agents-cli` keeps a local event log at `~/.agents/logs/` so you can see exactly what agents did on your machine. Logs are owner-readable only (0600) and auto-prune after 30 days. Set `AGENTS_DISABLE_EVENT_LOG=1` to disable. See [Security & Privacy](#security--privacy) for details.
+For full transparency: `agents-cli` keeps a local event log at `~/.agents/.cache/logs/` so you can see exactly what agents did on your machine. Logs are owner-readable only (0600) and auto-prune after 30 days. Set `AGENTS_DISABLE_EVENT_LOG=1` to disable. See [Security & Privacy](#security--privacy) for details.
 
 ### Which platforms?
 
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
-**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. The `--icloud-sync` flag on bundles requires macOS + iCloud Keychain enabled. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
 
 ### Do I need Node.js?
 
-The installer tries Bun first (faster), falls back to npm. Node 18+ required at runtime.
+The installer tries Bun first (faster), falls back to npm. Node 22.5+ required at runtime.
 
 ### Can I use it in CI?
 
