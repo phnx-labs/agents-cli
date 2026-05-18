@@ -40,6 +40,7 @@ import {
   getGlobalDefault,
   setGlobalDefault,
   getVersionHomePath,
+  getVersionDir,
   syncResourcesToVersion,
   parseAgentSpec,
   promptResourceSelection,
@@ -67,8 +68,22 @@ import {
 } from '../lib/shims.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 import { tryAutoPull } from '../lib/git.js';
-import { getAgentsDir } from '../lib/state.js';
+import { getAgentsDir, getTrashVersionsDir } from '../lib/state.js';
 import { setHelpSections } from '../lib/help.js';
+import { updateSessionFilePaths } from '../lib/session/db.js';
+
+/**
+ * After removeVersion soft-deletes a version dir to trash, rewrite session
+ * file_path entries in the DB so reads still work from the new trash location.
+ */
+function fixSessionFilePaths(agent: AgentId, version: string, oldVersionDir: string): void {
+  const trashAgentDir = path.join(getTrashVersionsDir(), agent, version);
+  if (!fs.existsSync(trashAgentDir)) return;
+  const stamps = fs.readdirSync(trashAgentDir).sort().reverse();
+  if (stamps.length === 0) return;
+  const trashPath = path.join(trashAgentDir, stamps[0]);
+  updateSessionFilePaths(oldVersionDir, trashPath);
+}
 
 /**
  * Helper to get actual installed version for an agent.
@@ -435,7 +450,9 @@ export function registerVersionsCommands(program: Command): void {
             }
 
             for (const v of toRemove) {
+              const versionDir = getVersionDir(agent, v);
               removeVersion(agent, v);
+              fixSessionFilePaths(agent, v, versionDir);
               console.log(chalk.green(`Removed ${agentLabel(agentConfig.id)}@${v}`));
             }
 
@@ -462,7 +479,9 @@ export function registerVersionsCommands(program: Command): void {
           if (!isVersionInstalled(agent, version)) {
             console.log(chalk.gray(`${agentLabel(agentConfig.id)}@${version} not installed`));
           } else {
+            const versionDir = getVersionDir(agent, version);
             removeVersion(agent, version);
+            fixSessionFilePaths(agent, version, versionDir);
             console.log(chalk.green(`Removed ${agentLabel(agentConfig.id)}@${version}`));
 
             // Remove shim if no versions left

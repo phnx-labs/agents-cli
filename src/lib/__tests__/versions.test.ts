@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 
 import { getProjectVersion, removeVersion } from '../versions.js';
 import { getVersionsDir, getTrashVersionsDir } from '../state.js';
+import { getDB, updateSessionFilePaths } from '../session/db.js';
 import type { AgentId } from '../types.js';
 
 let tmpDir: string;
@@ -139,4 +140,71 @@ describe('removeVersion soft-deletes the entire version dir to trash', () => {
       }
     });
   }
+});
+
+// When a version is removed, the command handler calls removeVersion then
+// updateSessionFilePaths so session reads still work from the new trash location.
+// This test verifies both pieces independently and together.
+describe('updateSessionFilePaths rewrites file_path after soft-delete to trash', () => {
+  const testVersion = `0.0.0-dbtest-${crypto.randomBytes(4).toString('hex')}`;
+  const testSessionId = `test-session-${crypto.randomBytes(8).toString('hex')}`;
+  const agent: AgentId = 'claude';
+  const binaryName = 'claude';
+
+  afterEach(() => {
+    // Clean up the test session row from the real DB
+    try {
+      const db = getDB();
+      db.prepare(`DELETE FROM session_text WHERE session_id = ?`).run(testSessionId);
+      db.prepare(`DELETE FROM sessions WHERE id = ?`).run(testSessionId);
+    } catch { /* ignore */ }
+
+    // Clean up any leftover version or trash dirs
+    const versionDir = path.join(getVersionsDir(), agent, testVersion);
+    const trashAgentDir = path.join(getTrashVersionsDir(), agent, testVersion);
+    if (fs.existsSync(versionDir)) fs.rmSync(versionDir, { recursive: true, force: true });
+    if (fs.existsSync(trashAgentDir)) fs.rmSync(trashAgentDir, { recursive: true, force: true });
+  });
+
+  it('rewrites file_path to trash location after removeVersion + updateSessionFilePaths', () => {
+    const versionDir = path.join(getVersionsDir(), agent, testVersion);
+    const sessionJsonl = path.join(versionDir, 'home', '.claude', 'projects', 'test', `${testSessionId}.jsonl`);
+
+    // Set up a minimal version dir so removeVersion has something to soft-delete
+    fs.mkdirSync(path.join(versionDir, 'node_modules', '.bin'), { recursive: true });
+    fs.writeFileSync(path.join(versionDir, 'node_modules', '.bin', binaryName), '#!/bin/sh\n');
+    fs.writeFileSync(path.join(versionDir, 'package.json'), '{}');
+    fs.writeFileSync(path.join(versionDir, 'package-lock.json'), '{}');
+    fs.mkdirSync(path.dirname(sessionJsonl), { recursive: true });
+    fs.writeFileSync(sessionJsonl, '{"type":"user"}\n');
+
+    // Insert a session row pointing at the version-dir path
+    const db = getDB();
+    db.prepare(`
+      INSERT OR REPLACE INTO sessions
+        (id, short_id, agent, timestamp, file_path, is_team_origin)
+      VALUES (?, ?, ?, ?, ?, 0)
+    `).run(testSessionId, testSessionId.slice(0, 8), 'claude', new Date().toISOString(), sessionJsonl);
+
+    // Soft-delete the version (mirrors what the command handler does)
+    expect(removeVersion(agent, testVersion)).toBe(true);
+
+    // The trash dir now holds a timestamped copy
+    const trashAgentDir = path.join(getTrashVersionsDir(), agent, testVersion);
+    const stamps = fs.readdirSync(trashAgentDir).sort().reverse();
+    expect(stamps.length).toBeGreaterThan(0);
+    const trashVersionDir = path.join(trashAgentDir, stamps[0]);
+
+    // Simulate what the command handler does: rewrite file_paths to trash location
+    const updated = updateSessionFilePaths(versionDir, trashVersionDir);
+    expect(updated).toBe(1);
+
+    // DB file_path must now point into the trash location
+    const row = db.prepare(`SELECT file_path FROM sessions WHERE id = ?`).get(testSessionId) as { file_path: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.file_path.startsWith(trashVersionDir)).toBe(true);
+
+    // The file must actually exist at the new path
+    expect(fs.existsSync(row!.file_path)).toBe(true);
+  });
 });

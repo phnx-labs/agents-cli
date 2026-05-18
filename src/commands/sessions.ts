@@ -25,7 +25,7 @@ import { parseSession } from '../lib/session/parse.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { colorAgent, resolveAgentName } from '../lib/agents.js';
-import { resolveVersion, resolveVersionAliasLoose } from '../lib/versions.js';
+import { resolveVersionAliasLoose } from '../lib/versions.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { sessionPicker, type PickedSession } from './sessions-picker.js';
 import { setHelpSections } from '../lib/help.js';
@@ -733,22 +733,13 @@ async function handlePickedSession(picked: PickedSession): Promise<void> {
     ? picked.session.cwd
     : process.cwd();
 
-  const activeVersion = resolveVersion(picked.session.agent as AgentId, cwd) ?? undefined;
-  const resume = buildResumeCommand(picked.session, activeVersion);
+  const resume = buildResumeCommand(picked.session);
   if (!resume) {
     console.log(chalk.yellow(
       `Resume is not supported for ${picked.session.agent} sessions yet. Showing summary instead.`
     ));
     await renderSession(picked.session, 'summary', {});
     return;
-  }
-
-  if (picked.session.version && activeVersion && picked.session.version !== activeVersion) {
-    console.log(chalk.gray(
-      `Cross-version handoff: session is ${picked.session.agent} ${picked.session.version}, ` +
-      `default is ${activeVersion}. Starting fresh and passing /continue so the new agent ` +
-      `reads the prior transcript via 'agents sessions'.`
-    ));
   }
 
   console.log(chalk.gray(`Resuming: ${resume.join(' ')} (cwd: ${cwd})`));
@@ -760,6 +751,18 @@ async function handlePickedSession(picked: PickedSession): Promise<void> {
       shell: false,
     });
     child.on('error', (err: any) => {
+      if (err.code === 'ENOENT' && picked.session.version) {
+        const fallback = buildFallbackCommand(picked.session);
+        if (fallback) {
+          console.log(chalk.gray(
+            `Version ${picked.session.version} is not installed. Falling back to current version via /continue...`
+          ));
+          const fb = spawn(fallback[0], fallback.slice(1), { cwd, stdio: 'inherit', shell: false });
+          fb.on('error', (e: any) => { console.error(chalk.red(`Failed: ${e.message}`)); resolve(); });
+          fb.on('close', () => resolve());
+          return;
+        }
+      }
       console.error(chalk.red(`Failed to launch ${resume[0]}: ${err.message}`));
       if (err.code === 'ENOENT') {
         console.error(chalk.gray(`Make sure '${resume[0]}' is on your PATH.`));
@@ -773,22 +776,21 @@ async function handlePickedSession(picked: PickedSession): Promise<void> {
 /**
  * Build the shell command that resumes a picked session.
  *
- * Cross-version handoff: when the session was created on a different version
- * than the one the shim will launch (activeVersion), the session file lives in
- * the other version's isolated home and `--resume <id>` would silently fail to
- * find it. Fall back to a fresh session seeded with `/continue <id>`, which is
- * wired (~/.claude/commands/continue.md) to read the prior transcript via
- * `agents sessions <id>` — that reader is version-agnostic.
+ * When the session's originating version is known, uses the version-pinned
+ * binary (e.g. `claude@2.1.138`) so the resume always runs in the same
+ * isolated HOME where the JSONL was written — regardless of which version is
+ * currently the default. Falls back to the bare shim when version is unknown.
+ *
+ * If the versioned binary is missing (version was removed), the ENOENT
+ * handler in handlePickedSession retries via buildFallbackCommand.
  */
-export function buildResumeCommand(session: SessionMeta, activeVersion?: string): string[] | null {
-  const versionMismatch = !!(session.version && activeVersion && session.version !== activeVersion);
-
+export function buildResumeCommand(session: SessionMeta): string[] | null {
   switch (session.agent) {
     case 'claude':
-      if (versionMismatch) return ['claude', `/continue ${session.id}`];
+      if (session.version) return [`claude@${session.version}`, '--resume', session.id];
       return ['claude', '--resume', session.id];
     case 'codex':
-      if (versionMismatch) return ['codex', `/continue ${session.id}`];
+      if (session.version) return [`codex@${session.version}`, 'resume', session.id];
       return ['codex', 'resume', session.id];
     case 'opencode':
       return ['opencode', '--session', session.id];
@@ -798,6 +800,15 @@ export function buildResumeCommand(session: SessionMeta, activeVersion?: string)
     case 'hermes':
       // Rush and Hermes sessions are captured artifacts, not resumable locally.
       return null;
+  }
+}
+
+/** Fallback resume command when the versioned binary is unavailable (ENOENT). */
+function buildFallbackCommand(session: SessionMeta): string[] | null {
+  switch (session.agent) {
+    case 'claude': return ['claude', `/continue ${session.id}`];
+    case 'codex':  return ['codex', `/continue ${session.id}`];
+    default: return null;
   }
 }
 
