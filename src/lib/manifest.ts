@@ -6,12 +6,7 @@
  */
 import * as fs from 'fs';
 import * as yaml from 'yaml';
-<<<<<<< HEAD
 import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic.js';
-=======
-import { randomBytes } from 'crypto';
-import lockfile from 'proper-lockfile';
->>>>>>> b1dcb42faa80b58f7aeddf399bba73b81e67e5f5
 import type { Manifest } from './types.js';
 import { safeJoin } from './paths.js';
 
@@ -47,7 +42,6 @@ export function readManifest(repoPath: string): Manifest | null {
   return parseManifest(content);
 }
 
-<<<<<<< HEAD
 function withManifestLock<T>(filePath: string, fn: () => T): T {
   const depth = manifestLockDepth.get(filePath) ?? 0;
   if (depth > 0) {
@@ -68,58 +62,13 @@ function withManifestLock<T>(filePath: string, fn: () => T): T {
       manifestLockDepth.delete(filePath);
     }
   });
-=======
-function ensureLockTarget(filePath: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  if (fs.existsSync(filePath)) return;
-  try {
-    fs.writeFileSync(filePath, '', { encoding: 'utf-8', flag: 'wx' });
-  } catch (err: any) {
-    if (err?.code !== 'EEXIST') throw err;
-  }
-}
-
-function atomicWriteFileSync(filePath: string, content: string): void {
-  const tmpPath = `${filePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
-  fs.writeFileSync(tmpPath, content, 'utf-8');
-  try {
-    fs.renameSync(tmpPath, filePath);
-  } catch (err) {
-    try { fs.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
-    throw err;
-  }
->>>>>>> b1dcb42faa80b58f7aeddf399bba73b81e67e5f5
 }
 
 /** Write a Manifest object to agents.yaml in the given directory. */
 export function writeManifest(repoPath: string, manifest: Manifest): void {
   const manifestPath = safeJoin(repoPath, MANIFEST_FILENAME);
   const content = serializeManifest(manifest);
-<<<<<<< HEAD
   withManifestLock(manifestPath, () => atomicWriteFileSync(manifestPath, content));
-=======
-  ensureLockTarget(manifestPath);
-  let release: (() => void) | null = null;
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= MANIFEST_LOCK_RETRIES; attempt++) {
-    try {
-      release = lockfile.lockSync(manifestPath, { stale: MANIFEST_LOCK_STALE_MS });
-      break;
-    } catch (err) {
-      lastError = err;
-      if (attempt < MANIFEST_LOCK_RETRIES) sleepSync(50 * (attempt + 1));
-    }
-  }
-  if (!release) {
-    const message = lastError instanceof Error ? lastError.message : String(lastError);
-    throw new Error(`Could not acquire lock for ${manifestPath}: ${message}`);
-  }
-  try {
-    atomicWriteFileSync(manifestPath, content);
-  } finally {
-    release();
-  }
->>>>>>> b1dcb42faa80b58f7aeddf399bba73b81e67e5f5
 }
 
 /** Create a Manifest with sensible defaults for a fresh agents repo. */

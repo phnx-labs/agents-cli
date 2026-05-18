@@ -23,12 +23,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
-<<<<<<< HEAD
 import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic.js';
-=======
-import { randomBytes } from 'crypto';
-import lockfile from 'proper-lockfile';
->>>>>>> b1dcb42faa80b58f7aeddf399bba73b81e67e5f5
 import type { Meta, RegistryType } from './types.js';
 import { SEEDED_REGISTRIES } from './types.js';
 
@@ -484,36 +479,6 @@ export function createDefaultMeta(): Meta {
 
 let metaCache: { mtime: number; meta: Meta } | null = null;
 let metaLockDepth = 0;
-<<<<<<< HEAD
-=======
-const META_LOCK_STALE_MS = 5_000;
-const META_LOCK_RETRIES = 5;
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function ensureLockTarget(filePath: string, initialContent: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  if (fs.existsSync(filePath)) return;
-  try {
-    fs.writeFileSync(filePath, initialContent, { encoding: 'utf-8', flag: 'wx' });
-  } catch (err: any) {
-    if (err?.code !== 'EEXIST') throw err;
-  }
-}
-
-function atomicWriteFileSync(filePath: string, content: string): void {
-  const tmpPath = `${filePath}.tmp-${process.pid}-${randomBytes(8).toString('hex')}`;
-  fs.writeFileSync(tmpPath, content, 'utf-8');
-  try {
-    fs.renameSync(tmpPath, filePath);
-  } catch (err) {
-    try { fs.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
-    throw err;
-  }
-}
->>>>>>> b1dcb42faa80b58f7aeddf399bba73b81e67e5f5
 
 function withMetaLock<T>(fn: () => T): T {
   ensureAgentsDir();
@@ -525,7 +490,6 @@ function withMetaLock<T>(fn: () => T): T {
       metaLockDepth--;
     }
   }
-<<<<<<< HEAD
   ensureLockTarget(META_FILE, META_HEADER + yaml.stringify(createDefaultMeta()), 0o700);
   return withFileLock(META_FILE, () => {
     metaLockDepth = 1;
@@ -535,33 +499,6 @@ function withMetaLock<T>(fn: () => T): T {
       metaLockDepth = 0;
     }
   });
-=======
-
-  ensureLockTarget(META_FILE, META_HEADER + yaml.stringify(createDefaultMeta()));
-  let release: (() => void) | null = null;
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= META_LOCK_RETRIES; attempt++) {
-    try {
-      release = lockfile.lockSync(META_FILE, { stale: META_LOCK_STALE_MS });
-      break;
-    } catch (err) {
-      lastError = err;
-      if (attempt < META_LOCK_RETRIES) sleepSync(50 * (attempt + 1));
-    }
-  }
-  if (!release) {
-    const message = lastError instanceof Error ? lastError.message : String(lastError);
-    throw new Error(`Could not acquire lock for ${META_FILE}: ${message}`);
-  }
-
-  metaLockDepth = 1;
-  try {
-    return fn();
-  } finally {
-    metaLockDepth = 0;
-    release();
-  }
->>>>>>> b1dcb42faa80b58f7aeddf399bba73b81e67e5f5
 }
 
 function writeMetaUnlocked(meta: Meta): void {

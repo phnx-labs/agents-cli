@@ -870,6 +870,34 @@ export function countSessionsOlderThan(cutoffMs: number): number {
   return row.n;
 }
 
+/**
+ * Rewrite file_path for all sessions whose path starts with oldPrefix, replacing
+ * it with newPrefix + the unchanged suffix. Also clears the matching scan_ledger
+ * entries so they are re-indexed from the new location on the next scan.
+ *
+ * Used by removeVersion after soft-deleting a version directory to trash, so
+ * that session reads (transcript view, /continue) still work from the trash path.
+ * Returns the number of session rows updated.
+ */
+export function updateSessionFilePaths(oldPrefix: string, newPrefix: string): number {
+  const db = getDB();
+  const rows = db
+    .prepare(`SELECT id, file_path FROM sessions WHERE file_path LIKE ?`)
+    .all(oldPrefix + '%') as { id: string; file_path: string }[];
+
+  if (rows.length === 0) return 0;
+
+  const txn = db.transaction(() => {
+    for (const { id, file_path } of rows) {
+      const newPath = newPrefix + file_path.slice(oldPrefix.length);
+      db.prepare(`UPDATE sessions SET file_path = ? WHERE id = ?`).run(newPath, id);
+      db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`).run(canonicalLedgerKey(file_path));
+    }
+  });
+  txn();
+  return rows.length;
+}
+
 /** Delete sessions older than the given timestamp. Returns the number of rows deleted. */
 export function deleteSessionsOlderThan(cutoffMs: number): number {
   const db = getDB();

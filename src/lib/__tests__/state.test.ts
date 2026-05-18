@@ -90,12 +90,9 @@ describe('readMeta merges agents.yaml from both repos', () => {
     }).trim();
   }
 
-<<<<<<< HEAD
   // Uses Node.js instead of Bun because the rename-failure test needs
   // syncBuiltinESMExports() to propagate a monkey-patched fs.renameSync
   // across ESM module boundaries — a Node.js-only API not available in Bun.
-=======
->>>>>>> b1dcb42faa80b58f7aeddf399bba73b81e67e5f5
   function runStateScriptWithNode(home: string, script: string): string {
     return execFileSync('node', ['--import', 'tsx', '--input-type=module', '-e', script], {
       cwd: process.cwd(),
