@@ -139,7 +139,7 @@ Quick start:
   agents sessions                 Browse past sessions across all agents
 
 Agent versions:
-  add <agent>[@version]           Install an agent CLI (e.g. agents add codex)
+  add <agent>[@version]           Install an agent CLI (e.g. agents add grok or agents add codex)
   import <agent>                  Adopt an existing global install (npm/homebrew) into agents-cli
   prune <agent>[@version]         Uninstall a version
   remove <agent>[@version]        Alias for prune
@@ -191,7 +191,7 @@ Automation tips:
   Pass explicit names/IDs         Avoid pickers: agents sessions <id> --markdown
   Use --yes for defaults          Auto-accept sync/default prompts on add/use/pull
   Use --names for central items   e.g. agents commands add --names review-pr,debug
-  Use agent@version targets       e.g. --agents claude@2.1.79,codex@default
+  Use agent@version targets       e.g. --agents grok@0.1.218,claude@2.1.79,codex@default
   Non-TTY shells apply defaults   Omitted required selections fail with a plain hint
 
 Options:
