@@ -807,6 +807,12 @@ export function registerHooksToSettings(
   if (agentId === 'gemini') {
     return registerHooksForGemini(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'grok') {
+    // Grok has a rich native hooks system (~/.grok/hooks/*.json + project .grok/hooks/).
+    // Full bidirectional sync (agents hooks -> grok JSON) can be added in a follow-up.
+    // For now we rely on the general file copy in syncResourcesToVersion + GROK_HOME.
+    return { registered: [], errors: [] };
+  }
   return { registered: [], errors: [] };
 }
 
