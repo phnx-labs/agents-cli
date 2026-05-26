@@ -842,6 +842,11 @@ export async function getAccountInfo(
         const data = JSON.parse(await fs.promises.readFile(path.join(base, '.gemini', 'google_accounts.json'), 'utf-8'));
         return { ...empty, email: data.active || null, lastActive };
       }
+      case 'grok': {
+        // Grok stores auth in ~/.grok/auth.json. Basic support for now
+        // (full parsing can be expanded later like claude/codex).
+        return { ...empty, lastActive };
+      }
       default:
         return { ...empty, lastActive };
     }
