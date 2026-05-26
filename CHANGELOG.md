@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+**Grok Build (first-class support)**
+
+- Add `grok` as a first-class supported agent (AgentId + full registry entry using official `~/.grok/README.md` paths).
+- Implement proper binary resolution from `~/.grok/downloads/`.
+- Add `GROK_HOME` isolation to generated shims for true versioned config (skills, hooks, plugins, agents/, MCP, memory, etc.).
+- Extend `installVersion` to support Grok via its official installer script (`curl ... -s <version>`).
+- Update shims, exec templates, MCP path helpers, session helpers, unmanaged detection, and docs.
+- `agents add grok@<ver>`, `agents use grok@<ver>`, resource sync, and shims now work end-to-end for Grok Build.
+
 ## 1.18.6
 
 **Claude**
