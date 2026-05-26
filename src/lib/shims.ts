@@ -259,7 +259,14 @@ fi
 # written by agents-cli actually take effect.
 export CODEX_HOME="$VERSION_DIR/home/${configDirName}"
 `
-      : '';
+      : agent === 'grok'
+        ? `
+# Grok Build uses GROK_HOME to isolate its entire configuration tree
+# (skills, hooks, plugins, agents, memory, sessions, config.toml, MCP, etc.).
+# This gives agents-cli full versioned isolation + resource sync for grok.
+export GROK_HOME="$VERSION_DIR/home/.grok"
+`
+        : '';
 
   // Agents that don't natively resolve @-imports in their rules file need
   // agents-cli to recompile when the user edits a rule/preset file. The
@@ -411,7 +418,27 @@ if [[ ! "$VERSION" =~ ^(latest|[A-Za-z0-9._+-]{1,64})$ || "$VERSION" == *..* ]];
 fi
 
 VERSION_DIR="$AGENTS_USER_DIR/.history/versions/$AGENT/$VERSION"
-BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
+
+# Grok special case: binary lives in ~/.grok/downloads/, not node_modules.
+# We still use the agents-cli version dir purely for GROK_HOME isolation.
+if [ "$AGENT" = "grok" ]; then
+  # Try to find a matching binary for the pinned version in the global grok downloads dir.
+  GROK_DOWNLOADS="$HOME/.grok/downloads"
+  if [ -d "$GROK_DOWNLOADS" ]; then
+    # Prefer a binary whose filename contains the exact version
+    BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | grep -i "$VERSION" | head -1)
+    if [ -z "$BINARY" ]; then
+      # Fallback to the "current" grok binary (symlink or latest)
+      BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | head -1)
+    fi
+  fi
+  if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
+    # Last resort: whatever is on PATH (user may have installed grok globally)
+    BINARY=$(command -v grok 2>/dev/null || echo "")
+  fi
+else
+  BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
+fi
 
 # Auto-install if not present
 if [ ! -x "$BINARY" ]; then

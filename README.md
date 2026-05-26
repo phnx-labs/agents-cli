@@ -27,6 +27,8 @@
   <a href="https://github.com/openclaw/openclaw" title="OpenClaw"><img src="assets/harnesses/openclaw.svg" height="36" alt="OpenClaw" /></a>
   &nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://github.com/NousResearch/hermes-agent" title="Hermes Agent"><img src="assets/harnesses/hermes.png" height="32" alt="Hermes Agent" /></a>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://x.ai" title="Grok Build (xAI)"><strong>Grok</strong></a>
 </p>
 
 https://agents-cli.sh/demo.mp4
@@ -79,7 +81,7 @@ agents:
   codex: "0.116.0"
 ```
 
-Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `gemini` to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
+Think `requirements.txt` for CLI coding agents, on steroids. A shim reads `agents.yaml` from the project root and routes `claude` / `codex` / `gemini` / `grok` (and others) to the right version automatically. Each version gets its own isolated home -- switching backs up config and re-syncs resources.
 
 ```bash
 agents add claude@2.0.65     # Install a specific version
@@ -156,7 +158,7 @@ agents run claude "review this diff" --acp --json
 
 `--acp` routes through the [Agent Client Protocol](https://agentclientprotocol.com/) so you get a unified event stream -- `agent_message_chunk`, `tool_call`, `plan_update`, `stop_reason` -- instead of writing a parser per CLI. File writes and shell commands flow through agents-cli, which means `--mode plan` becomes a real sandbox: the write RPC is denied, not just unused.
 
-ACP adapters are documented for claude, codex, gemini, cursor, opencode, and openclaw. Other harnesses keep running on the direct-exec path.
+ACP adapters are documented for claude, codex, gemini, cursor, opencode, openclaw, and grok. Other harnesses keep running on the direct-exec path.
 
 ---
 
@@ -653,7 +655,7 @@ Codex command sync is version-aware: Codex `0.116.x` and older receive slash com
 
 ### Why use `agents` instead of `claude` / `codex` / `gemini` directly?
 
-Claude Code, Codex CLI, and Gemini CLI each have their own config format, MCP setup, version management, and skill system. If you use more than one, you maintain N copies of everything. `agents` gives you one interface, one config source, and one place to pin versions -- plus features the individual CLIs don't ship: cross-agent pipelines, shared teams, unified session search, and project-pinned versions like `.nvmrc`.
+Claude Code, Codex CLI, Gemini CLI, Grok Build, and others each have their own config format, MCP setup, version management, and skill system. If you use more than one, you maintain N copies of everything. `agents` gives you one interface, one config source, and one place to pin versions -- plus features the individual CLIs don't ship: cross-agent pipelines, shared teams, unified session search, and project-pinned versions like `.nvmrc`.
 
 ### Is it free?
 

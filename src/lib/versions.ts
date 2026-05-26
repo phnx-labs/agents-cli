@@ -960,8 +960,23 @@ export function getVersionDir(agent: AgentId, version: string): string {
  * Get the binary path for a specific agent version.
  */
 export function getBinaryPath(agent: AgentId, version: string): string {
-  const versionDir = getVersionDir(agent, version);
   const agentConfig = AGENTS[agent];
+  if (agent === 'grok') {
+    // Grok binaries live in the global ~/.grok/downloads, not per-version node_modules.
+    // We return a best-effort path (used for display / checks). Real resolution
+    // happens in agents.ts resolveGrokBinary + the generated shims.
+    const grokDownloads = path.join(os.homedir(), '.grok', 'downloads');
+    // Best effort: first matching file for this version
+    try {
+      const entries = fs.readdirSync(grokDownloads);
+      const match = entries.find((e: string) => e.includes(version) && e.startsWith('grok-'));
+      if (match) return path.join(grokDownloads, match);
+      const first = entries.find((e: string) => e.startsWith('grok-'));
+      if (first) return path.join(grokDownloads, first);
+    } catch {}
+    return path.join(grokDownloads, `grok-${version}`);
+  }
+  const versionDir = getVersionDir(agent, version);
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);
 }
 
@@ -1092,7 +1107,32 @@ export async function installVersion(
   const agentConfig = AGENTS[agent];
 
   if (!agentConfig.npmPackage) {
-    return { success: false, installedVersion: version, error: 'Agent has no npm package' };
+    // Support agents that provide an installScript (cursor, roo, goose, kiro, grok, etc.)
+    if (agentConfig.installScript) {
+      // For grok we give special love because the user asked for first-class support
+      if (agent === 'grok') {
+        onProgress?.(`Installing Grok ${version} via official installer...`);
+        try {
+          const script = agentConfig.installScript.replace('VERSION', version);
+          // The official installer supports -s <version>
+          const { exec } = await import('child_process');
+          const { promisify } = await import('util');
+          const execAsync = promisify(exec);
+          await execAsync(script, { timeout: 120000 });
+          onProgress?.('Grok binary installed. Setting up agents-cli version home for isolation...');
+        } catch (err: any) {
+          return { success: false, installedVersion: version, error: `Grok installer failed: ${err.message}` };
+        }
+      } else {
+        return {
+          success: false,
+          installedVersion: version,
+          error: `${agent} uses an external installer. Run: ${agentConfig.installScript}`,
+        };
+      }
+    } else {
+      return { success: false, installedVersion: version, error: 'Agent has no npm package' };
+    }
   }
 
   // Validate before deriving filesystem paths or npm package specs. The CLI
@@ -1109,7 +1149,16 @@ export async function installVersion(
   fs.mkdirSync(versionDir, { recursive: true });
   fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
 
-  // Initialize package.json
+  // For agents using external installers (especially grok), we don't do npm install.
+  // The binary is managed by the agent's own installer; we only manage the isolated home + resources.
+  if (agent === 'grok' || !agentConfig.npmPackage) {
+    // Grok (and similar) — binary already installed by the step above (or user ran external installer).
+    // We still want to record the version for config isolation.
+    createVersionedAlias(agent, version);
+    return { success: true, installedVersion: version };
+  }
+
+  // Initialize package.json (only for real npm agents)
   const packageJson = {
     name: `agents-${agent}-${version}`,
     version: '1.0.0',

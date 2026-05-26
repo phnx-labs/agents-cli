@@ -2,7 +2,7 @@
  * Core agent configuration and detection module.
  *
  * Defines the canonical registry of all supported AI coding agents (Claude, Codex,
- * Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Roo) with their
+ * Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Roo, Grok) with their
  * CLI commands, config paths, capability flags, and MCP integration points.
  *
  * Provides functions for detecting installed CLIs, resolving version-managed binaries,
@@ -91,6 +91,42 @@ function findInPath(command: string): string | null {
     }
   }
   return null;
+}
+
+/** Grok-specific binary resolution.
+ * Grok does not live in node_modules/.bin. Its versioned binaries live in
+ * ~/.grok/downloads/ with names like `grok-0.1.218-macos-aarch64`.
+ * We still use the agents-cli version dir for *config isolation* via GROK_HOME.
+ */
+function resolveGrokBinary(version?: string): string | null {
+  const grokDownloads = path.join(HOME, '.grok', 'downloads');
+  if (!fs.existsSync(grokDownloads)) return null;
+
+  const entries = fs.readdirSync(grokDownloads);
+  // Prefer exact version match in filename
+  if (version && version !== 'latest') {
+    const match = entries.find((e) => e.includes(version) && e.startsWith('grok-'));
+    if (match) return path.join(grokDownloads, match);
+  }
+
+  // Fallback: the "current" symlink or the plain `grok-*` without version in name
+  const current = entries.find((e) => e === 'grok' || e.startsWith('grok-') && !e.match(/grok-\d/));
+  if (current) return path.join(grokDownloads, current);
+
+  // Last resort: newest file by mtime
+  let latest: string | null = null;
+  let latestMtime = 0;
+  for (const e of entries) {
+    if (!e.startsWith('grok-')) continue;
+    try {
+      const stat = fs.statSync(path.join(grokDownloads, e));
+      if (stat.mtimeMs > latestMtime) {
+        latestMtime = stat.mtimeMs;
+        latest = e;
+      }
+    } catch {}
+  }
+  return latest ? path.join(grokDownloads, latest) : null;
 }
 
 function splitCommandLine(command: string): string[] {
@@ -384,25 +420,34 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, rulesImports: false },
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
-  // first launch, or GROK_CODE_XAI_API_KEY env var for headless. MCP supported
-  // out of the box; exact config file path verified at first install.
+  // first launch, or GROK_CODE_XAI_API_KEY env var for headless. Grok exposes
+  // skills, hooks, plugins, and MCP via .grok/* directories per the official
+  // ~/.grok/README.md; MCP servers live inside config.toml under [mcp_servers].
   grok: {
     id: 'grok',
     name: 'Grok',
-    color: 'whiteBright',
+    color: 'cyanBright',
     cliCommand: 'grok',
     npmPackage: '',
-    installScript: 'curl -fsSL https://x.ai/cli/install.sh | bash',
+    installScript: 'curl -fsSL https://x.ai/cli/install.sh | bash -s VERSION',
     configDir: path.join(HOME, '.grok'),
-    commandsDir: path.join(HOME, '.grok', 'commands'),
-    commandsSubdir: 'commands',
+    commandsDir: '', // Grok primarily uses skills + slash commands from skills
+    commandsSubdir: '',
     skillsDir: path.join(HOME, '.grok', 'skills'),
-    hooksDir: 'hooks',
+    hooksDir: path.join(HOME, '.grok', 'hooks'),
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false },
+    supportsHooks: true,
+    capabilities: {
+      hooks: true,
+      mcp: true,
+      allowlist: true, // maps to Grok's granular Bash/Edit/Write/Read/Grep/WebFetch/MCPTool rules
+      skills: true,
+      commands: false, // covered by skills
+      plugins: true,
+      rulesImports: true,
+    },
   },
 };
 
@@ -546,6 +591,19 @@ export async function getCliState(agentId: AgentId): Promise<CliState> {
   }
 
   // Non-version-managed: single PATH lookup + cached version read
+  // Special case for grok: it manages its own binaries in ~/.grok/downloads/
+  if (agentId === 'grok') {
+    const grokBin = resolveGrokBinary();
+    if (!grokBin) {
+      return { installed: false, version: null, path: null };
+    }
+    return {
+      installed: true,
+      version: await getCachedVersionForBinary(agentId, grokBin),
+      path: grokBin,
+    };
+  }
+
   const binaryPath = findInPath(agent.cliCommand);
   if (!binaryPath) {
     return { installed: false, version: null, path: null };
@@ -591,7 +649,7 @@ export interface UnmanagedInstall {
  */
 export async function getUnmanagedAgentInstalls(): Promise<UnmanagedInstall[]> {
   const unmanaged: UnmanagedInstall[] = [];
-  const candidates: AgentId[] = ['claude', 'codex', 'gemini'];
+  const candidates: AgentId[] = ['claude', 'codex', 'gemini', 'grok'];
 
   for (const agentId of candidates) {
     const agent = AGENTS[agentId];
@@ -825,6 +883,8 @@ function getSessionDir(agentId: AgentId, base: string): string | null {
       return path.join(base, '.codex', 'sessions');
     case 'gemini':
       return path.join(base, '.gemini', 'tmp');
+    case 'grok':
+      return path.join(base, '.grok', 'sessions');
     default:
       return null;
   }
@@ -838,6 +898,8 @@ function getSessionExtension(agentId: AgentId): string | null {
       return '.jsonl';
     case 'gemini':
       return '.json';
+    case 'grok':
+      return '.json'; // sessions contain summary.json, events.jsonl, etc.
     default:
       return null;
   }
@@ -1334,7 +1396,7 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
     case 'antigravity':
       return path.join(home, '.gemini', 'antigravity-cli', 'mcp_config.json');
     case 'grok':
-      return path.join(home, '.grok', 'mcp.json');
+      return path.join(home, '.grok', 'config.toml');
     default:
       return path.join(home, `.${agentId}`, 'settings.json');
   }
@@ -1371,7 +1433,7 @@ function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()):
     case 'antigravity':
       return path.join(cwd, '.gemini', 'antigravity-cli', 'mcp_config.json');
     case 'grok':
-      return path.join(cwd, '.grok', 'mcp.json');
+      return path.join(cwd, '.grok', 'config.toml');
     default:
       return path.join(cwd, `.${agentId}`, 'settings.json');
   }

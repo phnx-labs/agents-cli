@@ -11,7 +11,7 @@ Do NOT use built-in Claude Code agents (Task tool with Explore/Plan subagent_typ
 
 # agents-cli
 
-CLI for managing AI coding agent versions, config, sessions, and cloud dispatch (Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw).
+CLI for managing AI coding agent versions, config, sessions, and cloud dispatch (Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok Build).
 
 ## Three DotAgents repos
 
@@ -89,8 +89,9 @@ Promptcuts are hook data, not a top-level resource — `~/.agents-system/hooks/p
 | Gemini | `commands/` (toml) | GEMINI.md |
 | Cursor | `commands/` (md) | .cursorrules |
 | OpenCode | `commands/` (md) | OPENCODE.md |
+| Grok | skills + `.grok/` (hooks, plugins, agents, config.toml) | AGENTS.md + `~/.grok/memory/` |
 
-`AGENTS.md` is the canonical source — synced to each agent's expected name.
+`AGENTS.md` is the canonical source — synced to each agent's expected name. Grok also has native support for project `.grok/` resources.
 
 ## Build
 
