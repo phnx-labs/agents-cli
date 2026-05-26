@@ -808,10 +808,7 @@ export function registerHooksToSettings(
     return registerHooksForGemini(versionHome, manifest, resolveScript, managedPrefixes);
   }
   if (agentId === 'grok') {
-    // Grok has a rich native hooks system (~/.grok/hooks/*.json + project .grok/hooks/).
-    // Full bidirectional sync (agents hooks -> grok JSON) can be added in a follow-up.
-    // For now we rely on the general file copy in syncResourcesToVersion + GROK_HOME.
-    return { registered: [], errors: [] };
+    return registerHooksForGrok(versionHome, manifest, resolveScript, managedPrefixes);
   }
   return { registered: [], errors: [] };
 }
@@ -1177,6 +1174,81 @@ function registerHooksForGemini(
     });
   } catch (err) {
     errors.push(`Failed to write gemini settings.json: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+/**
+ * Register hooks for Grok Build.
+ * Grok uses per-event JSON files under .grok/hooks/ (e.g. session-start.json).
+ */
+function registerHooksForGrok(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const grokHooksDir = path.join(versionHome, '.grok', 'hooks');
+  fs.mkdirSync(grokHooksDir, { recursive: true });
+
+  const eventMap: Record<string, string> = {
+    SessionStart: 'SessionStart',
+    SessionEnd: 'SessionEnd',
+    UserPromptSubmit: 'UserPromptSubmit',
+    PreToolUse: 'PreToolUse',
+    PostToolUse: 'PostToolUse',
+    PreCompact: 'PreCompact',
+    Stop: 'Stop',
+    Notification: 'Notification',
+  };
+
+  const grokHooks: Record<string, any> = { hooks: {} };
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveScript(hookDef.script);
+    if (!commandPath) {
+      errors.push(`${name}: script not found`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 30;
+
+    for (const ev of hookDef.events) {
+      const grokEvent = eventMap[ev] || ev;
+
+      if (!grokHooks.hooks[grokEvent]) {
+        grokHooks.hooks[grokEvent] = [];
+      }
+
+      grokHooks.hooks[grokEvent].push({
+        hooks: [{ type: 'command' as const, command: commandPath, timeout }],
+      });
+
+      registered.push(`${name} -> ${grokEvent}`);
+    }
+  }
+
+  const mainHooksPath = path.join(grokHooksDir, 'hooks.json');
+  try {
+    fs.writeFileSync(mainHooksPath, JSON.stringify(grokHooks, null, 2));
+  } catch (e) {
+    errors.push(`Failed to write hooks.json: ${(e as Error).message}`);
+  }
+
+  for (const [eventName, groups] of Object.entries(grokHooks.hooks)) {
+    const fileName = eventName.toLowerCase().replace(/([a-z])([A-Z])/g, '$1-$2') + '.json';
+    const eventFile = path.join(grokHooksDir, fileName);
+    try {
+      fs.writeFileSync(eventFile, JSON.stringify({ hooks: { [eventName]: groups } }, null, 2));
+    } catch (e) {
+      errors.push(`Failed to write ${fileName}: ${(e as Error).message}`);
+    }
   }
 
   return { registered, errors };
