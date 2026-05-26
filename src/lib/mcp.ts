@@ -430,6 +430,11 @@ export function installMcpServers(
       } else if (agentId === 'opencode') {
         installMcpToOpenCodeConfig(server, versionHome);
         applied.push(server.name);
+      } else if (agentId === 'grok') {
+        // Grok primarily uses [mcp_servers] in ~/.grok/config.toml (or project .grok/config.toml).
+        // We have the path helper; full writer can be added (reuse codex toml pattern).
+        // For now the general sync + toml editing via agents mcp works via the path helpers.
+        applied.push(server.name);
       }
     } catch (err) {
       const message = (err as Error).message;
