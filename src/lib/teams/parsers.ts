@@ -2,14 +2,14 @@
  * Agent event stream parsers.
  *
  * Normalizes the heterogeneous JSON event formats emitted by each agent CLI
- * (Claude, Codex, Gemini, Cursor, OpenCode) into a unified event schema
+ * (Claude, Codex, Gemini, Cursor, OpenCode, Grok) into a unified event schema
  * with consistent types: init, message, tool_use, bash, file_read, file_write,
  * file_create, file_delete, result, error, and others.
  */
 import { extractFileOpsFromBash } from './file_ops.js';
 
 /** Supported agent CLI types for team spawning. */
-export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode';
+export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 'grok';
 
 const claudeToolUseMap = new Map<string, { tool: string; command?: string; path?: string }>();
 
@@ -25,6 +25,8 @@ export function normalizeEvents(agentType: AgentType, raw: any): any[] {
     return normalizeClaude(raw);
   } else if (agentType === 'opencode') {
     return normalizeOpencode(raw);
+  } else if (agentType === 'grok') {
+    return normalizeGrok(raw);
   }
 
   const timestamp = new Date().toISOString();
@@ -847,6 +849,82 @@ function normalizeOpencode(raw: any): any[] {
   return [{
     type: eventType,
     agent: 'opencode',
+    raw: raw,
+    timestamp: timestamp,
+  }];
+}
+
+// --- Grok parsing ---
+// Grok's streaming-json mode emits one JSON object per token, with three event
+// types:
+//   {"type":"thought","data":"<chunk>"}   — reasoning tokens (many, small)
+//   {"type":"text","data":"<chunk>"}      — visible response tokens (many, small)
+//   {"type":"end","stopReason":"EndTurn","sessionId":"<uuid>","requestId":"<uuid>"}
+//
+// Tool calls are NOT exposed as separate events in this format; they appear
+// inside the `thought` text as XML-like markup. Extracting them reliably would
+// require running a streaming XML/markup parser over concatenated thought
+// chunks, which is out of scope for v1. The teams summary will show grok
+// teammates' bash/file ops as empty — known limitation, fixable later by
+// switching to grok's `agent` subcommand (richer event stream) once stable.
+//
+// Tokens are emitted as `message` events with `complete: false` so the
+// summarizer can concatenate them into a final message; `thinking` events are
+// already collapsed by the summarizer's groupAndFlattenEvents pathway.
+function normalizeGrok(raw: any): any[] {
+  if (!raw || typeof raw !== 'object') {
+    return [{
+      type: 'unknown',
+      agent: 'grok',
+      raw: raw,
+      timestamp: new Date().toISOString(),
+    }];
+  }
+
+  const eventType = raw.type || 'unknown';
+  const timestamp = new Date().toISOString();
+
+  if (eventType === 'thought') {
+    const data = typeof raw.data === 'string' ? raw.data : '';
+    if (!data) return [];
+    return [{
+      type: 'thinking',
+      agent: 'grok',
+      content: data,
+      timestamp: timestamp,
+    }];
+  }
+
+  if (eventType === 'text') {
+    const data = typeof raw.data === 'string' ? raw.data : '';
+    if (!data) return [];
+    return [{
+      type: 'message',
+      agent: 'grok',
+      content: data,
+      complete: false,
+      timestamp: timestamp,
+    }];
+  }
+
+  if (eventType === 'end') {
+    const stopReason = typeof raw.stopReason === 'string' ? raw.stopReason : '';
+    const status = stopReason === 'EndTurn' || stopReason === 'StopSequence' || stopReason === ''
+      ? 'success'
+      : 'error';
+    return [{
+      type: 'result',
+      agent: 'grok',
+      status: status,
+      stop_reason: stopReason || null,
+      session_id: typeof raw.sessionId === 'string' ? raw.sessionId : null,
+      timestamp: timestamp,
+    }];
+  }
+
+  return [{
+    type: eventType,
+    agent: 'grok',
     raw: raw,
     timestamp: timestamp,
   }];

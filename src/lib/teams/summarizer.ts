@@ -183,12 +183,19 @@ export function groupAndFlattenEvents(events: any[]): any[] {
     if (eventType === 'message' || eventType === 'thinking') {
       let count = 1;
       let combinedContent = event.content || '';
+      // Streaming token events (complete:false) get concatenated without a
+      // separator so tokens reassemble into readable prose. Whole-turn events
+      // get joined with newlines so distinct turns/thoughts stay separated.
+      const isStreaming = event.complete === false;
       let j = i + 1;
 
       while (j < events.length && events[j].type === eventType) {
         count++;
         if (events[j].content) {
-          combinedContent += (combinedContent ? '\n' : '') + events[j].content;
+          const sep = isStreaming || events[j].complete === false
+            ? ''
+            : (combinedContent ? '\n' : '');
+          combinedContent += sep + events[j].content;
         }
         j++;
       }
@@ -454,7 +461,15 @@ export function summarizeEvents(
     } else if (eventType === 'message') {
       const content = event.content || '';
       if (content) {
-        summary.finalMessage = content;
+        // Streaming token-by-token messages (e.g., grok) arrive as many small
+        // `message` events with complete:false; concatenate them so the final
+        // turn reads as one message. Whole-turn messages (claude, codex,
+        // gemini) keep their complete:true semantics — last one wins.
+        if (event.complete === false) {
+          summary.finalMessage = (summary.finalMessage || '') + content;
+        } else {
+          summary.finalMessage = content;
+        }
       }
     } else if (eventType === 'error') {
       let errorMsg: string | null = null;
