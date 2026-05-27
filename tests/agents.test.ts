@@ -26,9 +26,9 @@ describe('COMMANDS_CAPABLE_AGENTS', () => {
     expect(AGENTS['openclaw'].capabilities.commands).toBe(false);
   });
 
-  it('all non-openclaw agents have non-empty commandsDir', () => {
+  it('agents with capabilities.commands have non-empty commandsDir', () => {
     for (const id of ALL_AGENT_IDS) {
-      if (id === 'openclaw') continue;
+      if (!AGENTS[id].capabilities.commands) continue;
       expect(AGENTS[id].commandsDir).not.toBe('');
     }
   });
