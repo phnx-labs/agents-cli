@@ -86,6 +86,7 @@ export function parseSession(filePath: string, agent?: SessionAgentId): SessionE
     case 'codex': events = parseCodex(filePath); break;
     case 'gemini': events = parseGemini(filePath); break;
     case 'opencode': events = parseOpenCode(filePath); break;
+    case 'grok': events = parseGrok(filePath); break;
     case 'rush': events = parseRush(filePath); break;
     case 'openclaw': events = []; break; // OpenClaw sessions don't have parseable files yet
     case 'hermes': events = parseHermes(filePath); break;
@@ -103,6 +104,7 @@ export function detectAgent(filePath: string): SessionAgentId | null {
   if (filePath.includes('/.claude/') || filePath.includes('\\.claude\\')) return 'claude';
   if (filePath.includes('/.codex/') || filePath.includes('\\.codex\\')) return 'codex';
   if (filePath.includes('/.gemini/') || filePath.includes('\\.gemini\\')) return 'gemini';
+  if (filePath.includes('/.grok/') || filePath.includes('\\.grok\\')) return 'grok';
   if (filePath.includes('/.rush/') || filePath.includes('\\.rush\\')) return 'rush';
   if (filePath.includes('/.hermes/') || filePath.includes('\\.hermes\\')) return 'hermes';
   // Cloud convention: cloud-sessions/<id>/session.<format>.jsonl
@@ -643,6 +645,44 @@ function extractGeminiContent(content: any): string {
  * Messages have role (user/assistant) and metadata.
  * Parts contain the actual content: text, tool, reasoning, patch, step-start/finish.
  */
+export function parseGrok(filePath: string): SessionEvent[] {
+  // Grok sessions are rich (summary.json + events.jsonl + chat_history.jsonl + updates.jsonl)
+  // This is a minimal stub for now so grok appears in `agents sessions`.
+  // Full parser (with subagents, tool calls, etc.) can be expanded later.
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    // If it's a summary.json, create a basic event
+    if (filePath.endsWith('summary.json')) {
+      const summary = JSON.parse(content);
+      return [{
+        timestamp: summary.created_at || new Date().toISOString(),
+        type: 'session_start',
+        content: summary.session_summary || 'Grok session',
+        agent: 'grok',
+        metadata: { sessionId: summary.id, cwd: summary.cwd },
+      } as any];
+    }
+    // For JSONL files (events, chat_history, updates), return basic parsed lines
+    if (filePath.endsWith('.jsonl')) {
+      const lines = content.trim().split('\n').filter(Boolean);
+      return lines.slice(0, 50).map((line, i) => {
+        try {
+          const obj = JSON.parse(line);
+          return {
+            timestamp: obj.timestamp || obj.ts || new Date().toISOString(),
+            type: obj.type || obj.method || 'grok_event',
+            content: typeof obj.content === 'string' ? obj.content : JSON.stringify(obj).slice(0, 200),
+            agent: 'grok',
+          } as any;
+        } catch {
+          return { timestamp: new Date().toISOString(), type: 'raw', content: line.slice(0, 200), agent: 'grok' } as any;
+        }
+      });
+    }
+  } catch {}
+  return [];
+}
+
 export function parseOpenCode(filePath: string): SessionEvent[] {
   const [dbPath, sessionId] = filePath.split('#');
   if (!dbPath || !sessionId) return [];

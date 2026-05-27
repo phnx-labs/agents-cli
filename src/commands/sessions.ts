@@ -798,7 +798,8 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
     case 'openclaw':
     case 'rush':
     case 'hermes':
-      // Rush and Hermes sessions are captured artifacts, not resumable locally.
+    case 'grok':
+      // Grok (and some others) sessions are captured artifacts, not resumable the same way.
       return null;
   }
 }

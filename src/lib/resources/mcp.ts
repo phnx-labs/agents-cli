@@ -290,6 +290,41 @@ function syncToCodexConfig(configPath: string, items: McpItem[]): void {
 }
 
 /**
+ * Write MCP servers to Grok config.toml format ([mcp_servers] section).
+ */
+function syncToGrokConfig(configPath: string, items: McpItem[]): void {
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      config = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      config = {};
+    }
+  }
+
+  const mcpServers: Record<string, unknown> = {};
+  for (const item of items) {
+    if (item.transport === 'stdio') {
+      mcpServers[item.name] = {
+        command: item.command,
+        args: item.args || [],
+        ...(item.env && { env: item.env }),
+      };
+    } else if (item.transport === 'http' || item.transport === 'sse') {
+      mcpServers[item.name] = {
+        url: item.url,
+        ...(item.headers && { headers: item.headers }),
+      };
+    }
+  }
+
+  config.mcp_servers = mcpServers;
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, TOML.stringify(config), 'utf-8');
+}
+
+/**
  * Write MCP servers to OpenCode opencode.jsonc format.
  */
 function syncToOpenCodeConfig(configPath: string, items: McpItem[]): void {
@@ -539,12 +574,16 @@ export const McpHandler: ResourceHandler<McpItem> = {
       case 'openclaw':
         syncToOpenClawConfig(configPath, mcpItems);
         break;
+      case 'grok':
+        syncToGrokConfig(configPath, mcpItems);
+        break;
     }
   },
 
   format(agent: AgentId): 'md' | 'toml' | 'json' | 'yaml' {
     switch (agent) {
       case 'codex':
+      case 'grok':
         return 'toml';
       default:
         return 'json';
