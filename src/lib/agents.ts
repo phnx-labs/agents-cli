@@ -843,8 +843,15 @@ export async function getAccountInfo(
         return { ...empty, email: data.active || null, lastActive };
       }
       case 'grok': {
-        // Grok stores auth in ~/.grok/auth.json. Basic support for now
-        // (full parsing can be expanded later like claude/codex).
+        // Grok stores auth in ~/.grok/auth.json
+        try {
+          const authPath = path.join(base, '.grok', 'auth.json');
+          if (fs.existsSync(authPath)) {
+            const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
+            const email = data.email || data.user?.email || data.account?.email || null;
+            return { ...empty, email, lastActive };
+          }
+        } catch {}
         return { ...empty, lastActive };
       }
       default:
