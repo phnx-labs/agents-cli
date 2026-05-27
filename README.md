@@ -296,6 +296,56 @@ Resolution is project > user > system: a `<repo>/.agents/workflows/<name>/` over
 
 ---
 
+## Plugins
+
+Bundle skills, commands, hooks, MCP servers, settings, and permissions under a single manifest. One source dir at `~/.agents/plugins/<name>/`, mirrored into every installed Claude / OpenClaw version automatically.
+
+```bash
+# Install from a git URL or local path
+agents plugins install hivemind@https://github.com/activeloopai/hivemind.git
+agents plugins install ./my-plugin
+
+# Apply to one agent (default version) or all supported
+agents plugins sync rush-toolkit claude
+agents plugins sync rush-toolkit
+```
+
+A plugin is a directory with a manifest:
+
+```
+~/.agents/plugins/my-plugin/
+  .claude-plugin/plugin.json       # required: { name, version, description }
+  skills/<name>/SKILL.md           # optional
+  commands/*.md                    # optional
+  hooks/hooks.json                 # optional — executable surface
+  .mcp.json                        # optional — executable surface
+  bin/, scripts/, settings.json    # optional — executable surface
+  permissions/                     # optional — executable surface
+```
+
+On sync, agents-cli copies the plugin into each version home's marketplace (`<home>/.claude/plugins/marketplaces/agents-cli/plugins/<name>/`), registers the synthetic marketplace, and flips `settings.json#enabledPlugins[<name>@agents-cli] = true` so Claude / OpenClaw load it.
+
+### Executable-surface gate
+
+Plugins that ship `hooks/`, `.mcp.json`, `bin/`, `scripts/`, `settings.json` (non-permissions), or `permissions/` can execute code on session events. agents-cli requires explicit consent before flipping `enabledPlugins`:
+
+```bash
+# Hooks-bearing plugins copy in but stay disabled by default
+agents plugins install hivemind@https://github.com/activeloopai/hivemind.git \
+  --allow-exec-surfaces
+
+# Same gate on re-sync (e.g., after upstream updates)
+agents plugins sync hivemind claude --allow-exec-surfaces
+```
+
+Skills, commands, and subagents are declarative and never trip the gate. The gate is per-plugin, per-install: consenting to hivemind doesn't grant blanket exec-surface trust to anything else.
+
+### Version portability
+
+Plugins live in the user repo (`~/.agents/plugins/`), not inside any single version home. Switching Claude via `agents use claude@<v>` re-syncs the plugin into the new version automatically — no re-install. New Claude versions added later pick it up on their first sync. Project-level `<repo>/.agents/plugins/<name>/` overrides a same-named user plugin (resolution is project > user > system, same as every other resource).
+
+---
+
 ## Browser
 
 Give agents access to a real browser — no relay extension, no cloud service, no Playwright getting blocked.

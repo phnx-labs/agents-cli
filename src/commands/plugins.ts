@@ -297,6 +297,7 @@ Examples:
   pluginsCmd
     .command('sync <name> [agent]')
     .description('Apply a plugin to the default version of an agent (or all supported agents if none specified)')
+    .option('--allow-exec-surfaces', 'Enable the plugin even when it ships hooks/, .mcp.json, bin/, scripts/, settings.json, or permissions/')
     .addHelpText('after', `
 Examples:
   # Sync a plugin to a specific agent (default version)
@@ -304,8 +305,11 @@ Examples:
 
   # Sync to all supported agents
   agents plugins sync rush-toolkit
+
+  # Re-affirm consent for a hooks-bearing plugin
+  agents plugins sync hivemind claude --allow-exec-surfaces
 `)
-    .action(async (name: string, agentArg?: string) => {
+    .action(async (name: string, agentArg: string | undefined, options: { allowExecSurfaces?: boolean }) => {
       const plugin = getPlugin(name);
       if (!plugin) {
         console.log(chalk.red(`Plugin '${name}' not found`));
@@ -329,6 +333,8 @@ Examples:
         targetAgents = PLUGINS_CAPABLE_AGENTS.filter(a => pluginSupportsAgent(plugin, a));
       }
 
+      const allowExec = options.allowExecSurfaces === true;
+
       for (const agentId of targetAgents) {
         const versions = listInstalledVersions(agentId);
         if (versions.length === 0) continue;
@@ -337,9 +343,11 @@ Examples:
         const targetVersions = defaultVer ? [defaultVer] : [versions[versions.length - 1]];
 
         for (const version of targetVersions) {
-          const syncResult = syncResourcesToVersion(agentId, version, { plugins: [name] });
-          if (syncResult.plugins.length > 0) {
-            console.log(chalk.green(`Synced ${name} to ${agentLabel(agentId)}@${version}`));
+          const didSync = allowExec
+            ? syncPluginToVersion(plugin, agentId, getVersionHomePath(agentId, version), { allowExecSurfaces: true, version }).success
+            : syncResourcesToVersion(agentId, version, { plugins: [name] }).plugins.length > 0;
+          if (didSync) {
+            console.log(chalk.green(`Synced ${name} to ${agentLabel(agentId)}@${version}${allowExec ? ' (exec surfaces enabled)' : ''}`));
           } else {
             console.log(chalk.gray(`${name} already synced to ${agentLabel(agentId)}@${version}`));
           }

@@ -14,6 +14,7 @@ For the conceptual model — what a DotAgents repo is, what resources are, and h
 | Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
 | MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
 | Permissions | `…/.agents/permissions/groups/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
+| Plugins | `…/.agents/plugins/{name}/` (same layering, Claude + OpenClaw only) | `.{agent}/plugins/marketplaces/agents-cli/plugins/<name>/` | Copy + synthetic marketplace + enable in settings |
 
 `resolveResource(kind, name)` returns the single winner; `listResources(kind)` returns the union with `source: 'project' \| 'user' \| 'system'`. Same name in a higher layer overrides lower layers; otherwise everything unions.
 
@@ -176,6 +177,75 @@ Per-agent conversion is lossy in both directions:
 - Codex emits Starlark deny rules to a generated `agents-deny.rules` file
   (`permissions.ts:38-56`). Allow rules aren't expressed; Codex defaults to
   deny-unless-allowed elsewhere.
+
+## Plugins: Synthetic Marketplace + Exec-Surface Gate
+
+Plugins bundle skills, commands, hooks, MCP servers, settings, and permissions
+under a single `.claude-plugin/plugin.json` manifest. Sync copies the bundle
+into each version home, registers a synthetic per-user marketplace named
+`agents-cli`, and enables the plugin in Claude's / OpenClaw's settings.
+
+```
+Source: ~/.agents/plugins/<name>/        Per-version destination:
+
+┌──────────────────────────────┐         <version-home>/.claude/plugins/
+│ .claude-plugin/plugin.json   │         ├── known_marketplaces.json
+│ skills/<name>/SKILL.md       │         │     └ "agents-cli" → marketplaces/agents-cli
+│ commands/*.md                │         ├── marketplaces/agents-cli/
+│ hooks/hooks.json   ◄─ exec   │         │   ├── .claude-plugin/marketplace.json
+│ .mcp.json          ◄─ exec   │         │   │     └ synthesized: lists every
+│ bin/, scripts/     ◄─ exec   │         │   │       discovered plugin
+│ settings.json      ◄─ exec   │         │   └── plugins/<name>/  ← copy
+│ permissions/       ◄─ exec   │         └── settings.json
+└──────────────────────────────┘               └ enabledPlugins["<name>@agents-cli"] = true
+```
+
+Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`:
+
+1. **Discovery requires a valid manifest.** `discoverPlugins()`
+   (`plugins.ts:61`) scans `~/.agents/plugins/<dir>/` and only accepts entries
+   with a parseable `.claude-plugin/plugin.json` containing `name` and
+   `version`. Directories without the manifest are silently skipped.
+
+2. **Copy, not symlink.** Unlike commands/skills/hooks/rules, plugins are
+   copied via `copyPluginToMarketplace()` (`plugin-marketplace.ts`). The copy
+   pre-expands `${user_config.*}` placeholders against the per-plugin
+   `.user-config.json` so each version sees its resolved values. `${CLAUDE_PLUGIN_ROOT}`
+   and `${CLAUDE_PLUGIN_DATA}` are left for Claude to expand at runtime.
+
+3. **Synthetic marketplace per version.** `syncMarketplaceManifest()` writes a
+   `marketplace.json` listing every discovered plugin, and
+   `registerMarketplace()` adds `agents-cli` to `known_marketplaces.json` so
+   Claude treats it as installed (not a remote git source). This is what
+   makes `claude plugin enable <name>@agents-cli` work without contacting a
+   remote.
+
+4. **Exec-surface gate.** Plugins shipping `hooks/`, `.mcp.json`, `bin/`,
+   `scripts/`, non-permissions `settings.json`, or `permissions/` are
+   *installed* (copied + marketplace registered) but *not enabled* unless the
+   caller passes `allowExecSurfaces: true`. `enablePluginInSettings()`
+   (`plugin-marketplace.ts:196`) short-circuits without flipping
+   `enabledPlugins[<name>@agents-cli]` to `true`. The user-facing flag is
+   `--allow-exec-surfaces` on both `agents plugins install` and
+   `agents plugins sync`. The gate's purpose is to prevent unattended sync
+   flows (e.g., `agents use claude@<v>`) from silently arming third-party
+   code on every session.
+
+5. **Capability gating.** Only `PLUGINS_CAPABLE_AGENTS` (Claude, OpenClaw —
+   `src/lib/agents.ts:433`) participate. Plugins can additionally declare
+   `agents: [...]` in their manifest to narrow further;
+   `pluginSupportsAgent()` (`plugins.ts:179`) intersects both lists.
+
+6. **Codex command-to-skill fallback.** Codex `>= 0.117.0` dropped
+   command support; for those versions, plugin `commands/*.md` are
+   converted to skills prefixed with `<plugin>-<command>`
+   (`plugins.ts:444-453`) so they remain reachable as `$<plugin>-<command>`.
+
+7. **Source delete ≠ destination clean — but skills get swept.**
+   `cleanOrphanedPluginSkills()` (`plugins.ts:866`) runs every sync and
+   removes plugin-owned skill dirs whose parent plugin no longer exists in
+   `~/.agents/plugins/`. The marketplace copy itself isn't pruned until
+   `agents plugins remove <name>` runs explicitly.
 
 ## Format Conversion (Gemini)
 
