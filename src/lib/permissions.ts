@@ -27,7 +27,11 @@ import { AGENTS } from './agents.js';
 const HOME = os.homedir();
 
 /** Agents that support the permissions subsystem. */
-export const PERMISSIONS_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode'];
+// antigravity: permissions in ~/.gemini/antigravity-cli/settings.json under
+// `permissions: { allow: [...], deny: [...] }`. Serializer is a follow-up.
+// grok: permissions via --allow/--deny CLI flags or [permission] block in
+// ~/.grok/config.toml. Serializer is a follow-up.
+export const PERMISSIONS_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'antigravity', 'grok'];
 
 /** Filename used for Codex Starlark deny-rules generated from permission groups. */
 export const CODEX_RULES_FILENAME = 'agents-deny.rules';

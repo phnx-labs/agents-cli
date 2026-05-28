@@ -807,11 +807,31 @@ export function registerHooksToSettings(
   if (agentId === 'gemini') {
     return registerHooksForGemini(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'antigravity') {
+    return registerHooksForAntigravity(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   if (agentId === 'grok') {
     return registerHooksForGrok(versionHome, manifest, resolveScript, managedPrefixes);
   }
   return { registered: [], errors: [] };
 }
+
+/**
+ * Antigravity (agy) event names differ from agents-cli manifest names. The
+ * mapping below is the documented agy schema. PostToolUse has no exact
+ * agy equivalent — agy fires `after_model_call` after the model finishes a
+ * turn (which includes any tool calls in that turn), so it's the closest
+ * lifecycle phase but not a 1:1 match. Manifest events not in this map are
+ * skipped silently (the manifest may declare events for other agents).
+ */
+const ANTIGRAVITY_EVENT_MAP: Record<string, string> = {
+  PreToolUse: 'before_tool_call',
+  // Imperfect mapping: agy has no per-tool post-event. after_model_call
+  // fires once at the end of the turn, after all tool calls completed.
+  PostToolUse: 'after_model_call',
+  Stop: 'on_loop_stop',
+  OnError: 'on_error',
+};
 
 /**
  * Gemini has no native UserPromptSubmit event — map it to BeforeAgent,
@@ -1174,6 +1194,116 @@ function registerHooksForGemini(
     });
   } catch (err) {
     errors.push(`Failed to write gemini settings.json: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+/**
+ * Register hooks into antigravity's (agy) settings.json. Unlike gemini, agy uses
+ * a flat per-event array of `{ command }` entries (no matcher groups). Events
+ * are renamed via ANTIGRAVITY_EVENT_MAP; unmapped manifest events are skipped.
+ *
+ * settings.json lives at `${versionHome}/.gemini/antigravity-cli/settings.json`
+ * because agy nests its config under the shared `.gemini` parent dir.
+ */
+function registerHooksForAntigravity(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const configDir = path.join(versionHome, '.gemini', 'antigravity-cli');
+  const settingsPath = path.join(configDir, 'settings.json');
+
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(settingsPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        config = parsed as Record<string, unknown>;
+      }
+    } catch {
+      errors.push('Failed to parse antigravity settings.json');
+      return { registered, errors };
+    }
+  }
+
+  if (!config.hooks || typeof config.hooks !== 'object' || Array.isArray(config.hooks)) {
+    config.hooks = {};
+  }
+  const hooks = config.hooks as Record<string, unknown[]>;
+
+  // Build set of all command paths the current manifest will register, so we
+  // can garbage-collect stale managed entries left over from renamed/deleted
+  // hooks. Only managed paths are considered for removal — user-added entries
+  // outside managedPrefixes are preserved.
+  const currentManifestPaths = new Set<string>();
+  for (const hookDef of Object.values(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+    // Only paths whose events map to a known agy event would actually be
+    // registered, so only those should survive GC.
+    const anyMapped = hookDef.events.some((e) => ANTIGRAVITY_EVENT_MAP[e]);
+    if (!anyMapped) continue;
+    const resolved = resolveScript(hookDef.script);
+    if (resolved) currentManifestPaths.add(resolved);
+  }
+
+  for (const eventKey of Object.keys(hooks)) {
+    const entries = hooks[eventKey];
+    if (!Array.isArray(entries)) continue;
+    hooks[eventKey] = entries.filter((entry) => {
+      if (!entry || typeof entry !== 'object') return true;
+      const cmd = (entry as { command?: unknown }).command;
+      if (typeof cmd !== 'string') return true;
+      if (!isManagedHookCommand(cmd, managedPrefixes)) return true;
+      return currentManifestPaths.has(cmd);
+    });
+    if ((hooks[eventKey] as unknown[]).length === 0) {
+      delete hooks[eventKey];
+    }
+  }
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveScript(hookDef.script);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    for (const event of hookDef.events) {
+      const agyEvent = ANTIGRAVITY_EVENT_MAP[event];
+      if (!agyEvent) continue; // unmapped event — silently skip
+
+      if (!hooks[agyEvent]) {
+        hooks[agyEvent] = [];
+      }
+      const list = hooks[agyEvent] as Array<{ command: string }>;
+
+      const existingIdx = list.findIndex(
+        (e) => e && typeof e === 'object' && e.command === commandPath
+      );
+      const entry = { command: commandPath };
+      if (existingIdx >= 0) {
+        list[existingIdx] = entry;
+      } else {
+        list.push(entry);
+      }
+
+      registered.push(`${name} -> ${agyEvent}`);
+    }
+  }
+
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  } catch (err) {
+    errors.push(`Failed to write antigravity settings.json: ${(err as Error).message}`);
   }
 
   return { registered, errors };

@@ -297,12 +297,239 @@ describe('registerHooksToSettings - returns empty for unsupported agents', () =>
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns no-op for agents other than claude/codex/gemini', () => {
+  it('returns no-op for agents other than claude/codex/gemini/antigravity', () => {
     const manifest: Record<string, ManifestHook> = {
       'on-prompt': { script: 'on-prompt.sh', events: ['UserPromptSubmit'] },
     };
     const result = registerHooksToSettings('opencode', path.join(tmpDir, 'home'), manifest, agentsDir);
     expect(result.registered).toHaveLength(0);
     expect(result.errors).toHaveLength(0);
+  });
+
+  it('writes grok hook JSON files for PreToolUse events', () => {
+    fs.writeFileSync(path.join(agentsDir, 'hooks', 'on-prompt.sh'), '#!/bin/sh\necho hi\n');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings('grok', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> PreToolUse');
+    const mainPath = path.join(versionHome, '.grok', 'hooks', 'hooks.json');
+    expect(fs.existsSync(mainPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(mainPath, 'utf-8'));
+    expect(parsed.hooks.PreToolUse).toBeDefined();
+    expect(parsed.hooks.PreToolUse[0].hooks[0].type).toBe('command');
+  });
+});
+
+describe('registerHooksToSettings - Antigravity', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeAgyVersionHome(): string {
+    const home = path.join(tmpDir, 'agy-home');
+    fs.mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    return home;
+  }
+
+  function readAgySettings(home: string): Record<string, any> {
+    return JSON.parse(
+      fs.readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf-8')
+    );
+  }
+
+  it('writes settings.json at ~/.gemini/antigravity-cli/ with flat hooks arrays', () => {
+    const versionHome = makeAgyVersionHome();
+    const scriptPath = makeScript('pre-tool.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      'pre-tool': {
+        script: 'pre-tool.sh',
+        events: ['PreToolUse'],
+      },
+    };
+
+    const result = registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('pre-tool -> before_tool_call');
+
+    const settings = readAgySettings(versionHome);
+    expect(settings.hooks).toBeDefined();
+    expect(Array.isArray(settings.hooks.before_tool_call)).toBe(true);
+    expect(settings.hooks.before_tool_call).toHaveLength(1);
+    expect(settings.hooks.before_tool_call[0]).toEqual({ command: scriptPath });
+  });
+
+  it('maps all four supported events: PreToolUse, PostToolUse, Stop, OnError', () => {
+    const versionHome = makeAgyVersionHome();
+    makeScript('a.sh');
+    makeScript('b.sh');
+    makeScript('c.sh');
+    makeScript('d.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      a: { script: 'a.sh', events: ['PreToolUse'] },
+      b: { script: 'b.sh', events: ['PostToolUse'] },
+      c: { script: 'c.sh', events: ['Stop'] },
+      d: { script: 'd.sh', events: ['OnError'] },
+    };
+
+    const result = registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+
+    const settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call).toHaveLength(1);
+    expect(settings.hooks.after_model_call).toHaveLength(1);
+    expect(settings.hooks.on_loop_stop).toHaveLength(1);
+    expect(settings.hooks.on_error).toHaveLength(1);
+  });
+
+  it('expands a hook with multiple events into one entry per agy event', () => {
+    const versionHome = makeAgyVersionHome();
+    const scriptPath = makeScript('multi.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      multi: { script: 'multi.sh', events: ['PreToolUse', 'PostToolUse', 'Stop'] },
+    };
+
+    const result = registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toHaveLength(3);
+
+    const settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call[0].command).toBe(scriptPath);
+    expect(settings.hooks.after_model_call[0].command).toBe(scriptPath);
+    expect(settings.hooks.on_loop_stop[0].command).toBe(scriptPath);
+  });
+
+  it('silently skips unmapped events (e.g. UserPromptSubmit)', () => {
+    const versionHome = makeAgyVersionHome();
+    makeScript('prompt.sh');
+    makeScript('tool.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      // UserPromptSubmit has no agy equivalent — must not error, must not register
+      prompt: { script: 'prompt.sh', events: ['UserPromptSubmit'] },
+      tool: { script: 'tool.sh', events: ['PreToolUse'] },
+    };
+
+    const result = registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toEqual(['tool -> before_tool_call']);
+
+    const settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit).toBeUndefined();
+  });
+
+  it('preserves existing non-hooks settings.json content', () => {
+    const versionHome = makeAgyVersionHome();
+    const settingsPath = path.join(versionHome, '.gemini', 'antigravity-cli', 'settings.json');
+
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        theme: 'dark',
+        permissions: { allow: ['Bash(ls:*)'] },
+      }, null, 2)
+    );
+
+    makeScript('pre-tool.sh');
+    const manifest: Record<string, ManifestHook> = {
+      'pre-tool': { script: 'pre-tool.sh', events: ['PreToolUse'] },
+    };
+
+    registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+
+    const settings = readAgySettings(versionHome);
+    expect(settings.theme).toBe('dark');
+    expect(settings.permissions).toEqual({ allow: ['Bash(ls:*)'] });
+    expect(settings.hooks.before_tool_call).toHaveLength(1);
+  });
+
+  it('prunes removed managed entries on subsequent sync (GC invariant)', () => {
+    const versionHome = makeAgyVersionHome();
+    makeScript('a.sh');
+    makeScript('b.sh');
+
+    const firstManifest: Record<string, ManifestHook> = {
+      a: { script: 'a.sh', events: ['PreToolUse'] },
+      b: { script: 'b.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('antigravity', versionHome, firstManifest, agentsDir);
+
+    let settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call).toHaveLength(2);
+
+    // Smaller manifest — 'b' was deleted upstream
+    const secondManifest: Record<string, ManifestHook> = {
+      a: { script: 'a.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('antigravity', versionHome, secondManifest, agentsDir);
+
+    settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call).toHaveLength(1);
+    expect(settings.hooks.before_tool_call[0].command).toContain('a.sh');
+  });
+
+  it('never touches user-authored entries outside managedPrefixes', () => {
+    const versionHome = makeAgyVersionHome();
+    const settingsPath = path.join(versionHome, '.gemini', 'antigravity-cli', 'settings.json');
+
+    // Pre-seed with a user-authored hook outside the managed hooks dir
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        hooks: {
+          before_tool_call: [{ command: '/usr/local/bin/my-user-hook.sh' }],
+        },
+      }, null, 2)
+    );
+
+    makeScript('managed.sh');
+    const manifest: Record<string, ManifestHook> = {
+      managed: { script: 'managed.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+
+    const settings = readAgySettings(versionHome);
+    // Both entries should coexist — user hook untouched, managed hook added
+    expect(settings.hooks.before_tool_call).toHaveLength(2);
+    expect(settings.hooks.before_tool_call[0].command).toBe('/usr/local/bin/my-user-hook.sh');
+  });
+
+  it('does not duplicate entries on repeated calls', () => {
+    const versionHome = makeAgyVersionHome();
+    makeScript('pre-tool.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      'pre-tool': { script: 'pre-tool.sh', events: ['PreToolUse'] },
+    };
+
+    registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+    registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+
+    const settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call).toHaveLength(1);
+  });
+
+  it('returns error when script file does not exist', () => {
+    const versionHome = makeAgyVersionHome();
+    const manifest: Record<string, ManifestHook> = {
+      missing: { script: 'does-not-exist.sh', events: ['PreToolUse'] },
+    };
+
+    const result = registerHooksToSettings('antigravity', versionHome, manifest, agentsDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toContain('missing');
   });
 });

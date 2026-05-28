@@ -65,6 +65,14 @@ export const ACP_HARNESSES: Partial<Record<AgentId, AcpHarnessSpec>> = {
     confidence: 'documented',
     source: 'https://docs.openclaw.ai/tools/acp-agents',
   },
+  grok: {
+    command: 'grok',
+    args: ['agent', 'stdio'],
+    installHint: 'see https://docs.x.ai/build/cli',
+    confidence: 'documented',
+    source: 'https://docs.x.ai/build/cli/headless-scripting',
+  },
+  // antigravity: no documented ACP support (May 2026).
   // goose: ACP over HTTP via `goosed`, not a clean stdio subcommand.
   // copilot, kiro: excluded for now (not installed in the reference environment,
   //                no local verification possible).

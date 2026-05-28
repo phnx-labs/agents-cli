@@ -400,6 +400,11 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
   // CLI but isolates its own state in the `antigravity-cli/` subdir. Per-version HOME
   // isolation works because the shim's configDirName carries the full nested path.
+  // Auth: Google OAuth on first launch, or ANTIGRAVITY_API_KEY env var for headless.
+  // Hooks: JSON entries under a top-level `hooks` key in settings.json; events are
+  // before_tool_call, after_model_call, on_loop_stop, on_error. Plugins are the
+  // renamed Gemini CLI extensions. Permissions live in settings.json under a
+  // `permissions` key with allow/deny arrays.
   antigravity: {
     id: 'antigravity',
     name: 'Antigravity',
@@ -415,14 +420,15 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '{{args}}',
-    supportsHooks: false,
-    nativeAgentsSkillsDir: true,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, rulesImports: false },
+    supportsHooks: true,
+    capabilities: { hooks: true, mcp: true, allowlist: true, skills: true, commands: true, plugins: true, rulesImports: false },
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
-  // first launch, or GROK_CODE_XAI_API_KEY env var for headless. Grok exposes
-  // skills, hooks, plugins, and MCP via .grok/* directories per the official
-  // ~/.grok/README.md; MCP servers live inside config.toml under [mcp_servers].
+  // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
+  // under [mcp_servers] in ~/.grok/config.toml. Hooks auto-discovered from
+  // ~/.grok/hooks/ (+ project .grok/hooks/) — events PreToolUse, PostToolUse, etc.
+  // Plugins live in ~/.grok/plugins/ with marketplaces. Permissions: --allow/--deny
+  // CLI flags or [permission] TOML block in ~/.grok/config.toml.
   grok: {
     id: 'grok',
     name: 'Grok',

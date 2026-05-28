@@ -1994,7 +1994,9 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
         // Register hooks into agent-native settings.json/hooks.json. Gemini
         // shipped hooks in 0.26.0; gate already passed above so this is safe.
-        if (agent === 'claude' || agent === 'codex' || agent === 'gemini') {
+        // Grok auto-discovers from ~/.grok/hooks/ so the script copy above
+        // is sufficient — no settings.json registration needed.
+        if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity') {
           registerHooksToSettings(agent, versionHome);
         }
       }

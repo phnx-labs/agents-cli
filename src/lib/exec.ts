@@ -251,13 +251,18 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     },
     modelFlag: '--model',
   },
+  // Antigravity full mode uses --dangerously-skip-permissions (YOLO).
+  // TODO: --output-format json is documented but currently broken upstream
+  // ("flags provided but not defined: -output-format"). Track resolution at
+  // https://github.com/google-antigravity/antigravity-cli/issues/7 before
+  // adding `jsonFlags` here.
   antigravity: {
     base: ['agy'],
     promptFlag: 'positional',
     modeFlags: {
       plan: [],
       edit: [],
-      full: [],
+      full: ['--dangerously-skip-permissions'],
     },
     modelFlag: '--model',
   },
@@ -265,9 +270,9 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['grok'],
     promptFlag: '-p',
     modeFlags: {
-      plan: [],
+      plan: ['--mode', 'plan'],
       edit: [],
-      full: [],
+      full: ['--always-approve'],
     },
     jsonFlags: ['--output-format', 'streaming-json'],
     modelFlag: '--model',

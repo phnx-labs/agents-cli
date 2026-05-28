@@ -2,14 +2,14 @@
  * Agent event stream parsers.
  *
  * Normalizes the heterogeneous JSON event formats emitted by each agent CLI
- * (Claude, Codex, Gemini, Cursor, OpenCode, Grok) into a unified event schema
- * with consistent types: init, message, tool_use, bash, file_read, file_write,
- * file_create, file_delete, result, error, and others.
+ * (Claude, Codex, Gemini, Cursor, OpenCode, Grok, Antigravity) into a unified
+ * event schema with consistent types: init, message, tool_use, bash,
+ * file_read, file_write, file_create, file_delete, result, error, and others.
  */
 import { extractFileOpsFromBash } from './file_ops.js';
 
 /** Supported agent CLI types for team spawning. */
-export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 'grok';
+export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 'grok' | 'antigravity';
 
 const claudeToolUseMap = new Map<string, { tool: string; command?: string; path?: string }>();
 
@@ -27,6 +27,8 @@ export function normalizeEvents(agentType: AgentType, raw: any): any[] {
     return normalizeOpencode(raw);
   } else if (agentType === 'grok') {
     return normalizeGrok(raw);
+  } else if (agentType === 'antigravity') {
+    return normalizeAntigravity(raw);
   }
 
   const timestamp = new Date().toISOString();
@@ -925,6 +927,84 @@ function normalizeGrok(raw: any): any[] {
   return [{
     type: eventType,
     agent: 'grok',
+    raw: raw,
+    timestamp: timestamp,
+  }];
+}
+
+// --- Antigravity parsing ---
+// Intentionally conservative. Antigravity's `agy` binary advertises an
+// `--output-format json` flag in its docs, but the released binary errors with
+// `flags provided but not defined: -output-format` (tracked upstream as
+// google-antigravity/antigravity-cli#7, open as of May 2026). Until JSON
+// streaming stabilizes, this parser treats agy output as a black box:
+//   - non-object input (a plain string line, or null/number) becomes a single
+//     `message` event with the full content and complete:true so the
+//     summarizer captures it without token-level concatenation
+//   - objects with a recognizable `type` field (e.g. `init`, `message`,
+//     `result`) get a minimal shape-preserving normalization
+//   - everything else falls through to the generic unknown-event shape
+// Once agy ships stable streaming JSON, replace this with proper event
+// mapping mirroring normalizeGrok / normalizeClaude.
+function normalizeAntigravity(raw: any): any[] {
+  const timestamp = new Date().toISOString();
+
+  if (typeof raw === 'string') {
+    if (!raw) return [];
+    return [{
+      type: 'message',
+      agent: 'antigravity',
+      content: raw,
+      complete: true,
+      timestamp: timestamp,
+    }];
+  }
+
+  if (!raw || typeof raw !== 'object') {
+    return [{
+      type: 'unknown',
+      agent: 'antigravity',
+      raw: raw,
+      timestamp: timestamp,
+    }];
+  }
+
+  const eventType = raw.type || 'unknown';
+
+  if (eventType === 'init') {
+    return [{
+      type: 'init',
+      agent: 'antigravity',
+      session_id: typeof raw.sessionId === 'string' ? raw.sessionId : null,
+      timestamp: timestamp,
+    }];
+  }
+
+  if (eventType === 'message') {
+    const content = typeof raw.content === 'string' ? raw.content : '';
+    if (!content) return [];
+    return [{
+      type: 'message',
+      agent: 'antigravity',
+      content: content,
+      complete: raw.complete !== false,
+      timestamp: timestamp,
+    }];
+  }
+
+  if (eventType === 'result') {
+    return [{
+      type: 'result',
+      agent: 'antigravity',
+      status: raw.status === 'error' ? 'error' : 'success',
+      session_id: typeof raw.sessionId === 'string' ? raw.sessionId : null,
+      timestamp: timestamp,
+    }];
+  }
+
+  return [{
+    type: eventType,
+    agent: 'antigravity',
     raw: raw,
     timestamp: timestamp,
   }];

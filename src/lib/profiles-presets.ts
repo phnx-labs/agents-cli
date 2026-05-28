@@ -104,6 +104,43 @@ export const PRESETS: Preset[] = [
       ANTHROPIC_SMALL_FAST_MODEL: 'deepseek/deepseek-chat-v3-0324',
     },
   },
+  // ----- xAI Grok Build CLI (native host) -----
+  {
+    name: 'grok-fast',
+    description: 'xAI Grok Build CLI — fast tier. Native grok host, no OpenRouter wrapper.',
+    provider: 'xai',
+    host: 'grok',
+    authEnvVar: 'XAI_API_KEY',
+    signupUrl: 'https://console.x.ai',
+    env: {
+      // TODO: confirm model id (docs.x.ai/build/models, May 2026)
+      GROK_MODEL: 'grok-build-fast',
+    },
+  },
+  {
+    name: 'grok-heavy',
+    description: 'xAI Grok Build CLI — heavy tier (SuperGrok). Native grok host.',
+    provider: 'xai',
+    host: 'grok',
+    authEnvVar: 'XAI_API_KEY',
+    signupUrl: 'https://console.x.ai',
+    env: {
+      // TODO: confirm model id (docs.x.ai/build/models, May 2026)
+      GROK_MODEL: 'grok-build',
+    },
+  },
+  // ----- Google Antigravity CLI (native host) -----
+  {
+    name: 'agy',
+    description: 'Google Antigravity CLI default. Auth via Google OAuth or ANTIGRAVITY_API_KEY.',
+    provider: 'google',
+    host: 'antigravity',
+    authEnvVar: 'ANTIGRAVITY_API_KEY',
+    signupUrl: 'https://antigravity.google',
+    env: {
+      // TODO: confirm model id — antigravity defaults are managed by the CLI itself
+    },
+  },
 ];
 
 /** Look up a preset by name (case-sensitive). */
