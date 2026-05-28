@@ -16,7 +16,6 @@ import {
   applyPermissionsToVersion,
   convertDenyToCodexRules,
   CODEX_RULES_FILENAME,
-  buildPermissionsFromGroups,
 } from '../src/lib/permissions.js';
 import type { PermissionSet, ClaudePermissions, OpenCodePermissions, CodexPermissions } from '../src/lib/types.js';
 
@@ -915,8 +914,13 @@ describe('applyPermissionsToVersion codex deny rules', () => {
     const codexDir = join(versionHome, '.codex');
 
     try {
-      const set = buildPermissionsFromGroups(['99-deny']);
-      expect(set.deny!.length).toBeGreaterThan(0);
+      // Inline set keeps this test hermetic — the system 99-deny.yaml is not
+      // present on CI runners and we'd hit "set.deny is undefined" otherwise.
+      const set = {
+        name: '99-deny',
+        allow: [],
+        deny: ['Bash(sudo:*)', 'Bash(git reset:*)', 'Bash(git push --force:*)'],
+      };
 
       const result = applyPermissionsToVersion('codex', set, versionHome);
       expect(result.success).toBe(true);
