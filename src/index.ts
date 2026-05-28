@@ -794,7 +794,18 @@ if (firstRun) {
 // only exemption — it's the command that does the cloning.
 const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help']);
 
-if (!firstRun && requestedCommand && !SETUP_EXEMPT_COMMANDS.has(requestedCommand)) {
+// Help and version output are pure documentation — they must never gate on
+// setup, otherwise `agents <cmd> --help` becomes useless on a fresh box.
+const helpOrVersionRequested = passedArgs.some(
+  (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
+);
+
+if (
+  !firstRun &&
+  requestedCommand &&
+  !SETUP_EXEMPT_COMMANDS.has(requestedCommand) &&
+  !helpOrVersionRequested
+) {
   const { ensureInitialized } = await import('./commands/setup.js');
   await ensureInitialized(program);
 }
