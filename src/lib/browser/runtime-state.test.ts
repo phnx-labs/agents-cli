@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { execFileSync } from 'child_process';
 import {
   writeProfileRuntime,
   readProfileRuntime,
@@ -21,7 +22,19 @@ import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
 let prefix: string;
 const created: string[] = [];
 
+// Use whatever `ps` reports for THIS process — that's what the matcher
+// compares against at runtime. Test runners (vitest, bun) set process.title,
+// which mutates /proc/<pid>/comm on Linux, so `path.basename(process.execPath)`
+// disagrees with the live ps output. Fall back to execPath basename if `ps`
+// is unavailable.
 function currentProcessCommand(): string {
+  try {
+    const out = execFileSync('ps', ['-p', String(process.pid), '-o', 'comm='], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (out) return path.basename(out);
+  } catch { /* fall through */ }
   return path.basename(process.execPath);
 }
 
