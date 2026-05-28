@@ -99,7 +99,6 @@ describe('generateShimScript — configDirName derivation', () => {
   it('produces the nested ".gemini/antigravity-cli" path for antigravity', () => {
     // antigravity's configDir nests inside gemini's parent. The version-home
     // path must carry the full subpath so per-version sync lands correctly.
-    const { generateVersionedAliasScript } = require('../shims.js');
     const script = generateVersionedAliasScript('antigravity', '1.0.1');
     expect(script).toContain('versions/antigravity/1.0.1');
   });
