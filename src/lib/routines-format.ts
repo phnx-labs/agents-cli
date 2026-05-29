@@ -159,40 +159,60 @@ export function humanizeNextRun(date: Date | null, now: Date, tz?: string): stri
 // ---------------------------------------------------------------------------
 
 /**
+ * Maximum display length for a repo cell. Display strings longer than this
+ * are truncated with an ellipsis so column alignment is preserved.
+ * Consumers that render the column should use this constant as the column width.
+ */
+export const REPO_DISPLAY_MAX = 24;
+
+/**
  * Parse a repo string into a display label and an optional hyperlink target.
  *
  * Rules:
- *   - undefined / empty          → display '-', href null
- *   - 'owner/name' (one slash)   → display 'owner/name', href 'https://github.com/owner/name/pulls'
- *   - 'https://...' or 'http://…' → display hostname+path, href the URL verbatim
- *   - anything else              → display raw string, href null
+ *   - null / undefined / empty / non-string → display '-', href null
+ *   - 'owner/name' (one slash)              → display 'owner/name', href 'https://github.com/owner/name/pulls'
+ *   - 'https://...' or 'http://...'         → display hostname+path, href the URL verbatim
+ *   - anything else                         → display raw string, href null
+ *
+ * The display string is truncated to REPO_DISPLAY_MAX characters (with a
+ * trailing '…') when it would otherwise exceed the column width. The href
+ * is always the full untruncated URL so hyperlinks remain functional.
+ *
+ * NEVER throws — mirrors the contract of humanizeCron.
  */
-export function formatRepoLink(repo: string | undefined): { display: string; href: string | null } {
-  if (!repo || repo.trim() === '') {
+export function formatRepoLink(repo: unknown): { display: string; href: string | null } {
+  if (repo == null || typeof repo !== 'string' || repo.trim() === '') {
     return { display: '-', href: null };
   }
 
   const trimmed = repo.trim();
+  let display: string;
+  let href: string | null;
 
   // Absolute URL
   if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
     try {
       const url = new URL(trimmed);
-      const display = url.hostname + url.pathname.replace(/\/$/, '');
-      return { display, href: trimmed };
+      display = url.hostname + url.pathname.replace(/\/$/, '');
+      href = trimmed;
     } catch {
-      return { display: trimmed, href: null };
+      display = trimmed;
+      href = null;
     }
+  } else if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trimmed)) {
+    // GitHub shorthand: owner/name (exactly one slash, no scheme, no extra slashes)
+    display = trimmed;
+    href = `https://github.com/${trimmed}/pulls`;
+  } else {
+    // Anything else: plain text, no link
+    display = trimmed;
+    href = null;
   }
 
-  // GitHub shorthand: owner/name (exactly one slash, no scheme, no extra slashes)
-  if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trimmed)) {
-    return {
-      display: trimmed,
-      href: `https://github.com/${trimmed}/pulls`,
-    };
+  // Truncate display to column width; href stays untruncated.
+  if (display.length > REPO_DISPLAY_MAX) {
+    display = display.slice(0, REPO_DISPLAY_MAX - 1) + '…';
   }
 
-  // Anything else: plain text, no link
-  return { display: trimmed, href: null };
+  return { display, href };
 }

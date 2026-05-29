@@ -84,6 +84,22 @@ describe('humanizeNextRun', () => {
     const result = humanizeNextRun(date, NOW);
     expect(result).toMatch(/^Jun 28,/);
   });
+
+  // 7-day boundary: +6 days is still within the "weekday name" window (<7),
+  // +7 days crosses into the "full date" window (>=7).
+  it('+6 days (boundary) shows weekday name', () => {
+    // NOW is 2026-05-29 (Friday); +6 calendar days = 2026-06-04 (Thursday)
+    const date = new Date('2026-06-04T09:00:00Z');
+    const result = humanizeNextRun(date, NOW);
+    expect(result).toMatch(/^Thu /);
+  });
+
+  it('+7 days (boundary) shows full date', () => {
+    // NOW is 2026-05-29 (Friday); +7 calendar days = 2026-06-05 (Friday)
+    const date = new Date('2026-06-05T09:00:00Z');
+    const result = humanizeNextRun(date, NOW);
+    expect(result).toMatch(/^Jun 5,/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -93,6 +109,13 @@ describe('humanizeNextRun', () => {
 describe('formatRepoLink', () => {
   it('undefined → dash, no href', () => {
     const r = formatRepoLink(undefined);
+    expect(r.display).toBe('-');
+    expect(r.href).toBeNull();
+  });
+
+  it('non-string number → dash, no href (never throws)', () => {
+    // YAML files with `repo: 12345` spread directly into JobConfig; formatRepoLink must not throw.
+    const r = formatRepoLink(12345 as any);
     expect(r.display).toBe('-');
     expect(r.href).toBeNull();
   });
@@ -110,9 +133,10 @@ describe('formatRepoLink', () => {
   });
 
   it('https URL → display hostname+path, href verbatim', () => {
-    const r = formatRepoLink('https://github.com/phnx-labs/agents-cli');
-    expect(r.display).toBe('github.com/phnx-labs/agents-cli');
-    expect(r.href).toBe('https://github.com/phnx-labs/agents-cli');
+    // Use a URL whose hostname+path fits within REPO_DISPLAY_MAX (24 chars).
+    const r = formatRepoLink('https://github.com/foo/bar');
+    expect(r.display).toBe('github.com/foo/bar');
+    expect(r.href).toBe('https://github.com/foo/bar');
   });
 
   it('http URL → display without scheme, href verbatim', () => {
@@ -131,5 +155,14 @@ describe('formatRepoLink', () => {
     const r = formatRepoLink('org/team/repo');
     expect(r.display).toBe('org/team/repo');
     expect(r.href).toBeNull();
+  });
+
+  it('long URL display is truncated to REPO_DISPLAY_MAX chars with ellipsis, href untruncated', () => {
+    // 'gitlab.example.com/path/to/project' is 34 chars, exceeds REPO_DISPLAY_MAX (24)
+    const longUrl = 'https://gitlab.example.com/path/to/project';
+    const r = formatRepoLink(longUrl);
+    expect(r.display.length).toBe(24);
+    expect(r.display.endsWith('…')).toBe(true);
+    expect(r.href).toBe(longUrl);
   });
 });
