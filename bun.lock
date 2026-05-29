@@ -6,6 +6,7 @@
       "name": "@phnx-labs/agents-cli",
       "dependencies": {
         "@inquirer/prompts": "7.10.1",
+        "@playwright/browser-chromium": "1.59.1",
         "@types/proper-lockfile": "4.1.4",
         "@xterm/headless": "6.0.0",
         "@zed-industries/agent-client-protocol": "0.4.5",
@@ -17,6 +18,7 @@
         "marked-terminal": "7.3.0",
         "node-pty": "1.1.0",
         "ora": "8.2.0",
+        "playwright-core": "1.59.1",
         "proper-lockfile": "4.1.2",
         "simple-git": "3.36.0",
         "smol-toml": "1.6.1",
@@ -135,6 +137,8 @@
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.130.0", "", {}, "sha512-ibD2usx9JRu7f5pu2tMKMI4cpA4NgXJQoYRP4pQ7Pxmn1l6k/53qWtQWZayhYy3X4QZkt90Ot+mJEaeXouio6Q=="],
+
+    "@playwright/browser-chromium": ["@playwright/browser-chromium@1.59.1", "", { "dependencies": { "playwright-core": "1.59.1" } }, "sha512-XDwr0qOrzLXAuBAzg4WO/xctVMb+ldJ54yz9KCpFu8G8MVJzUVFO6BvK1tBtBl4DIoFcoFRKHgUGZT+8wOC8BQ=="],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.0.1", "", { "os": "android", "cpu": "arm64" }, "sha512-fJI3I0r3C3Oj/zdBCpaCmBRZYf07xpaq4yCfDDoSFm+beWNzbIl26puW8RraUdugoJw/95zerNOn6jasAhzSmg=="],
 

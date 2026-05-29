@@ -8,6 +8,7 @@ import { readBundle, resolveBundleEnv, bundleExists } from '../secrets/bundles.j
 import { writeProfileRuntime, readProfileRuntime } from './runtime-state.js';
 import type { ChromeOptions } from './types.js';
 import type { Readable, Writable } from 'stream';
+import { chromium as bundledChromium } from 'playwright-core';
 
 import type { BrowserType } from './types.js';
 
@@ -77,6 +78,16 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
   throw new Error(`Browser "${browserType}" not found. Install it first.`);
 }
 
+export function getBundledChromiumPath(): string {
+  const executablePath = bundledChromium.executablePath();
+  if (!fs.existsSync(executablePath)) {
+    throw new Error(
+      'Bundled Chromium is not installed. Reinstall agents-cli or run: npx playwright install chromium'
+    );
+  }
+  return executablePath;
+}
+
 export interface LaunchResult {
   pid: number;
   port: number;
@@ -128,6 +139,7 @@ export async function launchBrowser(
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-features=DefaultBrowserSetting,ChromeWhatsNewUI',
+    '--disable-crash-reporter',
     ...(options.headless ? ['--headless=new'] : []),
     `--window-size=${viewport.width},${viewport.height}`,
     ...(viewport.x !== undefined && viewport.y !== undefined

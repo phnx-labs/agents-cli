@@ -11,6 +11,7 @@
       "license": "MIT",
       "dependencies": {
         "@inquirer/prompts": "7.10.1",
+        "@playwright/browser-chromium": "1.59.1",
         "@types/proper-lockfile": "4.1.4",
         "@xterm/headless": "6.0.0",
         "@zed-industries/agent-client-protocol": "0.4.5",
@@ -22,6 +23,7 @@
         "marked-terminal": "7.3.0",
         "node-pty": "1.1.0",
         "ora": "8.2.0",
+        "playwright-core": "1.59.1",
         "proper-lockfile": "4.1.2",
         "simple-git": "3.36.0",
         "smol-toml": "1.6.1",
@@ -888,6 +890,19 @@
       "license": "MIT",
       "funding": {
         "url": "https://github.com/sponsors/Boshen"
+      }
+    },
+    "node_modules/@playwright/browser-chromium": {
+      "version": "1.59.1",
+      "resolved": "https://registry.npmjs.org/@playwright/browser-chromium/-/browser-chromium-1.59.1.tgz",
+      "integrity": "sha512-XDwr0qOrzLXAuBAzg4WO/xctVMb+ldJ54yz9KCpFu8G8MVJzUVFO6BvK1tBtBl4DIoFcoFRKHgUGZT+8wOC8BQ==",
+      "hasInstallScript": true,
+      "license": "Apache-2.0",
+      "dependencies": {
+        "playwright-core": "1.59.1"
+      },
+      "engines": {
+        "node": ">=18"
       }
     },
     "node_modules/@rolldown/binding-android-arm64": {
@@ -2456,7 +2471,8 @@
     },
     "node_modules/playwright-core": {
       "version": "1.59.1",
-      "dev": true,
+      "resolved": "https://registry.npmjs.org/playwright-core/-/playwright-core-1.59.1.tgz",
+      "integrity": "sha512-HBV/RJg81z5BiiZ9yPzIiClYV/QMsDCKUyogwH9p3MCP6IYjUFu/MActgYAvK0oWyV9NlwM3GLBjADyWgydVyg==",
       "license": "Apache-2.0",
       "bin": {
         "playwright-core": "cli.js"

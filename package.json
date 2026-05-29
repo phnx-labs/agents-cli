@@ -75,6 +75,7 @@
   },
   "dependencies": {
     "@inquirer/prompts": "7.10.1",
+    "@playwright/browser-chromium": "1.59.1",
     "@types/proper-lockfile": "4.1.4",
     "@xterm/headless": "6.0.0",
     "@zed-industries/agent-client-protocol": "0.4.5",
@@ -86,6 +87,7 @@
     "marked-terminal": "7.3.0",
     "node-pty": "1.1.0",
     "ora": "8.2.0",
+    "playwright-core": "1.59.1",
     "proper-lockfile": "4.1.2",
     "simple-git": "3.36.0",
     "smol-toml": "1.6.1",
