@@ -17,6 +17,8 @@ describe('pullRepo', () => {
     mkdirSync(REMOTE_DIR, { recursive: true });
     const remoteGit = simpleGit(REMOTE_DIR);
     await remoteGit.init(false);
+    await remoteGit.addConfig('user.name', 'Test User');
+    await remoteGit.addConfig('user.email', 'test@example.com');
     writeFileSync(join(REMOTE_DIR, 'README.md'), '# Test');
     await remoteGit.add('.');
     await remoteGit.commit('initial');
