@@ -21,7 +21,11 @@ import {
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
-import { sendIPCRequest } from '../lib/browser/ipc.js';
+import {
+  BrowserDaemonNotRunningError,
+  formatBrowserDaemonNotRunningError,
+  sendIPCRequest,
+} from '../lib/browser/ipc.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { isInteractiveTerminal } from './utils.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
@@ -881,10 +885,24 @@ function registerTaskCommands(browser: Command): void {
     .option('-p, --profile <name>', 'Filter by profile')
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts) => {
-      const response = await sendIPCRequest({
-        action: 'status',
-        profile: opts.profile,
-      });
+      let response;
+      try {
+        response = await sendIPCRequest({
+          action: 'status',
+          profile: opts.profile,
+        }, { autoStartDaemon: false });
+      } catch (err) {
+        if (err instanceof BrowserDaemonNotRunningError) {
+          const message = formatBrowserDaemonNotRunningError();
+          if (opts.json) {
+            console.log(JSON.stringify({ ok: false, error: message }));
+          } else {
+            console.error(message);
+          }
+          process.exit(1);
+        }
+        throw err;
+      }
 
       if (!response.ok) {
         if (opts.json) {
