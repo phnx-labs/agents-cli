@@ -101,6 +101,8 @@ node -e "
   const p = require('./package.json');
   p.version = '$DEV_VERSION';
   delete p.scripts?.postinstall;
+  delete p.scripts?.prepack;
+  delete p.scripts?.prepare;
   fs.writeFileSync('$STAGE_DIR/package.json', JSON.stringify(p, null, 2));
 "
 
