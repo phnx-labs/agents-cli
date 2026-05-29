@@ -6,6 +6,7 @@ import {
   getProfile,
   createProfile,
   deleteProfile,
+  ensureDefaultBrowserProfile,
   getProfileRuntimeDir,
   extractConfiguredPort,
   findFreeProfilePort,
@@ -473,24 +474,35 @@ function registerProfilesCommands(browser: Command): void {
 
 function registerTaskCommands(browser: Command): void {
   browser
-    .command('start')
-    .description('Start a browser task with a profile')
-    .requiredOption('-p, --profile <name>', 'Browser profile to use')
+    .command('start [profile]')
+    .description('Start a browser task with a profile (defaults to bundled Chromium profile "default")')
+    .option('-p, --profile <name>', 'Browser profile to use')
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
-    .action(async (opts) => {
+    .action(async (profileArg: string | undefined, opts) => {
+      let profileName = opts.profile || profileArg;
+      if (!profileName) {
+        try {
+          const defaultProfile = await ensureDefaultBrowserProfile();
+          profileName = defaultProfile.name;
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          process.exit(1);
+        }
+      }
+
       // Pre-check the profile locally so we fail fast with a helpful error
       // instead of round-tripping a generic "Profile not found" through the daemon.
-      const profile = await getProfile(opts.profile);
+      const profile = await getProfile(profileName);
       if (!profile) {
-        console.error(`Profile "${opts.profile}" not found.`);
+        console.error(`Profile "${profileName}" not found.`);
         const all = await listProfiles();
         if (all.length > 0) {
           console.error(`Available profiles: ${all.map((p) => p.name).join(', ')}`);
         }
         console.error(
-          `Create one with: agents browser profiles create ${opts.profile} --browser <chrome|comet|chromium|brave|edge|custom>`
+          `Create one with: agents browser profiles create ${profileName} --browser <chrome|comet|chromium|brave|edge|custom>`
         );
         process.exit(1);
       }
@@ -500,7 +512,7 @@ function registerTaskCommands(browser: Command): void {
         const presets = getEndpointPresets(profile);
         if (!presets[opts.endpoint]) {
           console.error(
-            `Endpoint "${opts.endpoint}" not found on profile "${opts.profile}". ` +
+            `Endpoint "${opts.endpoint}" not found on profile "${profileName}". ` +
               `Available: ${Object.keys(presets).join(', ')}`
           );
           process.exit(1);
@@ -509,7 +521,7 @@ function registerTaskCommands(browser: Command): void {
 
       const response = await sendIPCRequest({
         action: 'start',
-        profile: opts.profile,
+        profile: profileName,
         taskName: opts.task,
         url: opts.url,
         endpoint: opts.endpoint,
