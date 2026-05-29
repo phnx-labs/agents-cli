@@ -75,7 +75,6 @@
   },
   "dependencies": {
     "@inquirer/prompts": "7.10.1",
-    "@playwright/browser-chromium": "1.59.1",
     "@types/proper-lockfile": "4.1.4",
     "@xterm/headless": "6.0.0",
     "@zed-industries/agent-client-protocol": "0.4.5",
@@ -87,7 +86,7 @@
     "marked-terminal": "7.3.0",
     "node-pty": "1.1.0",
     "ora": "8.2.0",
-    "playwright-core": "1.59.1",
+    "playwright": "1.59.1",
     "proper-lockfile": "4.1.2",
     "simple-git": "3.36.0",
     "smol-toml": "1.6.1",
@@ -97,7 +96,6 @@
     "@types/diff": "6.0.0",
     "@types/marked-terminal": "6.1.1",
     "@types/node": "22.19.10",
-    "playwright": "1.59.1",
     "tsx": "4.22.2",
     "typescript": "5.9.3",
     "vitest": "4.1.6"

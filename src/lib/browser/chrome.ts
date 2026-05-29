@@ -8,7 +8,7 @@ import { readBundle, resolveBundleEnv, bundleExists } from '../secrets/bundles.j
 import { writeProfileRuntime, readProfileRuntime } from './runtime-state.js';
 import type { ChromeOptions } from './types.js';
 import type { Readable, Writable } from 'stream';
-import { chromium as bundledChromium } from 'playwright-core';
+import { chromium as bundledChromium } from 'playwright';
 
 import type { BrowserType } from './types.js';
 
