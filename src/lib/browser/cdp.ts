@@ -196,13 +196,45 @@ export interface BrowserDiscovery {
   browser: string;
 }
 
+export class BrowserCdpConnectionError extends Error {
+  constructor(
+    readonly port: number,
+    readonly profileName: string = '<name>',
+    readonly host = 'localhost'
+  ) {
+    super(formatBrowserCdpConnectionError(port, profileName, host));
+    this.name = 'BrowserCdpConnectionError';
+  }
+}
+
+export function formatBrowserCdpConnectionError(
+  port: number,
+  profileName = '<name>',
+  host = 'localhost'
+): string {
+  const target = host === 'localhost' || host === '127.0.0.1'
+    ? `port ${port}`
+    : `${host}:${port}`;
+  return [
+    `Could not connect to Chrome on ${target}.`,
+    `- Is Chrome running with --remote-debugging-port=${port}?`,
+    `- Try: agents browser start --profile ${profileName}`,
+  ].join('\n');
+}
+
 export async function discoverBrowserWsUrl(
   port: number,
-  host = 'localhost'
+  host = 'localhost',
+  profileName = '<name>'
 ): Promise<BrowserDiscovery> {
-  const response = await fetch(`http://${host}:${port}/json/version`);
+  let response: Response;
+  try {
+    response = await fetch(`http://${host}:${port}/json/version`);
+  } catch {
+    throw new BrowserCdpConnectionError(port, profileName, host);
+  }
   if (!response.ok) {
-    throw new Error(`Failed to discover browser: ${response.status}`);
+    throw new BrowserCdpConnectionError(port, profileName, host);
   }
   const data = (await response.json()) as {
     webSocketDebuggerUrl: string;

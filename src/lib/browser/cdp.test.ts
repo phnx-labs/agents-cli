@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { PassThrough } from 'stream';
-import { CDPClient, normalizeBrowserName, verifyBrowserIdentity } from './cdp.js';
+import {
+  BrowserCdpConnectionError,
+  CDPClient,
+  discoverBrowserWsUrl,
+  formatBrowserCdpConnectionError,
+  normalizeBrowserName,
+  verifyBrowserIdentity,
+} from './cdp.js';
 
 describe('normalizeBrowserName', () => {
   it('strips version suffix and lowercases', () => {
@@ -83,6 +90,37 @@ describe('verifyBrowserIdentity', () => {
 
   it('accepts chrome for edge (Edge reports Chrome/<version> in /json/version)', () => {
     expect(() => verifyBrowserIdentity('chrome', 'edge', 9222)).not.toThrow();
+  });
+});
+
+describe('discoverBrowserWsUrl', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('wraps unreachable Chrome endpoints with a remediation hint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED')));
+
+    await expect(discoverBrowserWsUrl(9333, 'localhost', 'work')).rejects.toThrow(
+      BrowserCdpConnectionError
+    );
+    await expect(discoverBrowserWsUrl(9333, 'localhost', 'work')).rejects.toThrow(
+      [
+        'Could not connect to Chrome on port 9333.',
+        '- Is Chrome running with --remote-debugging-port=9333?',
+        '- Try: agents browser start --profile work',
+      ].join('\n')
+    );
+  });
+
+  it('formats non-local Chrome endpoints with host and port', () => {
+    expect(formatBrowserCdpConnectionError(9444, 'remote', 'mac-mini')).toBe(
+      [
+        'Could not connect to Chrome on mac-mini:9444.',
+        '- Is Chrome running with --remote-debugging-port=9444?',
+        '- Try: agents browser start --profile remote',
+      ].join('\n')
+    );
   });
 });
 

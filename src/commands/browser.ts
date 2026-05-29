@@ -384,7 +384,7 @@ function registerProfilesCommands(browser: Command): void {
           checks.push({ label: 'port', ok: true, detail: `${port} is free` });
         } else {
           try {
-            const { browser } = await discoverBrowserWsUrl(port);
+            const { browser } = await discoverBrowserWsUrl(port, 'localhost', profile.name);
             verifyBrowserIdentity(browser, profile.browser, port);
             checks.push({
               label: 'port',

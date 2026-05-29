@@ -3,7 +3,12 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from './cdp.js';
+import {
+  BrowserCdpConnectionError,
+  CDPClient,
+  discoverBrowserWsUrl,
+  verifyBrowserIdentity,
+} from './cdp.js';
 import {
   getProfile,
   getProfileRuntimeDir,
@@ -1785,7 +1790,11 @@ export class BrowserService {
 
     if (existingInfo) {
       try {
-        const { wsUrl, browser } = await discoverBrowserWsUrl(existingInfo.port);
+        const { wsUrl, browser } = await discoverBrowserWsUrl(
+          existingInfo.port,
+          'localhost',
+          effectiveProfile.name
+        );
         verifyBrowserIdentity(browser, effectiveProfile.browser, existingInfo.port);
         const cdp = new CDPClient();
         await cdp.connect(wsUrl);
@@ -1856,8 +1865,13 @@ export class BrowserService {
     }
 
     if (url.protocol === 'wss:' || url.protocol === 'ws:') {
+      const port = parseInt(url.port || (url.protocol === 'wss:' ? '443' : '80'), 10);
       const cdp = new CDPClient();
-      await cdp.connect(endpoint);
+      try {
+        await cdp.connect(endpoint);
+      } catch {
+        throw new BrowserCdpConnectionError(port, profile.name, url.hostname || 'localhost');
+      }
       await this.enableDomains(cdp);
       return {
         cdp,
@@ -1872,7 +1886,7 @@ export class BrowserService {
 
     if (url.protocol === 'http:' || url.protocol === 'https:') {
       const port = parseInt(url.port || (url.protocol === 'https:' ? '443' : '80'), 10);
-      const { wsUrl, browser } = await discoverBrowserWsUrl(port, url.hostname);
+      const { wsUrl, browser } = await discoverBrowserWsUrl(port, url.hostname, profile.name);
       verifyBrowserIdentity(browser, profile.browser, port, url.hostname);
       const cdp = new CDPClient();
       await cdp.connect(wsUrl);
