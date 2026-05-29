@@ -1,4 +1,5 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 func writeStderr(_ message: String) {
@@ -10,8 +11,14 @@ func die(_ code: Int32, _ message: String) -> Never {
     exit(code)
 }
 
-func findItem(service: String, account: String, synchronizable: CFTypeRef) -> String? {
-    let query: [CFString: Any] = [
+func makeAuthenticationContext(reason: String) -> LAContext {
+    let context = LAContext()
+    context.localizedReason = reason
+    return context
+}
+
+func copyItem(service: String, account: String, synchronizable: CFTypeRef, context: LAContext?) -> (status: OSStatus, value: String?) {
+    var query: [CFString: Any] = [
         kSecClass: kSecClassGenericPassword,
         kSecAttrService: service as CFString,
         kSecAttrAccount: account as CFString,
@@ -19,20 +26,43 @@ func findItem(service: String, account: String, synchronizable: CFTypeRef) -> St
         kSecReturnData: kCFBooleanTrue!,
         kSecMatchLimit: kSecMatchLimitOne,
     ]
+    if let context = context {
+        query[kSecUseAuthenticationContext] = context
+    }
     var result: AnyObject?
-    guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    guard status == errSecSuccess,
           let data = result as? Data,
-          let value = String(data: data, encoding: .utf8) else { return nil }
-    return value
+          let value = String(data: data, encoding: .utf8) else { return (status, nil) }
+    return (status, value)
 }
 
-// Build a SecAccess that lists this binary as a trusted reader. Items
-// written with this access bypass the macOS "enter password" sheet on the
-// device where they were created. The ACL does NOT replicate via iCloud
-// Keychain — items synced FROM another Mac arrive with a default ACL, so
-// the first read on a fresh device still incurs one password prompt.
-// Deprecated since 10.10 but still the only path that supports trusted-app
-// ACLs (kSecAttrAccessControl is biometry-only and incompatible with sync).
+func findItem(service: String, account: String, synchronizable: CFTypeRef, reason: String?) -> String? {
+    let context = reason.map { makeAuthenticationContext(reason: $0) }
+    return copyItem(service: service, account: account, synchronizable: synchronizable, context: context).value
+}
+
+func requiresUserPresence(service: String) -> Bool {
+    return service.hasPrefix("agents-cli.secrets.") || service.hasPrefix("agents-cli.bundles.")
+}
+
+func buildUserPresenceAccess(syncFlag: CFBoolean) -> SecAccessControl {
+    var error: Unmanaged<CFError>?
+    let accessibility: CFTypeRef = syncFlag == kCFBooleanTrue!
+        ? kSecAttrAccessibleWhenUnlocked
+        : kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+    guard let access = SecAccessControlCreateWithFlags(
+        nil,
+        accessibility,
+        [.biometryCurrentSet, .or, .devicePasscode],
+        &error
+    ) else {
+        let message = error?.takeRetainedValue().localizedDescription ?? "unknown error"
+        die(2, "Failed to create keychain access control: \(message)")
+    }
+    return access
+}
+
 func buildSelfTrustedAccess() -> SecAccess? {
     var selfApp: SecTrustedApplication?
     guard SecTrustedApplicationCreateFromPath(nil, &selfApp) == errSecSuccess,
@@ -43,6 +73,13 @@ func buildSelfTrustedAccess() -> SecAccess? {
         return nil
     }
     return access
+}
+
+func parseOptionalReason(startIndex: Int, defaultReason: String) -> (reason: String, nextIndex: Int) {
+    if args.count > startIndex + 1 && args[startIndex] == "--reason" {
+        return (args[startIndex + 1], startIndex + 2)
+    }
+    return (defaultReason, startIndex)
 }
 
 let args = CommandLine.arguments
@@ -81,20 +118,38 @@ case "list":
     }
 
 case "get":
-    // Unauthenticated single-item read. Used by profiles.ts (OAuth token
-    // refresh) where a Touch ID prompt on every API call would be brutal.
-    // macOS may still show a password prompt if the item's ACL doesn't
-    // trust this binary — but reads of items we wrote via `set` (which
-    // attaches kSecAttrAccess) are silent.
     guard args.count == 4 else { die(2, "Usage: agents-keychain get <service> <account>") }
     let (service, account) = (args[2], args[3])
-    guard let value = findItem(service: service, account: account, synchronizable: kSecAttrSynchronizableAny) else { exit(1) }
+    guard let value = findItem(service: service, account: account, synchronizable: kSecAttrSynchronizableAny, reason: nil) else { exit(1) }
     print(value, terminator: "")
+
+case "get-auth":
+    guard args.count == 4 || args.count == 6 else { die(2, "Usage: agents-keychain get-auth <service> <account> [--reason \"text\"]") }
+    let (service, account) = (args[2], args[3])
+    let parsed = parseOptionalReason(startIndex: 4, defaultReason: "read agents-cli secrets")
+    guard parsed.nextIndex == args.count else { die(2, "Usage: agents-keychain get-auth <service> <account> [--reason \"text\"]") }
+    guard let value = findItem(service: service, account: account, synchronizable: kSecAttrSynchronizableAny, reason: parsed.reason) else { exit(1) }
+    print(value, terminator: "")
+
+case "get-batch":
+    guard args.count >= 4 else { die(2, "Usage: agents-keychain get-batch <account> [--reason \"text\"] <service1> [service2...]") }
+    let account = args[2]
+    let parsed = parseOptionalReason(startIndex: 3, defaultReason: "read agents-cli secrets")
+    let reason = parsed.reason
+    guard parsed.nextIndex < args.count else { die(2, "Usage: agents-keychain get-batch <account> [--reason \"text\"] <service1> [service2...]") }
+    let context = makeAuthenticationContext(reason: reason)
+    for service in args.dropFirst(parsed.nextIndex) {
+        let item = copyItem(service: service, account: account, synchronizable: kSecAttrSynchronizableAny, context: context)
+        if item.status == errSecSuccess, let value = item.value {
+            print("\(service)\t\(Data(value.utf8).base64EncodedString())")
+        }
+    }
 
 case "has":
     guard args.count == 4 else { die(2, "Usage: agents-keychain has <service> <account>") }
     let (service, account) = (args[2], args[3])
-    exit(findItem(service: service, account: account, synchronizable: kSecAttrSynchronizableAny) != nil ? 0 : 1)
+    let reason = requiresUserPresence(service: service) ? "check agents-cli secrets" : nil
+    exit(findItem(service: service, account: account, synchronizable: kSecAttrSynchronizableAny, reason: reason) != nil ? 0 : 1)
 
 case "set":
     guard args.count == 4 || args.count == 5 else { die(2, "Usage: agents-keychain set <service> <account> [nosync]") }
@@ -110,7 +165,8 @@ case "set":
     while password.hasSuffix("\n") || password.hasSuffix("\r") { password = String(password.dropLast()) }
     guard let valueData = password.data(using: .utf8) else { die(2, "Failed to encode password") }
 
-    let access = buildSelfTrustedAccess()
+    let userPresenceAccess = requiresUserPresence(service: service) ? buildUserPresenceAccess(syncFlag: syncFlag) : nil
+    let trustedAccess = userPresenceAccess == nil ? buildSelfTrustedAccess() : nil
 
     let matchAttrs: [CFString: Any] = [
         kSecClass: kSecClassGenericPassword,
@@ -118,10 +174,11 @@ case "set":
         kSecAttrAccount: account as CFString,
         kSecAttrSynchronizable: syncFlag,
     ]
-    // SecItemUpdate preserves the existing ACL — we can't change it here.
-    // For items that pre-date this version, rotate (delete + re-add) to
-    // pick up the trusted-app ACL.
-    var status = SecItemUpdate(matchAttrs as CFDictionary, [kSecValueData: valueData] as CFDictionary)
+    var updateAttrs: [CFString: Any] = [kSecValueData: valueData]
+    if let access = userPresenceAccess {
+        updateAttrs[kSecAttrAccessControl] = access
+    }
+    var status = SecItemUpdate(matchAttrs as CFDictionary, updateAttrs as CFDictionary)
     if status == errSecItemNotFound {
         var addAttrs: [CFString: Any] = [
             kSecClass: kSecClassGenericPassword,
@@ -130,13 +187,11 @@ case "set":
             kSecAttrSynchronizable: syncFlag,
             kSecValueData: valueData,
         ]
-        // kSecAttrAccess (legacy trusted-app ACL) is incompatible with
-        // kSecAttrSynchronizable=true — SecItemAdd returns errSecParam (-50)
-        // when both are set. iCloud-synced items use device-level keychain
-        // unlock instead of a per-item ACL. Only attach the ACL to non-sync
-        // (device-local) items, where it stops the legacy "enter password"
-        // sheet on each helper read.
-        if let acc = access, syncFlag == kCFBooleanFalse! { addAttrs[kSecAttrAccess] = acc }
+        if let access = userPresenceAccess {
+            addAttrs[kSecAttrAccessControl] = access
+        } else if let access = trustedAccess, syncFlag == kCFBooleanFalse! {
+            addAttrs[kSecAttrAccess] = access
+        }
         status = SecItemAdd(addAttrs as CFDictionary, nil)
     }
     if status == errSecNotAvailable {

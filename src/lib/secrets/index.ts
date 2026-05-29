@@ -19,6 +19,8 @@ import * as path from 'path';
 import { linuxBackend } from './linux.js';
 
 const SERVICE_PREFIX = 'agents-cli';
+const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
+const BUNDLES_ITEM_PREFIX = `${SERVICE_PREFIX}.bundles.`;
 
 /** Supported secret resolution backends. */
 export type SecretProvider = 'keychain' | 'env' | 'file' | 'exec';
@@ -80,7 +82,11 @@ export function profileKeychainItem(provider: string): string {
 
 /** Build the keychain item name for a secrets-bundle key. */
 export function secretsKeychainItem(bundle: string, key: string): string {
-  return `${SERVICE_PREFIX}.secrets.${bundle}.${key}`;
+  return `${SECRETS_ITEM_PREFIX}${bundle}.${key}`;
+}
+
+function keychainItemRequiresUserPresence(item: string): boolean {
+  return item.startsWith(SECRETS_ITEM_PREFIX) || item.startsWith(BUNDLES_ITEM_PREFIX);
 }
 
 // Resolve the bundled, signed-and-notarized Agents CLI.app shipped
@@ -154,9 +160,8 @@ export function getKeychainToken(item: string, sync = false): string {
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.get(item, sync);
   // macOS: read through the signed helper FIRST. The helper holds the
-  // keychain-access-group entitlement (so it reads iCloud-synced items) and is
-  // the trusted app on the SecAccess ACLs we attach to device-local writes — it
-  // reads both silently, via the unauthenticated `get` path (no Touch ID gate).
+  // keychain-access-group entitlement (so it reads iCloud-synced items) and
+  // supplies an LAContext for items protected by kSecAttrAccessControl.
   //
   // Bare `security` is only a fallback for when the helper bundle is absent
   // (e.g. a dev build without the .app). It must NOT be tried first: macOS
@@ -180,7 +185,10 @@ export function getKeychainToken(item: string, sync = false): string {
     throw new Error(`Keychain item '${item}' not found.`);
   }
   // Helper searches both synced and non-synced via kSecAttrSynchronizableAny.
-  const result = spawnSync(bin, ['get', item, os.userInfo().username], {
+  const args = keychainItemRequiresUserPresence(item)
+    ? ['get-auth', item, os.userInfo().username, '--reason', 'read agents-cli secrets']
+    : ['get', item, os.userInfo().username];
+  const result = spawnSync(bin, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status === 1) throw new Error(`Keychain item '${item}' not found.`);
@@ -198,25 +206,57 @@ export function getKeychainToken(item: string, sync = false): string {
  * unreadable items are simply absent from the map (the caller decides whether a
  * given key was required).
  *
- * Each item is read through the security-first single-read path
- * ({@link getKeychainToken}): `/usr/bin/security` resolves items with no prompt,
- * and the unauthenticated helper `get` is the fallback for anything it can't
- * see. This deliberately does NOT use the helper's `get-batch` Touch-ID gate.
- * That gate fired the macOS keychain *password* sheet whenever an item's
- * trusted-app ACL didn't list the reading helper — which, with deprecated
- * trusted-app ACLs across dev/global helper copies, was effectively every read.
- * `security` reads the same items with no prompt at all, so routing through it
- * keeps bundle resolution silent. The `reason` arg is retained for signature
- * compatibility but unused now that there is no biometric prompt.
+ * On macOS this uses the signed helper's `get-batch` command so one LAContext
+ * can satisfy all protected item reads for the bundle.
  */
-export function getKeychainTokensBatch(items: string[], sync = false, _reason?: string): Map<string, string> {
+export function getKeychainTokensBatch(items: string[], sync = false, reason = 'read agents-cli secrets'): Map<string, string> {
   const result = new Map<string, string>();
-  for (const item of items) {
-    try {
-      result.set(item, getKeychainToken(item, sync));
-    } catch {
-      // Missing or unreadable — skip; the caller reports which key is missing.
+  if (backend) {
+    for (const item of items) {
+      try {
+        result.set(item, backend.get(item, sync));
+      } catch {
+        // Missing or unreadable — skip; the caller reports which key is missing.
+      }
     }
+    return result;
+  }
+  assertSupportedPlatform();
+  if (isLinux()) {
+    for (const item of items) {
+      try {
+        result.set(item, linuxBackend.get(item, sync));
+      } catch {
+        // Missing or unreadable — skip; the caller reports which key is missing.
+      }
+    }
+    return result;
+  }
+  let bin: string;
+  try {
+    bin = ensureKeychainHelper();
+  } catch {
+    for (const item of items) {
+      try {
+        result.set(item, getKeychainToken(item, sync));
+      } catch {
+        // Missing or unreadable — skip; the caller reports which key is missing.
+      }
+    }
+    return result;
+  }
+  const proc = spawnSync(bin, ['get-batch', os.userInfo().username, '--reason', reason, ...items], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (proc.status !== 0) return result;
+  const out = proc.stdout?.toString() || '';
+  for (const line of out.split('\n')) {
+    if (!line) continue;
+    const tab = line.indexOf('\t');
+    if (tab <= 0) continue;
+    const item = line.slice(0, tab);
+    const encoded = line.slice(tab + 1);
+    result.set(item, Buffer.from(encoded, 'base64').toString('utf8'));
   }
   return result;
 }
@@ -232,11 +272,9 @@ export function setKeychainToken(item: string, value: string, sync = false): voi
   if (isLinux()) { linuxBackend.set(item, value, sync); return; }
 
   // macOS path. Both sync and non-sync writes go through the .app helper so
-  // the item picks up our SecAccess ACL (helper as trusted reader). That ACL
-  // is what stops macOS from showing the legacy "enter password" sheet on
-  // subsequent reads. The helper takes an optional `nosync` arg for
-  // device-local writes; sync writes get kSecAttrSynchronizable=true by
-  // default.
+  // the item picks up kSecAttrAccessControl user-presence protection. The
+  // helper takes an optional `nosync` arg for device-local writes; sync writes
+  // get kSecAttrSynchronizable=true by default.
   const bin = ensureKeychainHelper();
   const args = ['set', item, os.userInfo().username];
   if (!sync) args.push('nosync');
