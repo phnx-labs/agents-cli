@@ -35,6 +35,7 @@ coverage/
 # Internal plans (not shipped)
 .agents/plans/
 .agents/worktrees/
+.agents/scratch/
 .plans/
 
 # Scrub script lists personal data strings — must not be committed to public repo
