@@ -9,8 +9,36 @@ import type { IPCRequest, IPCResponse, RefNodeJson } from './types.js';
 
 const SOCKET_NAME = 'browser.sock';
 
+export interface IPCRequestOptions {
+  autoStartDaemon?: boolean;
+}
+
+export class BrowserDaemonNotRunningError extends Error {
+  constructor() {
+    super(formatBrowserDaemonNotRunningError());
+    this.name = 'BrowserDaemonNotRunningError';
+  }
+}
+
+export function formatBrowserDaemonNotRunningError(): string {
+  return [
+    'Browser daemon not running.',
+    'Start it with: agents browser start --profile <name>',
+    'List profiles: agents browser profiles list',
+  ].join('\n');
+}
+
 export function getSocketPath(): string {
   return path.join(getHelpersDir(), 'browser', SOCKET_NAME);
+}
+
+async function waitForSocket(socketPath: string, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(socketPath)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('Timeout waiting for browser daemon socket');
 }
 
 export class BrowserIPCServer {
@@ -474,8 +502,11 @@ async function maybeWarnVersionMismatch(): Promise<void> {
   }
 }
 
-export async function sendIPCRequest(request: IPCRequest): Promise<IPCResponse> {
-  const result = await sendRawIPCRequest(request);
+export async function sendIPCRequest(
+  request: IPCRequest,
+  opts: IPCRequestOptions = {}
+): Promise<IPCResponse> {
+  const result = await sendRawIPCRequest(request, opts);
   // Run the version check after the user's request returns — keeps the
   // critical path zero-overhead and ensures `start` doesn't get blocked
   // on a daemon-restart warning that the user hasn't read yet.
@@ -485,40 +516,22 @@ export async function sendIPCRequest(request: IPCRequest): Promise<IPCResponse> 
   return result;
 }
 
-async function sendRawIPCRequest(request: IPCRequest): Promise<IPCResponse> {
+async function sendRawIPCRequest(
+  request: IPCRequest,
+  opts: IPCRequestOptions = {}
+): Promise<IPCResponse> {
   const socketPath = getSocketPath();
+  const autoStartDaemon = opts.autoStartDaemon ?? true;
 
   if (!fs.existsSync(socketPath)) {
+    if (!autoStartDaemon) {
+      throw new BrowserDaemonNotRunningError();
+    }
     await fs.promises.mkdir(path.dirname(socketPath), { recursive: true, mode: 0o700 });
     await fs.promises.chmod(path.dirname(socketPath), 0o700);
     startDaemon();
     if (!fs.existsSync(socketPath)) {
-      await new Promise<void>((resolve, reject) => {
-        const socketDir = path.dirname(socketPath);
-        const socketName = path.basename(socketPath);
-        const watcher = fs.watch(socketDir, (_event, file) => {
-          if (file === socketName) {
-            clearTimeout(timeout);
-            watcher.close();
-            resolve();
-          }
-        });
-        watcher.on('error', (error) => {
-          clearTimeout(timeout);
-          watcher.close();
-          reject(error);
-        });
-        const timeout = setTimeout(() => {
-          watcher.close();
-          reject(new Error('Timeout waiting for browser daemon socket'));
-        }, 6000);
-
-        if (fs.existsSync(socketPath)) {
-          clearTimeout(timeout);
-          watcher.close();
-          resolve();
-        }
-      });
+      await waitForSocket(socketPath, 6000);
     }
     if (!fs.existsSync(socketPath)) {
       throw new Error('Failed to start browser daemon');
@@ -544,7 +557,11 @@ async function sendRawIPCRequest(request: IPCRequest): Promise<IPCResponse> {
       }
     });
 
-    socket.on('error', (err) => {
+    socket.on('error', (err: NodeJS.ErrnoException) => {
+      if (!autoStartDaemon && (err.code === 'ENOENT' || err.code === 'ECONNREFUSED')) {
+        reject(new BrowserDaemonNotRunningError());
+        return;
+      }
       reject(new Error(`IPC error: ${err.message}`));
     });
 

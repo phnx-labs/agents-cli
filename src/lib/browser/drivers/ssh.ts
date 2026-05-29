@@ -79,7 +79,7 @@ export async function connectSSH(
     throw new Error(`SSH tunnel failed to establish to ${host}`);
   }
 
-  const { wsUrl, browser } = await discoverBrowserWsUrl(localPort);
+  const { wsUrl, browser } = await discoverBrowserWsUrl(localPort, 'localhost', profile.name);
   try {
     verifyBrowserIdentity(browser, profile.browser, remotePort, host);
   } catch (err) {
