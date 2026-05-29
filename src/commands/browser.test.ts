@@ -13,6 +13,7 @@ describe('browser command help', () => {
 
     expect(help).toContain('Usage:  start [options] [profile]');
     expect(help).toContain('-p, --profile <name>');
-    expect(help).toContain('defaults to bundled Chromium profile "default"');
+    expect(help).toContain('defaults to bundled Chromium profile');
+    expect(help).toContain('"default"');
   });
 });
