@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from 'child_process';
+import { createRequire } from 'module';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,9 +9,11 @@ import { readBundle, resolveBundleEnv, bundleExists } from '../secrets/bundles.j
 import { writeProfileRuntime, readProfileRuntime } from './runtime-state.js';
 import type { ChromeOptions } from './types.js';
 import type { Readable, Writable } from 'stream';
-import { chromium as bundledChromium } from 'playwright';
+import { chromium as bundledChromium } from 'playwright-core';
 
 import type { BrowserType } from './types.js';
+
+const require = createRequire(import.meta.url);
 
 const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
   darwin: {
@@ -80,12 +83,30 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
 
 export function getBundledChromiumPath(): string {
   const executablePath = bundledChromium.executablePath();
-  if (!fs.existsSync(executablePath)) {
+  if (fs.existsSync(executablePath)) {
+    return executablePath;
+  }
+
+  installBundledChromium();
+  if (fs.existsSync(executablePath)) {
+    return executablePath;
+  }
+
+  throw new Error(
+    'Bundled Chromium did not install correctly. Try: npx playwright-core install chromium'
+  );
+}
+
+function installBundledChromium(): void {
+  const cliPath = require.resolve('playwright-core/cli.js');
+  try {
+    execFileSync(process.execPath, [cliPath, 'install', 'chromium'], { stdio: 'inherit' });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
     throw new Error(
-      'Bundled Chromium is not installed. Reinstall agents-cli or run: npx playwright install chromium'
+      `Bundled Chromium is not installed and automatic install failed: ${detail}\nTry: npx playwright-core install chromium`
     );
   }
-  return executablePath;
 }
 
 export interface LaunchResult {

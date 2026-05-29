@@ -86,11 +86,11 @@
     "marked-terminal": "7.3.0",
     "node-pty": "1.1.0",
     "ora": "8.2.0",
-    "playwright": "1.59.1",
     "proper-lockfile": "4.1.2",
     "simple-git": "3.36.0",
     "smol-toml": "1.6.1",
-    "yaml": "2.8.3"
+    "yaml": "2.8.3",
+    "playwright-core": "1.59.1"
   },
   "devDependencies": {
     "@types/diff": "6.0.0",
@@ -98,6 +98,7 @@
     "@types/node": "22.19.10",
     "tsx": "4.22.2",
     "typescript": "5.9.3",
-    "vitest": "4.1.6"
+    "vitest": "4.1.6",
+    "playwright": "1.59.1"
   }
 }

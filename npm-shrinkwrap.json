@@ -22,7 +22,7 @@
         "marked-terminal": "7.3.0",
         "node-pty": "1.1.0",
         "ora": "8.2.0",
-        "playwright": "1.59.1",
+        "playwright-core": "1.59.1",
         "proper-lockfile": "4.1.2",
         "simple-git": "3.36.0",
         "smol-toml": "1.6.1",
@@ -38,6 +38,7 @@
         "@types/diff": "6.0.0",
         "@types/marked-terminal": "6.1.1",
         "@types/node": "22.19.10",
+        "playwright": "1.59.1",
         "tsx": "4.22.2",
         "typescript": "5.9.3",
         "vitest": "4.1.6"
@@ -1847,6 +1848,7 @@
     },
     "node_modules/fsevents": {
       "version": "2.3.2",
+      "dev": true,
       "license": "MIT",
       "optional": true,
       "os": [
@@ -2438,6 +2440,7 @@
     },
     "node_modules/playwright": {
       "version": "1.59.1",
+      "dev": true,
       "license": "Apache-2.0",
       "dependencies": {
         "playwright-core": "1.59.1"
