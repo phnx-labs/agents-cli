@@ -6,7 +6,6 @@ import {
   getProfile,
   createProfile,
   deleteProfile,
-  ensureDefaultBrowserProfile,
   getProfileRuntimeDir,
   extractConfiguredPort,
   findFreeProfilePort,
@@ -474,23 +473,14 @@ function registerProfilesCommands(browser: Command): void {
 
 function registerTaskCommands(browser: Command): void {
   browser
-    .command('start [profile]')
-    .description('Start a browser task with a profile (defaults to bundled Chromium profile "default")')
-    .option('-p, --profile <name>', 'Browser profile to use')
+    .command('start')
+    .description('Start a browser task with a profile')
+    .requiredOption('-p, --profile <name>', 'Browser profile to use')
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
-    .action(async (profileArg: string | undefined, opts) => {
-      let profileName = opts.profile || profileArg;
-      if (!profileName) {
-        try {
-          const defaultProfile = await ensureDefaultBrowserProfile();
-          profileName = defaultProfile.name;
-        } catch (err) {
-          console.error(err instanceof Error ? err.message : String(err));
-          process.exit(1);
-        }
-      }
+    .action(async (opts) => {
+      const profileName: string = opts.profile;
 
       // Pre-check the profile locally so we fail fast with a helpful error
       // instead of round-tripping a generic "Profile not found" through the daemon.
