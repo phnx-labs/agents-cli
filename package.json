@@ -81,7 +81,7 @@
     "commander": "12.1.0",
     "croner": "9.1.0",
     "diff": "9.0.0",
-    "marked": "15.0.12",
+    "marked": "18.0.4",
     "marked-terminal": "7.3.0",
     "node-pty": "1.1.0",
     "ora": "8.2.0",
