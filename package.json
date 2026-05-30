@@ -91,9 +91,9 @@
     "yaml": "2.8.3"
   },
   "devDependencies": {
-    "@types/diff": "6.0.0",
+    "@types/diff": "8.0.0",
     "@types/marked-terminal": "6.1.1",
-    "@types/node": "22.19.10",
+    "@types/node": "25.9.1",
     "tsx": "4.22.3",
     "typescript": "5.9.3",
     "vitest": "4.1.6"
