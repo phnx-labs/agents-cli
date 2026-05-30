@@ -353,11 +353,11 @@ Plugins live in the user repo (`~/.agents/plugins/`), not inside any single vers
 Give agents access to a real browser — no relay extension, no cloud service, no Playwright getting blocked.
 
 ```bash
-# First run creates an isolated "default" profile backed by bundled Chromium.
-export AGENTS_BROWSER_TASK=$(agents browser start --url https://app.example.com)
-
-# Or create a named profile and start it explicitly.
+# Create an isolated profile pointing at a real browser on your machine
+# (chrome, comet, brave, chromium, edge, or custom).
 agents browser profiles create work --browser chrome
+
+# Start a task once, then bind it to this shell — every later command picks it up.
 # `start` writes the resolved name (e.g. `swift-crab-falcon-a3f92b1c`) to stdout
 # and human-friendly commentary to stderr, so $(...) capture stays clean.
 export AGENTS_BROWSER_TASK=$(agents browser start --profile work --url https://app.example.com)
