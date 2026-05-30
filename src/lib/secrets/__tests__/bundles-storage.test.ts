@@ -222,6 +222,55 @@ describe('listBundles', () => {
     const bundles = listBundles();
     expect(bundles.map((b) => b.name)).toEqual(['good']);
   });
+
+  it('preserves description, icloud_sync, allow_exec, and timestamps for every bundle', () => {
+    // Regression for the Touch-ID-per-bundle bug: listBundles must produce
+    // fully-populated SecretsBundle objects from the batched read, not just
+    // names. We previously delegated to readBundle in a loop; the batch path
+    // duplicates the parse logic so this guards against drift.
+    writeBundle({
+      name: 'alpha',
+      description: 'first',
+      icloud_sync: true,
+      allow_exec: true,
+      vars: { API: 'keychain:API' },
+      meta: { API: { type: 'api-key', note: 'pinned' } },
+    });
+    writeBundle({
+      name: 'beta',
+      description: 'second',
+      icloud_sync: false,
+      vars: { TOKEN: 'literal-value' },
+    });
+    const bundles = listBundles();
+    expect(bundles).toHaveLength(2);
+    const a = bundles.find((b) => b.name === 'alpha')!;
+    expect(a.description).toBe('first');
+    expect(a.icloud_sync).toBe(true);
+    expect(a.allow_exec).toBe(true);
+    expect(a.vars).toEqual({ API: 'keychain:API' });
+    expect(a.meta).toEqual({ API: { type: 'api-key', note: 'pinned' } });
+    expect(typeof a.created_at).toBe('string');
+    expect(typeof a.updated_at).toBe('string');
+    const b = bundles.find((b) => b.name === 'beta')!;
+    expect(b.description).toBe('second');
+    expect(b.icloud_sync).toBe(false);
+    expect(b.allow_exec).toBe(false);
+  });
+
+  it('scales to many bundles without dropping any (no prompt-per-bundle regression)', () => {
+    // The realistic scenario from a real user: 20+ bundles all sync to iCloud
+    // Keychain. Before the fix, this produced 20+ Touch ID prompts because
+    // readBundle was called in a loop, each spawning a fresh LAContext. The
+    // batch read must return all of them in one shot.
+    for (let i = 0; i < 25; i++) {
+      writeBundle({ name: `bundle-${String(i).padStart(2, '0')}`, vars: {} });
+    }
+    const bundles = listBundles();
+    expect(bundles).toHaveLength(25);
+    expect(bundles[0].name).toBe('bundle-00');
+    expect(bundles[24].name).toBe('bundle-24');
+  });
 });
 
 describe('readBundle errors', () => {

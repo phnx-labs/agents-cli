@@ -267,13 +267,48 @@ export function listBundles(): SecretsBundle[] {
   const names = services
     .map((s) => s.slice(BUNDLE_META_PREFIX.length))
     .filter((n) => BUNDLE_NAME_PATTERN.test(n));
+  if (names.length === 0) return [];
+
+  // Batch all metadata reads behind ONE Touch ID prompt instead of N. Bundle
+  // metadata items carry user-presence ACLs (same as secret values), so a naive
+  // loop over readBundle() spawns a fresh LAContext per item — meaning N
+  // biometric prompts for `secrets list`. Sharing a single context across all
+  // SecItemCopyMatching calls collapses the prompt to one. Mirrors the pattern
+  // already used by resolveBundleEnv for runtime secret injection.
+  const itemsToFetch = names.map(bundleMetaItem);
+  const fetched = getKeychainTokensBatch(itemsToFetch, false, 'list secrets bundles');
+
   const out: SecretsBundle[] = [];
   for (const name of names) {
+    const json = fetched.get(bundleMetaItem(name));
+    if (json === undefined) continue;
+    let parsed: Partial<SecretsBundle>;
     try {
-      out.push(readBundle(name));
+      parsed = JSON.parse(json) as Partial<SecretsBundle>;
     } catch {
       // Skip malformed bundles; surfaced via `agents secrets view <name>`.
+      continue;
     }
+    if (!parsed || typeof parsed !== 'object') continue;
+    const bundle: SecretsBundle = {
+      name,
+      description: parsed.description,
+      allow_exec: Boolean(parsed.allow_exec),
+      icloud_sync: Boolean(parsed.icloud_sync),
+      vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
+    };
+    if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
+    if (typeof parsed.updated_at === 'string') bundle.updated_at = parsed.updated_at;
+    if (typeof parsed.last_used === 'string') bundle.last_used = parsed.last_used;
+    if (parsed.meta && typeof parsed.meta === 'object') bundle.meta = parsed.meta;
+    // Skip bundles with invalid env keys rather than throwing — same lenient
+    // posture readBundle had via the outer catch.
+    let valid = true;
+    for (const key of Object.keys(bundle.vars)) {
+      if (!ENV_KEY_PATTERN.test(key)) { valid = false; break; }
+    }
+    if (!valid) continue;
+    out.push(bundle);
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
