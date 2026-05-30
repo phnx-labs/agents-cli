@@ -88,7 +88,7 @@
     "proper-lockfile": "4.1.2",
     "simple-git": "3.36.0",
     "smol-toml": "1.6.1",
-    "yaml": "2.8.3"
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/diff": "6.0.0",
