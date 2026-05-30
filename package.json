@@ -95,7 +95,6 @@
     "@types/diff": "6.0.0",
     "@types/marked-terminal": "6.1.1",
     "@types/node": "22.19.10",
-    "playwright": "1.59.1",
     "tsx": "4.22.2",
     "typescript": "5.9.3",
     "vitest": "4.1.6"
