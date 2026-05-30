@@ -484,6 +484,10 @@ function registerTaskCommands(browser: Command): void {
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
     .option('--no-skills', 'Skip auto-discovery of site-specific SKILL.md from ~/.agents/skills/browser/domain-skills/')
+    .option('--record', 'Start recording right after the tab opens (shorthand for `agents browser record start` as a follow-up)')
+    .option('--fps <n>', 'Recording frames per second (with --record; 1–30, default 5)', (v) => parseInt(v, 10))
+    .option('--duration <sec>', 'Recording duration cap in seconds (with --record; default 60)', (v) => parseInt(v, 10))
+    .option('--max-mb <mb>', 'Recording size cap in MB (with --record; default 25)', (v) => parseInt(v, 10))
     .action(async (opts) => {
       let profileName: string = opts.profile;
       if (!profileName) {
@@ -560,6 +564,28 @@ function registerTaskCommands(browser: Command): void {
         console.error(`--- domain-skill: ${response.skill.name} (${response.skill.hostname}) ---`);
         console.error(response.skill.content);
         console.error(`--- end domain-skill: ${response.skill.name} ---`);
+      }
+
+      // --record convenience: fire record-start right after the tab opens so
+      // the user gets a single-command capture flow. Failures here are
+      // reported but don't fail the start — the task is already running.
+      if (opts.record) {
+        const recordResponse = await sendIPCRequest({
+          action: 'record-start',
+          task: response.task,
+          tabId: response.tabId,
+          fps: opts.fps,
+          duration: opts.duration,
+          maxMb: opts.maxMb,
+        });
+        if (!recordResponse.ok) {
+          console.error(`Recording failed to start: ${recordResponse.error}`);
+        } else {
+          console.error(
+            `Recording at ${recordResponse.fps} fps (cap ${recordResponse.durationCapSec}s / ${recordResponse.maxMb} MB) -> ${recordResponse.path}`
+          );
+          console.error('Stop with: agents browser record stop');
+        }
       }
     });
 
