@@ -12,6 +12,10 @@ vi.mock('child_process', () => ({
 
 vi.mock('./chrome.js', () => ({
   findBrowserPath: vi.fn(() => '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+  findFirstInstalledBrowser: vi.fn(() => ({
+    browserType: 'chrome',
+    binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  })),
 }));
 
 import {
@@ -19,7 +23,9 @@ import {
   extractConfiguredEndpoint,
   findFreeProfilePort,
   createProfile,
+  ensureDefaultBrowserProfile,
 } from './profiles.js';
+import { findFirstInstalledBrowser } from './chrome.js';
 import type { BrowserProfile } from './types.js';
 import type { BrowserProfileConfig } from '../types.js';
 import { readMeta, writeMeta } from '../state.js';
@@ -335,6 +341,57 @@ describe('profile YAML round-trip', () => {
         },
       })
     ).rejects.toThrow(/Remote browser binary contains shell metacharacters/);
+  });
+});
+
+describe('ensureDefaultBrowserProfile', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('auto-picks the first installed browser and persists a default profile', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('free port');
+    });
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    expect(profile.name).toBe('default');
+    expect(profile.browser).toBe('chrome');
+    expect(profile.binary).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+    expect(profile.endpoints).toEqual(['cdp://127.0.0.1:9222']);
+    expect(store.browser.default.browser).toBe('chrome');
+  });
+
+  it('reuses an existing default profile instead of overwriting it', async () => {
+    const existing: BrowserProfileConfig = {
+      browser: 'brave',
+      binary: '/custom/path/to/brave',
+      endpoints: ['cdp://127.0.0.1:9333'],
+    };
+    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: { default: existing } };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    const writeSpy = vi.mocked(writeMeta);
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    expect(profile.browser).toBe('brave');
+    expect(profile.binary).toBe('/custom/path/to/brave');
+    expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it('throws an actionable error when no Chromium-family browser is installed', async () => {
+    vi.mocked(readMeta).mockImplementation(() => ({ browser: {} }) as any);
+    vi.mocked(findFirstInstalledBrowser).mockReturnValueOnce(null);
+
+    await expect(ensureDefaultBrowserProfile()).rejects.toThrow(
+      /No supported browser found.*Chrome.*Brave.*Edge/
+    );
   });
 });
 

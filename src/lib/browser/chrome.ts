@@ -77,6 +77,47 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
   throw new Error(`Browser "${browserType}" not found. Install it first.`);
 }
 
+// Per-platform Chromium-family priority list for "no --profile" auto-pick.
+// Order is: most-likely-installed-and-stable first. Safari and Firefox are
+// intentionally excluded — they don't speak the Chrome DevTools Protocol the
+// way cdp.ts expects, so they'd need separate drivers.
+const DEFAULT_BROWSER_PRIORITY: Record<string, BrowserType[]> = {
+  // macOS: Chrome leads (>70% of dev machines), then the rest of the family.
+  darwin: ['chrome', 'brave', 'edge', 'chromium', 'comet'],
+  // Linux: Chrome/Chromium first (apt/snap), then Brave/Edge if present.
+  linux: ['chrome', 'chromium', 'brave', 'edge'],
+  // Windows: Edge is preinstalled on every supported build, so it's the
+  // reliable always-there default.
+  win32: ['edge', 'chrome', 'brave'],
+};
+
+/**
+ * Walk the per-platform priority list and return the first browser that's
+ * actually installed on disk. Returns null if none of them are present.
+ *
+ * This is the auto-pick the `agents browser start` command uses when the user
+ * doesn't pass `--profile`. The intent matches "use whatever's preinstalled,"
+ * but constrained to Chromium-family binaries so CDP works without a new
+ * driver layer.
+ */
+export function findFirstInstalledBrowser(
+  platform: string = os.platform()
+): { browserType: BrowserType; binary: string } | null {
+  const priority = DEFAULT_BROWSER_PRIORITY[platform];
+  if (!priority) return null;
+  const platformPaths = BROWSER_PATHS[platform];
+  if (!platformPaths) return null;
+  for (const browserType of priority) {
+    const candidates = platformPaths[browserType] || [];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        return { browserType, binary: p };
+      }
+    }
+  }
+  return null;
+}
+
 export interface LaunchResult {
   pid: number;
   port: number;

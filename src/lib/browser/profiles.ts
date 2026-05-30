@@ -7,9 +7,12 @@ import {
 } from '../state.js';
 import type { BrowserProfileConfig } from '../types.js';
 import type { BrowserProfile } from './types.js';
-import { findBrowserPath } from './chrome.js';
+import { findBrowserPath, findFirstInstalledBrowser } from './chrome.js';
+import { DEFAULT_VIEWPORT } from './devices.js';
 
 export type { BrowserProfile } from './types.js';
+
+export const DEFAULT_BROWSER_PROFILE_NAME = 'default';
 
 export function getBrowserRuntimeDir(): string {
   return getBrowserRuntimeDirRoot();
@@ -71,6 +74,46 @@ export async function getProfile(name: string): Promise<BrowserProfile | null> {
   const config = meta.browser?.[name];
   if (!config) return null;
   return configToProfile(name, config);
+}
+
+/**
+ * Ensure a `default` profile exists, auto-picking the first installed
+ * Chromium-family browser per the platform priority list in chrome.ts.
+ *
+ * Re-uses an existing `default` profile as-is (we don't second-guess the user
+ * if they've already customized it). On first run we walk the priority list
+ * (macOS: chrome > brave > edge > chromium > comet; Linux: chrome > chromium >
+ * brave > edge; Windows: edge > chrome > brave) and pin the profile to the
+ * first match. Throws an actionable error if none of those binaries are
+ * installed so the user knows exactly which browsers we'd accept.
+ */
+export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
+  const existing = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
+  if (existing) return existing;
+
+  const detected = findFirstInstalledBrowser();
+  if (!detected) {
+    throw new Error(
+      'No supported browser found. Install one of: Chrome, Brave, Edge, Chromium, or Comet, ' +
+      'then re-run `agents browser start`. Or create a profile explicitly with ' +
+      '`agents browser profiles create <name> --browser <chrome|comet|chromium|brave|edge|custom>`.'
+    );
+  }
+
+  const freePort = await findFreeProfilePort();
+  const profile: BrowserProfile = {
+    name: DEFAULT_BROWSER_PROFILE_NAME,
+    description: `Auto-detected ${detected.browserType} profile`,
+    browser: detected.browserType,
+    binary: detected.binary,
+    endpoints: [`cdp://127.0.0.1:${freePort}`],
+    viewport: {
+      width: DEFAULT_VIEWPORT.width,
+      height: DEFAULT_VIEWPORT.height,
+    },
+  };
+  await createProfile(profile);
+  return profile;
 }
 
 /**

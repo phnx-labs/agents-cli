@@ -6,6 +6,7 @@ import {
   getProfile,
   createProfile,
   deleteProfile,
+  ensureDefaultBrowserProfile,
   getProfileRuntimeDir,
   extractConfiguredPort,
   findFreeProfilePort,
@@ -83,8 +84,11 @@ export function registerBrowserCommand(program: Command): void {
       # Create a Chrome profile pointed at a CDP endpoint
       agents browser profiles create work --browser chrome --endpoint http://localhost:9222
 
-      # Start a session against a profile
-      agents browser start work
+      # Start a session — auto-picks the first installed Chromium-family browser
+      agents browser start
+
+      # Or pin to a specific profile
+      agents browser start --profile work
 
       # Drive the page
       agents browser navigate https://example.com
@@ -474,13 +478,22 @@ function registerProfilesCommands(browser: Command): void {
 function registerTaskCommands(browser: Command): void {
   browser
     .command('start')
-    .description('Start a browser task with a profile')
-    .requiredOption('-p, --profile <name>', 'Browser profile to use')
+    .description('Start a browser task. Pass --profile <name>, or omit to auto-pick a Chromium-family browser already installed on this machine.')
+    .option('-p, --profile <name>', 'Browser profile to use (auto-picks from installed Chromium-family browsers if omitted)')
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
     .action(async (opts) => {
-      const profileName: string = opts.profile;
+      let profileName: string = opts.profile;
+      if (!profileName) {
+        try {
+          const detected = await ensureDefaultBrowserProfile();
+          profileName = detected.name;
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          process.exit(1);
+        }
+      }
 
       // Pre-check the profile locally so we fail fast with a helpful error
       // instead of round-tripping a generic "Profile not found" through the daemon.
