@@ -1,7 +1,30 @@
+import * as net from 'net';
+
 import { CDPClient, discoverBrowserWsUrl, verifyBrowserIdentity } from '../cdp.js';
 import { launchBrowser, getPortOccupant } from '../chrome.js';
 import { parseEndpointUrl } from '../profiles.js';
 import type { BrowserProfile } from '../types.js';
+
+/**
+ * Cheap TCP-level "is something bound here?" probe. Used as a fallback when
+ * `getPortOccupant()` (lsof-based) misses the process — Comet and other
+ * Electron apps sometimes hold a TCP socket that lsof's `-sTCP:LISTEN` filter
+ * doesn't report. If anything ACKs the connection, we treat the port as taken
+ * and surface a friendly error instead of silently auto-launching a fresh
+ * browser that would then conflict.
+ */
+async function probeTcpBound(port: number, host = '127.0.0.1', timeoutMs = 500): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = net.createConnection({ port, host });
+    const cleanup = () => {
+      sock.removeAllListeners();
+      sock.destroy();
+    };
+    const timer = setTimeout(() => { cleanup(); resolve(false); }, timeoutMs);
+    sock.once('connect', () => { clearTimeout(timer); cleanup(); resolve(true); });
+    sock.once('error', () => { clearTimeout(timer); cleanup(); resolve(false); });
+  });
+}
 
 export interface LocalConnection {
   cdp: CDPClient;
@@ -78,20 +101,44 @@ export async function connectLocal(
       );
     }
 
+    // lsof-based detection misses some Electron-family processes (Comet, custom
+    // chrome wrappers). Cheap TCP probe as a safety net: if something ACKs a
+    // connect, the port is bound — bail loudly with the profile name + endpoint
+    // rather than silently launching a duplicate browser.
+    if (await probeTcpBound(port)) {
+      throw new Error(
+        `Profile "${profile.name}" is configured for cdp://127.0.0.1:${port}, ` +
+          `but something is already bound to that port without serving the Chrome ` +
+          `DevTools Protocol. If that's your browser running without remote debugging, ` +
+          `quit it and relaunch with \`--remote-debugging-port=${port}\`. Otherwise, ` +
+          `update the profile to a free port (\`agents browser profiles list\`).`
+      );
+    }
+
     const newPort = port;
     const chromeOpts = { ...profile.chrome, viewport: profile.viewport };
-    const { pid, wsUrl } = await launchBrowser(
-      profile.name,
-      profile.browser,
-      newPort,
-      chromeOpts,
-      profile.secrets,
-      profile.binary,
-      profile.electron === true
-    );
+    let launched;
+    try {
+      launched = await launchBrowser(
+        profile.name,
+        profile.browser,
+        newPort,
+        chromeOpts,
+        profile.secrets,
+        profile.binary,
+        profile.electron === true
+      );
+    } catch (launchErr) {
+      const reason = launchErr instanceof Error ? launchErr.message : String(launchErr);
+      throw new Error(
+        `Could not start ${profile.browser} for profile "${profile.name}" on port ${newPort}: ${reason}. ` +
+          `Check that the browser binary is installed (\`agents browser profiles list\`) and ` +
+          `that no other process is holding the port.`
+      );
+    }
     const cdp = new CDPClient();
-    await cdp.connect(wsUrl);
+    await cdp.connect(launched.wsUrl);
 
-    return { cdp, port: newPort, pid };
+    return { cdp, port: newPort, pid: launched.pid };
   }
 }

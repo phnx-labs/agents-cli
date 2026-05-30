@@ -854,5 +854,19 @@ try {
   if (err instanceof Error && err.name === 'ExitPromptError') {
     process.exit(130);
   }
+  // Browser-daemon-not-running and CDP-not-reachable surface as typed errors
+  // from src/lib/browser/. Don't dump a Node stacktrace for these — they are
+  // user-actionable, not engineering bugs. See issues #41 and #43.
+  if (err instanceof Error) {
+    const isBrowserDaemonNotRunning = err.name === 'BrowserDaemonNotRunningError';
+    const isBrowserCdpUnreachable = err.name === 'BrowserCdpConnectionError';
+    const isBrowserIpcDown =
+      err.message.startsWith('IPC error:') &&
+      (err.message.includes('ECONNREFUSED') || err.message.includes('ENOENT'));
+    if (isBrowserDaemonNotRunning || isBrowserCdpUnreachable || isBrowserIpcDown) {
+      console.error(err.message);
+      process.exit(1);
+    }
+  }
   throw err;
 }
