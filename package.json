@@ -26,6 +26,7 @@
     "dist/lib/secrets/Agents CLI.app/**",
     "npm-shrinkwrap.json",
     "scripts/postinstall.js",
+    "scripts/install-helper.js",
     "CHANGELOG.md",
     "README.md",
     "LICENSE"

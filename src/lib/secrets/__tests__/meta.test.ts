@@ -19,7 +19,7 @@ import {
   type KeychainBackend,
 } from '../index.js';
 
-interface StoredItem { value: string; sync: boolean }
+interface StoredItem { value: string }
 
 function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, StoredItem> } {
   const store = new Map<string, StoredItem>();
@@ -30,7 +30,7 @@ function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, Sto
       if (!v) throw new Error(`Keychain item '${item}' not found.`);
       return v.value;
     },
-    set: (item, value, sync) => { store.set(item, { value, sync }); },
+    set: (item, value) => { store.set(item, { value }); },
     delete: (item) => store.delete(item),
     list: (prefix) => Array.from(store.keys()).filter((k) => k.startsWith(prefix)),
   };
