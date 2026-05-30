@@ -53,6 +53,14 @@ export interface ActiveSession {
   cloudProvider?: string;
   cloudTaskId?: string;
   cloudStatus?: string;
+  /**
+   * IDE window that owns this terminal. Source of truth is the per-window
+   * slice key in `live-terminals.json` (computeWindowId in the swarmify
+   * extension): `${vscode.env.sessionId}-${extension-host pid}`. Lets the
+   * renderer cluster terminals that belong to the same IDE window even when
+   * two windows have the same cwd open. Only populated for `terminal` context.
+   */
+  windowId?: string;
 }
 
 export interface ActiveQueryOptions {
@@ -96,6 +104,8 @@ interface LiveTerminalEntry {
   label?: string | null;
   cwd?: string | null;
   startedAtMs: number;
+  /** Slice key from the registry — the IDE window that owns this terminal. */
+  windowId?: string;
 }
 
 /** Read the live-terminals registry, dedupe by sessionId, keep only pid-alive entries. */
@@ -115,10 +125,10 @@ function readLiveTerminals(): LiveTerminalEntry[] {
   if (!parsed || typeof parsed !== 'object') return [];
 
   const merged = new Map<string, LiveTerminalEntry>();
-  for (const slice of Object.values(parsed) as any[]) {
+  for (const [windowId, slice] of Object.entries(parsed) as [string, any][]) {
     for (const e of (slice?.entries ?? []) as LiveTerminalEntry[]) {
       if (!e?.sessionId || !isPidAlive(e.pid)) continue;
-      merged.set(e.sessionId, e);
+      merged.set(e.sessionId, { ...e, windowId });
     }
   }
   return Array.from(merged.values());
@@ -305,6 +315,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       sessionFile,
       startedAtMs: t.startedAtMs,
       status: classifyActivity(sessionFile),
+      windowId: t.windowId,
     };
   });
 }
