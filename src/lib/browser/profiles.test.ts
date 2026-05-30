@@ -12,7 +12,6 @@ vi.mock('child_process', () => ({
 
 vi.mock('./chrome.js', () => ({
   findBrowserPath: vi.fn(() => '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
-  getBundledChromiumPath: vi.fn(() => '/ms-playwright/chromium/chrome'),
 }));
 
 import {
@@ -20,7 +19,6 @@ import {
   extractConfiguredEndpoint,
   findFreeProfilePort,
   createProfile,
-  ensureDefaultBrowserProfile,
 } from './profiles.js';
 import type { BrowserProfile } from './types.js';
 import type { BrowserProfileConfig } from '../types.js';
@@ -287,26 +285,6 @@ describe('profile YAML round-trip', () => {
     expect('binary' in stored).toBe(false);
     expect('electron' in stored).toBe(false);
     expect('targetFilter' in stored).toBe(false);
-  });
-
-  it('creates a default profile backed by bundled Chromium on first use', async () => {
-    const store: { browser: Record<string, BrowserProfileConfig> } = { browser: {} };
-    vi.mocked(readMeta).mockImplementation(() => store as any);
-    vi.mocked(writeMeta).mockImplementation((meta: any) => {
-      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
-    });
-    vi.mocked(execFileSync).mockImplementation(() => {
-      throw new Error('free port');
-    });
-
-    const profile = await ensureDefaultBrowserProfile();
-
-    expect(profile.name).toBe('default');
-    expect(profile.browser).toBe('chromium');
-    expect(profile.binary).toBe('/ms-playwright/chromium/chrome');
-    expect(profile.endpoints).toEqual(['cdp://127.0.0.1:9222']);
-    expect(store.browser.default.browser).toBe('chromium');
-    expect(store.browser.default.binary).toBe('/ms-playwright/chromium/chrome');
   });
 
   it('allows spaces in browser binaries used by ssh endpoints', async () => {

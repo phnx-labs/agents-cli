@@ -7,12 +7,9 @@ import {
 } from '../state.js';
 import type { BrowserProfileConfig } from '../types.js';
 import type { BrowserProfile } from './types.js';
-import { findBrowserPath, getBundledChromiumPath } from './chrome.js';
-import { DEFAULT_VIEWPORT } from './devices.js';
+import { findBrowserPath } from './chrome.js';
 
 export type { BrowserProfile } from './types.js';
-
-export const DEFAULT_BROWSER_PROFILE_NAME = 'default';
 
 export function getBrowserRuntimeDir(): string {
   return getBrowserRuntimeDirRoot();
@@ -74,26 +71,6 @@ export async function getProfile(name: string): Promise<BrowserProfile | null> {
   const config = meta.browser?.[name];
   if (!config) return null;
   return configToProfile(name, config);
-}
-
-export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
-  const existing = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
-  if (existing) return existing;
-
-  const freePort = await findFreeProfilePort();
-  const profile: BrowserProfile = {
-    name: DEFAULT_BROWSER_PROFILE_NAME,
-    description: 'Default bundled Chromium profile',
-    browser: 'chromium',
-    binary: getBundledChromiumPath(),
-    endpoints: [`cdp://127.0.0.1:${freePort}`],
-    viewport: {
-      width: DEFAULT_VIEWPORT.width,
-      height: DEFAULT_VIEWPORT.height,
-    },
-  };
-  await createProfile(profile);
-  return profile;
 }
 
 /**
