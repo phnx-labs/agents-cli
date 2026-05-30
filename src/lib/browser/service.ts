@@ -21,6 +21,7 @@ import { killChrome, getRunningChromeInfo, launchBrowser, allocatePort } from '.
 import { connectLocal } from './drivers/local.js';
 import { connectSSH, shellQuote } from './drivers/ssh.js';
 import { clearProfileRuntime } from './runtime-state.js';
+import { resolveDomainSkill, type ResolvedDomainSkill } from './domain-skills.js';
 import {
   generateTaskId,
   generateShortId,
@@ -307,8 +308,8 @@ export class BrowserService {
 
   async start(
     profileName: string,
-    opts: { taskName?: string; url?: string; endpointName?: string } = {}
-  ): Promise<{ task: string; name: string; tabId?: string; windowId?: string; profile: string }> {
+    opts: { taskName?: string; url?: string; endpointName?: string; skipDomainSkill?: boolean } = {}
+  ): Promise<{ task: string; name: string; tabId?: string; windowId?: string; profile: string; skill?: ResolvedDomainSkill }> {
     const profile = await getProfile(profileName);
     if (!profile) {
       throw new Error(`Profile "${profileName}" not found`);
@@ -424,7 +425,16 @@ export class BrowserService {
       tabId = result.tabId;
     }
 
-    return { task: taskId, name: taskName, tabId, profile: effectiveProfileName };
+    // Domain-skill discovery: when a URL is supplied, look up site-specific
+    // operating instructions and pass them back so the calling agent can pick
+    // them up alongside the task id. Failures swallowed by resolveDomainSkill.
+    let skill: ResolvedDomainSkill | undefined;
+    if (opts.url && !opts.skipDomainSkill) {
+      const resolved = resolveDomainSkill(opts.url);
+      if (resolved) skill = resolved;
+    }
+
+    return { task: taskId, name: taskName, tabId, profile: effectiveProfileName, skill };
   }
 
   async stop(taskName: string): Promise<{ ok: boolean; profile?: string }> {

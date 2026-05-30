@@ -151,12 +151,14 @@ export class BrowserIPCServer {
           taskName: request.taskName,
           url: request.url,
           endpointName: request.endpoint,
+          skipDomainSkill: request.skipDomainSkill,
         });
         return {
           ok: true,
           task: result.name,
           tabId: result.tabId,
           windowTargetId: result.windowId,
+          skill: result.skill,
         };
       }
 

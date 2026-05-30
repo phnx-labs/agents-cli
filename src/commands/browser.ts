@@ -483,6 +483,7 @@ function registerTaskCommands(browser: Command): void {
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
+    .option('--no-skills', 'Skip auto-discovery of site-specific SKILL.md from ~/.agents/skills/browser/domain-skills/')
     .action(async (opts) => {
       let profileName: string = opts.profile;
       if (!profileName) {
@@ -528,6 +529,7 @@ function registerTaskCommands(browser: Command): void {
         taskName: opts.task,
         url: opts.url,
         endpoint: opts.endpoint,
+        skipDomainSkill: opts.skills === false,
       });
 
       if (!response.ok) {
@@ -548,6 +550,17 @@ function registerTaskCommands(browser: Command): void {
       }
       console.error(`Tip: export AGENTS_BROWSER_TASK=${response.task}`);
       console.error('Try: agents browser screenshot | agents browser console --level error');
+
+      // Surface the matched domain-skill (if any) so an agent driving the
+      // task picks up site-specific selectors and gotchas before it starts
+      // clicking. Header is recognizable so an agent parsing the stream can
+      // extract the skill content; suffix repeats the skill name for greps.
+      if (response.skill) {
+        console.error('');
+        console.error(`--- domain-skill: ${response.skill.name} (${response.skill.hostname}) ---`);
+        console.error(response.skill.content);
+        console.error(`--- end domain-skill: ${response.skill.name} ---`);
+      }
     });
 
   browser

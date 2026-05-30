@@ -194,6 +194,8 @@ export interface IPCRequest {
   since?: string;
   until?: string;
   appLevel?: string;
+  // Browser start: opt out of domain-skill discovery.
+  skipDomainSkill?: boolean;
 }
 
 /** Subset of IPCResponse describing a recording start result. */
@@ -253,6 +255,15 @@ export interface IPCResponse {
   // launchd-managed registry daemon silently serving old code to a
   // dev-build CLI client).
   version?: string;
+  // Domain-skill auto-discovery result from `start` when a URL is supplied
+  // and a matching SKILL.md was found under
+  // ~/.agents/skills/browser/domain-skills/.
+  skill?: {
+    name: string;
+    path: string;
+    content: string;
+    hostname: string;
+  };
 }
 
 export interface ConsoleEntry {
