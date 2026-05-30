@@ -100,6 +100,12 @@ export function registerBrowserCommand(program: Command): void {
     notes: `
       Most agent workflows should use the 'browser' skill instead of raw subcommands.
       The skill wraps profile selection, snapshotting, and tunneling.
+
+      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge).
+      Safari and Firefox are not supported — they don't speak the Chrome DevTools
+      Protocol the way agents browser expects. On Windows, Edge is the default
+      because it's preinstalled. On macOS and Linux, Chrome is preferred when
+      installed; otherwise the first Chromium-family binary on disk wins.
     `,
   });
 
