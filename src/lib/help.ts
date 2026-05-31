@@ -73,16 +73,22 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
   const itemIndentWidth = 2;
   const itemSeparatorWidth = 2;
 
+  // commander v15 dropped `Help.wrap(str, width, indent)` in favor of
+  // `boxWrap(str, width)` plus a built-in `formatItem(term, termWidth,
+  // description, helper)` that handles the term-pad + continuation-indent
+  // math we used to do by hand. Delegate to it so callers get the same
+  // continuation-line alignment under the description column.
   function formatItem(term: string, description?: string): string {
     if (description) {
-      const fullText = `${term.padEnd(termWidth + itemSeparatorWidth)}${description}`;
-      return helper.wrap(fullText, helpWidth - itemIndentWidth, termWidth + itemSeparatorWidth);
+      return helper.formatItem(term, termWidth, description, helper);
     }
-    return term;
+    return ' '.repeat(itemIndentWidth) + term;
   }
 
   function formatList(textArray: string[]): string {
-    return textArray.join('\n').replace(/^/gm, ' '.repeat(itemIndentWidth));
+    // formatItem already prefixes each item with its 2-space indent, so just
+    // join. Single-line items (no description) are indented above.
+    return textArray.join('\n');
   }
 
   // Drop arguments flagged as hidden (deprecation / compat slots) from both
@@ -110,7 +116,7 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
 
   const commandDescription = helper.commandDescription(cmd);
   if (commandDescription.length > 0) {
-    output = output.concat([helper.wrap(commandDescription, helpWidth, 0), '']);
+    output = output.concat([helper.boxWrap(commandDescription, helpWidth), '']);
   }
 
   const sections = helpSectionRegistry.get(cmd);
