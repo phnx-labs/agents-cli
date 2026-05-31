@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Codex (commands-as-skills sync fix)**
+
+- Fix recurring "N commands new" prompt on `agents view codex` for Codex >= 0.117.0. `getActuallySyncedResources` now detects converted command-skills via the `agents_command` marker in `~/.codex/skills/<name>/SKILL.md` instead of only scanning the empty legacy `prompts/` directory.
+- Summary and selection prompts are version-aware: the static `COMMANDS_CAPABLE_AGENTS` gate is replaced by `supports(agent, 'commands', version)` so the "X commands" line only appears for versions that can actually take them.
+- Generalize `shouldInstallCommandAsSkill` beyond Codex — any agent where commands are gated off and skills are on (e.g. Grok) now gets the same automatic slash-command → skill conversion at install/sync time.
+
 **Grok Build (first-class support)**
 
 - Add `grok` as a first-class supported agent (AgentId + full registry entry using official `~/.grok/README.md` paths).
@@ -10,6 +16,44 @@
 - Extend `installVersion` to support Grok via its official installer script (`curl ... -s <version>`).
 - Update shims, exec templates, MCP path helpers, session helpers, unmanaged detection, and docs.
 - `agents add grok@<ver>`, `agents use grok@<ver>`, resource sync, and shims now work end-to-end for Grok Build.
+
+**Browser**
+
+- `agents browser start --record` convenience flag for one-shot recording sessions.
+- Auto-discover per-site `SKILL.md` on `browser start` so skills appear under the active task without manual wiring.
+- Auto-pick a Chromium-family browser when `--profile` is omitted; the limitation is surfaced in `--help` and the auto-pick error.
+- No more stacktraces when the daemon is down or CDP is unreachable — error paths print a single human-readable line.
+- Drop the Playwright `bundled-chromium` devdependency.
+
+**Secrets / Keychain**
+
+- `agents secrets list` and `agents run --secrets <bundle>` collapse to one Touch ID prompt per bundle instead of one per key. Previously every secret in a bundle would re-prompt for keychain unlock.
+
+**Sessions**
+
+- Extract `groupActiveSessions` into a tested helper for `--active` window grouping.
+- Propagate `windowid` from live-terminals into the active session record.
+
+**Copilot**
+
+- Emit `COPILOT_HOME` in the shim and exec env builder for versioned isolation.
+- Wire the Copilot session dir and `.jsonl` extension into the sessions reader.
+
+**OpenClaw**
+
+- Carry OpenClaw user data forward on version switch.
+
+**Teams**
+
+- Warn loudly when `--after` teammates reference a name whose watch process never launched, instead of silently sitting in pending state.
+
+**Plugins**
+
+- Use `'directory'` source discriminator (not `'local'`) for marketplace registration so plugins reload correctly.
+
+**Dependencies**
+
+- Bump `@inquirer/prompts` 7.10.1 → 8.5.1, `diff` 8.0.4 → 9.0.0, `tsx` 4.22.2 → 4.22.3, `actions/setup-node` 4.4.0 → 6.4.0.
 
 ## 1.18.6
 
