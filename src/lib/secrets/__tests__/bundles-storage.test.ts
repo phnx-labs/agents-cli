@@ -214,7 +214,7 @@ describe('listBundles', () => {
     expect(bundles.map((b) => b.name)).toEqual(['good']);
   });
 
-  it('preserves description, icloud_sync, allow_exec, and timestamps for every bundle', () => {
+  it('preserves description, allow_exec, and timestamps for every bundle', () => {
     // Regression for the Touch-ID-per-bundle bug: listBundles must produce
     // fully-populated SecretsBundle objects from the batched read, not just
     // names. We previously delegated to readBundle in a loop; the batch path
@@ -222,7 +222,6 @@ describe('listBundles', () => {
     writeBundle({
       name: 'alpha',
       description: 'first',
-      icloud_sync: true,
       allow_exec: true,
       vars: { API: 'keychain:API' },
       meta: { API: { type: 'api-key', note: 'pinned' } },
@@ -230,14 +229,12 @@ describe('listBundles', () => {
     writeBundle({
       name: 'beta',
       description: 'second',
-      icloud_sync: false,
       vars: { TOKEN: 'literal-value' },
     });
     const bundles = listBundles();
     expect(bundles).toHaveLength(2);
     const a = bundles.find((b) => b.name === 'alpha')!;
     expect(a.description).toBe('first');
-    expect(a.icloud_sync).toBe(true);
     expect(a.allow_exec).toBe(true);
     expect(a.vars).toEqual({ API: 'keychain:API' });
     expect(a.meta).toEqual({ API: { type: 'api-key', note: 'pinned' } });
@@ -245,7 +242,6 @@ describe('listBundles', () => {
     expect(typeof a.updated_at).toBe('string');
     const b = bundles.find((b) => b.name === 'beta')!;
     expect(b.description).toBe('second');
-    expect(b.icloud_sync).toBe(false);
     expect(b.allow_exec).toBe(false);
   });
 

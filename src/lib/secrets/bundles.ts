@@ -268,7 +268,7 @@ export function listBundles(): SecretsBundle[] {
   // SecItemCopyMatching calls collapses the prompt to one. Mirrors the pattern
   // already used by resolveBundleEnv for runtime secret injection.
   const itemsToFetch = names.map(bundleMetaItem);
-  const fetched = getKeychainTokensBatch(itemsToFetch, false, 'list secrets bundles');
+  const fetched = getKeychainTokens(itemsToFetch);
 
   const out: SecretsBundle[] = [];
   for (const name of names) {
@@ -286,7 +286,6 @@ export function listBundles(): SecretsBundle[] {
       name,
       description: parsed.description,
       allow_exec: Boolean(parsed.allow_exec),
-      icloud_sync: Boolean(parsed.icloud_sync),
       vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
     };
     if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -446,10 +445,8 @@ export function readAndResolveBundleEnv(
     ? `read ${name} secrets (for ${opts.caller})`
     : `read ${name} secrets`;
 
-  // icloud_sync flag is unknown until we parse metadata, but the helper's
-  // get-batch uses kSecAttrSynchronizableAny so it finds both synced and
-  // device-local items in one shot.
-  const fetched = getKeychainTokensBatch([metaItem, ...secretItems], false, reason);
+  void reason;
+  const fetched = getKeychainTokens([metaItem, ...secretItems]);
 
   const json = fetched.get(metaItem);
   if (json === undefined) {
@@ -468,7 +465,6 @@ export function readAndResolveBundleEnv(
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
-    icloud_sync: Boolean(parsed.icloud_sync),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
   if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -533,7 +529,6 @@ export function readAndResolveBundleEnv(
       try {
         env[key] = resolveRef(p.ref, {
           allowExec: bundle.allow_exec,
-          iCloudSync: bundle.icloud_sync,
           keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
         });
       } catch (err) {
