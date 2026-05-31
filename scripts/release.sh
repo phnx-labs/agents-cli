@@ -184,15 +184,10 @@ green "Bump: $BUMP ($PHNX_LATEST -> $TARGET)"
 # Run these checks NOW (before tests) so a re-run that's already partly published
 # can short-circuit cleanly and the user can see what will actually happen.
 PHNX_TARGET_PUBLISHED=false
-SWARMIFY_TARGET_PUBLISHED=false
 if npm view "$PHNX_PKG@$TARGET" version >/dev/null 2>&1; then
   PHNX_TARGET_PUBLISHED=true
 fi
-if npm view "$SWARMIFY_PKG@$TARGET" version >/dev/null 2>&1; then
-  SWARMIFY_TARGET_PUBLISHED=true
-fi
 gray "  $PHNX_PKG@$TARGET     $($PHNX_TARGET_PUBLISHED && echo 'already published — will skip' || echo 'will publish')"
-gray "  $SWARMIFY_PKG@$TARGET   $($SWARMIFY_TARGET_PUBLISHED && echo 'already published — will skip' || echo 'will publish')"
 echo
 
 # ----- Sync package.json with target -----
@@ -387,7 +382,7 @@ fi
 bold "Publishing $PHNX_PKG@$TARGET..."
 if $PHNX_TARGET_PUBLISHED; then
   yellow "$PHNX_PKG@$TARGET is already on the registry, skipping publish"
-elif ! npm publish --access=public --provenance=false; then
+elif ! npm publish --access=public; then
   red "publish failed for $PHNX_PKG"
   red "the version commit and tag remain locally; rerun: $0 $TARGET --apply"
   exit 1
@@ -396,23 +391,7 @@ else
 fi
 echo
 
-# ----- Publish @companion shim (skip if pre-flight saw it on registry) -----
-bold "Publishing $SWARMIFY_PKG@$TARGET shim..."
-if $SWARMIFY_TARGET_PUBLISHED; then
-  yellow "$SWARMIFY_PKG@$TARGET is already on the registry, skipping publish"
-else
-  pushd "$SHIM_TMP" >/dev/null
-  if ! npm publish --access=public --provenance=false; then
-    red "publish failed for $SWARMIFY_PKG"
-    red "$PHNX_PKG@$TARGET is published successfully."
-    red "to retry the shim manually: rerun: $0 $TARGET --apply"
-    popd >/dev/null
-    exit 1
-  fi
-  popd >/dev/null
-  green "Published $SWARMIFY_PKG@$TARGET"
-fi
-echo
+# @swarmify/agents-cli legacy shim no longer published as of v1.20.0.
 
 # ----- Push commit + tag -----
 bold "Pushing commit and tag to origin..."

@@ -66,7 +66,7 @@ async function importAgent(agentId: AgentId, version: string): Promise<{ success
 }
 
 /** First-run setup. Clones ~/.agents-system/ from the system repo if needed. */
-export async function runSetup(program: Command, options: { force?: boolean; suppressFooter?: boolean } = {}): Promise<void> {
+export async function runSetup(program: Command, options: { force?: boolean; suppressFooter?: boolean; systemRepo?: boolean } = {}): Promise<void> {
   const agentsDir = getAgentsDir();
   const alreadyConfigured = isGitRepo(agentsDir);
 
@@ -84,40 +84,49 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
     sessionCounts[install.agentId] = countSessionFiles(install.agentId);
   }
 
+  const systemRepo = process.env.AGENTS_SYSTEM_REPO || DEFAULT_SYSTEM_REPO;
+
   console.log(chalk.bold('\nWelcome to agents-cli.'));
-  console.log(chalk.gray(`Cloning the system repo from ${systemRepoSlug(DEFAULT_SYSTEM_REPO)} into ~/.agents-system/.\n`));
 
-  ensureAgentsDir();
-
-  const spinner = ora('Cloning system repo...').start();
-
-  if (isGitRepo(agentsDir)) {
-    // --force on an existing repo: pull instead of re-clone
-    const result = await pullRepo(agentsDir);
-    if (!result.success) {
-      spinner.fail(`Pull failed: ${result.error}`);
-      console.log(chalk.gray('Fix the issue and re-run: agents setup --force'));
-      process.exit(1);
-    }
-    spinner.succeed(`Updated to ${result.commit}`);
+  if (options.systemRepo === false) {
+    ensureAgentsDir();
+    console.log(chalk.gray('Skipping system repo clone (--no-system-repo).'));
+    console.log(chalk.gray(`Populate ~/.agents-system/ yourself before running other commands that depend on it.\n`));
   } else {
-    // Check git is available
-    try {
-      const { execSync } = await import('child_process');
-      execSync('which git', { stdio: 'ignore' });
-    } catch {
-      spinner.fail('git is not installed');
-      console.log(chalk.gray('Install git first: https://git-scm.com/downloads'));
-      process.exit(1);
-    }
+    console.log(chalk.gray(`Cloning the system repo from ${systemRepoSlug(systemRepo)} into ~/.agents-system/.\n`));
 
-    const result = await cloneIntoExisting(DEFAULT_SYSTEM_REPO, agentsDir);
-    if (!result.success) {
-      spinner.fail(`Clone failed: ${result.error}`);
-      console.log(chalk.gray('Fix the issue and re-run: agents setup --force'));
-      process.exit(1);
+    ensureAgentsDir();
+
+    const spinner = ora('Cloning system repo...').start();
+
+    if (isGitRepo(agentsDir)) {
+      // --force on an existing repo: pull instead of re-clone
+      const result = await pullRepo(agentsDir);
+      if (!result.success) {
+        spinner.fail(`Pull failed: ${result.error}`);
+        console.log(chalk.gray('Fix the issue and re-run: agents setup --force'));
+        process.exit(1);
+      }
+      spinner.succeed(`Updated to ${result.commit}`);
+    } else {
+      // Check git is available
+      try {
+        const { execSync } = await import('child_process');
+        execSync('which git', { stdio: 'ignore' });
+      } catch {
+        spinner.fail('git is not installed');
+        console.log(chalk.gray('Install git first: https://git-scm.com/downloads'));
+        process.exit(1);
+      }
+
+      const result = await cloneIntoExisting(systemRepo, agentsDir);
+      if (!result.success) {
+        spinner.fail(`Clone failed: ${result.error}`);
+        console.log(chalk.gray('Fix the issue and re-run: agents setup --force'));
+        process.exit(1);
+      }
+      spinner.succeed(`Cloned ${systemRepoSlug(systemRepo)} (${result.commit})`);
     }
-    spinner.succeed(`Cloned ${systemRepoSlug(DEFAULT_SYSTEM_REPO)} (${result.commit})`);
   }
 
   // Offer to import existing unmanaged installations
@@ -223,7 +232,8 @@ export function registerSetupCommand(program: Command): void {
   const setupCmd = program
     .command('setup')
     .description('First-time setup. Clones a config repo and installs agent CLIs.')
-    .option('-f, --force', 'Re-run setup even if ~/.agents-system/ already exists (use with caution)');
+    .option('-f, --force', 'Re-run setup even if ~/.agents-system/ already exists (use with caution)')
+    .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents-system/ yourself)');
 
   setHelpSections(setupCmd, {
     examples: `

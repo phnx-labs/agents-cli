@@ -68,53 +68,6 @@ agents teams list --json &
 wait
 ```
 
-## Case Study: Companion Foreman
-
-Companion's Factory Floor ships a voice coordinator called Foreman. When the user
-asks "what's everyone doing?" the extension host calls all three JSON sources in
-parallel, cross-references with live VS Code terminals, and hands a unified digest
-to an OpenAI Realtime model that narrates the answer.
-
-```
-User voice ("what's everyone doing?")
-     │
-     ▼
-┌────────────────────────────────┐
-│  Extension host (Node)         │
-│                                │
-│  parallel:                     │
-│    agents sessions --json  ────┼──► local + team-spawned
-│    agents cloud list --json ───┼──► remote dispatches
-│    agents teams list --json ───┼──► DAG state
-│                                │
-│  cross-reference:              │
-│    AGENT_SESSION_ID env on     │
-│    VS Code terminals ──────────┼──► open_in_ide flag
-│                                │
-│  merge into unified digest     │
-└────────────────────────────────┘
-     │
-     ▼
-OpenAI Realtime (gpt-realtime)
-     │
-     ▼
-Voice response: "Claude is 12 minutes into auth refactor on agents
-                repo, last edited jwt.ts. Codex finished EXAMPLE-362.
-                Gemini stuck 40 min on staging timeout."
-```
-
-Key design choices from this case study:
-
-1. **Shell out, don't reach into the DB.** agents-cli owns the schema. External tools
-   get stable JSON. The DB migrates transparently when you run `agents sessions`.
-2. **Cache nothing.** Each call to `--json` hits the DB + incremental scan. Warm
-   calls return in ~100-200ms. Good enough for voice turns.
-3. **Fail open.** If any one of the three sources times out or errors, the other
-   two still produce a useful answer.
-4. **Cross-reference for UI state.** `sessions --json` tells you what sessions
-   exist on disk. To know which are open in the IDE *right now*, read
-   `AGENT_SESSION_ID` from live terminal env vars and intersect.
-
 ## Patterns for External Consumers
 
 ### Polling (dashboards)

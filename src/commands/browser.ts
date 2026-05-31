@@ -21,7 +21,11 @@ import {
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
-import { sendIPCRequest } from '../lib/browser/ipc.js';
+import {
+  BrowserDaemonNotRunningError,
+  formatBrowserDaemonNotRunningError,
+  sendIPCRequest,
+} from '../lib/browser/ipc.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { isInteractiveTerminal } from './utils.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
@@ -379,7 +383,7 @@ function registerProfilesCommands(browser: Command): void {
           checks.push({ label: 'port', ok: true, detail: `${port} is free` });
         } else {
           try {
-            const { browser } = await discoverBrowserWsUrl(port);
+            const { browser } = await discoverBrowserWsUrl(port, 'localhost', profile.name);
             verifyBrowserIdentity(browser, profile.browser, port);
             checks.push({
               label: 'port',
@@ -476,17 +480,19 @@ function registerTaskCommands(browser: Command): void {
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
     .action(async (opts) => {
+      const profileName: string = opts.profile;
+
       // Pre-check the profile locally so we fail fast with a helpful error
       // instead of round-tripping a generic "Profile not found" through the daemon.
-      const profile = await getProfile(opts.profile);
+      const profile = await getProfile(profileName);
       if (!profile) {
-        console.error(`Profile "${opts.profile}" not found.`);
+        console.error(`Profile "${profileName}" not found.`);
         const all = await listProfiles();
         if (all.length > 0) {
           console.error(`Available profiles: ${all.map((p) => p.name).join(', ')}`);
         }
         console.error(
-          `Create one with: agents browser profiles create ${opts.profile} --browser <chrome|comet|chromium|brave|edge|custom>`
+          `Create one with: agents browser profiles create ${profileName} --browser <chrome|comet|chromium|brave|edge|custom>`
         );
         process.exit(1);
       }
@@ -496,7 +502,7 @@ function registerTaskCommands(browser: Command): void {
         const presets = getEndpointPresets(profile);
         if (!presets[opts.endpoint]) {
           console.error(
-            `Endpoint "${opts.endpoint}" not found on profile "${opts.profile}". ` +
+            `Endpoint "${opts.endpoint}" not found on profile "${profileName}". ` +
               `Available: ${Object.keys(presets).join(', ')}`
           );
           process.exit(1);
@@ -505,7 +511,7 @@ function registerTaskCommands(browser: Command): void {
 
       const response = await sendIPCRequest({
         action: 'start',
-        profile: opts.profile,
+        profile: profileName,
         taskName: opts.task,
         url: opts.url,
         endpoint: opts.endpoint,
@@ -881,10 +887,24 @@ function registerTaskCommands(browser: Command): void {
     .option('-p, --profile <name>', 'Filter by profile')
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts) => {
-      const response = await sendIPCRequest({
-        action: 'status',
-        profile: opts.profile,
-      });
+      let response;
+      try {
+        response = await sendIPCRequest({
+          action: 'status',
+          profile: opts.profile,
+        }, { autoStartDaemon: false });
+      } catch (err) {
+        if (err instanceof BrowserDaemonNotRunningError) {
+          const message = formatBrowserDaemonNotRunningError();
+          if (opts.json) {
+            console.log(JSON.stringify({ ok: false, error: message }));
+          } else {
+            console.error(message);
+          }
+          process.exit(1);
+        }
+        throw err;
+      }
 
       if (!response.ok) {
         if (opts.json) {

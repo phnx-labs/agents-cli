@@ -28,6 +28,8 @@ import { linuxBackend } from './linux.js';
 import { getKeychainHelperPath } from './install-helper.js';
 
 const SERVICE_PREFIX = 'agents-cli';
+const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
+const BUNDLES_ITEM_PREFIX = `${SERVICE_PREFIX}.bundles.`;
 
 /** Supported secret resolution backends. */
 export type SecretProvider = 'keychain' | 'env' | 'file' | 'exec';
@@ -68,8 +70,9 @@ export function serializeRef(ref: SecretRef): string {
 function assertSupportedPlatform(): void {
   if (process.platform !== 'darwin' && process.platform !== 'linux') {
     throw new Error(
-      'Secure credential storage requires macOS or Linux. ' +
-      'On Windows, use environment variables or .env files instead.'
+      'agents secrets requires macOS Keychain or Linux libsecret.\n' +
+      'Windows is not supported — use environment variables or a .env file instead.\n' +
+      'WSL2 is supported (libsecret via gnome-keyring).'
     );
   }
 }
@@ -85,7 +88,11 @@ export function profileKeychainItem(provider: string): string {
 
 /** Build the keychain item name for a secrets-bundle key. */
 export function secretsKeychainItem(bundle: string, key: string): string {
-  return `${SERVICE_PREFIX}.secrets.${bundle}.${key}`;
+  return `${SECRETS_ITEM_PREFIX}${bundle}.${key}`;
+}
+
+function keychainItemRequiresUserPresence(item: string): boolean {
+  return item.startsWith(SECRETS_ITEM_PREFIX) || item.startsWith(BUNDLES_ITEM_PREFIX);
 }
 
 /**

@@ -71,8 +71,9 @@ export function parseExecEnv(entries: string[]): Record<string, string> | undefi
 
 /**
  * Build the process environment for an agent invocation.
- * Pins CLAUDE_CONFIG_DIR for Claude and CODEX_HOME for Codex; strips the
- * other agent's env var so it doesn't leak into unrelated invocations.
+ * Pins CLAUDE_CONFIG_DIR for Claude, CODEX_HOME for Codex, and COPILOT_HOME
+ * for GitHub Copilot; strips the other agents' env vars so they don't leak
+ * into unrelated invocations.
  */
 export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = { ...process.env };
@@ -93,6 +94,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       result.CLAUDE_CONFIG_DIR = path.join(getVersionHomePath('claude', version), '.claude');
     }
     delete result.CODEX_HOME;
+    delete result.COPILOT_HOME;
   } else if (options.agent === 'codex') {
     const cwd = options.cwd || process.cwd();
     const resolvedVersion = options.version ?? resolveVersion('codex', cwd);
@@ -103,9 +105,25 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       result.CODEX_HOME = path.join(getVersionHomePath('codex', version), '.codex');
     }
     delete result.CLAUDE_CONFIG_DIR;
+    delete result.COPILOT_HOME;
+  } else if (options.agent === 'copilot') {
+    // Copilot honors COPILOT_HOME (relocates ~/.copilot, including settings,
+    // mcp-config.json, sessions, logs). Pin it at the per-version home so
+    // version switches isolate MCP servers, auth, and session history.
+    const cwd = options.cwd || process.cwd();
+    const resolvedVersion = options.version ?? resolveVersion('copilot', cwd);
+    const version = options.version
+      ? resolvedVersion
+      : (resolvedVersion && isVersionInstalled('copilot', resolvedVersion) ? resolvedVersion : null);
+    if (version) {
+      result.COPILOT_HOME = path.join(getVersionHomePath('copilot', version), '.copilot');
+    }
+    delete result.CLAUDE_CONFIG_DIR;
+    delete result.CODEX_HOME;
   } else {
     delete result.CLAUDE_CONFIG_DIR;
     delete result.CODEX_HOME;
+    delete result.COPILOT_HOME;
   }
 
   return {
@@ -202,14 +220,25 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
   },
+  // GitHub Copilot CLI (`@github/copilot`, GA 2026-02-25). Flags verified
+  // against `copilot --help` from v0.0.413+:
+  //   -p, --prompt <text>          non-interactive one-shot
+  //   --mode <interactive|plan|autopilot>
+  //   --allow-all-tools            required for non-interactive tool exec
+  //   --allow-all (alias --yolo)   tools + paths + URLs
+  //   --output-format <text|json>  json => JSONL, one object per line
+  //   --model <model>
+  // Plan mode is read-only so it does not need an allow-tools grant; edit/full
+  // need at minimum --allow-all-tools so headless runs don't stall on prompts.
   copilot: {
     base: ['copilot'],
-    promptFlag: 'positional',
+    promptFlag: '-p',
     modeFlags: {
-      plan: [],
-      edit: [],
-      full: [],
+      plan: ['--mode', 'plan'],
+      edit: ['--allow-all-tools'],
+      full: ['--allow-all'],
     },
+    jsonFlags: ['--output-format', 'json'],
     modelFlag: '--model',
   },
   amp: {

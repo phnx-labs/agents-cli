@@ -397,7 +397,13 @@ async function promptUpgrade(latestVersion: string): Promise<void> {
   }
 }
 
-/** Fire-and-forget: refresh the registry cache in background. Never blocks the command. */
+/**
+ * Background update check — fires once per 24h cache window.
+ * Network: GET registry.npmjs.org/@phnx-labs/agents-cli/latest.
+ * Disable: set AGENTS_CLI_DISABLE_AUTO_UPDATE=1 in shell rc.
+ *
+ * Fire-and-forget; never blocks the CLI's foreground operation.
+ */
 function refreshUpdateCacheInBackground(): void {
   fetch('https://registry.npmjs.org/@phnx-labs/agents-cli/latest', {
     signal: AbortSignal.timeout(2000),

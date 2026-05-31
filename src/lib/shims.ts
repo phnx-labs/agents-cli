@@ -259,14 +259,22 @@ fi
 # written by agents-cli actually take effect.
 export CODEX_HOME="$VERSION_DIR/home/${configDirName}"
 `
-      : agent === 'grok'
+      : agent === 'copilot'
         ? `
+# GitHub Copilot CLI honors COPILOT_HOME to relocate its config and state
+# (settings.json, mcp-config.json, session-state/, logs/, plugins/). Point
+# it at the versioned home so MCP servers, custom agents, and session
+# history are isolated per copilot version.
+export COPILOT_HOME="$VERSION_DIR/home/${configDirName}"
+`
+        : agent === 'grok'
+          ? `
 # Grok Build uses GROK_HOME to isolate its entire configuration tree
 # (skills, hooks, plugins, agents, memory, sessions, config.toml, MCP, etc.).
 # This gives agents-cli full versioned isolation + resource sync for grok.
 export GROK_HOME="$VERSION_DIR/home/.grok"
 `
-        : '';
+          : '';
 
   // Agents that don't natively resolve @-imports in their rules file need
   // agents-cli to recompile when the user edits a rule/preset file. The
@@ -601,7 +609,14 @@ export CLAUDE_CONFIG_DIR="$HOME/.agents/.history/versions/${agent}/${version}/ho
 # and rules written by agents-cli actually take effect.
 export CODEX_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
-      : '';
+      : agent === 'copilot'
+        ? `
+# Copilot honors COPILOT_HOME to relocate ~/.copilot (settings, mcp-config.json,
+# session-state, logs). Point direct aliases at the versioned home so per-
+# version MCP and session state are isolated.
+export COPILOT_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+`
+        : '';
   const launchArgs = agent === 'codex' ? ' -c check_for_update_on_startup=false' : '';
 
   return `#!/bin/bash
@@ -1304,7 +1319,7 @@ export function getPathShadowingExecutable(agent: AgentId): string | null {
  * Delete the legacy ~/.agents/shims/<cli> file if it exists, returning whether
  * anything was removed. Pre-split installs put shims under ~/.agents/shims/;
  * the new layout uses ~/.agents-system/shims/. The leftover file causes the
- * repair-prompt loop reported in EXAMPLE-664 — `getPathShadowingExecutable` flags
+ * repair-prompt loop reported in PROJ-789 — `getPathShadowingExecutable` flags
  * it as a shadow but `addShimsToPath` only edits rc files, never the file
  * itself. Removing it ends the loop.
  */

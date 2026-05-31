@@ -21,6 +21,7 @@ import {
   readDaemonPid,
   readDaemonLog,
 } from '../lib/daemon.js';
+import { humanizeCron, humanizeNextRun, formatRepoLink } from '../lib/routines-format.js';
 import {
   listJobs as listAllJobs,
   deleteJob,
@@ -94,7 +95,7 @@ async function pickJob(
       message,
       choices: jobs.map((job) => ({
         value: job.name,
-        name: `${job.name} ${chalk.gray(`(${job.agent}, ${job.schedule})`)}`,
+        name: `${job.name} ${chalk.gray(`(${job.workflow ? `wf:${job.workflow}` : job.agent}, ${job.schedule})`)}`,
       })),
     });
   } catch (err) {
@@ -160,21 +161,54 @@ export function registerRoutinesCommands(program: Command): void {
 
       console.log(chalk.bold('Scheduled Jobs\n'));
 
-      const header = `  ${'Name'.padEnd(24)} ${'Agent'.padEnd(10)} ${'Schedule'.padEnd(20)} ${'Enabled'.padEnd(10)} ${'Next Run'.padEnd(24)} ${'Last Status'}`;
+      // OSC 8 hyperlink helper — renders as a clickable link in supporting terminals.
+      // In terminals that do not support OSC 8 the escape sequences are ignored and
+      // the label is displayed as plain text.
+      const link = (label: string, url: string | null): string =>
+        url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label;
+
+      const now = new Date();
+
+      const NAME_W = 24;
+      const AGENT_W = 10;
+      const REPO_W = 24;
+      const SCHED_W = 22;
+      const ENABLED_W = 10;
+      const NEXT_W = 22;
+
+      const header =
+        `  ${'Name'.padEnd(NAME_W)} ${'Agent'.padEnd(AGENT_W)} ${'Repo'.padEnd(REPO_W)} ${'Schedule'.padEnd(SCHED_W)} ${'Enabled'.padEnd(ENABLED_W)} ${'Next Run'.padEnd(NEXT_W)} Last Status`;
       console.log(chalk.gray(header));
-      console.log(chalk.gray('  ' + '-'.repeat(110)));
+      console.log(chalk.gray('  ' + '-'.repeat(NAME_W + AGENT_W + REPO_W + SCHED_W + ENABLED_W + NEXT_W + 20)));
 
       for (const job of jobs) {
         const nextRun = scheduler.getNextRun(job.name);
-        const nextStr = nextRun ? nextRun.toLocaleString() : '-';
+        const nextStr = humanizeNextRun(nextRun ?? null, now, job.timezone);
+        const schedStr = humanizeCron(job.schedule, job.timezone);
         const latestRun = getLatestRun(job.name);
         const lastStatus = latestRun?.status || '-';
 
-        const enabledStr = job.enabled ? chalk.green('yes') : chalk.gray('no');
-        const statusColor = lastStatus === 'completed' ? chalk.green : lastStatus === 'failed' ? chalk.red : lastStatus === 'timeout' ? chalk.yellow : chalk.gray;
+        const repoInfo = formatRepoLink(job.repo);
+        const repoCell = link(repoInfo.display, repoInfo.href);
+        // Pad based on the display string, not the raw cell (which may include escape codes).
+        const repoPadding = Math.max(0, REPO_W - repoInfo.display.length);
 
+        const enabledStr = job.enabled ? chalk.green('yes') : chalk.gray('no');
+        // chalk adds escape codes; pad the raw word and let chalk wrap it.
+        const enabledWord = job.enabled ? 'yes' : 'no';
+        const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
+
+        const statusColor =
+          lastStatus === 'completed' ? chalk.green
+          : lastStatus === 'failed' ? chalk.red
+          : lastStatus === 'timeout' ? chalk.yellow
+          : chalk.gray;
+
+        const agentLabelPadded = job.workflow
+          ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
+          : (job.agent || '').padEnd(10);
         console.log(
-          `  ${chalk.cyan(job.name.padEnd(24))} ${job.agent.padEnd(10)} ${job.schedule.padEnd(20)} ${enabledStr.padEnd(10 + 10)} ${chalk.gray(nextStr.padEnd(24))} ${statusColor(lastStatus)}`
+          `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}`
         );
       }
 
@@ -187,22 +221,29 @@ export function registerRoutinesCommands(program: Command): void {
     .description('Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.')
     .option('-s, --schedule <cron>', 'Cron schedule in standard format (5 fields: minute hour day month weekday)')
     .option('-a, --agent <agent>', 'Which agent runs this routine: claude, codex, gemini, cursor, or opencode')
+    .option('--workflow <name>', 'Run an installed workflow (~/.agents/workflows/<name>) via `agents run`. Mutually exclusive with --agent.')
     .option('-p, --prompt <prompt>', 'Task instruction for the agent')
     .option('-m, --mode <mode>', 'Execution mode: plan (read-only) or edit (can write files)', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto', 'auto')
-    .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 30m, 2h)', '30m')
+    .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .action(async (nameOrPath: string | undefined, options) => {
       // Check if inline mode (has flags) or file mode
-      const hasInlineFlags = options.schedule || options.agent || options.prompt || options.at;
+      const hasInlineFlags = options.schedule || options.agent || options.workflow || options.prompt || options.at;
 
       if (hasInlineFlags) {
         // Inline mode: create job from flags
         if (!nameOrPath) {
           console.log(chalk.red('Job name is required'));
           console.log(chalk.gray('Usage: agents routines add <name> --schedule "..." --agent <agent> --prompt "..."'));
+          process.exit(1);
+        }
+
+        // Validate mutually exclusive --agent / --workflow
+        if (options.agent && options.workflow) {
+          console.log(chalk.red('--agent and --workflow are mutually exclusive; specify exactly one'));
           process.exit(1);
         }
 
@@ -226,8 +267,8 @@ export function registerRoutinesCommands(program: Command): void {
           process.exit(1);
         }
 
-        if (!options.agent) {
-          console.log(chalk.red('Agent is required (use --agent)'));
+        if (!options.agent && !options.workflow) {
+          console.log(chalk.red('An agent or workflow is required (use --agent or --workflow)'));
           process.exit(1);
         }
 
@@ -240,6 +281,7 @@ export function registerRoutinesCommands(program: Command): void {
           name: nameOrPath,
           schedule,
           agent: options.agent,
+          ...(options.workflow ? { workflow: options.workflow } : {}),
           mode: options.mode,
           effort: options.effort,
           timeout: options.timeout,
@@ -304,7 +346,7 @@ export function registerRoutinesCommands(program: Command): void {
         const config: JobConfig = {
           mode: 'plan',
           effort: 'auto',
-          timeout: '30m',
+          timeout: '10m',
           enabled: true,
           ...parsed,
         } as JobConfig;
@@ -458,7 +500,8 @@ export function registerRoutinesCommands(program: Command): void {
         process.exit(1);
       }
 
-      console.log(chalk.bold(`Running job '${name}' (agent: ${job.agent}, mode: ${job.mode})\n`));
+      const runLabel = job.workflow ? `workflow: ${job.workflow}` : `agent: ${job.agent}`;
+      console.log(chalk.bold(`Running job '${name}' (${runLabel}, mode: ${job.mode})\n`));
       const spinner = ora('Executing...').start();
 
       try {

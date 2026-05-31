@@ -903,6 +903,10 @@ function getSessionDir(agentId: AgentId, base: string): string | null {
       return path.join(base, '.gemini', 'tmp');
     case 'grok':
       return path.join(base, '.grok', 'sessions');
+    case 'copilot':
+      // Copilot persists sessions at ~/.copilot/session-state/<id>/events.jsonl.
+      // The events.jsonl is the canonical NDJSON event stream per session.
+      return path.join(base, '.copilot', 'session-state');
     default:
       return null;
   }
@@ -913,6 +917,7 @@ function getSessionExtension(agentId: AgentId): string | null {
   switch (agentId) {
     case 'claude':
     case 'codex':
+    case 'copilot':
       return '.jsonl';
     case 'gemini':
       return '.json';

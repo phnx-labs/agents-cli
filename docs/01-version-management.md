@@ -154,10 +154,6 @@ pty output. Specifically:
 - **"Which process is the agent"** is always the immediate child of the
   shell, not a deeper descendant.
 
-See [`companion/docs/01-terminal-lifecycle.md`](../../companion/docs/01-terminal-lifecycle.md)
-for how the Companion extension consumes this contract to implement
-`tabReady → shellReady → promptReady → agentReady` event detection.
-
 ### What would break the contract
 
 | Hypothetical change | Breaks |

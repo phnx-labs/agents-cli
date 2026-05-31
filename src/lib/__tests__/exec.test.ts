@@ -127,6 +127,40 @@ describe('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--mode') + 1]).toBe('full');
     });
 
+    it('copilot plan produces --mode plan', () => {
+      const cmd = buildExecCommand(opts({ agent: 'copilot', mode: 'plan' }));
+      expect(cmd).toContain('--mode');
+      expect(cmd[cmd.indexOf('--mode') + 1]).toBe('plan');
+      expect(cmd).not.toContain('--allow-all-tools');
+      expect(cmd).not.toContain('--allow-all');
+    });
+
+    it('copilot edit produces --allow-all-tools (headless tools, scoped paths)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'copilot', mode: 'edit' }));
+      expect(cmd).toContain('--allow-all-tools');
+      expect(cmd).not.toContain('--allow-all');
+      expect(cmd).not.toContain('--mode');
+    });
+
+    it('copilot full produces --allow-all (tools + paths + URLs)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'copilot', mode: 'full' }));
+      expect(cmd).toContain('--allow-all');
+      expect(cmd).not.toContain('--allow-all-tools');
+    });
+
+    it('copilot uses -p (not positional) for the prompt', () => {
+      const cmd = buildExecCommand(opts({ agent: 'copilot', prompt: 'do the thing', mode: 'edit' }));
+      const idx = cmd.indexOf('-p');
+      expect(idx).toBeGreaterThan(-1);
+      expect(cmd[idx + 1]).toBe('do the thing');
+    });
+
+    it('copilot json adds --output-format json (JSONL)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'copilot', json: true, mode: 'edit' }));
+      expect(cmd).toContain('--output-format');
+      expect(cmd[cmd.indexOf('--output-format') + 1]).toBe('json');
+    });
+
     it('every agent has all three mode entries', () => {
       for (const agent of ALL_AGENTS) {
         const template = AGENT_COMMANDS[agent];
@@ -415,6 +449,23 @@ describe('buildExecCommand', () => {
     it('does not inject Claude config dir for non-Claude agents', () => {
       const env = buildExecEnv(opts({ agent: 'codex', version: '0.98.0' }));
       expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    });
+
+    it('injects COPILOT_HOME for pinned Copilot versions', () => {
+      const env = buildExecEnv(opts({ agent: 'copilot', version: '1.0.56', mode: 'edit' }));
+      expect(env.COPILOT_HOME).toBe(
+        `${process.env.HOME}/.agents/.history/versions/copilot/1.0.56/home/.copilot`
+      );
+    });
+
+    it('strips COPILOT_HOME for non-Copilot agents', () => {
+      process.env.COPILOT_HOME = '/tmp/leaked-copilot-home';
+      try {
+        const env = buildExecEnv(opts({ agent: 'claude', version: '2.1.98' }));
+        expect(env.COPILOT_HOME).toBeUndefined();
+      } finally {
+        delete process.env.COPILOT_HOME;
+      }
     });
   });
 

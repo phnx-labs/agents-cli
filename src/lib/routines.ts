@@ -27,13 +27,15 @@ export interface JobAllowConfig {
 export interface JobConfig {
   name: string;
   schedule: string;
-  agent: AgentId;
+  agent: AgentId;  // required when workflow is absent
+  workflow?: string;
   mode: 'plan' | 'edit' | 'full';
   effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
   timeout: string;
   enabled: boolean;
   prompt: string;
   timezone?: string;
+  repo?: string;
   variables?: Record<string, string>;
   sandbox?: boolean;
   allow?: JobAllowConfig;
@@ -46,7 +48,8 @@ export interface JobConfig {
 export interface RunMeta {
   jobName: string;
   runId: string;
-  agent: AgentId;
+  agent: AgentId;  // undefined at runtime for workflow jobs
+  workflow?: string;
   pid: number | null;
   status: 'running' | 'completed' | 'failed' | 'timeout';
   startedAt: string;
@@ -58,7 +61,7 @@ export interface RunMeta {
 const JOB_DEFAULTS: Partial<JobConfig> = {
   mode: 'plan',
   effort: 'auto',
-  timeout: '30m',
+  timeout: '10m',
   enabled: true,
 };
 
@@ -115,7 +118,7 @@ export function writeJob(config: JobConfig): void {
   const output: Record<string, unknown> = { ...config };
   if (output.mode === 'plan') delete output.mode;
   if (output.effort === 'auto') delete output.effort;
-  if (output.timeout === '30m') delete output.timeout;
+  if (output.timeout === '10m') delete output.timeout;
   if (output.enabled === true) delete output.enabled;
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
 
@@ -160,11 +163,20 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push(`invalid cron expression: "${config.schedule}"`);
     }
   }
-  if (!config.agent || typeof config.agent !== 'string') {
-    errors.push('agent is required');
+  const hasAgent = Boolean(config.agent && typeof config.agent === 'string');
+  const hasWorkflow = Boolean(config.workflow && typeof config.workflow === 'string');
+  if (!hasAgent && !hasWorkflow) {
+    errors.push('exactly one of agent or workflow is required');
+  } else if (hasAgent && hasWorkflow) {
+    errors.push('exactly one of agent or workflow must be set (not both)');
   }
-  if (config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
+  if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
     errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
+  }
+  if (hasWorkflow && config.workflow) {
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(config.workflow)) {
+      errors.push('workflow must be a lowercase alphanumeric name (hyphens and underscores allowed, e.g. autodev)');
+    }
   }
   if (config.mode && !['plan', 'edit', 'full'].includes(config.mode)) {
     errors.push('mode must be plan, edit, or full');
@@ -176,7 +188,7 @@ export function validateJob(config: Partial<JobConfig>): string[] {
     errors.push('prompt is required');
   }
   if (config.timeout && !parseTimeout(config.timeout)) {
-    errors.push('timeout must be like 30m, 2h, 1h30m');
+    errors.push('timeout must be like 10m, 2h, 3d, 1w (max 1w)');
   }
 
   return errors;
@@ -227,15 +239,26 @@ export function resolveJobPrompt(config: JobConfig): string {
   return prompt;
 }
 
-/** Parse a human-readable timeout string (e.g. "30m", "2h", "1h30m") into milliseconds. */
+/** Parse a human-readable timeout string (e.g. "10m", "2h", "1h30m", "3d", "1w") into milliseconds.
+ *  Accepts combinations of w (weeks), d (days), h (hours), m (minutes).
+ *  Returns null if the string is empty, matches nothing, totals zero, or exceeds 1 week.
+ */
 export function parseTimeout(timeout: string): number | null {
-  const match = timeout.match(/^(?:(\d+)h)?(?:(\d+)m)?$/);
+  const match = timeout.match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/);
   if (!match) return null;
 
-  const hours = parseInt(match[1] || '0', 10);
-  const minutes = parseInt(match[2] || '0', 10);
-  const ms = (hours * 60 + minutes) * 60 * 1000;
-  return ms > 0 ? ms : null;
+  const weeks = parseInt(match[1] || '0', 10);
+  const days = parseInt(match[2] || '0', 10);
+  const hours = parseInt(match[3] || '0', 10);
+  const minutes = parseInt(match[4] || '0', 10);
+
+  const ms = ((weeks * 7 + days) * 24 * 60 + hours * 60 + minutes) * 60 * 1000;
+  if (ms <= 0) return null;
+
+  const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000; // 604800000
+  if (ms > ONE_WEEK_MS) return null;
+
+  return ms;
 }
 
 /** List all run metadata entries for a job, sorted chronologically. */

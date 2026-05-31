@@ -53,7 +53,7 @@ export async function connectLocal(
   }
 
   try {
-    const { wsUrl, browser } = await discoverBrowserWsUrl(port);
+    const { wsUrl, browser } = await discoverBrowserWsUrl(port, 'localhost', profile.name);
     verifyBrowserIdentity(browser, profile.browser, port);
     const cdp = new CDPClient();
     await cdp.connect(wsUrl);

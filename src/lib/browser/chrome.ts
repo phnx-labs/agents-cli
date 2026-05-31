@@ -128,6 +128,7 @@ export async function launchBrowser(
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-features=DefaultBrowserSetting,ChromeWhatsNewUI',
+    '--disable-crash-reporter',
     ...(options.headless ? ['--headless=new'] : []),
     `--window-size=${viewport.width},${viewport.height}`,
     ...(viewport.x !== undefined && viewport.y !== undefined

@@ -90,7 +90,7 @@ const DRIVE_DIR = path.join(CACHE_DIR, 'drive');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
 const RUNTIME_STATE_DIR = path.join(CACHE_DIR, 'state');
-const SWARMIFY_DIR = path.join(CACHE_DIR, 'companion');
+const COMPANION_CACHE_DIR = path.join(CACHE_DIR, 'companion');
 const BROWSER_RUNTIME_DIR = path.join(CACHE_DIR, 'browser');
 const HELPERS_DIR = path.join(CACHE_DIR, 'helpers');
 const DAEMON_DIR = path.join(HELPERS_DIR, 'daemon');
@@ -356,7 +356,7 @@ export function getLogsDir(): string { return LOGS_DIR; }
 export function getRuntimeStateDir(): string { return RUNTIME_STATE_DIR; }
 
 /** Path to companion-extension scratch (~/.agents/.cache/companion/). */
-export function getCompanionDir(): string { return SWARMIFY_DIR; }
+export function getCompanionDir(): string { return COMPANION_CACHE_DIR; }
 
 /** Path to browser runtime data — chrome-data, pids (~/.agents/.cache/browser/). */
 export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }

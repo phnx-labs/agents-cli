@@ -1,19 +1,8 @@
 /**
- * Software Factory CLI -- thin client over `prix/factory/service`.
+ * Software Factory CLI — submits Linear issues to a remote orchestrator.
  *
- * One verb today:
- *
- *   agents factory submit <linear-ref>   POST /factory/submit
- *
- * Everything else (planner pod, worker dispatch, PR-merged/CI-failed
- * webhooks, retry caps, heartbeat reaper) lives server-side in
- * `agents/prix/factory/service/src/factory.ts`, driven by the
- * `factory-tick` k8s CronJob. The laptop is optional after submit.
- *
- * Future verbs (list / status / tail / cancel / message) are intentionally
- * deferred until the matching server endpoints land; they'll be thin
- * clients too. No supervisor, ledger, oracle, or `~/.agents/factory/`
- * registry on the laptop -- ever.
+ * Requires FACTORY_FLOOR_URL pointing at a Factory-compatible endpoint.
+ * Beta-gated; enable with `agents beta enable factory`.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -81,8 +70,8 @@ export function registerFactoryCommands(program: Command): void {
     .description('Software Factory -- submit Linear tickets to the cloud orchestrator.')
     .addHelpText('after', `
 Examples:
-  agents factory submit EXAMPLE-2451
-  agents factory submit https://linear.app/example/issue/EXAMPLE-2451
+  agents factory submit PROJ-123
+  agents factory submit https://linear.app/example/issue/PROJ-123
 `);
 
   factory.hook('preAction', () => {
@@ -94,7 +83,7 @@ Examples:
 
   factory
     .command('submit <linear-ref>')
-    .description('Submit a Linear issue (EXAMPLE-123 or URL) to the Software Factory.')
+    .description('Submit a Linear issue (PROJ-123 or URL) to the Software Factory.')
     .option('--json', 'Output machine-readable JSON')
     .action(async (ref: string, opts: { json?: boolean }) => {
       const result = await postFactorySubmit(ref);

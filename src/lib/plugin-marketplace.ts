@@ -24,7 +24,7 @@ import type { AgentId, DiscoveredPlugin, PluginManifest } from './types.js';
 export const MARKETPLACE_NAME = 'agents-cli';
 
 interface KnownMarketplaceEntry {
-  source: { source: 'local'; path: string };
+  source: { source: 'directory'; path: string };
   installLocation: string;
   lastUpdated: string;
 }
@@ -152,7 +152,7 @@ export function registerMarketplace(agent: AgentId, versionHome: string): void {
   }
 
   known[MARKETPLACE_NAME] = {
-    source: { source: 'local', path: root },
+    source: { source: 'directory', path: root },
     installLocation: root,
     lastUpdated: new Date().toISOString(),
   };

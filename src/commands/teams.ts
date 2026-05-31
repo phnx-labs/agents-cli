@@ -1044,6 +1044,16 @@ export function registerTeamsCommands(program: Command): void {
         console.log();
         if (staged) {
           console.log(chalk.gray(`Start the ready teammates:  agents teams start ${team}`));
+          if (after.length > 0) {
+            process.stderr.write(
+              chalk.yellow(
+                `\nWarning: this teammate has --after dependencies and will NEVER start on its own.\n` +
+                `  A supervisor watch process is required to launch it when its deps complete.\n` +
+                `  Run this in another terminal:\n` +
+                `    agents teams start ${team} --watch\n`
+              )
+            );
+          }
         } else {
           console.log(chalk.gray(`Check in later:  agents teams status ${team}`));
         }

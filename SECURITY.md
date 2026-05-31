@@ -2,18 +2,23 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in agents-cli, please report it responsibly.
+If you discover a security vulnerability in agents-cli, please report it
+responsibly via GitHub Security Advisories:
 
-**Email:** security@phnx-labs.com
+**https://github.com/phnx-labs/agents-cli/security/advisories/new**
 
-Please include:
+This opens a private channel with the maintainers. Please include:
 
 - A description of the vulnerability
 - Steps to reproduce
 - Potential impact
 - Suggested fix (if any)
 
-We will acknowledge receipt within 48 hours and aim to release a fix within 7 days for critical issues.
+We will acknowledge receipt within 48 hours and aim to release a fix within
+7 days for critical issues.
+
+**Fallback:** If you cannot use GitHub Security Advisories, email
+`security@phnx-labs.com`.
 
 ## Scope
 

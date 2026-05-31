@@ -135,7 +135,7 @@ Examples:
 
   # Add MiniMax for SWE-bench style fixes; reuses the same OpenRouter key
   agents profiles add minimax
-  agents run minimax "investigate EXAMPLE-2317 and patch the off-by-one in pagination"
+  agents run minimax "investigate PROJ-456 and patch the off-by-one in pagination"
 
   # Add DeepSeek for cheap, fast non-reasoning work
   agents profiles add deepseek

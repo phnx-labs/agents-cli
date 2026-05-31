@@ -39,6 +39,15 @@ const AGENT_COMMANDS: Record<string, string[]> = {
 
 /** Build the full CLI argv for executing a job, applying mode, model, and permission flags. */
 export function buildJobCommand(config: JobConfig, resolvedPrompt: string): string[] {
+  // Workflow branch: delegate to `agents run <workflow>` which handles subagent
+  // injection, WORKFLOW.md orchestration, and model selection via frontmatter.
+  // appendModelAndReasoning is intentionally skipped — the workflow frontmatter
+  // owns model selection. No --timeout flag: the runner enforces its own SIGTERM/SIGKILL.
+  if (config.workflow) {
+    const cmd = ['agents', 'run', config.workflow, resolvedPrompt, '--mode', config.mode];
+    return cmd;
+  }
+
   const template = AGENT_COMMANDS[config.agent];
   if (!template) {
     throw new Error(`Unsupported agent for daemon jobs: ${config.agent}`);
@@ -158,10 +167,15 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
     spawnEnv.TZ = config.timezone;
   }
 
+  // Workflows run via `agents run <workflow>` which delegates to claude under the hood.
+  // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
+  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent;
+
   const meta: RunMeta = {
     jobName: config.name,
     runId,
-    agent: config.agent,
+    agent: effectiveAgent,
+    ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
     status: 'running',
     startedAt: new Date().toISOString(),
@@ -170,7 +184,7 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
   };
   writeRunMeta(meta);
 
-  const timeoutMs = parseTimeout(config.timeout) || 30 * 60 * 1000;
+  const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
 
   return new Promise<RunResult>((resolve) => {
     const child = spawn(cmd[0], cmd.slice(1), {
@@ -206,7 +220,7 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
       writeRunMeta(meta);
       timer.end({ status: 'timeout', runId });
 
-      const reportPath = extractAndSaveReport(stdoutPath, config.agent, runDir);
+      const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
       resolve({ meta, reportPath });
     }, timeoutMs);
 
@@ -223,7 +237,7 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
       writeRunMeta(meta);
       timer.end({ status: meta.status, exitCode: code ?? undefined, runId });
 
-      const reportPath = extractAndSaveReport(stdoutPath, config.agent, runDir);
+      const reportPath = extractAndSaveReport(stdoutPath, effectiveAgent, runDir);
       resolve({ meta, reportPath });
     });
 
@@ -265,10 +279,13 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     spawnEnv.TZ = config.timezone;
   }
 
+  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent;
+
   const meta: RunMeta = {
     jobName: config.name,
     runId,
-    agent: config.agent,
+    agent: effectiveAgent,
+    ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
     status: 'running',
     startedAt: new Date().toISOString(),

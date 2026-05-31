@@ -232,9 +232,12 @@ export const DEFAULT_REGISTRIES: Record<RegistryType, Record<string, RegistryCon
 };
 
 /**
- * Registries that ship pre-seeded into new users' agents.yaml once, but are
- * not "defaults" — after seeding they behave like any user-added registry
- * (listable, disable-able, removable, and gone for good once removed).
+ * Third-party registries pre-seeded on first install for discoverability.
+ *
+ * These ship into new users' agents.yaml once, but are not "defaults" — after
+ * seeding they behave like any user-added registry (listable, disable-able,
+ * removable). Removed users can `agents registry remove <name>` to opt out;
+ * once removed they don't come back.
  */
 export const SEEDED_REGISTRIES: Record<RegistryType, Record<string, RegistryConfig>> = {
   mcp: {},
