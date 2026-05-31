@@ -1,7 +1,9 @@
 name: Sandbox tests
 
-# Runs on the phnx-labs org self-hosted runner pool (cpx41, 4 ephemeral
-# runner processes). Infra lives at agents/infra/ci-runner.
+# Temporary fallback to GitHub-hosted runners while the phnx-labs self-hosted
+# pool (cpx41, 4 ephemeral runner processes; infra at agents/infra/ci-runner)
+# is offline. Restore `runs-on: [self-hosted, linux, x64]` once the pool is
+# back online. Tracking: https://github.com/phnx-labs/agents-cli/issues/94
 #
 # Tool versions are NOT pinned here — setup-bun and any future setup-* steps
 # read the source of truth out of package.json / go.mod / etc.
@@ -16,7 +18,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
