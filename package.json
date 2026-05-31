@@ -25,6 +25,7 @@
     "dist/**/*.d.ts",
     "dist/lib/secrets/Agents CLI.app/**",
     "scripts/postinstall.js",
+    "scripts/install-helper.js",
     "CHANGELOG.md",
     "README.md",
     "LICENSE"

@@ -31,7 +31,7 @@ import {
 } from '../lib/secrets/bundles.js';
 import {
   deleteKeychainToken,
-  getKeychainToken,
+  getKeychainTokens,
   hasKeychainToken,
   secretsKeychainItem,
   setKeychainToken,
@@ -48,6 +48,8 @@ import {
 } from '../lib/onepassword.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { registerSecretsSyncCommands } from './secrets-sync.js';
+import { registerSecretsMigrateAclCommand } from './secrets-migrate.js';
 
 /** Prompt the user for a secret value with masked input. Requires an interactive TTY. */
 async function promptForSecret(message: string): Promise<string> {
@@ -209,7 +211,6 @@ function humanAge(iso: string): string {
 function renderBundleRow(b: SecretsBundle): string {
   const entries = describeBundle(b);
   const keys = entries.length;
-  const sync = b.icloud_sync ? chalk.cyan('icloud') : '';
   const expiringCount = countExpiringSoon(b.meta);
   const expiring = expiringCount > 0 ? chalk.yellow(String(expiringCount)) : chalk.gray('-');
   // Timestamp distinction:
@@ -226,7 +227,6 @@ function renderBundleRow(b: SecretsBundle): string {
   const head =
     `${chalk.cyan(b.name.padEnd(20))} ` +
     `${String(keys).padEnd(5)} ` +
-    `${padVisible(sync, 6)} ` +
     `${padVisible(expiring, 9)} ` +
     `${padVisible(created, 9)} ` +
     `${padVisible(updated, 9)} ` +
@@ -343,7 +343,7 @@ function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
 export function registerSecretsCommands(program: Command): void {
   const cmd = program
     .command('secrets')
-    .description('Named bundles of env variables backed by macOS Keychain (iCloud-synced by default). Inject into agents via `agents run --secrets <name>`.');
+    .description('Named bundles of env variables backed by macOS Keychain (device-local, biometry-gated). Inject into agents via `agents run --secrets <name>`.');
 
   setHelpSections(cmd, {
     examples: `
@@ -370,24 +370,23 @@ export function registerSecretsCommands(program: Command): void {
     `,
     notes: `
       Bundles are containers; secrets are the variables inside them. Keychain values
-      never touch disk in plaintext.
-
-      iCloud sync: new bundles use the iCloud-synced keychain by default so they
-      appear on other Macs (same iCloud account, iCloud Keychain enabled). Pass
-      --no-icloud-sync at create time to keep values device-local instead.
+      never touch disk in plaintext. Every item is device-local and gated by Touch ID
+      or device passcode; cross-machine sync is handled by 'agents secrets push/pull'.
 
       See also:
         agents secrets rotate <bundle> <key>           rotate value, preserve metadata
         agents secrets import <bundle> --from .env     bulk import from .env
         agents secrets import <bundle> --from-1password --vault <name>
         agents secrets generate [length]               generate a random password / PIN / hex
+        agents secrets migrate-acl                     upgrade legacy items to the biometry ACL
     `,
   });
 
   registerCommandGroups(cmd, [
     { title: 'Bundle commands', names: ['list', 'view', 'create', 'rename', 'describe', 'delete'] },
     { title: 'Secret commands', names: ['add', 'rotate', 'remove', 'import', 'export'] },
-    { title: 'Utilities', names: ['exec', 'generate'] },
+    { title: 'Sync commands', names: ['push', 'pull', 'remote-list'] },
+    { title: 'Utilities', names: ['exec', 'generate', 'migrate-acl'] },
   ]);
 
   cmd
@@ -402,7 +401,7 @@ export function registerSecretsCommands(program: Command): void {
         return;
       }
       console.log(chalk.bold(
-        `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'SYNC'.padEnd(6)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
+        `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
       ));
       for (const b of bundles) {
         console.log(renderBundleRow(b));
@@ -423,7 +422,6 @@ export function registerSecretsCommands(program: Command): void {
         console.log(chalk.bold(bundle.name));
         if (bundle.description) console.log(chalk.gray(bundle.description));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
-        if (bundle.icloud_sync) console.log(chalk.cyan('icloud_sync: true'));
         if (bundle.created_at) console.log(chalk.gray(`created_at: ${bundle.created_at} (${humanAge(bundle.created_at)})`));
         if (bundle.updated_at) console.log(chalk.gray(`updated_at: ${bundle.updated_at} (${humanAge(bundle.updated_at)})`));
         if (bundle.last_used) console.log(chalk.gray(`last_used:  ${bundle.last_used} (${humanAge(bundle.last_used)})`));
@@ -437,18 +435,28 @@ export function registerSecretsCommands(program: Command): void {
           console.error(chalk.red('--reveal in a non-TTY requires --plaintext.'));
           process.exit(1);
         }
+        // Batch every keychain read into one helper call so --reveal pops
+        // Touch ID once for the whole bundle instead of once per key.
+        const revealedValues = new Map<string, string>();
+        if (reveal) {
+          const items = entries
+            .filter((e) => e.kind === 'keychain')
+            .map((e) => secretsKeychainItem(bundle.name, e.detail));
+          try {
+            const fetched = getKeychainTokens(items);
+            for (const [item, value] of fetched) revealedValues.set(item, value);
+          } catch {
+            // Fall through to masked output on cancellation / batch failure.
+          }
+        }
         for (const e of entries) {
           if (e.kind === 'keychain') {
             const item = secretsKeychainItem(bundle.name, e.detail);
-            const stored = hasKeychainToken(item, bundle.icloud_sync);
+            const stored = hasKeychainToken(item);
             const marker = stored ? chalk.green('stored') : chalk.red('missing');
             let valueCol = `[keychain:${e.detail}] ${marker}`;
-            if (reveal && stored) {
-              try {
-                valueCol = redact(getKeychainToken(item, bundle.icloud_sync), true);
-              } catch {
-                // fall through to masked
-              }
+            if (reveal && revealedValues.has(item)) {
+              valueCol = redact(revealedValues.get(item)!, true);
             }
             console.log(`  ${chalk.cyan(e.key.padEnd(28))} ${kindLabel(e.kind).padEnd(18)} ${valueCol}`);
           } else if (e.kind === 'literal') {
@@ -476,9 +484,8 @@ export function registerSecretsCommands(program: Command): void {
     .description('Create an empty bundle')
     .option('--description <text>', 'Free-form description')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
-    .option('--no-icloud-sync', 'Store keychain values device-local instead of syncing them via iCloud Keychain')
     .option('--force', 'Overwrite an existing bundle')
-    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; icloudSync?: boolean; force?: boolean }) => {
+    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; force?: boolean }) => {
       try {
         const resolvedName = name ?? (await promptBundleName());
         validateBundleName(resolvedName);
@@ -490,7 +497,6 @@ export function registerSecretsCommands(program: Command): void {
           name: resolvedName,
           description: opts.description,
           allow_exec: opts.allowExec,
-          icloud_sync: opts.icloudSync !== false,
           vars: {},
         };
         writeBundle(bundle);
@@ -630,12 +636,11 @@ export function registerSecretsCommands(program: Command): void {
           secretValue = await promptForSecret(`Enter value for ${resolvedBundleName}.${resolvedKey}`);
         }
         const item = secretsKeychainItem(resolvedBundleName, resolvedKey);
-        setKeychainToken(item, secretValue, bundle.icloud_sync);
+        setKeychainToken(item, secretValue);
         bundle.vars[resolvedKey] = keychainRef(resolvedKey);
         applyMeta();
         writeBundle(bundle);
-        const where = bundle.icloud_sync ? 'iCloud Keychain' : 'keychain';
-        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} stored in ${where} (${item}).`));
+        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} stored in keychain (${item}).`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
@@ -698,8 +703,7 @@ Examples:
           clearMeta: opts.clearMeta,
           meta: metaPatch,
         });
-        const where = bundle.icloud_sync ? 'iCloud Keychain' : 'keychain';
-        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} rotated in ${where}.`));
+        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} rotated in keychain.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
@@ -725,7 +729,7 @@ Examples:
         writeBundle(bundle);
         if (!opts.keepSecret && typeof raw === 'string' && raw.startsWith('keychain:')) {
           const item = secretsKeychainItem(resolvedBundleName, raw.slice('keychain:'.length));
-          const removed = deleteKeychainToken(item, bundle.icloud_sync);
+          const removed = deleteKeychainToken(item);
           if (removed) {
             console.log(chalk.green(`Removed ${resolvedBundleName}.${resolvedKey} and purged keychain item.`));
             return;
@@ -769,7 +773,7 @@ Examples:
         }
         if (!opts.keepSecrets) {
           for (const { item } of keychainItemsForBundle(bundle)) {
-            deleteKeychainToken(item, bundle.icloud_sync);
+            deleteKeychainToken(item);
           }
         }
         const existed = deleteBundle(resolvedName);
@@ -860,7 +864,7 @@ Examples:
               bundle.vars[envKey] = { value };
             } else {
               const item = secretsKeychainItem(resolvedBundleName, envKey);
-              setKeychainToken(item, value, bundle.icloud_sync);
+              setKeychainToken(item, value);
               bundle.vars[envKey] = keychainRef(envKey);
             }
             added++;
@@ -882,7 +886,7 @@ Examples:
               bundle.vars[key] = { value };
             } else {
               const item = secretsKeychainItem(resolvedBundleName, key);
-              setKeychainToken(item, value, bundle.icloud_sync);
+              setKeychainToken(item, value);
               bundle.vars[key] = keychainRef(key);
             }
             added++;
@@ -1076,4 +1080,7 @@ Examples:
         console.log(password);
       }
     });
+
+  registerSecretsSyncCommands(cmd);
+  registerSecretsMigrateAclCommand(cmd);
 }

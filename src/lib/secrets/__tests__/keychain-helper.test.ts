@@ -9,21 +9,19 @@ describe('keychain-helper Touch ID policy', () => {
     const source = helperSource();
 
     expect(source).toContain('SecAccessControlCreateWithFlags');
-    expect(source).toContain('kSecAttrAccessibleWhenUnlocked');
     expect(source).toContain('kSecAttrAccessibleWhenUnlockedThisDeviceOnly');
     expect(source).toContain('.biometryCurrentSet');
     expect(source).toContain('.devicePasscode');
-    expect(source).toContain('addAttrs[kSecAttrAccessControl] = access');
+    expect(source).toContain('kSecAttrAccessControl: buildBiometryAccessControl()');
   });
 
-  it('reads secrets through a LocalAuthentication context', () => {
+  it('reads secrets through a shared LocalAuthentication context', () => {
     const source = helperSource();
 
     expect(source).toContain('import LocalAuthentication');
-    expect(source).toContain('let context = LAContext()');
-    expect(source).toContain('context.localizedReason = reason');
-    expect(source).toContain('query[kSecUseAuthenticationContext] = context');
-    expect(source).toContain('case "get-auth":');
+    expect(source).toContain('let authContext: LAContext');
+    expect(source).toContain('kSecUseAuthenticationContext: authContext');
+    expect(source).toContain('case "get":');
     expect(source).toContain('case "get-batch":');
   });
 });

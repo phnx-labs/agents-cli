@@ -45,7 +45,7 @@ import {
   type KeychainBackend,
 } from '../index.js';
 
-interface StoredItem { value: string; sync: boolean }
+interface StoredItem { value: string }
 
 function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, StoredItem> } {
   const store = new Map<string, StoredItem>();
@@ -56,7 +56,7 @@ function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, Sto
       if (!v) throw new Error(`Keychain item '${item}' not found.`);
       return v.value;
     },
-    set: (item, value, sync) => { store.set(item, { value, sync }); },
+    set: (item, value) => { store.set(item, { value }); },
     delete: (item) => store.delete(item),
     list: (prefix) => Array.from(store.keys()).filter((k) => k.startsWith(prefix)),
   };
@@ -77,12 +77,11 @@ afterEach(() => {
 });
 
 describe('writeBundle + readBundle round-trip', () => {
-  it('preserves description, allow_exec, icloud_sync, and all var kinds', () => {
+  it('preserves description, allow_exec, and all var kinds', () => {
     const bundle: SecretsBundle = {
       name: 'roundtrip',
       description: 'a test bundle',
       allow_exec: true,
-      icloud_sync: true,
       vars: {
         LITERAL_STR: 'hello',
         LITERAL_OBJ: { value: 'env:NOT_A_REF' },
@@ -101,16 +100,8 @@ describe('writeBundle + readBundle round-trip', () => {
     writeBundle({ name: 'minimal', vars: { A: 'x' } });
     const got = readBundle('minimal');
     expect(got.allow_exec).toBe(false);
-    expect(got.icloud_sync).toBe(false);
     expect(got.description).toBeUndefined();
     expect(got.vars).toEqual({ A: 'x' });
-  });
-
-  it('routes icloud_sync through the sync flag of the backend', () => {
-    writeBundle({ name: 'syncy', icloud_sync: true, vars: {} });
-    expect(store.get('agents-cli.bundles.syncy')?.sync).toBe(true);
-    writeBundle({ name: 'local', vars: {} });
-    expect(store.get('agents-cli.bundles.local')?.sync).toBe(false);
   });
 });
 
@@ -223,7 +214,7 @@ describe('listBundles', () => {
     expect(bundles.map((b) => b.name)).toEqual(['good']);
   });
 
-  it('preserves description, icloud_sync, allow_exec, and timestamps for every bundle', () => {
+  it('preserves description, allow_exec, and timestamps for every bundle', () => {
     // Regression for the Touch-ID-per-bundle bug: listBundles must produce
     // fully-populated SecretsBundle objects from the batched read, not just
     // names. We previously delegated to readBundle in a loop; the batch path
@@ -231,7 +222,6 @@ describe('listBundles', () => {
     writeBundle({
       name: 'alpha',
       description: 'first',
-      icloud_sync: true,
       allow_exec: true,
       vars: { API: 'keychain:API' },
       meta: { API: { type: 'api-key', note: 'pinned' } },
@@ -239,14 +229,12 @@ describe('listBundles', () => {
     writeBundle({
       name: 'beta',
       description: 'second',
-      icloud_sync: false,
       vars: { TOKEN: 'literal-value' },
     });
     const bundles = listBundles();
     expect(bundles).toHaveLength(2);
     const a = bundles.find((b) => b.name === 'alpha')!;
     expect(a.description).toBe('first');
-    expect(a.icloud_sync).toBe(true);
     expect(a.allow_exec).toBe(true);
     expect(a.vars).toEqual({ API: 'keychain:API' });
     expect(a.meta).toEqual({ API: { type: 'api-key', note: 'pinned' } });
@@ -254,7 +242,6 @@ describe('listBundles', () => {
     expect(typeof a.updated_at).toBe('string');
     const b = bundles.find((b) => b.name === 'beta')!;
     expect(b.description).toBe('second');
-    expect(b.icloud_sync).toBe(false);
     expect(b.allow_exec).toBe(false);
   });
 
@@ -300,7 +287,7 @@ describe('rotateBundleSecret', () => {
       vars: { API: 'keychain:API' },
     });
     // Seed the underlying keychain item directly via the backend store.
-    store.set('agents-cli.secrets.rot.API', { value: 'old', sync: false });
+    store.set('agents-cli.secrets.rot.API', { value: 'old' });
 
     const bundle = readBundle('rot');
     rotateBundleSecret(bundle, 'API', { newValue: 'new' });
@@ -314,7 +301,7 @@ describe('rotateBundleSecret', () => {
       vars: { API: 'keychain:API' },
       meta: { API: { type: 'api-key', note: 'original note', expires: '2099-12-31' } },
     });
-    store.set('agents-cli.secrets.rot-meta.API', { value: 'old', sync: false });
+    store.set('agents-cli.secrets.rot-meta.API', { value: 'old' });
 
     const bundle = readBundle('rot-meta');
     rotateBundleSecret(bundle, 'API', { newValue: 'new' });
@@ -333,7 +320,7 @@ describe('rotateBundleSecret', () => {
       vars: { API: 'keychain:API' },
       meta: { API: { type: 'api-key', note: 'old note' } },
     });
-    store.set('agents-cli.secrets.rot-patch.API', { value: 'old', sync: false });
+    store.set('agents-cli.secrets.rot-patch.API', { value: 'old' });
 
     const bundle = readBundle('rot-patch');
     rotateBundleSecret(bundle, 'API', {
@@ -387,11 +374,10 @@ describe('renameBundle', () => {
     writeBundle({
       name: 'old',
       description: 'before',
-      icloud_sync: true,
       vars: { API_KEY: 'keychain:API_KEY', LITERAL: 'lit' },
     });
     // Seed the per-key keychain item the way `add` would.
-    store.set('agents-cli.secrets.old.API_KEY', { value: 'v1', sync: true });
+    store.set('agents-cli.secrets.old.API_KEY', { value: 'v1' });
 
     renameBundle('old', 'new');
 
@@ -399,10 +385,8 @@ describe('renameBundle', () => {
     expect(store.has('agents-cli.secrets.old.API_KEY')).toBe(false);
     const got = readBundle('new');
     expect(got.description).toBe('before');
-    expect(got.icloud_sync).toBe(true);
     expect(got.vars).toEqual({ API_KEY: 'keychain:API_KEY', LITERAL: 'lit' });
     expect(store.get('agents-cli.secrets.new.API_KEY')?.value).toBe('v1');
-    expect(store.get('agents-cli.secrets.new.API_KEY')?.sync).toBe(true);
   });
 
   it('preserves created_at and refreshes updated_at', async () => {
@@ -425,9 +409,9 @@ describe('renameBundle', () => {
 
   it('overwrites destination and purges its keychain items with force', () => {
     writeBundle({ name: 'src', vars: { K: 'keychain:K' } });
-    store.set('agents-cli.secrets.src.K', { value: 'src-val', sync: false });
+    store.set('agents-cli.secrets.src.K', { value: 'src-val' });
     writeBundle({ name: 'dst', vars: { OLD: 'keychain:OLD' } });
-    store.set('agents-cli.secrets.dst.OLD', { value: 'dst-val', sync: false });
+    store.set('agents-cli.secrets.dst.OLD', { value: 'dst-val' });
 
     renameBundle('src', 'dst', { force: true });
 
@@ -467,7 +451,6 @@ describe('migrateLegacyBundles', () => {
     fs.writeFileSync(file, yaml.stringify({
       name: 'legacy-bundle',
       description: 'from yaml',
-      icloud_sync: true,
       vars: { A: 'literal', B: 'keychain:K_B' },
     }), 'utf-8');
 
@@ -476,10 +459,8 @@ describe('migrateLegacyBundles', () => {
     expect(fs.existsSync(file)).toBe(false);
     const got = readBundle('legacy-bundle');
     expect(got.description).toBe('from yaml');
-    expect(got.icloud_sync).toBe(true);
     expect(got.vars).toEqual({ A: 'literal', B: 'keychain:K_B' });
-    // Should have written with the bundle's icloud_sync flag.
-    expect(store.get('agents-cli.bundles.legacy-bundle')?.sync).toBe(true);
+    expect(store.has('agents-cli.bundles.legacy-bundle')).toBe(true);
   });
 
   it('refuses legacy YAML with dynamic-loader env keys before writing', async () => {

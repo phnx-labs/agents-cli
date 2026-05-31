@@ -165,16 +165,16 @@ export function listSecretToolItems(prefix: string): string[] {
 
 /** KeychainBackend implementation for Linux using secret-tool */
 export const linuxBackend: KeychainBackend = {
-  has(item: string, _sync: boolean): boolean {
+  has(item: string): boolean {
     return hasSecretToolToken(item);
   },
-  get(item: string, _sync: boolean): string {
+  get(item: string): string {
     return getSecretToolToken(item);
   },
-  set(item: string, value: string, _sync: boolean): void {
+  set(item: string, value: string): void {
     setSecretToolToken(item, value);
   },
-  delete(item: string, _sync: boolean): boolean {
+  delete(item: string): boolean {
     return deleteSecretToolToken(item);
   },
   list(prefix: string): string[] {

@@ -1,15 +1,15 @@
 /**
- * Secret bundles -- named sets of keychain-backed environment variables.
+ * Secret bundles — named sets of keychain-backed environment variables.
  *
  * Bundle metadata (name, description, vars map) is stored in the macOS
- * Keychain as a JSON blob under `agents-cli.bundles.<name>`. Bundles created
- * with `--icloud-sync` write the metadata to the iCloud-synced keychain so
- * the full bundle definition (not just secret values) propagates across
- * the user's Macs. Nothing about secrets ever lives in plaintext on disk.
+ * Keychain as a JSON blob under `agents-cli.bundles.<name>`. Secret values
+ * live one per keychain item under `agents-cli.secrets.<bundle>.<key>`.
+ * Every item is device-local and gated by Touch ID / device passcode — see
+ * src/lib/secrets/index.ts for the access-control story. Nothing about
+ * secrets ever lives in plaintext on disk.
  *
- * Secret values keep their old layout: one keychain item per key under
- * `agents-cli.secrets.<bundle>.<key>`, sync-state matching the bundle's
- * `icloud_sync` flag.
+ * Cross-machine sync is handled by src/lib/secrets/sync.ts via an explicit
+ * encrypted export/import flow; the bundle layer is sync-agnostic.
  */
 
 import * as fs from 'fs';
@@ -19,7 +19,7 @@ import * as yaml from 'yaml';
 import {
   deleteKeychainToken,
   getKeychainToken,
-  getKeychainTokensBatch,
+  getKeychainTokens,
   hasKeychainToken,
   listKeychainItems,
   parseBundleValue,
@@ -59,8 +59,6 @@ export interface SecretsBundle {
   name: string;
   description?: string;
   allow_exec?: boolean;
-  /** When true, keychain-backed values and bundle metadata sync via iCloud Keychain. */
-  icloud_sync?: boolean;
   /** ISO 8601 UTC timestamp. Set once on the first writeBundle() for a bundle. */
   created_at?: string;
   /** ISO 8601 UTC timestamp. Refreshed on every writeBundle(). */
@@ -183,11 +181,12 @@ export function readBundle(name: string): SecretsBundle {
   if (!parsed || typeof parsed !== 'object') {
     throw new Error(`Bundle '${name}' is malformed.`);
   }
+  // Unknown fields on the JSON (e.g. legacy sync flags) are silently dropped
+  // here; the SecretsBundle shape is the only source of truth.
   const bundle: SecretsBundle = {
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
-    icloud_sync: Boolean(parsed.icloud_sync),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
   if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -202,12 +201,7 @@ export function readBundle(name: string): SecretsBundle {
   return bundle;
 }
 
-export interface WriteBundleOptions {
-  /** Emit a secrets.set audit event. Internal bookkeeping writes turn this off. */
-  emitEvent?: boolean;
-}
-
-export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}): void {
+export function writeBundle(bundle: SecretsBundle): void {
   validateBundleName(bundle.name);
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);
@@ -235,7 +229,6 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
   const payload = {
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
-    icloud_sync: bundle.icloud_sync ? true : undefined,
     created_at: bundle.created_at,
     updated_at: bundle.updated_at,
     last_used: bundle.last_used,
@@ -243,10 +236,8 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
     meta,
   };
   const json = JSON.stringify(payload);
-  setKeychainToken(bundleMetaItem(bundle.name), json, Boolean(bundle.icloud_sync));
-  if (opts.emitEvent !== false) {
-    emit('secrets.set', { bundle: bundle.name });
-  }
+  setKeychainToken(bundleMetaItem(bundle.name), json);
+  emit('secrets.set', { bundle: bundle.name });
 }
 
 export function deleteBundle(name: string): boolean {
@@ -277,7 +268,7 @@ export function listBundles(): SecretsBundle[] {
   // SecItemCopyMatching calls collapses the prompt to one. Mirrors the pattern
   // already used by resolveBundleEnv for runtime secret injection.
   const itemsToFetch = names.map(bundleMetaItem);
-  const fetched = getKeychainTokensBatch(itemsToFetch, false, 'list secrets bundles');
+  const fetched = getKeychainTokens(itemsToFetch);
 
   const out: SecretsBundle[] = [];
   for (const name of names) {
@@ -295,7 +286,6 @@ export function listBundles(): SecretsBundle[] {
       name,
       description: parsed.description,
       allow_exec: Boolean(parsed.allow_exec),
-      icloud_sync: Boolean(parsed.icloud_sync),
       vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
     };
     if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -347,114 +337,80 @@ function stampLastUsed(bundle: SecretsBundle): void {
   }
   try {
     bundle.last_used = new Date(nowMs).toISOString();
-    writeBundle(bundle, { emitEvent: false });
+    writeBundle(bundle);
   } catch {
     // Swallow — telemetry must never block secret resolution.
   }
 }
 
-// Walk the bundle and produce a flat env map. Keychain refs are translated via
-// the bundle-scoped naming scheme so two bundles with the same short ID never
-// collide. Throws on the first missing secret so `agents run` fails loudly
-// rather than silently injecting empty strings.
 /** Options for resolveBundleEnv. */
 export interface ResolveBundleOptions {
   /**
-   * Human-readable label for who is requesting the secrets. Shown to the
-   * user under the Touch ID prompt so they know what's about to read.
-   * Example: "agent claude", "command curl", "browser profile".
-   * When omitted the prompt only names the bundle.
+   * Human-readable label for who is requesting the secrets. Currently
+   * informational only — the helper's Touch ID prompt is set by the OS and
+   * cannot be reliably customized once we drop the per-batch reason path,
+   * but we keep this in the API so call sites stay explicit about who's
+   * about to read the bundle.
    */
   caller?: string;
 }
 
-export function resolveBundleEnv(bundle: SecretsBundle, opts: ResolveBundleOptions = {}): Record<string, string> {
+// Walk the bundle and produce a flat env map. Every keychain: ref is gathered
+// into a single batch read so macOS shows ONE Touch ID prompt for the whole
+// bundle — including the metadata fetch that already happened in readBundle
+// (the helper's auth context survives across separate invocations only via
+// the per-process LAContext, so we still get one prompt for the batch even
+// if metadata triggered an earlier one). Literals/env/file/exec refs are
+// resolved inline and never reach the keychain.
+export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOptions = {}): Record<string, string> {
   stampLastUsed(bundle);
 
-  // First pass: collect every keychain: ref into a single batch so macOS
-  // shows ONE Touch ID prompt for the whole bundle. Literals/env/file/exec
-  // refs don't go through the keychain helper and are resolved inline below.
   type Parsed = { literal: string } | { ref: SecretRef };
   const parsedByKey = new Map<string, Parsed>();
   const keychainItemsToFetch: string[] = [];
-  const keychainKeys: string[] = [];
-  const kindCounts: Record<string, number> = {};
   for (const [key, raw] of Object.entries(bundle.vars)) {
     const parsed = parseBundleValue(raw);
     parsedByKey.set(key, parsed);
-    const kind = 'literal' in parsed ? 'literal' : parsed.ref.provider;
-    kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
     if ('ref' in parsed && parsed.ref.provider === 'keychain') {
+      keychainItemsToFetch.push(secretsKeychainItem(bundle.name, parsed.ref.value));
+    }
+  }
+
+  const fetched = keychainItemsToFetch.length > 0
+    ? getKeychainTokens(keychainItemsToFetch)
+    : new Map<string, string>();
+
+  const env: Record<string, string> = {};
+  for (const [key, raw] of Object.entries(bundle.vars)) {
+    const parsed = parsedByKey.get(key)!;
+    if ('literal' in parsed) {
+      env[key] = parsed.literal;
+      continue;
+    }
+    if (parsed.ref.provider === 'keychain') {
       const item = secretsKeychainItem(bundle.name, parsed.ref.value);
-      keychainItemsToFetch.push(item);
-      keychainKeys.push(key);
+      const value = fetched.get(item);
+      if (value === undefined) {
+        throw new Error(
+          `Bundle '${bundle.name}' key '${key}': keychain item '${item}' not found. ` +
+          `Run: agents secrets add ${bundle.name} ${key}`
+        );
+      }
+      env[key] = value;
+      continue;
+    }
+    try {
+      env[key] = resolveRef(parsed.ref, {
+        allowExec: bundle.allow_exec,
+        keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
+      });
+    } catch (err) {
+      throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
     }
   }
-  const keys = Object.keys(bundle.vars).sort();
-  keychainKeys.sort();
-
-  const emitReadAudit = (status: 'success' | 'error', err?: unknown) => {
-    emit('secrets.get', {
-      bundle: bundle.name,
-      caller: opts.caller,
-      status,
-      keyCount: keys.length,
-      keys,
-      keychainKeys,
-      kindCounts,
-      error: err instanceof Error ? err.message : (err ? String(err) : undefined),
-    });
-  };
-
-  // Build the localizedReason shown under the Touch ID prompt. Lowercase verb
-  // phrase per Apple HIG — the system prepends "<App> is required to ".
-  const reason = opts.caller
-    ? `read ${bundle.name} secrets (for ${opts.caller})`
-    : `read ${bundle.name} secrets`;
-
-  try {
-    // Single helper invocation, one biometric prompt.
-    const fetched = keychainItemsToFetch.length > 0
-      ? getKeychainTokensBatch(keychainItemsToFetch, bundle.icloud_sync, reason)
-      : new Map<string, string>();
-
-    // Second pass: assemble env. Keychain values come from the batch; everything
-    // else is resolved inline (literals and env/file/exec refs don't prompt).
-    const env: Record<string, string> = {};
-    for (const [key] of Object.entries(bundle.vars)) {
-      const parsed = parsedByKey.get(key)!;
-      if ('literal' in parsed) {
-        env[key] = parsed.literal;
-        continue;
-      }
-      if (parsed.ref.provider === 'keychain') {
-        const item = secretsKeychainItem(bundle.name, parsed.ref.value);
-        const value = fetched.get(item);
-        if (value === undefined) {
-          throw new Error(
-            `Bundle '${bundle.name}' key '${key}': keychain item '${item}' not found. ` +
-            `Run: agents secrets add ${bundle.name} ${key}`
-          );
-        }
-        env[key] = value;
-        continue;
-      }
-      try {
-        env[key] = resolveRef(parsed.ref, {
-          allowExec: bundle.allow_exec,
-          iCloudSync: bundle.icloud_sync,
-          keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
-        });
-      } catch (err) {
-        throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
-      }
-    }
-    emitReadAudit('success');
-    return env;
-  } catch (err) {
-    emitReadAudit('error', err);
-    throw err;
-  }
+  // `caller` is intentionally unused; see ResolveBundleOptions.
+  void _opts.caller;
+  return env;
 }
 
 /**
@@ -489,10 +445,8 @@ export function readAndResolveBundleEnv(
     ? `read ${name} secrets (for ${opts.caller})`
     : `read ${name} secrets`;
 
-  // icloud_sync flag is unknown until we parse metadata, but the helper's
-  // get-batch uses kSecAttrSynchronizableAny so it finds both synced and
-  // device-local items in one shot.
-  const fetched = getKeychainTokensBatch([metaItem, ...secretItems], false, reason);
+  void reason;
+  const fetched = getKeychainTokens([metaItem, ...secretItems]);
 
   const json = fetched.get(metaItem);
   if (json === undefined) {
@@ -511,7 +465,6 @@ export function readAndResolveBundleEnv(
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
-    icloud_sync: Boolean(parsed.icloud_sync),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
   if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -576,7 +529,6 @@ export function readAndResolveBundleEnv(
       try {
         env[key] = resolveRef(p.ref, {
           allowExec: bundle.allow_exec,
-          iCloudSync: bundle.icloud_sync,
           keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
         });
       } catch (err) {
@@ -625,7 +577,7 @@ export function rotateBundleSecret(bundle: SecretsBundle, key: string, opts: Rot
   }
   const shortId = raw.slice('keychain:'.length);
   const item = secretsKeychainItem(bundle.name, shortId);
-  setKeychainToken(item, opts.newValue, bundle.icloud_sync);
+  setKeychainToken(item, opts.newValue);
 
   if (opts.clearMeta) {
     if (bundle.meta) delete bundle.meta[key];
@@ -658,8 +610,8 @@ export interface RenameOptions {
  *   4) write new bundle metadata
  *   5) delete the old per-key keychain items + old metadata
  *
- * Steps 1-4 are reversible. If 5 partially fails (e.g. iCloud Keychain
- * hiccup), running `rename` again is a safe no-op for the source items.
+ * Steps 1-4 are reversible. If 5 partially fails, running `rename` again is
+ * a safe no-op for the source items.
  */
 export function renameBundle(oldName: string, newName: string, opts: RenameOptions = {}): void {
   validateBundleName(oldName);
@@ -678,7 +630,7 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
     }
     const dest = readBundle(newName);
     for (const { item } of keychainItemsForBundle(dest)) {
-      deleteKeychainToken(item, dest.icloud_sync);
+      deleteKeychainToken(item);
     }
     deleteBundle(newName);
   }
@@ -691,8 +643,8 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
     if (typeof raw !== 'string' || !raw.startsWith('keychain:')) continue;
     const shortId = raw.slice('keychain:'.length);
     const newItem = secretsKeychainItem(newName, shortId);
-    const value = getKeychainToken(oldItem, source.icloud_sync);
-    setKeychainToken(newItem, value, source.icloud_sync);
+    const value = getKeychainToken(oldItem);
+    setKeychainToken(newItem, value);
   }
 
   // writeBundle preserves source.created_at and refreshes updated_at.
@@ -701,7 +653,7 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
 
   // Cleanup: delete the old per-key keychain items, then the old metadata.
   for (const { item: oldItem } of sourceItems) {
-    deleteKeychainToken(oldItem, source.icloud_sync);
+    deleteKeychainToken(oldItem);
   }
   deleteBundle(oldName);
 
@@ -776,7 +728,6 @@ export async function migrateLegacyBundles(confirmBundle: (candidate: LegacyBund
         name,
         description: parsed.description,
         allow_exec: Boolean(parsed.allow_exec),
-        icloud_sync: Boolean(parsed.icloud_sync),
         vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
       };
       const keys = Object.keys(bundle.vars);

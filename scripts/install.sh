@@ -139,6 +139,15 @@ LINKED_PATH="$LINK_DIR/agents"
 [[ -L "$LINKED_PATH" ]] || die "agents not installed at $LINKED_PATH"
 LINKED_VER=$("$LINKED_PATH" --version 2>/dev/null | head -1 || echo "?")
 
+# Install the signed macOS Keychain helper to its stable user path. The dev
+# install skips postinstall (see the package.json staging above), so this
+# needs to run explicitly. No-op on non-darwin and if the source .app is
+# missing (e.g. raw working tree without the bin/ asset).
+if [[ -f "$ROOT/scripts/install-helper.js" ]]; then
+  dim "  Installing Keychain helper"
+  node "$ROOT/scripts/install-helper.js" --force || true
+fi
+
 green "  Ready"
 dim   "  $LINKED_PATH ($LINKED_VER)"
 

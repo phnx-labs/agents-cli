@@ -1,0 +1,206 @@
+/**
+ * `agents secrets migrate-acl` — refresh existing keychain items so they pick
+ * up the new SecAccess ACL written by the signed Agents CLI.app helper.
+ *
+ * Items created before 1.19.2 (or by `security add-generic-password` directly)
+ * may carry the legacy "this-app-only" ACL that prompts the user for a
+ * password on every read. Re-writing them through the helper bakes in the
+ * empty trusted-app ACL that suppresses the prompt and lets the helper read
+ * them under LocalAuthentication instead.
+ *
+ * Sequence per item:
+ *   1. Read the current value (no auth prompt path — uses the unauthenticated
+ *      `security` CLI for non-sync items, helper `get` for sync items).
+ *   2. Append (item, value, sync) to an encrypted backup before any writes.
+ *   3. Delete + rewrite via the helper so macOS hands us a fresh ACL on the
+ *      new item.
+ *   4. Read back via the helper to verify the value round-trips.
+ *
+ * `--dry-run` (default) reports the planned actions. `--commit` performs the
+ * writes and produces the backup.
+ */
+
+import type { Command } from 'commander';
+import chalk from 'chalk';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  deleteKeychainToken,
+  getKeychainToken,
+  hasKeychainToken,
+  listKeychainItems,
+  setKeychainToken,
+} from '../lib/secrets/index.js';
+import { getBackupsDir } from '../lib/state.js';
+import { encryptBlob } from '../lib/secrets/sync.js';
+import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+
+const ITEM_PREFIX = 'agents-cli.';
+
+interface MigrationRecord {
+  item: string;
+  sync: boolean;
+  value: string;
+}
+
+interface MigrationResult {
+  item: string;
+  status: 'ok' | 'verify-failed' | 'write-failed' | 'read-failed';
+  detail?: string;
+}
+
+function enumerateItems(): Array<{ item: string; sync: boolean }> {
+  const seen = new Map<string, { item: string; sync: boolean }>();
+  for (const item of listKeychainItems(ITEM_PREFIX)) {
+    // hasKeychainToken with sync=false probes the non-synced keychain; the
+    // helper's list returns both. We don't try to distinguish — re-write with
+    // sync=false by default and only flip to sync=true if the value is only
+    // readable via the synced-only probe.
+    const localExists = hasKeychainToken(item);
+    seen.set(item, { item, sync: !localExists });
+  }
+  return [...seen.values()];
+}
+
+function writeEncryptedBackup(records: MigrationRecord[], passphrase: string): string {
+  const dir = getBackupsDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const iso = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = path.join(dir, `keychain-pre-migrate-${iso}.json.enc`);
+  const envelope = encryptBlob(JSON.stringify({ v: 1, records }), passphrase);
+  fs.writeFileSync(file, JSON.stringify(envelope), { mode: 0o600 });
+  return file;
+}
+
+async function promptPassphrase(): Promise<string> {
+  if (!isInteractiveTerminal()) {
+    throw new Error('A backup passphrase is required. Run from a TTY or set AGENTS_BACKUP_PASSPHRASE.');
+  }
+  const { password } = await import('@inquirer/prompts');
+  const first = await password({ message: 'Backup passphrase (used to encrypt the pre-migration snapshot)', mask: true });
+  if (first.length < 8) throw new Error('Passphrase must be at least 8 characters.');
+  const second = await password({ message: 'Confirm passphrase', mask: true });
+  if (first !== second) throw new Error('Passphrases do not match.');
+  return first;
+}
+
+function migrateOne(record: MigrationRecord): MigrationResult {
+  const { item, value } = record;
+  // Delete + re-add to force macOS to bind a fresh ACL on the new item.
+  // SecItemUpdate preserves the existing ACL, so an in-place rewrite would
+  // not fix the legacy "enter password" prompt.
+  try {
+    deleteKeychainToken(item);
+  } catch (err) {
+    return { item, status: 'write-failed', detail: `delete: ${(err as Error).message}` };
+  }
+  try {
+    setKeychainToken(item, value);
+  } catch (err) {
+    // Try to restore the old value so we don't lose data on a write failure.
+    // The backup is the durable safety net; this is best-effort UX.
+    try { setKeychainToken(item, value); } catch { /* swallow */ }
+    return { item, status: 'write-failed', detail: `set: ${(err as Error).message}` };
+  }
+  let readBack: string;
+  try {
+    readBack = getKeychainToken(item);
+  } catch (err) {
+    return { item, status: 'verify-failed', detail: `read-back: ${(err as Error).message}` };
+  }
+  if (readBack !== value) {
+    return { item, status: 'verify-failed', detail: 'value mismatch after rewrite' };
+  }
+  return { item, status: 'ok' };
+}
+
+/** Register `agents secrets migrate-acl` on the parent secrets Command. */
+export function registerSecretsMigrateAclCommand(secrets: Command): void {
+  secrets
+    .command('migrate-acl')
+    .description('Refresh existing keychain ACLs to use the signed Agents CLI helper. Dry-run by default.')
+    .option('--commit', 'Perform writes (default is dry-run reporting only)')
+    .option('--prefix <p>', `Restrict to items beginning with PREFIX (default ${ITEM_PREFIX})`, ITEM_PREFIX)
+    .option('--passphrase-env <var>', 'Read the backup passphrase from this env var instead of prompting')
+    .action(async (opts: { commit?: boolean; prefix?: string; passphraseEnv?: string }) => {
+      try {
+        if (process.platform !== 'darwin') {
+          throw new Error('migrate-acl is macOS-only. Linux items already use the keyring-native ACL model.');
+        }
+        const prefix = opts.prefix ?? ITEM_PREFIX;
+        const items = listKeychainItems(prefix).map((item) => {
+          const localExists = hasKeychainToken(item);
+          return { item, sync: !localExists };
+        });
+        if (items.length === 0) {
+          console.log(chalk.gray(`No keychain items with prefix '${prefix}'.`));
+          return;
+        }
+        console.log(chalk.bold(`Found ${items.length} item(s) under '${prefix}'.`));
+        if (!opts.commit) {
+          for (const { item, sync } of items) {
+            console.log(`  ${chalk.cyan(item)} ${chalk.gray(sync ? '(synced)' : '(local)')}`);
+          }
+          console.log();
+          console.log(chalk.gray('Dry-run — pass --commit to perform the migration.'));
+          return;
+        }
+        // Commit phase. Snapshot every value first, encrypt, then mutate.
+        const records: MigrationRecord[] = [];
+        for (const { item, sync } of items) {
+          try {
+            const value = getKeychainToken(item);
+            records.push({ item, sync, value });
+          } catch (err) {
+            console.error(chalk.red(`Skipping '${item}': read failed (${(err as Error).message}).`));
+          }
+        }
+        if (records.length === 0) {
+          console.error(chalk.red('No items could be read. Aborting before any writes.'));
+          process.exit(1);
+        }
+        const passphrase = opts.passphraseEnv
+          ? (() => {
+              const v = process.env[opts.passphraseEnv!];
+              if (!v) throw new Error(`Env var '${opts.passphraseEnv}' not set.`);
+              if (v.length < 8) throw new Error(`Env var '${opts.passphraseEnv}' must be at least 8 chars.`);
+              return v;
+            })()
+          : await promptPassphrase();
+        const backupPath = writeEncryptedBackup(records, passphrase);
+        // Compute a quick fingerprint so the user can sanity-check recovery without
+        // decrypting. Hash of (count, sorted item names).
+        const fingerprint = crypto
+          .createHash('sha256')
+          .update(records.length + '\n' + records.map((r) => r.item).sort().join('\n'))
+          .digest('hex')
+          .slice(0, 12);
+        console.log(chalk.green(`Encrypted backup written to ${backupPath} (sha256-12: ${fingerprint}).`));
+        const results: MigrationResult[] = [];
+        for (const record of records) {
+          const r = migrateOne(record);
+          results.push(r);
+          if (r.status === 'ok') {
+            console.log(`  ${chalk.green('ok')}     ${record.item}`);
+          } else {
+            console.log(`  ${chalk.red(r.status)} ${record.item} ${chalk.gray(r.detail ?? '')}`);
+          }
+        }
+        const okCount = results.filter((r) => r.status === 'ok').length;
+        const failCount = results.length - okCount;
+        console.log();
+        if (failCount === 0) {
+          console.log(chalk.green(`Migrated ${okCount}/${results.length} item(s).`));
+        } else {
+          console.error(chalk.yellow(`Migrated ${okCount}/${results.length} item(s); ${failCount} failed.`));
+          console.error(chalk.gray(`Restore from ${backupPath} using the backup passphrase if needed.`));
+          process.exit(1);
+        }
+      } catch (err) {
+        if (isPromptCancelled(err)) return;
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+}

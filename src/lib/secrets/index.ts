@@ -1,22 +1,31 @@
 /**
  * Cross-platform secure credential storage.
  *
- * macOS: Uses Keychain via signed Swift helper (Agents CLI.app) or `security` CLI.
- * Linux: Uses libsecret (GNOME Keyring) via `secret-tool` CLI.
- * Windows: Not yet supported.
+ * macOS: every keychain operation goes through the signed `Agents CLI.app`
+ * helper. The helper attaches a biometry-or-passcode access control to every
+ * item it writes, so the OS itself gates decryption with Touch ID. A single
+ * LAContext lives for the helper's process lifetime, so a batch read pops
+ * Touch ID once and reuses the assertion for every item in the same batch.
+ * No /usr/bin/security fast path: that path bypasses the helper's ACL,
+ * exposes items to the legacy password sheet, and would defeat the model.
  *
- * The .app embeds a provisioning profile that grants the application-identifier
- * + keychain-access-groups entitlement macOS requires for kSecAttrSynchronizable
- * writes (iCloud Keychain). For device-local writes the helper is invoked with
- * the `nosync` arg.
+ * Linux: libsecret (GNOME Keyring) via the `secret-tool` CLI. No biometry —
+ * items are unlocked when the keyring is open.
+ *
+ * Windows: not supported.
+ *
+ * Items are device-local: the biometry access control requires the OS to
+ * treat them as bound to this device, so cross-machine propagation goes
+ * through the explicit export/import flow in src/lib/secrets/sync.ts
+ * rather than the system's cloud-keychain path.
  */
 
-import { fileURLToPath } from 'url';
 import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { linuxBackend } from './linux.js';
+import { getKeychainHelperPath } from './install-helper.js';
 
 const SERVICE_PREFIX = 'agents-cli';
 const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
@@ -72,10 +81,6 @@ function isLinux(): boolean {
   return process.platform === 'linux';
 }
 
-function isMacOS(): boolean {
-  return process.platform === 'darwin';
-}
-
 /** Build the keychain item name for a profile provider token. */
 export function profileKeychainItem(provider: string): string {
   return `${SERVICE_PREFIX}.${provider}.token`;
@@ -90,25 +95,6 @@ function keychainItemRequiresUserPresence(item: string): boolean {
   return item.startsWith(SECRETS_ITEM_PREFIX) || item.startsWith(BUNDLES_ITEM_PREFIX);
 }
 
-// Resolve the bundled, signed-and-notarized Agents CLI.app shipped
-// alongside the compiled JS. The .app embeds a provisioning profile that
-// grants the application-identifier + keychain-access-groups entitlements
-// macOS requires for kSecAttrSynchronizable writes. Bare CLI binaries
-// (ad-hoc or Developer ID) cannot do this; only an .app with an embedded
-// profile can. So compile-on-first-use is not possible — the binary must
-// be prebuilt by `scripts/build-keychain-helper.sh` and shipped.
-function ensureKeychainHelper(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const binPath = path.join(here, 'Agents CLI.app', 'Contents', 'MacOS', 'Agents CLI');
-  if (!fs.existsSync(binPath)) {
-    throw new Error(
-      `Keychain helper missing at ${binPath}. ` +
-      'This npm package was built without the signed helper bundle. Reinstall agents-cli.'
-    );
-  }
-  return binPath;
-}
-
 /**
  * Test seam: lets bundle storage tests swap the keychain backend for an
  * in-memory map without touching the user's real keychain. Mocking is
@@ -116,10 +102,10 @@ function ensureKeychainHelper(): string {
  * tests) is destructive and would require an interactive Keychain unlock.
  */
 export interface KeychainBackend {
-  has(item: string, sync: boolean): boolean;
-  get(item: string, sync: boolean): string;
-  set(item: string, value: string, sync: boolean): void;
-  delete(item: string, sync: boolean): boolean;
+  has(item: string): boolean;
+  get(item: string): string;
+  set(item: string, value: string): void;
+  delete(item: string): boolean;
   list(prefix: string): string[];
 }
 
@@ -132,158 +118,148 @@ export function setKeychainBackendForTest(b: KeychainBackend | null): KeychainBa
   return prev;
 }
 
-// Backend routing: non-sync items go through /usr/bin/security with an empty
-// trusted-app ACL; existing items written by older versions retain their ACL.
-// Sync items must go through the signed .app — only the .app
-// holds the keychain-access-groups entitlement macOS requires for
-// kSecAttrSynchronizable. Enumeration also goes through the .app because the
-// security CLI doesn't expose listing by service prefix.
+/**
+ * Items whose name does NOT start with `agents-cli.` belong to another
+ * application (e.g. Anthropic's `Claude Code-credentials-*`). Their ACL
+ * trusts THEIR writer, not our signed helper, so routing them through our
+ * helper produces a legacy password sheet. `/usr/bin/security` reads them
+ * silently because it's in the default trusted-app list on most user-owned
+ * keychain items. And we MUST NOT JIT-migrate them — the owning app
+ * expects to re-write the item with its own ACL design.
+ */
+function isOurItem(item: string): boolean {
+  return item.startsWith('agents-cli.');
+}
 
-/** Check if a keychain/keyring item exists. */
-export function hasKeychainToken(item: string, sync = false): boolean {
-  if (backend) return backend.has(item, sync);
+/** Check if a keychain/keyring item exists. Never prompts for biometry. */
+export function hasKeychainToken(item: string): boolean {
+  if (backend) return backend.has(item);
   assertSupportedPlatform();
-  if (isLinux()) return linuxBackend.has(item, sync);
-  // macOS: `security find-generic-password` *without* `-w` only reads item
-  // metadata, never the value, so it doesn't consult the item's ACL — no
-  // prompt. The previous code passed `-w`, which forced decryption and
-  // triggered the "security wants to access keychain" sheet on every item
-  // the helper had written. Existence checks never need the value.
-  if (spawnSync('security', ['find-generic-password', '-a', os.userInfo().username, '-s', item], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  }).status === 0) return true;
-  // Fallback: binary searches both synced and non-synced via kSecAttrSynchronizableAny
-  const bin = ensureKeychainHelper();
+  if (isLinux()) return linuxBackend.has(item);
+  if (!isOurItem(item)) {
+    return spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    }).status === 0;
+  }
+  const bin = getKeychainHelperPath();
   return spawnSync(bin, ['has', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
   }).status === 0;
 }
 
-/** Retrieve a secret value from the keychain/keyring. Throws if not found. */
-export function getKeychainToken(item: string, sync = false): string {
-  if (backend) return backend.get(item, sync);
+/**
+ * Retrieve a secret value from the keychain/keyring. Throws if not found.
+ *
+ * On macOS this triggers Touch ID (or reuses an assertion held by an earlier
+ * call in the same process). For bundles, prefer getKeychainTokens() so a
+ * single biometric prompt covers every key in the batch.
+ */
+export function getKeychainToken(item: string): string {
+  if (backend) return backend.get(item);
   assertSupportedPlatform();
-  if (isLinux()) return linuxBackend.get(item, sync);
-  // macOS: read through the signed helper FIRST. The helper holds the
-  // keychain-access-group entitlement (so it reads iCloud-synced items) and
-  // supplies an LAContext for items protected by kSecAttrAccessControl.
-  //
-  // Bare `security` is only a fallback for when the helper bundle is absent
-  // (e.g. a dev build without the .app). It must NOT be tried first: macOS
-  // shows the "security wants to access … enter keychain password" sheet on any
-  // item whose ACL doesn't list `security`, which is every item we write. That
-  // security-first ordering is exactly what made bundle reads prompt on every
-  // `secrets exec`.
-  let bin: string;
-  try {
-    bin = ensureKeychainHelper();
-  } catch {
-    // Helper bundle missing — degrade to security. Reads items security created
-    // without a prompt; restrictive items may still prompt (dev-build only).
-    const secResult = spawnSync('security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
+  if (isLinux()) return linuxBackend.get(item);
+  if (!isOurItem(item)) {
+    const sec = spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    if (secResult.status === 0) {
-      const token = secResult.stdout?.toString().trim();
+    if (sec.status === 0) {
+      const token = sec.stdout?.toString().trim();
       if (token) return token;
     }
     throw new Error(`Keychain item '${item}' not found.`);
   }
-  // Helper searches both synced and non-synced via kSecAttrSynchronizableAny.
-  const args = keychainItemRequiresUserPresence(item)
-    ? ['get-auth', item, os.userInfo().username, '--reason', 'read agents-cli secrets']
-    : ['get', item, os.userInfo().username];
-  const result = spawnSync(bin, args, {
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['get', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status === 1) throw new Error(`Keychain item '${item}' not found.`);
+  if (result.status === 4) throw new Error(`Touch ID cancelled while reading '${item}'.`);
   if (result.status !== 0) {
     const msg = result.stderr?.toString().trim();
     throw new Error(msg || `Failed to read keychain item '${item}'.`);
   }
-  const token = result.stdout?.toString().trim();
+  const token = result.stdout?.toString();
   if (!token) throw new Error(`Keychain item '${item}' exists but is empty.`);
   return token;
 }
 
 /**
- * Read multiple keychain items, returning a Map keyed by item name. Missing or
- * unreadable items are simply absent from the map (the caller decides whether a
- * given key was required).
+ * Batch-read multiple keychain items behind a single Touch ID prompt. The
+ * macOS helper holds one LAContext for its whole process: the first protected
+ * item triggers Touch ID, every later item in the same invocation reuses the
+ * assertion. Missing items are absent from the returned map (caller decides
+ * whether that's an error).
  *
- * On macOS this uses the signed helper's `get-batch` command so one LAContext
- * can satisfy all protected item reads for the bundle.
+ * On Linux or when a test backend is installed, falls back to individual
+ * lookups — no biometric prompt path on those platforms.
  */
-export function getKeychainTokensBatch(items: string[], sync = false, reason = 'read agents-cli secrets'): Map<string, string> {
+export function getKeychainTokens(items: string[]): Map<string, string> {
   const result = new Map<string, string>();
+  if (items.length === 0) return result;
   if (backend) {
     for (const item of items) {
-      try {
-        result.set(item, backend.get(item, sync));
-      } catch {
-        // Missing or unreadable — skip; the caller reports which key is missing.
-      }
+      try { result.set(item, backend.get(item)); } catch { /* missing — skip */ }
     }
     return result;
   }
   assertSupportedPlatform();
   if (isLinux()) {
     for (const item of items) {
-      try {
-        result.set(item, linuxBackend.get(item, sync));
-      } catch {
-        // Missing or unreadable — skip; the caller reports which key is missing.
-      }
+      try { result.set(item, linuxBackend.get(item)); } catch { /* missing — skip */ }
     }
     return result;
   }
-  let bin: string;
-  try {
-    bin = ensureKeychainHelper();
-  } catch {
-    for (const item of items) {
-      try {
-        result.set(item, getKeychainToken(item, sync));
-      } catch {
-        // Missing or unreadable — skip; the caller reports which key is missing.
-      }
-    }
-    return result;
-  }
-  const proc = spawnSync(bin, ['get-batch', os.userInfo().username, '--reason', reason, ...items], {
+  const bin = getKeychainHelperPath();
+  const child = spawnSync(bin, ['get-batch', os.userInfo().username, ...items], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (proc.status !== 0) return result;
-  const out = proc.stdout?.toString() || '';
-  for (const line of out.split('\n')) {
-    if (!line) continue;
-    const tab = line.indexOf('\t');
-    if (tab <= 0) continue;
-    const item = line.slice(0, tab);
-    const encoded = line.slice(tab + 1);
-    result.set(item, Buffer.from(encoded, 'base64').toString('utf8'));
+  if (child.status === 4) {
+    throw new Error(`Touch ID cancelled while reading ${items.length} keychain item(s).`);
+  }
+  if (child.status !== 0) {
+    const msg = child.stderr?.toString().trim();
+    throw new Error(msg || `Failed to batch-read ${items.length} keychain items.`);
+  }
+  const out = child.stdout?.toString() ?? '';
+  // Output is a sequence of records, one per service in input order:
+  //   "V <service>\n<value>\n"   (present)
+  //   "M <service>\n"            (missing)
+  // Service names are validated newline/'='-free by setKeychainToken below
+  // and values are rejected if they contain newlines — so splitting on '\n'
+  // and walking line-by-line is unambiguous.
+  const lines = out.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line === '' && i === lines.length - 1) break;
+    if (line.startsWith('V ')) {
+      const service = line.slice(2);
+      const value = lines[i + 1] ?? '';
+      result.set(service, value);
+      i += 2;
+    } else if (line.startsWith('M ')) {
+      i += 1;
+    } else if (line === '') {
+      i += 1;
+    } else {
+      throw new Error(`Malformed get-batch output line: ${JSON.stringify(line)}`);
+    }
   }
   return result;
 }
 
-/** Store or update a secret value in the keychain/keyring. iCloud-synced when sync=true (macOS only). */
-export function setKeychainToken(item: string, value: string, sync = false): void {
-  if (backend) { backend.set(item, value, sync); return; }
+/** Store or update a secret value in the keychain/keyring. Device-local; biometry-gated on macOS. */
+export function setKeychainToken(item: string, value: string): void {
+  if (backend) { backend.set(item, value); return; }
   assertSupportedPlatform();
   if (!value || !value.trim()) throw new Error('Secret value is empty.');
   if (/[\r\n]/.test(value)) throw new Error('Secret value contains newlines, which are not supported.');
   if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
 
-  if (isLinux()) { linuxBackend.set(item, value, sync); return; }
+  if (isLinux()) { linuxBackend.set(item, value); return; }
 
-  // macOS path. Both sync and non-sync writes go through the .app helper so
-  // the item picks up kSecAttrAccessControl user-presence protection. The
-  // helper takes an optional `nosync` arg for device-local writes; sync writes
-  // get kSecAttrSynchronizable=true by default.
-  const bin = ensureKeychainHelper();
-  const args = ['set', item, os.userInfo().username];
-  if (!sync) args.push('nosync');
-  const result = spawnSync(bin, args, {
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['set', item, os.userInfo().username], {
     input: value,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -293,26 +269,12 @@ export function setKeychainToken(item: string, value: string, sync = false): voi
   }
 }
 
-/** Delete a keychain/keyring item. Returns true if it existed. */
-export function deleteKeychainToken(item: string, sync = false): boolean {
-  if (backend) return backend.delete(item, sync);
+/** Delete a keychain/keyring item. Returns true if it existed. Never prompts for biometry. */
+export function deleteKeychainToken(item: string): boolean {
+  if (backend) return backend.delete(item);
   assertSupportedPlatform();
-  if (isLinux()) return linuxBackend.delete(item, sync);
-  // macOS: delete through the signed helper FIRST. `security delete-generic-password`
-  // prompts for keychain-password authorization on any item whose ACL doesn't list
-  // `security` — which is every item the helper writes. Same reasoning as
-  // getKeychainToken's helper-first ordering above. The helper also handles the
-  // synced keychain via kSecAttrSynchronizableAny in one call.
-  let bin: string;
-  try {
-    bin = ensureKeychainHelper();
-  } catch {
-    // Helper bundle missing (dev build). Fall back to security; it can only
-    // touch non-synced items and may prompt for items it didn't write.
-    return spawnSync('security', ['delete-generic-password', '-a', os.userInfo().username, '-s', item], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).status === 0;
-  }
+  if (isLinux()) return linuxBackend.delete(item);
+  const bin = getKeychainHelperPath();
   return spawnSync(bin, ['delete', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
   }).status === 0;
@@ -323,8 +285,7 @@ export function listKeychainItems(prefix: string): string[] {
   if (backend) return backend.list(prefix);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.list(prefix);
-  // macOS path
-  const bin = ensureKeychainHelper();
+  const bin = getKeychainHelperPath();
   const result = spawnSync(bin, ['list', prefix], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -336,6 +297,28 @@ export function listKeychainItems(prefix: string): string[] {
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * One-time upgrade for a keychain item that was written by a previous helper
+ * generation with a trusted-app ACL. The helper reads the legacy item
+ * (which may pop the password sheet once), then deletes and re-adds it with
+ * the biometry access control. Returns true if the item was rewritten, false
+ * if no item by that name exists. macOS only — Linux backends have no ACL
+ * concept, so the call is a no-op there.
+ */
+export function migrateKeychainItem(item: string): boolean {
+  if (backend) return backend.has(item);
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.has(item);
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['migrate-acl', item, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  const msg = result.stderr?.toString().trim();
+  throw new Error(msg || `Failed to migrate keychain item '${item}'.`);
+}
+
 /** Options controlling how secret refs are resolved. */
 export interface ResolveOptions {
   /** Translate a short keychain ID to a fully namespaced item name. */
@@ -344,8 +327,6 @@ export interface ResolveOptions {
   allowExec?: boolean;
   /** Restrict env: refs to this allowlist. When undefined, any env var may be read. */
   envAllowlist?: string[];
-  /** Read keychain refs from the iCloud-synced keychain backend. */
-  iCloudSync?: boolean;
 }
 
 function expandHome(p: string): string {
@@ -360,7 +341,7 @@ export function resolveRef(ref: SecretRef, opts: ResolveOptions = {}): string {
   switch (ref.provider) {
     case 'keychain': {
       const item = opts.keychainItemFor ? opts.keychainItemFor(ref.value) : ref.value;
-      return getKeychainToken(item, opts.iCloudSync);
+      return getKeychainToken(item);
     }
     case 'env': {
       const name = ref.value;

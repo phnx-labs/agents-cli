@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
+import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 
 const HOME = os.homedir();
@@ -14,6 +15,16 @@ const SHIMS_DIR = path.join(HOME, '.agents', '.cache', 'shims');
 const SYSTEM_DIR = path.join(HOME, '.agents-system');
 const USER_DIR = path.join(HOME, '.agents');
 const AGENTS_BIN = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const INSTALL_HELPER_SCRIPT = fileURLToPath(new URL('./install-helper.js', import.meta.url));
+
+function installKeychainHelper() {
+  if (process.platform !== 'darwin') return;
+  if (!fs.existsSync(INSTALL_HELPER_SCRIPT)) return;
+  // Sub-process so a hard failure (codesign / spctl missing on a weird host)
+  // can't take down the rest of postinstall. install-helper.js stays silent
+  // on no-op and emits one stdout line on success.
+  spawnSync(process.execPath, [INSTALL_HELPER_SCRIPT], { stdio: 'inherit' });
+}
 
 function shellQuote(value) {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -24,6 +35,7 @@ const isGlobalInstall = process.env.npm_config_global || process.argv.includes('
 if (!isGlobalInstall) {
   // Still create user directories for local installs
   fs.mkdirSync(USER_DIR, { recursive: true, mode: 0o700 });
+  installKeychainHelper();
   console.log(`
 agents-cli installed locally.
 To complete setup, run: npx agents setup
@@ -35,6 +47,10 @@ To complete setup, run: npx agents setup
 fs.mkdirSync(SHIMS_DIR, { recursive: true });
 fs.mkdirSync(SYSTEM_DIR, { recursive: true });
 fs.mkdirSync(USER_DIR, { recursive: true, mode: 0o700 });
+
+// Copy the signed macOS Keychain helper to a stable user path so its trusted-app
+// ACLs survive future npm publishes (which re-sign the bundle).
+installKeychainHelper();
 
 // One-shot idempotent migrations
 function runMigrations() {
