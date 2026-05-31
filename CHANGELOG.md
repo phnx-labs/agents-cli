@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.20.1
+
+**Routines (fix wrong "failed" status on healthy detached runs)**
+
+- `monitorRunningJobs` was hardcoding `status: 'failed'` whenever it detected that a detached child had exited — with no way to read the real exit code, because `executeJobDetached` fires-and-forgets the child. Every routine that ran via the scheduler ended up labeled `failed/exitCode: null`, even when the agent completed cleanly.
+- Fix: when finalizing a vanished child, scan the tail of its stream-json `stdout.log` for Claude's `type: result` terminator (which carries `is_error`). If found, set `status` and `exitCode` from it. Only fall back to `failed` when no result marker exists (process was killed mid-run).
+- Codex/Gemini run finalization continues to fall back to `failed` until their stream tail parsers are added.
+
 ## 1.20.0
 
 **Routines (overdue detection + catchup)**
