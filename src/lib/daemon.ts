@@ -15,6 +15,7 @@ import { getDaemonDir as getDaemonDirRoot } from './state.js';
 import { listJobs as listAllJobs } from './routines.js';
 import { JobScheduler } from './scheduler.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
+import { detectOverdueJobs, notifyOverdue } from './overdue.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 
@@ -178,6 +179,25 @@ export async function runDaemon(): Promise<void> {
   log('INFO', `Loaded ${scheduled.length} jobs`);
   for (const job of scheduled) {
     log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
+  }
+
+  // Backlog detection: any enabled recurring job whose most-recent expected
+  // fire is older than its most-recent recorded run is overdue. Happens when
+  // the laptop was off or the daemon crashed through a scheduled fire.
+  // We log it and pop a native notification — the user can review with
+  // `agents routines list` and run them with `agents routines catchup`.
+  try {
+    const overdue = detectOverdueJobs();
+    if (overdue.length > 0) {
+      log('WARN', `${overdue.length} routine(s) overdue:`);
+      for (const job of overdue) {
+        const last = job.lastRanAt ? job.lastRanAt.toISOString() : 'never';
+        log('WARN', `  ${job.name} -- expected ${job.expectedAt.toISOString()}, last ran ${last}`);
+      }
+      notifyOverdue(overdue);
+    }
+  } catch (err) {
+    log('ERROR', `Overdue detection failed: ${(err as Error).message}`);
   }
 
   // Before the BrowserService comes up, reap browser + tunnel processes

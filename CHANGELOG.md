@@ -1,6 +1,18 @@
 # Changelog
 
-## Unreleased
+## 1.20.0
+
+**Routines (overdue detection + catchup)**
+
+- Detect routines whose most recent scheduled fire was missed (laptop off, daemon crashed, reboot). The daemon logs them on startup and pops a native desktop notification (`osascript` on macOS, `notify-send` on Linux).
+- `agents routines list` annotates overdue rows with `(overdue)` and prints a footer pointing at the catchup command.
+- New `agents routines catchup` command: lists overdue routines and fires them in the background under the scheduler. `--dry-run` lists without triggering.
+- `JobScheduler.schedule` now sets croner's `catch: true` and forwards `timezone` defensively, so a synchronous throw in one job's callback can't kill the whole cron loop.
+
+**Landing page (agents-cli.sh)**
+
+- Expanded the homepage with seven new sections: rotate accounts (`--rotate`), parallel teams (`agents teams`), browser automation, cross-agent session search, routines/cron, keychain secrets, and machine-to-machine sync (`agents drive`).
+- Rewrote meta description + lede to spell out the actual feature set (pin versions, swap models, rotate accounts, drive a browser, spawn parallel teams, schedule on cron) instead of just "same interface, on your machine."
 
 **Codex (commands-as-skills sync fix)**
 
