@@ -374,6 +374,40 @@ export function extractReport(stdoutPath: string, agentType: AgentId): string | 
   }
 }
 
+/** Derive the final status of a detached run by reading the agent's stream-json
+ *  tail. Detached children fire-and-forget, so we never see their exit code
+ *  directly — but Claude's stream-json terminates with a `type: result` line
+ *  that carries `is_error`. If we find it, the run completed cleanly (modulo
+ *  agent-reported error). If not, the process likely died mid-stream and the
+ *  caller should treat the run as failed. */
+function inferFinalStatusFromLog(
+  stdoutPath: string,
+  agent: AgentId,
+): { status: 'completed' | 'failed'; exitCode: number } | null {
+  if (!fs.existsSync(stdoutPath)) return null;
+  try {
+    const content = fs.readFileSync(stdoutPath, 'utf-8');
+    const lines = content.split('\n').filter((l) => l.trim());
+    // Walk backwards over the last few lines — the result marker is always
+    // at the tail. Cap the scan so a huge stdout doesn't iterate forever.
+    for (let i = lines.length - 1, scanned = 0; i >= 0 && scanned < 20; i--, scanned++) {
+      try {
+        const parsed = JSON.parse(lines[i]);
+        if (agent === 'claude' && parsed.type === 'result') {
+          return parsed.is_error
+            ? { status: 'failed', exitCode: 1 }
+            : { status: 'completed', exitCode: 0 };
+        }
+      } catch {
+        // malformed JSONL line — keep scanning
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Scan all runs marked "running" and finalize any whose process has exited. */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
@@ -399,12 +433,22 @@ export function monitorRunningJobs(): void {
         try {
           process.kill(meta.pid, 0);
         } catch { /* process no longer running */
-          meta.status = 'failed';
+          const runDirPath = path.join(jobRunsPath, runDirEntry.name);
+          const stdoutPath = path.join(runDirPath, 'stdout.log');
+
+          // Prefer the agent's own success/error marker; fall back to "failed"
+          // only when the stream ended without one (process killed mid-run).
+          const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent);
+          if (inferred) {
+            meta.status = inferred.status;
+            meta.exitCode = inferred.exitCode;
+          } else {
+            meta.status = 'failed';
+          }
           meta.completedAt = new Date().toISOString();
           writeRunMeta(meta);
 
-          const stdoutPath = path.join(jobRunsPath, runDirEntry.name, 'stdout.log');
-          extractAndSaveReport(stdoutPath, meta.agent, path.join(jobRunsPath, runDirEntry.name));
+          extractAndSaveReport(stdoutPath, meta.agent, runDirPath);
         }
       } catch { /* corrupt or unreadable meta.json */ }
     }
