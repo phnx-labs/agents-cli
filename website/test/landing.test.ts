@@ -42,7 +42,7 @@ describe('LANDING_HTML required content (EXAMPLE-365 spec)', () => {
     expect(LANDING_HTML).not.toMatch(/factory\s*floor/i);
   });
 
-  it('has H1 "agents" exactly', () => {
-    expect(LANDING_HTML).toMatch(/<h1[^>]*>agents<\/h1>/);
+  it('has H1 containing the agents wordmark image', () => {
+    expect(LANDING_HTML).toMatch(/<h1[^>]*><img[^>]+alt="agents"[^>]*><\/h1>/);
   });
 });
