@@ -19,9 +19,9 @@ export const LANDING_HTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>agents · the open client for AI coding agents</title>
-<meta name="description" content="The open client for AI coding agents. Run Claude, Codex, Gemini, Cursor — same interface, on your machine.">
+<meta name="description" content="The open client for AI coding agents. Pin versions, swap models, rotate accounts, drive a browser, spawn parallel teams, schedule on cron — one interface across Claude, Codex, Gemini, Cursor.">
 <meta property="og:title" content="agents · the open client for AI coding agents">
-<meta property="og:description" content="Run Claude, Codex, Gemini, Cursor — same interface, on your machine.">
+<meta property="og:description" content="One interface across Claude, Codex, Gemini, Cursor. Pin versions, swap models, rotate accounts, drive browsers, spawn parallel teams, schedule on cron.">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='28' font-family='monospace' fill='%23a3e635'%3E%3E%3C/text%3E%3C/svg%3E">
 ${gaSnippet}
@@ -163,7 +163,7 @@ ul li code { background: #141414; border: 1px solid #222; padding: 1px 6px; bord
 </nav>
 
 <h1>agents</h1>
-<p class="lede">The open client for AI coding agents. Run Claude, Codex, Gemini, Cursor — same interface, on your machine.</p>
+<p class="lede">The open client for AI coding agents. Pin versions, swap models, rotate accounts, drive a browser, spawn parallel teams, schedule on cron — one interface across Claude, Codex, Gemini, Cursor.</p>
 
 <div class="hero-video">
   <video id="demo-video" src="/demo.mp4" poster="/demo-poster.jpg" autoplay muted loop playsinline preload="metadata"></video>
@@ -179,6 +179,16 @@ ul li code { background: #141414; border: 1px solid #222; padding: 1px 6px; bord
 </div>
 <p class="muted">Or <code>npm install -g @phnx-labs/agents-cli</code> — also available as <code>ag</code>.</p>
 
+<h2>Run any model through any CLI</h2>
+<pre><span class="dim">$</span> agents profiles add kimi
+<span class="dim">$</span> agents run kimi <span class="dim">"refactor the queue worker"</span></pre>
+<p>Keep Claude Code's interface, swap in Kimi K2.5, MiniMax M2.5, GLM 5, Qwen3 Coder, or DeepSeek through OpenRouter. One key in your Keychain, every preset wired up. Run the model you want at the price you want.</p>
+
+<h2>Rotate across accounts — never hit a usage limit</h2>
+<pre><span class="dim">$</span> agents run claude --rotate <span class="dim">"run the full test suite"</span>
+<span class="dim">$</span> agents usage</pre>
+<p>Have multiple Claude logins? <code>--rotate</code> picks the least-used one automatically. <code>agents usage</code> shows the rate-limit gauge per agent so you can plan ahead. One subscription, multiple windows, zero wasted quota.</p>
+
 <h2>Chain agents in a pipeline</h2>
 <pre><span class="dim">$</span> agents run claude <span class="dim">"Find auth vulnerabilities in src/"</span> \\
     | agents run codex  <span class="dim">"Fix the issues Claude found"</span> \\
@@ -192,11 +202,51 @@ agents:
   codex: "0.116.0"</pre>
 <p><code>cd</code> into the project and every <code>agents</code> call resolves to those versions automatically. Like <code>.nvmrc</code>, but for AI. Nobody else does this.</p>
 
+<h2>Parallel agents, one command</h2>
+<pre><span class="dim">$</span> agents teams create pricing-page
+<span class="dim">$</span> agents teams add pricing-page claude <span class="dim">"rewrite /v2/pricing endpoint"</span> --name be
+<span class="dim">$</span> agents teams add pricing-page codex  <span class="dim">"build /pricing route"</span>        --name fe
+<span class="dim">$</span> agents teams add pricing-page claude <span class="dim">"run Playwright suite"</span>       --name qa --after be,fe
+<span class="dim">$</span> agents teams start pricing-page --watch</pre>
+<p>DAG dependencies (<code>--after</code>), isolated worktrees per teammate, live status. Spawn five Claudes and two Codex on the same task, wind them down with <code>agents teams disband</code>.</p>
+
+<h2>A browser your agents can drive</h2>
+<pre><span class="dim">$</span> agents browser start work
+<span class="dim">$</span> agents browser navigate https://example.com
+<span class="dim">$</span> agents browser click <span class="dim">ref_3</span>
+<span class="dim">$</span> agents browser screenshot
+<span class="dim">$</span> agents browser console</pre>
+<p>Full Chrome DevTools Protocol — navigate, click, type, screenshot, read console + network, record video. Hook it into any agent run. Replaces a cloud browser service with a local one you already have logged in.</p>
+
+<h2>Cross-agent session search</h2>
+<pre><span class="dim">$</span> agents sessions <span class="dim">"stripe webhook signature"</span>
+<span class="dim">$</span> agents sessions a7f3e2c1 --markdown</pre>
+<p>Every transcript from every agent, indexed and searchable. Find that fix from Tuesday — doesn't matter which CLI wrote it. Replay as markdown, filter by project, stream live with <code>sessions tail</code>.</p>
+
+<h2>Schedule agents on a cron</h2>
+<pre><span class="dim">$</span> agents routines add standup \\
+    --schedule <span class="dim">"0 9 * * 1-5"</span> \\
+    --agent claude \\
+    --prompt <span class="dim">"Draft a standup from yesterday's git log"</span></pre>
+<p>Recurring background work, plus one-shot <code>--at "14:30"</code>. Scheduler auto-starts on first add. Standups, weekly digests, nightly audits — your agents working while you sleep.</p>
+
+<h2>Keychain-backed secrets</h2>
+<pre><span class="dim">$</span> agents secrets create prod
+<span class="dim">$</span> agents secrets add prod STRIPE_API_KEY
+<span class="dim">$</span> agents run claude <span class="dim">"deploy the worker"</span> --secrets prod</pre>
+<p>No plaintext <code>.env</code> files, no leaked tokens in shell history. Bundles live in macOS Keychain, iCloud-synced across your machines, injected as env vars only at run time.</p>
+
 <h2>Install skills, MCP servers, and commands once</h2>
 <pre><span class="dim">$</span> agents skills add gh:yourname/python-expert
 <span class="dim">$</span> agents install mcp:com.notion/mcp
 <span class="dim">$</span> agents commands add gh:yourname/commands</pre>
 <p>Skills, MCP servers, slash commands, hooks, permissions — installed once, synced to every active agent version. No more <code>claude mcp add</code> then <code>codex mcp add</code> then editing Gemini's config file by hand.</p>
+
+<h2>Sync your agent memory across machines</h2>
+<pre><span class="dim">$</span> agents drive remote you@desktop.local
+<span class="dim">$</span> agents drive push
+<span class="dim">$</span> agents drive attach</pre>
+<p>rsync your sessions and config between laptop, desktop, and server. <code>attach</code> points <code>~/.claude/</code> (and friends) at the synced location so sessions write directly to the shared drive.</p>
 
 <h2>One config repo, every harness</h2>
 <pre><span class="dim">$</span> tree ~/.agents
