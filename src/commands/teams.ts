@@ -875,6 +875,12 @@ export function registerTeamsCommands(program: Command): void {
         }
       }
 
+      if (opts.worktree !== undefined) {
+        if (!opts.worktree || !/^[A-Za-z0-9_-]+$/.test(opts.worktree)) {
+          die(`Invalid worktree name '${opts.worktree}'. Use letters, numbers, '-', or '_'.`);
+        }
+      }
+
       const after = opts.after
         ? opts.after.split(',').map((s) => s.trim()).filter(Boolean)
         : [];

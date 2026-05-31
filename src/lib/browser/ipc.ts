@@ -23,7 +23,8 @@ export class BrowserDaemonNotRunningError extends Error {
 export function formatBrowserDaemonNotRunningError(): string {
   return [
     'Browser daemon not running.',
-    'Start it with: agents browser start --profile <name>',
+    'Start it with: agents browser start (auto-picks an installed browser)',
+    'Or pin a profile: agents browser start --profile <name>',
     'List profiles: agents browser profiles list',
   ].join('\n');
 }
@@ -150,12 +151,14 @@ export class BrowserIPCServer {
           taskName: request.taskName,
           url: request.url,
           endpointName: request.endpoint,
+          skipDomainSkill: request.skipDomainSkill,
         });
         return {
           ok: true,
           task: result.name,
           tabId: result.tabId,
           windowTargetId: result.windowId,
+          skill: result.skill,
         };
       }
 

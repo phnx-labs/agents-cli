@@ -915,14 +915,13 @@ Examples:
       force?: boolean;
     }) => {
       try {
-        const { resolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
+        const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
-        const bundle = readBundle(resolvedBundleName);
 
         if (opts.to1password) {
           assertOpAvailable();
           const vault = await resolveVault(opts.vault);
-          const env = resolveBundleEnv(bundle, { caller: `1Password vault ${vault}` });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}` });
           let created = 0;
           let overwritten = 0;
           let skipped = 0;
@@ -953,7 +952,7 @@ Examples:
           console.error(chalk.red('export to a TTY requires --plaintext (prevents shoulder-surfing).'));
           process.exit(1);
         }
-        const env = resolveBundleEnv(bundle, { caller: `export to shell` });
+        const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `export to shell` });
         const prefix = bundleToEnvPrefix(resolvedBundleName);
         for (const [k, v] of Object.entries(env)) {
           const exportKey = isReservedEnvName(k) ? `${prefix}_${k}` : k;
@@ -978,10 +977,9 @@ Examples:
           console.error(chalk.red('Usage: agents secrets exec <bundle> -- <command...>'));
           process.exit(1);
         }
-        const { resolveBundleEnv } = await import('../lib/secrets/bundles.js');
-        const bundle = readBundle(bundleName);
+        const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
         const [cmd, ...args] = commandParts;
-        const secretEnv = resolveBundleEnv(bundle, { caller: `command ${cmd}` });
+        const { env: secretEnv } = readAndResolveBundleEnv(bundleName, { caller: `command ${cmd}` });
         const { spawn } = await import('child_process');
         const proc = spawn(cmd, args, {
           stdio: 'inherit',

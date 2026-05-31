@@ -56,7 +56,6 @@ function readSkillCommandMarker(skillMdPath: string): string | null {
 }
 
 export function shouldInstallCommandAsSkill(agent: AgentId, version: string): boolean {
-  if (agent !== 'codex') return false;
   return !supports(agent, 'commands', version).ok && supports(agent, 'skills', version).ok;
 }
 

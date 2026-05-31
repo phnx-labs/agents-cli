@@ -11,9 +11,12 @@ import {
   resolveSocketPath,
   resolveLogPath,
   resolvePolicyPath,
+  resolvePeersPath,
   describeTransport,
   loadComputerAllowList,
+  loadDefaultPeers,
   writeComputerPolicy,
+  writeComputerPeers,
 } from '../lib/computer-rpc.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
@@ -65,6 +68,9 @@ function registerStatusCommand(program: Command): void {
       const previewParts = allowed.slice(0, 5);
       const previewSuffix = allowed.length > 5 ? ` (+${allowed.length - 5} more)` : '';
       console.log(`policy:    ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed${allowed.length > 0 ? `: ${previewParts.join(', ')}${previewSuffix}` : ''}`);
+
+      const callers = loadDefaultPeers();
+      console.log(`peers:     ${callers.length} caller${callers.length === 1 ? '' : 's'} (peer-auth on socket)`);
 
       if (!installed) {
         console.log('');
@@ -321,6 +327,15 @@ function registerStartCommand(program: Command): void {
         console.log(`          - "Computer(com.apple.finder)"`);
       }
 
+      // Peer-auth allow list — which caller executables may connect to
+      // the socket. Default: this CLI's Node binary, plus Rush.app if
+      // installed. A `nc -U socket` from a malicious npm postinstall has
+      // a different exec path and gets refused at accept().
+      const callers = loadDefaultPeers();
+      writeComputerPeers(callers);
+      console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
+      for (const p of callers) console.log(`        ${p}`);
+
       // Bootout first to clear any prior registration. Best-effort.
       try {
         execFileSync('/bin/launchctl', ['bootout', domain, plistPath], { stdio: 'pipe' });
@@ -394,6 +409,13 @@ function registerReloadCommand(program: Command): void {
       const allowed = loadComputerAllowList();
       writeComputerPolicy(allowed);
       console.log(`policy: ${allowed.length} app${allowed.length === 1 ? '' : 's'} allowed (${resolvePolicyPath()})`);
+
+      // Rewrite peers list too — an upgrade of the npm-global CLI moves
+      // its node path; without this the reloaded daemon would reject the
+      // very binary that just signaled it.
+      const callers = loadDefaultPeers();
+      writeComputerPeers(callers);
+      console.log(`peers:  ${callers.length} caller${callers.length === 1 ? '' : 's'} allowed (${resolvePeersPath()})`);
 
       // Resolve the daemon's pid via `launchctl list <label>`. The plist
       // output includes a "PID" key when the service is running.

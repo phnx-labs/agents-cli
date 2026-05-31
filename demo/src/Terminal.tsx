@@ -25,7 +25,7 @@ const Typewriter: React.FC<{ text: string; startFrame: number; color: string }> 
             display: "inline-block",
             width: 10,
             height: 20,
-            backgroundColor: "#a3e635",
+            backgroundColor: "#b3ff0c",
             marginLeft: 2,
             opacity: Math.sin(elapsed * 0.3) > 0 ? 1 : 0,
           }}
@@ -42,7 +42,7 @@ const Spinner: React.FC<{ startFrame: number }> = ({ startFrame }) => {
   if (elapsed < 0) return null;
   const chars = [".", "..", "...", "....", "...."];
   const idx = Math.floor(elapsed / 4) % chars.length;
-  return <span style={{ color: "#a3e635" }}>{chars[idx]}</span>;
+  return <span style={{ color: "#b3ff0c" }}>{chars[idx]}</span>;
 };
 
 // ── Single terminal line ──
@@ -103,7 +103,7 @@ export const Terminal: React.FC<{
         borderRadius: 12,
         border: "1px solid #222",
         overflow: "hidden",
-        boxShadow: "0 25px 80px rgba(0,0,0,0.6), 0 0 120px rgba(163,230,53,0.03)",
+        boxShadow: "0 25px 80px rgba(0,0,0,0.6), 0 0 120px rgba(179,255,12,0.03)",
       }}
     >
       {/* Title bar */}

@@ -22,7 +22,7 @@ import {
 import type { AgentId } from '../lib/types.js';
 import { profileExists, resolveProfileForRun } from '../lib/profiles.js';
 import { setHelpSections } from '../lib/help.js';
-import { readBundle, resolveBundleEnv, describeBundle } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv, describeBundle } from '../lib/secrets/bundles.js';
 import {
   getConfiguredRunStrategy,
   normalizeRunStrategy,
@@ -350,7 +350,7 @@ export function registerRunCommand(program: Command): void {
       let secretsEnv: Record<string, string> = {};
       for (const bundleName of options.secrets) {
         try {
-          const bundle = readBundle(bundleName);
+          const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, { caller: `agent ${agent}` });
           const entries = describeBundle(bundle);
           const counts: Record<string, number> = {};
           for (const e of entries) {
@@ -358,7 +358,7 @@ export function registerRunCommand(program: Command): void {
           }
           const breakdown = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ');
           console.log(chalk.gray(`[secrets] Resolved ${bundleName}: ${entries.length} keys (${breakdown})`));
-          secretsEnv = { ...secretsEnv, ...resolveBundleEnv(bundle, { caller: `agent ${agent}` }) };
+          secretsEnv = { ...secretsEnv, ...bundleEnv };
         } catch (err) {
           console.error(chalk.red((err as Error).message));
           process.exit(1);

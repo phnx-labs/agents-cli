@@ -405,9 +405,9 @@ export function registerVersionsCommands(program: Command): void {
                 if (userSelection) {
                   selection = userSelection;
                 }
-              } else if (hasNewResources(newResources, agent)) {
+              } else if (hasNewResources(newResources, agent, installedVersion)) {
                 // Some synced, but NEW resources available - prompt for new only
-                const userSelection = await promptNewResourceSelection(agent, newResources);
+                const userSelection = await promptNewResourceSelection(agent, newResources, installedVersion);
                 if (userSelection) {
                   selection = userSelection;
                 }
@@ -737,9 +737,9 @@ export function registerVersionsCommands(program: Command): void {
                   console.log(chalk.green(`Synced: ${syncedTypes.join(', ')}`));
                 }
               }
-            } else if (hasNewResources(newResources, agentId)) {
+            } else if (hasNewResources(newResources, agentId, finalVersion)) {
               // Has synced before, but NEW items available
-              const userSelection = await promptNewResourceSelection(agentId, newResources);
+              const userSelection = await promptNewResourceSelection(agentId, newResources, finalVersion);
               if (userSelection && Object.keys(userSelection).length > 0) {
                 const syncResult = syncResourcesToVersion(agentId, finalVersion, userSelection);
                 const syncedTypes: string[] = [];

@@ -21,7 +21,7 @@ export interface Scene {
   clear?: boolean;        // clear screen before this scene
 }
 
-const G = '#a3e635';  // green accent
+const G = '#b3ff0c';  // green accent
 const W = '#e8e8e8';  // white text
 const D = '#777777';  // dim/gray
 const Y = '#facc15';  // yellow

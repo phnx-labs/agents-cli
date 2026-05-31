@@ -39,6 +39,17 @@ struct Policy {
 
 var policy = Policy()
 
+// Peer-auth allow list — which caller executables may connect to the
+// socket. Same fail-safe semantics as `policy`: missing/unparseable file
+// means empty set means no peer is allowed to connect. The CLI rewrites
+// this file at every `start`/`reload`, so the daemon picks up new caller
+// paths (npm-global upgrades, new Rush.app installs) on SIGHUP.
+struct Peers {
+    var allow: Set<String> = []
+}
+
+var peers = Peers()
+
 // Resolve the policy file path. Env override mirrors the socket-path
 // override so tests can point us at a scratch file. Default lives next to
 // the socket under ~/.agents/.cache/helpers/.
@@ -47,6 +58,13 @@ func resolvePolicyPath() -> String {
         return env
     }
     return "\(NSHomeDirectory())/.agents/.cache/helpers/computer-policy.json"
+}
+
+func resolvePeersPath() -> String {
+    if let env = ProcessInfo.processInfo.environment["COMPUTER_HELPER_PEERS"], !env.isEmpty {
+        return env
+    }
+    return "\(NSHomeDirectory())/.agents/.cache/helpers/computer-peers.json"
 }
 
 // Load (or reload) the policy file. Errors are logged but never thrown:
@@ -72,6 +90,88 @@ func loadPolicy() {
     }
     policy = Policy(allow: Set(allow))
     log("policy loaded: \(allow.count) allowed bundle ids")
+}
+
+// Mirror of loadPolicy() for the peer-auth allow list. Same fail-safe
+// behavior: missing or unparseable = empty set = no caller may connect.
+func loadPeers() {
+    let path = resolvePeersPath()
+    guard FileManager.default.fileExists(atPath: path) else {
+        log("peers file missing at \(path) — empty allow list (fail-safe, all connections will be refused)")
+        peers = Peers()
+        return
+    }
+    guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+        log("peers file unreadable at \(path) — keeping previous allow list (\(peers.allow.count) entries)")
+        return
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let allow = json["allow"] as? [String] else {
+        log("peers file unparseable at \(path) — empty allow list (fail-safe)")
+        peers = Peers()
+        return
+    }
+    peers = Peers(allow: Set(allow))
+    log("peers loaded: \(allow.count) allowed caller paths")
+}
+
+// Resolve the peer (caller) pid for an accepted client fd via the
+// LOCAL_PEERPID socket option. Returns nil if the kernel call fails —
+// caller should refuse the connection.
+private let SOL_LOCAL_C: Int32 = 0          // <sys/un.h>: SOL_LOCAL
+private let LOCAL_PEERPID_C: Int32 = 0x002  // <sys/un.h>: LOCAL_PEERPID
+private let PROC_PIDPATH_MAX: Int = 4 * 1024 // PROC_PIDPATHINFO_MAXSIZE = 4*MAXPATHLEN
+
+func peerPid(fd: Int32) -> pid_t? {
+    var pid: pid_t = 0
+    var size = socklen_t(MemoryLayout<pid_t>.size)
+    let r = withUnsafeMutablePointer(to: &pid) { ptr -> Int32 in
+        return ptr.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout<pid_t>.size) { raw in
+            return getsockopt(fd, SOL_LOCAL_C, LOCAL_PEERPID_C, raw, &size)
+        }
+    }
+    if r != 0 { return nil }
+    if pid <= 0 { return nil }
+    return pid
+}
+
+// Resolve a pid to its executable path via libproc proc_pidpath(). Returns
+// nil if the process has already exited or the kernel call fails.
+func execPathForPid(_ pid: pid_t) -> String? {
+    var buf = [CChar](repeating: 0, count: PROC_PIDPATH_MAX)
+    let n = proc_pidpath(pid, &buf, UInt32(PROC_PIDPATH_MAX))
+    if n <= 0 { return nil }
+    return String(cString: buf)
+}
+
+// Check whether an accepted fd's peer is on the allow list. Logs both
+// allowed and denied outcomes for the audit trail. Sends one structured
+// error frame on denial so a legitimate-but-misconfigured client knows
+// what's wrong, then closes.
+func authorizePeer(fd: Int32) -> Bool {
+    guard let pid = peerPid(fd: fd) else {
+        log("peer-auth: LOCAL_PEERPID failed for fd=\(fd) — closing")
+        return false
+    }
+    guard let execPath = execPathForPid(pid) else {
+        log("peer-auth: proc_pidpath failed for pid=\(pid) — closing")
+        return false
+    }
+    if peers.allow.contains(execPath) {
+        log("peer-auth: pid=\(pid) exec=\(execPath) — allowed")
+        return true
+    }
+    log("peer-auth: pid=\(pid) exec=\(execPath) — DENIED (not in peers list)")
+    if let frame = encodeResponse([
+        "id": NSNull(),
+        "error": [
+            "code": "peer_denied",
+            "message": "caller exec \(execPath) (pid \(pid)) is not in the peer allow list — `agents computer reload` re-derives it from this binary",
+        ],
+    ]) {
+        _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, frame.count) }
+    }
+    return false
 }
 
 // Resolve socket path: --socket <path> argv, else env COMPUTER_HELPER_SOCKET.
@@ -128,14 +228,17 @@ func handleLine(_ line: Data) -> Data? {
 
 log("started pid=\(getpid())")
 
-// Load the allow-list policy before accepting any RPC calls. SIGHUP from
-// the CLI's `agents computer reload` triggers a reload.
+// Load the allow-list policy + peer-auth list before accepting any RPC
+// calls. SIGHUP from the CLI's `agents computer reload` triggers a reload
+// of both.
 loadPolicy()
+loadPeers()
 
 let sighupSource = DispatchSource.makeSignalSource(signal: SIGHUP, queue: .main)
 sighupSource.setEventHandler {
-    log("SIGHUP — reloading policy")
+    log("SIGHUP — reloading policy + peers")
     loadPolicy()
+    loadPeers()
 }
 sighupSource.resume()
 signal(SIGHUP, SIG_IGN) // DispatchSource needs the libc handler ignored
@@ -303,7 +406,18 @@ if let socketPath = resolveSocketPath() {
 // Handle one accepted connection. Line-delimited JSON-RPC, same wire format
 // as stdio. Runs on a background queue; serializes writes via a per-
 // connection lock.
+//
+// Peer-auth (F5): before reading any RPC bytes, resolve the connecting
+// pid via LOCAL_PEERPID and its exec path via proc_pidpath. If that path
+// isn't in `peers.allow`, send one structured `peer_denied` frame and
+// close. This blocks the obvious `nc -U socket` exfil — nc's exec path
+// won't be in the allow list — and forces the user to explicitly trust
+// any non-default caller via `agents computer trust <path>`.
 func handleConnection(fd: Int32) {
+    guard authorizePeer(fd: fd) else {
+        close(fd)
+        return
+    }
     let writeLock = NSLock()
     func writeData(_ data: Data) {
         writeLock.lock()

@@ -8,8 +8,11 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { safeJoin } from '../paths.js';
 
 const execFileAsync = promisify(execFile);
+
+const WORKTREE_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
 export async function isGitRepo(dir: string): Promise<boolean> {
   try {
@@ -45,8 +48,11 @@ export async function hasUncommittedChanges(worktreePath: string): Promise<boole
  * @returns The absolute path to the created worktree
  */
 export async function createWorktree(repoDir: string, worktreeName: string): Promise<string> {
+  if (!WORKTREE_NAME_RE.test(worktreeName)) {
+    throw new Error(`Invalid worktree name: ${worktreeName}`);
+  }
   const gitRoot = await getGitRoot(repoDir);
-  const worktreePath = path.join(gitRoot, '.agents', 'worktrees', worktreeName);
+  const worktreePath = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
   const branchName = `agents/${worktreeName}`;
 
   await fs.mkdir(path.dirname(worktreePath), { recursive: true });
@@ -69,8 +75,11 @@ export async function removeWorktree(
   worktreeName: string,
   deleteBranch = true
 ): Promise<void> {
+  if (!WORKTREE_NAME_RE.test(worktreeName)) {
+    throw new Error(`Invalid worktree name: ${worktreeName}`);
+  }
   const gitRoot = await getGitRoot(repoDir);
-  const worktreePath = path.join(gitRoot, '.agents', 'worktrees', worktreeName);
+  const worktreePath = safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
   const branchName = `agents/${worktreeName}`;
 
   try {
@@ -96,7 +105,10 @@ export async function removeWorktree(
  * Get the worktree path for a given name.
  */
 export function getWorktreePath(gitRoot: string, worktreeName: string): string {
-  return path.join(gitRoot, '.agents', 'worktrees', worktreeName);
+  if (!WORKTREE_NAME_RE.test(worktreeName)) {
+    throw new Error(`Invalid worktree name: ${worktreeName}`);
+  }
+  return safeJoin(path.join(gitRoot, '.agents', 'worktrees'), worktreeName);
 }
 
 /**

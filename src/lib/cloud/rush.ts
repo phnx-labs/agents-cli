@@ -26,7 +26,7 @@ import { getAccountInfo } from '../agents.js';
 import { loadClaudeOauth } from '../usage.js';
 import { selectBalancedVersion } from '../rotate.js';
 
-const PROXY_BASE = 'https://api.prix.dev';
+const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const PROXY_HOST = new URL(PROXY_BASE).host;
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 
@@ -553,7 +553,7 @@ export class RushCloudProvider implements CloudProvider {
 
   async status(taskId: string): Promise<CloudTask> {
     const token = readToken();
-    const res = await api('GET', `/api/v1/cloud-runs/${taskId}`, token);
+    const res = await api('GET', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}`, token);
     if (!res.ok) {
       throw new Error(`Failed to get task status (${res.status}).`);
     }
@@ -600,7 +600,7 @@ export class RushCloudProvider implements CloudProvider {
 
   async *stream(taskId: string): AsyncIterable<CloudEvent> {
     const token = readToken();
-    const res = await fetch(`${PROXY_BASE}/api/v1/cloud-runs/${taskId}/stream`, {
+    const res = await fetch(`${PROXY_BASE}/api/v1/cloud-runs/${encodeURIComponent(taskId)}/stream`, {
       headers: { 'Authorization': `Bearer ${token}` },
     });
     if (!res.ok) {
@@ -611,7 +611,7 @@ export class RushCloudProvider implements CloudProvider {
 
   async cancel(taskId: string): Promise<void> {
     const token = readToken();
-    const res = await api('DELETE', `/api/v1/cloud-runs/${taskId}`, token);
+    const res = await api('DELETE', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}`, token);
     if (!res.ok) {
       throw new Error(`Failed to cancel task (${res.status}).`);
     }
@@ -619,7 +619,7 @@ export class RushCloudProvider implements CloudProvider {
 
   async message(taskId: string, content: string): Promise<void> {
     const token = readToken();
-    const res = await api('POST', `/api/v1/cloud-runs/${taskId}/message`, token, { content });
+    const res = await api('POST', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}/message`, token, { content });
     if (!res.ok) {
       throw new Error(`Failed to send message (${res.status}).`);
     }

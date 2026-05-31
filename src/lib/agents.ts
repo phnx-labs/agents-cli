@@ -19,7 +19,6 @@ import type { AgentConfig, AgentId } from './types.js';
 import { walkForFiles } from './fs-walk.js';
 import { getVersionsDir, getShimsDir, getCliVersionCachePath } from './state.js';
 import { resolveVersion, getVersionHomePath, getBinaryPath } from './versions.js';
-import { loadClaudeOauth } from './usage.js';
 
 /** Represents the installation state of an agent's CLI binary. */
 export interface CliState {
@@ -762,12 +761,15 @@ export async function getAccountInfo(
         ]);
         const usageKey = buildIdentityKey(agentId, [['org', organizationId]]);
 
+        // Plan is derived from .claude.json's billingType only. Reading
+        // subscriptionType from the keychain item ("Claude Code-credentials-<hash>")
+        // forces a macOS Keychain ACL prompt on every `agents run` (one prompt per
+        // installed version under balanced rotation) because Claude Code writes its
+        // credentials with its own process in the ACL — our helper isn't trusted by
+        // that item. Callers that genuinely need subscriptionType (e.g. detailed
+        // `agents view`) should call loadClaudeOauth() directly.
         let plan: string | null = null;
-        const keychainOauth = await loadClaudeOauth(home);
-        if (keychainOauth?.subscriptionType) {
-          plan = keychainOauth.subscriptionType.charAt(0).toUpperCase()
-            + keychainOauth.subscriptionType.slice(1);
-        } else if (oa?.billingType === 'stripe_subscription') {
+        if (oa?.billingType === 'stripe_subscription') {
           plan = 'Pro';
         } else if (oa?.billingType) {
           plan = oa.billingType;

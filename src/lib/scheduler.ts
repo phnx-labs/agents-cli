@@ -37,7 +37,14 @@ export class JobScheduler {
   schedule(config: JobConfig): void {
     this.unschedule(config.name);
 
-    const cron = new Cron(config.schedule, async () => {
+    // catch: true — a throw from one job's callback should not kill the
+    // whole cron loop. Each invocation of onTrigger is already wrapped in
+    // try/catch, but a synchronous throw before the await would otherwise
+    // bubble up; defense in depth.
+    const cronOptions: Record<string, unknown> = { catch: true };
+    if (config.timezone) cronOptions.timezone = config.timezone;
+
+    const cron = new Cron(config.schedule, cronOptions, async () => {
       try {
         await this.onTrigger(config);
       } catch (err) {

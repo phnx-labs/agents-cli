@@ -38,8 +38,9 @@ import {
 import type { JobConfig } from '../lib/routines.js';
 import { getRoutinesDir } from '../lib/state.js';
 import { safeJoin } from '../lib/paths.js';
-import { executeJob } from '../lib/runner.js';
+import { executeJob, executeJobDetached } from '../lib/runner.js';
 import { JobScheduler } from '../lib/scheduler.js';
+import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 
@@ -159,6 +160,14 @@ export function registerRoutinesCommands(program: Command): void {
       const scheduler = new JobScheduler(async () => {});
       scheduler.loadAll();
 
+      // Build a quick lookup: which jobs are currently overdue?
+      const overdueSet = new Set<string>();
+      try {
+        for (const j of detectOverdueJobs()) overdueSet.add(j.name);
+      } catch {
+        // Best-effort indicator; never block the list on detection errors.
+      }
+
       console.log(chalk.bold('Scheduled Jobs\n'));
 
       // OSC 8 hyperlink helper — renders as a clickable link in supporting terminals.
@@ -204,12 +213,19 @@ export function registerRoutinesCommands(program: Command): void {
           : lastStatus === 'timeout' ? chalk.yellow
           : chalk.gray;
 
+        const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
+
         const agentLabelPadded = job.workflow
           ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
           : (job.agent || '').padEnd(10);
         console.log(
-          `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}`
+          `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
         );
+      }
+
+      if (overdueSet.size > 0) {
+        console.log();
+        console.log(chalk.yellow(`  ${overdueSet.size} routine(s) overdue — catch up with: agents routines catchup`));
       }
 
       scheduler.stopAll();
@@ -526,6 +542,54 @@ export function registerRoutinesCommands(program: Command): void {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
       }
+    });
+
+  routinesCmd
+    .command('catchup')
+    .description('Run any routines that missed their last scheduled fire (e.g. because your laptop was off). Detached — runs in the background under the scheduler.')
+    .option('--dry-run', 'List overdue routines without running them')
+    .action(async (options) => {
+      const overdue = detectOverdueJobs();
+      if (overdue.length === 0) {
+        console.log(chalk.gray('No overdue routines.'));
+        return;
+      }
+
+      console.log(chalk.bold(`${overdue.length} overdue routine(s):\n`));
+      for (const job of overdue) {
+        const last = job.lastRanAt ? job.lastRanAt.toLocaleString() : 'never';
+        console.log(`  ${chalk.cyan(job.name)} — missed ${chalk.gray(job.expectedAt.toLocaleString())}, last ran ${chalk.gray(last)}`);
+      }
+
+      if (options.dryRun) {
+        console.log(chalk.gray('\n(dry run — no jobs triggered)'));
+        return;
+      }
+
+      // Need the daemon alive so spawned jobs are monitored and meta.json is
+      // finalized. Start it if it isn't already running.
+      if (!isDaemonRunning()) {
+        const started = startDaemon();
+        if (started.pid) {
+          console.log(chalk.gray(`\nStarted scheduler (PID: ${started.pid}) so catchup runs are monitored.`));
+        }
+      }
+
+      console.log(chalk.bold('\nTriggering catchup runs...'));
+      for (const job of overdue) {
+        const config = readJob(job.name);
+        if (!config) {
+          console.log(`  ${job.name} → ${chalk.red('config not found')}`);
+          continue;
+        }
+        try {
+          const meta = await executeJobDetached(config);
+          console.log(`  ${job.name} → ${chalk.green('started')} (run: ${meta.runId}, PID: ${meta.pid ?? 'n/a'})`);
+        } catch (err) {
+          console.log(`  ${job.name} → ${chalk.red('failed to start')}: ${(err as Error).message}`);
+        }
+      }
+      console.log(chalk.gray('\nTrack progress with: agents routines runs <name>'));
     });
 
   routinesCmd

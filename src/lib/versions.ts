@@ -339,13 +339,20 @@ export function getActuallySyncedResources(agent: AgentId, version: string, opti
     promptcuts: false,
   };
 
-  // Commands - check what files exist in version home
-  const commandsDir = path.join(configDir, agentConfig.commandsSubdir);
-  if (fs.existsSync(commandsDir)) {
-    const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
-    result.commands = fs.readdirSync(commandsDir)
-      .filter(f => f.endsWith(ext))
-      .map(f => f.replace(new RegExp(`\\${ext}$`), ''));
+  // Commands - check what files exist in version home.
+  // For agent/version pairs that store commands as converted skills (e.g. Codex >= 0.117.0),
+  // detect them via the agents_command marker in skills/<name>/SKILL.md — otherwise the
+  // diff falsely reports every command as "new" every run and re-prompts on `agents view`.
+  if (shouldInstallCommandAsSkill(agent, version)) {
+    result.commands = listCommandSkillsInVersion(path.join(configDir));
+  } else {
+    const commandsDir = path.join(configDir, agentConfig.commandsSubdir);
+    if (fs.existsSync(commandsDir)) {
+      const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
+      result.commands = fs.readdirSync(commandsDir)
+        .filter(f => f.endsWith(ext))
+        .map(f => f.replace(new RegExp(`\\${ext}$`), ''));
+    }
   }
 
   // Skills - check what directories exist AND content matches central source
@@ -611,11 +618,17 @@ export function hasNewResources(diff: AvailableResources, agent?: AgentId, versi
  * Build a summary string of new resources.
  * E.g., "2 commands, 5 permission groups"
  */
-function buildNewResourcesSummary(newResources: AvailableResources, agent: AgentId): string {
+function buildNewResourcesSummary(newResources: AvailableResources, agent: AgentId, version?: string): string {
   const agentConfig = AGENTS[agent];
   const parts: string[] = [];
 
-  if (newResources.commands.length > 0 && COMMANDS_CAPABLE_AGENTS.includes(agent)) {
+  // Use version-aware gates so Codex >= 0.117.0 (which converts commands to skills) doesn't
+  // double-count and so "16 commands" never appears in the summary when commands have
+  // already been emitted as skills in the version home.
+  const commandsApply = version ? supports(agent, 'commands', version).ok : COMMANDS_CAPABLE_AGENTS.includes(agent);
+  const commandsAsSkills = version ? shouldInstallCommandAsSkill(agent, version) : false;
+
+  if (newResources.commands.length > 0 && (commandsApply || commandsAsSkills)) {
     parts.push(`${newResources.commands.length} command${newResources.commands.length === 1 ? '' : 's'}`);
   }
   if (newResources.skills.length > 0) {
@@ -624,7 +637,7 @@ function buildNewResourcesSummary(newResources: AvailableResources, agent: Agent
   if (newResources.hooks.length > 0 && agentConfig.supportsHooks) {
     parts.push(`${newResources.hooks.length} hook${newResources.hooks.length === 1 ? '' : 's'}`);
   }
-  if (newResources.memory.length > 0 && COMMANDS_CAPABLE_AGENTS.includes(agent)) {
+  if (newResources.memory.length > 0 && (commandsApply || commandsAsSkills)) {
     parts.push(`${newResources.memory.length} rule file${newResources.memory.length === 1 ? '' : 's'}`);
   }
   if (newResources.mcp.length > 0 && MCP_CAPABLE_AGENTS.includes(agent)) {
@@ -652,10 +665,18 @@ function buildNewResourcesSummary(newResources: AvailableResources, agent: Agent
  */
 export async function promptNewResourceSelection(
   agent: AgentId,
-  newResources: AvailableResources
+  newResources: AvailableResources,
+  version?: string
 ): Promise<ResourceSelection | null> {
   const agentConfig = AGENTS[agent];
   const selection: ResourceSelection = {};
+
+  // Version-aware gates. When version is known, prefer per-version capability checks; the
+  // commands branch is allowed when either native commands are supported OR when the
+  // version emits commands as converted skills (Codex >= 0.117.0).
+  const commandsApply = version ? supports(agent, 'commands', version).ok : COMMANDS_CAPABLE_AGENTS.includes(agent);
+  const commandsAsSkills = version ? shouldInstallCommandAsSkill(agent, version) : false;
+  const commandsBranch = commandsApply || commandsAsSkills;
 
   // Get permission group info for display
   const permissionGroups = discoverPermissionGroups();
@@ -663,7 +684,7 @@ export async function promptNewResourceSelection(
   const totalNewPermissionRules = newPermissionGroups.reduce((sum, g) => sum + g.ruleCount, 0);
 
   // Build the summary
-  const summary = buildNewResourcesSummary(newResources, agent);
+  const summary = buildNewResourcesSummary(newResources, agent, version);
   console.log(chalk.cyan(`\nNew resources available:`));
   console.log(chalk.gray(`  ${summary}`));
 
@@ -684,10 +705,10 @@ export async function promptNewResourceSelection(
 
   if (action === 'all') {
     // Sync all new resources
-    if (newResources.commands.length > 0 && COMMANDS_CAPABLE_AGENTS.includes(agent)) selection.commands = newResources.commands;
+    if (newResources.commands.length > 0 && commandsBranch) selection.commands = newResources.commands;
     if (newResources.skills.length > 0) selection.skills = newResources.skills;
     if (newResources.hooks.length > 0 && agentConfig.supportsHooks) selection.hooks = newResources.hooks;
-    if (newResources.memory.length > 0 && COMMANDS_CAPABLE_AGENTS.includes(agent)) selection.memory = newResources.memory;
+    if (newResources.memory.length > 0 && commandsBranch) selection.memory = newResources.memory;
     if (newResources.mcp.length > 0 && MCP_CAPABLE_AGENTS.includes(agent)) selection.mcp = newResources.mcp;
     if (newResources.permissions.length > 0 && PERMISSIONS_CAPABLE_AGENTS.includes(agent)) selection.permissions = newResources.permissions;
     if (newResources.subagents.length > 0 && SUBAGENT_CAPABLE_AGENTS.includes(agent)) selection.subagents = newResources.subagents;
@@ -697,7 +718,7 @@ export async function promptNewResourceSelection(
   }
 
   // Select specific items for each category
-  if (newResources.commands.length > 0 && COMMANDS_CAPABLE_AGENTS.includes(agent)) {
+  if (newResources.commands.length > 0 && commandsBranch) {
     const selected = await checkbox({
       message: 'Select new commands to sync:',
       choices: newResources.commands.map(c => ({ name: c, value: c, checked: true })),
@@ -721,7 +742,7 @@ export async function promptNewResourceSelection(
     if (selected.length > 0) selection.hooks = selected;
   }
 
-  if (newResources.memory.length > 0 && COMMANDS_CAPABLE_AGENTS.includes(agent)) {
+  if (newResources.memory.length > 0 && commandsBranch) {
     const selected = await checkbox({
       message: 'Select new rule files to sync:',
       choices: newResources.memory.map(m => ({ name: m, value: m, checked: true })),
@@ -1854,13 +1875,25 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
     const syncedCommands: string[] = [];
     for (const cmd of commandsToSync) {
-      const resolved = resolveResource('commands', `${cmd}.md`, cwd);
-      if (!resolved || fs.lstatSync(resolved.path).isSymbolicLink()) continue;
-      const srcFile = resolved.path;
+      // Commands are content that gets injected into the agent's prompt
+      // surface (slash commands, skill bodies). We intentionally do NOT pull
+      // from the project's own .agents/commands/ directory: a cloned public
+      // repo could ship a command whose body instructs the agent to do
+      // something harmful the next time the user invokes it. Commands must
+      // come from the user's central ~/.agents/commands/, the system layer,
+      // or an explicitly enabled extra repo. Same defense as hooks below.
+      const candidates: Array<string | null> = [
+        safeJoin(path.join(userAgentsDir, 'commands'), `${cmd}.md`),
+        safeJoin(getCommandsDir(), `${cmd}.md`),
+        ...extraRepos.map((e) => safeJoin(path.join(e.dir, 'commands'), `${cmd}.md`)),
+      ];
+      const srcFile = candidates.find((p) => p && fs.existsSync(p) && !fs.lstatSync(p).isSymbolicLink()) || null;
+      if (!srcFile) continue;
 
       if (commandsAsSkills) {
+        // Project skills dir is intentionally excluded for the same reason
+        // commands are: the body of a project skill becomes agent context.
         const skillSourceDirs = [
-          projectAgentsDir ? path.join(projectAgentsDir, 'skills') : null,
           path.join(userAgentsDir, 'skills'),
           getSkillsDir(),
           ...extraRepos.map((e) => path.join(e.dir, 'skills')),
@@ -1926,10 +1959,21 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
       const syncedSkills: string[] = [];
       for (const skill of skillsToSync) {
-        const resolved = resolveResource('skills', skill, cwd);
-        const srcDir = resolved && fs.existsSync(resolved.path) && fs.lstatSync(resolved.path).isDirectory()
-          ? resolved.path
-          : null;
+        // Same defense as commands and hooks: don't pull skills from the
+        // project's .agents/skills/ directory. A skill's contents (SKILL.md
+        // and any auxiliary scripts) get loaded into the agent's tool/context
+        // surface, and a malicious public repo could ship a SKILL.md whose
+        // body coerces the agent. Trusted layers only.
+        const skillCandidates: Array<string> = [
+          safeJoin(path.join(userAgentsDir, 'skills'), skill),
+          safeJoin(getSkillsDir(), skill),
+          ...extraRepos.map((e) => safeJoin(path.join(e.dir, 'skills'), skill)),
+        ];
+        const srcDir = skillCandidates.find((p) =>
+          fs.existsSync(p) &&
+          !fs.lstatSync(p).isSymbolicLink() &&
+          fs.lstatSync(p).isDirectory()
+        ) || null;
         if (!srcDir) continue;
 
         const destDir = safeJoin(skillsTarget, skill);
@@ -2054,6 +2098,10 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // ~/.agents/permissions/presets/<name>.yaml pick a subset via `includes:`.
   // If AGENTS_PERMISSION_PRESET is set, we resolve that recipe and use its
   // includes list as the group filter (intersected with groups on disk).
+  // Note: discoverPermissionGroups intentionally reads from user + system
+  // only — never from a project's .agents/permissions/. Permissions gate
+  // every other action, so a cloned public repo must not be able to widen
+  // its own sandbox by shipping a permissions group. Same defense as hooks.
   const permissionGroups = discoverPermissionGroups();
   const allGroupNames = permissionGroups.map(g => g.name);
   const activePresetName = getActivePermissionPresetName();
@@ -2098,9 +2146,22 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // Install MCP servers (if agent supports them)
   // For Claude/Codex: uses CLI commands (claude mcp add, codex mcp add)
   // For others: edits config files directly
-  const mcpToSync = selection
+  //
+  // Mirror the hooks defense: exclude project-scoped MCPs from the sync. An
+  // MCP server is an executable invoked under the agent's authority, so a
+  // cloned public repo's .agents/mcp/foo.yaml could install an arbitrary
+  // command. We pre-compute the set of project-scoped names and drop them
+  // before handing the list to installMcpServers. (The deeper helper-side
+  // dedup in lib/mcp.ts still lets a project entry shadow a same-named
+  // user entry, so name-collision shadowing is not fully closed here —
+  // tracked separately for a follow-up in lib/mcp.ts.)
+  const projectScopedMcpNames = new Set(
+    getScopedMcpResources(cwd).filter(r => r.scope === 'project').map(r => r.name)
+  );
+  const mcpToSyncAll = selection
     ? resolveSelection(selection.mcp, available.mcp)
     : (MCP_CAPABLE_AGENTS.includes(agent) ? available.mcp : []);
+  const mcpToSync = mcpToSyncAll.filter(n => !projectScopedMcpNames.has(n));
 
   if (mcpToSync.length > 0 && MCP_CAPABLE_AGENTS.includes(agent)) {
     const mcpResult = installMcpServers(agent, version, versionHome, mcpToSync, { cwd });
@@ -2108,7 +2169,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     // mcp patterns already written via ensureVersionResourcePatterns above.
   }
 
-  // Sync subagents (claude and openclaw only)
+  // Sync subagents (claude and openclaw only).
+  // Note: listInstalledSubagents (used to populate the map below) reads only
+  // user + system layers — never project. Subagents bundle prompts that fire
+  // when the agent delegates work, so a cloned public repo must not be able
+  // to plant a subagent the user later invokes. Same defense as hooks.
   const subagentsToSync = selection
     ? resolveSelection(selection.subagents, available.subagents)
     : (SUBAGENT_CAPABLE_AGENTS.includes(agent) ? available.subagents : []);

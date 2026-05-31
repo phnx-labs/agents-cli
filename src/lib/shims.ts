@@ -826,6 +826,27 @@ export async function switchConfigSymlink(
         // Already pointing to correct target, no-op
         return { success: true };
       }
+      // openclaw mixes user data (openclaw.json, openclaw.db, per-agent
+      // workspaces under ~/.openclaw/{agentId}/, memory/) with the version
+      // home — silently swapping the symlink to a fresh version home strips
+      // every running agent's config + workspace + memory. Carry the user
+      // data forward into the new version home before flipping the symlink
+      // (keep-dest preserves anything the new version already shipped).
+      // Other agents (Claude, Codex, etc.) keep user data outside the
+      // version-home dir, so this is openclaw-only by design.
+      if (agent === 'openclaw') {
+        try {
+          if (fs.existsSync(resolvedCurrent) && fs.statSync(resolvedCurrent).isDirectory()) {
+            await copyDirContents(resolvedCurrent, versionConfigPath, 'keep-dest');
+          }
+        } catch (migrationErr) {
+          console.error(
+            `Warning: openclaw data migration from ${resolvedCurrent} -> ${versionConfigPath} ` +
+              `failed: ${(migrationErr as Error).message}. The previous version's data is intact ` +
+              `at the old path; you can copy it manually if needed.`
+          );
+        }
+      }
       // Different target - update it
       fs.unlinkSync(configPath);
       fs.mkdirSync(path.dirname(configPath), { recursive: true });

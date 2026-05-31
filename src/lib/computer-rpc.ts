@@ -126,6 +126,62 @@ export function writeComputerPolicy(allowedBundleIds: string[]): void {
   fs.writeFileSync(resolvePolicyPath(), JSON.stringify(policy, null, 2), { mode: 0o600 });
 }
 
+// Peer-auth (F5): the helper reads a list of executable paths it will
+// accept connections from. Anything else — `nc`, `/usr/bin/python3`, a
+// random electron app — gets the socket closed before its first RPC.
+// File mirrors computer-policy.json: JSON, mode 0600, missing/unparseable
+// means deny-everything.
+export function resolvePeersPath(): string {
+  return path.join(getHelpersDir(), 'computer-peers.json');
+}
+
+// Default peer set: this exact `agents` CLI binary plus Rush.app if it's
+// installed. realpath() the symlink chain so we record the on-disk path
+// the helper will see via proc_pidpath, not the shim path.
+//
+// Why path-based instead of codesign-team-id? The agents CLI is unsigned
+// today (npm distribution), and even if we sign Rush.app the team-id
+// check would need a separate roundtrip. Path is concrete and fast; the
+// daemon already runs as the user so anyone who can swap a binary at
+// these paths can do worse via other means.
+export function loadDefaultPeers(): string[] {
+  const out = new Set<string>();
+  const add = (p: string) => {
+    try {
+      out.add(fs.realpathSync(p));
+    } catch {
+      out.add(p);
+    }
+  };
+
+  // The Node executable currently running the CLI. This is what
+  // proc_pidpath() will report when the CLI calls into the daemon.
+  if (process.execPath) add(process.execPath);
+
+  // Rush.app — the consumer Electron client. Both the helper-binary and
+  // the main app binary are possible callers depending on how Rush wires
+  // the RPC client.
+  const rushCandidates = [
+    '/Applications/Rush.app/Contents/MacOS/Rush',
+    '/Applications/Rush.app/Contents/MacOS/Electron',
+  ];
+  for (const p of rushCandidates) {
+    if (fs.existsSync(p)) add(p);
+  }
+
+  return [...out].sort();
+}
+
+// Write the peer-auth allow list. Same mode 0600 + atomic-ish semantics
+// as the policy file. The daemon picks it up at startup and on SIGHUP.
+export function writeComputerPeers(allowedExecPaths: string[]): void {
+  const dir = getHelpersDir();
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(resolvePeersPath(), JSON.stringify({ allow: allowedExecPaths }, null, 2), { mode: 0o600 });
+}
+
 // Resolve the helper executable inside the dist .app bundle. Used by the
 // stdio fallback and by install-helper to find the source bundle.
 export function resolveHelperExec(): string | null {

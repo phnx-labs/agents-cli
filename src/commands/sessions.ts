@@ -250,6 +250,105 @@ function buildSessionDescription(s: ActiveSession): string {
   return '';
 }
 
+/**
+ * Render a single agent-session row inside an already-printed group header.
+ * Indent is the leading whitespace (2 spaces for flat groups, 4 inside a
+ * window sub-group).
+ */
+function printActiveRow(s: ActiveSession, indent: string): void {
+  const kindCol = colorAgent(s.kind as any)(padRight(truncate(s.kind, 8), 9));
+  const hostCol = chalk.gray(padRight(truncate(s.host ?? '-', 8), 9));
+  const statusCol = statusColor(s.status)(padRight(truncate(s.status, 7), 8));
+  const pidCol = chalk.yellow(padRight(s.pid ? String(s.pid) : '-', 7));
+  const desc = buildSessionDescription(s);
+  console.log(
+    indent +
+    pidCol +
+    kindCol +
+    hostCol +
+    statusCol +
+    chalk.white(truncate(desc || '-', 50))
+  );
+}
+
+/**
+ * Short label for an IDE window. The slice key in live-terminals.json is
+ * `${vscode.env.sessionId}-${ext-host pid}`; the trailing pid is the cheap
+ * stable disambiguator. We surface it as `ext-pid` so two windows on the
+ * same repo are visibly different.
+ */
+function shortWindowLabel(windowId: string): string {
+  const m = windowId.match(/-(\d+)$/);
+  return m ? `ext-pid ${m[1]}` : `win ${windowId.slice(0, 8)}`;
+}
+
+/** Grouped + sorted view of active sessions for the --active renderer. */
+export interface ActiveSessionsLayout {
+  workspaces: Array<{
+    /** Internal grouping key — `__cloud__`, `__unknown__`, or the cwd. */
+    key: string;
+    /** Sessions in this workspace, both windowed and flat (preserves total count). */
+    total: number;
+    /** Terminals grouped by IDE window (sorted by oldest startedAtMs). */
+    windows: Array<{ windowId: string; sessions: ActiveSession[] }>;
+    /** Everything else in this workspace: cloud, teams, headless, terminals without a windowId. */
+    flat: ActiveSession[];
+  }>;
+}
+
+/**
+ * Group sessions by workspace, then split each workspace into IDE-window
+ * sub-groups + a flat bucket. Pure function — no I/O — so the renderer's
+ * grouping rules can be tested without mocking the session scanner.
+ *
+ * Sort order:
+ *   - workspaces: by session count descending, then key ascending
+ *   - windows within a workspace: by oldest startedAtMs ascending
+ *   - sessions within a window/flat bucket: input order preserved
+ */
+export function groupActiveSessions(sessions: ActiveSession[]): ActiveSessionsLayout {
+  const byWorkspace = new Map<string, ActiveSession[]>();
+  for (const s of sessions) {
+    const key = s.cwd ?? (s.context === 'cloud' ? '__cloud__' : '__unknown__');
+    const list = byWorkspace.get(key) || [];
+    list.push(s);
+    byWorkspace.set(key, list);
+  }
+  const sortedKeys = Array.from(byWorkspace.keys()).sort((a, b) => {
+    const aCount = byWorkspace.get(a)!.length;
+    const bCount = byWorkspace.get(b)!.length;
+    if (aCount !== bCount) return bCount - aCount;
+    return a.localeCompare(b);
+  });
+  const workspaces = sortedKeys.map((key) => {
+    const group = byWorkspace.get(key)!;
+    const windowedSessions: ActiveSession[] = [];
+    const flat: ActiveSession[] = [];
+    for (const s of group) {
+      if (s.context === 'terminal' && s.windowId) windowedSessions.push(s);
+      else flat.push(s);
+    }
+    const byWindow = new Map<string, ActiveSession[]>();
+    for (const s of windowedSessions) {
+      const list = byWindow.get(s.windowId!) || [];
+      list.push(s);
+      byWindow.set(s.windowId!, list);
+    }
+    const windowKeys = Array.from(byWindow.keys()).sort((a, b) => {
+      const aStart = Math.min(...byWindow.get(a)!.map(s => s.startedAtMs ?? Infinity));
+      const bStart = Math.min(...byWindow.get(b)!.map(s => s.startedAtMs ?? Infinity));
+      return aStart - bStart;
+    });
+    return {
+      key,
+      total: group.length,
+      windows: windowKeys.map((wid) => ({ windowId: wid, sessions: byWindow.get(wid)! })),
+      flat,
+    };
+  });
+  return { workspaces };
+}
+
 /** Render the unified active-session view. */
 async function renderActiveSessions(asJson: boolean): Promise<void> {
   const sessions = await getActiveSessions();
@@ -264,54 +363,31 @@ async function renderActiveSessions(asJson: boolean): Promise<void> {
     return;
   }
 
-  // Group sessions by workspace (cwd), with cloud/undefined grouped separately
-  const byWorkspace = new Map<string, ActiveSession[]>();
-  for (const s of sessions) {
-    const key = s.cwd ?? (s.context === 'cloud' ? '__cloud__' : '__unknown__');
-    const list = byWorkspace.get(key) || [];
-    list.push(s);
-    byWorkspace.set(key, list);
-  }
-
-  // Sort workspaces: most sessions first, then alphabetically
-  const sortedKeys = Array.from(byWorkspace.keys()).sort((a, b) => {
-    const aCount = byWorkspace.get(a)!.length;
-    const bCount = byWorkspace.get(b)!.length;
-    if (aCount !== bCount) return bCount - aCount;
-    return a.localeCompare(b);
-  });
+  const layout = groupActiveSessions(sessions);
 
   let first = true;
-  for (const key of sortedKeys) {
-    const group = byWorkspace.get(key)!;
+  for (const ws of layout.workspaces) {
     if (!first) console.log();
     first = false;
 
     // Print workspace header
-    const header = key === '__cloud__'
+    const header = ws.key === '__cloud__'
       ? chalk.magenta.bold('cloud')
-      : key === '__unknown__'
+      : ws.key === '__unknown__'
         ? chalk.gray.bold('unknown')
-        : chalk.cyan.bold(shortCwd(key));
-    console.log(`${header} ${chalk.gray(`(${group.length})`)}`);
+        : chalk.cyan.bold(shortCwd(ws.key));
+    console.log(`${header} ${chalk.gray(`(${ws.total})`)}`);
 
-    // Print each session in this workspace
-    for (const s of group) {
-      const kindCol = colorAgent(s.kind as any)(padRight(truncate(s.kind, 8), 9));
-      const hostCol = chalk.gray(padRight(truncate(s.host ?? '-', 8), 9));
-      const statusCol = statusColor(s.status)(padRight(truncate(s.status, 7), 8));
-      const pidCol = chalk.yellow(padRight(s.pid ? String(s.pid) : '-', 7));
-      const desc = buildSessionDescription(s);
-
-      console.log(
-        '  ' +
-        pidCol +
-        kindCol +
-        hostCol +
-        statusCol +
-        chalk.white(truncate(desc || '-', 50))
-      );
+    for (const win of ws.windows) {
+      // Host is per-process, but every terminal in the same IDE window shares
+      // an ancestor — take the first non-empty host as the window's label.
+      const host = win.sessions.find((s) => s.host)?.host ?? 'terminal';
+      const winHeader = `${chalk.gray(host)} ${chalk.gray('·')} ${chalk.gray(shortWindowLabel(win.windowId))} ${chalk.gray(`(${win.sessions.length})`)}`;
+      console.log('  ' + winHeader);
+      for (const s of win.sessions) printActiveRow(s, '    ');
     }
+
+    for (const s of ws.flat) printActiveRow(s, '  ');
   }
 
   const runningCount = sessions.filter(s => s.status === 'running').length;

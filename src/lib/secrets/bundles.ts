@@ -82,6 +82,7 @@ const LAST_USED_THROTTLE_MS = 60_000;
 const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9\-_.]{0,48}$/i;
 const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const BUNDLE_META_PREFIX = 'agents-cli.bundles.';
+const SECRETS_ITEM_PREFIX = 'agents-cli.secrets.';
 
 export const RESERVED_ENV_NAMES = new Set([
   'PATH', 'HOME', 'USER', 'USERNAME', 'SHELL', 'PWD', 'OLDPWD',
@@ -258,13 +259,48 @@ export function listBundles(): SecretsBundle[] {
   const names = services
     .map((s) => s.slice(BUNDLE_META_PREFIX.length))
     .filter((n) => BUNDLE_NAME_PATTERN.test(n));
+  if (names.length === 0) return [];
+
+  // Batch all metadata reads behind ONE Touch ID prompt instead of N. Bundle
+  // metadata items carry user-presence ACLs (same as secret values), so a naive
+  // loop over readBundle() spawns a fresh LAContext per item — meaning N
+  // biometric prompts for `secrets list`. Sharing a single context across all
+  // SecItemCopyMatching calls collapses the prompt to one. Mirrors the pattern
+  // already used by resolveBundleEnv for runtime secret injection.
+  const itemsToFetch = names.map(bundleMetaItem);
+  const fetched = getKeychainTokensBatch(itemsToFetch, false, 'list secrets bundles');
+
   const out: SecretsBundle[] = [];
   for (const name of names) {
+    const json = fetched.get(bundleMetaItem(name));
+    if (json === undefined) continue;
+    let parsed: Partial<SecretsBundle>;
     try {
-      out.push(readBundle(name));
+      parsed = JSON.parse(json) as Partial<SecretsBundle>;
     } catch {
       // Skip malformed bundles; surfaced via `agents secrets view <name>`.
+      continue;
     }
+    if (!parsed || typeof parsed !== 'object') continue;
+    const bundle: SecretsBundle = {
+      name,
+      description: parsed.description,
+      allow_exec: Boolean(parsed.allow_exec),
+      icloud_sync: Boolean(parsed.icloud_sync),
+      vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
+    };
+    if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
+    if (typeof parsed.updated_at === 'string') bundle.updated_at = parsed.updated_at;
+    if (typeof parsed.last_used === 'string') bundle.last_used = parsed.last_used;
+    if (parsed.meta && typeof parsed.meta === 'object') bundle.meta = parsed.meta;
+    // Skip bundles with invalid env keys rather than throwing — same lenient
+    // posture readBundle had via the outer catch.
+    let valid = true;
+    for (const key of Object.keys(bundle.vars)) {
+      if (!ENV_KEY_PATTERN.test(key)) { valid = false; break; }
+    }
+    if (!valid) continue;
+    out.push(bundle);
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -376,6 +412,140 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
   // `caller` is intentionally unused; see ResolveBundleOptions.
   void _opts.caller;
   return env;
+}
+
+/**
+ * Read a bundle's metadata AND resolve its env in a single Touch ID prompt.
+ *
+ * `readBundle` + `resolveBundleEnv` issued two separate `LAContext` calls
+ * (metadata read via `get-auth`, then secret values via `get-batch`) which
+ * surfaced as two consecutive Touch ID prompts. macOS does not honor
+ * "Always Allow" for items protected with `kSecAttrAccessControl`+biometry,
+ * so caching at the OS level was never an option. This collapses both reads
+ * into one `get-batch` call: we enumerate the bundle's secret items first
+ * (silent — `list` returns attrs only and does not trigger biometry) and
+ * include the metadata item in the same batch. One prompt, correctly scoped
+ * to the bundle name and caller.
+ */
+export function readAndResolveBundleEnv(
+  name: string,
+  opts: ResolveBundleOptions = {},
+): { bundle: SecretsBundle; env: Record<string, string> } {
+  validateBundleName(name);
+
+  const metaItem = bundleMetaItem(name);
+  const bundleSecretPrefix = `${SECRETS_ITEM_PREFIX}${name}.`;
+  let secretItems: string[];
+  try {
+    secretItems = listKeychainItems(bundleSecretPrefix);
+  } catch {
+    secretItems = [];
+  }
+
+  const reason = opts.caller
+    ? `read ${name} secrets (for ${opts.caller})`
+    : `read ${name} secrets`;
+
+  // icloud_sync flag is unknown until we parse metadata, but the helper's
+  // get-batch uses kSecAttrSynchronizableAny so it finds both synced and
+  // device-local items in one shot.
+  const fetched = getKeychainTokensBatch([metaItem, ...secretItems], false, reason);
+
+  const json = fetched.get(metaItem);
+  if (json === undefined) {
+    throw new Error(`Secrets bundle '${name}' not found.`);
+  }
+  let parsed: Partial<SecretsBundle>;
+  try {
+    parsed = JSON.parse(json) as Partial<SecretsBundle>;
+  } catch {
+    throw new Error(`Bundle '${name}' is malformed.`);
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error(`Bundle '${name}' is malformed.`);
+  }
+  const bundle: SecretsBundle = {
+    name,
+    description: parsed.description,
+    allow_exec: Boolean(parsed.allow_exec),
+    icloud_sync: Boolean(parsed.icloud_sync),
+    vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
+  };
+  if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
+  if (typeof parsed.updated_at === 'string') bundle.updated_at = parsed.updated_at;
+  if (typeof parsed.last_used === 'string') bundle.last_used = parsed.last_used;
+  if (parsed.meta && typeof parsed.meta === 'object') bundle.meta = parsed.meta;
+  for (const key of Object.keys(bundle.vars)) {
+    validateEnvKey(key);
+  }
+
+  stampLastUsed(bundle);
+
+  type Parsed = { literal: string } | { ref: SecretRef };
+  const parsedByKey = new Map<string, Parsed>();
+  const keychainKeys: string[] = [];
+  const kindCounts: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(bundle.vars)) {
+    const p = parseBundleValue(raw);
+    parsedByKey.set(key, p);
+    const kind = 'literal' in p ? 'literal' : p.ref.provider;
+    kindCounts[kind] = (kindCounts[kind] ?? 0) + 1;
+    if ('ref' in p && p.ref.provider === 'keychain') {
+      keychainKeys.push(key);
+    }
+  }
+  const keys = Object.keys(bundle.vars).sort();
+  keychainKeys.sort();
+
+  const emitReadAudit = (status: 'success' | 'error', err?: unknown) => {
+    emit('secrets.get', {
+      bundle: bundle.name,
+      caller: opts.caller,
+      status,
+      keyCount: keys.length,
+      keys,
+      keychainKeys,
+      kindCounts,
+      error: err instanceof Error ? err.message : (err ? String(err) : undefined),
+    });
+  };
+
+  try {
+    const env: Record<string, string> = {};
+    for (const [key] of Object.entries(bundle.vars)) {
+      const p = parsedByKey.get(key)!;
+      if ('literal' in p) {
+        env[key] = p.literal;
+        continue;
+      }
+      if (p.ref.provider === 'keychain') {
+        const item = secretsKeychainItem(bundle.name, p.ref.value);
+        const value = fetched.get(item);
+        if (value === undefined) {
+          throw new Error(
+            `Bundle '${bundle.name}' key '${key}': keychain item '${item}' not found. ` +
+            `Run: agents secrets add ${bundle.name} ${key}`,
+          );
+        }
+        env[key] = value;
+        continue;
+      }
+      try {
+        env[key] = resolveRef(p.ref, {
+          allowExec: bundle.allow_exec,
+          iCloudSync: bundle.icloud_sync,
+          keychainItemFor: (shortId: string) => secretsKeychainItem(bundle.name, shortId),
+        });
+      } catch (err) {
+        throw new Error(`Bundle '${bundle.name}' key '${key}': ${(err as Error).message}`);
+      }
+    }
+    emitReadAudit('success');
+    return { bundle, env };
+  } catch (err) {
+    emitReadAudit('error', err);
+    throw err;
+  }
 }
 
 // Build a keychain ref expression from a bundle+key pair, for storage in the bundle metadata.

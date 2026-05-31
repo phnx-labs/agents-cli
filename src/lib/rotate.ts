@@ -16,7 +16,6 @@ import { listInstalledVersions, getVersionHomePath, resolveVersion } from './ver
 import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
-  isClaudeAuthValid,
   type UsageSnapshot,
 } from './usage.js';
 
@@ -275,9 +274,15 @@ async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> 
     versions.map(async (version) => {
       const home = getVersionHomePath(agent, version);
       const info = await getAccountInfo(agent, home);
-      const authValid = info.email
-        ? agent === 'claude' ? await isClaudeAuthValid(home) : true
-        : false;
+      // `info.email` (from .claude.json's oauthAccount) is the auth heuristic.
+      // We used to additionally call isClaudeAuthValid(home), which reads
+      // "Claude Code-credentials-<hash>" from the system keychain. That item is
+      // written by Claude Code itself with its own process in the ACL, so our
+      // helper triggers a macOS keychain-authorization sheet on every probe —
+      // one per installed version, every time `agents run` cold-starts. If
+      // claude's stored token has actually expired, the spawned agent detects
+      // it at its own startup and re-auths; that's the correct UX.
+      const authValid = info.email != null;
       return {
         agent,
         version,

@@ -227,11 +227,19 @@ export async function discoverBrowserWsUrl(
   host = 'localhost',
   profileName = '<name>'
 ): Promise<BrowserDiscovery> {
+  // Node's fetch has no default timeout — a port that ACKs the TCP connect
+  // but never sends an HTTP response will hang here indefinitely. Bound the
+  // discovery probe so the caller can surface an actionable error in seconds,
+  // not minutes.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
   let response: Response;
   try {
-    response = await fetch(`http://${host}:${port}/json/version`);
+    response = await fetch(`http://${host}:${port}/json/version`, { signal: controller.signal });
   } catch {
     throw new BrowserCdpConnectionError(port, profileName, host);
+  } finally {
+    clearTimeout(timer);
   }
   if (!response.ok) {
     throw new BrowserCdpConnectionError(port, profileName, host);

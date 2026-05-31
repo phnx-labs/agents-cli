@@ -328,10 +328,10 @@ export function registerPullCommand(program: Command): void {
               console.log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer} has no synced resources.`));
               const userSelection = await promptResourceSelection(agentId);
               if (userSelection) selection = userSelection;
-            } else if (hasNewResources(newResources, agentId)) {
+            } else if (hasNewResources(newResources, agentId, defaultVer)) {
               // Has synced before, but NEW items available
               console.log(chalk.cyan(`\n${agentLabel(agentId)}@${defaultVer}:`));
-              const userSelection = await promptNewResourceSelection(agentId, newResources);
+              const userSelection = await promptNewResourceSelection(agentId, newResources, defaultVer);
               if (userSelection) selection = userSelection;
             }
 
