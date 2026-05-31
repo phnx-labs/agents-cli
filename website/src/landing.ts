@@ -156,15 +156,17 @@ ul li::before { content: "\\2192"; position: absolute; left: 0; color: #555; }
 .group-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 40px; padding-bottom: 16px; border-bottom: 1px solid #1a1a1a; }
 .group-head h1.group-title { font-size: 32px; font-weight: 500; letter-spacing: -0.02em; margin: 0; color: #fff; }
 .group-head .group-idx { color: #444; font-size: 13px; }
-.feature { display: grid; grid-template-columns: 1fr; gap: 24px; margin: 0 0 56px; align-items: center; }
+.feature { display: flex; flex-direction: column; gap: 24px; margin: 0 0 56px; align-items: stretch; }
 .feature:last-child { margin-bottom: 0; }
 .feature .copy h2 { margin-top: 0; }
 .feature .copy p { margin-bottom: 0; }
 .feature .demo { min-width: 0; }
-.feature .demo pre { margin: 0; }
+.feature .demo pre { margin: 0; font-size: 13px; }
 @media (min-width: 760px) {
-  .feature { grid-template-columns: 1fr 1fr; gap: 48px; }
-  .feature.flip .demo { order: -1; }
+  .feature { flex-direction: row; gap: 48px; align-items: center; }
+  .feature.flip { flex-direction: row-reverse; }
+  .feature .copy { flex: 0 1 42%; }
+  .feature .demo { flex: 1 1 58%; }
 }
 
 /* SECTION HEADS */
@@ -329,11 +331,11 @@ agents:
       <p>DAG dependencies (<code>--after</code>), isolated worktrees per teammate, live status. Spawn five Claudes and two Codex on the same task, wind them down with <code>agents teams disband</code>.</p>
     </div>
     <div class="demo">
-<pre><span class="dim">$</span> agents teams create pricing-page
-<span class="dim">$</span> agents teams add pricing-page claude <span class="dim">"rewrite /v2/pricing endpoint"</span> --name be
-<span class="dim">$</span> agents teams add pricing-page codex  <span class="dim">"build /pricing route"</span>        --name fe
-<span class="dim">$</span> agents teams add pricing-page claude <span class="dim">"run Playwright suite"</span>       --name qa --after be,fe
-<span class="dim">$</span> agents teams start pricing-page --watch</pre>
+<pre><span class="dim">$</span> agents teams create pricing
+<span class="dim">$</span> agents teams add pricing claude <span class="dim">"rewrite endpoint"</span> -n be
+<span class="dim">$</span> agents teams add pricing codex <span class="dim">"build route"</span> -n fe
+<span class="dim">$</span> agents teams add pricing claude <span class="dim">"run tests"</span> -n qa --after be,fe
+<span class="dim">$</span> agents teams start pricing --watch</pre>
     </div>
   </div>
 
