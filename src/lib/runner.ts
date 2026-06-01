@@ -22,7 +22,7 @@ import { getRunsDir } from './state.js';
 import type { AgentId } from './types.js';
 import { prepareJobHome, buildSpawnEnv } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
-import { createTimer, maybeRotate, truncate } from './events.js';
+import { createTimer, maybeRotate, redactPrompt } from './events.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -145,7 +145,7 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
     version: config.version,
     jobName: config.name,
     mode: config.mode,
-    prompt: truncate(config.prompt, 200),
+    ...redactPrompt(config.prompt),
     schedule: config.schedule,
   });
 
