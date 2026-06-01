@@ -13,7 +13,7 @@ function manifest(install: InstallMethod[]): CliManifest {
   return {
     name: 'higgsfield',
     description: 'test',
-    check: 'higgsfield --version',
+    check: { kind: 'version', cmd: 'higgsfield', args: ['--version'] },
     install,
     source: 'user',
     path: '/tmp/test.yaml',
@@ -37,7 +37,7 @@ post_install: |
     const parsed = parseCliManifest(yaml, { name: 'higgsfield', source: 'user', path: '/tmp/h.yaml' });
     expect(parsed.name).toBe('higgsfield');
     expect(parsed.description).toBe('AI media CLI');
-    expect(parsed.check).toBe('higgsfield --version');
+    expect(parsed.check).toEqual({ kind: 'version', cmd: 'higgsfield', args: ['--version'] });
     expect(parsed.install).toHaveLength(3);
     expect(parsed.install[0]).toEqual({ npm: '@higgsfield/cli@latest' });
     expect(parsed.install[1]).toEqual({ brew: 'higgsfield' });
@@ -50,7 +50,7 @@ post_install: |
       'name: gh\ninstall:\n  - brew: gh\n',
       { name: 'gh', source: 'user', path: '/tmp/g.yaml' },
     );
-    expect(parsed.check).toBe('gh --version');
+    expect(parsed.check).toEqual({ kind: 'version', cmd: 'gh', args: ['--version'] });
   });
 
   it('uses the filename-derived name when manifest omits it', () => {

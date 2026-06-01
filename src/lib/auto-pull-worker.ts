@@ -23,6 +23,16 @@ import { lockFilePath, statusFilePath, type FetchStatusMarker } from './auto-pul
 
 const LOCK_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Background auto-pull of ~/.agents-system/ is off by default. When enabled it
+ * silently fast-forwards a tracked source tree that the CLI then reads as a
+ * source of skills, hooks, install manifests, and commands — anyone with push
+ * access to that upstream gets remote code execution on every user the next
+ * time they invoke a command that loads a system resource. Operators that
+ * really want the convenience can set AGENTS_AUTO_PULL=1.
+ */
+const ENABLE_AUTO_PULL = process.env.AGENTS_AUTO_PULL === '1';
+
 interface RepoTarget {
   alias: string;
   dir: string;
@@ -94,7 +104,14 @@ async function processTarget(target: RepoTarget): Promise<void> {
   if (!tryAcquireLock(target.alias)) return;
   try {
     if (target.mode === 'pull') {
-      await tryAutoPull(target.dir);
+      if (!ENABLE_AUTO_PULL) {
+        // Demote to a fetch + notify; the user still sees ahead/behind on the
+        // next foreground CLI invocation, but the source tree is never mutated
+        // by a detached worker.
+        await notifyRepo(target);
+      } else {
+        await tryAutoPull(target.dir);
+      }
     } else {
       await notifyRepo(target);
     }

@@ -22,6 +22,7 @@ import {
   resolveCliManifest,
   installCli,
   describeMethod,
+  describeCheck,
   selectInstallMethod,
   isCliInstalled,
   type CliManifest,
@@ -191,7 +192,7 @@ When to use:
             console.log(chalk.gray(m.postInstall.trim().split('\n').map((l) => '  ' + l).join('\n')));
           }
         } else {
-          console.log(chalk.yellow(`  install command ran but \`${m.check}\` still fails — check the output above`));
+          console.log(chalk.yellow(`  install command ran but \`${describeCheck(m.check)}\` still fails — check the output above`));
           failures++;
         }
       }
@@ -214,7 +215,7 @@ When to use:
       console.log('  ' + chalk.gray(`file: ${manifest.path}`));
       console.log('');
       console.log(chalk.bold('  check'));
-      console.log('    ' + manifest.check);
+      console.log('    ' + describeCheck(manifest.check));
       console.log('');
       console.log(chalk.bold('  install methods'));
       for (const method of manifest.install) {

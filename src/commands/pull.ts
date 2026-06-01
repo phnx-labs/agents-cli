@@ -61,6 +61,7 @@ import {
   listCliStatus,
   installCli,
   describeMethod,
+  describeCheck,
   selectInstallMethod,
 } from '../lib/cli-resources.js';
 import {
@@ -484,7 +485,7 @@ export function registerPullCommand(program: Command): void {
                       console.log(chalk.gray(s.manifest.postInstall.trim().split('\n').map((l) => '  ' + l).join('\n')));
                     }
                   } else {
-                    console.log(chalk.yellow(`  install ran but \`${s.manifest.check}\` still fails`));
+                    console.log(chalk.yellow(`  install ran but \`${describeCheck(s.manifest.check)}\` still fails`));
                   }
                 }
               } else {
