@@ -20,6 +20,7 @@ import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from '../gemini-set
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir } from '../state.js';
 import { AGENTS } from '../agents.js';
+import { sanitizeProcessEnv } from '../secrets/bundles.js';
 
 let lastMemoryWarnAt = 0;
 
@@ -1226,8 +1227,8 @@ export class AgentManager {
         cwd: agent.cwd || undefined,
         detached: true,
         env: agent.envOverrides
-          ? { ...process.env, ...agent.envOverrides }
-          : process.env,
+          ? { ...sanitizeProcessEnv(process.env), ...agent.envOverrides }
+          : sanitizeProcessEnv(process.env),
       });
 
       childProcess.unref();
