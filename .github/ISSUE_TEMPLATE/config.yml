@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/phnx-labs/agents-cli/discussions
+    about: Questions, ideas, "how do I…" — open a discussion instead of an issue.
+  - name: Security
+    url: https://github.com/phnx-labs/agents-cli/security/advisories/new
+    about: Report a vulnerability privately. Do not file public issues for security.

@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a new capability or improvement to agents-cli.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Concrete situation where today's behavior falls short. Skip the abstract.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should `agents` do? Example commands, flags, or output welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other shapes you weighed, and why this one wins.
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - Single agent surface (e.g. Claude only)
+        - Cross-agent (touches multiple agents' configs)
+        - Cloud/dispatch
+        - Sessions/observability
+        - Browser / PTY / secrets
+        - Other
+    validations:
+      required: true

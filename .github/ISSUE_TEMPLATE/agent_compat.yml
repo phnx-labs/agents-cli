@@ -1,0 +1,61 @@
+name: Agent compatibility issue
+description: An agent's CLI is broken under agents-cli (version detection, install path, sync surface, capability mismatch).
+labels: [bug, compat]
+body:
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Affected agent
+      options:
+        - Claude Code
+        - Codex
+        - Gemini
+        - Cursor
+        - OpenCode
+        - Grok Build
+        - Copilot
+        - Amp
+        - Kiro
+        - Goose
+        - Roo Code
+        - OpenClaw
+    validations:
+      required: true
+  - type: input
+    id: agent_version
+    attributes:
+      label: Agent CLI version
+      placeholder: "claude-code 1.2.3"
+    validations:
+      required: true
+  - type: input
+    id: agents_cli_version
+    attributes:
+      label: agents-cli version
+      placeholder: "1.20.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface broke?
+      multiple: true
+      options:
+        - Install / version detection
+        - Memory file sync (AGENTS.md / CLAUDE.md / etc.)
+        - Commands / skills sync
+        - MCP server sync
+        - Hooks / permissions
+        - Sessions reader
+        - Cloud dispatch
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: What's wrong
+      description: What does `agents` produce vs. what should happen for this agent? Include any relevant `agents doctor` output.
+      render: shell
+    validations:
+      required: true

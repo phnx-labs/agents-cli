@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in agents-cli is broken or behaving unexpectedly.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: agents-cli version
+      description: Output of `agents --version`.
+      placeholder: "1.20.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Which agent CLI?
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Gemini
+        - Cursor
+        - OpenCode
+        - Grok Build
+        - Copilot
+        - Amp
+        - Kiro
+        - Goose
+        - Roo Code
+        - OpenClaw
+        - Not agent-specific
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS + version
+      placeholder: "macOS 15.4 / Ubuntu 24.04 / Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Commands you ran, in order. Include `agents` invocations verbatim.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Paste full error output. `agents doctor` output helps too.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Logs, screenshots, related issues, workarounds you tried.
