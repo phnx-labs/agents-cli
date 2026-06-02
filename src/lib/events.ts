@@ -508,7 +508,7 @@ export function emitError(
  * Remove log files older than the retention period.
  * Called lazily on emit or explicitly via CLI.
  *
- * @param retentionDays - Number of days to keep (default 30)
+ * @param retentionDays - Number of days to keep (default 7, from DEFAULT_RETENTION_DAYS)
  * @returns Number of files removed
  */
 export function rotate(retentionDays: number = DEFAULT_RETENTION_DAYS): number {

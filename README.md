@@ -598,11 +598,11 @@ Every agent run, version install, browser launch, and secrets access is logged t
 }
 ```
 
-**What's logged:** Operation type, agent, version, timing, truncated prompts (first 200 chars), exit codes, errors, and secret bundle/key names with caller context. **What's NOT logged:** Full prompts, outputs, file contents, or secret values.
+**What's logged:** Operation type, agent, version, timing, prompt length + SHA-256 hash (raw text never stored), exit codes, errors, and secret bundle/key names with caller context. Argv entries that look like tokens or secret paths are redacted. **What's NOT logged:** Raw prompts, outputs, file contents, or secret values.
 
 **Permissions:** Logs directory is `0700` (owner-only), files are `0600`. Only you can read them.
 
-**Retention:** 30 days by default, then auto-pruned.
+**Retention:** 7 days by default, then auto-pruned.
 
 **Opt out:** Set `AGENTS_DISABLE_EVENT_LOG=1` in your shell to disable completely.
 
@@ -693,7 +693,7 @@ Your choice. We hand off to the original CLI process — use your existing subsc
 
 **No CLI telemetry or phone-home.** API keys come from your shell environment or each agent CLI's existing auth, and remote calls only happen when you invoke a feature that requires them, such as cloud dispatch.
 
-For full transparency: `agents-cli` keeps a local event log at `~/.agents/.cache/logs/` so you can see exactly what agents did on your machine. Logs are owner-readable only (0600) and auto-prune after 30 days. Set `AGENTS_DISABLE_EVENT_LOG=1` to disable. See [Security & Privacy](#security--privacy) for details.
+For full transparency: `agents-cli` keeps a local event log at `~/.agents/.cache/logs/` so you can see exactly what agents did on your machine. Logs are owner-readable only (0600) and auto-prune after 7 days. Set `AGENTS_DISABLE_EVENT_LOG=1` to disable. See [Security & Privacy](#security--privacy) for details.
 
 ### Which platforms?
 
