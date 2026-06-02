@@ -1,3 +1,17 @@
+## Brand identity (read this first)
+
+**`agents-cli` is a Phoenix Labs OSS product (MIT-licensed). It is NOT part of the Rush brand.** Phoenix Horizon, Inc. owns several brands; agents-cli sits in the OSS lane, Rush sits in the consumer-product lane. Different audiences, different voice, different visual language.
+
+When working on this repo or its sibling `agent-cli-web` landing:
+
+- **Do NOT apply Rush brand styling** (gold sheen, cream paper, falcon mark, Cormorant Garamond serif, "Interface for the future" voice). Rush brand assets live in `~/.agents/plugins/rush/` — those are tools, not a brand to import.
+- **Do NOT write to `~/Rush/Brand/`** for agents-cli renders, screenshots, or videos. The Rush brand surface is for Rush product only. agents-cli assets go under `~/Phoenix/agents-cli/` (the `~/Rush/` prefix is the Google Drive sync root, not a brand) or the repo's own `assets/` / `demo/out/`.
+- **Visual language is terminal-coded** — near-black `#0a0a0a` bg, lime accent `#a3e635`, JetBrains Mono for wordmark + code, Inter for prose. See `assets/`, `demo/src/`, and `website/`.
+- **Voice is direct-developer** — name the verb, name the artifact, no marketing claims. Closer to a `man` page than a landing pitch.
+- **The composer + animator skills under `~/.agents/plugins/rush/skills/`** can be USED for agents-cli work, but ignore their §Brand voice sections — those apply only to Rush content. Override the destination dir with `~/Phoenix/agents-cli/launches/` and use this repo's color/type tokens, not Rush's.
+
+If any agent (Claude / Codex / Gemini / Cursor) starts pulling in Rush styling, Rush directory paths, or Rush voice for this project, stop and reread this block.
+
 ## Agent Spawning
 
 When asked to spawn agents or perform multi-agent tasks, use the Swarm MCP extension:
