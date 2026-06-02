@@ -29,6 +29,16 @@ const C = '#22d3ee';  // cyan
 const R = '#f87171';  // red
 
 export const SCENES: Scene[] = [
+  // ── ACT 0: COVER ──
+  // 1.5s logo+wordmark intro. No terminal lines — rendered by AgentsDemo's
+  // isIntro branch (see AgentsDemo.tsx). Lands inside the music's `enter`
+  // section (0-4s) for the agent-cli-neon-* score variants.
+  {
+    id: 'intro',
+    title: 'agents',
+    lines: [],
+    durationFrames: 45, // 1.5s @ 30fps
+  },
   // ── ACT 1: INSTALL + VERSION SWITCH ──
   {
     id: 'install',

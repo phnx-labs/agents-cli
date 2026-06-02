@@ -64,6 +64,7 @@ import { registerPullCommand } from './commands/pull.js';
 import { registerRepoCommands } from './commands/repo.js';
 import { registerSetupCommand, runSetup } from './commands/setup.js';
 import { registerStatusCommand } from './commands/status.js';
+import { registerFeedbackCommand } from './commands/feedback.js';
 import { registerViewCommand } from './commands/view.js';
 import { registerCommandsCommands } from './commands/commands.js';
 import { registerHooksCommands } from './commands/hooks.js';
@@ -552,6 +553,7 @@ async function maybeBootstrapShimIntegration(requestedCommand: string | undefine
 // Register all commands
 registerViewCommand(program);
 registerStatusCommand(program);
+registerFeedbackCommand(program);
 registerCommandsCommands(program);
 registerHooksCommands(program);
 registerSkillsCommands(program);

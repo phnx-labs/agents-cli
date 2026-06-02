@@ -21,7 +21,7 @@ import {
   readDaemonPid,
   readDaemonLog,
 } from '../lib/daemon.js';
-import { humanizeCron, humanizeNextRun, formatRepoLink } from '../lib/routines-format.js';
+import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
 import {
   listJobs as listAllJobs,
   deleteJob,
@@ -171,16 +171,16 @@ export function registerRoutinesCommands(program: Command): void {
       console.log(chalk.bold('Scheduled Jobs\n'));
 
       // OSC 8 hyperlink helper — renders as a clickable link in supporting terminals.
-      // In terminals that do not support OSC 8 the escape sequences are ignored and
-      // the label is displayed as plain text.
+      // Guarded on process.stdout.isTTY so that piped/redirected output never
+      // contains raw ESC ] 8 ;; ... BEL escape sequences.
       const link = (label: string, url: string | null): string =>
-        url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label;
+        url && process.stdout.isTTY ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label;
 
       const now = new Date();
 
       const NAME_W = 24;
       const AGENT_W = 10;
-      const REPO_W = 24;
+      const REPO_W = REPO_DISPLAY_MAX;
       const SCHED_W = 22;
       const ENABLED_W = 10;
       const NEXT_W = 22;

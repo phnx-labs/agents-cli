@@ -104,6 +104,85 @@ const CaptionOverlay: React.FC<{
   );
 };
 
+// Intro: 1.5s logo + wordmark fade-in. Lighter cousin of Finale — no CTA,
+// no footer. Just the agents cover image + green glow + brief wordmark.
+const Intro: React.FC<{ frameInScene: number; fps: number }> = ({
+  frameInScene,
+  fps,
+}) => {
+  const logoSpring = spring({
+    frame: frameInScene,
+    fps,
+    config: { damping: 14, stiffness: 110, mass: 0.7 },
+  });
+  const wordFade = interpolate(frameInScene, [12, 28], [0, 1], {
+    extrapolateRight: "clamp",
+    extrapolateLeft: "clamp",
+  });
+  const fadeOut = interpolate(frameInScene, [36, 45], [1, 0], {
+    extrapolateRight: "clamp",
+    extrapolateLeft: "clamp",
+  });
+  const glowPulse =
+    0.5 + 0.5 * Math.sin((frameInScene / fps) * 2 * Math.PI * 1.2);
+
+  return (
+    <AbsoluteFill
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 18,
+        opacity: fadeOut,
+      }}
+    >
+      <div
+        style={{
+          width: 240,
+          height: 240,
+          position: "relative",
+          transform: `scale(${logoSpring}) translateY(${(1 - logoSpring) * 16}px)`,
+          opacity: logoSpring,
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: -36,
+            background: `radial-gradient(circle, rgba(163,230,53,${0.08 + glowPulse * 0.08}) 0%, transparent 65%)`,
+            filter: "blur(18px)",
+          }}
+        />
+        <Img
+          src={staticFile("agents-logo.png")}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            position: "relative",
+            filter: "drop-shadow(0 16px 32px rgba(0,0,0,0.55))",
+          }}
+        />
+      </div>
+      <div
+        style={{
+          opacity: wordFade,
+          transform: `translateY(${(1 - wordFade) * 10}px)`,
+          fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+          fontSize: 64,
+          fontWeight: 500,
+          letterSpacing: "-0.04em",
+          color: "#f5f5f5",
+          marginTop: 4,
+        }}
+      >
+        agents
+      </div>
+    </AbsoluteFill>
+  );
+};
+
 // Finale: agents 'a' mark + wordmark + CTA.
 const Finale: React.FC<{ frameInScene: number; fps: number }> = ({
   frameInScene,
@@ -270,6 +349,7 @@ export const AgentsDemo: React.FC = () => {
   const scene = SCENES[currentSceneIdx];
   const frameInScene = frame - sceneStartFrame;
   const isFinale = scene.id === "finale";
+  const isIntro = scene.id === "intro";
 
   const fadeIn = spring({
     frame: frameInScene,
@@ -298,7 +378,9 @@ export const AgentsDemo: React.FC = () => {
         }}
       />
 
-      {isFinale ? (
+      {isIntro ? (
+        <Intro frameInScene={frameInScene} fps={fps} />
+      ) : isFinale ? (
         <Finale frameInScene={frameInScene} fps={fps} />
       ) : (
         <>

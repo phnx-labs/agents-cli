@@ -216,7 +216,7 @@ async function ensureRemoteBrowser(
   const remoteCmd = [
     shellQuote(browserPath),
     `--remote-debugging-port=${port}`,
-    shellQuote('--remote-allow-origins=*'),
+    shellQuote(`--remote-allow-origins=http://127.0.0.1:${port}`),
     '--disable-background-timer-throttling',
     `--user-data-dir=/tmp/agents-browser-${port}`,
     '</dev/null >/dev/null 2>&1 &',

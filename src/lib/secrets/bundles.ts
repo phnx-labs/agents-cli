@@ -116,6 +116,16 @@ export function isLoaderOrInterpreterEnv(name: string): boolean {
     ].includes(upper);
 }
 
+export function sanitizeProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) continue;
+    if (isLoaderOrInterpreterEnv(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 /** Validate a bundle name against the allowed pattern. Throws on invalid input. */
 export function validateBundleName(name: string): void {
   if (!BUNDLE_NAME_PATTERN.test(name)) {

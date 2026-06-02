@@ -15,6 +15,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { createHash } from 'node:crypto';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -22,7 +23,7 @@ import * as os from 'os';
 const LOGS_DIR = path.join(os.homedir(), '.agents', '.cache', 'logs');
 
 /** Default retention period in days. */
-const DEFAULT_RETENTION_DAYS = 30;
+const DEFAULT_RETENTION_DAYS = 7;
 
 /** Default max length for truncated strings. */
 const DEFAULT_TRUNCATE_LENGTH = 500;
@@ -121,7 +122,11 @@ export interface EventPayload {
   // Input/Output (truncated)
   input?: string;
   output?: string;
-  prompt?: string;
+
+  // Prompt is NEVER persisted in raw form — only length + hash.
+  // Users paste secrets into prompts; raw retention is a leak.
+  prompt_length?: number;
+  prompt_sha256?: string;
 
   // Timing
   durationMs?: number;
@@ -175,6 +180,36 @@ function ensureLogsDir(): void {
       // May fail if not owner
     }
   }
+}
+
+// ─── Redaction ────────────────────────────────────────────────────────────────
+
+/**
+ * Replace a prompt string with length + short SHA so we can correlate runs
+ * without persisting the raw text. Returns the fields to spread into a payload.
+ */
+export function redactPrompt(prompt: string | null | undefined): { prompt_length?: number; prompt_sha256?: string } {
+  if (prompt == null) return {};
+  return {
+    prompt_length: prompt.length,
+    prompt_sha256: createHash('sha256').update(prompt).digest('hex').slice(0, 16),
+  };
+}
+
+const TOKEN_LIKE = /(sk_(?:live|test)_|pk_(?:live|test)_|ghp_|gho_|ghu_|ghs_|xox[bpars]-|AKIA|ASIA|AIza|Bearer\s+|eyJ[A-Za-z0-9_-]+\.)/i;
+const SECRET_PATH = /\/(secrets|credentials|\.env|user\.yaml)\b/i;
+
+/**
+ * Mask argv entries that look like tokens or secret paths. Preserves structure
+ * for debugging but drops the sensitive substring.
+ */
+export function redactArgs(args: string[] | undefined): string[] | undefined {
+  if (!args) return undefined;
+  return args.map(a => {
+    if (typeof a !== 'string') return a;
+    if (TOKEN_LIKE.test(a) || SECRET_PATH.test(a)) return '[REDACTED]';
+    return a;
+  });
 }
 
 // ─── Truncation ───────────────────────────────────────────────────────────────

@@ -11,7 +11,8 @@ import type { AgentId } from './types.js';
 import { parseTimeout } from './routines.js';
 import { getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
-import { emitStart, maybeRotate, createTimer, truncate } from './events.js';
+import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
+import { sanitizeProcessEnv } from './secrets/bundles.js';
 
 /** Agent execution modes controlling tool access and autonomy level. */
 export type ExecMode = 'plan' | 'edit' | 'full' | 'auto';
@@ -76,7 +77,7 @@ export function parseExecEnv(entries: string[]): Record<string, string> | undefi
  * into unrelated invocations.
  */
 export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
-  const result: NodeJS.ProcessEnv = { ...process.env };
+  const result: NodeJS.ProcessEnv = { ...sanitizeProcessEnv(process.env) };
 
   // Config-dir env vars are agent-specific. When the caller is running inside
   // an agent-managed shell, process.env already carries one; spreading into a
@@ -443,9 +444,9 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     model: options.model,
     interactive,
     sessionId: options.sessionId,
-    prompt: truncate(options.prompt, 200),
+    ...redactPrompt(options.prompt),
     command: executable,
-    args: args.slice(0, 10),
+    args: redactArgs(args.slice(0, 10)),
   });
 
   return new Promise((resolve, reject) => {
