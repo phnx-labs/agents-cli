@@ -77,9 +77,9 @@ describe('validateJob', () => {
     expect(errors).toContain('schedule (cron expression) is required');
   });
 
-  it('requires agent', () => {
+  it('requires agent or workflow', () => {
     const errors = validateJob({ name: 'test', schedule: '* * * * *', prompt: 'hi' });
-    expect(errors).toContain('agent is required');
+    expect(errors).toContain('exactly one of agent or workflow is required');
   });
 
   it('requires prompt', () => {
@@ -109,7 +109,7 @@ describe('validateJob', () => {
 
   it('rejects invalid timeout', () => {
     const errors = validateJob({ ...makeConfig(), timeout: 'forever' });
-    expect(errors).toContain('timeout must be like 30m, 2h, 1h30m');
+    expect(errors).toContain('timeout must be like 10m, 2h, 3d, 1w (max 1w)');
   });
 
   it('accepts all valid job agents', () => {
@@ -236,7 +236,7 @@ describe('job CRUD', () => {
     const job = readJob(`${PREFIX}crud-defaults`)!;
     expect(job.mode).toBe('plan');
     expect(job.effort).toBe('auto');
-    expect(job.timeout).toBe('30m');
+    expect(job.timeout).toBe('10m');
     expect(job.enabled).toBe(true);
   });
 
