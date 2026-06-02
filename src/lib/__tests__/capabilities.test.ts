@@ -102,6 +102,7 @@ describe('capableAgents()', () => {
     const agents = capableAgents('hooks');
     expect(agents).not.toContain('cursor');
     expect(agents).not.toContain('opencode');
+    expect(agents).not.toContain('copilot');
     expect(agents).not.toContain('amp');
   });
 });

@@ -1362,7 +1362,7 @@ function parseMcpFromOpenCodeConfig(configPath: string): Record<string, McpConfi
 /**
  * Get user-scoped MCP config path for an agent.
  */
-function getUserMcpConfigPath(agentId: AgentId): string {
+export function getUserMcpConfigPath(agentId: AgentId): string {
   const agent = AGENTS[agentId];
 
   switch (agentId) {
@@ -1381,6 +1381,9 @@ function getUserMcpConfigPath(agentId: AgentId): string {
     case 'openclaw':
       // OpenClaw uses openclaw.json
       return path.join(agent.configDir, 'openclaw.json');
+    case 'copilot':
+      // GitHub Copilot CLI uses mcp-config.json (matches versioned + project paths)
+      return path.join(agent.configDir, 'mcp-config.json');
     case 'antigravity':
       // agy uses mcp_config.json inside its nested config dir (~/.gemini/antigravity-cli/)
       return path.join(agent.configDir, 'mcp_config.json');
