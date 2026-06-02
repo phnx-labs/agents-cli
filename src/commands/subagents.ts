@@ -32,14 +32,17 @@ import {
   syncResourcesToVersion,
   getGlobalDefault,
   getVersionHomePath,
+  resolveAgentVersionTargets,
+  promptAgentVersionSelection,
 } from '../lib/versions.js';
-import { getSubagentsDir } from '../lib/state.js';
+import { getSubagentsDir, recordVersionResources } from '../lib/state.js';
 import {
   isInteractiveTerminal,
   isPromptCancelled,
   requireInteractiveSelection,
   requireDestructiveArg,
   promptRemovalTargets,
+  parseCommaSeparatedList,
   type RemovalTarget,
 } from './utils.js';
 import {
@@ -141,12 +144,19 @@ Examples:
   subagentsCmd
     .command('add <source>')
     .description('Install subagents from a source (GitHub, local path) and sync to agent versions')
-    .option('-a, --agents <agents...>', 'Targets: claude, openclaw (defaults to all subagent-capable agents)')
+    .option('-a, --agents <list>', 'Targets: claude, openclaw, claude@2.1.141, claude@all, all')
+    .option('--names <list>', 'Subagent names from the source (comma-separated)')
     .option('-y, --yes', 'Skip all prompts and confirmations')
     .addHelpText('after', `
 Examples:
   # Install from GitHub
   agents subagents add gh:team/subagents --agents claude,openclaw
+
+  # Pluck specific subagents from a multi-subagent repo
+  agents subagents add gh:team/subagents --names code-reviewer,planner
+
+  # Install across every installed Claude version
+  agents subagents add gh:team/subagents --agents claude@all
 
   # Install from local directory (must contain subagents/*/AGENT.md)
   agents subagents add ~/my-subagent --agents claude
@@ -157,9 +167,13 @@ Examples:
     .action(async (source, options) => {
       const spinner = ora({ text: 'Fetching source...', isSilent: !process.stdout.isTTY }).start();
 
-      // Clone or use local source
+      // Clone or use local source. Accept any git-like scheme to match the
+      // other <resource> add commands (skills, workflows, commands, hooks).
       let sourcePath: string;
-      if (source.startsWith('gh:') || source.startsWith('http')) {
+      const isGitRepo = source.startsWith('gh:') || source.startsWith('git:') ||
+                        source.startsWith('ssh:') || source.startsWith('https://') ||
+                        source.startsWith('http://');
+      if (isGitRepo) {
         try {
           const cloneResult = await cloneRepo(source);
           sourcePath = cloneResult.localPath;
@@ -176,12 +190,25 @@ Examples:
 
       // Discover subagents
       spinner.text = 'Discovering subagents...';
-      const discovered = discoverSubagentsFromRepo(sourcePath);
+      let discovered = discoverSubagentsFromRepo(sourcePath);
 
       if (discovered.length === 0) {
         spinner.fail('No subagents found in source');
         console.log(chalk.gray(`Expected: subagents/*/AGENT.md`));
         process.exit(1);
+      }
+
+      // --names filter: pluck specific subagents from a multi-subagent source.
+      const requestedNames = parseCommaSeparatedList(options.names);
+      if (requestedNames.length > 0) {
+        const discoveredNames = new Set(discovered.map((s) => s.name));
+        const missing = requestedNames.filter((n) => !discoveredNames.has(n));
+        if (missing.length > 0) {
+          spinner.fail(`Subagent(s) not found in source: ${missing.join(', ')}`);
+          console.log(chalk.gray(`Available: ${[...discoveredNames].join(', ')}`));
+          process.exit(1);
+        }
+        discovered = discovered.filter((s) => requestedNames.includes(s.name));
       }
 
       spinner.succeed(`Found ${discovered.length} subagent(s)`);
@@ -193,41 +220,26 @@ Examples:
       }
       console.log();
 
-      // Determine target agents
-      let targetAgents: AgentId[] = options.agents || [];
+      // Determine target agent versions, using the same path skills/workflows use.
+      // Back-compat: commander's old `--agents <agents...>` shape arrives as an array;
+      // join it with commas so resolveAgentVersionTargets can parse it.
+      const agentsArg: string | undefined = Array.isArray(options.agents)
+        ? options.agents.join(',')
+        : options.agents;
 
-      if (targetAgents.length === 0 && !options.yes) {
-        // Prompt for target agents
-        const installedAgents = SUBAGENT_CAPABLE_AGENTS.filter(id => {
-          const versions = listInstalledVersions(id);
-          return versions.length > 0;
+      let selectedAgents: AgentId[];
+      let versionSelections: Map<AgentId, string[]>;
+
+      if (agentsArg) {
+        const result = resolveAgentVersionTargets(agentsArg, SUBAGENT_CAPABLE_AGENTS);
+        selectedAgents = result.selectedAgents;
+        versionSelections = result.versionSelections;
+      } else {
+        const result = await promptAgentVersionSelection(SUBAGENT_CAPABLE_AGENTS, {
+          skipPrompts: options.yes || !isInteractiveTerminal(),
         });
-
-        if (installedAgents.length === 0) {
-          console.log(chalk.yellow('No subagent-capable agents installed'));
-          console.log(chalk.gray('Subagents will be stored centrally and synced when you install claude or openclaw'));
-          targetAgents = [];
-        } else {
-          if (!isInteractiveTerminal()) {
-            requireInteractiveSelection('Selecting target agents for subagents', [
-              'agents subagents add <source> --agents claude openclaw',
-              'agents subagents add <source> --yes',
-            ]);
-          }
-          try {
-            targetAgents = await checkbox({
-              message: 'Install to which agents?',
-              choices: installedAgents.map(id => ({
-                name: AGENTS[id].name,
-                value: id,
-                checked: true,
-              })),
-            });
-          } catch (err) {
-            if (isPromptCancelled(err)) return;
-            throw err;
-          }
-        }
+        selectedAgents = result.selectedAgents;
+        versionSelections = result.versionSelections;
       }
 
       // Install centrally
@@ -243,18 +255,25 @@ Examples:
 
       installSpinner.succeed(`Installed ${discovered.length} subagent(s) to ${formatPath(getSubagentsDir())}`);
 
-      // Sync to target agents
-      if (targetAgents.length > 0) {
+      // Sync to selected versions
+      if (versionSelections.size > 0) {
         const syncSpinner = ora({ text: 'Syncing to agents...', isSilent: !process.stdout.isTTY }).start();
-
-        for (const agentId of targetAgents) {
-          const versions = listInstalledVersions(agentId);
+        const subagentNames = discovered.map((s) => s.name);
+        let synced = 0;
+        for (const [agentId, versions] of versionSelections) {
           for (const version of versions) {
             syncResourcesToVersion(agentId, version);
+            recordVersionResources(agentId, version, 'subagents', subagentNames);
+            synced++;
           }
         }
-
-        syncSpinner.succeed(`Synced to ${targetAgents.map(id => agentLabel(id)).join(', ')}`);
+        if (synced > 0) {
+          syncSpinner.succeed(`Synced to ${synced} agent version(s) across ${selectedAgents.map((id) => agentLabel(id)).join(', ')}`);
+        } else {
+          syncSpinner.info('No version-managed agents to sync');
+        }
+      } else {
+        console.log(chalk.gray('Stored centrally; no agent versions selected for sync.'));
       }
 
       console.log();

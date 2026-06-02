@@ -43,6 +43,7 @@ import {
   requireInteractiveSelection,
   printWithPager,
   promptRemovalTargets,
+  parseCommaSeparatedList,
   type RemovalTarget,
 } from './utils.js';
 import {
@@ -139,18 +140,25 @@ Examples:
   workflowsCmd
     .command('add [source]')
     .description('Install workflows from a source (GitHub, local) or pick from central storage')
-    .option('-a, --agents <list>', 'Targets: claude, claude@2.1.138')
+    .option('-a, --agents <list>', 'Targets: claude, claude@2.1.138, claude@all, all')
+    .option('--names <list>', 'Workflow names from the source (comma-separated)')
     .option('-y, --yes', 'Skip confirmation prompts')
     .addHelpText('after', `
 Examples:
   # Install from GitHub
   agents workflows add gh:user/workflows
 
+  # Pluck specific workflows from a multi-workflow repo
+  agents workflows add gh:user/workflows --names rdev,plan
+
   # Install a local workflow directory (must contain WORKFLOW.md)
   agents workflows add ./rdev
 
   # Install and sync to a specific version
   agents workflows add gh:user/workflows --agents claude@2.1.138
+
+  # Install across every installed Claude version
+  agents workflows add gh:user/workflows --agents claude@all
 `)
     .action(async (source: string | undefined, options) => {
       try {
@@ -208,10 +216,23 @@ Examples:
             spinner.succeed('Using local path');
           }
 
-          const discovered = discoverWorkflowsFromRepo(localPath);
+          let discovered = discoverWorkflowsFromRepo(localPath);
           if (discovered.length === 0) {
             console.log(chalk.yellow('No workflows found (looking for WORKFLOW.md files)'));
             return;
+          }
+
+          // --names filter: pluck specific workflows from a multi-workflow source.
+          const requestedNames = parseCommaSeparatedList(options.names);
+          if (requestedNames.length > 0) {
+            const discoveredNames = new Set(discovered.map((w) => w.name));
+            const missing = requestedNames.filter((n) => !discoveredNames.has(n));
+            if (missing.length > 0) {
+              console.log(chalk.red(`\nWorkflow(s) not found in source: ${missing.join(', ')}`));
+              console.log(chalk.gray(`Available: ${[...discoveredNames].join(', ')}`));
+              process.exit(1);
+            }
+            discovered = discovered.filter((w) => requestedNames.includes(w.name));
           }
 
           console.log(chalk.bold(`\nFound ${discovered.length} workflow(s):`));

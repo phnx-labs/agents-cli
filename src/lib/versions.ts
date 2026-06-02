@@ -2329,10 +2329,26 @@ export function resolveAgentVersionTargets(
   const selectedAgents: AgentId[] = [];
   const versionSelections = new Map<AgentId, string[]>();
   const explicitSelections = new Set<AgentId>();
-  const targets = value
+  const rawTargets = value
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+
+  // Expand literal `all` (with optional @all) into every available agent's all
+  // installed versions. Skip agents with no installed versions so `all` is
+  // lenient — only explicit `claude@all` errors when claude isn't installed.
+  const targets: string[] = [];
+  for (const t of rawTargets) {
+    if (t === 'all' || t === 'all@all') {
+      for (const a of availableAgents) {
+        if (listInstalledVersions(a).length > 0) {
+          targets.push(`${a}@all`);
+        }
+      }
+    } else {
+      targets.push(t);
+    }
+  }
 
   for (const target of targets) {
     const atIndex = target.indexOf('@');
@@ -2344,7 +2360,7 @@ export function resolveAgentVersionTargets(
     }
 
     if (atIndex !== -1 && !versionToken) {
-      throw new Error(`Missing version in --agents entry '${target}'. Use agent@x.y.z or agent@default.`);
+      throw new Error(`Missing version in --agents entry '${target}'. Use agent@x.y.z, agent@default, or agent@all.`);
     }
 
     const agentId = resolveAgentName(agentToken);
@@ -2394,6 +2410,12 @@ export function resolveAgentVersionTargets(
         explicitVersions.push(defaultVersion);
       }
       versionSelections.set(agentId, explicitVersions);
+      explicitSelections.add(agentId);
+      continue;
+    }
+
+    if (versionToken === 'all') {
+      versionSelections.set(agentId, [...installedVersions]);
       explicitSelections.add(agentId);
       continue;
     }

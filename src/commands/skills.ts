@@ -276,12 +276,26 @@ Examples:
             }
           }
 
-          console.log(chalk.bold(`\nFound ${discoveredSkills.length} skill(s):`));
-
           if (discoveredSkills.length === 0) {
             console.log(chalk.yellow('No skills found (looking for SKILL.md files)'));
             return;
           }
+
+          // Filter by --names if provided. Mirrors the no-source path's behavior
+          // so users can pluck specific skills from a multi-skill repo.
+          const requestedNames = parseCommaSeparatedList(options.names);
+          if (requestedNames.length > 0) {
+            const discoveredNames = new Set(discoveredSkills.map((s) => s.name));
+            const missing = requestedNames.filter((n) => !discoveredNames.has(n));
+            if (missing.length > 0) {
+              console.log(chalk.red(`\nSkill(s) not found in source: ${missing.join(', ')}`));
+              console.log(chalk.gray(`Available: ${[...discoveredNames].join(', ')}`));
+              process.exit(1);
+            }
+            discoveredSkills = discoveredSkills.filter((s) => requestedNames.includes(s.name));
+          }
+
+          console.log(chalk.bold(`\nFound ${discoveredSkills.length} skill(s):`));
 
           for (const skill of discoveredSkills) {
             const nameColor = skill.parseError ? chalk.yellow : chalk.cyan;
