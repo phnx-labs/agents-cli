@@ -156,6 +156,48 @@ export function listMcpServerConfigs(cwd: string = process.cwd()): InstalledMcpS
 }
 
 /**
+ * Scan a repository for MCP server YAML configs.
+ * Looks under <repoPath>/mcp/*.yaml — same on-disk layout as ~/.agents/mcp/.
+ */
+export function discoverMcpConfigsFromRepo(repoPath: string): InstalledMcpServer[] {
+  const dir = path.join(repoPath, 'mcp');
+  if (!fs.existsSync(dir)) return [];
+
+  const results: InstalledMcpServer[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.endsWith('.yaml') && !entry.name.endsWith('.yml')) continue;
+
+    const filePath = path.join(dir, entry.name);
+    const config = parseMcpServerConfig(filePath);
+    if (config) {
+      results.push({ name: config.name, path: filePath, config, scope: 'user' });
+    }
+  }
+  return results;
+}
+
+/**
+ * Install an MCP YAML config from a source file into ~/.agents/mcp/.
+ * Re-serializes via writeMcpServerConfig so the on-disk filename is
+ * deterministic (sanitized from the server name).
+ */
+export function installMcpConfigCentrally(
+  sourcePath: string
+): { success: boolean; error?: string; path?: string } {
+  try {
+    const config = parseMcpServerConfig(sourcePath);
+    if (!config) {
+      return { success: false, error: `Invalid MCP config at ${sourcePath}` };
+    }
+    const written = writeMcpServerConfig(config);
+    return { success: true, path: written };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
  * Get MCP servers by name.
  * If names is provided, returns only those servers.
  * Otherwise returns all servers.

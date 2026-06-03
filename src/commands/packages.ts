@@ -46,6 +46,18 @@ import {
   installHooksCentrally,
 } from '../lib/hooks.js';
 import {
+  discoverWorkflowsFromRepo,
+  installWorkflowCentrally,
+} from '../lib/workflows.js';
+import {
+  discoverSubagentsFromRepo,
+  installSubagentCentrally,
+} from '../lib/subagents.js';
+import {
+  discoverPermissionsFromRepo,
+  installPermissionSet,
+} from '../lib/permissions.js';
+import {
   listInstalledVersions,
   resolveInstalledAgentTargets,
   resolveConfiguredAgentTargets,
@@ -54,11 +66,17 @@ import {
 import {
   isInteractiveTerminal,
   isPromptCancelled,
+  parseCommaSeparatedList,
   requireDestructiveArg,
   requireInteractiveSelection,
 } from './utils.js';
 import { itemPicker } from '../lib/picker.js';
-import { registerMcpCommandToTargets, type McpCommandSpec } from '../lib/mcp.js';
+import {
+  registerMcpCommandToTargets,
+  discoverMcpConfigsFromRepo,
+  installMcpConfigCentrally,
+  type McpCommandSpec,
+} from '../lib/mcp.js';
 
 export function buildMcpPackageCommand(pkg: McpPackage): McpCommandSpec {
   const packageName = pkg.name || pkg.registry_name;
@@ -405,6 +423,14 @@ When to use:
     .command('install <identifier>')
     .description('Install a package by registry name (mcp:notion), GitHub URL (gh:user/repo), or skill identifier')
     .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0, or gemini@default')
+    .option(
+      '--types <list>',
+      'When source is a repo: comma-separated resource types to install (skills,workflows,commands,hooks,permissions,subagents,mcp)'
+    )
+    .option(
+      '--names <list>',
+      'When source is a repo: comma-separated resource names within the selected types'
+    )
     .addHelpText('after', `
 Install resolves the package type (MCP server, skill, command, hook) and installs to the specified agents. Packages can come from registries (mcp:, skill:), GitHub (gh:user/repo), or direct URLs.
 
@@ -417,6 +443,12 @@ Examples:
 
   # Install using GitHub shorthand
   agents install gh:user/repo --agents claude@2.1.112
+
+  # Install only specific resource types from a multi-resource repo
+  agents install gh:phnx-labs/.agents-system --types skills,workflows --agents claude@all
+
+  # Install specific resources by name
+  agents install gh:phnx-labs/.agents-system --types skills --names animator,composer --agents claude@all
 
   # Install to all installed agents (uses defaults or prompts)
   agents install mcp:postgres
@@ -511,29 +543,83 @@ When to use:
 
           console.log(chalk.green('\nMCP server installed.'));
         } else if (resolved.type === 'git' || resolved.type === 'skill') {
-          // Install from git source (skills/commands/hooks)
+          // Install from git source: sniff every resource type the repo
+          // contains. Optional --types narrows which kinds get installed;
+          // --names narrows which specific resources within those kinds.
           console.log(chalk.bold(`\nInstalling from ${resolved.source}`));
 
           const { localPath } = await cloneRepo(resolved.source);
 
-          // Discover what's in the repo
-          const commands = discoverCommands(localPath);
-          const skills = discoverSkillsFromRepo(localPath);
-          const hooks = discoverHooksFromRepo(localPath);
+          const requestedTypes = new Set(parseCommaSeparatedList(options.types));
+          const includeType = (type: string): boolean =>
+            requestedTypes.size === 0 || requestedTypes.has(type);
 
-          const hasCommands = commands.length > 0;
-          const hasSkills = skills.length > 0;
-          const hasHooks = hooks.length > 0;
+          const requestedNames = new Set(parseCommaSeparatedList(options.names));
+          const nameFilter = <T extends { name: string }>(items: T[]): T[] => {
+            if (requestedNames.size === 0) return items;
+            return items.filter((item) => requestedNames.has(item.name));
+          };
 
-          if (!hasCommands && !hasSkills && !hasHooks) {
+          // Discover everything; filter to requested types up front so the
+          // summary table reflects what will actually be installed.
+          let commands = includeType('commands') ? discoverCommands(localPath) : [];
+          let skills = includeType('skills') ? discoverSkillsFromRepo(localPath) : [];
+          let hooks = includeType('hooks') ? discoverHooksFromRepo(localPath) : [];
+          let workflows = includeType('workflows') ? discoverWorkflowsFromRepo(localPath) : [];
+          let subagents = includeType('subagents') ? discoverSubagentsFromRepo(localPath) : [];
+          let permissions = includeType('permissions') ? discoverPermissionsFromRepo(localPath) : [];
+          let mcpServers = includeType('mcp') ? discoverMcpConfigsFromRepo(localPath) : [];
+
+          // --names filter applies across every discovered type. If the user
+          // typed a name that matched nothing, fail loud so they can fix the
+          // typo rather than silently install zero items.
+          if (requestedNames.size > 0) {
+            const allNames = new Set<string>([
+              ...commands.map((c) => c.name),
+              ...skills.map((s) => s.name),
+              ...hooks,
+              ...workflows.map((w) => w.name),
+              ...subagents.map((s) => s.name),
+              ...permissions.map((p) => p.name),
+              ...mcpServers.map((s) => s.name),
+            ]);
+            const missing = [...requestedNames].filter((n) => !allNames.has(n));
+            if (missing.length > 0) {
+              console.log(chalk.red(`\nResource(s) not found in repo: ${missing.join(', ')}`));
+              console.log(chalk.gray(`Available: ${[...allNames].sort().join(', ')}`));
+              process.exit(1);
+            }
+            commands = nameFilter(commands);
+            skills = nameFilter(skills);
+            hooks = hooks.filter((h) => requestedNames.has(h));
+            workflows = nameFilter(workflows);
+            subagents = nameFilter(subagents);
+            permissions = nameFilter(permissions);
+            mcpServers = nameFilter(mcpServers);
+          }
+
+          const summary: Array<{ kind: string; count: number }> = [
+            { kind: 'commands', count: commands.length },
+            { kind: 'skills', count: skills.length },
+            { kind: 'hooks', count: hooks.length },
+            { kind: 'workflows', count: workflows.length },
+            { kind: 'subagents', count: subagents.length },
+            { kind: 'permissions', count: permissions.length },
+            { kind: 'mcp', count: mcpServers.length },
+          ].filter((s) => s.count > 0);
+
+          if (summary.length === 0) {
             console.log(chalk.yellow('No installable content found in repository.'));
+            if (requestedTypes.size > 0 || requestedNames.size > 0) {
+              console.log(chalk.gray('Try removing --types/--names to see everything the repo offers.'));
+            }
             process.exit(1);
           }
 
           console.log(chalk.bold('\nFound:'));
-          if (hasCommands) console.log(`  ${commands.length} commands`);
-          if (hasSkills) console.log(`  ${skills.length} skills`);
-          if (hasHooks) console.log(`  ${hooks.length} hooks`);
+          for (const { kind, count } of summary) {
+            console.log(`  ${count} ${kind}`);
+          }
 
           const gitCliStates = await getAllCliStates();
           const installedAgents = ALL_AGENT_IDS.filter(
@@ -549,7 +635,7 @@ When to use:
           }
 
           // Install commands
-          if (hasCommands) {
+          if (commands.length > 0) {
             console.log(chalk.bold('\nInstalling commands...'));
             let directInstalled = 0;
             let syncedVersions = 0;
@@ -594,7 +680,7 @@ When to use:
           }
 
           // Install skills
-          if (hasSkills) {
+          if (skills.length > 0) {
             console.log(chalk.bold('\nInstalling skills...'));
             const directAgents = targets.directAgents.filter(
               (agentId) => AGENTS[agentId].capabilities.skills && gitCliStates[agentId]?.installed
@@ -625,7 +711,7 @@ When to use:
           }
 
           // Install hooks
-          if (hasHooks) {
+          if (hooks.length > 0) {
             console.log(chalk.bold('\nInstalling hooks...'));
             let syncedVersions = 0;
             const directHookAgents = targets.directAgents.filter(
@@ -648,6 +734,94 @@ When to use:
               }
             }
             console.log(`  Synced hooks to ${syncedVersions} managed version(s)`);
+          }
+
+          // Install workflows
+          if (workflows.length > 0) {
+            console.log(chalk.bold('\nInstalling workflows...'));
+            let installed = 0;
+            for (const w of workflows) {
+              const result = installWorkflowCentrally(w.path, w.name);
+              if (result.success) {
+                installed++;
+              } else {
+                console.log(`  ${chalk.red('x')} ${w.name}: ${result.error}`);
+              }
+            }
+            const workflowNames = workflows.map((w) => w.name);
+            let syncedVersions = 0;
+            for (const [agentId, versions] of targets.versionSelections) {
+              for (const version of versions) {
+                const result = syncResourcesToVersion(agentId, version, { workflows: workflowNames });
+                if (result.workflows.length > 0) syncedVersions++;
+              }
+            }
+            console.log(`  Installed ${installed} workflow(s) to ~/.agents/workflows/`);
+            console.log(`  Synced workflows to ${syncedVersions} managed version(s)`);
+          }
+
+          // Install subagents
+          if (subagents.length > 0) {
+            console.log(chalk.bold('\nInstalling subagents...'));
+            let installed = 0;
+            for (const s of subagents) {
+              const result = installSubagentCentrally(s.path, s.name);
+              if (result.success) {
+                installed++;
+              } else {
+                console.log(`  ${chalk.red('x')} ${s.name}: ${result.error}`);
+              }
+            }
+            const subagentNames = subagents.map((s) => s.name);
+            let syncedVersions = 0;
+            for (const [agentId, versions] of targets.versionSelections) {
+              for (const version of versions) {
+                const result = syncResourcesToVersion(agentId, version, { subagents: subagentNames });
+                if (result.subagents.length > 0) syncedVersions++;
+              }
+            }
+            console.log(`  Installed ${installed} subagent(s) to ~/.agents/subagents/`);
+            console.log(`  Synced subagents to ${syncedVersions} managed version(s)`);
+          }
+
+          // Install permissions
+          if (permissions.length > 0) {
+            console.log(chalk.bold('\nInstalling permission sets...'));
+            let installed = 0;
+            for (const p of permissions) {
+              const result = installPermissionSet(p.path, p.name);
+              if (result.success) {
+                installed++;
+              } else {
+                console.log(`  ${chalk.red('x')} ${p.name}: ${result.error}`);
+              }
+            }
+            console.log(`  Installed ${installed} permission set(s) to ~/.agents/permissions/`);
+            console.log(chalk.gray('  Apply with: agents permissions apply <name> --agents <selector>'));
+          }
+
+          // Install MCP server configs
+          if (mcpServers.length > 0) {
+            console.log(chalk.bold('\nInstalling MCP server configs...'));
+            let installed = 0;
+            for (const s of mcpServers) {
+              const result = installMcpConfigCentrally(s.path);
+              if (result.success) {
+                installed++;
+              } else {
+                console.log(`  ${chalk.red('x')} ${s.name}: ${result.error}`);
+              }
+            }
+            const mcpNames = mcpServers.map((s) => s.name);
+            let syncedVersions = 0;
+            for (const [agentId, versions] of targets.versionSelections) {
+              for (const version of versions) {
+                const result = syncResourcesToVersion(agentId, version, { mcp: mcpNames });
+                if (result.mcp.length > 0) syncedVersions++;
+              }
+            }
+            console.log(`  Installed ${installed} MCP config(s) to ~/.agents/mcp/`);
+            console.log(`  Synced MCP configs to ${syncedVersions} managed version(s)`);
           }
 
           console.log(chalk.green('\nPackage installed.'));

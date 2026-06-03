@@ -27,7 +27,13 @@ import {
 } from '../lib/agents.js';
 import type { AgentId, McpServerConfig } from '../lib/types.js';
 import { readManifest, writeManifest, createDefaultManifest } from '../lib/manifest.js';
-import { listMcpServerConfigs, type InstalledMcpServer } from '../lib/mcp.js';
+import {
+  listMcpServerConfigs,
+  discoverMcpConfigsFromRepo,
+  installMcpConfigCentrally,
+  type InstalledMcpServer,
+} from '../lib/mcp.js';
+import { cloneRepo } from '../lib/git.js';
 import { getMcpDir } from '../lib/state.js';
 import {
   getEffectiveHome,
@@ -37,9 +43,11 @@ import {
   resolveInstalledAgentTargets,
   resolveConfiguredAgentTargets,
   resolveVersionAlias,
+  resolveAgentVersionTargets,
+  syncResourcesToVersion,
 } from '../lib/versions.js';
 import { getUserAgentsDir } from '../lib/state.js';
-import { isPromptCancelled, isInteractiveTerminal, requireInteractiveSelection, promptRemovalTargets, type RemovalTarget } from './utils.js';
+import { isPromptCancelled, isInteractiveTerminal, requireInteractiveSelection, promptRemovalTargets, parseCommaSeparatedList, type RemovalTarget } from './utils.js';
 import {
   showResourceList,
   buildTargetsSection,
@@ -203,6 +211,7 @@ When to use:
     .option('-a, --agents <list>', 'Targets: claude, codex@0.116.0', MCP_CAPABLE_AGENTS.join(','))
     .option('-s, --scope <scope>', 'user (global) or project (repo-specific)', 'user')
     .option('-t, --transport <type>', 'stdio (default) or http', 'stdio')
+    .option('--names <list>', 'When source is a repo: MCP server names to install (comma-separated)')
     .option('-H, --header <header>', 'HTTP header as name:value (repeatable)', (val, acc: string[]) => {
       acc.push(val);
       return acc;
@@ -217,8 +226,23 @@ Examples:
 
   # Add to manifest only (register later)
   agents mcp add db-server -- uvx postgres-mcp
+
+  # Install all MCP server configs from a repo's mcp/*.yaml
+  agents mcp add gh:user/repo --agents claude@all
+
+  # Install specific servers by name
+  agents mcp add gh:phnx-labs/.agents-system --names notion,figma --agents claude
 `)
     .action(async (name: string, commandOrUrl: string[], options) => {
+      // Repo-source form: `agents mcp add gh:user/repo [--names a,b] [--agents …]`
+      // Mirrors `agents skills add gh:…`. Discovers <repoPath>/mcp/*.yaml,
+      // copies to ~/.agents/mcp/, and syncs to selected agent versions.
+      const isRepoSource = /^(gh:|git:|ssh:|https?:\/\/)/.test(name);
+      if (isRepoSource && commandOrUrl.length === 0) {
+        await installMcpsFromRepoSource(name, options);
+        return;
+      }
+
       // Registry resolution: if the user just typed `agents mcp add <name>`,
       // try looking up `<name>` in any configured MCP registry (by default the
       // official MCP Registry at registry.modelcontextprotocol.io) and derive
@@ -611,6 +635,90 @@ Examples:
         }
       }
     });
+}
+
+async function installMcpsFromRepoSource(
+  source: string,
+  options: { names?: string; agents?: string }
+): Promise<void> {
+  const spinner = ora('Cloning repository...').start();
+  let localPath: string;
+  try {
+    const cloneResult = await cloneRepo(source);
+    localPath = cloneResult.localPath;
+  } catch (err) {
+    spinner.fail(`Failed to clone: ${(err as Error).message}`);
+    process.exit(1);
+  }
+  spinner.succeed('Repository cloned');
+
+  let discovered = discoverMcpConfigsFromRepo(localPath);
+  if (discovered.length === 0) {
+    console.log(chalk.yellow('No MCP server configs found (looking for mcp/*.yaml)'));
+    return;
+  }
+
+  const requestedNames = parseCommaSeparatedList(options.names);
+  if (requestedNames.length > 0) {
+    const discoveredNames = new Set(discovered.map((s) => s.name));
+    const missing = requestedNames.filter((n) => !discoveredNames.has(n));
+    if (missing.length > 0) {
+      console.log(chalk.red(`\nMCP server(s) not found in source: ${missing.join(', ')}`));
+      console.log(chalk.gray(`Available: ${[...discoveredNames].join(', ')}`));
+      process.exit(1);
+    }
+    discovered = discovered.filter((s) => requestedNames.includes(s.name));
+  }
+
+  console.log(chalk.bold(`\nFound ${discovered.length} MCP server config(s):`));
+  for (const s of discovered) {
+    const summary = s.config.transport === 'stdio'
+      ? `${s.config.command}${s.config.args?.length ? ' ' + s.config.args.join(' ') : ''}`
+      : s.config.url ?? '';
+    console.log(`  ${chalk.cyan(s.name)}: ${chalk.gray(summary)}`);
+  }
+
+  const installSpinner = ora('Installing MCP configs to ~/.agents/mcp/...').start();
+  let installed = 0;
+  for (const s of discovered) {
+    const result = installMcpConfigCentrally(s.path);
+    if (result.success) {
+      installed++;
+    } else {
+      installSpinner.stop();
+      console.log(chalk.red(`  Failed to install ${s.name}: ${result.error}`));
+      installSpinner.start();
+    }
+  }
+  installSpinner.succeed(`Installed ${installed} MCP config(s) to ~/.agents/mcp/`);
+
+  // Agent/version selection — same default as the non-repo form: every
+  // MCP-capable agent. resolveAgentVersionTargets is lenient with agents
+  // that have no installed versions.
+  const agentsValue = options.agents ?? MCP_CAPABLE_AGENTS.join(',');
+  let targets: ReturnType<typeof resolveAgentVersionTargets>;
+  try {
+    targets = resolveAgentVersionTargets(agentsValue, MCP_CAPABLE_AGENTS);
+  } catch (err) {
+    console.log(chalk.red((err as Error).message));
+    process.exit(1);
+  }
+
+  if (targets.versionSelections.size === 0) {
+    console.log(chalk.gray('\nStored centrally; no agent versions selected for sync.'));
+    return;
+  }
+
+  const syncSpinner = ora('Syncing to agent versions...').start();
+  const mcpNames = discovered.map((s) => s.name);
+  let synced = 0;
+  for (const [agentId, versions] of targets.versionSelections) {
+    for (const version of versions) {
+      const result = syncResourcesToVersion(agentId, version, { mcp: mcpNames });
+      if (result.mcp.length > 0) synced++;
+    }
+  }
+  syncSpinner.succeed(`Synced MCP configs to ${synced} agent version(s).`);
 }
 
 interface McpTargetPair {
