@@ -43,11 +43,21 @@ import {
   resolveInstalledAgentTargets,
   resolveConfiguredAgentTargets,
   resolveVersionAlias,
-  resolveAgentVersionTargets,
   syncResourcesToVersion,
 } from '../lib/versions.js';
 import { getUserAgentsDir } from '../lib/state.js';
-import { isPromptCancelled, isInteractiveTerminal, requireInteractiveSelection, promptRemovalTargets, parseCommaSeparatedList, type RemovalTarget } from './utils.js';
+import {
+  isPromptCancelled,
+  isInteractiveTerminal,
+  requireInteractiveSelection,
+  promptRemovalTargets,
+  parseCommaSeparatedList,
+  ensureAgentVersionsInstalled,
+  resolveAgentTargetsAutoInstalling,
+  resolveInstalledAgentTargetsAutoInstalling,
+  VersionNotInstalledError,
+  type RemovalTarget,
+} from './utils.js';
 import {
   showResourceList,
   buildTargetsSection,
@@ -55,17 +65,45 @@ import {
   type SyncTarget,
 } from './resource-view.js';
 
-/** Parse a comma-separated --agents string into validated agent IDs and optional version targets. */
+/**
+ * Parse a comma-separated --agents string into validated agent IDs and
+ * optional version targets in the manifest shape.
+ *
+ * Supports the same selector syntax as resolveAgentVersionTargets:
+ *   - bare `agent`        → manifest agents:[agent] (no version pin)
+ *   - `agent@default`     → manifest agents:[agent] (no version pin)
+ *   - `agent@x.y.z`       → manifest agentVersions[agent] = ['x.y.z']
+ *   - `agent@all`         → manifest agentVersions[agent] = every installed version
+ *   - literal `all`       → expand to all MCP-capable agents (each as `@all`)
+ *
+ * Throws VersionNotInstalledError for unknown specific versions so callers
+ * can prompt-and-install before retrying.
+ */
 function parseMcpAgentTargets(value: string): {
   agents: AgentId[];
   agentVersions?: Partial<Record<AgentId, string[]>>;
 } {
   const agents: AgentId[] = [];
   const agentVersions: Partial<Record<AgentId, string[]>> = {};
-  const targets = value
+  const rawTargets = value
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+
+  // Expand literal `all` / `all@all` into per-agent @all. Skip agents with no
+  // installed versions so `all` is lenient — mirrors resolveAgentVersionTargets.
+  const targets: string[] = [];
+  for (const t of rawTargets) {
+    if (t === 'all' || t === 'all@all') {
+      for (const a of MCP_CAPABLE_AGENTS) {
+        if (listInstalledVersions(a).length > 0) {
+          targets.push(`${a}@all`);
+        }
+      }
+    } else {
+      targets.push(t);
+    }
+  }
 
   for (const target of targets) {
     const atIndex = target.indexOf('@');
@@ -77,7 +115,7 @@ function parseMcpAgentTargets(value: string): {
     }
 
     if (atIndex !== -1 && !versionToken) {
-      throw new Error(`Missing version in --agents entry '${target}'. Use agent@x.y.z or agent@default.`);
+      throw new Error(`Missing version in --agents entry '${target}'. Use agent@x.y.z, agent@default, or agent@all.`);
     }
 
     const agentId = resolveAgentName(agentToken);
@@ -107,14 +145,24 @@ function parseMcpAgentTargets(value: string): {
       throw new Error(`No managed versions are installed for ${AGENTS[agentId].name}. Run: agents add ${agentId}@latest`);
     }
 
+    if (versionToken === 'all') {
+      const versions = agentVersions[agentId] || [];
+      for (const ver of installedVersions) {
+        if (!versions.includes(ver)) versions.push(ver);
+      }
+      agentVersions[agentId] = versions;
+      if (!agents.includes(agentId)) {
+        agents.push(agentId);
+      }
+      continue;
+    }
+
     const resolvedVersion = versionToken === 'latest'
       ? installedVersions[installedVersions.length - 1]
       : versionToken;
 
     if (!installedVersions.includes(resolvedVersion)) {
-      throw new Error(
-        `Version ${resolvedVersion} is not installed for ${AGENTS[agentId].name}. Installed versions: ${installedVersions.join(', ')}`
-      );
+      throw new VersionNotInstalledError(agentId, resolvedVersion, installedVersions);
     }
 
     const versions = agentVersions[agentId] || [];
@@ -212,6 +260,7 @@ When to use:
     .option('-s, --scope <scope>', 'user (global) or project (repo-specific)', 'user')
     .option('-t, --transport <type>', 'stdio (default) or http', 'stdio')
     .option('--names <list>', 'When source is a repo: MCP server names to install (comma-separated)')
+    .option('-y, --yes', 'Auto-install any missing agent versions without prompting')
     .option('-H, --header <header>', 'HTTP header as name:value (repeatable)', (val, acc: string[]) => {
       acc.push(val);
       return acc;
@@ -285,6 +334,14 @@ Examples:
       const manifest = readManifest(localPath) || createDefaultManifest();
 
       manifest.mcp = manifest.mcp || {};
+
+      // Pre-flight: prompt-and-install any requested agent@version that isn't
+      // installed yet, before parseMcpAgentTargets validates the selector.
+      const okInstall = await ensureAgentVersionsInstalled(options.agents, MCP_CAPABLE_AGENTS, { yes: options.yes });
+      if (!okInstall) {
+        console.log(chalk.gray('Cancelled.'));
+        return;
+      }
 
       const targetConfig = parseMcpAgentTargets(options.agents);
 
@@ -571,6 +628,7 @@ Examples:
     .command('register [name]')
     .description('Apply MCP servers from manifest to agent config files')
     .option('-a, --agents <list>', 'Override manifest targets: claude, codex@0.116.0')
+    .option('-y, --yes', 'Auto-install any missing agent versions without prompting')
     .addHelpText('after', `
 Examples:
   # Register all servers from manifest
@@ -612,9 +670,17 @@ Examples:
         }
 
         console.log(`\n  ${chalk.cyan(mcpName)}:`);
-        const targets = options.agents
-          ? resolveInstalledAgentTargets(options.agents, MCP_CAPABLE_AGENTS)
-          : resolveConfiguredAgentTargets(config.agents, config.agentVersions, MCP_CAPABLE_AGENTS);
+        let targets;
+        if (options.agents) {
+          const resolved = await resolveInstalledAgentTargetsAutoInstalling(options.agents, MCP_CAPABLE_AGENTS, { yes: options.yes });
+          if (!resolved) {
+            console.log(chalk.gray('  Cancelled.'));
+            continue;
+          }
+          targets = resolved;
+        } else {
+          targets = resolveConfiguredAgentTargets(config.agents, config.agentVersions, MCP_CAPABLE_AGENTS);
+        }
         const results = await registerMcpToTargets(
           targets,
           mcpName,
@@ -639,7 +705,7 @@ Examples:
 
 async function installMcpsFromRepoSource(
   source: string,
-  options: { names?: string; agents?: string }
+  options: { names?: string; agents?: string; yes?: boolean }
 ): Promise<void> {
   const spinner = ora('Cloning repository...').start();
   let localPath: string;
@@ -693,12 +759,17 @@ async function installMcpsFromRepoSource(
   installSpinner.succeed(`Installed ${installed} MCP config(s) to ~/.agents/mcp/`);
 
   // Agent/version selection — same default as the non-repo form: every
-  // MCP-capable agent. resolveAgentVersionTargets is lenient with agents
-  // that have no installed versions.
+  // MCP-capable agent. Routes through resolveAgentTargetsAutoInstalling so
+  // a typo'd `claude@2.1.999` prompts to install (and --yes auto-installs).
   const agentsValue = options.agents ?? MCP_CAPABLE_AGENTS.join(',');
-  let targets: ReturnType<typeof resolveAgentVersionTargets>;
+  let targets;
   try {
-    targets = resolveAgentVersionTargets(agentsValue, MCP_CAPABLE_AGENTS);
+    const resolved = await resolveAgentTargetsAutoInstalling(agentsValue, MCP_CAPABLE_AGENTS, { yes: options.yes });
+    if (!resolved) {
+      console.log(chalk.gray('\nCancelled.'));
+      return;
+    }
+    targets = resolved;
   } catch (err) {
     console.log(chalk.red((err as Error).message));
     process.exit(1);

@@ -69,6 +69,7 @@ import {
   parseCommaSeparatedList,
   requireDestructiveArg,
   requireInteractiveSelection,
+  resolveInstalledAgentTargetsAutoInstalling,
 } from './utils.js';
 import { itemPicker } from '../lib/picker.js';
 import {
@@ -431,6 +432,7 @@ When to use:
       '--names <list>',
       'When source is a repo: comma-separated resource names within the selected types'
     )
+    .option('-y, --yes', 'Auto-install any missing agent versions without prompting')
     .addHelpText('after', `
 Install resolves the package type (MCP server, skill, command, hook) and installs to the specified agents. Packages can come from registries (mcp:, skill:), GitHub (gh:user/repo), or direct URLs.
 
@@ -521,9 +523,17 @@ When to use:
           const installedAgents = MCP_CAPABLE_AGENTS.filter(
             (id) => cliStates[id]?.installed || listInstalledVersions(id).length > 0
           );
-          const targets = options.agents
-            ? resolveInstalledAgentTargets(options.agents, MCP_CAPABLE_AGENTS)
-            : resolveConfiguredAgentTargets(installedAgents, undefined, MCP_CAPABLE_AGENTS);
+          let targets;
+          if (options.agents) {
+            const resolved = await resolveInstalledAgentTargetsAutoInstalling(options.agents, MCP_CAPABLE_AGENTS, { yes: options.yes });
+            if (!resolved) {
+              console.log(chalk.gray('Cancelled.'));
+              return;
+            }
+            targets = resolved;
+          } else {
+            targets = resolveConfiguredAgentTargets(installedAgents, undefined, MCP_CAPABLE_AGENTS);
+          }
 
           if (targets.selectedAgents.length === 0) {
             console.log(chalk.yellow('\nNo MCP-capable agents installed.'));
@@ -625,9 +635,17 @@ When to use:
           const installedAgents = ALL_AGENT_IDS.filter(
             (id) => gitCliStates[id]?.installed || listInstalledVersions(id).length > 0
           );
-          const targets = options.agents
-            ? resolveInstalledAgentTargets(options.agents, ALL_AGENT_IDS)
-            : resolveConfiguredAgentTargets(installedAgents, undefined, ALL_AGENT_IDS);
+          let targets;
+          if (options.agents) {
+            const resolved = await resolveInstalledAgentTargetsAutoInstalling(options.agents, ALL_AGENT_IDS, { yes: options.yes });
+            if (!resolved) {
+              console.log(chalk.gray('Cancelled.'));
+              return;
+            }
+            targets = resolved;
+          } else {
+            targets = resolveConfiguredAgentTargets(installedAgents, undefined, ALL_AGENT_IDS);
+          }
 
           if (targets.selectedAgents.length === 0) {
             console.log(chalk.yellow('\nNo agents selected.'));

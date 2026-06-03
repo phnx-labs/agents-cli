@@ -57,6 +57,7 @@ import {
   parseCommaSeparatedList,
   printWithPager,
   requireInteractiveSelection,
+  resolveAgentTargetsAutoInstalling,
   promptRemovalTargets,
   type RemovalTarget,
 } from './utils.js';
@@ -332,7 +333,11 @@ Examples:
         let versionSelections: Map<AgentId, string[]>;
 
         if (options.agents) {
-          const result = resolveAgentVersionTargets(options.agents, SKILLS_CAPABLE_AGENTS);
+          const result = await resolveAgentTargetsAutoInstalling(options.agents, SKILLS_CAPABLE_AGENTS, { yes: options.yes });
+          if (!result) {
+            console.log(chalk.gray('Cancelled.'));
+            return;
+          }
           selectedAgents = result.selectedAgents;
           versionSelections = result.versionSelections;
         } else {

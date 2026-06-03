@@ -2317,6 +2317,23 @@ export interface InstalledAgentTargetResult {
 }
 
 /**
+ * Thrown when the user references an agent@version that is not installed.
+ * Carries the parsed (agentId, version) so callers can react — e.g. prompt
+ * to install it on demand — without having to parse the error message.
+ */
+export class VersionNotInstalledError extends Error {
+  constructor(
+    public readonly agentId: AgentId,
+    public readonly version: string,
+    public readonly installedVersions: readonly string[]
+  ) {
+    const installed = installedVersions.length > 0 ? installedVersions.join(', ') : '(none)';
+    super(`Version ${version} is not installed for ${AGENTS[agentId].name}. Installed versions: ${installed}`);
+    this.name = 'VersionNotInstalledError';
+  }
+}
+
+/**
  * Resolve a comma-separated --agents list into concrete version selections.
  * Bare agents target the default version, or the newest installed version when no default exists.
  * Explicit agent@version targets only that installed version.
@@ -2421,9 +2438,7 @@ export function resolveAgentVersionTargets(
     }
 
     if (!installedVersions.includes(versionToken)) {
-      throw new Error(
-        `Version ${versionToken} is not installed for ${AGENTS[agentId].name}. Installed versions: ${installedVersions.join(', ')}`
-      );
+      throw new VersionNotInstalledError(agentId, versionToken, installedVersions);
     }
 
     const explicitVersions = explicitSelections.has(agentId)
@@ -2454,10 +2469,28 @@ export function resolveInstalledAgentTargets(
   const selectedAgents: AgentId[] = [];
   const directAgents: AgentId[] = [];
   const versionSelections = new Map<AgentId, string[]>();
-  const targets = value
+  const rawTargets = value
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+
+  // Expand literal `all` (with optional @all) into every available agent's all
+  // installed versions. Skip agents with no installed versions so `all` is
+  // lenient — only explicit `claude@all` errors when claude isn't installed.
+  // Mirrors resolveAgentVersionTargets so every --agents flag site supports
+  // the same selector syntax.
+  const targets: string[] = [];
+  for (const t of rawTargets) {
+    if (t === 'all' || t === 'all@all') {
+      for (const a of availableAgents) {
+        if (listInstalledVersions(a).length > 0) {
+          targets.push(`${a}@all`);
+        }
+      }
+    } else {
+      targets.push(t);
+    }
+  }
 
   const addVersionTarget = (agentId: AgentId, version: string) => {
     const versions = versionSelections.get(agentId) || [];
@@ -2482,7 +2515,7 @@ export function resolveInstalledAgentTargets(
     }
 
     if (atIndex !== -1 && !versionToken) {
-      throw new Error(`Missing version in --agents entry '${target}'. Use agent@x.y.z or agent@default.`);
+      throw new Error(`Missing version in --agents entry '${target}'. Use agent@x.y.z, agent@default, or agent@all.`);
     }
 
     const agentId = resolveAgentName(agentToken);
@@ -2523,14 +2556,22 @@ export function resolveInstalledAgentTargets(
       continue;
     }
 
+    if (versionToken === 'all') {
+      if (installedVersions.length === 0) {
+        throw new Error(`No managed versions are installed for ${AGENTS[agentId].name}. Run: agents add ${agentId}@latest`);
+      }
+      for (const version of installedVersions) {
+        addVersionTarget(agentId, version);
+      }
+      continue;
+    }
+
     if (installedVersions.length === 0) {
       throw new Error(`No managed versions are installed for ${AGENTS[agentId].name}. Run: agents add ${agentId}@latest`);
     }
 
     if (!installedVersions.includes(versionToken)) {
-      throw new Error(
-        `Version ${versionToken} is not installed for ${AGENTS[agentId].name}. Installed versions: ${installedVersions.join(', ')}`
-      );
+      throw new VersionNotInstalledError(agentId, versionToken, installedVersions);
     }
 
     addVersionTarget(agentId, versionToken);

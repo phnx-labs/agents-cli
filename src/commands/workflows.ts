@@ -44,6 +44,7 @@ import {
   printWithPager,
   promptRemovalTargets,
   parseCommaSeparatedList,
+  resolveAgentTargetsAutoInstalling,
   type RemovalTarget,
 } from './utils.js';
 import {
@@ -267,7 +268,11 @@ Examples:
         let versionSelections: Map<AgentId, string[]>;
 
         if (options.agents) {
-          const result = resolveAgentVersionTargets(options.agents, WORKFLOW_CAPABLE_AGENTS);
+          const result = await resolveAgentTargetsAutoInstalling(options.agents, WORKFLOW_CAPABLE_AGENTS, { yes: options.yes });
+          if (!result) {
+            console.log(chalk.gray('Cancelled.'));
+            return;
+          }
           selectedAgents = result.selectedAgents;
           versionSelections = result.versionSelections;
         } else {

@@ -43,6 +43,7 @@ import {
   requireDestructiveArg,
   promptRemovalTargets,
   parseCommaSeparatedList,
+  resolveAgentTargetsAutoInstalling,
   type RemovalTarget,
 } from './utils.js';
 import {
@@ -231,7 +232,11 @@ Examples:
       let versionSelections: Map<AgentId, string[]>;
 
       if (agentsArg) {
-        const result = resolveAgentVersionTargets(agentsArg, SUBAGENT_CAPABLE_AGENTS);
+        const result = await resolveAgentTargetsAutoInstalling(agentsArg, SUBAGENT_CAPABLE_AGENTS, { yes: options.yes });
+        if (!result) {
+          console.log(chalk.gray('Cancelled.'));
+          return;
+        }
         selectedAgents = result.selectedAgents;
         versionSelections = result.versionSelections;
       } else {

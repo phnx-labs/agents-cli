@@ -44,6 +44,7 @@ import {
   promptAgentVersionSelection,
   getVersionHomePath,
   resolveAgentVersionTargets,
+  resolveInstalledAgentTargets,
 } from '../lib/versions.js';
 import { recordVersionResources } from '../lib/state.js';
 import {
@@ -53,6 +54,7 @@ import {
   printWithPager,
   requireInteractiveSelection,
   promptRemovalTargets,
+  resolveAgentTargetsAutoInstalling,
   type RemovalTarget,
 } from './utils.js';
 
@@ -423,7 +425,11 @@ Examples:
         const hooksCapableAgents = Array.from(HOOKS_CAPABLE_AGENTS) as AgentId[];
 
         if (options.agents) {
-          const result = resolveAgentVersionTargets(options.agents, hooksCapableAgents);
+          const result = await resolveAgentTargetsAutoInstalling(options.agents, hooksCapableAgents, { yes: options.yes });
+          if (!result) {
+            console.log(chalk.gray('Cancelled.'));
+            return;
+          }
           selectedAgents = result.selectedAgents;
           versionSelections = result.versionSelections;
         } else {
@@ -553,11 +559,24 @@ Examples:
           continue;
         }
 
-        // Filter by --agents if specified
+        // Filter by --agents if specified. Routes through resolveInstalledAgentTargets
+        // so the same selector syntax used everywhere else (agent, agent@default,
+        // agent@x.y.z, agent@all, literal all) works here too.
         let availableTargets = hookInfo.targets;
         if (options?.agents) {
-          const requestedAgents = new Set(options.agents.split(','));
-          availableTargets = availableTargets.filter((t) => requestedAgents.has(t.agent));
+          const requestedTargets = resolveInstalledAgentTargets(options.agents, [...HOOKS_CAPABLE_AGENTS]);
+          const requested = new Set<string>();
+          for (const aid of requestedTargets.directAgents) {
+            for (const ver of listInstalledVersions(aid)) {
+              requested.add(`${aid}@${ver}`);
+            }
+          }
+          for (const [aid, versions] of requestedTargets.versionSelections) {
+            for (const ver of versions) {
+              requested.add(`${aid}@${ver}`);
+            }
+          }
+          availableTargets = availableTargets.filter((t) => requested.has(`${t.agent}@${t.version}`));
         }
 
         if (availableTargets.length === 0) {

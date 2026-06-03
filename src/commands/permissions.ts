@@ -52,6 +52,7 @@ import {
   parseCommaSeparatedList,
   printWithPager,
   requireInteractiveSelection,
+  resolveAgentTargetsAutoInstalling,
 } from './utils.js';
 
 export function shouldRefuseBroadPermissions(
@@ -356,9 +357,14 @@ Examples:
           let versionSelections: Map<AgentId, string[]>;
 
           if (options.agents) {
-            const result = resolveAgentVersionTargets(options.agents, PERMISSIONS_CAPABLE_AGENTS, {
+            const result = await resolveAgentTargetsAutoInstalling(options.agents, PERMISSIONS_CAPABLE_AGENTS, {
+              yes: options.yes,
               allVersions: options.all,
             });
+            if (!result) {
+              console.log(chalk.gray('Cancelled.'));
+              return;
+            }
             selectedAgents = result.selectedAgents;
             versionSelections = result.versionSelections;
           } else if (options.all) {
@@ -513,9 +519,14 @@ Examples:
           let versionSelections: Map<AgentId, string[]>;
 
           if (options.agents) {
-            const result = resolveAgentVersionTargets(options.agents, PERMISSIONS_CAPABLE_AGENTS, {
+            const result = await resolveAgentTargetsAutoInstalling(options.agents, PERMISSIONS_CAPABLE_AGENTS, {
+              yes: options.yes,
               allVersions: options.all,
             });
+            if (!result) {
+              console.log(chalk.gray('Cancelled.'));
+              return;
+            }
             selectedAgents = result.selectedAgents;
             versionSelections = result.versionSelections;
           } else if (options.all) {
@@ -645,9 +656,14 @@ Examples:
           let versionSelections: Map<AgentId, string[]>;
 
           if (options.agents) {
-            const result = resolveAgentVersionTargets(options.agents, PERMISSIONS_CAPABLE_AGENTS, {
+            const result = await resolveAgentTargetsAutoInstalling(options.agents, PERMISSIONS_CAPABLE_AGENTS, {
+              yes: options.yes,
               allVersions: options.all,
             });
+            if (!result) {
+              console.log(chalk.gray('Cancelled.'));
+              return;
+            }
             selectedAgents = result.selectedAgents;
             versionSelections = result.versionSelections;
           } else if (options.all) {

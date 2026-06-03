@@ -53,6 +53,7 @@ import {
   printWithPager,
   requireInteractiveSelection,
   requireDestructiveArg,
+  resolveAgentTargetsAutoInstalling,
 } from './utils.js';
 
 /** Register the `agents rules` command tree (list, add, view, remove). */
@@ -388,7 +389,11 @@ Examples:
         let versionSelections: Map<AgentId, string[]>;
 
         if (options.agents) {
-          const result = resolveAgentVersionTargets(options.agents, ALL_AGENT_IDS);
+          const result = await resolveAgentTargetsAutoInstalling(options.agents, ALL_AGENT_IDS, { yes: options.yes });
+          if (!result) {
+            console.log(chalk.gray('Cancelled.'));
+            return;
+          }
           selectedAgents = result.selectedAgents;
           versionSelections = result.versionSelections;
         } else {
