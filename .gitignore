@@ -58,3 +58,6 @@ scripts/scrub-history.sh
 
 # Cloudflare Worker local state
 **/.wrangler/
+
+# Local scratch / abandoned scaffold (lives in agent-cli-web, not here)
+/website/
