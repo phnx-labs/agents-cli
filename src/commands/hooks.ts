@@ -428,7 +428,7 @@ Examples:
           versionSelections = result.versionSelections;
         } else {
           const result = await promptAgentVersionSelection(hooksCapableAgents, {
-            skipPrompts: options.yes || !isInteractiveTerminal(),
+            skipPrompts: options.yes,
           });
           selectedAgents = result.selectedAgents;
           versionSelections = result.versionSelections;

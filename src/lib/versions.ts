@@ -2601,8 +2601,15 @@ export async function promptAgentVersionSelection(
     const versions = listInstalledVersions(agentId);
     const defaultVer = getGlobalDefault(agentId);
     if (versions.length === 0) return `${AGENTS[agentId].name}  ${chalk.gray('(not installed)')}`;
-    if (defaultVer) return `${AGENTS[agentId].name}  ${chalk.gray(`(active: ${defaultVer})`)}`;
-    return `${AGENTS[agentId].name}  ${chalk.gray(`(${versions[0]})`)}`;
+    // Surface the version count when there's more than one — mirrors the new
+    // `--agents <agent>@all` syntax so users can see at a glance how many
+    // versions `@all` would target before the per-version prompt fires.
+    const detail = versions.length > 1
+      ? (defaultVer
+        ? `active: ${defaultVer}, ${versions.length} versions installed`
+        : `${versions.length} versions installed`)
+      : (defaultVer ?? versions[0]);
+    return `${AGENTS[agentId].name}  ${chalk.gray(`(${detail})`)}`;
   };
 
   let selectedAgents: AgentId[];
@@ -2618,6 +2625,20 @@ export async function promptAgentVersionSelection(
       }
     }
   } else {
+    // Non-TTY without an explicit --agents value used to silently fall through
+    // to default-picking inside the caller. That's surprising in scripts — fail
+    // loud and point at the new `--agents` syntax instead.
+    if (!(process.stdin.isTTY && process.stdout.isTTY)) {
+      throw new Error(
+        'Non-interactive shell: cannot prompt for agent/version selection.\n' +
+        'Pass --agents explicitly. Examples:\n' +
+        '  --agents claude              (default version)\n' +
+        '  --agents claude@all          (every installed Claude version)\n' +
+        '  --agents claude@2.1.141      (a specific version)\n' +
+        '  --agents all                 (every installed version of every capable agent)\n' +
+        'Or pass --yes to auto-pick defaults.'
+      );
+    }
     // Prompt for agent selection
     const checkboxResult = await checkbox<string>({
       message: 'Which agents should receive these resources?',
@@ -2658,7 +2679,7 @@ export async function promptAgentVersionSelection(
       const versionResult = await checkbox<string>({
         message: `Which versions of ${AGENTS[agentId].name} should receive these resources?`,
         choices: [
-          { name: chalk.bold('All versions'), value: 'all', checked: false },
+          { name: chalk.bold(`All versions (${versions.length})`), value: 'all', checked: false },
           ...versions.map((v) => {
             const base = v === defaultVer ? `${v} (default)` : v;
             let label = base.padEnd(maxLabelLen);

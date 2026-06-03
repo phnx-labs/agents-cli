@@ -373,7 +373,7 @@ Examples:
           } else {
             const result = await promptAgentVersionSelection(
               PERMISSIONS_CAPABLE_AGENTS,
-              { skipPrompts }
+              { skipPrompts: options.yes }
             );
             selectedAgents = result.selectedAgents;
             versionSelections = result.versionSelections;
