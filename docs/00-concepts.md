@@ -51,6 +51,8 @@ A **resource** is any named item inside a DotAgents repo. Resources are typed by
 
 Resources are installed once in `~/.agents/` and synced to every supported agent's native format automatically. Sync happens when you run `agents use`, `agents repo pull`, or explicitly via `agents sync`.
 
+To inspect what's installed, use the per-kind listers — `agents commands list`, `agents skills list`, `agents hooks list`, `agents mcp list`, `agents permissions list`, `agents subagents list`, `agents profiles list`. There is no single `agents resources` viewer that prints a merged cross-kind table today; if you want one, file an issue.
+
 ---
 
 ## Layered resolution
