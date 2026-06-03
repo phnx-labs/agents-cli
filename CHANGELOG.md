@@ -1,12 +1,55 @@
 # Changelog
 
-## 1.20.1
+## 1.21.0
 
-**Routines (fix wrong "failed" status on healthy detached runs)**
+**Prompt (fail loud on non-TTY + `@all` syntax in picker)**
 
-- `monitorRunningJobs` was hardcoding `status: 'failed'` whenever it detected that a detached child had exited — with no way to read the real exit code, because `executeJobDetached` fires-and-forgets the child. Every routine that ran via the scheduler ended up labeled `failed/exitCode: null`, even when the agent completed cleanly.
+- Scripts that called `agents <resource> add` with no `--agents` and no `--yes` used to silently auto-pick a default version. That hid scripted misuse behind unpredictable picks. The non-TTY path now throws with a clear pointer at the new syntax: `--agents claude@all` (every installed version of Claude), `--agents all` (every capable agent at all versions), or `--agents claude@2.1.141` (one specific version).
+- `--agents` parsing in `<resource> add` understands `@all` and the bare `all` literal; `promptAgentVersionSelection`'s picker surfaces version counts when there's more than one installed, mirroring what `@all` would target.
+
+**Resources / install (`gh:` form sniffs every type, `mcp add gh:`, `--names` + `@all` unified across resource add)**
+
+- `agents install gh:<owner>/<repo>` now sniffs every resource type in the source repo (commands, skills, hooks, MCP, permissions, profiles, subagents, workflows) instead of requiring one `--types` per kind. Pass `--types skills,workflows` to narrow.
+- New `agents mcp add gh:<owner>/<repo>` form — install MCP servers directly from a git source, parallel to the other `<resource> add gh:` paths.
+- `<resource> add` accepts `--names` and `@all` uniformly across commands, skills, hooks, MCP, permissions, profiles, rules, subagents, workflows — same flags, same semantics, regardless of resource kind.
+
+**Profiles (interactive `create` wizard, gateway + self-hosted presets)**
+
+- New `agents profiles create` command — interactive wizard to assemble a profile from gateway or self-hosted presets (OpenRouter, OpenAI-compatible) without hand-writing YAML.
+- `--smoke-test` exercises the resolved env block against the configured endpoint before writing the profile.
+
+**Feedback (in-CLI bug / idea / question routing)**
+
+- New `agents feedback` command — collects a short description + optional category (bug, idea, question) and routes to the project's tracker without leaving the terminal.
+
+**Routines (real exit codes for detached scheduled runs)**
+
+- `monitorRunningJobs` used to hardcode `status: 'failed'` whenever it detected that a detached child had exited — `executeJobDetached` fires-and-forgets, so the real exit code was unreachable. Every scheduler-driven routine ended up labeled `failed/exitCode: null`, even when the agent completed cleanly.
 - Fix: when finalizing a vanished child, scan the tail of its stream-json `stdout.log` for Claude's `type: result` terminator (which carries `is_error`). If found, set `status` and `exitCode` from it. Only fall back to `failed` when no result marker exists (process was killed mid-run).
+- Routines list cell rendering hardened around 7-day retention boundaries.
 - Codex/Gemini run finalization continues to fall back to `failed` until their stream tail parsers are added.
+
+**Security**
+
+- `security(cli)`: eliminated `shell: true` from manifest-driven installs — closes a command-injection vector in `install`/`add` paths that took git URLs or shell-interpolated metadata.
+- `security(logs)`: prompts and tokens are redacted before `events.jsonl` is written, and event retention is shortened from 30d to 7d. Reduces blast radius on accidental disclosure.
+- `security(exec)`: strip loader env vars (`DYLD_*`, `LD_*`, `NODE_OPTIONS`) from environments propagated to child agents — avoids passing host-process loader state into spawned binaries.
+- `security(browser)`: CDP origin allowlist replaces the previous wildcard — only `localhost` and explicitly configured browser hosts can speak CDP into a session.
+- `security(ci)`: keychain helper SHA is verified at publish time, so a tampered helper binary cannot ride a release.
+
+**Copilot (fix user-scoped MCP path)**
+
+- Copilot's user-scoped MCP path now correctly resolves to `mcp-config.json` (the path the IDE actually reads) instead of the legacy filename. Fixes user-level MCP registrations not appearing in Copilot sessions.
+
+**Docs**
+
+- Full docs site IA shipped: browser, cloud, computer, hooks, plugins, profiles, pty, secrets, subagents, teams, workflows.
+- Brand identity block: `agents-cli` is Phoenix Labs OSS, not part of the Rush brand — guards downstream agents against pulling Rush styling into this project.
+
+**Build / install**
+
+- Staged dev install tarball strips `prepack` and `prepare` hooks so side-by-side dev installs don't accidentally re-run the full publish pipeline locally.
+- `test(jobs)`: un-break 3 stale assertions on main.
 
 ## 1.20.0
 
