@@ -129,6 +129,11 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
           throw new Error('migrate-acl is macOS-only. Linux items already use the keyring-native ACL model.');
         }
         const prefix = opts.prefix ?? ITEM_PREFIX;
+        if (!prefix.startsWith(ITEM_PREFIX)) {
+          throw new Error(
+            `--prefix must start with '${ITEM_PREFIX}' to avoid touching unrelated Keychain items (got '${prefix}').`,
+          );
+        }
         const items = listKeychainItems(prefix).map((item) => {
           const localExists = hasKeychainToken(item);
           return { item, sync: !localExists };

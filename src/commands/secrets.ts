@@ -465,7 +465,7 @@ export function registerSecretsCommands(program: Command): void {
               typeof raw === 'string'
                 ? raw
                 : (raw && typeof raw === 'object' && 'value' in raw ? (raw as any).value : '');
-            console.log(`  ${chalk.cyan(e.key.padEnd(28))} ${kindLabel(e.kind).padEnd(18)} ${literalValue}`);
+            console.log(`  ${chalk.cyan(e.key.padEnd(28))} ${kindLabel(e.kind).padEnd(18)} ${redact(literalValue, reveal)}`);
           } else {
             console.log(`  ${chalk.cyan(e.key.padEnd(28))} ${kindLabel(e.kind).padEnd(18)} ${e.detail}`);
           }
@@ -948,8 +948,8 @@ Examples:
           return;
         }
 
-        if (isInteractiveTerminal() && !opts.plaintext) {
-          console.error(chalk.red('export to a TTY requires --plaintext (prevents shoulder-surfing).'));
+        if (!opts.plaintext) {
+          console.error(chalk.red('export prints secrets in the clear and requires --plaintext (works for TTY and pipes alike).'));
           process.exit(1);
         }
         const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `export to shell` });
