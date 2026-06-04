@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.21.0
+## 1.20.1
+
+**Agents selector (auto-install missing versions + unified `@all` everywhere)**
+
+- `--agents claude@2.1.999` used to hard-error when 2.1.999 wasn't installed. Now the CLI prompts to install it inline and continues (auto-install with `--yes`). No more breaking flow to run `agents add` first.
+- `--agents claude@all` and the bare `all` literal now work across every callsite that takes `--agents` — previously `agents install gh:...`, `mcp register`, `mcp remove`, and inline `mcp add` had diverged from the canonical syntax and threw "Version all is not installed" despite the help text advertising it. Selector is unified end-to-end.
 
 **Prompt (fail loud on non-TTY + `@all` syntax in picker)**
 
