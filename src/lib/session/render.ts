@@ -920,12 +920,12 @@ export function renderConversationMarkdown(
   for (const event of events) {
     if (event.type === 'message') {
       if (event.role === 'user') {
-        parts.push(`## User\n\n${event.content ?? ''}`);
+        parts.push(`## User\n\n${sanitize(event.content ?? '')}`);
       } else if (event.role === 'assistant') {
-        parts.push(`## Assistant\n\n${event.content ?? ''}`);
+        parts.push(`## Assistant\n\n${sanitize(event.content ?? '')}`);
       }
     } else if (event.type === 'thinking') {
-      if (event.content) parts.push(`### Thinking\n\n${event.content}`);
+      if (event.content) parts.push(`### Thinking\n\n${sanitize(event.content)}`);
     } else if (event.type === 'tool_use') {
       const tool = event.tool || 'unknown';
       if (event.command) {
@@ -943,7 +943,7 @@ export function renderConversationMarkdown(
         parts.push(`### Tool Result\n\n\`\`\`\n${body}\n\`\`\``);
       }
     } else if (event.type === 'error') {
-      parts.push(`### Error\n\n${event.content || event.tool || 'Unknown error'}`);
+      parts.push(`### Error\n\n${event.content ? sanitize(event.content) : (event.tool || 'Unknown error')}`);
     }
   }
 

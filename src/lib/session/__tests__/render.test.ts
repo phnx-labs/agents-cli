@@ -193,6 +193,19 @@ describe('renderConversationMarkdown', () => {
     expect(out).not.toContain('TOKEN=abc123');
   });
 
+  it('redacts secrets echoed in user, assistant, thinking, and error blocks by default', () => {
+    const token = 'sk-' + 'a'.repeat(40);
+    const events: SessionEvent[] = [
+      { type: 'message', agent: 'claude', timestamp: 't0', role: 'user', content: `here is my key ${token}` },
+      { type: 'message', agent: 'claude', timestamp: 't1', role: 'assistant', content: `your key ${token} is noted` },
+      { type: 'thinking', agent: 'claude', timestamp: 't2', content: `mulling over ${token}` },
+      { type: 'error', agent: 'claude', timestamp: 't3', content: `failed with ${token}` },
+    ];
+    const out = renderConversationMarkdown(events);
+    expect(out).not.toContain(token);
+    expect(out).toContain('[REDACTED_API_KEY]');
+  });
+
   it('can render markdown without redaction when explicitly requested', () => {
     const events: SessionEvent[] = [
       { type: 'tool_use', agent: 'claude', timestamp: 't0', tool: 'Bash', args: {}, command: 'TOKEN=abc123 deploy' },
