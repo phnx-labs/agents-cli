@@ -70,7 +70,8 @@ const AGENT_NAMES: Record<AgentType, string> = {
 };
 
 const VALID_AGENTS = Object.keys(AGENT_NAMES) as AgentType[];
-const VALID_MODES = ['plan', 'edit', 'full'] as const;
+// 'full' kept as historical alias for 'skip'; normalized to 'skip' downstream.
+const VALID_MODES = ['plan', 'edit', 'auto', 'skip', 'full'] as const;
 const VALID_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'auto'] as const;
 const VALID_CLOUD_PROVIDERS = ['rush', 'codex', 'factory'] as const satisfies readonly CloudProviderId[];
 
@@ -812,7 +813,7 @@ export function registerTeamsCommands(program: Command): void {
     .alias('a')
     .description("Add a teammate to work on a task. Runs in background; returns immediately. Use 'status' to check in.")
     .option('-n, --name <name>', 'Friendly name for this teammate (e.g. alice). Required if using --after. Unique within team.')
-    .option('-m, --mode <mode>', `Permissions: plan (read-only) | edit (can write files) | full (write + skip permission prompts)`, 'edit')
+    .option('-m, --mode <mode>', `Permissions: plan (read-only) | edit (can write files) | auto (smart classifier auto-approves safe ops) | skip (bypass all permission prompts). 'full' accepted as alias for skip.`, 'edit')
     .option('-e, --effort <effort>', `Reasoning intensity: ${VALID_EFFORTS.join('|')}`, 'medium')
     .option('--model <model>', 'Override the effort tier and use this specific model (e.g. claude-opus-4-6)')
     .option(

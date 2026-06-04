@@ -99,7 +99,14 @@ describe('validateJob', () => {
 
   it('rejects invalid mode', () => {
     const errors = validateJob({ ...makeConfig(), mode: 'yolo' as any });
-    expect(errors).toContain('mode must be plan, edit, or full');
+    expect(errors).toContain("mode must be plan, edit, auto, or skip ('full' accepted as alias for skip)");
+  });
+
+  it("accepts 'skip' (canonical) and 'full' (legacy alias) and 'auto'", () => {
+    for (const m of ['plan', 'edit', 'auto', 'skip', 'full'] as const) {
+      const errors = validateJob({ ...makeConfig(), mode: m });
+      expect(errors).not.toContain("mode must be plan, edit, auto, or skip ('full' accepted as alias for skip)");
+    }
   });
 
   it('rejects invalid effort', () => {

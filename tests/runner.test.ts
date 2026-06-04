@@ -100,8 +100,19 @@ describe('buildJobCommand', () => {
       expect(cmd).toContain('hello');
     });
 
-    it('adds --yolo in edit mode', () => {
+    it('adds --approval-mode auto_edit in edit mode', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'gemini', mode: 'edit' }), 'hello');
+      expect(cmd).toContain('--approval-mode');
+      expect(cmd[cmd.indexOf('--approval-mode') + 1]).toBe('auto_edit');
+    });
+
+    it('adds --yolo in skip mode (formerly full)', () => {
+      const cmd = buildJobCommand(makeConfig({ agent: 'gemini', mode: 'skip' }), 'hello');
+      expect(cmd).toContain('--yolo');
+    });
+
+    it("legacy 'full' alias still produces --yolo for gemini", () => {
+      const cmd = buildJobCommand(makeConfig({ agent: 'gemini', mode: 'full' as any }), 'hello');
       expect(cmd).toContain('--yolo');
     });
 

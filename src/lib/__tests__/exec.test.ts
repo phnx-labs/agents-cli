@@ -6,10 +6,12 @@ import {
   detectRateLimit,
   AGENT_COMMANDS,
   parseExecEnv,
+  normalizeMode,
+  resolveMode,
   type ExecOptions,
-  type ExecMode,
 } from '../exec.js';
-import type { AgentId } from '../types.js';
+import type { AgentId, Mode } from '../types.js';
+import { AGENTS } from '../agents.js';
 
 function opts(overrides: Partial<ExecOptions>): ExecOptions {
   return {
@@ -22,7 +24,6 @@ function opts(overrides: Partial<ExecOptions>): ExecOptions {
 }
 
 const ALL_AGENTS = Object.keys(AGENT_COMMANDS) as AgentId[];
-const ALL_MODES: ExecMode[] = ['plan', 'edit', 'full'];
 
 describe('buildExecCommand', () => {
   // --- Mode flags per agent ---
@@ -40,10 +41,21 @@ describe('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('acceptEdits');
     });
 
-    it('claude full produces --dangerously-skip-permissions', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'full' }));
+    it('claude skip produces --dangerously-skip-permissions', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'skip' }));
       expect(cmd).toContain('--dangerously-skip-permissions');
       expect(cmd).not.toContain('--permission-mode');
+    });
+
+    it("claude 'full' (legacy alias) routes through skip and produces --dangerously-skip-permissions", () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'skip' as Mode }));
+      expect(cmd).toContain('--dangerously-skip-permissions');
+    });
+
+    it('claude auto produces --permission-mode auto (smart classifier)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'auto' }));
+      expect(cmd).toContain('--permission-mode');
+      expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('auto');
     });
 
     it('codex plan produces --sandbox workspace-write', () => {
@@ -59,39 +71,41 @@ describe('buildExecCommand', () => {
       expect(cmd).toContain('--full-auto');
     });
 
-    it('codex full produces --full-auto without --sandbox', () => {
-      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'full' }));
+    it('codex skip produces --full-auto without --sandbox', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'skip' }));
       expect(cmd).toContain('--full-auto');
       expect(cmd).not.toContain('--sandbox');
     });
 
-    it('gemini plan has no mode flags', () => {
+    it('gemini plan produces --approval-mode plan', () => {
       const cmd = buildExecCommand(opts({ agent: 'gemini', mode: 'plan' }));
-      expect(cmd).not.toContain('--yolo');
+      expect(cmd).toContain('--approval-mode');
+      expect(cmd[cmd.indexOf('--approval-mode') + 1]).toBe('plan');
     });
 
-    it('gemini edit produces --yolo', () => {
+    it('gemini edit produces --approval-mode auto_edit', () => {
       const cmd = buildExecCommand(opts({ agent: 'gemini', mode: 'edit' }));
+      expect(cmd).toContain('--approval-mode');
+      expect(cmd[cmd.indexOf('--approval-mode') + 1]).toBe('auto_edit');
+    });
+
+    it('gemini skip produces --yolo', () => {
+      const cmd = buildExecCommand(opts({ agent: 'gemini', mode: 'skip' }));
       expect(cmd).toContain('--yolo');
     });
 
-    it('gemini full produces --yolo', () => {
-      const cmd = buildExecCommand(opts({ agent: 'gemini', mode: 'full' }));
-      expect(cmd).toContain('--yolo');
+    it('cursor plan throws (cursor has no read-only mode)', () => {
+      expect(() => buildExecCommand(opts({ agent: 'cursor', mode: 'plan' })))
+        .toThrow(/cursor does not support 'plan' mode/);
     });
 
-    it('cursor plan has no mode flags', () => {
-      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'plan' }));
+    it('cursor edit produces no flags (edit is cursor default)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'edit' }));
       expect(cmd).not.toContain('-f');
     });
 
-    it('cursor edit produces -f', () => {
-      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'edit' }));
-      expect(cmd).toContain('-f');
-    });
-
-    it('cursor full produces -f', () => {
-      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'full' }));
+    it('cursor skip produces -f', () => {
+      const cmd = buildExecCommand(opts({ agent: 'cursor', mode: 'skip' }));
       expect(cmd).toContain('-f');
     });
 
@@ -106,9 +120,9 @@ describe('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--agent') + 1]).toBe('build');
     });
 
-    it('opencode full produces --agent build', () => {
-      const cmd = buildExecCommand(opts({ agent: 'opencode', mode: 'full' }));
-      expect(cmd[cmd.indexOf('--agent') + 1]).toBe('build');
+    it('opencode skip throws (opencode has no skip-permissions flag)', () => {
+      expect(() => buildExecCommand(opts({ agent: 'opencode', mode: 'skip' })))
+        .toThrow(/opencode does not support 'skip' mode/);
     });
 
     it('openclaw plan produces --mode plan', () => {
@@ -122,8 +136,8 @@ describe('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--mode') + 1]).toBe('edit');
     });
 
-    it('openclaw full produces --mode full', () => {
-      const cmd = buildExecCommand(opts({ agent: 'openclaw', mode: 'full' }));
+    it('openclaw skip produces --mode full (openclaw native flag is still "full")', () => {
+      const cmd = buildExecCommand(opts({ agent: 'openclaw', mode: 'skip' }));
       expect(cmd[cmd.indexOf('--mode') + 1]).toBe('full');
     });
 
@@ -142,10 +156,15 @@ describe('buildExecCommand', () => {
       expect(cmd).not.toContain('--mode');
     });
 
-    it('copilot full produces --allow-all (tools + paths + URLs)', () => {
-      const cmd = buildExecCommand(opts({ agent: 'copilot', mode: 'full' }));
+    it('copilot skip produces --allow-all (tools + paths + URLs)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'copilot', mode: 'skip' }));
       expect(cmd).toContain('--allow-all');
       expect(cmd).not.toContain('--allow-all-tools');
+    });
+
+    it('copilot auto produces --autopilot (smart classifier)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'copilot', mode: 'auto' }));
+      expect(cmd).toContain('--autopilot');
     });
 
     it('copilot uses -p (not positional) for the prompt', () => {
@@ -161,13 +180,17 @@ describe('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--output-format') + 1]).toBe('json');
     });
 
-    it('every agent has all three mode entries', () => {
+    it('every agent declares at least the edit mode (the universal default)', () => {
       for (const agent of ALL_AGENTS) {
-        const template = AGENT_COMMANDS[agent];
-        for (const mode of ALL_MODES) {
-          expect(template.modeFlags[mode]).toBeDefined();
-          expect(Array.isArray(template.modeFlags[mode])).toBe(true);
-        }
+        expect(AGENTS[agent].capabilities.modes).toContain('edit');
+      }
+    });
+
+    it("AGENT_COMMANDS.modeFlags keys agree with AGENTS.capabilities.modes (no drift)", () => {
+      for (const agent of ALL_AGENTS) {
+        const cap = [...AGENTS[agent].capabilities.modes].sort();
+        const decl = Object.keys(AGENT_COMMANDS[agent].modeFlags).sort();
+        expect(decl).toEqual(cap);
       }
     });
   });
@@ -473,17 +496,17 @@ describe('buildExecCommand', () => {
 
   describe('version pinning', () => {
     it('appends @version to base command when version is set', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', version: '2.1.98', mode: 'full' }));
+      const cmd = buildExecCommand(opts({ agent: 'claude', version: '2.1.98', mode: 'skip' }));
       expect(cmd[0]).toBe('claude@2.1.98');
     });
 
     it('does not append @version when version is undefined', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'full' }));
+      const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'skip' }));
       expect(cmd[0]).toBe('claude');
     });
 
     it('works for codex with version', () => {
-      const cmd = buildExecCommand(opts({ agent: 'codex', version: '0.98.0', mode: 'full' }));
+      const cmd = buildExecCommand(opts({ agent: 'codex', version: '0.98.0', mode: 'skip' }));
       expect(cmd[0]).toBe('codex@0.98.0');
       expect(cmd[1]).toBe('exec');
     });
@@ -495,7 +518,7 @@ describe('buildExecCommand', () => {
     it('produces claude command matching agent-runner pattern', () => {
       const cmd = buildExecCommand(opts({
         agent: 'claude',
-        mode: 'full',
+        mode: 'skip',
         headless: true,
         sessionId: 'sess-123',
         verbose: true,
@@ -514,7 +537,7 @@ describe('buildExecCommand', () => {
     it('produces codex command matching agent-runner pattern', () => {
       const cmd = buildExecCommand(opts({
         agent: 'codex',
-        mode: 'full',
+        mode: 'skip',
         prompt: 'fix the bug',
       }));
       expect(cmd).toEqual([
@@ -527,7 +550,7 @@ describe('buildExecCommand', () => {
     it('claude with effort=high emits --effort high', () => {
       const cmd = buildExecCommand(opts({
         agent: 'claude',
-        mode: 'full',
+        mode: 'skip',
         effort: 'high',
         prompt: 'fix the bug',
       }));
@@ -542,7 +565,7 @@ describe('buildExecCommand', () => {
     it('codex with effort=medium emits -c model_reasoning_effort=medium before exec', () => {
       const cmd = buildExecCommand(opts({
         agent: 'codex',
-        mode: 'full',
+        mode: 'skip',
         effort: 'medium',
         prompt: 'fix the bug',
       }));
@@ -611,5 +634,59 @@ describe('buildFallbackPrompt', () => {
     const prompt = buildFallbackPrompt('codex', undefined, 'claude', 'deploy');
     expect(prompt).not.toMatch(/^\/continue/);
     expect(prompt).toContain('Original request: deploy');
+  });
+});
+
+describe('normalizeMode', () => {
+  it.each<[string, Mode]>([
+    ['plan', 'plan'],
+    ['edit', 'edit'],
+    ['auto', 'auto'],
+    ['skip', 'skip'],
+    ['full', 'skip'],          // canonical alias
+    ['FULL', 'skip'],          // case insensitive
+    [' Skip ', 'skip'],        // whitespace tolerant
+  ])("maps '%s' → %s", (input, expected) => {
+    expect(normalizeMode(input)).toBe(expected);
+  });
+
+  it.each(['', null, undefined])("throws on empty/nullish input: %s", (input) => {
+    expect(() => normalizeMode(input)).toThrow(/Mode is required/);
+  });
+
+  it.each(['yolo', 'dangerous', 'ralph', 'foo', 'auto_edit'])("throws on unknown mode '%s'", (input) => {
+    expect(() => normalizeMode(input)).toThrow(/Invalid mode/);
+  });
+});
+
+describe('resolveMode', () => {
+  it("returns the requested mode when supported (claude/skip)", () => {
+    expect(resolveMode('claude', 'skip')).toBe('skip');
+  });
+
+  it("degrades 'auto' to 'edit' for agents without smart-classifier support", () => {
+    // codex has no auto in its capabilities.modes — should silently degrade.
+    expect(AGENTS.codex.capabilities.modes).not.toContain('auto');
+    expect(resolveMode('codex', 'auto')).toBe('edit');
+  });
+
+  it("keeps 'auto' for agents that natively support it (claude, copilot)", () => {
+    expect(resolveMode('claude', 'auto')).toBe('auto');
+    expect(resolveMode('copilot', 'auto')).toBe('auto');
+  });
+
+  it("throws on 'skip' for agents without skip support, naming supported modes", () => {
+    expect(() => resolveMode('opencode', 'skip'))
+      .toThrow(/opencode does not support 'skip' mode\. Supported modes: plan, edit\./);
+  });
+
+  it("throws on 'plan' for agents without plan support (cursor)", () => {
+    expect(() => resolveMode('cursor', 'plan'))
+      .toThrow(/cursor does not support 'plan' mode\. Supported modes: edit, skip\./);
+  });
+
+  it("throws on 'skip' for kiro (edit-only agent)", () => {
+    expect(() => resolveMode('kiro', 'skip'))
+      .toThrow(/kiro does not support 'skip' mode\. Supported modes: edit\./);
   });
 });

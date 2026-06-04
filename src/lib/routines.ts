@@ -29,7 +29,8 @@ export interface JobConfig {
   schedule: string;
   agent: AgentId;  // required when workflow is absent
   workflow?: string;
-  mode: 'plan' | 'edit' | 'full';
+  // 'full' is accepted as a permanent silent alias for 'skip' (see normalizeMode).
+  mode: 'plan' | 'edit' | 'auto' | 'skip' | 'full';
   effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
   timeout: string;
   enabled: boolean;
@@ -178,8 +179,8 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push('workflow must be a lowercase alphanumeric name (hyphens and underscores allowed, e.g. autodev)');
     }
   }
-  if (config.mode && !['plan', 'edit', 'full'].includes(config.mode)) {
-    errors.push('mode must be plan, edit, or full');
+  if (config.mode && !['plan', 'edit', 'auto', 'skip', 'full'].includes(config.mode)) {
+    errors.push("mode must be plan, edit, auto, or skip ('full' accepted as alias for skip)");
   }
   if (config.effort && !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(config.effort)) {
     errors.push('effort must be low, medium, high, xhigh, max, or auto');

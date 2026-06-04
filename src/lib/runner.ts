@@ -23,6 +23,7 @@ import type { AgentId } from './types.js';
 import { prepareJobHome, buildSpawnEnv } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, maybeRotate, redactPrompt } from './events.js';
+import { normalizeMode } from './exec.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -55,11 +56,17 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
 
   let cmd = template.map((part) => part.replace('{prompt}', resolvedPrompt));
 
+  // Canonicalize mode (accepts legacy `full` as alias for `skip`).
+  const mode = normalizeMode(config.mode);
+
   if (config.agent === 'claude') {
-    if (config.mode === 'edit') {
+    if (mode === 'edit') {
       const planIndex = cmd.indexOf('plan');
       if (planIndex !== -1) cmd[planIndex] = 'acceptEdits';
-    } else if (config.mode === 'full') {
+    } else if (mode === 'auto') {
+      const planIndex = cmd.indexOf('plan');
+      if (planIndex !== -1) cmd[planIndex] = 'auto';
+    } else if (mode === 'skip') {
       // Replace --permission-mode plan with --dangerously-skip-permissions
       const pmIndex = cmd.indexOf('--permission-mode');
       if (pmIndex !== -1) cmd.splice(pmIndex, 2, '--dangerously-skip-permissions');
@@ -82,9 +89,9 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   }
 
   if (config.agent === 'codex') {
-    if (config.mode === 'edit') {
+    if (mode === 'edit') {
       cmd.push('--full-auto');
-    } else if (config.mode === 'full') {
+    } else if (mode === 'skip') {
       // Remove sandbox restriction, just --full-auto
       const sbIndex = cmd.indexOf('--sandbox');
       if (sbIndex !== -1) cmd.splice(sbIndex, 2);
@@ -95,7 +102,9 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   }
 
   if (config.agent === 'gemini') {
-    if (config.mode === 'edit' || config.mode === 'full') {
+    if (mode === 'edit') {
+      cmd.push('--approval-mode', 'auto_edit');
+    } else if (mode === 'skip') {
       cmd.push('--yolo');
     }
 

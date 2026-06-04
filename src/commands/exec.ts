@@ -14,6 +14,8 @@ import {
   execAgent,
   runWithFallback,
   AGENT_COMMANDS,
+  normalizeMode,
+  resolveMode,
   type ExecOptions,
   type ExecMode,
   type ExecEffort,
@@ -78,7 +80,7 @@ export function registerRunCommand(program: Command): void {
   const runCmd = program
     .command('run <agent> [prompt]')
     .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively.')
-    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), full (writes + all permissions)', 'plan')
+    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (smart classifier auto-approves safe ops, prompts for risky), skip (bypass all permission prompts). \'full\' accepted as alias for skip.', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)', 'auto')
     .option('--model <model>', 'Override the model directly (e.g., claude-opus-4-6)')
     .option(
@@ -149,8 +151,12 @@ export function registerRunCommand(program: Command): void {
       agents run claude "deploy the worker" --secrets prod --mode edit
     `,
     notes: `
-      Modes:
-        plan  read-only       edit  can write files       full  writes + all permissions
+      Modes (not every agent supports every mode — check agents.yaml capabilities):
+        plan  read-only investigation; no writes, no shell side-effects
+        edit  may edit files; prompts for shell / risky operations
+        auto  smart classifier auto-approves safe ops, prompts for risky (claude, copilot)
+        skip  bypass every permission prompt (dangerously-skip-permissions)
+        Legacy 'full' is silently rewritten to 'skip'.
 
       Run strategy (set via --strategy or run.<agent>.strategy in agents.yaml):
         pinned     use the workspace/global pinned version (default)
@@ -324,9 +330,21 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
+      // Accept the four canonical modes plus 'full' as a permanent silent
+      // alias for 'skip' (rewritten downstream by normalizeMode in exec.ts).
       const mode = options.mode as ExecMode;
-      if (!['plan', 'edit', 'full'].includes(mode)) {
-        console.error(chalk.red(`Invalid mode: ${mode}. Use 'plan', 'edit', or 'full'`));
+      if (!['plan', 'edit', 'auto', 'skip', 'full'].includes(mode)) {
+        console.error(chalk.red(`Invalid mode: ${mode}. Use plan, edit, auto, or skip ('full' accepted as alias for skip).`));
+        process.exit(1);
+      }
+
+      // Surface capability errors as a clean CLI message instead of a stack
+      // trace from buildExecCommand. resolveMode degrades 'auto' silently and
+      // throws on unsupported 'plan'/'skip' — we catch and pretty-print.
+      try {
+        resolveMode(agent, normalizeMode(mode));
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
         process.exit(1);
       }
 

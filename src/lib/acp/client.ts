@@ -134,7 +134,12 @@ function buildClient(opts: AcpRunOptions): Client {
     },
 
     async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
-      const optionId = mode === 'full'
+      // `skip` (formerly `full`) and `auto` blanket-approve; in `auto` the
+      // upstream model has its own classifier so we just say "allow once" and
+      // let it decide. `edit` says allow_once. `plan` should never reach here
+      // (canWrite gates writes earlier), but if it does we cancel.
+      const skipAll = mode === 'skip';
+      const optionId = skipAll
         ? (params.options.find(o => o.kind === 'allow_always')?.optionId
             ?? params.options[0]?.optionId)
         : params.options.find(o => o.kind === 'allow_once')?.optionId;

@@ -215,7 +215,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, allowlist: true, skills: true, commands: true, plugins: true, rulesImports: true },
+    capabilities: { hooks: true, mcp: true, allowlist: true, skills: true, commands: true, plugins: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true },
   },
   // codex hooks: gated to >= 0.116.0 (introduced [features] codex_hooks flag).
   codex: {
@@ -234,7 +234,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: { since: '0.116.0' }, mcp: true, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' } },
+    capabilities: { hooks: { since: '0.116.0' }, mcp: true, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, modes: ['plan', 'edit', 'skip'] },
   },
   gemini: {
     id: 'gemini',
@@ -253,7 +253,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     nativeAgentsSkillsDir: true,
     // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
-    capabilities: { hooks: { since: '0.26.0' }, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, rulesImports: true },
+    capabilities: { hooks: { since: '0.26.0' }, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
   },
   cursor: {
     id: 'cursor',
@@ -271,7 +271,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, modes: ['edit', 'skip'] },
   },
   opencode: {
     id: 'opencode',
@@ -288,7 +288,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, modes: ['plan', 'edit'] },
   },
   openclaw: {
     id: 'openclaw',
@@ -305,7 +305,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, allowlist: false, skills: true, commands: false, plugins: true },
+    capabilities: { hooks: true, mcp: true, allowlist: false, skills: true, commands: false, plugins: true, modes: ['plan', 'edit', 'skip'] },
   },
   copilot: {
     id: 'copilot',
@@ -322,7 +322,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, modes: ['plan', 'edit', 'auto', 'skip'] },
   },
   amp: {
     id: 'amp',
@@ -339,7 +339,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, modes: ['plan', 'edit'] },
   },
   kiro: {
     id: 'kiro',
@@ -357,7 +357,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, modes: ['edit'] },
   },
   goose: {
     id: 'goose',
@@ -375,7 +375,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: false, commands: false, plugins: false },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: false, commands: false, plugins: false, modes: ['edit'] },
   },
   roo: {
     id: 'roo',
@@ -393,7 +393,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, modes: ['plan', 'edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -420,7 +420,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '{{args}}',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, allowlist: true, skills: true, commands: true, plugins: true, rulesImports: false },
+    capabilities: { hooks: true, mcp: true, allowlist: true, skills: true, commands: true, plugins: true, modes: ['edit', 'skip'], rulesImports: false },
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
   // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
@@ -451,6 +451,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       skills: true,
       commands: false, // covered by skills
       plugins: true,
+      modes: ['plan', 'edit', 'skip'],
       rulesImports: true,
     },
   },

@@ -46,6 +46,12 @@ export interface AgentConfig {
     commands: Capability;
     plugins: Capability;
     /**
+     * Permission modes this agent natively supports. Modes outside this set
+     * are gated by buildExecCommand: `auto` silently degrades to `edit`,
+     * `skip` errors with a clear message naming the supported modes.
+     */
+    modes: Mode[];
+    /**
      * Whether the agent natively resolves `@path/to/file` imports inside its
      * rules file at session start. If false, agents-cli must pre-compile the
      * rules file (inline all @-imports) when syncing it into the version home.
@@ -64,6 +70,21 @@ export type Capability = boolean | { since?: string; until?: string };
 
 /** Names of every gateable capability on AgentConfig. */
 export type CapabilityName = 'hooks' | 'mcp' | 'allowlist' | 'skills' | 'commands' | 'plugins';
+
+/**
+ * Permission modes controlling agent autonomy.
+ *   plan  read-only investigation; no writes, no shell side-effects
+ *   edit  may edit files; prompts for shell/risky operations
+ *   auto  smart classifier auto-approves safe operations, prompts for risky ones
+ *   skip  bypasses every permission prompt (dangerously-skip-permissions)
+ *
+ * `full` is accepted as a permanent silent alias for `skip` via normalizeMode().
+ * Per-agent support is declared on AgentConfig.capabilities.modes.
+ */
+export type Mode = 'plan' | 'edit' | 'auto' | 'skip';
+
+/** Every canonical mode in declaration order. Useful for iteration / validation. */
+export const ALL_MODES: readonly Mode[] = ['plan', 'edit', 'auto', 'skip'] as const;
 
 /** Reason a capability check failed. */
 export type CapabilityFailReason = 'unsupported' | 'too_old' | 'too_new';

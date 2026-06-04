@@ -203,13 +203,17 @@ const CLAUDE_PLAN_MODE_PREFIX = `You are running in HEADLESS PLAN MODE. This mod
 
 `;
 
-const VALID_MODES = ['plan', 'edit', 'full', 'auto'] as const;
-type Mode = typeof VALID_MODES[number];
+// Canonical modes plus the historical `full` alias (rewritten to `skip` by
+// normalizeModeValue). Keep `full` listed so user-typed CLI flags and stored
+// metadata that pre-date the rename continue to parse.
+export const VALID_MODES = ['plan', 'edit', 'auto', 'skip', 'full'] as const;
+type Mode = 'plan' | 'edit' | 'auto' | 'skip';
 
 function normalizeModeValue(modeValue: string | null | undefined): Mode | null {
   if (!modeValue) return null;
   const normalized = modeValue.trim().toLowerCase();
-  if (VALID_MODES.includes(normalized as Mode)) {
+  if (normalized === 'full') return 'skip';
+  if ((['plan', 'edit', 'auto', 'skip'] as readonly string[]).includes(normalized)) {
     return normalized as Mode;
   }
   return null;
@@ -223,7 +227,7 @@ function defaultModeFromEnv(): Mode {
       return parsed;
     }
     if (rawValue) {
-      console.warn(`Invalid ${envVar}='${rawValue}'. Use 'plan' or 'edit'. Falling back to plan mode.`);
+      console.warn(`Invalid ${envVar}='${rawValue}'. Use plan, edit, auto, or skip. Falling back to plan mode.`);
     }
   }
   return 'plan';
@@ -282,13 +286,13 @@ export function resolveMode(
 ): Mode {
   const normalizedDefault = normalizeModeValue(defaultMode);
   if (!normalizedDefault) {
-    throw new Error(`Invalid default mode '${defaultMode}'. Use 'plan' or 'edit'.`);
+    throw new Error(`Invalid default mode '${defaultMode}'. Use plan, edit, auto, or skip.`);
   }
 
   if (requestedMode !== null && requestedMode !== undefined) {
     const normalizedMode = normalizeModeValue(requestedMode);
     if (!normalizedMode) {
-      throw new Error(`Invalid mode '${requestedMode}'. Valid modes: 'plan' (read-only) or 'edit' (can write).`);
+      throw new Error(`Invalid mode '${requestedMode}'. Valid modes: plan (read-only), edit (can write), auto (smart classifier), skip (bypass all permissions). 'full' is accepted as alias for skip.`);
     }
     return normalizedMode;
   }
@@ -475,7 +479,9 @@ export class AgentProcess {
   }
 
   get isEditMode(): boolean {
-    return this.mode === 'edit' || this.mode === 'full';
+    // Any mode that can mutate the workspace counts as "edit mode" for the
+    // purposes of guarding read-only flows (plan-mode teammates).
+    return this.mode === 'edit' || this.mode === 'auto' || this.mode === 'skip';
   }
 
   async getAgentDir(): Promise<string> {
@@ -714,12 +720,16 @@ export class AgentProcess {
       const metaContent = await fs.readFile(metaPath, 'utf-8');
       const meta = JSON.parse(metaContent);
 
-      // Legacy teammates may have mode='ralph' or 'cloud' from before modes
-      // were narrowed. Coerce to the closest current mode so they still load.
+      // Legacy teammates may have mode='ralph', 'cloud', or 'full' from before
+      // modes were narrowed/renamed. Coerce to the closest current mode so they
+      // still load.
       const modeMap: Record<string, Mode> = {
+        plan: 'plan',
         edit: 'edit',
-        full: 'full',
-        ralph: 'full',  // ralph used the same "no-permission" flags as full
+        auto: 'auto',
+        skip: 'skip',
+        full: 'skip',   // historical alias — `full` is the old name for `skip`
+        ralph: 'skip',  // ralph used the same "no-permission" flags as full
         cloud: 'edit',  // cloud teammates had edit-level write access
       };
       const resolvedMode: Mode = modeMap[meta.mode] || 'plan';
@@ -917,7 +927,7 @@ export class AgentManager {
     this.cleanupAgeDays = cleanupAgeDays;
     const resolvedDefaultMode = defaultMode ? normalizeModeValue(defaultMode) : defaultModeFromEnv();
     if (!resolvedDefaultMode) {
-      throw new Error(`Invalid default_mode '${defaultMode}'. Use 'plan' or 'edit'.`);
+      throw new Error(`Invalid default_mode '${defaultMode}'. Use plan, edit, auto, or skip.`);
     }
     this.defaultMode = resolvedDefaultMode;
 
@@ -1319,7 +1329,7 @@ export class AgentManager {
     // plan-mode restrictions) and a universal summary suffix. These are
     // team-specific prompt scaffolding — `agents run` does not apply them.
     let fullPrompt = prompt + PROMPT_SUFFIX;
-    if (agentType === 'claude' && mode !== 'edit') {
+    if (agentType === 'claude' && mode === 'plan') {
       fullPrompt = CLAUDE_PLAN_MODE_PREFIX + fullPrompt;
     }
 

@@ -7,15 +7,62 @@
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
-import type { AgentId } from './types.js';
+import type { AgentId, Mode } from './types.js';
+import { ALL_MODES } from './types.js';
+import { AGENTS } from './agents.js';
 import { parseTimeout } from './routines.js';
 import { getVersionHomePath, isVersionInstalled, resolveVersion } from './versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 
-/** Agent execution modes controlling tool access and autonomy level. */
-export type ExecMode = 'plan' | 'edit' | 'full' | 'auto';
+/**
+ * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
+ * `full` is accepted as a permanent silent alias via normalizeMode().
+ */
+export type ExecMode = Mode;
+
+/**
+ * Map a raw mode string (CLI flag, YAML field, env var) to the canonical Mode.
+ *
+ * Accepts the historical `full` spelling and rewrites it to `skip`. Throws on
+ * anything outside the four canonical values so bad input fails loud at the
+ * boundary rather than silently picking a wrong code path.
+ */
+export function normalizeMode(input: string | null | undefined): Mode {
+  if (!input) {
+    throw new Error(`Mode is required. Use one of: ${ALL_MODES.join(', ')}.`);
+  }
+  const v = input.trim().toLowerCase();
+  if (v === 'full') return 'skip';
+  if ((ALL_MODES as readonly string[]).includes(v)) return v as Mode;
+  throw new Error(`Invalid mode '${input}'. Use one of: ${ALL_MODES.join(', ')} (or 'full' as a deprecated alias for 'skip').`);
+}
+
+/**
+ * Resolve a requested mode against an agent's capability table.
+ *
+ * - `auto` on an agent without auto support silently degrades to `edit`
+ *   (every agent supports edit-like behavior as its default).
+ * - `skip` on an agent without skip support throws with a clear message
+ *   naming the agent's supported modes. No silent fallback — the user
+ *   explicitly asked to bypass permissions; pretending we did is unsafe.
+ * - `plan` on an agent without plan support throws the same way.
+ */
+export function resolveMode(agent: AgentId, requested: Mode): Mode {
+  const supported = AGENTS[agent].capabilities.modes;
+  if (supported.includes(requested)) return requested;
+
+  if (requested === 'auto') {
+    // Fall back to edit — guaranteed to exist on every agent (every agent has
+    // at least 'edit' in its modes table, since that's the default behavior).
+    return 'edit';
+  }
+
+  throw new Error(
+    `${agent} does not support '${requested}' mode. Supported modes: ${supported.join(', ')}.`,
+  );
+}
 
 /** Reasoning effort levels passed to agents that support them. 'auto' defers to the agent's default. */
 export type ExecEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
@@ -134,23 +181,29 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
 }
 
 
-/** Describes how to translate ExecOptions into CLI arguments for a specific agent. */
+/**
+ * Describes how to translate ExecOptions into CLI arguments for a specific agent.
+ *
+ * `modeFlags` only declares modes this agent natively supports. Keys must agree
+ * with AGENTS[agent].capabilities.modes — resolveMode() routes a request to a
+ * supported mode (or throws), then buildExecCommand looks up the flags here.
+ */
 export interface AgentCommandTemplate {
   base: string[];
   promptFlag: 'positional' | string;
-  modeFlags: {
-    plan: string[];
-    edit: string[];
-    full: string[];
-    auto?: string[];
-  };
+  modeFlags: Partial<Record<Mode, string[]>>;
   jsonFlags?: string[];
   modelFlag?: string;
   printFlags?: string[];
   verboseFlag?: string;
 }
 
-/** CLI command templates for every supported agent. */
+/**
+ * CLI command templates for every supported agent.
+ *
+ * Each agent's `modeFlags` keys MUST match the modes listed in
+ * AGENTS[agent].capabilities.modes. A test in exec.test.ts asserts this.
+ */
 export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
   claude: {
     base: ['claude'],
@@ -158,8 +211,8 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modeFlags: {
       plan: ['--permission-mode', 'plan'],
       edit: ['--permission-mode', 'acceptEdits'],
-      full: ['--dangerously-skip-permissions'],
       auto: ['--permission-mode', 'auto'],
+      skip: ['--dangerously-skip-permissions'],
     },
     jsonFlags: ['--output-format', 'stream-json', '--verbose'],
     modelFlag: '--model',
@@ -170,9 +223,13 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['codex', 'exec'],
     promptFlag: 'positional',
     modeFlags: {
+      // NOTE: codex has no read-only mode in --sandbox; 'plan' here means
+      // "workspace-write but no auto-approval" — closer to plan-as-restraint.
+      // True read-only requires --sandbox read-only which we haven't wired.
       plan: ['--sandbox', 'workspace-write'],
       edit: ['--sandbox', 'workspace-write', '--full-auto'],
-      full: ['--full-auto'],
+      // skip drops the sandbox entirely; --full-auto then approves anything.
+      skip: ['--full-auto'],
     },
     jsonFlags: ['--json'],
     modelFlag: '--model',
@@ -181,9 +238,9 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['gemini'],
     promptFlag: 'positional',
     modeFlags: {
-      plan: [],
-      edit: ['--yolo'],
-      full: ['--yolo'],
+      plan: ['--approval-mode', 'plan'],
+      edit: ['--approval-mode', 'auto_edit'],
+      skip: ['--yolo'],
     },
     jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
@@ -192,9 +249,9 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['cursor-agent'],
     promptFlag: '-p',
     modeFlags: {
-      plan: [],
-      edit: ['-f'],
-      full: ['-f'],
+      // cursor-agent has no read-only flag; we only expose edit + skip.
+      edit: [],
+      skip: ['-f'],
     },
     jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
@@ -205,7 +262,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modeFlags: {
       plan: ['--agent', 'plan'],
       edit: ['--agent', 'build'],
-      full: ['--agent', 'build'],
     },
     jsonFlags: ['--format', 'json'],
     modelFlag: '--model',
@@ -216,7 +272,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modeFlags: {
       plan: ['--mode', 'plan'],
       edit: ['--mode', 'edit'],
-      full: ['--mode', 'full'],
+      skip: ['--mode', 'full'],
     },
     jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
@@ -225,19 +281,21 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
   // against `copilot --help` from v0.0.413+:
   //   -p, --prompt <text>          non-interactive one-shot
   //   --mode <interactive|plan|autopilot>
+  //   --autopilot                  start in autopilot (smart-classifier) mode
   //   --allow-all-tools            required for non-interactive tool exec
   //   --allow-all (alias --yolo)   tools + paths + URLs
   //   --output-format <text|json>  json => JSONL, one object per line
   //   --model <model>
-  // Plan mode is read-only so it does not need an allow-tools grant; edit/full
-  // need at minimum --allow-all-tools so headless runs don't stall on prompts.
+  // Plan mode is read-only so it does not need an allow-tools grant; edit
+  // needs --allow-all-tools so headless runs don't stall on prompts.
   copilot: {
     base: ['copilot'],
     promptFlag: '-p',
     modeFlags: {
       plan: ['--mode', 'plan'],
       edit: ['--allow-all-tools'],
-      full: ['--allow-all'],
+      auto: ['--autopilot'],
+      skip: ['--allow-all'],
     },
     jsonFlags: ['--output-format', 'json'],
     modelFlag: '--model',
@@ -248,7 +306,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modeFlags: {
       plan: ['--mode', 'plan'],
       edit: ['--mode', 'edit'],
-      full: ['--mode', 'edit'],
     },
     modelFlag: '--model',
   },
@@ -256,9 +313,8 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['kiro-cli'],
     promptFlag: 'positional',
     modeFlags: {
-      plan: [],
+      // kiro-cli has no permission flags — edit is the default behavior.
       edit: [],
-      full: [],
     },
     modelFlag: '--model',
   },
@@ -266,9 +322,8 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['goose', 'run'],
     promptFlag: 'positional',
     modeFlags: {
-      plan: [],
+      // goose has no permission flags — edit is the default behavior.
       edit: [],
-      full: [],
     },
   },
   roo: {
@@ -277,11 +332,9 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modeFlags: {
       plan: ['--mode', 'architect'],
       edit: ['--mode', 'code'],
-      full: ['--mode', 'code'],
     },
     modelFlag: '--model',
   },
-  // Antigravity full mode uses --dangerously-skip-permissions (YOLO).
   // TODO: --output-format json is documented but currently broken upstream
   // ("flags provided but not defined: -output-format"). Track resolution at
   // https://github.com/google-antigravity/antigravity-cli/issues/7 before
@@ -290,9 +343,10 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['agy'],
     promptFlag: 'positional',
     modeFlags: {
-      plan: [],
+      // agy --help shows no plan/edit flags; default behavior is edit-like
+      // (prompts on tool use). Only skip has an explicit flag.
       edit: [],
-      full: ['--dangerously-skip-permissions'],
+      skip: ['--dangerously-skip-permissions'],
     },
     modelFlag: '--model',
   },
@@ -300,9 +354,12 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     base: ['grok'],
     promptFlag: '-p',
     modeFlags: {
+      // grok defaults to plan mode; --permission-mode <MODE> exists in --help
+      // (modes not enumerated). Preserve historical --mode plan behavior until
+      // someone with a working grok install can verify the canonical spelling.
       plan: ['--mode', 'plan'],
       edit: [],
-      full: ['--always-approve'],
+      skip: ['--always-approve'],
     },
     jsonFlags: ['--output-format', 'streaming-json'],
     modelFlag: '--model',
@@ -341,8 +398,19 @@ export function buildExecCommand(options: ExecOptions): string[] {
     }
   }
 
-  // Add mode flags. 'auto' is only defined for claude; other agents fall back to edit flags.
-  const modeFlags = template.modeFlags[options.mode] ?? template.modeFlags.edit;
+  // Resolve the requested mode against the agent's capability table.
+  // - `auto` on an agent without auto support → silently degrades to `edit`
+  // - `skip`/`plan` on an unsupported agent → throws a clear error
+  // After resolveMode, the chosen mode is guaranteed to be in template.modeFlags.
+  const resolvedMode = resolveMode(options.agent, normalizeMode(options.mode));
+  const modeFlags = template.modeFlags[resolvedMode];
+  if (!modeFlags) {
+    // Defense in depth: would only fire if AGENTS.capabilities.modes and
+    // AGENT_COMMANDS.modeFlags drifted apart. Tests assert they agree.
+    throw new Error(
+      `Internal error: ${options.agent} declares '${resolvedMode}' in capabilities.modes but has no entry in AGENT_COMMANDS.modeFlags.${resolvedMode}.`,
+    );
+  }
   cmd.push(...modeFlags);
 
   // Add print/headless flags only when a prompt is provided. Without a prompt

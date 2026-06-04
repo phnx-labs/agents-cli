@@ -43,7 +43,7 @@ export interface SessionEvent {
 export interface TeamOrigin {
   /** Teammate name if set, otherwise first 8 chars of the agent UUID. */
   handle?: string;
-  /** Agent mode: 'plan', 'edit', or 'full'. */
+  /** Agent mode: 'plan', 'edit', 'auto', or 'skip' ('full' accepted as legacy alias for 'skip'). */
   mode?: string;
 }
 
