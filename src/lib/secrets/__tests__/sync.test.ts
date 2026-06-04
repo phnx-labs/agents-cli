@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encryptBlob, decryptBlob } from '../sync.js';
+import { encryptBlob, decryptBlob, MIN_PASSPHRASE_LEN } from '../sync.js';
 
 describe('sync encrypt/decrypt', () => {
   it('round-trips arbitrary JSON under a passphrase', () => {
@@ -22,7 +22,8 @@ describe('sync encrypt/decrypt', () => {
   });
 
   it('rejects short passphrases', () => {
-    expect(() => encryptBlob('payload', 'short')).toThrow(/at least 8 characters/);
+    const short = 'x'.repeat(MIN_PASSPHRASE_LEN - 1);
+    expect(() => encryptBlob('payload', short)).toThrow(/at least 12 characters/);
   });
 
   it('rejects tampered ciphertext (auth tag mismatch)', () => {

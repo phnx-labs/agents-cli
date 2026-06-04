@@ -11,6 +11,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import {
   listRemoteBundles,
+  MIN_PASSPHRASE_LEN,
   pullBundle,
   pushBundle,
 } from '../lib/secrets/sync.js';
@@ -23,7 +24,7 @@ async function promptPassphrase(message: string, confirm = false): Promise<strin
   }
   const { password } = await import('@inquirer/prompts');
   const first = await password({ message, mask: true });
-  if (first.length < 8) throw new Error('Passphrase must be at least 8 characters.');
+  if (first.length < MIN_PASSPHRASE_LEN) throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`);
   if (!confirm) return first;
   const second = await password({ message: 'Confirm passphrase', mask: true });
   if (first !== second) throw new Error('Passphrases do not match.');
@@ -33,8 +34,8 @@ async function promptPassphrase(message: string, confirm = false): Promise<strin
 function passphraseFromEnvOrPrompt(confirm: boolean): Promise<string> {
   const fromEnv = process.env.AGENTS_SECRETS_PASSPHRASE;
   if (fromEnv) {
-    if (fromEnv.length < 8) {
-      return Promise.reject(new Error('AGENTS_SECRETS_PASSPHRASE must be at least 8 characters.'));
+    if (fromEnv.length < MIN_PASSPHRASE_LEN) {
+      return Promise.reject(new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`));
     }
     return Promise.resolve(fromEnv);
   }

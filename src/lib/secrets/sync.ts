@@ -34,6 +34,7 @@ const BUNDLE_ENDPOINT = '/api/v1/secrets/bundles';
 // PBKDF2 cost. 600k SHA-256 iters matches OWASP 2023+ guidance and keeps a
 // passphrase prompt under a second on the hardware the CLI targets.
 const PBKDF2_ITER = 600_000;
+export const MIN_PASSPHRASE_LEN = 12;
 const KEY_LEN = 32;
 const SALT_LEN = 16;
 const IV_LEN = 12;
@@ -97,8 +98,8 @@ function deriveKey(passphrase: string, salt: Buffer): Buffer {
 
 /** Encrypt a JSON-serializable payload with a passphrase. */
 export function encryptBlob(plaintext: string, passphrase: string): EncryptedEnvelope {
-  if (!passphrase || passphrase.length < 8) {
-    throw new Error('Passphrase must be at least 8 characters.');
+  if (!passphrase || passphrase.length < MIN_PASSPHRASE_LEN) {
+    throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`);
   }
   const salt = crypto.randomBytes(SALT_LEN);
   const iv = crypto.randomBytes(IV_LEN);

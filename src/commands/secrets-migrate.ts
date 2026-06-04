@@ -33,7 +33,7 @@ import {
   setKeychainToken,
 } from '../lib/secrets/index.js';
 import { getBackupsDir } from '../lib/state.js';
-import { encryptBlob } from '../lib/secrets/sync.js';
+import { encryptBlob, MIN_PASSPHRASE_LEN } from '../lib/secrets/sync.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 const ITEM_PREFIX = 'agents-cli.';
@@ -79,7 +79,7 @@ async function promptPassphrase(): Promise<string> {
   }
   const { password } = await import('@inquirer/prompts');
   const first = await password({ message: 'Backup passphrase (used to encrypt the pre-migration snapshot)', mask: true });
-  if (first.length < 8) throw new Error('Passphrase must be at least 8 characters.');
+  if (first.length < MIN_PASSPHRASE_LEN) throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`);
   const second = await password({ message: 'Confirm passphrase', mask: true });
   if (first !== second) throw new Error('Passphrases do not match.');
   return first;
@@ -169,7 +169,7 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
           ? (() => {
               const v = process.env[opts.passphraseEnv!];
               if (!v) throw new Error(`Env var '${opts.passphraseEnv}' not set.`);
-              if (v.length < 8) throw new Error(`Env var '${opts.passphraseEnv}' must be at least 8 chars.`);
+              if (v.length < MIN_PASSPHRASE_LEN) throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`);
               return v;
             })()
           : await promptPassphrase();
