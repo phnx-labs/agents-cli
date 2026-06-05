@@ -159,6 +159,35 @@ function readSessionFilePath(home: string, id: string): string | null {
   return output.length > 0 ? output : null;
 }
 
+function writeProfileYaml(
+  home: string,
+  name: string,
+  body: {
+    agent: string;
+    version?: string;
+    env?: Record<string, string>;
+    provider?: string;
+    description?: string;
+  },
+): void {
+  const dir = path.join(home, '.agents', 'profiles');
+  fs.mkdirSync(dir, { recursive: true });
+  const env = body.env ?? {};
+  const lines: string[] = [
+    `name: ${name}`,
+    'host:',
+    `  agent: ${body.agent}`,
+  ];
+  if (body.version) lines.push(`  version: ${body.version}`);
+  if (body.provider) lines.push(`provider: ${body.provider}`);
+  if (body.description) lines.push(`description: "${body.description}"`);
+  lines.push('env:');
+  for (const [k, v] of Object.entries(env)) {
+    lines.push(`  ${k}: "${v}"`);
+  }
+  fs.writeFileSync(path.join(dir, `${name}.yml`), lines.join('\n') + '\n');
+}
+
 function seedNewerUpdateCache(home: string, futureVersion: string): void {
   const cacheDir = path.join(home, '.agents', '.cache');
   fs.mkdirSync(cacheDir, { recursive: true });
@@ -536,4 +565,87 @@ describe('non-interactive CLI usage', () => {
     expect(combined).toContain(`Update available: ${PACKAGE_VERSION.version} -> 99.0.0`);
     expect(combined).not.toContain('Upgrade now');
   });
+
+  it('renders profile rows inline under their host harness in `agents view`', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
+    writeFakeManagedVersion(home, 'codex', '0.134.0', 'codex');
+    writeProfileYaml(home, 'yosemite', {
+      agent: 'claude',
+      provider: 'truefoundry',
+      env: { ANTHROPIC_MODEL: 'truefoundry/qwen3-coder' },
+    });
+    writeProfileYaml(home, 'ollama', {
+      agent: 'codex',
+      provider: 'ollama',
+      env: { OPENAI_MODEL: 'qwen3-coder:30b' },
+    });
+
+    const result = runAgents(home, ['view'], { AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' });
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, combined).toBe(0);
+    // No separate "Profiles" section header — rows live under the harness.
+    expect(combined).not.toMatch(/^Profiles\s*$/m);
+    // Each profile row carries its name, the `profile` kind marker, and model.
+    expect(combined).toContain('yosemite');
+    expect(combined).toContain('truefoundry/qwen3-coder');
+    expect(combined).toContain('ollama');
+    expect(combined).toContain('qwen3-coder:30b');
+    expect(combined).toContain('profile');
+  }, 30_000);
+
+  it('filters profiles to the requested harness in `agents view claude`', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
+    writeFakeManagedVersion(home, 'codex', '0.134.0', 'codex');
+    writeProfileYaml(home, 'yosemite', {
+      agent: 'claude',
+      env: { ANTHROPIC_MODEL: 'truefoundry/qwen3-coder' },
+    });
+    writeProfileYaml(home, 'ollama', {
+      agent: 'codex',
+      env: { OPENAI_MODEL: 'qwen3-coder:30b' },
+    });
+
+    const result = runAgents(home, ['view', 'claude'], { AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' });
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status, combined).toBe(0);
+    expect(combined).toContain('yosemite');
+    expect(combined).not.toContain('ollama');
+  }, 30_000);
+
+  it('includes profile summaries in `agents view <agent> --json`', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'claude', '2.1.143', 'claude');
+    writeProfileYaml(home, 'yosemite', {
+      agent: 'claude',
+      provider: 'truefoundry',
+      env: { ANTHROPIC_MODEL: 'truefoundry/qwen3-coder' },
+    });
+
+    const result = runAgents(home, ['view', 'claude', '--json'], {
+      AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    // `view <agent> --json` emits a single object, not an array.
+    const claudeEntry = JSON.parse(result.stdout) as {
+      agent: string;
+      profiles: Array<{ name: string; agent: string; model: string; provider: string }>;
+    };
+    expect(claudeEntry.agent).toBe('claude');
+    expect(claudeEntry.profiles).toEqual([
+      expect.objectContaining({
+        name: 'yosemite',
+        agent: 'claude',
+        model: 'truefoundry/qwen3-coder',
+        provider: 'truefoundry',
+      }),
+    ]);
+  }, 30_000);
 });

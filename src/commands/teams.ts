@@ -52,6 +52,7 @@ import { parseExecEnv } from '../lib/exec.js';
 import { teamPicker, printTeamTable, type TeamRow } from './teams-picker.js';
 import { itemPicker } from '../lib/picker.js';
 import type { AgentProcess } from '../lib/teams/agents.js';
+import { profileExists, readProfile } from '../lib/profiles.js';
 import {
   isPromptCancelled,
   isInteractiveTerminal,
@@ -139,16 +140,56 @@ function fullName(type: AgentType, version: string | null | undefined): string {
   return version ? `${name} ${version}` : name;
 }
 
-function parseTeammate(spec: string): { agent: AgentType; version: string | null } {
+/**
+ * Resolve a teammate spec to its execution target.
+ *
+ * Accepts:
+ *  - `claude`            — default version of an installed agent
+ *  - `claude@2.1.112`    — pinned version of an installed agent
+ *  - `<profile-name>`    — runs through `agents run <profile>`, with the
+ *                          profile's host agent used as the underlying
+ *                          AgentType for event parsing and CLI checks.
+ *
+ * `agent` is always the underlying harness so event parsers, CLI-availability
+ * checks, and version pins keep working. `profileName` is set only when the
+ * spec resolved through a profile.
+ */
+function parseTeammate(spec: string): {
+  agent: AgentType;
+  version: string | null;
+  profileName: string | null;
+} {
   const [name, version] = spec.split('@');
-  if (!VALID_AGENTS.includes(name as AgentType)) {
-    die(
-      `Unknown teammate '${name}'. Available: ${VALID_AGENTS.join(', ')}.\n` +
-        `  Use the form 'claude' or 'claude@2.1.112' (see 'agents view' for installed versions).`
-    );
+
+  if (VALID_AGENTS.includes(name as AgentType)) {
+    const agent = name as AgentType;
+    return {
+      agent,
+      version: resolveVersionAlias(agent as AgentId, version) ?? null,
+      profileName: null,
+    };
   }
-  const agent = name as AgentType;
-  return { agent, version: resolveVersionAlias(agent as AgentId, version) ?? null };
+
+  // Not a built-in agent id — try resolving as a profile name. A profile
+  // pinning a version is allowed; `profile@<override>` is not (would conflict
+  // with the profile's own host.version).
+  if (!version && profileExists(name)) {
+    try {
+      const profile = readProfile(name);
+      return {
+        agent: profile.host.agent as AgentType,
+        version: profile.host.version ?? null,
+        profileName: profile.name,
+      };
+    } catch (err) {
+      die(`Profile '${name}' is malformed: ${(err as Error).message}`);
+    }
+  }
+
+  die(
+    `Unknown teammate '${spec}'. Available agents: ${VALID_AGENTS.join(', ')}.\n` +
+      `  Use 'claude', 'claude@2.1.112', or the name of a profile from 'agents view'.`
+  );
 }
 
 function shortId(id: string): string {
@@ -638,6 +679,8 @@ export function registerTeamsCommands(program: Command): void {
       Teammate syntax:
         'claude'           the default Claude version on this machine
         'claude@2.1.112'   a specific installed version (see 'agents view')
+        '<profile>'        a profile from 'agents view' — runs through 'agents
+                           run <profile>' with the profile's host harness
 
       Short aliases:
         teams c  = create    teams a  = add       teams s  = status
@@ -861,7 +904,7 @@ export function registerTeamsCommands(program: Command): void {
         }
       }
 
-      const { agent, version } = parseTeammate(teammate);
+      const { agent, version, profileName } = parseTeammate(teammate);
       if (version && !isVersionInstalled(agent, version)) {
         die(
           `${AGENT_NAMES[agent]} ${version} isn't installed.\n` +
@@ -1015,14 +1058,15 @@ export function registerTeamsCommands(program: Command): void {
           opts.repo ?? null,
           opts.branch ?? null,
           worktreeName,
-          worktreePath
+          worktreePath,
+          profileName,
         );
 
         if (isJsonMode(opts)) {
           console.log(JSON.stringify(result, null, 2));
           return;
         }
-        const who = fullName(agent, version);
+        const who = profileName ? `${profileName} (via ${fullName(agent, version)})` : fullName(agent, version);
         const staged = result.status === 'pending';
         const verb = staged ? 'Staged' : 'Welcomed';
         const greeting = result.name

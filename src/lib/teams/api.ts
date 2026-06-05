@@ -76,6 +76,7 @@ export interface SpawnResult {
   status: string;
   started_at: string;
   version?: string | null;
+  profile_name?: string | null;
   remote_session_id?: string | null;
   name?: string | null;
   after?: string[];
@@ -172,14 +173,15 @@ export async function handleSpawn(
   cloudRepo: string | null = null,
   cloudBranch: string | null = null,
   worktreeName: string | null = null,
-  worktreePath: string | null = null
+  worktreePath: string | null = null,
+  profileName: string | null = null,
 ): Promise<SpawnResult> {
   const defaultMode = manager.getDefaultMode();
   const resolvedMode = resolveMode(mode, defaultMode);
   const resolvedEffort = effort ?? 'medium';
 
   debug(
-    `[spawn] Spawning ${agentType} agent for task "${taskName}" [${resolvedMode}] effort=${resolvedEffort}...`
+    `[spawn] Spawning ${agentType} agent for task "${taskName}" [${resolvedMode}] effort=${resolvedEffort}${profileName ? ` profile=${profileName}` : ''}...`
   );
 
   const agent = await manager.spawn(
@@ -202,7 +204,8 @@ export async function handleSpawn(
     cloudRepo,
     cloudBranch,
     worktreeName,
-    worktreePath
+    worktreePath,
+    profileName,
   );
 
   debug(`[spawn] Spawned ${agentType} agent ${agent.agentId} for task "${taskName}"`);
@@ -214,6 +217,7 @@ export async function handleSpawn(
     status: agent.status,
     started_at: agent.startedAt.toISOString(),
     version: agent.version,
+    profile_name: agent.profileName,
     remote_session_id: agent.remoteSessionId,
     name: agent.name,
     after: agent.after,

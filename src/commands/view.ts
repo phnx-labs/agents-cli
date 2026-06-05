@@ -67,8 +67,32 @@ import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
 import { getConfiguredRunStrategy } from '../lib/rotate.js';
+import { listProfiles, profileSummary, type ProfileSummary } from '../lib/profiles.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
+
+/**
+ * Group profile summaries by their host harness, optionally filtered to a
+ * single agent. Profile YAMLs that fail validation are silently skipped by
+ * `listProfiles` so this never throws on a malformed file.
+ */
+function getProfilesByAgent(filterAgentId?: AgentId): Map<AgentId, ProfileSummary[]> {
+  const byAgent = new Map<AgentId, ProfileSummary[]>();
+  for (const profile of listProfiles()) {
+    if (filterAgentId && profile.host.agent !== filterAgentId) continue;
+    const summary = profileSummary(profile);
+    const existing = byAgent.get(profile.host.agent);
+    if (existing) existing.push(summary);
+    else byAgent.set(profile.host.agent, [summary]);
+  }
+  return byAgent;
+}
+
+/** Build the usage-column equivalent for a profile row: "profile  <model>". */
+function profileKindAndModel(model: string, planWidth: number): string {
+  const kind = 'profile'.padEnd(Math.max(planWidth, 'profile'.length));
+  return `${kind}  ${model}`;
+}
 
 function termLink(text: string, filePath: string): string {
   const url = `file://${filePath}`;
@@ -159,6 +183,8 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
 
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
   const showPaths = !!filterAgentId;
+  const profilesByAgent = getProfilesByAgent(filterAgentId);
+  const profileSummaries = [...profilesByAgent.values()].flat();
 
   // Auto-heal stale versioned aliases. Pre-v2 aliases (e.g. pre-CLAUDE_CONFIG_DIR
   // claude shims) silently route login through the default version's symlinked
@@ -256,15 +282,19 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
   // Separate version-managed from globally-installed agents
   const versionManaged: AgentId[] = [];
   const globallyInstalled: AgentId[] = [];
+  const profileOnly: AgentId[] = [];
 
   for (const agentId of agentsToShow) {
     const versions = listInstalledVersions(agentId);
     const cliState = cliStates[agentId];
+    const hasProfiles = (profilesByAgent.get(agentId)?.length ?? 0) > 0;
 
     if (versions.length > 0) {
       versionManaged.push(agentId);
     } else if (cliState?.installed) {
       globallyInstalled.push(agentId);
+    } else if (hasProfiles) {
+      profileOnly.push(agentId);
     }
   }
 
@@ -287,6 +317,12 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         if (info?.email) maxEmail = Math.max(maxEmail, info.email.length);
         if (info?.plan) maxPlanWidth = Math.max(maxPlanWidth, info.plan.length);
       }
+      // Profile rows share these columns with version rows so they line up.
+      for (const profile of profilesByAgent.get(agentId) ?? []) {
+        maxVerLabel = Math.max(maxVerLabel, profile.name.length);
+        maxEmail = Math.max(maxEmail, profile.auth.length);
+        maxPlanWidth = Math.max(maxPlanWidth, 'profile'.length);
+      }
     }
     // Second pass: compute max visible usage + status widths (now that maxPlanWidth is settled)
     for (const agentId of versionManaged) {
@@ -300,6 +336,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         maxUsageWidth = Math.max(maxUsageWidth, visibleWidth(usageStr));
         const statusStr = formatUsageStatusBadge(info?.usageStatus);
         maxStatusWidth = Math.max(maxStatusWidth, visibleWidth(statusStr));
+      }
+      for (const profile of profilesByAgent.get(agentId) ?? []) {
+        const usageEquivalent = profileKindAndModel(profile.model, maxPlanWidth);
+        maxUsageWidth = Math.max(maxUsageWidth, visibleWidth(usageEquivalent));
       }
     }
 
@@ -367,6 +407,19 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         }
       }
 
+      // Profile rows share the same columns as versions: name | auth | "profile"+model.
+      // No status badge, no last-active — profiles don't accumulate usage state.
+      for (const profile of profilesByAgent.get(agentId) ?? []) {
+        const nameCol = chalk.cyan(profile.name.padEnd(maxVerLabel));
+        const authCol = chalk.gray(profile.auth.padEnd(maxEmail));
+        const usageEquivalent = profileKindAndModel(profile.model, maxPlanWidth);
+        const usagePad = ' '.repeat(Math.max(0, maxUsageWidth - visibleWidth(usageEquivalent)));
+        console.log(`    ${nameCol}  ${authCol}  ${chalk.gray(usageEquivalent + usagePad)}`);
+        if (showPaths) {
+          console.log(chalk.gray(`      ${profile.path}`));
+        }
+      }
+
       // Check for project override
       const projectVersion = getProjectVersionFromCwd(agentId);
       if (projectVersion && projectVersion !== globalDefault) {
@@ -428,6 +481,25 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       if (showPaths && cliState?.path) {
         console.log(chalk.gray(`      ${cliState.path}`));
       }
+      // Profile rows under a globally-installed harness. Use a simpler
+      // alignment here since this section doesn't share column state with
+      // the version-managed block.
+      const profilesHere = profilesByAgent.get(agentId) ?? [];
+      if (profilesHere.length > 0) {
+        const nameWidth = Math.max(globalMaxVerLabel, ...profilesHere.map((p) => p.name.length));
+        const authWidth = Math.max(...profilesHere.map((p) => p.auth.length));
+        for (const profile of profilesHere) {
+          console.log(
+            `    ${chalk.cyan(profile.name.padEnd(nameWidth))}  ` +
+              `${chalk.gray(profile.auth.padEnd(authWidth))}  ` +
+              `${chalk.gray('profile')}  ` +
+              chalk.gray(profile.model),
+          );
+          if (showPaths) {
+            console.log(chalk.gray(`      ${profile.path}`));
+          }
+        }
+      }
       if (agent.npmPackage && cliState?.version) {
         console.log(chalk.gray(`    Manage: agents add ${agentId}@${cliState.version} -y`));
       }
@@ -435,14 +507,51 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
     }
   }
 
+  // Agents with no install but with profiles defined — render under the same
+  // harness header so users find them where they look.
+  if (profileOnly.length > 0) {
+    if (versionManaged.length === 0 && globallyInstalled.length === 0) {
+      console.log(chalk.bold('Profile-only Agents\n'));
+    }
+    for (const agentId of profileOnly) {
+      const profilesHere = profilesByAgent.get(agentId) ?? [];
+      console.log(`  ${chalk.bold(agentLabel(agentId))}${chalk.yellow(' (profile only)')}`);
+      const nameWidth = Math.max(...profilesHere.map((p) => p.name.length));
+      const authWidth = Math.max(...profilesHere.map((p) => p.auth.length));
+      for (const profile of profilesHere) {
+        console.log(
+          `    ${chalk.cyan(profile.name.padEnd(nameWidth))}  ` +
+            `${chalk.gray(profile.auth.padEnd(authWidth))}  ` +
+            `${chalk.gray('profile')}  ` +
+            chalk.gray(profile.model),
+        );
+        if (showPaths) {
+          console.log(chalk.gray(`      ${profile.path}`));
+        }
+      }
+      console.log();
+    }
+  }
+
   // If filtering to a specific agent and not found
-  if (filterAgentId && versionManaged.length === 0 && globallyInstalled.length === 0) {
+  if (
+    filterAgentId &&
+    versionManaged.length === 0 &&
+    globallyInstalled.length === 0 &&
+    profileOnly.length === 0
+  ) {
     console.log(`  ${chalk.bold(agentLabel(filterAgentId))}: ${chalk.gray('not installed')}`);
     console.log();
   }
 
   // No agents installed at all
-  if (versionManaged.length === 0 && globallyInstalled.length === 0 && !filterAgentId) {
+  if (
+    versionManaged.length === 0 &&
+    globallyInstalled.length === 0 &&
+    profileOnly.length === 0 &&
+    profileSummaries.length === 0 &&
+    !filterAgentId
+  ) {
     console.log(chalk.gray('  No agent CLIs installed.'));
     console.log(chalk.gray('  Run: agents add claude@latest'));
     console.log();
@@ -847,6 +956,7 @@ export interface ViewJsonVersion {
 export interface ViewJsonAgent {
   agent: AgentId;
   versions: ViewJsonVersion[];
+  profiles: ProfileSummary[];
 }
 
 /**
@@ -923,6 +1033,7 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
     else byAgent.set(agentId, [entry]);
   }
 
+  const profilesByAgent = getProfilesByAgent(filterAgentId);
   const out: ViewJsonAgent[] = [];
   for (const agentId of agentsToShow) {
     const versions = byAgent.get(agentId) ?? [];
@@ -930,7 +1041,7 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
       if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
       return compareVersions(b.version, a.version);
     });
-    out.push({ agent: agentId, versions });
+    out.push({ agent: agentId, versions, profiles: profilesByAgent.get(agentId) ?? [] });
   }
   return out;
 }
@@ -1223,7 +1334,7 @@ export async function viewAction(
     // --json ignores the @version suffix (detailed resource view is not yet
     // exposed as structured data). Emit the version list for the agent.
     const data = await collectAgentsJson(agentId);
-    console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [] }, null, 2));
+    console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [], profiles: [] }, null, 2));
     return;
   }
 

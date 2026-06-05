@@ -402,6 +402,11 @@ export class AgentProcess {
   // Pinned model for this teammate. When null, the agent's CLI picks its
   // own default (no --model forwarded).
   model: string | null = null;
+  // Profile target name when the teammate was added via `agents teams add
+  // <team> <profile>`. The launcher targets the profile name so env/keychain
+  // injection happens; agentType stays the underlying harness so event
+  // parsers and CLI availability checks keep working.
+  profileName: string | null = null;
   // Extra env vars passed through to the child process (from --env KEY=VALUE).
   envOverrides: Record<string, string> | null = null;
   // Factory task-type label. Drives planner fan-out. Null for plain teammates — no behavioral change.
@@ -446,7 +451,8 @@ export class AgentProcess {
     cloudRepo: string | null = null,
     cloudBranch: string | null = null,
     worktreeName: string | null = null,
-    worktreePath: string | null = null
+    worktreePath: string | null = null,
+    profileName: string | null = null,
   ) {
     this.agentId = agentId;
     this.remoteSessionId = remoteSessionId;
@@ -454,6 +460,7 @@ export class AgentProcess {
     this.after = after;
     this.effort = effort;
     this.model = model;
+    this.profileName = profileName;
     this.envOverrides = envOverrides;
     this.taskType = taskType;
     this.cloudRepo = cloudRepo;
@@ -559,6 +566,7 @@ export class AgentProcess {
       after: this.after,
       effort: this.effort,
       model: this.model,
+      profile_name: this.profileName,
       env_overrides: this.envOverrides,
       task_type: this.taskType,
       cloud_repo: this.cloudRepo,
@@ -694,6 +702,7 @@ export class AgentProcess {
       after: this.after,
       effort: this.effort,
       model: this.model,
+      profile_name: this.profileName,
       env_overrides: this.envOverrides,
       task_type: this.taskType,
       cloud_repo: this.cloudRepo,
@@ -772,7 +781,8 @@ export class AgentProcess {
         meta.cloud_repo || null,
         meta.cloud_branch || null,
         meta.worktree_name || null,
-        meta.worktree_path || null
+        meta.worktree_path || null,
+        meta.profile_name || null,
       );
       agent.startTime = typeof meta.start_time === 'string' ? meta.start_time : null;
       return agent;
@@ -1071,7 +1081,8 @@ export class AgentManager {
     cloudRepo: string | null = null,
     cloudBranch: string | null = null,
     worktreeName: string | null = null,
-    worktreePath: string | null = null
+    worktreePath: string | null = null,
+    profileName: string | null = null,
   ): Promise<AgentProcess> {
     await this.initialize();
     const resolvedMode = resolveMode(mode, this.defaultMode);
@@ -1131,6 +1142,9 @@ export class AgentManager {
     // dispatched via the cloud provider and passed us the provider + session.
     const isCloudBacked = Boolean(cloudProvider);
     if (!isCloudBacked) {
+      // Profile-backed teammates still spawn through `agents run`, which
+      // resolves the profile to its host harness — so the CLI we need to be
+      // present is the underlying agentType, not the profile name.
       const [available, pathOrError] = checkCliAvailable(agentType);
       if (!available) {
         throw new Error(pathOrError || 'CLI tool not available');
@@ -1174,7 +1188,8 @@ export class AgentManager {
       cloudRepo,
       cloudBranch,
       worktreeName,
-      worktreePath
+      worktreePath,
+      profileName,
     );
 
     const agentDir = await agent.getAgentDir();
@@ -1223,6 +1238,7 @@ export class AgentManager {
       agent.agentId,
       effort,
       agent.version,
+      agent.profileName,
     );
 
     debug(`Launching ${agent.agentType} agent ${agent.agentId} [${agent.mode}]: ${cmd.slice(0, 3).join(' ')}...`);
@@ -1324,6 +1340,7 @@ export class AgentManager {
     sessionId: string | null = null,
     effort: EffortLevel = 'medium',
     version: string | null = null,
+    profileName: string | null = null,
   ): string[] {
     // Compose the prompt: a plan-mode prefix for Claude (clarifying headless
     // plan-mode restrictions) and a universal summary suffix. These are
@@ -1333,7 +1350,10 @@ export class AgentManager {
       fullPrompt = CLAUDE_PLAN_MODE_PREFIX + fullPrompt;
     }
 
-    const target = version ? `${agentType}@${version}` : agentType;
+    // Profile target takes precedence — `agents run <profile>` resolves the
+    // host harness, version pin, and env injection in one place. Plain
+    // version pins only apply when no profile is selected.
+    const target = profileName ?? (version ? `${agentType}@${version}` : agentType);
     const agentsCli = process.argv[1];
 
     const cmd: string[] = [
