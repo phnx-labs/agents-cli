@@ -44,6 +44,7 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
+  getProjectOnlyResources,
   hasNewResources,
   promptNewResourceSelection,
   syncResourcesToVersion,
@@ -438,7 +439,8 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
     if (defaultVersion) {
       const available = getAvailableResources();
       const synced = getActuallySyncedResources(filterAgentId, defaultVersion);
-      const newResources = getNewResources(available, synced);
+      const projectOnly = getProjectOnlyResources();
+      const newResources = getNewResources(available, synced, projectOnly);
 
       if (hasNewResources(newResources, filterAgentId, defaultVersion)) {
         try {

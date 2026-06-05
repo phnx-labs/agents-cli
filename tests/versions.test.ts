@@ -432,6 +432,46 @@ describe('getNewResources', () => {
     const diff = getNewResources(resources, resources);
     expect(diff).toEqual(emptyResources());
   });
+
+  it('excludes project-only entries for kinds that sync intentionally skips', () => {
+    // Regression for the "infinite New resources prompt" bug. The available
+    // set unions project + user + system layers, but syncResourcesToVersion
+    // intentionally excludes the project layer for security on commands,
+    // skills, hooks, subagents, plugins, and workflows — so those project-only
+    // names would otherwise re-appear as "new" on every run.
+    const available: AvailableResources = {
+      commands: ['debug', 'project-only-cmd'],
+      skills: ['mq', 'project-only-skill'],
+      hooks: ['00-shared.sh', 'project-only-hook.sh'],
+      memory: ['AGENTS'],
+      mcp: ['Swarm'],
+      permissions: ['01-core'],
+      subagents: ['researcher', 'project-only-sub'],
+      plugins: ['plug', 'project-only-plug'],
+      workflows: ['flow', 'project-only-flow'],
+      promptcuts: false,
+    };
+    const synced = emptyResources();
+    const projectOnly = {
+      commands: new Set(['project-only-cmd']),
+      skills: new Set(['project-only-skill']),
+      hooks: new Set(['project-only-hook.sh']),
+      subagents: new Set(['project-only-sub']),
+      plugins: new Set(['project-only-plug']),
+      workflows: new Set(['project-only-flow']),
+    };
+
+    const diff = getNewResources(available, synced, projectOnly);
+    expect(diff.commands).toEqual(['debug']);
+    expect(diff.skills).toEqual(['mq']);
+    expect(diff.hooks).toEqual(['00-shared.sh']);
+    expect(diff.subagents).toEqual(['researcher']);
+    expect(diff.plugins).toEqual(['plug']);
+    expect(diff.workflows).toEqual(['flow']);
+    // MCP and permissions are unaffected by the project-layer exclusion.
+    expect(diff.mcp).toEqual(['Swarm']);
+    expect(diff.permissions).toEqual(['01-core']);
+  });
 });
 
 describe('hasNewResources', () => {

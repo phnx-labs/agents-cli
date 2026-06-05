@@ -51,6 +51,7 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
+  getProjectOnlyResources,
   hasNewResources,
   promptNewResourceSelection,
   promptResourceSelection,
@@ -303,7 +304,7 @@ export function registerPullCommand(program: Command): void {
           if (!defaultVer) continue;
 
           const actuallySynced = getActuallySyncedResources(agentId, defaultVer);
-          const newResources = getNewResources(available, actuallySynced);
+          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
 
           const hasAnySynced = actuallySynced.commands.length > 0 ||
             actuallySynced.skills.length > 0 ||

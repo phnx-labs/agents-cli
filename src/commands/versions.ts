@@ -50,6 +50,7 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
+  getProjectOnlyResources,
   hasNewResources,
   printTrashFooter,
   type ResourceSelection,
@@ -380,7 +381,7 @@ export function registerVersionsCommands(program: Command): void {
             // Smart resource detection: compare available vs ACTUALLY synced (source of truth: files)
             const available = getAvailableResources();
             const actuallySynced = getActuallySyncedResources(agent, installedVersion);
-            const newResources = getNewResources(available, actuallySynced);
+            const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
 
             const hasAnySynced = actuallySynced.commands.length > 0 ||
               actuallySynced.skills.length > 0 ||
@@ -684,7 +685,7 @@ export function registerVersionsCommands(program: Command): void {
           // Smart resource detection: compare available vs ACTUALLY synced (source of truth: files, not tracking)
           const available = getAvailableResources();
           const actuallySynced = getActuallySyncedResources(agentId, finalVersion);
-          const newResources = getNewResources(available, actuallySynced);
+          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
 
           // Check if anything is actually synced (source of truth: actual files)
           const hasAnySynced = actuallySynced.commands.length > 0 ||

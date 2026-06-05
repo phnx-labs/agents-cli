@@ -560,19 +560,122 @@ export function getActuallySyncedResources(agent: AgentId, version: string, opti
   return result;
 }
 
+/** Resource names that only exist in the project's `.agents/` layer, grouped by kind. */
+export interface ProjectOnlyResources {
+  commands: Set<string>;
+  skills: Set<string>;
+  hooks: Set<string>;
+  subagents: Set<string>;
+  plugins: Set<string>;
+  workflows: Set<string>;
+}
+
+/**
+ * Names that exist ONLY in the project's `.agents/` layer (no matching entry in
+ * user/system/extra layers). Sync intentionally skips project-layer commands,
+ * skills, hooks, subagents, plugins, and workflows for security — see the
+ * defense comments above each sync branch in syncResourcesToVersion. Without
+ * this filter, those names would forever appear in the "New resources" diff
+ * because they live in `available` but never reach `actuallySynced`.
+ */
+export function getProjectOnlyResources(cwd: string = process.cwd()): ProjectOnlyResources {
+  const empty: ProjectOnlyResources = {
+    commands: new Set(), skills: new Set(), hooks: new Set(),
+    subagents: new Set(), plugins: new Set(), workflows: new Set(),
+  };
+
+  const projectAgentsDir = getProjectAgentsDir(cwd);
+  if (!projectAgentsDir) return empty;
+
+  const trustedBases: string[] = [getUserAgentsDir(), getAgentsDir(), ...getEnabledExtraRepos().map(e => e.dir)];
+
+  const trustedNames = (relSubdir: string, predicate: (full: string, name: string) => boolean): Set<string> => {
+    const acc = new Set<string>();
+    for (const base of trustedBases) {
+      const dir = path.join(base, relSubdir);
+      if (!fs.existsSync(dir)) continue;
+      try {
+        for (const entry of fs.readdirSync(dir)) {
+          if (entry.startsWith('.')) continue;
+          if (predicate(path.join(dir, entry), entry)) acc.add(entry);
+        }
+      } catch { /* ignore unreadable */ }
+    }
+    return acc;
+  };
+
+  const readProjectNames = (relSubdir: string, predicate: (full: string, name: string) => boolean): string[] => {
+    const dir = path.join(projectAgentsDir, relSubdir);
+    if (!fs.existsSync(dir)) return [];
+    try {
+      return fs.readdirSync(dir)
+        .filter(e => !e.startsWith('.'))
+        .filter(e => predicate(path.join(dir, e), e));
+    } catch { return []; }
+  };
+
+  const isMdFile = (full: string, name: string) =>
+    name.endsWith('.md') && (() => { try { return fs.statSync(full).isFile(); } catch { return false; } })();
+  const isDir = (full: string) => { try { return fs.statSync(full).isDirectory(); } catch { return false; } };
+  const hasFile = (sub: string) => (full: string) => isDir(full) && fs.existsSync(path.join(full, sub));
+
+  const stripMd = (n: string) => n.replace(/\.md$/, '');
+
+  const trustedCommands = new Set([...trustedNames('commands', isMdFile)].map(stripMd));
+  const projectCommands = readProjectNames('commands', isMdFile).map(stripMd);
+  for (const n of projectCommands) if (!trustedCommands.has(n)) empty.commands.add(n);
+
+  const trustedSkills = trustedNames('skills', (full) => isDir(full));
+  for (const n of readProjectNames('skills', (full) => isDir(full))) if (!trustedSkills.has(n)) empty.skills.add(n);
+
+  // Hooks: project entries are files; trusted entries are also files. Name match
+  // is filename-with-extension (sync compares by full filename, line 2031).
+  const trustedHooks = trustedNames('hooks', (full) => { try { return fs.statSync(full).isFile(); } catch { return false; } });
+  for (const n of readProjectNames('hooks', (full) => { try { return fs.statSync(full).isFile(); } catch { return false; } })) {
+    if (!trustedHooks.has(n)) empty.hooks.add(n);
+  }
+
+  const trustedSubagents = trustedNames('subagents', hasFile('AGENT.md'));
+  for (const n of readProjectNames('subagents', hasFile('AGENT.md'))) {
+    if (!trustedSubagents.has(n)) empty.subagents.add(n);
+  }
+
+  const trustedWorkflows = trustedNames('workflows', hasFile('WORKFLOW.md'));
+  for (const n of readProjectNames('workflows', hasFile('WORKFLOW.md'))) {
+    if (!trustedWorkflows.has(n)) empty.workflows.add(n);
+  }
+
+  const trustedPlugins = trustedNames('plugins', hasFile('.claude-plugin/plugin.json'));
+  for (const n of readProjectNames('plugins', hasFile('.claude-plugin/plugin.json'))) {
+    if (!trustedPlugins.has(n)) empty.plugins.add(n);
+  }
+
+  return empty;
+}
+
 /**
  * Compare available resources with what's ACTUALLY synced to version home.
  * Returns only NEW resources that haven't been synced yet.
  * Source of truth: the actual files/config, NOT agents.yaml tracking.
+ *
+ * `projectOnly` (recommended): the result of `getProjectOnlyResources(cwd)`.
+ * Names listed there are filtered out for kinds that sync intentionally
+ * excludes the project layer — otherwise they would re-appear as "new"
+ * on every run and "Yes, sync all new" would silently do nothing for them.
  */
 export function getNewResources(
   available: AvailableResources,
-  actuallySynced: AvailableResources
+  actuallySynced: AvailableResources,
+  projectOnly?: ProjectOnlyResources
 ): AvailableResources {
+  const exclude = projectOnly || {
+    commands: new Set<string>(), skills: new Set<string>(), hooks: new Set<string>(),
+    subagents: new Set<string>(), plugins: new Set<string>(), workflows: new Set<string>(),
+  };
   return {
-    commands: available.commands.filter(c => !actuallySynced.commands.includes(c)),
-    skills: available.skills.filter(s => !actuallySynced.skills.includes(s)),
-    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h)),
+    commands: available.commands.filter(c => !actuallySynced.commands.includes(c) && !exclude.commands.has(c)),
+    skills: available.skills.filter(s => !actuallySynced.skills.includes(s) && !exclude.skills.has(s)),
+    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h) && !exclude.hooks.has(h)),
     // Memory/rules presets are mutually exclusive — only one can be active.
     // If any preset is synced, don't report others as "new".
     memory: actuallySynced.memory.length > 0
@@ -580,9 +683,9 @@ export function getNewResources(
       : available.memory.filter(m => !actuallySynced.memory.includes(m)),
     mcp: available.mcp.filter(m => !actuallySynced.mcp.includes(m)),
     permissions: available.permissions.filter(p => !actuallySynced.permissions.includes(p)),
-    subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s)),
-    plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p)),
-    workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w)),
+    subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s) && !exclude.subagents.has(s)),
+    plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p) && !exclude.plugins.has(p)),
+    workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w) && !exclude.workflows.has(w)),
     // Promptcuts aren't version-scoped — the hook reads ~/.agents/promptcuts.yaml
     // directly, so there is never a "new" per-version state to reconcile.
     promptcuts: false,
