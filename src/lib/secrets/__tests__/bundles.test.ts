@@ -127,8 +127,12 @@ describe('describeBundle + resolveBundleEnv', () => {
 
   it('resolveBundleEnv inlines literals and resolves env: refs', () => {
     process.env.__AGENTS_RESOLVE_TEST = 'resolved-value';
-    const bundle = b({ STATIC: 'x', DYN: 'env:__AGENTS_RESOLVE_TEST' });
-    expect(resolveBundleEnv(bundle)).toEqual({ STATIC: 'x', DYN: 'resolved-value' });
+    try {
+      const bundle = b({ STATIC: 'x', DYN: 'env:__AGENTS_RESOLVE_TEST' });
+      expect(resolveBundleEnv(bundle)).toEqual({ STATIC: 'x', DYN: 'resolved-value' });
+    } finally {
+      delete process.env.__AGENTS_RESOLVE_TEST;
+    }
   });
 
   it('keychainItemsForBundle enumerates keychain-backed keys only', () => {

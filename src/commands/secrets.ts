@@ -231,7 +231,7 @@ function renderBundleRow(b: SecretsBundle): string {
     `${padVisible(created, 9)} ` +
     `${padVisible(updated, 9)} ` +
     `${padVisible(used, 7)}`;
-  return b.description ? `${head} ${chalk.gray(b.description)}` : head.trimEnd();
+  return b.description ? `${head} ${chalk.gray(safePrint(b.description))}` : head.trimEnd();
 }
 
 /** Colorize a variable source kind (literal, keychain, env, file, exec). */
@@ -251,6 +251,18 @@ function redact(value: string, reveal: boolean): string {
   if (reveal) return value;
   if (!value) return '';
   return '*'.repeat(Math.min(value.length, 8));
+}
+
+/**
+ * Strip ASCII / C1 control bytes from a string before printing it to the
+ * terminal. Bundle descriptions, notes, and remote-supplied names can carry
+ * arbitrary text and a malicious value containing ANSI escape sequences (e.g.
+ * OSC 52 clipboard set, screen-clear, cursor moves) would otherwise be
+ * interpreted by the user's terminal. Allow tab and newline so multi-line
+ * notes still render; strip everything else in the C0/C1 ranges plus DEL.
+ */
+function safePrint(s: string): string {
+  return s.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, '');
 }
 
 /**
@@ -317,7 +329,7 @@ function renderMetaLine(meta: VarMeta | undefined, reveal: boolean): string {
     parts.push(colored);
   }
   if (meta.note) {
-    let note = meta.note;
+    let note = safePrint(meta.note);
     if (!reveal && note.length > 80) {
       note = note.slice(0, 79) + '\u2026';
     }
@@ -420,7 +432,7 @@ export function registerSecretsCommands(program: Command): void {
         const bundle = readBundle(resolvedName);
         const entries = describeBundle(bundle);
         console.log(chalk.bold(bundle.name));
-        if (bundle.description) console.log(chalk.gray(bundle.description));
+        if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
         if (bundle.created_at) console.log(chalk.gray(`created_at: ${bundle.created_at} (${humanAge(bundle.created_at)})`));
         if (bundle.updated_at) console.log(chalk.gray(`updated_at: ${bundle.updated_at} (${humanAge(bundle.updated_at)})`));
@@ -715,7 +727,8 @@ Examples:
     .command('remove [bundle] [key]')
     .description('Remove a key from the bundle. Purges the keychain item if the ref was keychain:. Use --keep-secret to retain it.')
     .option('--keep-secret', 'Leave the keychain item in place after removing the ref from the bundle')
-    .action(async (bundleName: string | undefined, key: string | undefined, opts: { keepSecret?: boolean }) => {
+    .option('-y, --yes', 'Skip the confirmation prompt when purging a keychain item')
+    .action(async (bundleName: string | undefined, key: string | undefined, opts: { keepSecret?: boolean; yes?: boolean }) => {
       try {
         const resolvedBundleName = bundleName ?? (await pickBundleName('remove from'));
         const bundle = readBundle(resolvedBundleName);
@@ -725,9 +738,28 @@ Examples:
           process.exit(1);
         }
         const raw = bundle.vars[resolvedKey];
+        const willPurge = !opts.keepSecret && typeof raw === 'string' && raw.startsWith('keychain:');
+        if (willPurge && !opts.yes) {
+          if (!isInteractiveTerminal()) {
+            console.error(chalk.red(
+              `Refusing to purge keychain item for ${resolvedBundleName}.${resolvedKey} non-interactively. ` +
+              `Pass --yes to confirm or --keep-secret to retain the keychain entry.`,
+            ));
+            process.exit(1);
+          }
+          const { confirm } = await import('@inquirer/prompts');
+          const ok = await confirm({
+            message: `Purge keychain item for ${resolvedBundleName}.${resolvedKey}? (use --keep-secret to retain)`,
+            default: false,
+          });
+          if (!ok) {
+            console.log(chalk.gray('Aborted. Bundle metadata unchanged.'));
+            return;
+          }
+        }
         delete bundle.vars[resolvedKey];
         writeBundle(bundle);
-        if (!opts.keepSecret && typeof raw === 'string' && raw.startsWith('keychain:')) {
+        if (willPurge) {
           const item = secretsKeychainItem(resolvedBundleName, raw.slice('keychain:'.length));
           const removed = deleteKeychainToken(item);
           if (removed) {

@@ -240,6 +240,27 @@ eval "$(agents secrets export prod --plaintext)"
 
 `agents secrets create prod` then `agents secrets add prod STRIPE_API_KEY` — the key is stored in Keychain and injected automatically on `agents run --secrets prod`.
 
+## Security model
+
+The threat model `agents secrets` defends against is **on-disk plaintext exposure** — credentials in `.env` files, shell history, dotfiles, accidental git commits, backups. It does NOT defend a logged-in user from another binary running as that same user.
+
+What the macOS Keychain ACL actually protects:
+
+- Keychain items are written with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` plus an access control of `biometryCurrentSet OR devicePasscode`. Source: `src/lib/secrets/keychain-helper.swift:32-44`.
+- That ACL is **user-presence**, not **code-identity**. The OS does not pin the item to the helper binary's code signature. Any same-user process that calls `SecItemCopyMatching` with the same service+account names and pops Touch ID (or the password sheet) gets the value.
+
+Practical implications:
+
+- A malicious binary running as your user, with you logged in at the keyboard, can read any bundle by popping Touch ID with a prompt that says "Unlock agents-cli secrets". Don't approve Touch ID prompts you didn't initiate.
+- `agents secrets list` returns service names without prompting — service names are enumerable metadata. Don't name a bundle after a secret value.
+- Bundle values injected via `agents secrets exec` or `agents run --secrets <bundle>` flow into the child process environment, which is inherited by every subprocess that child spawns (npm install scripts, shell commands, etc.). That's the documented feature — only put credentials in a bundle that you're OK letting the agent's full subprocess tree see.
+
+What we don't protect against:
+
+- Other same-user processes (you control your user account).
+- A user who approves a Touch ID prompt for an attacker-controlled binary.
+- Cross-user attacks where the attacker is `root` (the OS keychain is owned at user scope).
+
 ## See Also
 
 - `docs/00-concepts.md` — DotAgents repos and resource model

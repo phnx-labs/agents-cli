@@ -70,8 +70,12 @@ describe('keychain item namespacing', () => {
 describe('resolveRef providers', () => {
   it('resolves env: from process.env', () => {
     process.env.__AGENTS_TEST_ENV_VAR = 'hello-from-parent';
-    const value = resolveRef({ provider: 'env', value: '__AGENTS_TEST_ENV_VAR' });
-    expect(value).toBe('hello-from-parent');
+    try {
+      const value = resolveRef({ provider: 'env', value: '__AGENTS_TEST_ENV_VAR' });
+      expect(value).toBe('hello-from-parent');
+    } finally {
+      delete process.env.__AGENTS_TEST_ENV_VAR;
+    }
   });
 
   it('env: throws when the parent var is unset', () => {
@@ -83,9 +87,13 @@ describe('resolveRef providers', () => {
 
   it('env: enforces the allowlist when one is set', () => {
     process.env.__AGENTS_TEST_BLOCKED = 'leaky';
-    expect(() =>
-      resolveRef({ provider: 'env', value: '__AGENTS_TEST_BLOCKED' }, { envAllowlist: ['SOMETHING_ELSE'] })
-    ).toThrow(/not in allowlist/);
+    try {
+      expect(() =>
+        resolveRef({ provider: 'env', value: '__AGENTS_TEST_BLOCKED' }, { envAllowlist: ['SOMETHING_ELSE'] })
+      ).toThrow(/not in allowlist/);
+    } finally {
+      delete process.env.__AGENTS_TEST_BLOCKED;
+    }
   });
 
   it('file: reads and trims the target', () => {

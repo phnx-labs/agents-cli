@@ -31,15 +31,31 @@ async function promptPassphrase(message: string, confirm = false): Promise<strin
   return first;
 }
 
+// Print the env-var-source warning at most once per process so a `--all` push
+// over many bundles doesn't flood stderr with the same notice.
+let envPassphraseWarned = false;
+
 function passphraseFromEnvOrPrompt(confirm: boolean): Promise<string> {
   const fromEnv = process.env.AGENTS_SECRETS_PASSPHRASE;
   if (fromEnv) {
     if (fromEnv.length < MIN_PASSPHRASE_LEN) {
       return Promise.reject(new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`));
     }
+    if (!envPassphraseWarned) {
+      envPassphraseWarned = true;
+      process.stderr.write(chalk.yellow(
+        'warn: using AGENTS_SECRETS_PASSPHRASE. Env vars are readable by other same-user processes ' +
+        '(/proc, ps, crash dumps, CI logs) — rotate the passphrase after CI use.\n',
+      ));
+    }
     return Promise.resolve(fromEnv);
   }
   return promptPassphrase('Sync passphrase', confirm);
+}
+
+/** Strip C0/C1 control bytes from server-supplied strings before terminal print. */
+function safePrint(s: string): string {
+  return s.replace(/[\x00-\x08\x0B-\x1F\x7F-\x9F]/g, '');
 }
 
 /** Register `agents secrets push|pull|remote-list` on the parent secrets Command. */
@@ -135,7 +151,7 @@ export function registerSecretsSyncCommands(secrets: Command): void {
         }
         console.log(chalk.bold(`${'NAME'.padEnd(24)} UPDATED_AT`));
         for (const r of remote) {
-          console.log(`${chalk.cyan(r.name.padEnd(24))} ${chalk.gray(r.updated_at)}`);
+          console.log(`${chalk.cyan(safePrint(r.name).padEnd(24))} ${chalk.gray(safePrint(r.updated_at))}`);
         }
       } catch (err) {
         console.error(chalk.red((err as Error).message));
