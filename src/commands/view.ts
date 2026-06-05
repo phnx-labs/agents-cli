@@ -388,6 +388,18 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         return `${cliState?.version || 'installed'} (global)`.length;
       })
     );
+    // Pre-pass: max badge width so rows with `lastActive` line up whether or
+    // not THIS row carries a throttle badge. Without this, the row that DOES
+    // have "out of credits" shifts every other row's `lastActive` left by
+    // ~16 chars, exactly what the version-managed block at maxStatusWidth
+    // already solves above.
+    let gMaxStatusWidth = 0;
+    for (const agentId of globallyInstalled) {
+      const gInfoRaw = globalInfoMap.get(agentId);
+      const gInfo = gInfoRaw ? mergeCanonical(gInfoRaw) : undefined;
+      const w = visibleWidth(formatUsageStatusBadge(gInfo?.usageStatus));
+      if (w > gMaxStatusWidth) gMaxStatusWidth = w;
+    }
 
     for (const agentId of globallyInstalled) {
       const agent = AGENTS[agentId];
@@ -407,7 +419,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       if (gInfo?.email || gUsageStr || gActiveStr) parts.push(gInfo?.email ? chalk.cyan(gInfo.email) : '');
       if (gUsageStr || gActiveStr) parts.push(gUsageStr);
       const gStatusStr = formatUsageStatusBadge(gInfo?.usageStatus);
-      if (gStatusStr) parts.push(gStatusStr);
+      if (gMaxStatusWidth > 0) {
+        const statusPad = ' '.repeat(Math.max(0, gMaxStatusWidth - visibleWidth(gStatusStr)));
+        parts.push(gStatusStr + statusPad);
+      }
       if (gActiveStr) parts.push(gActiveStr);
       console.log(parts.join('  '));
       if (showPaths && cliState?.path) {
@@ -815,7 +830,10 @@ export interface ViewJsonVersion {
   email: string | null;
   plan: string | null;
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
-  overageCredits: { amount: number; currency: string } | null;
+  // Optional so existing TypeScript consumers compiled against the prior
+  // interface don't error on the new field; null means we know there are no
+  // outstanding overage credits, undefined means we haven't fetched / can't say.
+  overageCredits?: { amount: number; currency: string } | null;
   windows: Array<{
     key: 'session' | 'week' | 'sonnet_week';
     usedPercent: number;

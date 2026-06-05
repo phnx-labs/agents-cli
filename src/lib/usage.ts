@@ -327,14 +327,25 @@ export function formatUsageSummary(
  * a glance at the row tells the user whether the version can do useful work.
  * The same signal is exposed as `usageStatus` in `agents view --json` for
  * programmatic consumers (e.g. the swarmify panel's "resume in healthy agent").
+ *
+ * The switch is exhaustive on purpose — adding a new `AccountInfo.usageStatus`
+ * value without updating the cases here is a build error at `_exhaustive`,
+ * which is exactly the bug class this PR is fixing.
  */
 export function formatUsageStatusBadge(
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null | undefined
 ): string {
-  if (!usageStatus || usageStatus === 'available') return '';
-  if (usageStatus === 'out_of_credits') return chalk.red('out of credits');
-  if (usageStatus === 'rate_limited') return chalk.yellow('rate-limited');
-  return '';
+  if (usageStatus === null || usageStatus === undefined) return '';
+  switch (usageStatus) {
+    case 'available':       return '';
+    case 'out_of_credits':  return chalk.red('out of credits');
+    case 'rate_limited':    return chalk.yellow('rate-limited');
+    default: {
+      const _exhaustive: never = usageStatus;
+      void _exhaustive;
+      return '';
+    }
+  }
 }
 
 /** Format a multi-line usage section for detailed agent views. */
