@@ -127,6 +127,40 @@ export interface HookMatches {
   project_has?: string;              // project root contains this file
 }
 
+/**
+ * Cache scoping. Determines which cache file a hook invocation reads/writes:
+ *  - `global`      one file per hook, shared across cwds/sessions. Right for
+ *                  SessionStart hooks pulling org-wide context (Linear sprint).
+ *  - `per-cwd`     keyed on the working directory the hook fires from.
+ *  - `per-session` keyed on the agent's session_id (read from stdin JSON).
+ *  - `per-project` keyed on the nearest git repo root above cwd.
+ */
+export type HookCacheKey = 'global' | 'per-cwd' | 'per-session' | 'per-project';
+
+/** Prefetch strategy when the cache is stale. */
+export type HookCachePrefetch = 'none' | 'background';
+
+/**
+ * Full hook cache config. Authors usually use the shorthand string form
+ * (`HookCache`) below. Shorthand examples in hooks.yaml:
+ *
+ *   cache: 5m          # → { ttl: 300, key: 'global', prefetch: 'none' }
+ *   cache: 5m-bg       # → { ttl: 300, key: 'global', prefetch: 'background' }
+ *   cache:             # full form
+ *     ttl: 1h
+ *     key: per-cwd
+ *     prefetch: background
+ */
+export interface HookCacheConfig {
+  /** TTL in seconds or duration string ("30s", "5m", "1h"). */
+  ttl: number | string;
+  key?: HookCacheKey;
+  prefetch?: HookCachePrefetch;
+}
+
+/** Cache shorthand: duration string, optionally suffixed `-bg` for background prefetch. */
+export type HookCache = string | HookCacheConfig;
+
 /** Hook entry as declared in a package manifest (agents.yaml). */
 export interface ManifestHook {
   script: string;
@@ -141,6 +175,13 @@ export interface ManifestHook {
   override?: boolean;
   /** Optional pre-filter predicates evaluated before invoking the script. */
   matches?: HookMatches;
+  /**
+   * Opt-in caching. When set, the registrar generates a per-hook shim
+   * under the hook shims dir that handles cache lookup, stale-while-revalidate,
+   * and per-invocation timing/logging, then registers that shim with the agent
+   * instead of the raw script. The underlying script is unchanged.
+   */
+  cache?: HookCache;
 }
 
 /** Lightweight hook descriptor used in resource listings. */

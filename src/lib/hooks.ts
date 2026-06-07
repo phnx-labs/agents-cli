@@ -64,8 +64,35 @@ function isManagedHookCommand(command: string, prefixes: string[]): boolean {
 }
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './versions.js';
 import type { AgentId, InstalledHook, ManifestHook } from './types.js';
+import { generateHookShim, getHookShimPath, parseCacheConfig, removeHookShim } from './hooks/cache.js';
+import { getHookShimsDir } from './state.js';
 
 export type HookEntry = { name: string; scriptPath: string; dataFile?: string };
+
+/**
+ * Resolve the command path to register for a hook.
+ *
+ * Returns either the raw script path (no `cache:` set, legacy behavior) or
+ * the path to a generated caching/timing shim. The shim is written as a
+ * side effect when `cache:` is configured. The agent-native settings file
+ * gets the same shape either way — just a different command path.
+ */
+function resolveHookCommand(
+  name: string,
+  hookDef: ManifestHook,
+  resolveScript: (script: string) => string | null
+): string | null {
+  const scriptPath = resolveScript(hookDef.script);
+  if (!scriptPath) return null;
+  const cache = parseCacheConfig(hookDef.cache);
+  if (!cache) {
+    // No caching opted in — make sure a previously generated shim from an
+    // earlier `cache:` config is gone so the JSONL doesn't keep claiming hits.
+    removeHookShim(name);
+    return scriptPath;
+  }
+  return generateHookShim({ name, scriptPath, cache });
+}
 
 /**
  * Extensions that are NEVER hooks — docs, configuration, plain data. A file
@@ -796,6 +823,10 @@ export function registerHooksToSettings(
     : [
         ...getManagedHookPrefixes(),
         ...(localHooksDir ? [localHooksDir + path.sep] : []),
+        // Generated cache/timing shims live here; needs GC coverage so that a
+        // hook whose `cache:` field is removed gets its stale shim path purged
+        // from the agent's settings file (see resolveHookCommand).
+        getHookShimsDir() + path.sep,
       ];
 
   if (agentId === 'claude') {
@@ -872,11 +903,12 @@ function registerHooksForClaude(
   const hooks = config.hooks as Record<string, unknown[]>;
 
   // Build set of all command paths the current manifest will register.
-  // Used to garbage-collect stale entries left behind after hook renames.
+  // Used to garbage-collect stale entries left behind after hook renames
+  // or after a `cache:` field is added/removed (raw script vs shim path).
   const currentManifestPaths = new Set<string>();
-  for (const hookDef of Object.values(manifest)) {
+  for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
-    const resolved = resolveScript(hookDef.script);
+    const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
     if (resolved) currentManifestPaths.add(resolved);
   }
 
@@ -906,7 +938,7 @@ function registerHooksForClaude(
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
 
-    const commandPath = resolveScript(hookDef.script);
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
     if (!commandPath) {
       errors.push(`${name}: script not found in user or system hooks dir`);
       continue;
@@ -991,11 +1023,12 @@ function registerHooksForCodex(
     }
   }
 
-  // Build set of current manifest command paths for codex to GC stale entries
+  // Build set of current manifest command paths for codex to GC stale entries.
+  // Uses resolveHookCommand so cached hooks resolve to their shim path.
   const currentManifestPaths = new Set<string>();
-  for (const hookDef of Object.values(manifest)) {
+  for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
-    const resolved = resolveScript(hookDef.script);
+    const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
     if (resolved) currentManifestPaths.add(resolved);
   }
 
@@ -1015,7 +1048,7 @@ function registerHooksForCodex(
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
 
-    const commandPath = resolveScript(hookDef.script);
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
     if (!commandPath) {
       errors.push(`${name}: script not found in user or system hooks dir`);
       continue;
@@ -1122,9 +1155,9 @@ function registerHooksForGemini(
       const hooks = config.hooks as Record<string, unknown[]>;
 
       const currentManifestPaths = new Set<string>();
-      for (const hookDef of Object.values(manifest)) {
+      for (const [hookName, hookDef] of Object.entries(manifest)) {
         if (!hookDef.events || hookDef.events.length === 0) continue;
-        const resolved = resolveScript(hookDef.script);
+        const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
         if (resolved) currentManifestPaths.add(resolved);
       }
 
@@ -1149,7 +1182,7 @@ function registerHooksForGemini(
       for (const [name, hookDef] of Object.entries(manifest)) {
         if (!hookDef.events || hookDef.events.length === 0) continue;
 
-        const commandPath = resolveScript(hookDef.script);
+        const commandPath = resolveHookCommand(name, hookDef, resolveScript);
         if (!commandPath) {
           errors.push(`${name}: script not found in user or system hooks dir`);
           continue;
@@ -1242,13 +1275,13 @@ function registerHooksForAntigravity(
   // hooks. Only managed paths are considered for removal — user-added entries
   // outside managedPrefixes are preserved.
   const currentManifestPaths = new Set<string>();
-  for (const hookDef of Object.values(manifest)) {
+  for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
     // Only paths whose events map to a known agy event would actually be
     // registered, so only those should survive GC.
     const anyMapped = hookDef.events.some((e) => ANTIGRAVITY_EVENT_MAP[e]);
     if (!anyMapped) continue;
-    const resolved = resolveScript(hookDef.script);
+    const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
     if (resolved) currentManifestPaths.add(resolved);
   }
 
@@ -1270,7 +1303,7 @@ function registerHooksForAntigravity(
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
 
-    const commandPath = resolveScript(hookDef.script);
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
     if (!commandPath) {
       errors.push(`${name}: script not found in user or system hooks dir`);
       continue;
@@ -1341,7 +1374,7 @@ function registerHooksForGrok(
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
 
-    const commandPath = resolveScript(hookDef.script);
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
     if (!commandPath) {
       errors.push(`${name}: script not found`);
       continue;

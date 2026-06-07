@@ -80,6 +80,8 @@ const TRASH_DIR = path.join(HISTORY_DIR, 'trash');
 
 // Cache bucket (regenerable).
 const SHIMS_DIR = path.join(CACHE_DIR, 'shims');
+const HOOK_SHIMS_DIR = path.join(SHIMS_DIR, 'hooks');
+const HOOK_CACHE_DIR = path.join(CACHE_DIR, 'state', 'hooks');
 const BIN_DIR = path.join(CACHE_DIR, 'bin');
 const PACKAGES_DIR = path.join(CACHE_DIR, 'packages');
 // Plugins are user-authored resources, alongside skills/, commands/, hooks/.
@@ -312,6 +314,12 @@ export function getVersionsDir(): string { return VERSIONS_DIR; }
 
 /** Path to version-switching shim scripts (~/.agents/.cache/shims/). */
 export function getShimsDir(): string { return SHIMS_DIR; }
+
+/** Path to generated per-hook caching/timing shims (~/.agents/.cache/shims/hooks/). */
+export function getHookShimsDir(): string { return HOOK_SHIMS_DIR; }
+
+/** Path to per-hook stdout cache files (~/.agents/.cache/state/hooks/). */
+export function getHookCacheDir(): string { return HOOK_CACHE_DIR; }
 
 /** Path to per-agent installed CLI binaries (~/.agents/.cache/bin/). */
 export function getBinDir(): string { return BIN_DIR; }

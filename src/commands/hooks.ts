@@ -703,4 +703,70 @@ Examples:
         printWithPager(output, contentLines.length);
       }
     });
+
+  hooksCmd
+    .command('profile')
+    .description('Per-hook timing + cache stats from recent invocations')
+    .option('--days <n>', 'Number of days of logs to read', '7')
+    .option('--warn-ms <n>', 'p99 threshold above which a hook is flagged as slow', '2000')
+    .option('--json', 'Emit raw JSON rows instead of the table')
+    .addHelpText('after', `
+Shows aggregated stats for every hook that emitted a hook.fire event into
+~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl. Only hooks with \`cache:\` in
+their manifest are instrumented today — the generated shim writes the events.
+
+Examples:
+  agents hooks profile                # last 7 days, table form
+  agents hooks profile --days 30      # roll up the full month
+  agents hooks profile --json | jq    # pipe somewhere
+
+A hook whose p99 exceeds --warn-ms gets flagged in the cache column. Add
+'cache: 5m' or 'cache: 5m-bg' to its hooks.yaml entry to fix it.
+`)
+    .action(async (options: { days: string; warnMs: string; json?: boolean }) => {
+      const { aggregateHookProfile, loadHookFireEvents, formatMs, formatCacheColumn, DEFAULT_SLOW_HOOK_WARN_MS } = await import('../lib/hooks/profile.js');
+      const days = Math.max(1, parseInt(options.days, 10) || 7);
+      const warnMs = Math.max(0, parseInt(options.warnMs, 10) || DEFAULT_SLOW_HOOK_WARN_MS);
+      const rows = aggregateHookProfile(loadHookFireEvents(days));
+
+      if (options.json) {
+        console.log(JSON.stringify(rows, null, 2));
+        return;
+      }
+
+      if (rows.length === 0) {
+        console.log(chalk.gray(`No hook.fire events in the last ${days} day${days === 1 ? '' : 's'}.`));
+        console.log(chalk.gray('Add \'cache: 5m\' to a hook in hooks.yaml to start collecting stats.'));
+        return;
+      }
+
+      const widths = { hook: 36, n: 5, p50: 7, p99: 7, mean: 7, max: 7, cache: 30 };
+      const pad = (s: string, w: number) => (s.length >= w ? s.slice(0, w) : s + ' '.repeat(w - s.length));
+      const header = [
+        pad('HOOK', widths.hook),
+        pad('N', widths.n),
+        pad('P50', widths.p50),
+        pad('P99', widths.p99),
+        pad('MEAN', widths.mean),
+        pad('MAX', widths.max),
+        pad('CACHE', widths.cache),
+      ].join(' ');
+      console.log(chalk.bold(header));
+      console.log(chalk.gray('─'.repeat(header.length)));
+      for (const r of rows) {
+        const slow = r.p99Ms > warnMs;
+        const cacheCol = formatCacheColumn(r);
+        const warning = slow && r.cacheHitPct + r.cacheStalePct === 0 ? '  ← add cache: 5m' : '';
+        const line = [
+          pad(r.hook, widths.hook),
+          pad(String(r.n), widths.n),
+          pad(formatMs(r.p50Ms), widths.p50),
+          pad(formatMs(r.p99Ms), widths.p99),
+          pad(formatMs(r.meanMs), widths.mean),
+          pad(formatMs(r.maxMs), widths.max),
+          pad(cacheCol, widths.cache),
+        ].join(' ') + warning;
+        console.log(slow ? chalk.yellow(line) : line);
+      }
+    });
 }

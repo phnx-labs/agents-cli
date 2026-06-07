@@ -1,0 +1,243 @@
+/**
+ * Declarative hook caching + timing.
+ *
+ * Hooks that opt in via `cache:` in hooks.yaml get a generated bash shim
+ * (~/.agents/.cache/shims/hooks/<name>.sh) registered with the agent instead
+ * of the raw script path. The shim handles:
+ *
+ *   1. cache lookup — reads ~/.agents/.cache/state/hooks/<name>.<key>.out
+ *      and serves it if newer than ttl.
+ *   2. stale-while-revalidate — when prefetch=background, serves stale cache
+ *      and refreshes the cache file in a detached child.
+ *   3. timing — appends one JSONL line per fire to events-YYYY-MM-DD.jsonl.
+ *
+ * The shim is regenerated whenever the registrar runs; if its content doesn't
+ * change (idempotent), mtime is preserved. Stale shims for removed hooks are
+ * cleaned by the registrar's garbage collection (shims dir is in
+ * managedPrefixes).
+ */
+import * as fs from 'fs';
+import * as path from 'path';
+import type { HookCache, HookCacheConfig, HookCacheKey, HookCachePrefetch } from '../types.js';
+import { getHookCacheDir, getHookShimsDir, getLogsDir } from '../state.js';
+
+/**
+ * Parse a `cache:` value from hooks.yaml into the canonical config form.
+ * Accepts the shorthand string ("5m", "30s-bg") or the full object form.
+ * Returns null if the value is missing or unparseable.
+ */
+export function parseCacheConfig(raw: HookCache | undefined): HookCacheConfig | null {
+  if (raw == null) return null;
+  if (typeof raw === 'string') return parseShorthand(raw);
+  const ttlSec = parseDuration(raw.ttl);
+  if (ttlSec == null) return null;
+  return {
+    ttl: ttlSec,
+    key: raw.key ?? 'global',
+    prefetch: raw.prefetch ?? 'none',
+  };
+}
+
+function parseShorthand(s: string): HookCacheConfig | null {
+  const trimmed = s.trim();
+  let prefetch: HookCachePrefetch = 'none';
+  let durationPart = trimmed;
+  if (trimmed.endsWith('-bg')) {
+    prefetch = 'background';
+    durationPart = trimmed.slice(0, -3);
+  }
+  const ttlSec = parseDuration(durationPart);
+  if (ttlSec == null) return null;
+  return { ttl: ttlSec, key: 'global', prefetch };
+}
+
+/** Parse "30s" | "5m" | "1h" | plain seconds. Returns seconds, or null on failure. */
+export function parseDuration(d: number | string | undefined): number | null {
+  if (d == null) return null;
+  if (typeof d === 'number') return Number.isFinite(d) && d > 0 ? Math.floor(d) : null;
+  const m = d.trim().match(/^(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs)?$/i);
+  if (!m) return null;
+  const value = parseInt(m[1], 10);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const unit = (m[2] || 's').toLowerCase();
+  if (unit.startsWith('h')) return value * 3600;
+  if (unit.startsWith('m')) return value * 60;
+  return value;
+}
+
+/** Absolute path of the generated shim for a hook name. */
+export function getHookShimPath(name: string): string {
+  return path.join(getHookShimsDir(), `${name}.sh`);
+}
+
+/**
+ * Optional path overrides for tests that need to redirect cache + logs to a
+ * temp dir. Production callers omit `paths`; the shim uses real state.ts dirs.
+ * (state.ts captures HOME at module load, so mutating process.env.HOME in a
+ * test's beforeEach doesn't reach getHookCacheDir() — this is the explicit
+ * seam.)
+ */
+export interface HookShimPaths {
+  shimsDir?: string;
+  cacheDir?: string;
+  logsDir?: string;
+}
+
+/**
+ * Generate (or refresh) the shim script for a hook. Idempotent — only writes
+ * when the content differs from what's on disk. Returns the absolute shim path.
+ */
+export function generateHookShim(args: {
+  name: string;
+  scriptPath: string;
+  cache: HookCacheConfig;
+  paths?: HookShimPaths;
+}): string {
+  const shimsDir = args.paths?.shimsDir ?? getHookShimsDir();
+  const cacheDir = args.paths?.cacheDir ?? getHookCacheDir();
+  const logsDir = args.paths?.logsDir ?? getLogsDir();
+  const shimPath = path.join(shimsDir, `${args.name}.sh`);
+  const content = renderShim(args.name, args.scriptPath, args.cache, { cacheDir, logsDir });
+  fs.mkdirSync(shimsDir, { recursive: true });
+
+  let existing: string | null = null;
+  if (fs.existsSync(shimPath)) {
+    try { existing = fs.readFileSync(shimPath, 'utf-8'); } catch { /* rewrite */ }
+  }
+  if (existing !== content) {
+    fs.writeFileSync(shimPath, content, { mode: 0o755 });
+  } else {
+    // Ensure exec bit even when content unchanged (file mode can drift).
+    try { fs.chmodSync(shimPath, 0o755); } catch { /* best effort */ }
+  }
+  return shimPath;
+}
+
+/**
+ * Render the bash shim. Bash 3.2-compatible (macOS default). Uses python3 for
+ * monotonic-ish nanosecond timing — already a hard dependency of other hooks
+ * in this repo (04-capture-session-start-metadata.sh does the same).
+ */
+function renderShim(
+  name: string,
+  scriptPath: string,
+  cache: HookCacheConfig,
+  paths: { cacheDir: string; logsDir: string }
+): string {
+  const ttl = typeof cache.ttl === 'number' ? cache.ttl : (parseDuration(cache.ttl) ?? 0);
+  const key: HookCacheKey = cache.key ?? 'global';
+  const prefetch: HookCachePrefetch = cache.prefetch ?? 'none';
+  const { cacheDir, logsDir } = paths;
+
+  // sh-escape: wrap in single quotes, escape any embedded single quotes.
+  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+  return `#!/usr/bin/env bash
+# GENERATED by agents-cli. Do not edit — re-run \`agents hooks sync\` to refresh.
+# Hook: ${name}
+# Source: ${scriptPath}
+# Cache: key=${key} ttl=${ttl}s prefetch=${prefetch}
+set -u
+
+HOOK_NAME=${q(name)}
+SOURCE=${q(scriptPath)}
+CACHE_DIR=${q(cacheDir)}
+LOGS_DIR=${q(logsDir)}
+TTL=${ttl}
+PREFETCH=${q(prefetch)}
+KEY_MODE=${q(key)}
+
+mkdir -p "$CACHE_DIR" "$LOGS_DIR"
+
+# Read stdin once (Claude/Codex/Gemini pass JSON on stdin to every hook).
+STDIN_PAYLOAD="$(cat || true)"
+
+# Derive cache key suffix from KEY_MODE.
+cache_suffix=""
+case "$KEY_MODE" in
+  per-cwd)
+    cwd_val="$(printf '%s' "$STDIN_PAYLOAD" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("cwd","") or "")
+except Exception: pass' 2>/dev/null || true)"
+    [ -z "$cwd_val" ] && cwd_val="$PWD"
+    cache_suffix=".$(printf '%s' "$cwd_val" | shasum -a 1 2>/dev/null | awk '{print substr($1,1,12)}')"
+    ;;
+  per-session)
+    sid_val="$(printf '%s' "$STDIN_PAYLOAD" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("session_id","") or "")
+except Exception: pass' 2>/dev/null || true)"
+    [ -n "$sid_val" ] && cache_suffix=".$sid_val"
+    ;;
+  per-project)
+    proj_val="$(git -C "\${PWD}" rev-parse --show-toplevel 2>/dev/null || echo "")"
+    [ -z "$proj_val" ] && proj_val="$PWD"
+    cache_suffix=".$(printf '%s' "$proj_val" | shasum -a 1 2>/dev/null | awk '{print substr($1,1,12)}')"
+    ;;
+  global|*)
+    cache_suffix=""
+    ;;
+esac
+CACHE_FILE="$CACHE_DIR/$HOOK_NAME$cache_suffix.out"
+
+# Monotonic-ish nanosecond timer (macOS \`date\` has no %N).
+now_ns() { python3 -c 'import time; print(int(time.time()*1e9))'; }
+START_NS=$(now_ns)
+
+CACHE_STATUS=miss
+CACHE_AGE=-1
+EXIT=0
+
+if [ -f "$CACHE_FILE" ]; then
+  mtime=$(stat -f %m "$CACHE_FILE" 2>/dev/null || stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)
+  now_s=$(date +%s)
+  CACHE_AGE=$((now_s - mtime))
+  if [ "$CACHE_AGE" -ge 0 ] && [ "$CACHE_AGE" -lt "$TTL" ]; then
+    cat "$CACHE_FILE"
+    CACHE_STATUS=hit
+  fi
+fi
+
+if [ "$CACHE_STATUS" = miss ]; then
+  if [ -f "$CACHE_FILE" ] && [ "$PREFETCH" = background ]; then
+    # Stale-while-revalidate: serve stale immediately, refresh in detached child.
+    cat "$CACHE_FILE"
+    CACHE_STATUS=stale-prefetch
+    tmp="$CACHE_FILE.new.$$"
+    ( printf '%s' "$STDIN_PAYLOAD" | "$SOURCE" >"$tmp" 2>/dev/null && mv -f "$tmp" "$CACHE_FILE" || rm -f "$tmp" ) >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+  else
+    # Synchronous fetch + cache.
+    tmp="$CACHE_FILE.new.$$"
+    if printf '%s' "$STDIN_PAYLOAD" | "$SOURCE" >"$tmp"; then
+      EXIT=0
+      cat "$tmp"
+      mv -f "$tmp" "$CACHE_FILE"
+    else
+      EXIT=$?
+      rm -f "$tmp"
+    fi
+  fi
+fi
+
+END_NS=$(now_ns)
+MS=$(( (END_NS - START_NS) / 1000000 ))
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+LOG_FILE="$LOGS_DIR/events-$(date +%Y-%m-%d).jsonl"
+printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":%d,"cache":"%s","exit":%d}\\n' \\
+  "$TS" "$HOOK_NAME" "$MS" "$CACHE_STATUS" "$EXIT" >>"$LOG_FILE" 2>/dev/null || true
+
+exit "$EXIT"
+`;
+}
+
+/**
+ * Remove a hook's shim. Called by the registrar's garbage collection when a
+ * hook is renamed/deleted or has its `cache:` field removed.
+ */
+export function removeHookShim(name: string, shimsDir?: string): void {
+  const dir = shimsDir ?? getHookShimsDir();
+  const shimPath = path.join(dir, `${name}.sh`);
+  if (fs.existsSync(shimPath)) {
+    try { fs.unlinkSync(shimPath); } catch { /* best effort */ }
+  }
+}

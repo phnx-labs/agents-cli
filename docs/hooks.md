@@ -107,6 +107,73 @@ hooks:
 | `matches` | `HookMatches` | no | Predicate set; all predicates AND together |
 | `enabled` | boolean | no | Set `false` in user layer to disable a system-shipped hook of the same name |
 | `override` | boolean | no | Set `true` to silence the shadow warning when a user hook has the same name as a system hook |
+| `cache` | string \| object | no | Opt-in caching + per-invocation timing. See [Caching](#caching). |
+
+## Caching
+
+Any hook that runs slow — API call, heavy script, anything over a few hundred ms — should declare `cache:` so the registrar wraps it in a shim that serves cached output and logs timing. The underlying script stays unchanged.
+
+### Shorthand
+
+```yaml
+hooks:
+  linear-inject-tasks:
+    script: 03-linear-inject-tasks-context.sh
+    events: [SessionStart]
+    cache: 5m         # ttl=5min, key=global, prefetch=none
+```
+
+| Shorthand | Meaning |
+|-----------|---------|
+| `30s` | 30-second TTL, sync refresh on miss |
+| `5m` | 5-minute TTL, sync refresh on miss |
+| `1h` | 1-hour TTL, sync refresh on miss |
+| `5m-bg` | 5-minute TTL, stale-while-revalidate: serve stale immediately + refresh in background |
+
+### Full object form
+
+```yaml
+cache:
+  ttl: 1h                # seconds or "30s" / "5m" / "1h"
+  key: per-cwd           # global | per-cwd | per-session | per-project
+  prefetch: background   # none | background
+```
+
+| Key | Effect | Use when |
+|-----|--------|----------|
+| `global` (default) | One cache file per hook, shared everywhere | SessionStart hooks pulling org-wide context (Linear sprint, GitHub notifications) |
+| `per-cwd` | Cache keyed on the `cwd` field in the hook's stdin JSON | Per-repo context injection |
+| `per-session` | Cache lives for the agent's `session_id` | Memoization within a session for hooks that fire repeatedly |
+| `per-project` | Cache keyed on the nearest git repo root above cwd | Per-project context injection |
+
+`prefetch: background` is the magic flag for SessionStart-style hooks: boot is always instant because the shim serves the cached file immediately, then refreshes in a detached child for the next session.
+
+### What it generates
+
+When the registrar sees `cache:` on a hook, it writes a per-hook shim under `~/.agents/.cache/shims/hooks/<name>.sh` and registers that shim's path in the agent's native settings file (`~/.claude/settings.json`, `~/.codex/hooks.json`, etc.) instead of the raw script. The shim:
+
+1. Reads stdin once (Claude/Codex/Gemini pass JSON to every hook).
+2. Computes the cache file path from `key:`.
+3. If the cache is fresh, serves it (cache=hit).
+4. If stale + `prefetch: background`, serves stale + spawns a detached refresh (cache=stale-prefetch).
+5. If stale + no prefetch, runs the real script + caches the output (cache=miss).
+6. Appends one JSONL line per fire to `~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl`.
+
+Stale shim files are garbage-collected automatically when a hook is renamed, deleted, or has its `cache:` field removed.
+
+### `agents hooks profile`
+
+```
+agents hooks profile              # last 7 days, table form
+agents hooks profile --days 30
+agents hooks profile --json | jq
+agents hooks profile --warn-ms 500
+```
+
+Aggregates `hook.fire` events into per-hook p50/p99/mean/max + cache hit rate. Any hook whose p99 exceeds `--warn-ms` (default 2000) and has no cache config gets flagged as a candidate for `cache:`.
+
+Only hooks with `cache:` are instrumented today — that's deliberate. Opting into the primitive is what surfaces the data. To make every hook show up, declare `cache: 5m` on it (or `cache: 1s` to effectively disable caching while still getting timing).
+
 
 ### Supported Events
 
