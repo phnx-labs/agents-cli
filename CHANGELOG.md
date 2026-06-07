@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.20.4
+
+**Plugin marketplace sync (skip outside-pointing symlinks)**
+
+- `copyPluginToMarketplace` used `fs.cpSync(plugin.root, dest, { recursive: true, dereference: false })`, which faithfully preserved every symlink — including the ones plugin authors put at the top of their plugin source for prompt-side references (the rush plugin's `app -> ../../../rush/app`, `web -> rush/web`, `widgets -> rush/widgets`). Those targets resolve to the rush monorepo (~8.7 GB of `app/` including node_modules + .next builds, 782 MB of `web/`, plus 463 MB brand-assets). Every claude version got a full set of those symlinks in `~/.claude/plugins/marketplaces/agents-cli/plugins/rush/`. When the consumer (Claude Code, OpenClaw) discovers plugins, it walks the marketplace tree and follows those symlinks — producing multi-minute startup hangs.
+- The copy now walks the source tree and drops symlinks whose `realpath` escapes the plugin root, leaving internal symlinks intact (cpSync rewrites internal targets to absolute paths into the source tree, which the consumer still resolves correctly). One informational line per plugin lists the skipped names so plugin authors notice.
+- Existing per-version marketplace directories still hold the bloat from prior syncs; clean up with `rm` against `~/.claude/plugins/marketplaces/agents-cli/plugins/*/{app,web,widgets,*-symlinks-that-escaped}` then re-run `agents pull` or any plugin sync to re-copy with the filter.
+
 ## 1.20.3
 
 **`agents run` startup latency (stale-while-revalidate the usage probe + memoize agents.yaml)**
