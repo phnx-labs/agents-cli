@@ -24,10 +24,16 @@ const claudeBinaryVer = listInstalledVersions('claude').find((v) =>
   fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')) &&
   !fs.existsSync(path.join(getVersionDir('claude', v), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'))
 ) ?? null;
-const codexVer = pickInstalledVersion('codex', () => undefined);
-const geminiVer = pickInstalledVersion('gemini', () => undefined);
-const opencodeVer = pickInstalledVersion('opencode', () => undefined);
-const openclawVer = pickInstalledVersion('openclaw', () => undefined);
+// Prefer a version whose model source actually resolves on this host — partial
+// installs (e.g. ones missing the vendored binary) would otherwise short-circuit
+// the catalog tests with null catalogs.
+const firstLocatable = (agent: 'codex' | 'gemini' | 'opencode' | 'openclaw'): string | null =>
+  listInstalledVersions(agent).find((v) => locateModelSource(agent, v) !== null) ?? null;
+
+const codexVer = firstLocatable('codex');
+const geminiVer = firstLocatable('gemini');
+const opencodeVer = firstLocatable('opencode');
+const openclawVer = firstLocatable('openclaw');
 
 describe('locateModelSource', () => {
   it('finds the JS bundle for Claude versions that ship one', () => {
@@ -51,7 +57,8 @@ describe('locateModelSource', () => {
     const src = locateModelSource('codex', codexVer);
     expect(src).not.toBeNull();
     expect(src!.kind).toBe('binary');
-    expect(src!.path).toMatch(/\/codex\/codex$/);
+    // Old layout: vendor/<triple>/codex/codex; new layout (0.134+): vendor/<triple>/bin/codex.
+    expect(src!.path).toMatch(/\/(?:codex|bin)\/codex$/);
   });
 
   it('returns null for an unknown version', () => {
@@ -177,14 +184,17 @@ describe('getModelCatalog (gemini)', () => {
     const src = locateModelSource('gemini', geminiVer);
     expect(src).not.toBeNull();
     expect(src!.kind).toBe('js');
-    expect(src!.path).toMatch(/gemini-cli-core\/dist\/src\/config\/models\.js$/);
+    // <=0.41 ships gemini-cli-core/dist/src/config/models.js; 0.42+ inlines the same
+    // constants into a chunk under @google/gemini-cli/bundle/.
+    expect(src!.path).toMatch(/(gemini-cli-core\/dist\/src\/config\/models\.js$)|(gemini-cli\/bundle\/.+\.js$)/);
 
     const catalog = getModelCatalog('gemini', geminiVer);
     expect(catalog).not.toBeNull();
     expect(catalog!.models.length).toBeGreaterThan(0);
-    // All extracted ids must look like `gemini-*` — Gemini has no providers.
+    // Gemini's VALID_GEMINI_MODELS set covers both `gemini-*` and Google's
+    // `gemma-*` sibling family; either prefix is valid.
     for (const m of catalog!.models) {
-      expect(m.id).toMatch(/^gemini-/);
+      expect(m.id).toMatch(/^(gemini|gemma)-/);
     }
     // The `flash` / `flash-lite` / `pro` aliases always resolve somewhere.
     expect(Object.keys(catalog!.aliases)).toEqual(
@@ -204,7 +214,10 @@ describe('getModelCatalog (opencode)', () => {
 
     const catalog = getModelCatalog('opencode', opencodeVer);
     if (!catalog || catalog.models.length === 0) return;
-    expect(catalog!.models.length).toBeGreaterThan(10);
+    // opencode 1.16+ only lists free zen models in its local catalog (currently 5);
+    // older builds shipped the full models.dev snapshot. Either way the parser must
+    // surface a non-trivial set of provider/id keys.
+    expect(catalog!.models.length).toBeGreaterThanOrEqual(5);
     for (const m of catalog!.models) {
       expect(m.id).toMatch(/^[a-z0-9][a-z0-9.-]*\/.+$/i);
     }

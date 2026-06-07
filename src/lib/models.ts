@@ -150,32 +150,34 @@ export function locateModelSource(
   }
 
   if (agent === 'codex') {
+    // Codex's vendored binary has moved across releases:
+    //   <=0.98:     @openai/codex/vendor/<triple>/codex/codex
+    //   0.99..0.13: @openai/codex-<plat>-<arch>/vendor/<triple>/codex/codex
+    //   0.134+:     @openai/codex-<plat>-<arch>/vendor/<triple>/bin/codex
+    // We probe all known shapes; first hit wins.
+    const triples = ['aarch64-apple-darwin', 'x86_64-apple-darwin', 'x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl', 'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc'];
     const triple = currentTargetTriple();
-    if (triple) {
-      const platformPkg = path.join(
-        versionDir,
-        'node_modules',
-        '@openai',
-        `codex-${triple.includes('apple') ? 'darwin' : triple.includes('linux') ? 'linux' : 'win32'}-${triple.includes('aarch64') ? 'arm64' : 'x64'}`,
-        'vendor',
-        triple,
-        'codex',
-        'codex'
-      );
-      if (fs.existsSync(platformPkg)) return { path: platformPkg, kind: 'binary' };
-    }
-    // 0.98 layout: binary inside @openai/codex itself
-    const triples = ['aarch64-apple-darwin', 'x86_64-apple-darwin', 'x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl'];
-    for (const t of triples) {
-      const p = path.join(versionDir, 'node_modules', '@openai', 'codex', 'vendor', t, 'codex', 'codex');
-      if (fs.existsSync(p)) return { path: p, kind: 'binary' };
+    const orderedTriples = triple ? [triple, ...triples.filter((t) => t !== triple)] : triples;
+
+    const platformPkgFor = (t: string) => `codex-${t.includes('apple') ? 'darwin' : t.includes('linux') ? 'linux' : 'win32'}-${t.includes('aarch64') ? 'arm64' : 'x64'}`;
+
+    for (const t of orderedTriples) {
+      const candidates = [
+        path.join(versionDir, 'node_modules', '@openai', platformPkgFor(t), 'vendor', t, 'bin', 'codex'),
+        path.join(versionDir, 'node_modules', '@openai', platformPkgFor(t), 'vendor', t, 'codex', 'codex'),
+        path.join(versionDir, 'node_modules', '@openai', 'codex', 'vendor', t, 'bin', 'codex'),
+        path.join(versionDir, 'node_modules', '@openai', 'codex', 'vendor', t, 'codex', 'codex'),
+      ];
+      for (const p of candidates) {
+        if (fs.existsSync(p)) return { path: p, kind: 'binary' };
+      }
     }
     return null;
   }
 
   if (agent === 'gemini') {
-    // Gemini ships a clean ES module with all constants and aliases -- no need
-    // to parse the minified CLI bundle.
+    // <=0.41 shipped a clean ES module at @google/gemini-cli-core/dist/src/config/models.js.
+    // 0.42+ inlines the same constants into a minified chunk under @google/gemini-cli/bundle/.
     const modelsJs = path.join(
       versionDir,
       'node_modules',
@@ -187,6 +189,33 @@ export function locateModelSource(
       'models.js'
     );
     if (fs.existsSync(modelsJs)) return { path: modelsJs, kind: 'js' };
+
+    const bundleDir = path.join(versionDir, 'node_modules', '@google', 'gemini-cli', 'bundle');
+    if (fs.existsSync(bundleDir)) {
+      try {
+        const entries = fs.readdirSync(bundleDir);
+        // The model constants live in a single chunk; pick the first .js file
+        // whose contents contain VALID_GEMINI_MODELS. Skip subdirectories.
+        for (const name of entries) {
+          if (!name.endsWith('.js')) continue;
+          const full = path.join(bundleDir, name);
+          let stat: fs.Stats;
+          try { stat = fs.statSync(full); } catch { continue; }
+          if (!stat.isFile()) continue;
+          // Most chunks just re-export the constants; only the defining chunk
+          // actually has `var VALID_GEMINI_MODELS = ... new Set(`. Match that
+          // shape so we pick the chunk that the extractor can parse.
+          let body: string;
+          try {
+            body = fs.readFileSync(full, 'utf-8');
+          } catch { continue; }
+          if (/var\s+VALID_GEMINI_MODELS\s*=[^\n]*new\s+Set/.test(body) &&
+              /var\s+DEFAULT_GEMINI_MODEL\s*=/.test(body)) {
+            return { path: full, kind: 'js' };
+          }
+        }
+      } catch { /* unreadable bundle dir */ }
+    }
     return null;
   }
 
@@ -395,7 +424,9 @@ function extractCodexCatalog(text: string): { models: ModelInfo[]; aliases: Reco
  * would pollute the runtime and ES-module interop is awkward from a CJS build).
  */
 function extractGeminiCatalog(text: string): { models: ModelInfo[]; aliases: Record<string, string> } {
-  const constRe = /export\s+const\s+([A-Z0-9_]+)\s*=\s*'([^']+)'/g;
+  // Old (<=0.41) layout used `export const FOO = 'bar';` in models.js.
+  // New (0.42+) bundle inlines the same constants as `var FOO = "bar";`.
+  const constRe = /(?:export\s+const|var)\s+([A-Z0-9_]+)\s*=\s*['"]([^'"]+)['"]/g;
   const constants = new Map<string, string>();
   let m: RegExpExecArray | null;
   while ((m = constRe.exec(text)) !== null) {
@@ -405,7 +436,7 @@ function extractGeminiCatalog(text: string): { models: ModelInfo[]; aliases: Rec
   // The set of ids the CLI accepts as "valid model names". Names (not values)
   // are listed inside `new Set([...])`, so we expand them via the constants map.
   const validIds = new Set<string>();
-  const setBlock = text.match(/VALID_GEMINI_MODELS\s*=\s*new\s+Set\(\[([\s\S]*?)\]\)/);
+  const setBlock = text.match(/VALID_GEMINI_MODELS\s*=\s*(?:\/\*[^*]*\*\/\s*)?new\s+Set\(\[([\s\S]*?)\]\)/);
   if (setBlock) {
     const nameRe = /([A-Z0-9_]+)/g;
     let nm: RegExpExecArray | null;
