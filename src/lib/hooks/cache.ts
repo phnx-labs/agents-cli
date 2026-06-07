@@ -188,7 +188,11 @@ CACHE_AGE=-1
 EXIT=0
 
 if [ -f "$CACHE_FILE" ]; then
-  mtime=$(stat -f %m "$CACHE_FILE" 2>/dev/null || stat -c %Y "$CACHE_FILE" 2>/dev/null || echo 0)
+  # python3 is already a hard dep (used for now_ns) and gives portable mtime
+  # without the macOS-vs-Linux \`stat\` flag divergence (-f %m vs -c %Y) that
+  # blew up under \`set -u\` when the wrong flag produced literal "%m".
+  mtime=$(python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$CACHE_FILE" 2>/dev/null)
+  mtime=\${mtime:-0}
   now_s=$(date +%s)
   CACHE_AGE=$((now_s - mtime))
   if [ "$CACHE_AGE" -ge 0 ] && [ "$CACHE_AGE" -lt "$TTL" ]; then
