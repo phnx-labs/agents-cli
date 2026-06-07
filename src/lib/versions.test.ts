@@ -112,6 +112,27 @@ describe('version resource sync path handling', () => {
     expect(fs.existsSync(path.join(syncedSkillDir, 'secret-link'))).toBe(false);
   });
 
+  it('skips a clean full sync after expanding persisted resource patterns', async () => {
+    const home = makeTempHome();
+
+    const skillDir = path.join(home, '.agents-system', 'skills', 'tiny');
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), 'skill body', 'utf-8');
+
+    const first = runVersionSync(
+      home,
+      "syncResourcesToVersion('codex', '0.1.0', undefined, { cwd: home })"
+    ) as { skills: boolean };
+
+    const second = runVersionSync(
+      home,
+      "syncResourcesToVersion('codex', '0.1.0', undefined, { cwd: home })"
+    ) as { skills: boolean };
+
+    expect(first.skills).toBe(true);
+    expect(second.skills).toBe(false);
+  });
+
   it('does not sync project MCP servers under the default user-only MCP policy', async () => {
     const home = makeTempHome();
     const project = path.join(home, 'repo');

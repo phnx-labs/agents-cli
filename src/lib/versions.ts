@@ -1923,12 +1923,11 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     }
   }
 
-  // Fast guard: skip the entire sync when no selection is active and nothing
-  // has changed since the last full sync. Drops steady-state cost from ~16s
-  // (unconditional file copies) to ~8-15ms (`isStale` walks the manifest's
-  // fingerprints, short-circuiting at the first mismatch). Numbers from
-  // scripts/bench-staleness.ts against a real ~50-resource project.
-  if (!selection && !options.force) {
+  // Fast guard: skip the entire sync when the caller requested a full sync and
+  // nothing has changed since the last full sync. Pattern-derived selections
+  // still count as full syncs because they are the persisted intended scope,
+  // not a one-off caller override.
+  if (!userPassedSelection && !options.force) {
     const manifest = loadManifest(agent, version);
     if (manifest && !isStale(manifest, agent, version, cwd)) {
       return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [] };

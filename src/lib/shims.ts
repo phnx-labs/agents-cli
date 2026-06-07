@@ -212,8 +212,11 @@ async function promptConflictStrategy(
  *         instead of hardcoding `.${agent}`. Backwards-compatible for every
  *         existing agent (their configDir is `~/.{agent}`); enables nested
  *         layouts like Antigravity's `~/.gemini/antigravity-cli/`.
+ *   v15 — remove foreground resource sync / rules refresh from launch shims.
+ *         Version homes are reconciled by agents-cli management commands; the
+ *         shim hot path only resolves a version and execs the agent binary.
  */
-export const SHIM_SCHEMA_VERSION = 14;
+export const SHIM_SCHEMA_VERSION = 15;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -276,18 +279,6 @@ export GROK_HOME="$VERSION_DIR/home/.grok"
 `
           : '';
 
-  // Agents that don't natively resolve @-imports in their rules file need
-  // agents-cli to recompile when the user edits a rule/preset file. The
-  // check is fast (sha256 of ~8 small files) and skips the recompile when
-  // sources haven't changed.
-  const refreshRulesCall = !agentConfig.capabilities.rulesImports
-    ? `
-# Recompile rules if any rule/preset source has changed since last sync.
-# Fast-path check (~10-20ms) when nothing changed; full recompile only on
-# actual diff. Non-blocking failure — if the refresh errors, we still launch.
-"$AGENTS_BIN" refresh-rules --agent "$AGENT" --agent-version "$VERSION" --quiet 2>/dev/null || true
-`
-    : '';
   const launchArgs = agent === 'codex' ? ' -c check_for_update_on_startup=false' : '';
 
   return `#!/bin/bash
@@ -340,22 +331,6 @@ resolve_default_version() {
       in_agents && $0 ~ "^  " agent ":" { gsub(/.*:[[:space:]]*["'"'"']?|["'"'"']?[[:space:]]*$/, ""); print; exit }
     ' "$meta"
   fi
-}
-
-# Find project-scoped .agents directory (stop at agents.yaml or .git)
-find_project_agents_dir() {
-  local dir="$PWD"
-  while [ "$dir" != "/" ]; do
-    if [ -d "$dir/.agents" ]; then
-      echo "$dir/.agents"
-      return 0
-    fi
-    if [ -f "$dir/agents.yaml" ] || [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
-      break
-    fi
-    dir=$(dirname "$dir")
-  done
-  return 1
 }
 
 # Find the latest installed version by numeric component comparison.
@@ -509,12 +484,7 @@ if [ ! -x "$BINARY" ]; then
   fi
 fi
 
-# Sync project-scoped resources into version home if a project .agents/ is present
-PROJECT_AGENTS_DIR=$(find_project_agents_dir)
-if [ -n "$PROJECT_AGENTS_DIR" ]; then
-  "$AGENTS_BIN" sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR" --quiet >/dev/null 2>&1
-fi
-${refreshRulesCall}${managedEnv}
+${managedEnv}
 
 exec "$BINARY"${launchArgs} "$@"
 `;

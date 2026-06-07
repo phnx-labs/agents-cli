@@ -370,15 +370,15 @@ describe('shims - generateShimScript', () => {
     expect(script).not.toContain('meta.yaml');
   });
 
-  test('includes project sync hook in shim', () => {
+  test('does not include foreground project sync in shim', () => {
     const script = generateShimScript('claude');
-    expect(script).toContain('find_project_agents_dir');
-    expect(script).toContain('"$AGENTS_BIN" sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR"');
+    expect(script).not.toContain('find_project_agents_dir');
+    expect(script).not.toContain('"$AGENTS_BIN" sync --agent "$AGENT"');
   });
 
-  test('non-@-capable agents get a refresh-rules shim hook', () => {
+  test('non-@-capable agents do not refresh rules on the launch hot path', () => {
     const script = generateShimScript('codex');
-    expect(script).toContain('"$AGENTS_BIN" refresh-rules --agent "$AGENT" --agent-version "$VERSION"');
+    expect(script).not.toContain('"$AGENTS_BIN" refresh-rules --agent "$AGENT"');
   });
 
   test('shim does not use --version flag, which collides with the top-level CLI version flag', () => {

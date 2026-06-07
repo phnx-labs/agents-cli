@@ -84,8 +84,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 14 (configDirName derived from agentConfig.configDir for nested layouts)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(14);
+  it('is 15 (launch shims do not run foreground resource sync)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(15);
   });
 });
 
@@ -204,10 +204,11 @@ describe('generateShimScript', () => {
     expect(script).not.toContain('required by .agents-version');
   });
 
-  it('find_project_agents_dir stops at agents.yaml or .git', () => {
+  it('does not run project resource sync on the launch hot path', () => {
     const script = generateShimScript('claude');
-    expect(script).toContain('[ -f "$dir/agents.yaml" ]');
-    expect(script).not.toContain('[ -f "$dir/.agents-version" ]');
+    expect(script).not.toContain('find_project_agents_dir');
+    expect(script).not.toContain('sync --agent "$AGENT"');
+    expect(script).not.toContain('refresh-rules --agent "$AGENT"');
   });
 
   it('includes find_latest_installed that handles semver and date-based versions', () => {
@@ -240,17 +241,17 @@ describe('generateShimScript', () => {
     expect(script).toContain('read -r _ans </dev/tty');
   });
 
-  it('uses an absolute agents-cli entrypoint for helper calls', () => {
+  it('uses an absolute agents-cli entrypoint for cold-path helper calls only', () => {
     const script = generateShimScript('codex');
     const match = script.match(/^AGENTS_BIN='([^']+)'$/m);
 
     expect(match).not.toBeNull();
     expect(path.isAbsolute(match![1])).toBe(true);
-    expect(script).toContain('"$AGENTS_BIN" refresh-rules --agent "$AGENT" --agent-version "$VERSION"');
     expect(script).toContain('"$AGENTS_BIN" use "$AGENT" "$LATEST"');
     expect(script).toContain('"$AGENTS_BIN" add "$AGENT@$VERSION" --yes');
-    expect(script).toContain('"$AGENTS_BIN" sync --agent "$AGENT" --agent-version "$VERSION" --project-dir "$PROJECT_AGENTS_DIR"');
     expect(script).not.toMatch(/^\s*agents (refresh-rules|use|add|sync)\b/m);
+    expect(script).not.toContain('"$AGENTS_BIN" refresh-rules');
+    expect(script).not.toContain('"$AGENTS_BIN" sync');
   });
 
   it('fails clearly when the embedded agents-cli entrypoint is not executable', () => {
