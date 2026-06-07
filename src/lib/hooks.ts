@@ -791,6 +791,24 @@ type CodexHooksFile = {
  *   only managed hook root. Used by tests to inject a temp path. In normal
  *   operation, both user and system roots are consulted with user precedence.
  */
+/**
+ * Delete shim files for hooks that no longer exist in the manifest.
+ * managedPrefixes already GCs the settings.json entries pointing at orphaned
+ * shims, but the .sh files on disk would otherwise persist forever. Called
+ * once per registerHooksToSettings invocation — cheap (a single readdir).
+ */
+function sweepOrphanShims(manifest: Record<string, ManifestHook>): void {
+  const shimsDir = getHookShimsDir();
+  if (!fs.existsSync(shimsDir)) return;
+  const activeNames = new Set(Object.keys(manifest));
+  for (const file of fs.readdirSync(shimsDir)) {
+    if (!file.endsWith('.sh')) continue;
+    const name = file.slice(0, -3);
+    if (activeNames.has(name)) continue;
+    try { fs.unlinkSync(path.join(shimsDir, file)); } catch { /* best effort */ }
+  }
+}
+
 export function registerHooksToSettings(
   agentId: AgentId,
   versionHome: string,
@@ -801,6 +819,7 @@ export function registerHooksToSettings(
   if (Object.keys(manifest).length === 0) {
     return { registered: [], errors: [] };
   }
+  sweepOrphanShims(manifest);
 
   const overrideRoots = agentsDirOverride ? [agentsDirOverride] : null;
   // Scripts are copied into the version home during sync — prefer that stable

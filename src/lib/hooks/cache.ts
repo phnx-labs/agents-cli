@@ -152,7 +152,13 @@ mkdir -p "$CACHE_DIR" "$LOGS_DIR"
 # Read stdin once (Claude/Codex/Gemini pass JSON on stdin to every hook).
 STDIN_PAYLOAD="$(cat || true)"
 
-# Derive cache key suffix from KEY_MODE.
+# Portable sha1 — \`shasum\` is Perl, missing on minimal Linux images;
+# \`sha1sum\` is coreutils, missing on macOS. Truncate to 12 hex chars.
+sha1_12() { python3 -c 'import hashlib,sys; print(hashlib.sha1(sys.stdin.read().encode()).hexdigest()[:12])'; }
+
+# Derive cache key suffix from KEY_MODE. All untrusted inputs (cwd, session_id,
+# project path) are hashed before going into the filename so a malicious stdin
+# payload can't write outside $CACHE_DIR via path traversal.
 cache_suffix=""
 case "$KEY_MODE" in
   per-cwd)
@@ -160,18 +166,21 @@ case "$KEY_MODE" in
 try: print(json.load(sys.stdin).get("cwd","") or "")
 except Exception: pass' 2>/dev/null || true)"
     [ -z "$cwd_val" ] && cwd_val="$PWD"
-    cache_suffix=".$(printf '%s' "$cwd_val" | shasum -a 1 2>/dev/null | awk '{print substr($1,1,12)}')"
+    cache_suffix=".$(printf '%s' "$cwd_val" | sha1_12)"
     ;;
   per-session)
     sid_val="$(printf '%s' "$STDIN_PAYLOAD" | python3 -c 'import json,sys
 try: print(json.load(sys.stdin).get("session_id","") or "")
 except Exception: pass' 2>/dev/null || true)"
-    [ -n "$sid_val" ] && cache_suffix=".$sid_val"
+    # Hash + fall back to a sentinel so missing-session doesn't silently
+    # collapse to the same file as KEY_MODE=global.
+    [ -z "$sid_val" ] && sid_val="__nosession__"
+    cache_suffix=".$(printf '%s' "$sid_val" | sha1_12)"
     ;;
   per-project)
-    proj_val="$(git -C "\${PWD}" rev-parse --show-toplevel 2>/dev/null || echo "")"
+    proj_val="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || echo "")"
     [ -z "$proj_val" ] && proj_val="$PWD"
-    cache_suffix=".$(printf '%s' "$proj_val" | shasum -a 1 2>/dev/null | awk '{print substr($1,1,12)}')"
+    cache_suffix=".$(printf '%s' "$proj_val" | sha1_12)"
     ;;
   global|*)
     cache_suffix=""
@@ -226,7 +235,7 @@ fi
 END_NS=$(now_ns)
 MS=$(( (END_NS - START_NS) / 1000000 ))
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-LOG_FILE="$LOGS_DIR/events-$(date +%Y-%m-%d).jsonl"
+LOG_FILE="$LOGS_DIR/events-$(date -u +%Y-%m-%d).jsonl"
 printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":%d,"cache":"%s","exit":%d}\\n' \\
   "$TS" "$HOOK_NAME" "$MS" "$CACHE_STATUS" "$EXIT" >>"$LOG_FILE" 2>/dev/null || true
 
