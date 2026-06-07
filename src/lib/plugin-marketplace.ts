@@ -72,6 +72,16 @@ function settingsPath(agent: AgentId, versionHome: string): string {
 /**
  * Copy plugin source into marketplace install dir.
  * Source of truth remains ~/.agents/plugins/<name>/ — this is a per-version snapshot.
+ *
+ * Symlinks pointing OUTSIDE the plugin source root are dropped. They show up
+ * when plugin authors (legitimately) link prompt-side references to sibling
+ * codebases — e.g. the rush plugin's `app -> ../../../rush/app` for @app/...
+ * autocomplete in user prompts. Faithfully copying those symlinks pollutes
+ * the marketplace with gigabytes of node_modules / .next / brand-asset video
+ * that the consumer (Claude Code, OpenClaw) then walks during plugin
+ * discovery — which is the documented cause of multi-minute startup hangs.
+ *
+ * Internal symlinks (target stays inside the plugin root) are preserved.
  */
 export function copyPluginToMarketplace(
   plugin: DiscoveredPlugin,
@@ -83,7 +93,43 @@ export function copyPluginToMarketplace(
   if (fs.existsSync(dest)) {
     fs.rmSync(dest, { recursive: true, force: true });
   }
-  fs.cpSync(plugin.root, dest, { recursive: true, dereference: false });
+
+  const sourceRealRoot = (() => {
+    try { return fs.realpathSync(plugin.root); }
+    catch { return plugin.root; }
+  })();
+  const skipped: string[] = [];
+
+  fs.cpSync(plugin.root, dest, {
+    recursive: true,
+    dereference: false,
+    filter: (src) => {
+      try {
+        const stat = fs.lstatSync(src);
+        if (!stat.isSymbolicLink()) return true;
+        const target = fs.realpathSync(src);
+        if (target === sourceRealRoot || target.startsWith(sourceRealRoot + path.sep)) {
+          return true;
+        }
+        skipped.push(path.relative(plugin.root, src) || path.basename(src));
+        return false;
+      } catch {
+        // Dangling symlink or stat failure — drop it; it can't be useful in
+        // the marketplace and would error the consumer's walk anyway.
+        skipped.push(path.relative(plugin.root, src) || path.basename(src));
+        return false;
+      }
+    },
+  });
+
+  if (skipped.length > 0) {
+    process.stderr.write(
+      `agents-cli: plugin '${plugin.name}' has ${skipped.length} symlink(s) ` +
+      `pointing outside its source root; not copied to marketplace ` +
+      `(would bloat consumer startup): ${skipped.join(', ')}\n`
+    );
+  }
+
   return dest;
 }
 
