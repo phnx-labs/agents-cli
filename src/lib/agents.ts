@@ -73,12 +73,23 @@ function saveCliVersionCache(): void {
   }
 }
 
-/** Synchronous PATH search -- no subprocess. Returns first matching binary path. */
+/**
+ * Synchronous PATH search -- no subprocess. Returns first matching binary path.
+ *
+ * Skips our own shims dir (`~/.agents/.cache/shims/`) — those shims are
+ * dispatch helpers, not real installs. Counting them as installed produced a
+ * false positive where agents with NO real binary on the host (e.g. a
+ * never-installed Cursor whose only PATH entry was our `cursor-agent` shim
+ * dispatcher) showed up under `agents view`'s "Not Managed by Agents CLI"
+ * section, even though the user had nothing to import.
+ */
 function findInPath(command: string): string | null {
   const pathEnv = process.env.PATH || '';
   const pathExt = process.platform === 'win32' ? (process.env.PATHEXT || '').split(';') : [''];
+  const shimsDir = getShimsDir();
   for (const dir of pathEnv.split(path.delimiter)) {
     if (!dir) continue;
+    if (path.resolve(dir) === path.resolve(shimsDir)) continue;
     for (const ext of pathExt) {
       const full = path.join(dir, command + ext);
       try {
