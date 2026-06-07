@@ -170,6 +170,10 @@ export async function launchBrowser(
     '--no-default-browser-check',
     '--disable-features=DefaultBrowserSetting,ChromeWhatsNewUI',
     '--disable-crash-reporter',
+    // Suppress navigator.webdriver = true, which Chromium sets whenever a
+    // remote-debugging transport is active. That property is the loudest
+    // signal Cloudflare Turnstile, hCaptcha, and similar checks read.
+    '--disable-blink-features=AutomationControlled',
     ...(options.headless ? ['--headless=new'] : []),
     `--window-size=${viewport.width},${viewport.height}`,
     ...(viewport.x !== undefined && viewport.y !== undefined

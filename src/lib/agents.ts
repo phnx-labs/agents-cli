@@ -434,7 +434,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     color: 'cyanBright',
     cliCommand: 'grok',
     npmPackage: '',
-    installScript: 'curl -fsSL https://x.ai/cli/install.sh | bash -s VERSION',
+    installScript: 'curl -fsSL https://x.ai/cli/install.sh | bash',
     configDir: path.join(HOME, '.grok'),
     commandsDir: '', // Grok primarily uses skills + slash commands from skills
     commandsSubdir: '',

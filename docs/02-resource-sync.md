@@ -30,8 +30,10 @@ Central `AGENTS.md` maps to agent-specific filenames:
 ~/.agents/rules/AGENTS.md  ───▶  ~/.claude/CLAUDE.md
                             ───▶  ~/.codex/AGENTS.md
                             ───▶  ~/.gemini/GEMINI.md
+                            ───▶  ~/.gemini/antigravity-cli/AGENTS.md
                             ───▶  ~/.cursor/.cursorrules
                             ───▶  ~/.opencode/OPENCODE.md
+                            ───▶  ~/.grok/AGENTS.md
 ```
 
 Symlinks in `~/.agents/rules/`:
@@ -99,14 +101,18 @@ Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
 
 ┌────────────────────┐             Gemini  → <home>/.gemini/settings.json
 │ github.yaml        │                      · key: mcpServers.<name> = {command,args,env}
-│ ───────            │             Cursor  → <home>/.cursor/mcp.json
+│ ───────            │             Agy     → <home>/.gemini/antigravity-cli/mcp_config.json
 │ name: github       │                      · key: mcpServers.<name> = {command,args,env}
-│ transport: stdio   │             Claude  → CLI: `claude mcp add ...`
-│ command: npx ...   │                      (claude owns its own settings)
-│ args: [...]        │             Codex   → CLI: `codex mcp add ...`
-│ env: { ... }       │                      · HTTP transport not supported
-└────────────────────┘             OpenCode → <home>/.config/opencode/config.toml
+│ transport: stdio   │             Cursor  → <home>/.cursor/mcp.json
+│ command: npx ...   │                      · key: mcpServers.<name> = {command,args,env}
+│ args: [...]        │             Claude  → CLI: `claude mcp add ...`
+│ env: { ... }       │                      (claude owns its own settings)
+└────────────────────┘             Codex   → CLI: `codex mcp add ...`
+                                            · HTTP transport not supported
+                                   OpenCode → <home>/.config/opencode/config.toml
                                             · key: mcp.<name> (TOML)
+                                   Grok    → <home>/.grok/config.toml
+                                            · key: mcp_servers.<name> (TOML)
 ```
 
 Behavior rules, per `src/lib/mcp.ts`:

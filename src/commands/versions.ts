@@ -337,7 +337,7 @@ export function registerVersionsCommands(program: Command): void {
         const { agent, version } = parsed;
         const agentConfig = AGENTS[agent];
 
-        if (!agentConfig.npmPackage) {
+        if (!agentConfig.npmPackage && !agentConfig.installScript) {
           console.log(chalk.yellow(`${agentLabel(agentConfig.id)} has no npm package. Install manually.`));
           continue;
         }

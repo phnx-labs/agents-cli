@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.20.2
+
+**Grok and Antigravity Support & Documentation**
+
+- **Grok CLI Integration**: Added support for installing Grok via `agents add grok@<version>`, which invokes the official xAI installer with the specified version. Grok MCP server configuration paths (via `config.toml`) and memory file mapping are now correctly documented.
+- **Antigravity (AGY) CLI Integration**: Added support for the Google Antigravity CLI. Since the AGY installer doesn't support version-pinned installs currently, `agents add agy` uses the `latest` version. Documented the canonical config path `~/.gemini/antigravity-cli/` and its `mcp_config.json`.
+- **Documentation**: Updated `02-resource-sync.md` to reflect accurate MCP mappings and memory file symlinks for both Grok and Antigravity.
+- **Profiles**: Hardened presets with verified 2026 model IDs and added generic proxy configuration. Show custom profiles in agents view.
+
 ## 1.20.1
 
 **Agents selector (auto-install missing versions + unified `@all` everywhere)**

@@ -140,6 +140,7 @@ import {
   type AvailableResources,
   type ResourceSelection,
 } from '../src/lib/versions.js';
+import { AGENTS } from '../src/lib/agents.js';
 
 function installManagedVersion(agent: 'claude' | 'codex', version: string): void {
   const binaryPath = getBinaryPath(agent, version);
@@ -1085,6 +1086,28 @@ describe('installVersion', () => {
     );
 
     expect(fs.existsSync(path.join(AGENTS_DIR, 'versions', 'claude'))).toBe(false);
+  });
+
+  it('runs configured external installers for non-npm agents and creates a version home', async () => {
+    const original = AGENTS.antigravity.installScript;
+    AGENTS.antigravity.installScript = 'true VERSION';
+
+    try {
+      const result = await installVersion('antigravity', '1.2.3');
+
+      expect(result).toEqual({ success: true, installedVersion: '1.2.3' });
+      expect(fs.existsSync(path.join(AGENTS_DIR, 'versions', 'antigravity', '1.2.3', 'home'))).toBe(true);
+    } finally {
+      AGENTS.antigravity.installScript = original;
+    }
+  });
+
+  it('rejects version-pinned external installs when the installer has no version placeholder', async () => {
+    const result = await installVersion('antigravity', '1.2.3');
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('does not support version-pinned installs');
+    expect(fs.existsSync(path.join(AGENTS_DIR, 'versions', 'antigravity'))).toBe(false);
   });
 });
 

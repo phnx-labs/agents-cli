@@ -272,4 +272,95 @@ describe('readMeta merges agents.yaml from both repos', () => {
       codex: '2.0.0',
     });
   });
+
+  it('caches parsed agents.yaml across repeated reads (no re-parse when mtime unchanged)', () => {
+    const moduleUrl = pathToFileURL(modulePath).href;
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'agents:\n  claude: "1.0.0"\n',
+      'utf-8',
+    );
+
+    // Spawn a single process that reads readMeta three times back-to-back AND counts how
+    // many readFileSync calls hit agents.yaml. If the cache works, only the FIRST call
+    // should read the file; subsequent calls should be served from memory.
+    const output = runStateScriptWithNode(testDir, `
+      import fs from 'fs';
+      import path from 'path';
+      import { syncBuiltinESMExports } from 'module';
+
+      const targetUser = path.join(process.env.HOME, '.agents', 'agents.yaml');
+      const targetSystem = path.join(process.env.HOME, '.agents-system', 'agents.yaml');
+      const originalRead = fs.readFileSync;
+      let reads = 0;
+      fs.readFileSync = (file, opts) => {
+        if (file === targetUser || file === targetSystem) reads++;
+        return originalRead(file, opts);
+      };
+      syncBuiltinESMExports();
+
+      const { readMeta } = await import(${JSON.stringify(moduleUrl)});
+      readMeta();
+      const readsAfterFirst = reads;
+      readMeta();
+      readMeta();
+      console.log(JSON.stringify({ readsAfterFirst, readsTotal: reads }));
+    `);
+    const counts = JSON.parse(output) as { readsAfterFirst: number; readsTotal: number };
+
+    // After the first read, the cache should be primed. The next two reads must add zero
+    // new yaml file reads against either source path.
+    expect(counts.readsTotal).toBe(counts.readsAfterFirst);
+    expect(counts.readsAfterFirst).toBeGreaterThan(0);
+  });
+
+  it('invalidates the cache when writeMeta runs', () => {
+    const moduleUrl = pathToFileURL(modulePath).href;
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'agents:\n  claude: "1.0.0"\n',
+      'utf-8',
+    );
+
+    const output = runStateScriptWithNode(testDir, `
+      import { readMeta, writeMeta } from ${JSON.stringify(moduleUrl)};
+      const before = readMeta();
+      writeMeta({ ...before, agents: { ...before.agents, claude: '9.9.9' } });
+      const after = readMeta();
+      console.log(JSON.stringify({ before: before.agents?.claude, after: after.agents?.claude }));
+    `);
+    const result = JSON.parse(output) as { before: string; after: string };
+
+    expect(result.before).toBe('1.0.0');
+    expect(result.after).toBe('9.9.9');
+  });
+
+  it('refreshes the cache when agents.yaml is modified out-of-band', () => {
+    const moduleUrl = pathToFileURL(modulePath).href;
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'agents:\n  claude: "1.0.0"\n',
+      'utf-8',
+    );
+
+    const output = runStateScriptWithNode(testDir, `
+      import fs from 'fs';
+      import path from 'path';
+      import { readMeta } from ${JSON.stringify(moduleUrl)};
+
+      const target = path.join(process.env.HOME, '.agents', 'agents.yaml');
+      const before = readMeta();
+
+      // Wait long enough for the mtime to definitely advance (HFS+ mtime is per-second).
+      await new Promise((r) => setTimeout(r, 1100));
+      fs.writeFileSync(target, 'agents:\\n  claude: "2.0.0"\\n', 'utf-8');
+
+      const after = readMeta();
+      console.log(JSON.stringify({ before: before.agents?.claude, after: after.agents?.claude }));
+    `);
+    const result = JSON.parse(output) as { before: string; after: string };
+
+    expect(result.before).toBe('1.0.0');
+    expect(result.after).toBe('2.0.0');
+  });
 });

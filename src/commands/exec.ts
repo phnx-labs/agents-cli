@@ -8,37 +8,13 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import {
-  buildExecCommand,
-  parseExecEnv,
-  execAgent,
-  runWithFallback,
-  AGENT_COMMANDS,
-  normalizeMode,
-  resolveMode,
-  type ExecOptions,
-  type ExecMode,
-  type ExecEffort,
-  type FallbackEntry,
-} from '../lib/exec.js';
+import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
 import type { AgentId } from '../lib/types.js';
-import { profileExists, resolveProfileForRun } from '../lib/profiles.js';
 import { setHelpSections } from '../lib/help.js';
-import { readAndResolveBundleEnv, describeBundle } from '../lib/secrets/bundles.js';
-import {
-  getConfiguredRunStrategy,
-  normalizeRunStrategy,
-  resolveRunVersion,
-  RUN_STRATEGIES,
-  type RotateResult,
-} from '../lib/rotate.js';
-import { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
-import { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion } from '../lib/plugins.js';
-import { parseWorkflowFrontmatter, resolveWorkflowRef } from '../lib/workflows.js';
+import type { RotateResult } from '../lib/rotate.js';
+import { AGENTS } from '../lib/agents.js';
 import * as fs from 'fs';
 import * as path from 'path';
-
-const VALID_AGENTS = Object.keys(AGENT_COMMANDS);
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -64,7 +40,7 @@ interface ExecCommandActionOptions {
 
 /** Type guard that narrows a string to a known AgentId. */
 function isValidAgent(agent: string): agent is AgentId {
-  return VALID_AGENTS.includes(agent);
+  return agent in AGENTS;
 }
 
 /** Build a one-line banner describing which version the strategy picked. */
@@ -171,6 +147,27 @@ export function registerRunCommand(program: Command): void {
   });
 
   runCmd.action(async (agentSpec: string, prompt: string | undefined, options: ExecCommandActionOptions) => {
+      const [
+        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode },
+        { ALL_AGENT_IDS },
+        { profileExists, resolveProfileForRun },
+        { readAndResolveBundleEnv, describeBundle },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
+        { getGlobalDefault, getVersionHomePath, resolveVersionAlias },
+        { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
+        { parseWorkflowFrontmatter, resolveWorkflowRef },
+      ] = await Promise.all([
+        import('../lib/exec.js'),
+        import('../lib/agents.js'),
+        import('../lib/profiles.js'),
+        import('../lib/secrets/bundles.js'),
+        import('../lib/rotate.js'),
+        import('../lib/versions.js'),
+        import('../lib/plugins.js'),
+        import('../lib/workflows.js'),
+      ]);
+      const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);
+
       // Parse agent@version
       const [rawAgent, rawVersion] = agentSpec.split('@');
       let agent: AgentId;
@@ -282,7 +279,7 @@ export function registerRunCommand(program: Command): void {
         process.stderr.write(chalk.gray(`Workflow '${rawAgent}' → claude (${subagentCount} subagents)\n`));
       } else {
         console.error(chalk.red(`Unknown agent: ${rawAgent}`));
-        console.error(chalk.gray(`Available agents: ${VALID_AGENTS.join(', ')}`));
+        console.error(chalk.gray(`Available agents: ${ALL_AGENT_IDS.join(', ')}`));
         console.error(chalk.gray(`Or add a profile: agents profiles add <name>`));
         process.exit(1);
       }
@@ -431,7 +428,7 @@ export function registerRunCommand(program: Command): void {
           const [fbAgent, fbVersion] = entry.split('@');
           if (!isValidAgent(fbAgent)) {
             console.error(chalk.red(`Unknown fallback agent: ${fbAgent}`));
-            console.error(chalk.gray(`Available: ${VALID_AGENTS.join(', ')}`));
+            console.error(chalk.gray(`Available: ${ALL_AGENT_IDS.join(', ')}`));
             process.exit(1);
           }
           if (fbAgent === agent) {

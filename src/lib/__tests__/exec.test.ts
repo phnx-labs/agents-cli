@@ -167,6 +167,18 @@ describe('buildExecCommand', () => {
       expect(cmd).toContain('--autopilot');
     });
 
+    it('grok plan produces --permission-mode plan', () => {
+      const cmd = buildExecCommand(opts({ agent: 'grok', mode: 'plan' }));
+      expect(cmd).toContain('--permission-mode');
+      expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('plan');
+      expect(cmd).not.toContain('--mode');
+    });
+
+    it('grok skip produces --always-approve', () => {
+      const cmd = buildExecCommand(opts({ agent: 'grok', mode: 'skip' }));
+      expect(cmd).toContain('--always-approve');
+    });
+
     it('copilot uses -p (not positional) for the prompt', () => {
       const cmd = buildExecCommand(opts({ agent: 'copilot', prompt: 'do the thing', mode: 'edit' }));
       const idx = cmd.indexOf('-p');
@@ -216,6 +228,11 @@ describe('buildExecCommand', () => {
     it('gemini headless adds nothing', () => {
       const cmd = buildExecCommand(opts({ agent: 'gemini', headless: true }));
       expect(cmd).not.toContain('--print');
+    });
+
+    it('antigravity headless prompts use --print before the prompt', () => {
+      const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit', headless: true }));
+      expect(cmd).toEqual(['agy', '--print', 'do the thing']);
     });
   });
 

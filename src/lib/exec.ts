@@ -348,16 +348,15 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
       edit: [],
       skip: ['--dangerously-skip-permissions'],
     },
+    printFlags: ['--print'],
     modelFlag: '--model',
   },
   grok: {
     base: ['grok'],
     promptFlag: '-p',
     modeFlags: {
-      // grok defaults to plan mode; --permission-mode <MODE> exists in --help
-      // (modes not enumerated). Preserve historical --mode plan behavior until
-      // someone with a working grok install can verify the canonical spelling.
-      plan: ['--mode', 'plan'],
+      // grok --help lists `--permission-mode plan`; the TUI defaults to ask.
+      plan: ['--permission-mode', 'plan'],
       edit: [],
       skip: ['--always-approve'],
     },

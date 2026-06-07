@@ -2115,6 +2115,26 @@ export class BrowserService {
       targetId: tabId,
       flatten: true,
     })) as { sessionId: string };
+
+    // Inject a one-shot stealth shim before any page script runs. Chromium
+    // unconditionally exposes navigator.webdriver = true when a remote-debug
+    // transport is attached; Cloudflare Turnstile, hCaptcha, and similar bot
+    // checks read that property first. For browsers agents-cli spawns the
+    // --disable-blink-features=AutomationControlled launch flag already
+    // covers this, but for attach-to-running profiles (the Comet / Arc /
+    // Brave case where the user launched the browser themselves) the flag
+    // is unavailable — Page.addScriptToEvaluateOnNewDocument is the only
+    // lever. Non-page targets (workers, service workers) will reject these
+    // calls; we swallow the error and keep going.
+    try {
+      await conn.cdp.send('Page.enable', {}, sessionId);
+      await conn.cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});",
+      }, sessionId);
+    } catch {
+      // Target doesn't support Page domain — nothing to inject.
+    }
+
     conn.sessionCache.set(tabId, sessionId);
     return sessionId;
   }

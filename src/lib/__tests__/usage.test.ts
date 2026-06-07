@@ -1,14 +1,16 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AccountInfo } from '../agents.js';
+import * as state from '../state.js';
 import {
   buildCanonicalUsageContext,
   formatUsageSummary,
   formatUsageStatusBadge,
   getClaudeKeychainService,
+  getUsageInfoForIdentity,
   readClaudeUsageCache,
   isClaudeUsageOrgMatch,
   writeClaudeUsageCache,
@@ -215,6 +217,79 @@ describe('Claude usage cache', () => {
       expect(cached?.windows.map((window) => window.shortLabel)).toEqual(['S', 'W']);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('SWR: fresh cache (<2 min) is returned with no network call', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-swr-'));
+    const realFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls++;
+      throw new Error('fetch must not be called on fresh cache');
+    }) as typeof globalThis.fetch;
+    vi.spyOn(state, 'getCacheDir').mockReturnValue(tmpDir);
+
+    try {
+      const snapshot: UsageSnapshot = {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(Date.now() - 30_000), // 30 s old — fresh.
+        windows: [
+          { key: 'session', label: 'S', shortLabel: 'S', usedPercent: 10, resetsAt: null, windowMinutes: 300 },
+        ],
+      };
+      writeClaudeUsageCache('claude:org=swr-fresh', snapshot);
+
+      const result = await getUsageInfoForIdentity({
+        agentId: 'claude',
+        info: makeAccountInfo({ usageKey: 'claude:org=swr-fresh' }),
+      });
+
+      expect(result.error).toBeNull();
+      expect(result.snapshot?.windows[0]?.usedPercent).toBe(10);
+      expect(fetchCalls).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+      vi.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('SWR: stale cache (>2 min, <24 h) returns the cached snapshot instantly', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-swr-'));
+    vi.spyOn(state, 'getCacheDir').mockReturnValue(tmpDir);
+
+    try {
+      const snapshot: UsageSnapshot = {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(Date.now() - 5 * 60 * 1000), // 5 min old — stale but within SWR.
+        windows: [
+          { key: 'session', label: 'S', shortLabel: 'S', usedPercent: 42, resetsAt: null, windowMinutes: 300 },
+        ],
+      };
+      writeClaudeUsageCache('claude:org=swr-stale', snapshot);
+
+      const t0 = Date.now();
+      const result = await getUsageInfoForIdentity({
+        agentId: 'claude',
+        info: makeAccountInfo({ usageKey: 'claude:org=swr-stale' }),
+      });
+      const elapsedMs = Date.now() - t0;
+
+      // The foreground must NOT block on any I/O — not network, not the
+      // synchronous `security` CLI call that loadClaudeOauth makes under
+      // the hood. The fix is that triggerBackgroundUsageRefresh defers its
+      // entire body to setImmediate, so the caller returns before any of
+      // that runs. 100 ms is a generous ceiling for the in-process cache
+      // read + serialization.
+      expect(elapsedMs).toBeLessThan(100);
+      expect(result.error).toBeNull();
+      expect(result.snapshot?.windows[0]?.usedPercent).toBe(42);
+    } finally {
+      vi.restoreAllMocks();
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 

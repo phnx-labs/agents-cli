@@ -488,6 +488,26 @@ export function createDefaultMeta(): Meta {
 let metaCache: { mtime: number; meta: Meta } | null = null;
 let metaLockDepth = 0;
 
+/** Return mtimeMs for a file path, or 0 if the file is absent or unreadable. */
+function safeMtimeMs(filePath: string): number {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** Compute the combined cache stamp for the user + system agents.yaml files. */
+function currentMetaStamp(): number {
+  return safeMtimeMs(META_FILE) + safeMtimeMs(SYSTEM_META_FILE) * 1e-3;
+}
+
+/** Memoize a parsed Meta against the current file mtimes. */
+function rememberMeta(meta: Meta): Meta {
+  metaCache = { mtime: currentMetaStamp(), meta };
+  return meta;
+}
+
 function withMetaLock<T>(fn: () => T): T {
   ensureAgentsDir();
   if (metaLockDepth > 0) {
@@ -556,9 +576,30 @@ function migrateSystemMetaToUser(): void {
   }
 }
 
-/** Read and cache ~/.agents/agents.yaml, migrating from legacy locations if needed. */
+/**
+ * Read and cache ~/.agents/agents.yaml, migrating from legacy locations if needed.
+ *
+ * Cache invariants:
+ * - Cache key is the mtime of the user agents.yaml.
+ * - `writeMetaUnlocked` clears the cache; in-process callers always see fresh state.
+ * - If the file is mutated by ANOTHER process while we hold a stale cache, the
+ *   mtime check below catches it on the next read (assuming the mtime advanced).
+ * - The cache stores the merged system+user meta; both files' mtimes contribute.
+ */
 export function readMeta(): Meta {
   ensureAgentsDir();
+
+  // Fast path: serve from cache when both source files are byte-identical to
+  // what we last parsed. Reduces N readMeta calls per CLI invocation to ~2 stat
+  // syscalls plus an in-memory object spread.
+  if (metaCache) {
+    const userMtime = safeMtimeMs(META_FILE);
+    const systemMtime = safeMtimeMs(SYSTEM_META_FILE);
+    const stamp = userMtime + systemMtime * 1e-3;
+    if (stamp === metaCache.mtime) {
+      return metaCache.meta;
+    }
+  }
 
   // NOTE: agents.yaml migration from ~/.agents-system/ to ~/.agents/ is handled
   // exclusively by runMigration() in migrate.ts, called from postinstall and
@@ -590,7 +631,7 @@ export function readMeta(): Meta {
 
       writeMeta(meta);
       try { fs.unlinkSync(oldMetaFile); } catch { /* non-critical */ }
-      return meta;
+      return rememberMeta(meta);
     } catch {
       /* meta.yaml migration failed */
     }
@@ -634,16 +675,16 @@ export function readMeta(): Meta {
 
     if (applyRegistrySeeds(meta)) {
       writeMeta(meta);
-      return meta;
+      return rememberMeta(meta);
     }
-    return meta;
+    return rememberMeta(meta);
   }
 
   const meta = createDefaultMeta();
   if (applyRegistrySeeds(meta)) {
     writeMeta(meta);
   }
-  return meta;
+  return rememberMeta(meta);
 }
 
 /** Serialize and write agents.yaml to the user repo, invalidating the in-memory cache. */

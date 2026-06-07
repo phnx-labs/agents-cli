@@ -23,6 +23,7 @@ import type {
 import { getPermissionsDir, getUserPermissionsDir, ensureAgentsDir } from './state.js';
 import { safeJoin } from './paths.js';
 import { AGENTS } from './agents.js';
+import { updateGeminiSettings } from './gemini-settings.js';
 
 const HOME = os.homedir();
 
@@ -31,7 +32,7 @@ const HOME = os.homedir();
 // `permissions: { allow: [...], deny: [...] }`. Serializer is a follow-up.
 // grok: permissions via --allow/--deny CLI flags or [permission] block in
 // ~/.grok/config.toml. Serializer is a follow-up.
-export const PERMISSIONS_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'antigravity', 'grok'];
+export const PERMISSIONS_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'opencode', 'antigravity', 'grok', 'gemini'];
 
 /** Filename used for Codex Starlark deny-rules generated from permission groups. */
 export const CODEX_RULES_FILENAME = 'agents-deny.rules';
@@ -468,6 +469,34 @@ function parseCanonicalPattern(permission: string): { tool: string; pattern: str
 
 /** Blanket-Bash canonical forms that mean "allow any bash command". */
 const BLANKET_BASH_FORMS = new Set(['Bash', 'Bash(*)', 'Bash(**)']);
+
+/**
+ * Convert canonical permission set to Gemini format.
+ * Gemini reads tool allow-lists from settings.json under `tools.allowed`.
+ * Bash permissions map to run_shell_command(prefix) — the prefix is extracted
+ * from the canonical "Bash(cmd:*)" pattern by stripping the trailing ":*".
+ * Blanket Bash grants map to bare "run_shell_command" (no prefix filter).
+ * Non-Bash tool patterns are skipped; Gemini uses different tool names.
+ */
+export function convertToGeminiFormat(set: PermissionSet): { tools: { allowed: string[] } } {
+  const allowed = new Set<string>();
+  for (const perm of set.allow) {
+    if (BLANKET_BASH_FORMS.has(perm)) {
+      allowed.add('run_shell_command');
+      continue;
+    }
+    const parsed = parseCanonicalPattern(perm);
+    if (!parsed || parsed.tool !== 'bash') continue;
+    const colonIdx = parsed.pattern.lastIndexOf(':');
+    const prefix = colonIdx > 0 ? parsed.pattern.slice(0, colonIdx) : parsed.pattern;
+    if (prefix === '*' || prefix === '**') {
+      allowed.add('run_shell_command');
+    } else {
+      allowed.add(`run_shell_command(${prefix})`);
+    }
+  }
+  return { tools: { allowed: Array.from(allowed) } };
+}
 
 /**
  * Convert canonical permission set to OpenCode format.
@@ -1032,6 +1061,26 @@ export function applyPermissionsToVersion(
         }
       }
 
+      return { success: true };
+    }
+
+    if (agentId === 'gemini') {
+      const geminiPerms = convertToGeminiFormat(set);
+      const settingsPath = path.join(versionHome, '.gemini', 'settings.json');
+      updateGeminiSettings(settingsPath, (settings) => {
+        // Remove stale permissions key written by earlier versions of this serializer.
+        delete (settings as Record<string, unknown>).permissions;
+        const tools = (typeof settings.tools === 'object' && settings.tools !== null && !Array.isArray(settings.tools))
+          ? settings.tools as Record<string, unknown>
+          : {};
+        if (merge) {
+          const existing = Array.isArray(tools.allowed) ? (tools.allowed as string[]) : [];
+          tools.allowed = Array.from(new Set([...existing, ...geminiPerms.tools.allowed]));
+        } else {
+          tools.allowed = geminiPerms.tools.allowed;
+        }
+        settings.tools = tools;
+      });
       return { success: true };
     }
 

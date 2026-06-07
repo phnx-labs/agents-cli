@@ -248,46 +248,102 @@ export async function getUsageInfoByIdentity(inputs: UsageIdentityInput[]): Prom
   };
 }
 
-const USAGE_CACHE_FRESH_MS = 2 * 60 * 1000; // 2 minutes
+const USAGE_CACHE_FRESH_MS = 2 * 60 * 1000; // 2 minutes — fresh window: don't refresh.
+const USAGE_CACHE_SWR_MS = 24 * 60 * 60 * 1000; // 24 hours — beyond this, block on live fetch.
+
+/** In-process dedup: don't fire concurrent background refreshes for the same identity. */
+const inFlightRefreshes = new Map<string, Promise<void>>();
 
 /**
- * Fetch usage for a single identity, with a 2-minute cache fast path.
- * Falls back to cached data when the live fetch fails.
+ * Fetch usage for a single identity using stale-while-revalidate.
+ *
+ * - Cache fresh (< 2 min): return cached snapshot, NO network.
+ * - Cache stale but < 24h: return cached snapshot instantly, fire background refresh.
+ * - Cache too stale or absent: block on live fetch, fall back to cache on error.
+ *
+ * This keeps `agents run` startup off the network on the hot path. The first
+ * invocation after a cold install or 24h gap still blocks once to seed the
+ * cache; every run after that returns instantly while the cache silently
+ * refreshes in the background.
  */
 export async function getUsageInfoForIdentity(input: UsageIdentityInput): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
 
-  // Fast path: serve from cache if fresh. Skips the network call entirely.
-  if (input.agentId === 'claude' && usageKey) {
-    const cached = readClaudeUsageCache(usageKey);
-    if (cached?.capturedAt) {
-      const ageMs = Date.now() - cached.capturedAt.getTime();
-      if (ageMs < USAGE_CACHE_FRESH_MS) {
-        return { snapshot: cached, error: null };
-      }
-    }
+  // Non-Claude or no identity: legacy path, blocking fetch.
+  if (input.agentId !== 'claude' || !usageKey) {
+    return getUsageInfo(input.agentId, {
+      home: input.home,
+      cliVersion: input.cliVersion,
+      organizationId: input.info.organizationId,
+    });
   }
 
-  // Cache miss or stale -- make the network call.
+  const cached = readClaudeUsageCache(usageKey);
+  const ageMs = cached?.capturedAt ? Date.now() - cached.capturedAt.getTime() : Infinity;
+
+  // Fresh: cache is recent enough, skip network entirely.
+  if (cached && ageMs < USAGE_CACHE_FRESH_MS) {
+    return { snapshot: cached, error: null };
+  }
+
+  // Stale-while-revalidate: cache exists and isn't ancient, return it now and
+  // refresh in the background so the next invocation has fresh data.
+  if (cached && ageMs < USAGE_CACHE_SWR_MS) {
+    triggerBackgroundUsageRefresh(input, usageKey);
+    return { snapshot: cached, error: null };
+  }
+
+  // Cold cache or > 24h old: block on live fetch.
   const usage = await getUsageInfo(input.agentId, {
     home: input.home,
     cliVersion: input.cliVersion,
     organizationId: input.info.organizationId,
   });
-  if (input.agentId !== 'claude' || !usageKey) {
-    return usage;
-  }
 
   if (usage.snapshot?.source === 'live') {
     writeClaudeUsageCache(usageKey, usage.snapshot);
     return usage;
   }
 
-  const cached = readClaudeUsageCache(usageKey);
+  // Live fetch failed — last-resort fallback to whatever cache we had.
   if (cached) {
     return { snapshot: cached, error: usage.error };
   }
   return usage;
+}
+
+/**
+ * Kick off a background refresh of the usage cache. Errors are swallowed —
+ * a failed background refresh leaves the existing cache in place for the
+ * next invocation. The work is deferred to a future event-loop tick via
+ * `setImmediate` because some of the call chain (loadClaudeOauth →
+ * getKeychainToken → execFileSync) does synchronous I/O even though the
+ * functions are declared `async`. Without the defer, that sync I/O blocks
+ * the SWR caller and defeats the whole point of returning the cache instantly.
+ */
+function triggerBackgroundUsageRefresh(input: UsageIdentityInput, usageKey: string): void {
+  if (inFlightRefreshes.has(usageKey)) return;
+
+  const promise = new Promise<void>((resolve) => {
+    setImmediate(async () => {
+      try {
+        const usage = await getUsageInfo(input.agentId, {
+          home: input.home,
+          cliVersion: input.cliVersion,
+          organizationId: input.info.organizationId,
+        });
+        if (usage.snapshot?.source === 'live') {
+          writeClaudeUsageCache(usageKey, usage.snapshot);
+        }
+      } catch {
+        /* background refresh failed — leave existing cache in place */
+      } finally {
+        inFlightRefreshes.delete(usageKey);
+        resolve();
+      }
+    });
+  });
+  inFlightRefreshes.set(usageKey, promise);
 }
 
 /** Format a one-line usage summary with compact bars for inline display. */
