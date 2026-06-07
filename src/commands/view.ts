@@ -536,6 +536,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       }
       if (agent.npmPackage && cliState?.version) {
         console.log(chalk.gray(`    Manage: agents add ${agentId}@${cliState.version} -y`));
+      } else if (!agent.npmPackage && cliState?.installed) {
+        // installScript-based agent already on PATH — direct users to adopt the
+        // existing install with `agents import` instead of re-running curl.
+        console.log(chalk.gray(`    Adopt:  agents import ${agentId}`));
       }
       console.log();
     }

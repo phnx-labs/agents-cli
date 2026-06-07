@@ -550,8 +550,16 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
     version = null;
   }
 
-  cache[agentId] = { binaryPath, mtime, version };
-  saveCliVersionCache();
+  // Skip persisting null results — the most common cause is a transient
+  // `--version` failure (slow startup, stdout race, etc.). A sticky-null
+  // entry kept users in a broken state where every subsequent
+  // `getCachedVersionForBinary` short-circuited to null forever, even
+  // after the binary started working. Re-probing on the next call costs
+  // one execFile; persisting null costs the whole feature.
+  if (version !== null) {
+    cache[agentId] = { binaryPath, mtime, version };
+    saveCliVersionCache();
+  }
   return version;
 }
 

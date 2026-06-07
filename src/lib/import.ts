@@ -18,6 +18,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import type { AgentId } from './types.js';
 import { AGENTS } from './agents.js';
@@ -64,14 +65,19 @@ export async function importAgentConfig(
   const configDir = agent.configDir;
   const versionsDir = getVersionsDir();
   const versionHome = path.join(versionsDir, agentId, version, 'home');
-  const versionConfigDir = path.join(versionHome, `.${agentId}`);
+  // Match the shim's derivation in generateShimScript: the per-version config
+  // path mirrors the original configDir's path relative to $HOME. Hardcoding
+  // `.${agentId}` broke for nested configDirs like Antigravity
+  // (`~/.gemini/antigravity-cli`) — the destination would be `.antigravity`,
+  // mismatching the shim's expectation of `.gemini/antigravity-cli`.
+  const versionConfigDir = path.join(versionHome, path.relative(os.homedir(), configDir));
 
   if (fs.existsSync(versionConfigDir)) {
     return { success: false, skipped: true, error: `${version} already installed` };
   }
 
   try {
-    fs.mkdirSync(versionHome, { recursive: true });
+    fs.mkdirSync(path.dirname(versionConfigDir), { recursive: true });
     fs.renameSync(configDir, versionConfigDir);
     fs.symlinkSync(versionConfigDir, configDir);
     setGlobalDefault(agentId, version);
@@ -206,6 +212,70 @@ export function importAgentBinary(
     fs.symlinkSync(binaryTarget, binaryLink);
 
     return { success: true, resolvedFromPath: globalPath };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Register an existing installScript-based binary (Grok, Antigravity, Cursor,
+ * etc. — anything with `npmPackage: ''` and a curl/brew installer) under the
+ * managed version path. Unlike `importAgentBinary` this skips the npm
+ * package.json walk and just symlinks the resolved PATH binary directly into
+ * `{versionDir}/node_modules/.bin/{cliCommand}`. The symlink is what makes
+ * `listInstalledVersions` consider the version Managed.
+ *
+ * Layout produced:
+ *
+ *   {versionDir}/
+ *     package.json                              # marker (private, imported, from)
+ *     home/                                     # empty isolated $HOME
+ *     node_modules/.bin/{cliCommand} -> {binaryPath}
+ *
+ * For agents whose binary lookup is special-cased elsewhere (e.g. Grok's
+ * `~/.grok/downloads/`), the symlink is still created — `getBinaryPath` won't
+ * read it for those agents, but it documents provenance and lets a future
+ * refactor consolidate the binary-resolution registry.
+ */
+export function importInstallScriptBinary(
+  spec: AgentBinarySpec,
+  version: string,
+  binaryPath: string,
+  versionDir: string
+): ImportBinaryResult {
+  const binaryLink = path.join(versionDir, 'node_modules', '.bin', spec.cliCommand);
+
+  let alreadyExists = false;
+  try {
+    fs.lstatSync(binaryLink);
+    alreadyExists = true;
+  } catch {
+    /* not present */
+  }
+  if (alreadyExists) {
+    return { success: false, skipped: true, error: `${version} already installed`, resolvedFromPath: binaryPath };
+  }
+
+  if (!fs.existsSync(binaryPath)) {
+    return { success: false, error: `Binary does not exist: ${binaryPath}` };
+  }
+
+  try {
+    fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
+    fs.mkdirSync(path.join(versionDir, 'node_modules', '.bin'), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(versionDir, 'package.json'),
+      JSON.stringify(
+        { name: `agents-${spec.agentId}-${version}`, version: '1.0.0', private: true, imported: true, from: binaryPath, installScriptBased: true },
+        null,
+        2
+      )
+    );
+
+    fs.symlinkSync(binaryPath, binaryLink);
+
+    return { success: true, resolvedFromPath: binaryPath };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }

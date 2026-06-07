@@ -25,6 +25,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { confirm } from '@inquirer/prompts';
 
@@ -36,6 +37,7 @@ import {
   finalizeImport,
   importAgentBinary,
   importAgentConfig,
+  importInstallScriptBinary,
   isValidImportVersion,
   resolvePackageDirFromBinary,
 } from '../lib/import.js';
@@ -60,16 +62,14 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   const agentId = agentArg;
   const agent = AGENTS[agentId];
 
-  // Reject agents that don't ship via npm before we spin up PATH lookups and
-  // prompts. cursor/kiro/goose/roo all have npmPackage='' and use custom
-  // install scripts — the symlink-farm import doesn't apply to them.
-  if (!agent.npmPackage) {
-    console.error(chalk.red(`${agentLabel(agentId)} doesn't install via npm — \`agents import\` only handles npm-style packages.`));
-    console.error(chalk.gray(`Use \`agents add ${agentId}\` to install via its native script.`));
-    process.exit(1);
-  }
+  // installScript-based agents (Grok, Antigravity, Cursor, Kiro, Goose, Roo)
+  // don't have an npm package; their binary lives wherever the curl/brew
+  // installer dropped it. We adopt by symlinking that PATH binary directly
+  // into the version's `node_modules/.bin/`. No package.json walk.
+  const isInstallScriptAgent = !agent.npmPackage;
 
   let globalPath: string | null = null;
+  let installScriptBinary: string | null = null;
 
   if (opts.fromPath) {
     globalPath = path.resolve(opts.fromPath);
@@ -77,38 +77,78 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
       console.error(chalk.red(`Path does not exist: ${globalPath}`));
       process.exit(1);
     }
+    if (isInstallScriptAgent) {
+      // With --from-path on an installScript agent, the path is the binary
+      // itself (or a directory containing it). Accept either.
+      if (fs.statSync(globalPath).isDirectory()) {
+        const candidate = path.join(globalPath, agent.cliCommand);
+        if (!fs.existsSync(candidate)) {
+          console.error(chalk.red(`No "${agent.cliCommand}" in ${globalPath}`));
+          process.exit(1);
+        }
+        installScriptBinary = candidate;
+      } else {
+        installScriptBinary = globalPath;
+      }
+    }
   } else {
     const binary = await getCliPath(agentId);
     if (!binary) {
-      // Use || (not ??) so empty-string npmPackage falls back to cliCommand.
-      // Defensive: agents with empty npmPackage are rejected above, but keep
-      // the operator correct in case that early check is ever relaxed.
-      const installName = agent.npmPackage || agent.cliCommand;
+      const installHint = isInstallScriptAgent
+        ? `Run \`agents add ${agentId}\` to install via the official script, or pass --from-path.`
+        : `Install it first (e.g. \`npm i -g ${agent.npmPackage || agent.cliCommand}\`) or pass --from-path.`;
       console.error(chalk.red(`No "${agent.cliCommand}" found on PATH.`));
-      console.error(chalk.gray(`Install it first (e.g. \`npm i -g ${installName}\`) or pass --from-path.`));
+      console.error(chalk.gray(installHint));
       process.exit(1);
     }
-    globalPath = resolvePackageDirFromBinary(binary);
-    if (!globalPath) {
-      console.error(chalk.red(`Could not resolve npm package for binary: ${binary}`));
-      console.error(chalk.gray('Pass --from-path <dir> with the package directory explicitly.'));
-      process.exit(1);
+    if (isInstallScriptAgent) {
+      installScriptBinary = binary;
+    } else {
+      globalPath = resolvePackageDirFromBinary(binary);
+      if (!globalPath) {
+        console.error(chalk.red(`Could not resolve npm package for binary: ${binary}`));
+        console.error(chalk.gray('Pass --from-path <dir> with the package directory explicitly.'));
+        process.exit(1);
+      }
+    }
+  }
+
+  // For Grok, the binary on PATH is typically `~/.grok/bin/grok` (a moving
+  // pointer to the latest install). Prefer the exact versioned file in
+  // `~/.grok/downloads/` so the v<x.y.z> alias is pinned to that file and
+  // doesn't drift when the user upgrades externally.
+  if (isInstallScriptAgent && agentId === 'grok' && !opts.fromPath) {
+    const detected = await getCliVersion(agentId);
+    if (detected) {
+      const downloads = path.join(os.homedir(), '.grok', 'downloads');
+      try {
+        const entries = fs.readdirSync(downloads);
+        const exact = entries.find((e) => e.startsWith('grok-') && e.includes(detected));
+        if (exact) {
+          installScriptBinary = path.join(downloads, exact);
+        }
+      } catch {
+        /* fall back to PATH binary already set above */
+      }
     }
   }
 
   let version = opts.version;
   if (!version) {
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(globalPath, 'package.json'), 'utf8'));
-      version = typeof pkg.version === 'string' ? pkg.version : undefined;
-    } catch {
-      /* fall through */
+    if (!isInstallScriptAgent && globalPath) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(globalPath, 'package.json'), 'utf8'));
+        version = typeof pkg.version === 'string' ? pkg.version : undefined;
+      } catch {
+        /* fall through */
+      }
     }
     // Only fall back to running the PATH binary's --version when we're
-    // auto-detecting. With --from-path, the PATH binary may belong to a
-    // different install entirely; reporting its version here would silently
-    // mis-attribute the imported version.
-    if (!version && !opts.fromPath) {
+    // auto-detecting. With --from-path on an npm agent, the PATH binary may
+    // belong to a different install entirely; reporting its version here
+    // would silently mis-attribute the imported version. installScript agents
+    // always use `<bin> --version` since they have no package.json to read.
+    if (!version && (isInstallScriptAgent || !opts.fromPath)) {
       const detected = await getCliVersion(agentId);
       version = detected ?? undefined;
     }
@@ -126,9 +166,10 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   }
 
   const versionDir = getVersionDir(agentId, version);
+  const fromLabel = isInstallScriptAgent ? (installScriptBinary as string) : (globalPath as string);
 
   console.log(chalk.bold(`\nImport ${agentLabel(agentId)} v${version}`));
-  console.log(`  from: ${chalk.gray(globalPath)}`);
+  console.log(`  from: ${chalk.gray(fromLabel)}`);
   console.log(`  into: ${chalk.gray(versionDir)}`);
 
   const configDirExists = fs.existsSync(agent.configDir);
@@ -169,7 +210,8 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
     const cfgSpinner = ora(`Importing config dir for ${agentLabel(agentId)} v${version}...`).start();
     const cfgResult = await importAgentConfig(agentId, version);
     if (cfgResult.success) {
-      cfgSpinner.succeed(`Config imported (${agent.configDir} -> ${versionDir}/home/.${agentId})`);
+      const relConfig = path.relative(os.homedir(), agent.configDir);
+      cfgSpinner.succeed(`Config imported (${agent.configDir} -> ${versionDir}/home/${relConfig})`);
     } else if (cfgResult.skipped) {
       cfgSpinner.warn(`Config: ${cfgResult.error}`);
     } else {
@@ -179,14 +221,21 @@ async function runImport(agentArg: string, opts: ImportOptions): Promise<void> {
   }
 
   const binSpinner = ora(`Registering ${agentLabel(agentId)} v${version} binary...`).start();
-  const binResult = importAgentBinary(
-    { agentId, npmPackage: agent.npmPackage, cliCommand: agent.cliCommand },
-    version,
-    globalPath,
-    versionDir
-  );
+  const binResult = isInstallScriptAgent
+    ? importInstallScriptBinary(
+        { agentId, npmPackage: agent.npmPackage, cliCommand: agent.cliCommand },
+        version,
+        installScriptBinary as string,
+        versionDir
+      )
+    : importAgentBinary(
+        { agentId, npmPackage: agent.npmPackage, cliCommand: agent.cliCommand },
+        version,
+        globalPath as string,
+        versionDir
+      );
   if (binResult.success) {
-    binSpinner.succeed(`Binary registered (${agent.cliCommand} -> ${globalPath})`);
+    binSpinner.succeed(`Binary registered (${agent.cliCommand} -> ${binResult.resolvedFromPath})`);
   } else if (binResult.skipped) {
     binSpinner.warn(`Binary: ${binResult.error}`);
   } else {
@@ -225,11 +274,19 @@ Examples:
   $ agents import openclaw --version 2026.3.8       Pin a version label
   $ agents import openclaw --from-path /opt/homebrew/lib/node_modules/openclaw
 
+  # installScript-based agents (curl/brew installers, no npm package):
+  $ agents import grok                              Adopt ~/.grok/downloads/grok-<ver>
+  $ agents import antigravity                       Adopt ~/.local/bin/agy
+  $ agents import cursor                            Adopt ~/.local/bin/cursor-agent
+  $ agents import antigravity --from-path ~/.local/bin/agy
+
 When to use:
-  When an agent CLI is already installed globally via npm or homebrew and you
-  want to bring it under agents-cli management without reinstalling. Creates a
-  symlink farm pointing at the existing install — nothing is copied or moved
-  (except the agent's config dir, which is moved into the version's home).
+  When an agent CLI is already installed globally and you want to bring it
+  under agents-cli management without reinstalling. Creates a symlink farm
+  pointing at the existing install — nothing is copied or moved (except the
+  agent's config dir, which is moved into the version's home). Works for both
+  npm-style packages (claude, codex, gemini, opencode, openclaw) and
+  installScript-based agents (grok, antigravity, cursor, kiro, goose, roo).
 `)
     .action(runImport);
 }

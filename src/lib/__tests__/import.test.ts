@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { resolvePackageDirFromBinary, importAgentBinary } from '../import.js';
+import { resolvePackageDirFromBinary, importAgentBinary, importInstallScriptBinary } from '../import.js';
 
 const OPENCLAW_SPEC = { agentId: 'openclaw', npmPackage: 'openclaw', cliCommand: 'openclaw' };
 
@@ -187,5 +187,74 @@ describe('importAgentBinary', () => {
 
     const managedBinary = path.join(versionDir, 'node_modules', '.bin', 'openclaw');
     expect(fs.realpathSync(managedBinary)).toBe(fs.realpathSync(binarySource));
+  });
+});
+
+describe('importInstallScriptBinary', () => {
+  let tmp: string;
+  let versionDir: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-import-installscript-'));
+    versionDir = path.join(tmp, '.agents', '.history', 'versions', 'antigravity', '1.0.6');
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const ANTIGRAVITY_SPEC = { agentId: 'antigravity', npmPackage: '', cliCommand: 'agy' };
+
+  function makeFakeInstallScriptBinary(): string {
+    // Mirror `curl ... install.sh` landing the binary at ~/.local/bin/agy.
+    const localBin = path.join(tmp, '.local', 'bin');
+    fs.mkdirSync(localBin, { recursive: true });
+    const binaryPath = path.join(localBin, 'agy');
+    fs.writeFileSync(binaryPath, '#!/usr/bin/env bash\necho "fake agy"\n');
+    fs.chmodSync(binaryPath, 0o755);
+    return binaryPath;
+  }
+
+  it('symlinks the PATH binary into node_modules/.bin and writes a marker', () => {
+    const binaryPath = makeFakeInstallScriptBinary();
+
+    const result = importInstallScriptBinary(ANTIGRAVITY_SPEC, '1.0.6', binaryPath, versionDir);
+    expect(result.success).toBe(true);
+    expect(result.resolvedFromPath).toBe(binaryPath);
+
+    const managedBinary = path.join(versionDir, 'node_modules', '.bin', 'agy');
+    expect(fs.lstatSync(managedBinary).isSymbolicLink()).toBe(true);
+    expect(fs.realpathSync(managedBinary)).toBe(fs.realpathSync(binaryPath));
+
+    // Marker package.json records provenance + installScript origin.
+    const marker = JSON.parse(fs.readFileSync(path.join(versionDir, 'package.json'), 'utf8'));
+    expect(marker.imported).toBe(true);
+    expect(marker.installScriptBased).toBe(true);
+    expect(marker.from).toBe(binaryPath);
+
+    // Isolated home is created.
+    expect(fs.existsSync(path.join(versionDir, 'home'))).toBe(true);
+  });
+
+  it('returns skipped=true on a second import of the same version', () => {
+    const binaryPath = makeFakeInstallScriptBinary();
+    const first = importInstallScriptBinary(ANTIGRAVITY_SPEC, '1.0.6', binaryPath, versionDir);
+    expect(first.success).toBe(true);
+
+    const second = importInstallScriptBinary(ANTIGRAVITY_SPEC, '1.0.6', binaryPath, versionDir);
+    expect(second.success).toBe(false);
+    expect(second.skipped).toBe(true);
+    expect(second.error).toMatch(/already installed/);
+  });
+
+  it('fails cleanly when the binary path does not exist', () => {
+    const result = importInstallScriptBinary(
+      ANTIGRAVITY_SPEC,
+      '1.0.6',
+      path.join(tmp, 'does-not-exist'),
+      versionDir
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Binary does not exist/);
   });
 });

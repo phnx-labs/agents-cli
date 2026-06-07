@@ -32,6 +32,7 @@ import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersi
 import { installMcpServers, parseMcpServerConfig } from './mcp.js';
 import { markdownToToml } from './convert.js';
 import { createVersionedAlias, removeVersionedAlias, switchConfigSymlink, getConfigSymlinkVersion, ensureClaudeInsideSymlink } from './shims.js';
+import { importInstallScriptBinary } from './import.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw, SUBAGENT_CAPABLE_AGENTS } from './subagents.js';
 import { WORKFLOW_CAPABLE_AGENTS, listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks.js';
@@ -1270,6 +1271,32 @@ export async function installVersion(
     const versionDir = getVersionDir(agent, installedVersion);
     fs.mkdirSync(versionDir, { recursive: true });
     fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
+
+    // Symlink the installed binary into the version's node_modules/.bin so
+    // listInstalledVersions (which checks getBinaryPath) sees this version as
+    // installed. Without this, `agents add antigravity@latest` succeeds
+    // but `agents view` shows the agent under "Not Managed" because
+    // listInstalledVersions returns [] — the installer drops the binary in
+    // ~/.local/bin (or similar) rather than the version's node_modules/.bin.
+    // Grok is special-cased in getBinaryPath itself (binary lives in
+    // ~/.grok/downloads), so we skip the symlink there.
+    if (agent !== 'grok') {
+      try {
+        const { stdout: whichOut } = await execFileAsync('which', [agentConfig.cliCommand]);
+        const installedBinary = whichOut.trim();
+        if (installedBinary && fs.existsSync(installedBinary)) {
+          importInstallScriptBinary(
+            { agentId: agent, npmPackage: agentConfig.npmPackage, cliCommand: agentConfig.cliCommand },
+            installedVersion,
+            installedBinary,
+            versionDir
+          );
+        }
+      } catch {
+        /* binary missing from PATH — install script failed silently; surface via the existing version.install error path below isn't possible here since the script returned 0. Leave the version dir empty so getBinaryPath check correctly reports it uninstalled. */
+      }
+    }
+
     createVersionedAlias(agent, installedVersion);
     emit('version.install', { agent, version: installedVersion });
     return { success: true, installedVersion };
