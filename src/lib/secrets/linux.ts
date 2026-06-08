@@ -377,6 +377,35 @@ export function deleteSecretToolToken(item: string): boolean {
 }
 
 /**
+ * Parse the item names out of `secret-tool search --all` output, keeping only
+ * those starting with `prefix`. Exported for tests.
+ *
+ * `output` must be the combined stdout+stderr of the search: libsecret splits
+ * the dump across both streams — the value/label/schema lines go to stdout
+ * while the `attribute.*` lines (which carry `attribute.item`, the only place
+ * the item name is reliably machine-readable) go to stderr (observed on
+ * libsecret 0.21.4). Which stream each line lands on has varied across
+ * libsecret versions, so callers concatenate both rather than bet on one.
+ */
+export function parseSecretToolItems(output: string, prefix: string): string[] {
+  const items: string[] = [];
+  // Parse output format:
+  // [/org/freedesktop/secrets/collection/login/1]
+  // label = agents-cli: myitem
+  // ...
+  // attribute.item = myitem
+  const itemRegex = /attribute\.item\s*=\s*(.+)/g;
+  let match;
+  while ((match = itemRegex.exec(output)) !== null) {
+    const itemName = match[1].trim();
+    if (itemName.startsWith(prefix)) {
+      items.push(itemName);
+    }
+  }
+  return [...new Set(items)]; // dedupe
+}
+
+/**
  * List secrets by prefix. secret-tool doesn't have a list command,
  * so we use secret-tool search which outputs in a specific format.
  */
@@ -397,24 +426,8 @@ export function listSecretToolItems(prefix: string): string[] {
     return [];
   }
 
-  const output = result.stdout?.toString() || '';
-  const items: string[] = [];
-
-  // Parse output format:
-  // [/org/freedesktop/secrets/collection/login/1]
-  // label = agents-cli: myitem
-  // ...
-  // attribute.item = myitem
-  const itemRegex = /attribute\.item\s*=\s*(.+)/g;
-  let match;
-  while ((match = itemRegex.exec(output)) !== null) {
-    const itemName = match[1].trim();
-    if (itemName.startsWith(prefix)) {
-      items.push(itemName);
-    }
-  }
-
-  return [...new Set(items)]; // dedupe
+  const output = `${result.stdout?.toString() || ''}\n${result.stderr?.toString() || ''}`;
+  return parseSecretToolItems(output, prefix);
 }
 
 /** KeychainBackend implementation for Linux. Routes through secret-tool
