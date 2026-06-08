@@ -1,0 +1,7 @@
+version: 1
+agents:
+  - id: prix/code-reviewer
+    on:
+      pull_request:
+        types: [opened, reopened, synchronize]
+        branches: [main]
