@@ -590,7 +590,7 @@ export interface BrowserProfileConfig {
   logHost?: string;
 }
 
-/** Options controlling which agents and resources are synced during `agents pull` / `agents use`. */
+/** Options controlling which agents and resources are synced during `agents repo refresh` / `agents use`. */
 export interface SyncOptions {
   agents?: AgentId[];
   yes?: boolean;

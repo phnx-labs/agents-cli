@@ -246,10 +246,10 @@ export function registerSetupCommand(program: Command): void {
     notes: `
       What it does:
         1. Clones the system repo into ~/.agents/.system/
-        2. Installs agent CLIs based on agents.yaml in that repo
-        3. Syncs commands, skills, hooks, and MCP servers to each version
+        2. Imports any unmanaged agent installations it finds
 
-      Non-interactive alternative: agents pull
+      To install CLIs from agents.yaml and sync resources into version homes:
+        agents repo refresh -y
     `,
   });
 

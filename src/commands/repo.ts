@@ -49,7 +49,9 @@ import {
 } from '../lib/state.js';
 import { parseSource, pullRepo, commitAndPush, isGitRepo, isSystemRepoOrigin } from '../lib/git.js';
 import { DEFAULT_SYSTEM_REPO } from '../lib/types.js';
-import type { ExtraRepoConfig } from '../lib/types.js';
+import type { AgentId, ExtraRepoConfig } from '../lib/types.js';
+import { ALL_AGENT_IDS, isAgentName, resolveAgentName } from '../lib/agents.js';
+import { refresh } from '../lib/refresh.js';
 
 const ALIAS_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
@@ -66,17 +68,6 @@ function deriveAlias(source: string): string {
   // Strip leading dots and any "agents-" prefix so the alias is short and
   // becomes ~/.agents-<alias>/ on disk (e.g. ".agents-work" -> "work").
   return base.replace(/^\.+/, '').replace(/^agents-/, '') || 'repo';
-}
-
-/** Get the last commit short hash for a repo, or null if unavailable. */
-async function getShortCommit(repoDir: string): Promise<string | null> {
-  try {
-    const git = simpleGit(repoDir);
-    const log = await git.log({ maxCount: 1 });
-    return log.latest?.hash.slice(0, 8) || null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -100,6 +91,89 @@ function formatDirtyCounts(status: {
   if (status.conflicted.length) parts.push(chalk.magenta(`U:${status.conflicted.length}`));
   if (status.not_added.length) parts.push(chalk.gray(`?:${status.not_added.length}`));
   return parts.join(' ');
+}
+
+/** Visible character width of a string with embedded ANSI color codes. */
+function visibleWidth(s: string): number {
+  return s.replace(/\[[0-9;]*m/g, '').length;
+}
+
+/** Pad string with trailing spaces to a target visible column width. */
+function padVisible(s: string, width: number): string {
+  return s + ' '.repeat(Math.max(0, width - visibleWidth(s)));
+}
+
+/**
+ * Render one row of the unified repo table: alias / branch / ahead-behind /
+ * dirty counts / url+commit. Used by `agents repo list` and the hidden
+ * `agents repo status` alias.
+ */
+async function renderRepoRow(t: RepoTarget): Promise<string> {
+  const aliasCol = chalk.cyan(t.alias.padEnd(12));
+
+  if (!fs.existsSync(t.dir)) {
+    return `  ${aliasCol} ${chalk.red('missing')} ${chalk.gray(t.dir)}`;
+  }
+  if (!isGitRepo(t.dir)) {
+    return `  ${aliasCol} ${chalk.gray('local (no git remote)')} ${chalk.gray(t.dir)}`;
+  }
+
+  try {
+    const git = simpleGit(t.dir);
+    const status = await git.status();
+    const branch = status.tracking || status.current || '(detached)';
+
+    const inSync = (status.ahead ?? 0) === 0 && (status.behind ?? 0) === 0;
+    const remoteRaw = inSync ? 'in sync' : `+${status.ahead ?? 0} -${status.behind ?? 0}`;
+    const remoteColored = inSync ? chalk.green(remoteRaw) : chalk.yellow(remoteRaw);
+    const remotePad = ' '.repeat(Math.max(0, 12 - remoteRaw.length));
+
+    const tree = status.isClean() ? chalk.green('clean') : formatDirtyCounts(status);
+
+    const remotes = await git.getRemotes(true);
+    const origin = remotes.find((r) => r.name === 'origin');
+    const url = origin?.refs?.fetch || '';
+    const commit = (await git.log({ maxCount: 1 })).latest?.hash.slice(0, 8) || '';
+    const tail = url
+      ? chalk.gray(`${url}${commit ? ` (${commit})` : ''}`)
+      : commit
+        ? chalk.gray(`(${commit})`)
+        : '';
+
+    return `  ${aliasCol} ${branch.padEnd(28)}  ${remoteColored}${remotePad}  ${padVisible(tree, 14)}  ${tail}`;
+  } catch (err) {
+    return `  ${aliasCol} ${chalk.red('error')} ${(err as Error).message}`;
+  }
+}
+
+/**
+ * Shared action body for `agents repo list` and the hidden `agents repo status`
+ * alias. Prints a unified table: alias, branch, ahead/behind, dirty counts,
+ * remote URL and short commit hash.
+ */
+async function listRepos(alias: string | undefined): Promise<void> {
+  const targets = collectRepoTargets(alias);
+  if (!targets) {
+    process.exitCode = 1;
+    return;
+  }
+  if (targets.length === 0) {
+    console.log(chalk.gray('No repos to show.'));
+    return;
+  }
+  console.log('');
+  console.log(
+    `  ${chalk.gray('REPO'.padEnd(12))} ${chalk.gray('BRANCH'.padEnd(28))}  ${chalk.gray('REMOTE'.padEnd(12))}  ${chalk.gray('LOCAL'.padEnd(14))}  ${chalk.gray('URL')}`,
+  );
+  for (const t of targets) {
+    console.log(await renderRepoRow(t));
+  }
+
+  const userDir = getUserAgentsDir();
+  if (!isGitRepo(userDir) && fs.existsSync(userDir)) {
+    console.log(chalk.gray('\n  user repo has no git remote — scaffold one with: agents repo init'));
+  }
+  console.log('');
 }
 
 /** Register the `agents repo` command tree. */
@@ -295,78 +369,11 @@ export function registerRepoCommands(program: Command): void {
     });
 
   repoCmd
-    .command('list')
+    .command('list [alias]')
     .alias('ls')
-    .description('Show all repos: system, user, and any registered extras')
-    .action(async () => {
-      const meta = readMeta();
-      console.log('');
-
-      // System repo
-      const systemUrl = meta.source || DEFAULT_SYSTEM_REPO;
-      const systemDir = getSystemAgentsDir();
-      const systemOnDisk = fs.existsSync(systemDir);
-      const systemIsGit = systemOnDisk && isGitRepo(systemDir);
-      const systemCommit = systemIsGit ? await getShortCommit(systemDir) : null;
-      const systemStatus = !systemOnDisk
-        ? chalk.red('missing')
-        : !systemIsGit
-          ? chalk.yellow('not a git repo — run: agents setup')
-          : chalk.green('cloned');
-      const systemCommitLabel = systemCommit ? chalk.gray(`(${systemCommit})`) : '';
-      console.log(chalk.bold('System  (~/.agents/.system/)'));
-      console.log(`  ${chalk.cyan('system'.padEnd(12))}  ${systemUrl}  ${systemStatus}  ${systemCommitLabel}`);
-
-      // User repo
-      const userDir = getUserAgentsDir();
-      const userOnDisk = fs.existsSync(userDir);
-      const userIsGit = userOnDisk && isGitRepo(userDir);
-      const userCommit = userIsGit ? await getShortCommit(userDir) : null;
-      let userRemoteUrl = '';
-      if (userIsGit) {
-        try {
-          const git = simpleGit(userDir);
-          const remotes = await git.getRemotes(true);
-          const origin = remotes.find(r => r.name === 'origin');
-          userRemoteUrl = origin?.refs?.fetch || '';
-        } catch { /* no remote */ }
-      }
-      const userStatus = !userOnDisk
-        ? chalk.gray('not created')
-        : !userIsGit
-          ? chalk.gray('local (no remote)')
-          : chalk.green('cloned');
-      const userCommitLabel = userCommit ? chalk.gray(`(${userCommit})`) : '';
-      console.log(chalk.bold('\nUser  (~/.agents/)'));
-      console.log(`  ${chalk.cyan('user'.padEnd(12))}  ${userRemoteUrl || '~/.agents/'}  ${userStatus}  ${userCommitLabel}`);
-      if (!userIsGit) {
-        console.log(chalk.gray(`  ${''.padEnd(12)}  scaffold one with: agents repo init`));
-      }
-
-      // Extra repos
-      const extras = meta.extraRepos || {};
-      const aliases = Object.keys(extras);
-      console.log(chalk.bold('\nExtras:'));
-      if (aliases.length === 0) {
-        console.log(chalk.gray('  (none — add one with `agents repo add <source>`)\n'));
-        return;
-      }
-
-      for (const alias of aliases) {
-        const config = extras[alias];
-        const dir = resolveExtraRepoDir(alias, config);
-        const onDisk = fs.existsSync(dir);
-        const commit = onDisk ? await getShortCommit(dir) : null;
-
-        const status = !config.enabled
-          ? chalk.yellow('disabled')
-          : !onDisk
-            ? chalk.red('missing')
-            : chalk.green('enabled');
-        const commitLabel = commit ? chalk.gray(`(${commit})`) : '';
-        console.log(`  ${chalk.cyan(alias.padEnd(12))}  ${config.url}  ${status}  ${commitLabel}`);
-      }
-      console.log('');
+    .description('Show all repos: branch, ahead/behind, dirty counts, URL, commit.')
+    .action(async (alias: string | undefined) => {
+      await listRepos(alias);
     });
 
   repoCmd
@@ -535,47 +542,43 @@ export function registerRepoCommands(program: Command): void {
     });
 
   repoCmd
-    .command('status [alias]')
-    .description('Per-repo summary: branch, ahead/behind upstream, working-tree state')
+    .command('refresh [agent]')
+    .description('Re-materialize resources into installed agent version homes. No git, no network.')
+    .option('-y, --yes', 'Auto-sync everything without prompting')
+    .option('--skip-clis', 'Skip CLI version install/upgrade from agents.yaml')
+    .action(async (arg: string | undefined, options: { yes?: boolean; skipClis?: boolean }) => {
+      let agentFilter: AgentId | undefined;
+      if (arg) {
+        if (!isAgentName(arg)) {
+          console.log(chalk.red(`Unknown agent "${arg}".`));
+          console.log(chalk.gray(`Available: ${ALL_AGENT_IDS.join(', ')}`));
+          process.exitCode = 1;
+          return;
+        }
+        agentFilter = resolveAgentName(arg)!;
+      }
+      try {
+        await refresh({
+          agentFilter,
+          skipPrompts: options.yes,
+          skipClis: options.skipClis,
+        });
+        console.log(chalk.green('\nRefresh complete'));
+      } catch (err) {
+        if (isPromptCancelled(err)) {
+          console.log(chalk.yellow('\nCancelled'));
+          return;
+        }
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  repoCmd
+    .command('status [alias]', { hidden: true })
+    .description('Alias of `list` (kept for muscle memory).')
     .action(async (alias: string | undefined) => {
-      const targets = collectRepoTargets(alias) || [];
-      if (targets.length === 0) {
-        console.log(chalk.gray('No git repos found.'));
-        return;
-      }
-      console.log('');
-      console.log(`  ${chalk.gray('REPO'.padEnd(12))} ${chalk.gray('BRANCH'.padEnd(28))}  ${chalk.gray('REMOTE'.padEnd(12))}  ${chalk.gray('LOCAL')}`);
-      for (const t of targets) {
-        if (!fs.existsSync(t.dir)) {
-          console.log(`  ${chalk.cyan(t.alias.padEnd(12))} ${chalk.red('missing')} ${chalk.gray(t.dir)}`);
-          continue;
-        }
-        if (!isGitRepo(t.dir)) {
-          console.log(`  ${chalk.cyan(t.alias.padEnd(12))} ${chalk.gray('not a git repo')} ${chalk.gray(t.dir)}`);
-          continue;
-        }
-        try {
-          const git = simpleGit(t.dir);
-          const status = await git.status();
-          const branch = status.tracking || status.current || '(detached)';
-          const remoteRaw =
-            (status.ahead ?? 0) === 0 && (status.behind ?? 0) === 0
-              ? 'in sync'
-              : `+${status.ahead ?? 0} -${status.behind ?? 0}`;
-          const remoteColored =
-            (status.ahead ?? 0) === 0 && (status.behind ?? 0) === 0
-              ? chalk.green(remoteRaw)
-              : chalk.yellow(remoteRaw);
-          const tree = status.isClean()
-            ? chalk.green('clean')
-            : formatDirtyCounts(status);
-          const remotePad = ' '.repeat(Math.max(0, 12 - remoteRaw.length));
-          console.log(`  ${chalk.cyan(t.alias.padEnd(12))} ${branch.padEnd(28)}  ${remoteColored}${remotePad}  ${tree}`);
-        } catch (err) {
-          console.log(`  ${chalk.cyan(t.alias.padEnd(12))} ${chalk.red('error')} ${(err as Error).message}`);
-        }
-      }
-      console.log('');
+      await listRepos(alias);
     });
 }
 
