@@ -74,14 +74,14 @@ describe('buildJobCommand', () => {
       expect(cmd).toContain('hello');
     });
 
-    it('adds --full-auto in edit mode', () => {
+    it('adds --dangerously-bypass-approvals-and-sandbox in edit mode', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'edit' }), 'hello');
-      expect(cmd).toContain('--full-auto');
+      expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
-    it('does not add --full-auto in plan mode', () => {
+    it('does not add bypass flag in plan mode', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'plan' }), 'hello');
-      expect(cmd).not.toContain('--full-auto');
+      expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
     it('adds --model flag when config.model is set', () => {

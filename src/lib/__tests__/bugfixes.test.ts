@@ -9,15 +9,26 @@ import { cleanOrphanedPluginSkills } from '../plugins.js';
 describe('Bug Fix: Path traversal in sandbox.ts', () => {
   let overlayHome: string;
   let allowedDir: string;
+  let fakeHome: string;
+  let originalHome: string | undefined;
 
   beforeEach(() => {
+    // Point HOME at an isolated tmpdir so the test never touches the real home.
+    // sandbox.ts resolves the user's home via os.homedir(), which consults $HOME.
+    originalHome = process.env.HOME;
+    fakeHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-fakehome-')));
+    process.env.HOME = fakeHome;
+
     overlayHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-test-'));
-    allowedDir = fs.mkdtempSync(path.join(os.homedir(), '.agents-system', 'agents-cli-sandbox-allowed-'));
+    fs.mkdirSync(path.join(fakeHome, '.agents-system'), { recursive: true });
+    allowedDir = fs.mkdtempSync(path.join(fakeHome, '.agents-system', 'agents-cli-sandbox-allowed-'));
   });
 
   afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
     fs.rmSync(overlayHome, { recursive: true, force: true });
-    fs.rmSync(allowedDir, { recursive: true, force: true });
+    fs.rmSync(fakeHome, { recursive: true, force: true });
   });
 
   it('should block path traversal via .. components', () => {
