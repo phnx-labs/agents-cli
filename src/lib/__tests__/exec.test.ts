@@ -528,6 +528,26 @@ describe('buildExecCommand', () => {
       expect(cmd[0]).toBe('codex@0.98.0');
       expect(cmd[1]).toBe('exec');
     });
+
+    it('resolves to absolute shim path when the shim exists on disk (closes #196)', async () => {
+      // Linux installs without ~/.agents/.cache/shims on PATH would otherwise
+      // spawn the bare versioned name and fail with ENOENT.
+      const fs = await import('fs');
+      const path = await import('path');
+      const { getShimsDir } = await import('../state.js');
+      const shimsDir = getShimsDir();
+      fs.mkdirSync(shimsDir, { recursive: true });
+      const fakeShim = path.join(shimsDir, 'claude@9.9.9-test');
+      const preexisted = fs.existsSync(fakeShim);
+      if (!preexisted) fs.writeFileSync(fakeShim, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      try {
+        const cmd = buildExecCommand(opts({ agent: 'claude', version: '9.9.9-test', mode: 'skip' }));
+        expect(cmd[0]).toBe(fakeShim);
+        expect(path.isAbsolute(cmd[0])).toBe(true);
+      } finally {
+        if (!preexisted) fs.rmSync(fakeShim, { force: true });
+      }
+    });
   });
 
   // --- Snapshot: agent-runner.sh patterns ---

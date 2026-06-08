@@ -6,6 +6,7 @@
  */
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
+import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
@@ -15,6 +16,7 @@ import { getVersionHomePath, isVersionInstalled, resolveVersion } from './versio
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
+import { getShimsDir } from './state.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -394,9 +396,14 @@ export function buildExecCommand(options: ExecOptions): string[] {
     cmd.splice(1, 1);
   }
 
-  // Use versioned alias if a specific version was requested (e.g., claude@2.1.98)
+  // Use versioned alias if a specific version was requested (e.g., claude@2.1.98).
+  // Resolve to the absolute path of the shim so spawn doesn't depend on PATH —
+  // on Linux installs where the shims dir isn't on PATH, spawning the bare
+  // versioned name fails with ENOENT even though `agents view` shows the agent.
   if (options.version && cmd.length > 0) {
-    cmd[0] = `${cmd[0]}@${options.version}`;
+    const versionedName = `${cmd[0]}@${options.version}`;
+    const absPath = path.join(getShimsDir(), versionedName);
+    cmd[0] = fs.existsSync(absPath) ? absPath : versionedName;
   }
 
   // Add reasoning effort flags (before mode flags for codex -c positioning)
