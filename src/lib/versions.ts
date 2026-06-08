@@ -925,7 +925,7 @@ export async function getLatestNpmVersion(agent: AgentId): Promise<string | null
   if (!agentConfig.npmPackage) return null;
 
   try {
-    const { stdout } = await execFileAsync('npm', ['view', agentConfig.npmPackage, 'version']);
+    const { stdout } = await execFileAsync('npm', ['view', agentConfig.npmPackage, 'version'], { shell: process.platform === 'win32' });
     return stdout.trim();
   } catch {
     return null;
@@ -1078,8 +1078,8 @@ export async function installVersion(
     // ~/.grok/downloads), so we skip the symlink there.
     if (agent !== 'grok') {
       try {
-        const { stdout: whichOut } = await execFileAsync('which', [agentConfig.cliCommand]);
-        const installedBinary = whichOut.trim();
+        const { stdout: whichOut } = await execFileAsync(process.platform === 'win32' ? 'where' : 'which', [agentConfig.cliCommand]);
+        const installedBinary = whichOut.trim().split('\n')[0];
         if (installedBinary && fs.existsSync(installedBinary)) {
           importInstallScriptBinary(
             { agentId: agent, npmPackage: agentConfig.npmPackage, cliCommand: agentConfig.cliCommand },
@@ -1120,8 +1120,9 @@ export async function installVersion(
 
   try {
     // Check npm is available
+    const winShell = process.platform === 'win32';
     try {
-      await execFileAsync('which', ['npm']);
+      await execFileAsync('npm', ['--version'], { shell: winShell });
     } catch {
       return {
         success: false,
@@ -1131,7 +1132,7 @@ export async function installVersion(
     }
 
     onProgress?.(`Installing ${packageSpec}...`);
-    const { stdout } = await execFileAsync('npm', ['install', packageSpec], { cwd: versionDir });
+    const { stdout } = await execFileAsync('npm', ['install', packageSpec], { cwd: versionDir, shell: winShell });
 
     // Determine the actual installed version
     let installedVersion = version;
@@ -1462,8 +1463,7 @@ export async function getInstalledVersion(agent: AgentId, version: string): Prom
 async function getCliVersionFromPath(agent: AgentId): Promise<string | null> {
   const agentConfig = AGENTS[agent];
   try {
-    await execFileAsync('which', [agentConfig.cliCommand]);
-    const { stdout } = await execFileAsync(agentConfig.cliCommand, ['--version'], { timeout: 3000 });
+    const { stdout } = await execFileAsync(agentConfig.cliCommand, ['--version'], { timeout: 3000, shell: process.platform === 'win32' });
     const match = stdout.match(/(\d+\.\d+\.\d+)/);
     return match ? match[1] : null;
   } catch {

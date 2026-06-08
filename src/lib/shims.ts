@@ -819,7 +819,7 @@ export async function switchConfigSymlink(
       // Different target - update it
       fs.unlinkSync(configPath);
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.symlinkSync(versionConfigPath, configPath);
+      fs.symlinkSync(versionConfigPath, configPath, process.platform === 'win32' ? 'junction' : undefined);
       return { success: true };
     } else if (stat.isDirectory()) {
       // Real directory exists - backup and replace with symlink
@@ -852,7 +852,7 @@ export async function switchConfigSymlink(
       }
 
       // Create symlink (parent already exists since the dir we just moved was here)
-      fs.symlinkSync(versionConfigPath, configPath);
+      fs.symlinkSync(versionConfigPath, configPath, process.platform === 'win32' ? 'junction' : undefined);
 
       return { success: true, backupPath: finalBackupPath };
     } else {
@@ -864,7 +864,7 @@ export async function switchConfigSymlink(
       // For nested layouts (e.g., ~/.gemini/antigravity-cli) the parent dir
       // may also be missing if the parent agent (Gemini) is not installed.
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
-      fs.symlinkSync(versionConfigPath, configPath);
+      fs.symlinkSync(versionConfigPath, configPath, process.platform === 'win32' ? 'junction' : undefined);
       return { success: true };
     }
     return { success: false, error: (err as Error).message };
