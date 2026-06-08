@@ -112,7 +112,7 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
       // Check git is available
       try {
         const { execSync } = await import('child_process');
-        execSync('which git', { stdio: 'ignore' });
+        execSync('git --version', { stdio: 'ignore' });
       } catch {
         spinner.fail('git is not installed');
         console.log(chalk.gray('Install git first: https://git-scm.com/downloads'));

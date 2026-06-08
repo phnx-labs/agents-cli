@@ -35,7 +35,12 @@ function installGithooksSymlinks(repoDir: string): void {
     if (fs.lstatSync(dest, { throwIfNoEntry: false })) {
       fs.rmSync(dest);
     }
-    fs.symlinkSync(target, dest);
+    try {
+      fs.symlinkSync(target, dest);
+    } catch (err) {
+      // Windows requires Developer Mode or elevated privileges for symlinks; skip gracefully.
+      if ((err as NodeJS.ErrnoException).code !== 'EPERM') throw err;
+    }
   }
 }
 
