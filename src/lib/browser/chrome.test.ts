@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const presentPaths = new Set<string>();
 
@@ -11,7 +14,7 @@ vi.mock('fs', async () => {
   };
 });
 
-import { findFirstInstalledBrowser } from './chrome.js';
+import { findFirstInstalledBrowser, resolveBrowserBinary } from './chrome.js';
 
 describe('findFirstInstalledBrowser', () => {
   beforeEach(() => {
@@ -69,5 +72,82 @@ describe('findFirstInstalledBrowser', () => {
   it('returns null on unsupported platforms', () => {
     expect(findFirstInstalledBrowser('aix')).toBeNull();
     expect(findFirstInstalledBrowser('freebsd')).toBeNull();
+  });
+});
+
+// resolveBrowserBinary only does work on Linux, where distro launchers are
+// shell wrappers around the real ELF. The `head -c2` read, realpath, and
+// readFileSync below all hit the actual filesystem (existsSync is the only
+// mocked fs call), so these are gated to Linux hosts.
+describe.skipIf(os.platform() !== 'linux')('resolveBrowserBinary', () => {
+  // The upstream Chromium wrapper, verbatim down to the launch line — this is
+  // exactly what Debian/Ubuntu ship at /usr/bin/{brave-browser,google-chrome}.
+  const WRAPPER = [
+    '#!/bin/bash',
+    'export CHROME_WRAPPER="`readlink -f "$0"`"',
+    'HERE="`dirname "$CHROME_WRAPPER"`"',
+    'exec < /dev/null',
+    'exec > >(exec cat)',
+    'exec 2> >(exec cat >&2)',
+    '"$HERE/brave" "$@" || true',
+    '',
+  ].join('\n');
+  // ELF magic so the byte-sniff classifies it as a real binary, not a script.
+  const ELF = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]);
+
+  let dir: string;
+
+  beforeEach(() => {
+    presentPaths.clear();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-'));
+  });
+
+  function realFsPaths(...names: string[]) {
+    // existsSync is mocked to consult presentPaths, so register the real ELF
+    // for the resolver's final fs.existsSync(realBinary) guard.
+    for (const n of names) presentPaths.add(path.join(dir, n));
+  }
+
+  it('follows a Chromium wrapper script to the real ELF next to it', () => {
+    fs.writeFileSync(path.join(dir, 'brave-browser'), WRAPPER);
+    fs.writeFileSync(path.join(dir, 'brave'), ELF);
+    realFsPaths('brave');
+
+    expect(resolveBrowserBinary(path.join(dir, 'brave-browser'))).toBe(
+      path.join(dir, 'brave')
+    );
+  });
+
+  it('also handles the `exec -a "$0" "$HERE/chrome"` wrapper variant', () => {
+    const variant = WRAPPER.replace('"$HERE/brave" "$@" || true', 'exec -a "$0" "$HERE/chrome" "$@"');
+    fs.writeFileSync(path.join(dir, 'google-chrome'), variant);
+    fs.writeFileSync(path.join(dir, 'chrome'), ELF);
+    realFsPaths('chrome');
+
+    expect(resolveBrowserBinary(path.join(dir, 'google-chrome'))).toBe(
+      path.join(dir, 'chrome')
+    );
+  });
+
+  it('leaves a real ELF binary untouched', () => {
+    const elfPath = path.join(dir, 'brave');
+    fs.writeFileSync(elfPath, ELF);
+
+    expect(resolveBrowserBinary(elfPath)).toBe(elfPath);
+  });
+
+  it('returns the original path when the wrapped binary is missing', () => {
+    const wrapperPath = path.join(dir, 'brave-browser');
+    fs.writeFileSync(wrapperPath, WRAPPER);
+    // Note: no `brave` ELF written and none registered in presentPaths.
+
+    expect(resolveBrowserBinary(wrapperPath)).toBe(wrapperPath);
+  });
+
+  it('returns the original path for a script with no recognizable launch line', () => {
+    const scriptPath = path.join(dir, 'weird-launcher');
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n');
+
+    expect(resolveBrowserBinary(scriptPath)).toBe(scriptPath);
   });
 });

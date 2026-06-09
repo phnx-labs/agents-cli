@@ -49,12 +49,71 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
 };
 
 
+/**
+ * On Debian/Ubuntu the canonical launchers under `/usr/bin`
+ * (`brave-browser`, `google-chrome`, `chromium`) are not the browser ELF —
+ * they're `#!/bin/bash` wrapper scripts (the upstream Chromium wrapper) that,
+ * as their final step, run the real binary as a NON-exec child:
+ *
+ *     exec < /dev/null
+ *     exec > >(exec cat)
+ *     exec 2> >(exec cat >&2)
+ *     "$HERE/brave" "$@" || true
+ *
+ * That breaks `launchBrowser`'s `--remote-debugging-pipe` transport two ways:
+ * the std-fd sanitization (and the extra `cat` process-substitution children)
+ * disturbs the inherited CDP pipe on fd 3/4, and the pid we record is the
+ * wrapper's, not the browser's. The symptom is `read ECONNRESET` /
+ * `CDP connection closed` right after spawn (issue #229).
+ *
+ * Follow the wrapper to the ELF it execs. The wrapper sets
+ * `HERE="dirname(readlink -f "$0")"` and invokes `"$HERE/<name>"`, so we
+ * resolve the script path, scan for that invocation line, and join the two.
+ * Returns the original path untouched when it's already an ELF, when it's not
+ * a resolvable wrapper, or on any non-Linux platform.
+ */
+export function resolveBrowserBinary(binaryPath: string): string {
+  if (os.platform() !== 'linux') return binaryPath;
+  let fd: number;
+  try {
+    fd = fs.openSync(binaryPath, 'r');
+  } catch {
+    return binaryPath;
+  }
+  let head: Buffer;
+  try {
+    head = Buffer.alloc(2);
+    fs.readSync(fd, head, 0, 2, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  // ELF binaries start with 0x7f 'E'; shebang scripts with '#!'. Only scripts
+  // need unwrapping.
+  if (!(head[0] === 0x23 && head[1] === 0x21)) return binaryPath;
+
+  let script: string;
+  let realScriptPath: string;
+  try {
+    realScriptPath = fs.realpathSync(binaryPath);
+    script = fs.readFileSync(realScriptPath, 'utf8');
+  } catch {
+    return binaryPath;
+  }
+  // Match the Chromium wrapper's launch line: `"$HERE/<name>" "$@"`, optionally
+  // prefixed with `exec -a "$0"`. The captured name is the real ELF, sitting in
+  // the same directory as the resolved wrapper.
+  const match = script.match(/"\$HERE\/([A-Za-z0-9._-]+)"\s+"\$@"/);
+  if (!match) return binaryPath;
+  const realBinary = path.join(path.dirname(realScriptPath), match[1]);
+  return fs.existsSync(realBinary) ? realBinary : binaryPath;
+}
+
 export function findBrowserPath(browserType: BrowserType, customBinary?: string): string {
   if (customBinary) {
     if (!fs.existsSync(customBinary)) {
       throw new Error(`Custom binary not found: ${customBinary}`);
     }
-    return customBinary;
+    return resolveBrowserBinary(customBinary);
   }
 
   if (browserType === 'custom') {
@@ -70,7 +129,7 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
   const candidates = platformPaths[browserType] || [];
   for (const p of candidates) {
     if (fs.existsSync(p)) {
-      return p;
+      return resolveBrowserBinary(p);
     }
   }
 
@@ -111,7 +170,7 @@ export function findFirstInstalledBrowser(
     const candidates = platformPaths[browserType] || [];
     for (const p of candidates) {
       if (fs.existsSync(p)) {
-        return { browserType, binary: p };
+        return { browserType, binary: resolveBrowserBinary(p) };
       }
     }
   }
