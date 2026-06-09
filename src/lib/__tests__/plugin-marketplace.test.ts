@@ -56,7 +56,7 @@ describe('copyPluginToMarketplace', () => {
     fs.writeFileSync(path.join(outsideTarget, 'huge.bin'), Buffer.alloc(1024));
     fs.symlinkSync(outsideTarget, path.join(pluginSource, 'app'));
 
-    const dest = copyPluginToMarketplace(makePlugin('sample'), 'claude', versionHome);
+    const dest = copyPluginToMarketplace(makePlugin('sample'), { kind: 'user' }, 'claude', versionHome);
 
     expect(fs.existsSync(dest)).toBe(true);
     expect(fs.existsSync(path.join(dest, 'app'))).toBe(false);
@@ -70,7 +70,7 @@ describe('copyPluginToMarketplace', () => {
     // Relative symlink staying inside the plugin tree (e.g. an alias to a sibling skill).
     fs.symlinkSync('real', path.join(pluginSource, 'skills', 'alias'));
 
-    const dest = copyPluginToMarketplace(makePlugin('sample'), 'claude', versionHome);
+    const dest = copyPluginToMarketplace(makePlugin('sample'), { kind: 'user' }, 'claude', versionHome);
 
     const aliasPath = path.join(dest, 'skills', 'alias');
     const aliasStat = fs.lstatSync(aliasPath);
@@ -94,7 +94,7 @@ describe('copyPluginToMarketplace', () => {
     fs.mkdirSync(path.join(pluginSource, 'hooks'));
     fs.writeFileSync(path.join(pluginSource, 'hooks', 'hooks.json'), '[]');
 
-    const dest = copyPluginToMarketplace(makePlugin('plain'), 'claude', versionHome);
+    const dest = copyPluginToMarketplace(makePlugin('plain'), { kind: 'user' }, 'claude', versionHome);
 
     expect(fs.readFileSync(path.join(dest, 'commands', 'hello.md'), 'utf-8')).toBe('hello');
     expect(fs.readFileSync(path.join(dest, 'hooks', 'hooks.json'), 'utf-8')).toBe('[]');
@@ -118,7 +118,7 @@ describe('copyPluginToMarketplace', () => {
     );
     fs.writeFileSync(path.join(pluginSource, 'README.md'), '# rush-like');
 
-    const dest = copyPluginToMarketplace(makePlugin('rush-like'), 'claude', versionHome);
+    const dest = copyPluginToMarketplace(makePlugin('rush-like'), { kind: 'user' }, 'claude', versionHome);
 
     for (const name of ['app', 'web', 'widgets']) {
       expect(fs.existsSync(path.join(dest, name))).toBe(false);

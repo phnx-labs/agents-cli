@@ -26,6 +26,7 @@ export interface ResourceRow {
   name: string;
   description?: string;
   extra?: string; // small per-type metric (e.g., "3 rules", "http")
+  extra2?: string; // optional secondary metric (e.g., marketplace name)
   targets: SyncTarget[];
   buildDetail: () => string;
 }
@@ -34,6 +35,7 @@ export interface ResourceViewOptions {
   resourcePlural: string;
   resourceSingular: string;
   extraLabel?: string;
+  extra2Label?: string;
   rows: ResourceRow[];
   emptyMessage: string;
   centralPath?: string;
@@ -105,10 +107,13 @@ function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
   const extra = opts.extraLabel
     ? chalk.gray(padRight(row.extra ?? '-', 10))
     : '';
+  const extra2 = opts.extra2Label
+    ? chalk.gray(padRight(row.extra2 ?? '-', 16))
+    : '';
   const descRaw = row.description ? truncate(row.description, 40) : '';
   const desc = padRight(chalk.gray(descRaw), 42);
   const sync = formatSyncSummary(row.targets, opts);
-  return `${name} ${extra}${desc} ${sync}`;
+  return `${name} ${extra}${extra2}${desc} ${sync}`;
 }
 
 /** Render resources as a plain-text table (used when output is piped). */
@@ -122,10 +127,13 @@ function printResourceTable(opts: ResourceViewOptions): void {
     const extra = opts.extraLabel
       ? padRight(row.extra ?? '-', 10)
       : '';
+    const extra2 = opts.extra2Label
+      ? padRight(row.extra2 ?? '-', 16)
+      : '';
     const descRaw = row.description ? truncate(row.description, 40) : '-';
     const desc = padRight(chalk.gray(descRaw), 42);
     const sync = formatSyncSummary(row.targets, opts);
-    console.log(`${name} ${extra}${desc} ${sync}`);
+    console.log(`${name} ${extra}${extra2}${desc} ${sync}`);
   }
 
   console.log();
@@ -144,9 +152,12 @@ function buildTableHeader(opts: ResourceViewOptions): string {
   const extra = opts.extraLabel
     ? chalk.bold(padRight(opts.extraLabel, 10))
     : '';
+  const extra2 = opts.extra2Label
+    ? chalk.bold(padRight(opts.extra2Label, 16))
+    : '';
   const desc = padRight(chalk.bold('Description'), 42);
   const sync = chalk.bold('Synced');
-  return `${name} ${extra}${desc} ${sync}`;
+  return `${name} ${extra}${extra2}${desc} ${sync}`;
 }
 
 /** Compact sync summary: "everywhere", "14 of 16 installs", or "not installed". */

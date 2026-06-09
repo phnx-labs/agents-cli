@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
-import { AGENTS, ALL_AGENT_IDS } from './agents.js';
+import { AGENTS, ALL_AGENT_IDS, agentConfigDirName } from './agents.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
 import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos } from './state.js';
@@ -130,7 +130,7 @@ function isExecutable(mode: number): boolean {
 function getHooksDir(agentId: AgentId): string {
   const agent = AGENTS[agentId];
   const home = getEffectiveHome(agentId);
-  return path.join(home, `.${agentId}`, agent.hooksDir);
+  return path.join(home, agentConfigDirName(agentId), agent.hooksDir);
 }
 
 function getProjectHooksDirs(agentId: AgentId, cwd: string): string[] {
@@ -377,7 +377,7 @@ export function listInstalledHooksWithScope(
 
   // User-scoped hooks (version-aware when home is provided)
   const home = options?.home || getEffectiveHome(agentId);
-  const userDir = path.join(home, `.${agentId}`, agent.hooksDir);
+  const userDir = path.join(home, agentConfigDirName(agentId), agent.hooksDir);
   const userHooks = listHookEntriesFromDir(userDir);
   for (const hook of userHooks) {
     addHook(hook, 'user', agentId);
@@ -428,7 +428,7 @@ export async function installHooks(
  */
 export function getVersionHooksDir(agent: AgentId, version: string): string {
   const home = getVersionHomePath(agent, version);
-  return path.join(home, `.${agent}`, AGENTS[agent].hooksDir);
+  return path.join(home, agentConfigDirName(agent), AGENTS[agent].hooksDir);
 }
 
 /**
@@ -825,7 +825,7 @@ export function registerHooksToSettings(
   // Scripts are copied into the version home during sync — prefer that stable
   // local path so registered commands don't break when source dirs change.
   const localHooksDir = !overrideRoots
-    ? path.join(versionHome, `.${agentId}`, AGENTS[agentId].hooksDir)
+    ? path.join(versionHome, agentConfigDirName(agentId), AGENTS[agentId].hooksDir)
     : null;
   const resolveScript = (script: string): string | null => {
     if (overrideRoots) {

@@ -15,6 +15,7 @@
 
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -22,9 +23,19 @@ import * as path from 'path';
 const APP_BUNDLE_NAME = 'Agents CLI.app';
 const INSTALL_DIR_NAME = 'agents-cli';
 
+let installRootOverride: string | null = null;
+
+/** Redirect the install root (test only). Returns the previous override so callers can restore. */
+export function setInstallRootForTest(dir: string | null): string | null {
+  const prev = installRootOverride;
+  installRootOverride = dir;
+  return prev;
+}
+
 /** Absolute path to the installed `.app` bundle directory (not the executable). */
 function installedAppPath(): string {
-  return path.join(os.homedir(), 'Library', 'Application Support', INSTALL_DIR_NAME, APP_BUNDLE_NAME);
+  const root = installRootOverride ?? os.homedir();
+  return path.join(root, 'Library', 'Application Support', INSTALL_DIR_NAME, APP_BUNDLE_NAME);
 }
 
 /** Absolute path to the executable inside the installed `.app` bundle. */
@@ -64,6 +75,33 @@ function assertDarwin(): void {
   }
 }
 
+function sha256File(filePath: string): string {
+  return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+/**
+ * True when the installed helper executable differs byte-for-byte from the
+ * bundled source helper. A stale-but-validly-signed helper is exactly how the
+ * broken 1.20.4 build (signed, but missing the keychain-access-groups
+ * entitlement) survived upgrades: codesign --verify passes on it, so the
+ * "exists and verifies" early-return kept it installed forever. Returns false
+ * when there is no bundled source to compare against (dev installs) or no
+ * installed copy yet — both cases are decided by the existence checks in the
+ * callers, not by staleness.
+ */
+function installedHelperIsStale(): boolean {
+  let srcApp: string;
+  try {
+    srcApp = sourceAppPath();
+  } catch {
+    return false;
+  }
+  const srcExec = path.join(srcApp, 'Contents', 'MacOS', 'Agents CLI');
+  const destExec = installedExecutablePath();
+  if (!fs.existsSync(srcExec) || !fs.existsSync(destExec)) return false;
+  return sha256File(srcExec) !== sha256File(destExec);
+}
+
 function codesignVerify(appPath: string): { ok: boolean; output: string } {
   const r = spawnSync('codesign', ['--verify', '--deep', '--strict', appPath], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -95,8 +133,10 @@ function copyAppBundle(src: string, dest: string): void {
 
 /**
  * Idempotent install. Copies the bundled `.app` to the stable user path. Skips
- * if the destination already exists and `codesign --verify` passes, unless
- * `forceReinstall=true`.
+ * if the destination already exists, `codesign --verify` passes, AND the
+ * installed executable matches the bundled one byte-for-byte — a valid
+ * signature alone is not enough, because an outdated helper signs clean too.
+ * `forceReinstall=true` skips all checks and always copies.
  *
  * Notarization is checked via `spctl --assess` after install — a failure is
  * logged as a warning but does NOT throw. Notarization checks require network
@@ -108,7 +148,7 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
   const dest = installedAppPath();
   if (!opts.forceReinstall && fs.existsSync(dest)) {
     const { ok } = codesignVerify(dest);
-    if (ok) return;
+    if (ok && !installedHelperIsStale()) return;
   }
   const src = sourceAppPath();
   copyAppBundle(src, dest);
@@ -132,14 +172,18 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
 
 /**
  * Return the absolute path to the helper executable. If the installed bundle
- * is missing, performs a lazy install first.
+ * is missing, or is stale relative to the bundled source helper, performs a
+ * lazy (re)install first. The staleness check is what lets an upgraded CLI
+ * replace a helper a previous version installed — `agents helper install`
+ * never runs on `npm i -g`, so this call site is the only one every machine
+ * is guaranteed to pass through.
  *
  * Throws on non-darwin.
  */
 export function getKeychainHelperPath(): string {
   assertDarwin();
   const exec = installedExecutablePath();
-  if (!fs.existsSync(exec)) {
+  if (!fs.existsSync(exec) || installedHelperIsStale()) {
     ensureKeychainHelperInstalled();
   }
   return exec;

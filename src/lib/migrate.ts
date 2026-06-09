@@ -1383,6 +1383,157 @@ function migrateVersionResourcesToPatterns(): void {
   }
 }
 
+/**
+ * Rename the legacy `extras-extras/` plugin-marketplace dir to `agents-extras/`
+ * inside every installed agent version-home, and rewrite cross-references in
+ * `known_marketplaces.json` and the agent's `settings.json`.
+ *
+ * A previous dev build of `agents-cli` named the extras-aliased repo's
+ * synthesized marketplace dir `extras-extras` (double "extras" because the alias
+ * itself was `extras`). The new naming convention is `agents-<alias>`, so the
+ * directory should be `agents-extras`. Without this migration the orphan dir
+ * stays on disk and Claude Code loads two parallel marketplaces (the legacy
+ * `extras-extras` entry from `known_marketplaces.json` plus the freshly
+ * synthesized `agents-extras` from the new code path).
+ *
+ * Strategy per `<historyDir>/versions/<agent>/<ver>/home/.<agent>/plugins/`:
+ *   1. `marketplaces/extras-extras/` → `marketplaces/agents-extras/`
+ *      (drops `extras-extras/` outright when `agents-extras/` already exists —
+ *      previous incomplete migration ran)
+ *   2. Inside the renamed dir's `.claude-plugin/marketplace.json`, set
+ *      `"name": "agents-extras"`.
+ *   3. In `<configDir>/plugins/known_marketplaces.json`, rename the
+ *      `extras-extras` key to `agents-extras` and rewrite `source.path` /
+ *      `installLocation`.
+ *   4. In `<configDir>/settings.json`'s `enabledPlugins`, rename every
+ *      `<plugin>@extras-extras` key to `<plugin>@agents-extras` (preserving
+ *      its boolean value, skipping if the new key already exists).
+ *
+ * Idempotent: re-running converges without further writes once everything is on
+ * the new name.
+ */
+export function migrateExtrasExtrasToAgentsExtras(historyDir: string = HISTORY_DIR): void {
+  const versionsRoot = path.join(historyDir, 'versions');
+  if (!fs.existsSync(versionsRoot)) return;
+
+  const OLD = 'extras-extras';
+  const NEW = 'agents-extras';
+
+  let agentEntries: fs.Dirent[];
+  try {
+    agentEntries = fs.readdirSync(versionsRoot, { withFileTypes: true });
+  } catch { return; }
+
+  let renamedDirs = 0;
+  let rewroteKnown = 0;
+  let rewroteSettings = 0;
+
+  for (const agentEntry of agentEntries) {
+    if (!agentEntry.isDirectory()) continue;
+    const agentId = agentEntry.name;
+    const agentVersionsDir = path.join(versionsRoot, agentId);
+
+    let verEntries: fs.Dirent[];
+    try {
+      verEntries = fs.readdirSync(agentVersionsDir, { withFileTypes: true });
+    } catch { continue; }
+
+    for (const ver of verEntries) {
+      if (!ver.isDirectory()) continue;
+      const configDir = path.join(agentVersionsDir, ver.name, 'home', `.${agentId}`);
+      const pluginsDir = path.join(configDir, 'plugins');
+      if (!fs.existsSync(pluginsDir)) continue;
+
+      const marketplacesDir = path.join(pluginsDir, 'marketplaces');
+      const oldDir = path.join(marketplacesDir, OLD);
+      const newDir = path.join(marketplacesDir, NEW);
+      const oldExists = fs.existsSync(oldDir);
+      const newExists = fs.existsSync(newDir);
+
+      if (oldExists && !newExists) {
+        try {
+          fs.renameSync(oldDir, newDir);
+          renamedDirs++;
+        } catch { /* best-effort, leave orphan */ }
+      } else if (oldExists && newExists) {
+        // Previous incomplete migration — drop the stale old dir.
+        try { fs.rmSync(oldDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+      }
+
+      // Rewrite marketplace.json name field inside the (now) agents-extras dir.
+      const marketplaceJson = path.join(newDir, '.claude-plugin', 'marketplace.json');
+      if (fs.existsSync(marketplaceJson)) {
+        try {
+          const raw = fs.readFileSync(marketplaceJson, 'utf-8');
+          const parsed = JSON.parse(raw) as Record<string, unknown>;
+          if (parsed?.name === OLD) {
+            parsed.name = NEW;
+            fs.writeFileSync(marketplaceJson, JSON.stringify(parsed, null, 2) + '\n', 'utf-8');
+          }
+        } catch { /* best-effort */ }
+      }
+
+      // Rewrite known_marketplaces.json key + path fields.
+      const knownFile = path.join(pluginsDir, 'known_marketplaces.json');
+      if (fs.existsSync(knownFile)) {
+        try {
+          const raw = fs.readFileSync(knownFile, 'utf-8');
+          const known = JSON.parse(raw) as Record<string, {
+            source?: { source?: string; path?: string; repo?: string };
+            installLocation?: string;
+            lastUpdated?: string;
+          }>;
+          if (known && typeof known === 'object' && OLD in known) {
+            const entry = known[OLD];
+            if (!(NEW in known)) {
+              if (entry?.source?.path) entry.source.path = entry.source.path.split(OLD).join(NEW);
+              if (entry?.installLocation) entry.installLocation = entry.installLocation.split(OLD).join(NEW);
+              known[NEW] = entry;
+            }
+            delete known[OLD];
+            fs.writeFileSync(knownFile, JSON.stringify(known, null, 2) + '\n', 'utf-8');
+            rewroteKnown++;
+          }
+        } catch { /* best-effort */ }
+      }
+
+      // Rewrite settings.json enabledPlugins keys.
+      const settingsFile = path.join(configDir, 'settings.json');
+      if (fs.existsSync(settingsFile)) {
+        try {
+          const raw = fs.readFileSync(settingsFile, 'utf-8');
+          const settings = JSON.parse(raw) as Record<string, unknown>;
+          const enabled = settings?.enabledPlugins as Record<string, boolean> | undefined;
+          if (enabled && typeof enabled === 'object') {
+            const suffix = `@${OLD}`;
+            const newSuffix = `@${NEW}`;
+            let changed = false;
+            for (const key of Object.keys(enabled)) {
+              if (!key.endsWith(suffix)) continue;
+              const renamed = key.slice(0, -suffix.length) + newSuffix;
+              if (renamed in enabled) {
+                delete enabled[key];
+              } else {
+                enabled[renamed] = enabled[key];
+                delete enabled[key];
+              }
+              changed = true;
+            }
+            if (changed) {
+              fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+              rewroteSettings++;
+            }
+          }
+        } catch { /* best-effort */ }
+      }
+    }
+  }
+
+  if (renamedDirs > 0 || rewroteKnown > 0 || rewroteSettings > 0) {
+    console.error(`Renamed extras-extras → agents-extras (dirs: ${renamedDirs}, known_marketplaces: ${rewroteKnown}, settings: ${rewroteSettings})`);
+  }
+}
+
 /** Run all idempotent migrations. Safe to call multiple times. */
 export async function runMigration(): Promise<void> {
   // MUST run first: every other migrator reads SYSTEM_DIR (the new path).
@@ -1428,6 +1579,11 @@ export async function runMigration(): Promise<void> {
   await migrateSystemCloudToCache();
   dropDeadSystemArtifacts();
   warnSystemOrphans();
+
+  // Rename the legacy extras-extras marketplace dir to agents-extras across every
+  // installed version-home. Runs after migrateRuntimeToHistory so the version
+  // homes are at their canonical HISTORY_DIR location.
+  migrateExtrasExtrasToAgentsExtras();
 
   // Symlink repair runs LAST so it can find the post-move version homes.
   repairAgentConfigSymlinks();

@@ -1,0 +1,425 @@
+/**
+ * Tests for per-DotAgents-repo plugin marketplaces: naming policy, source-side
+ * discovery, per-version catalog synthesis (symlink-aware), registration, and
+ * top-level orchestration.
+ *
+ * Real filesystem under os.tmpdir(). The only thing redirected is state.js's
+ * path getters (getPluginsDir / getEnabledExtraRepos / getProjectPluginsDir) so
+ * discovery points at tmp repos instead of the real ~/.agents — the same
+ * vi.doMock('./state.js') pattern used in plugins.test.ts.
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+
+import {
+  MARKETPLACE_NAME,
+  PROJECT_MARKETPLACE_NAME,
+  marketplaceNameFor,
+  marketplaceRoot,
+  marketplaceManifestPath,
+  knownMarketplacesPath,
+  copyPluginToMarketplace,
+  syncMarketplaceManifest,
+  registerMarketplace,
+  unregisterMarketplace,
+  addPluginToSettings,
+  removePluginFromSettings,
+} from './plugin-marketplace.js';
+import type { DiscoveredPlugin, MarketplaceSpec } from './types.js';
+
+// ─── Fixtures ─────────────────────────────────────────────────────────────────
+
+/** Write a real plugin source tree (dir + .claude-plugin/plugin.json). */
+function writePluginSource(parent: string, name: string, extra: Record<string, unknown> = {}): string {
+  const root = path.join(parent, name);
+  fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name, version: '1.0.0', description: `desc-${name}`, ...extra })
+  );
+  return root;
+}
+
+function discoveredPlugin(root: string, name: string): DiscoveredPlugin {
+  return {
+    name, root,
+    manifest: { name, version: '1.0.0', description: `desc-${name}` },
+    skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], bin: [],
+    mcpServers: [], lspServers: [], monitors: [],
+    hasMcp: false, hasSettings: false,
+  };
+}
+
+/** Copy a plugin into a marketplace dest (the version-home side) for synth tests. */
+function installInto(spec: MarketplaceSpec, plugin: DiscoveredPlugin, versionHome: string): void {
+  copyPluginToMarketplace(plugin, spec, 'claude', versionHome);
+}
+
+const SPECS = {
+  user: { kind: 'user' } as MarketplaceSpec,
+  project: (root: string) => ({ kind: 'project', root } as MarketplaceSpec),
+  extra: (alias: string, root: string) => ({ kind: 'extra', alias, root } as MarketplaceSpec),
+};
+
+// ─── marketplaceNameFor ─────────────────────────────────────────────────────
+
+describe('marketplaceNameFor', () => {
+  it('maps user → agents-cli', () => {
+    expect(marketplaceNameFor(SPECS.user)).toBe('agents-cli');
+    expect(MARKETPLACE_NAME).toBe('agents-cli');
+  });
+
+  it('maps extra alias=extras → agents-extras', () => {
+    expect(marketplaceNameFor(SPECS.extra('extras', '/x/plugins'))).toBe('agents-extras');
+  });
+
+  it('maps project → agents-project', () => {
+    expect(marketplaceNameFor(SPECS.project('/p/plugins'))).toBe('agents-project');
+    expect(PROJECT_MARKETPLACE_NAME).toBe('agents-project');
+  });
+});
+
+// ─── discoverMarketplaces ───────────────────────────────────────────────────
+
+describe('discoverMarketplaces', () => {
+  let tmpDir: string;
+  let userPlugins: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mkt-'));
+    userPlugins = path.join(tmpDir, 'user', 'plugins');
+    fs.mkdirSync(userPlugins, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  async function withState(
+    overrides: {
+      pluginsDir?: string;
+      extras?: Array<{ alias: string; dir: string; url: string }>;
+      projectPlugins?: string | null;
+    },
+    fn: (mod: typeof import('./plugin-marketplace.js')) => void | Promise<void>
+  ): Promise<void> {
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return {
+        ...actual,
+        getPluginsDir: () => overrides.pluginsDir ?? userPlugins,
+        getEnabledExtraRepos: () => overrides.extras ?? [],
+        getProjectPluginsDir: () => overrides.projectPlugins ?? null,
+      };
+    });
+    try {
+      const mod = await import('./plugin-marketplace.js');
+      await fn(mod);
+    } finally {
+      vi.doUnmock('./state.js');
+      vi.resetModules();
+    }
+  }
+
+  it('finds only the user marketplace when no extras/project exist', async () => {
+    await withState({}, ({ discoverMarketplaces }) => {
+      const found = discoverMarketplaces();
+      expect(found.map(m => m.name)).toEqual(['agents-cli']);
+      expect(found[0].pluginsRoot).toBe(userPlugins);
+      expect(found[0].spec.kind).toBe('user');
+    });
+  });
+
+  it('returns user + each enabled extra repo, skipping disabled (filtered upstream)', async () => {
+    const extraDir = path.join(tmpDir, 'extra-extras');
+    fs.mkdirSync(path.join(extraDir, 'plugins'), { recursive: true });
+    // getEnabledExtraRepos already filters disabled repos — we feed only enabled ones.
+    await withState(
+      { extras: [{ alias: 'extras', dir: extraDir, url: 'gh:x/y' }] },
+      ({ discoverMarketplaces }) => {
+        const found = discoverMarketplaces();
+        expect(found.map(m => m.name)).toEqual(['agents-cli', 'agents-extras']);
+        const extra = found[1];
+        expect(extra.spec).toMatchObject({ kind: 'extra', alias: 'extras' });
+        expect(extra.pluginsRoot).toBe(path.join(extraDir, 'plugins'));
+      }
+    );
+  });
+
+  it('skips an extra repo whose plugins/ dir does not exist on disk', async () => {
+    const extraDir = path.join(tmpDir, 'extra-empty'); // no plugins/ subdir
+    fs.mkdirSync(extraDir, { recursive: true });
+    await withState(
+      { extras: [{ alias: 'empty', dir: extraDir, url: 'gh:x/y' }] },
+      ({ discoverMarketplaces }) => {
+        expect(discoverMarketplaces().map(m => m.name)).toEqual(['agents-cli']);
+      }
+    );
+  });
+
+  it('includes the project marketplace when cwd has .agents/plugins/', async () => {
+    const projectPlugins = path.join(tmpDir, 'proj', '.agents', 'plugins');
+    fs.mkdirSync(projectPlugins, { recursive: true });
+    await withState({ projectPlugins }, ({ discoverMarketplaces }) => {
+      const found = discoverMarketplaces({ cwd: '/whatever' });
+      expect(found.map(m => m.name)).toEqual(['agents-cli', 'agents-project']);
+      expect(found[1].spec).toMatchObject({ kind: 'project', root: projectPlugins });
+    });
+  });
+});
+
+// ─── syncMarketplaceManifest ─────────────────────────────────────────────────
+
+describe('syncMarketplaceManifest', () => {
+  let tmpDir: string;
+  let versionHome: string;
+  let srcDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mkt-'));
+    versionHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    srcDir = path.join(tmpDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null when the marketplace plugins dir does not exist', () => {
+    expect(syncMarketplaceManifest(SPECS.user, 'claude', versionHome)).toBeNull();
+  });
+
+  it.each([
+    ['user', SPECS.user, 'agents-cli'],
+    ['extra', SPECS.extra('extras', '/x/plugins'), 'agents-extras'],
+    ['project', SPECS.project('/p/plugins'), 'agents-project'],
+  ] as Array<[string, MarketplaceSpec, string]>)(
+    'synthesizes a marketplace.json named %s with the copied plugin list',
+    (_label, spec, expectedName) => {
+      const root = writePluginSource(srcDir, 'alpha');
+      installInto(spec, discoveredPlugin(root, 'alpha'), versionHome);
+
+      const manifest = syncMarketplaceManifest(spec, 'claude', versionHome);
+      expect(manifest).not.toBeNull();
+      expect(manifest!.name).toBe(expectedName);
+      expect(manifest!.plugins.map(p => p.name)).toEqual(['alpha']);
+      expect(manifest!.plugins[0]).toMatchObject({ name: 'alpha', source: './plugins/alpha', version: '1.0.0' });
+
+      // Manifest is written to disk at the expected path.
+      const onDisk = JSON.parse(fs.readFileSync(marketplaceManifestPath(spec, 'claude', versionHome), 'utf-8'));
+      expect(onDisk.name).toBe(expectedName);
+    }
+  );
+
+  it('FOLLOWS SYMLINKS — a plugin symlinked into the marketplace plugins dir is catalogued', () => {
+    // Reproduces the phoenix/prix/rush case: plugins that are symlinks-to-dirs.
+    // The old code used Dirent.isDirectory() which is false for a symlink and
+    // silently dropped them. statSync follows the link.
+    const realPlugin = writePluginSource(srcDir, 'linked');
+    const mktPluginsDir = path.join(marketplaceRoot(SPECS.user, 'claude', versionHome), 'plugins');
+    fs.mkdirSync(mktPluginsDir, { recursive: true });
+    fs.symlinkSync(realPlugin, path.join(mktPluginsDir, 'linked'), 'dir');
+
+    const manifest = syncMarketplaceManifest(SPECS.user, 'claude', versionHome);
+    expect(manifest!.plugins.map(p => p.name)).toEqual(['linked']);
+  });
+
+  it('sorts plugins by name and skips dirs without a plugin.json', () => {
+    installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'zeta'), 'zeta'), versionHome);
+    installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'beta'), 'beta'), versionHome);
+    // A stray dir with no manifest must be ignored.
+    fs.mkdirSync(path.join(marketplaceRoot(SPECS.user, 'claude', versionHome), 'plugins', 'not-a-plugin'), { recursive: true });
+
+    const manifest = syncMarketplaceManifest(SPECS.user, 'claude', versionHome);
+    expect(manifest!.plugins.map(p => p.name)).toEqual(['beta', 'zeta']);
+  });
+});
+
+// ─── registerMarketplace / unregisterMarketplace ─────────────────────────────
+
+describe('register/unregister marketplace', () => {
+  let tmpDir: string;
+  let versionHome: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mkt-'));
+    versionHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function readKnown(): Record<string, { source: { path: string }; installLocation: string }> {
+    return JSON.parse(fs.readFileSync(knownMarketplacesPath('claude', versionHome), 'utf-8'));
+  }
+
+  it('writes its own entry without clobbering other entries', () => {
+    registerMarketplace(SPECS.user, 'claude', versionHome);
+    registerMarketplace(SPECS.project('/p/plugins'), 'claude', versionHome);
+
+    const known = readKnown();
+    expect(Object.keys(known).sort()).toEqual(['agents-cli', 'agents-project']);
+    expect(known['agents-cli'].source.path).toBe(marketplaceRoot(SPECS.user, 'claude', versionHome));
+    expect(known['agents-project'].installLocation).toBe(marketplaceRoot(SPECS.project('/p/plugins'), 'claude', versionHome));
+  });
+
+  it('unregisterMarketplace removes only its own entry', () => {
+    registerMarketplace(SPECS.user, 'claude', versionHome);
+    registerMarketplace(SPECS.extra('extras', '/x/plugins'), 'claude', versionHome);
+
+    unregisterMarketplace(SPECS.extra('extras', '/x/plugins'), 'claude', versionHome);
+    expect(Object.keys(readKnown())).toEqual(['agents-cli']);
+  });
+
+  it('unregister accepts a bare name string and deletes the file when last entry goes', () => {
+    registerMarketplace(SPECS.user, 'claude', versionHome);
+    unregisterMarketplace('agents-cli', 'claude', versionHome);
+    expect(fs.existsSync(knownMarketplacesPath('claude', versionHome))).toBe(false);
+  });
+});
+
+// ─── syncAllMarketplaces ─────────────────────────────────────────────────────
+
+describe('syncAllMarketplaces', () => {
+  let tmpDir: string;
+  let versionHome: string;
+  let userPlugins: string;
+  let projectPlugins: string;
+  let srcDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mkt-'));
+    versionHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    userPlugins = path.join(tmpDir, 'user', 'plugins');
+    projectPlugins = path.join(tmpDir, 'proj', '.agents', 'plugins');
+    fs.mkdirSync(userPlugins, { recursive: true });
+    fs.mkdirSync(projectPlugins, { recursive: true });
+    srcDir = path.join(tmpDir, 'src');
+    fs.mkdirSync(srcDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('produces one entry per discovered marketplace that has copied plugins', async () => {
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return {
+        ...actual,
+        getPluginsDir: () => userPlugins,
+        getEnabledExtraRepos: () => [],
+        getProjectPluginsDir: () => projectPlugins,
+      };
+    });
+    try {
+      const mod = await import('./plugin-marketplace.js');
+      const userSpec: MarketplaceSpec = { kind: 'user' };
+      const projSpec: MarketplaceSpec = { kind: 'project', root: projectPlugins };
+
+      // Copy a plugin into each marketplace's version-home dest (the work a
+      // per-plugin sync would do) before reconciling.
+      mod.copyPluginToMarketplace(discoveredPlugin(writePluginSource(srcDir, 'u1'), 'u1'), userSpec, 'claude', versionHome);
+      mod.copyPluginToMarketplace(discoveredPlugin(writePluginSource(srcDir, 'p1'), 'p1'), projSpec, 'claude', versionHome);
+      mod.copyPluginToMarketplace(discoveredPlugin(writePluginSource(srcDir, 'p2'), 'p2'), projSpec, 'claude', versionHome);
+
+      const results = mod.syncAllMarketplaces('claude', versionHome);
+      const byName = Object.fromEntries(results.map(r => [r.name, r.plugins]));
+      expect(byName).toEqual({ 'agents-cli': 1, 'agents-project': 2 });
+
+      // Both got registered in known_marketplaces.json.
+      const known = JSON.parse(fs.readFileSync(mod.knownMarketplacesPath('claude', versionHome), 'utf-8'));
+      expect(Object.keys(known).sort()).toEqual(['agents-cli', 'agents-project']);
+    } finally {
+      vi.doUnmock('./state.js');
+      vi.resetModules();
+    }
+  });
+
+  it('skips discovered marketplaces with no copied plugins (no empty registration)', async () => {
+    const { vi } = await import('vitest');
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return {
+        ...actual,
+        getPluginsDir: () => userPlugins,
+        getEnabledExtraRepos: () => [],
+        getProjectPluginsDir: () => projectPlugins, // discovered, but nothing copied
+      };
+    });
+    try {
+      const mod = await import('./plugin-marketplace.js');
+      mod.copyPluginToMarketplace(discoveredPlugin(writePluginSource(srcDir, 'u1'), 'u1'), { kind: 'user' }, 'claude', versionHome);
+
+      const results = mod.syncAllMarketplaces('claude', versionHome);
+      expect(results.map(r => r.name)).toEqual(['agents-cli']);
+    } finally {
+      vi.doUnmock('./state.js');
+      vi.resetModules();
+    }
+  });
+});
+
+// ─── add/removePluginFromSettings ────────────────────────────────────────────
+
+describe('add/removePluginFromSettings', () => {
+  let tmpDir: string;
+  let versionHome: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mkt-'));
+    versionHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const settingsFile = () => path.join(versionHome, '.claude', 'settings.json');
+
+  it('adds <plugin>@<marketplace> preserving other settings keys', () => {
+    fs.writeFileSync(settingsFile(), JSON.stringify({ theme: 'dark' }));
+    addPluginToSettings('alpha', 'agents-project', 'claude', versionHome);
+
+    const s = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'));
+    expect(s.theme).toBe('dark');
+    expect(s.enabledPlugins).toEqual({ 'alpha@agents-project': true });
+  });
+
+  it('keys are namespaced per marketplace so the same plugin can live in two repos', () => {
+    addPluginToSettings('alpha', 'agents-cli', 'claude', versionHome);
+    addPluginToSettings('alpha', 'agents-project', 'claude', versionHome);
+    const s = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'));
+    expect(s.enabledPlugins).toEqual({ 'alpha@agents-cli': true, 'alpha@agents-project': true });
+  });
+
+  it('removePluginFromSettings drops only the matching key', () => {
+    addPluginToSettings('alpha', 'agents-cli', 'claude', versionHome);
+    addPluginToSettings('beta', 'agents-cli', 'claude', versionHome);
+    removePluginFromSettings('alpha', 'agents-cli', 'claude', versionHome);
+
+    const s = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'));
+    expect(s.enabledPlugins).toEqual({ 'beta@agents-cli': true });
+  });
+
+  it('removePluginFromSettings clears enabledPlugins entirely when last key goes', () => {
+    addPluginToSettings('alpha', 'agents-cli', 'claude', versionHome);
+    removePluginFromSettings('alpha', 'agents-cli', 'claude', versionHome);
+    const s = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'));
+    expect(s.enabledPlugins).toBeUndefined();
+  });
+});

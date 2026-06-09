@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { AGENTS, ALL_AGENT_IDS } from '../agents.js';
+import { AGENTS, ALL_AGENT_IDS, agentConfigDirName } from '../agents.js';
 import { getResolvedRulesDir, getUserRulesDir, getProjectAgentsDir } from '../state.js';
 import { getEffectiveHome } from '../versions.js';
 import type { AgentId } from '../types.js';
@@ -94,7 +94,7 @@ function normalizeContent(content: string): string {
  */
 function getUserConfigDir(agentId: AgentId): string {
   const home = getEffectiveHome(agentId);
-  return path.join(home, `.${agentId}`);
+  return path.join(home, agentConfigDirName(agentId));
 }
 
 export function getInstructionsPath(agentId: AgentId, scope: InstructionsScope, cwd: string = process.cwd()): string {
@@ -275,7 +275,7 @@ export function listInstalledInstructionsWithScope(
 
   // User-scoped instructions (version-aware when home is provided)
   const home = options?.home || getEffectiveHome(agentId);
-  const userConfigDir = path.join(home, `.${agentId}`);
+  const userConfigDir = path.join(home, agentConfigDirName(agentId));
   const userPath = path.join(userConfigDir, agent.instructionsFile);
   results.push({
     agentId,

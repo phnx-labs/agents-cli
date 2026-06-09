@@ -13,7 +13,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
-import { AGENTS } from '../../agents.js';
+import { AGENTS, agentConfigDirName } from '../../agents.js';
 import { capableAgents, supports } from '../../capabilities.js';
 import { composeRulesFromState } from '../../rules/compose.js';
 import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
@@ -35,7 +35,7 @@ function buildRulesWriter(agent: AgentId): ResourceWriter<RulesSelection> {
       }
       const targetName = cap.file;
       const composed = composeRulesFromState({ preset: selection.preset || undefined });
-      const agentDir = path.join(versionHome, `.${agent}`);
+      const agentDir = path.join(versionHome, agentConfigDirName(agent));
       // `cap.file` is a trusted constant from AGENTS table; openclaw ships a
       // nested path (`workspace/AGENTS.md`) so we use path.join rather than
       // safeJoin (which rejects path separators in `name`).

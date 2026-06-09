@@ -138,21 +138,44 @@ case "list":
     // list <prefix> — enumerate generic-password items whose service starts
     // with <prefix> for the current user. Returns attributes only (never
     // data), so it never decrypts and never prompts.
+    //
+    // Two passes, because no single query covers both keychains: items written
+    // by `set` carry a biometry ACL, which forces them into the data-protection
+    // keychain, and a query with kSecUseAuthenticationUIFail skips the DP
+    // keychain entirely (it errors with errSecInteractionNotAllowed before
+    // returning anything). The DP pass therefore omits the UI key — safe only
+    // because kSecReturnAttributes without kSecReturnData never evaluates the
+    // ACL. Do NOT drop the explicit return key: with no kSecReturn* at all,
+    // SecItemCopyMatching evaluates the ACL anyway and blocks on Touch ID.
     guard args.count == 3 else { die(2, "Usage: agents-keychain list <prefix>") }
     let prefix = args[2]
     guard !prefix.isEmpty else { die(2, "list requires non-empty prefix") }
     let user = ProcessInfo.processInfo.environment["USER"] ?? NSUserName()
-    let query: [CFString: Any] = [
+    let fileQuery: [CFString: Any] = [
         kSecClass: kSecClassGenericPassword,
         kSecMatchLimit: kSecMatchLimitAll,
         kSecReturnAttributes: kCFBooleanTrue!,
         kSecUseAuthenticationUI: kSecUseAuthenticationUIFail,
     ]
-    var result: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecItemNotFound { exit(0) }
-    if status != errSecSuccess { die(2, "Failed to enumerate keychain (OSStatus \(status))") }
-    guard let items = result as? [[String: Any]] else { exit(0) }
+    let dpQuery: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecMatchLimit: kSecMatchLimitAll,
+        kSecReturnAttributes: kCFBooleanTrue!,
+        kSecUseDataProtectionKeychain: kCFBooleanTrue!,
+    ]
+    var items: [[String: Any]] = []
+    for query in [fileQuery, dpQuery] {
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { continue }
+        // The DP keybag locks with the screen; enumeration then reports
+        // errSecInteractionNotAllowed wholesale. Skip the pass instead of
+        // failing — the file-based results are still valid, and DP items
+        // are unreadable until unlock anyway.
+        if status == errSecInteractionNotAllowed { continue }
+        if status != errSecSuccess { die(2, "Failed to enumerate keychain (OSStatus \(status))") }
+        items.append(contentsOf: (result as? [[String: Any]]) ?? [])
+    }
     var seen = Set<String>()
     for item in items {
         guard let svce = item[kSecAttrService as String] as? String, svce.hasPrefix(prefix) else { continue }
@@ -166,18 +189,30 @@ case "has":
     // has <service> <account> — existence check, exit 0 if present else 1.
     // Reads no data, so it never decrypts and never prompts. If the OS
     // reports that interaction would be required, the item still exists.
+    //
+    // Two passes, because no single prompt-free query covers both keychains:
+    // items written by `set` carry a biometry ACL, which forces them into the
+    // data-protection keychain, and a UIFail query without the DP key skips
+    // the DP keychain entirely — it reports errSecItemNotFound for items that
+    // exist. The DP pass keeps UIFail (guaranteed no prompt); a present
+    // DP item then surfaces as errSecInteractionNotAllowed, which already
+    // counts as "exists".
     guard args.count == 4 else { die(2, "Usage: agents-keychain has <service> <account>") }
     let (service, account) = (args[2], args[3])
-    let query: [CFString: Any] = [
-        kSecClass: kSecClassGenericPassword,
-        kSecAttrService: service as CFString,
-        kSecAttrAccount: account as CFString,
-        kSecMatchLimit: kSecMatchLimitOne,
-        kSecUseAuthenticationUI: kSecUseAuthenticationUIFail,
-    ]
-    var ignored: AnyObject?
-    let status = SecItemCopyMatching(query as CFDictionary, &ignored)
-    exit((status == errSecSuccess || status == errSecInteractionNotAllowed) ? 0 : 1)
+    for dp in [false, true] {
+        var query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service as CFString,
+            kSecAttrAccount: account as CFString,
+            kSecMatchLimit: kSecMatchLimitOne,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUIFail,
+        ]
+        if dp { query[kSecUseDataProtectionKeychain] = kCFBooleanTrue! }
+        var ignored: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &ignored)
+        if status == errSecSuccess || status == errSecInteractionNotAllowed { exit(0) }
+    }
+    exit(1)
 
 case "get":
     // get <service> <account> — single protected read. Pops Touch ID (or

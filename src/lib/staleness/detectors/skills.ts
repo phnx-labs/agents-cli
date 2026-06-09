@@ -5,7 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
-import { AGENTS } from '../../agents.js';
+import { AGENTS, agentConfigDirName } from '../../agents.js';
 import { capableAgents } from '../../capabilities.js';
 import { resolveSkillSource } from '../writers/sources.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
@@ -36,7 +36,7 @@ function buildSkillsDetector(agent: AgentId): ResourceDetector {
     kind: 'skills',
     agent,
     list({ versionHome }: DetectArgs): string[] {
-      const skillsDir = path.join(versionHome, `.${agent}`, 'skills');
+      const skillsDir = path.join(versionHome, agentConfigDirName(agent), 'skills');
       if (!fs.existsSync(skillsDir)) return [];
       const installed = fs.readdirSync(skillsDir, { withFileTypes: true })
         .filter(d => d.isDirectory() && !d.name.startsWith('.'))

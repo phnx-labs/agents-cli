@@ -153,7 +153,7 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
     const result = runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
     expect(result.marketplaces[PROJECT_MARKETPLACE_NAME]).toContain('myproj');
-    const manifestPath = marketplaceManifestPath('claude', VERSION_HOME, PROJECT_MARKETPLACE_NAME);
+    const manifestPath = marketplaceManifestPath(PROJECT_MARKETPLACE_NAME, 'claude', VERSION_HOME);
     const manifest = readJson(manifestPath) as { name: string; plugins: Array<{ name: string }> };
     expect(manifest.name).toBe(PROJECT_MARKETPLACE_NAME);
     expect(manifest.plugins.map(p => p.name)).toEqual(['myproj']);
@@ -174,7 +174,7 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
       : { enabledPlugins: undefined };
     expect(settings.enabledPlugins?.[`evil@${PROJECT_MARKETPLACE_NAME}`]).toBeUndefined();
     // But the marketplace install dir should exist — user can still `/plugin enable` it.
-    expect(fs.existsSync(path.join(marketplaceRoot('claude', VERSION_HOME, PROJECT_MARKETPLACE_NAME), 'plugins', 'evil'))).toBe(true);
+    expect(fs.existsSync(path.join(marketplaceRoot(PROJECT_MARKETPLACE_NAME, 'claude', VERSION_HOME), 'plugins', 'evil'))).toBe(true);
   });
 
   it('DOES auto-enable a user-scope plugin even when it ships exec surfaces', () => {
@@ -224,8 +224,8 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
     expect(result.marketplaces[SYSTEM_MARKETPLACE_NAME]).toEqual(['sysplug']);
     expect(result.marketplaces[MARKETPLACE_NAME]).toEqual(['userplug']);
 
-    expect(fs.existsSync(path.join(marketplaceRoot('claude', VERSION_HOME, SYSTEM_MARKETPLACE_NAME), 'plugins', 'sysplug'))).toBe(true);
-    expect(fs.existsSync(path.join(marketplaceRoot('claude', VERSION_HOME, MARKETPLACE_NAME), 'plugins', 'userplug'))).toBe(true);
+    expect(fs.existsSync(path.join(marketplaceRoot(SYSTEM_MARKETPLACE_NAME, 'claude', VERSION_HOME), 'plugins', 'sysplug'))).toBe(true);
+    expect(fs.existsSync(path.join(marketplaceRoot(MARKETPLACE_NAME, 'claude', VERSION_HOME), 'plugins', 'userplug'))).toBe(true);
 
     const known = readJson(path.join(VERSION_HOME, '.claude', 'plugins', 'known_marketplaces.json')) as Record<string, unknown>;
     expect(Object.keys(known).sort()).toEqual([MARKETPLACE_NAME, SYSTEM_MARKETPLACE_NAME].sort());
@@ -241,7 +241,7 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
     writePluginManifest(path.join(USER_DIR, 'plugins', 'fast'), 'fast');
 
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
-    const manifestPath = marketplaceManifestPath('claude', VERSION_HOME, MARKETPLACE_NAME);
+    const manifestPath = marketplaceManifestPath(MARKETPLACE_NAME, 'claude', VERSION_HOME);
     const mtime1 = fs.statSync(manifestPath).mtimeMs;
 
     // Sleep enough to make a rewrite detectable, then re-run.
@@ -272,5 +272,42 @@ describe('runLaunchSync — project rules compile', () => {
     expect(result.rulesCompiled).toBe(true);
     const agentsMd = fs.readFileSync(path.join(PROJECT_DIR, 'AGENTS.md'), 'utf-8');
     expect(agentsMd).toContain('Hello from project rules.');
+  });
+});
+
+describe('runLaunchSync — shim skip-fast sentinel', () => {
+  // Local-scope $HOME override: touchLaunchSentinel reads process.env.HOME
+  // directly (matches the bash shim's $HOME expansion). Scoping the override
+  // to this describe block keeps the other tests' mocked state.js paths
+  // intact — globally overriding HOME breaks their settings.json fixtures.
+  let originalHome: string | undefined;
+  beforeEach(() => {
+    originalHome = process.env.HOME;
+    process.env.HOME = TMP_HOME;
+  });
+  afterEach(() => {
+    if (originalHome !== undefined) process.env.HOME = originalHome;
+    else delete process.env.HOME;
+  });
+
+  it('writes the bash skip-fast sentinel at the shim-expected path', () => {
+    runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
+
+    // Slug derivation must match shims.ts: `/` and ` ` → `_`.
+    const slug = PROJECT_DIR.replace(/\//g, '_').replace(/ /g, '_');
+    const sentinel = path.join(USER_DIR, '.cache', 'launch-sync', `claude@1.0.0@${slug}`);
+    expect(fs.existsSync(sentinel)).toBe(true);
+  });
+
+  it('sentinel mtime advances on a second run after the first', () => {
+    runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
+    const slug = PROJECT_DIR.replace(/\//g, '_').replace(/ /g, '_');
+    const sentinel = path.join(USER_DIR, '.cache', 'launch-sync', `claude@1.0.0@${slug}`);
+    const t1 = fs.statSync(sentinel).mtimeMs;
+    const target = Date.now() + 25;
+    while (Date.now() < target) { /* spin */ }
+    runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
+    const t2 = fs.statSync(sentinel).mtimeMs;
+    expect(t2).toBeGreaterThan(t1);
   });
 });

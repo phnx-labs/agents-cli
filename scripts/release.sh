@@ -82,28 +82,31 @@ REMOTE="$(git rev-parse origin/main)"
 [[ "$LOCAL" == "$REMOTE" ]] || die "main is not in sync with origin/main (run 'git push' first)"
 
 # ----- npm auth via token (skips 2FA OTP prompts) -----
-# Resolve NPM_TOKEN from the keychain-backed secrets bundle and write a temp
-# .npmrc that the rest of the script will use via NPM_CONFIG_USERCONFIG. The
-# token must have publish access to both @phnx-labs and @companion; create
-# automation tokens at https://www.npmjs.com/settings/<user>/tokens with the
-# "Automation" type so 2FA is bypassed for publishes.
-# Use local build if available (has latest keychain fixes), fallback to global
-if [[ -f "$ROOT/dist/index.js" ]]; then
-  AGENTS_CMD="node $ROOT/dist/index.js"
-else
-  command -v agents >/dev/null || die "'agents' CLI not on PATH (needed to read npmjs.com secrets bundle)"
-  AGENTS_CMD="agents"
+# Resolve NPM_TOKEN. Honor an env-supplied token first (lets CI and machines
+# whose keychain helper is broken publish without the bundle); otherwise read
+# from the keychain-backed `npmjs.com` secrets bundle. The token must have
+# publish access to both @phnx-labs and @companion; create automation tokens
+# at https://www.npmjs.com/settings/<user>/tokens with the "Automation" type
+# so 2FA is bypassed for publishes.
+if [[ -z "${NPM_TOKEN:-}" ]]; then
+  # Use local build if available (has latest keychain fixes), fallback to global
+  if [[ -f "$ROOT/dist/index.js" ]]; then
+    AGENTS_CMD="node $ROOT/dist/index.js"
+  else
+    command -v agents >/dev/null || die "'agents' CLI not on PATH (needed to read npmjs.com secrets bundle)"
+    AGENTS_CMD="agents"
+  fi
+  NPM_BUNDLE_OUT="$($AGENTS_CMD secrets export npmjs.com --plaintext 2>/dev/null || true)"
+  [[ -n "$NPM_BUNDLE_OUT" ]] || die "could not read 'npmjs.com' secrets bundle -- create it with: agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN  (or export NPM_TOKEN=<token> before running this script)"
+  NPM_TOKEN_LINE="$(printf '%s\n' "$NPM_BUNDLE_OUT" | grep -E '^export NPM_TOKEN=' | head -1)"
+  [[ -n "$NPM_TOKEN_LINE" ]] || die "secrets bundle 'npmjs.com' is missing key NPM_TOKEN"
+  # Strip 'export NPM_TOKEN=' prefix and surrounding quotes if any.
+  NPM_TOKEN="${NPM_TOKEN_LINE#export NPM_TOKEN=}"
+  NPM_TOKEN="${NPM_TOKEN%\"}"
+  NPM_TOKEN="${NPM_TOKEN#\"}"
+  NPM_TOKEN="${NPM_TOKEN%\'}"
+  NPM_TOKEN="${NPM_TOKEN#\'}"
 fi
-NPM_BUNDLE_OUT="$($AGENTS_CMD secrets export npmjs.com --plaintext 2>/dev/null || true)"
-[[ -n "$NPM_BUNDLE_OUT" ]] || die "could not read 'npmjs.com' secrets bundle -- create it with: agents secrets create npmjs.com && agents secrets add npmjs.com NPM_TOKEN"
-NPM_TOKEN_LINE="$(printf '%s\n' "$NPM_BUNDLE_OUT" | grep -E '^export NPM_TOKEN=' | head -1)"
-[[ -n "$NPM_TOKEN_LINE" ]] || die "secrets bundle 'npmjs.com' is missing key NPM_TOKEN"
-# Strip 'export NPM_TOKEN=' prefix and surrounding quotes if any.
-NPM_TOKEN="${NPM_TOKEN_LINE#export NPM_TOKEN=}"
-NPM_TOKEN="${NPM_TOKEN%\"}"
-NPM_TOKEN="${NPM_TOKEN#\"}"
-NPM_TOKEN="${NPM_TOKEN%\'}"
-NPM_TOKEN="${NPM_TOKEN#\'}"
 [[ -n "$NPM_TOKEN" ]] || die "NPM_TOKEN resolved to empty string"
 
 NPMRC_TMP="$(mktemp -t agents-cli-npmrc)"
@@ -394,7 +397,7 @@ fi
 bold "Publishing $PHNX_PKG@$TARGET..."
 if $PHNX_TARGET_PUBLISHED; then
   yellow "$PHNX_PKG@$TARGET is already on the registry, skipping publish"
-elif ! npm publish --access=public; then
+elif ! npm publish --access=public --provenance=false; then
   red "publish failed for $PHNX_PKG"
   red "the version commit and tag remain locally; rerun: $0 $TARGET --apply"
   exit 1

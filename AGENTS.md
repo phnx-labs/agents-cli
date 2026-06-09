@@ -1,165 +1,151 @@
-## Brand identity (read this first)
-
-**`agents-cli` is a Phoenix Labs OSS product (MIT-licensed). It is NOT part of the Rush brand.** Phoenix Horizon, Inc. owns several brands; agents-cli sits in the OSS lane, Rush sits in the consumer-product lane. Different audiences, different voice, different visual language.
-
-When working on this repo or its sibling `agent-cli-web` landing:
-
-- **Do NOT apply Rush brand styling** (gold sheen, cream paper, falcon mark, Cormorant Garamond serif, "Interface for the future" voice). Rush brand assets live in `~/.agents/plugins/rush/` — those are tools, not a brand to import.
-- **Do NOT write to `~/Rush/Brand/`** for agents-cli renders, screenshots, or videos. The Rush brand surface is for Rush product only. agents-cli assets go under `~/Phoenix/agents-cli/` (the `~/Rush/` prefix is the Google Drive sync root, not a brand) or the repo's own `assets/` / `demo/out/`.
-- **Visual language is terminal-coded** — near-black `#0a0a0a` bg, lime accent `#a3e635`, JetBrains Mono for wordmark + code, Inter for prose. See `assets/`, `demo/src/`, and `website/`.
-- **Voice is direct-developer** — name the verb, name the artifact, no marketing claims. Closer to a `man` page than a landing pitch.
-- **The composer + animator skills under `~/.agents/plugins/rush/skills/`** can be USED for agents-cli work, but ignore their §Brand voice sections — those apply only to Rush content. Override the destination dir with `~/Phoenix/agents-cli/launches/` and use this repo's color/type tokens, not Rush's.
-
-If any agent (Claude / Codex / Gemini / Cursor) starts pulling in Rush styling, Rush directory paths, or Rush voice for this project, stop and reread this block.
-
-## Agent Spawning
-
-When asked to spawn agents or perform multi-agent tasks, use the Swarm MCP extension:
-
-- `mcp__Swarm__Spawn` - Spawn agents (codex, cursor, gemini, claude)
-- `mcp__Swarm__Status` - Check agent status
-- `mcp__Swarm__Read` - Read agent output
-- `mcp__Swarm__Stop` - Stop agents
-
-Do NOT use built-in Claude Code agents (Task tool with Explore/Plan subagent_type) when Swarm agents are requested.
-
 # agents-cli
 
 CLI for managing AI coding agent versions, config, sessions, and cloud dispatch (Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok Build).
 
-## Three DotAgents repos
+> Phoenix Labs OSS (MIT). **NOT part of the Rush brand** — see [§Brand identity](#brand-identity) before touching assets, demos, or website.
+
+## Core design choices (read this first)
+
+Break these and downstream code drifts silently.
+
+### 1. Three DotAgents repos, resolution is project > user > system
+
+Resources AND `agents.yaml` resolve in that order. Same-name overrides, everything else unions.
 
 | Path | Role | Edited by |
 |---|---|---|
-| `.agents/` (project root) | **Project repo** — project-specific commands, skills, hooks, rules. Scoped to this repo only. | Project maintainers |
-| `~/.agents/` | **User repo** — your resources + ALL operational state (versions, shims, sessions, agents.yaml, browser runtime). | You / CLI |
-| `~/.agents/.system/` | **System repo** — npm-shipped defaults ONLY. Nothing else. | Maintainers |
+| `<repo>/.agents/` | **Project repo** — project-pinned commands / skills / hooks / rules. | Project maintainers |
+| `~/.agents/` | **User repo** — user resources + ALL operational state (versions, shims, sessions, `agents.yaml`, browser). | You / CLI |
+| `~/.agents/.system/` | **System repo** — npm-shipped defaults ONLY. | Maintainers (`gh:phnx-labs/.agents-system`) |
 
-Resources AND `agents.yaml` resolve **project > user > system** — project-level pins override user/system.
+Extra repos register via `agents repo add <source>` → clone into `~/.agents-<alias>/` and participate after the user repo.
 
-### What lives where
+### 2. `AGENTS.md` is the canonical memory file
 
-**System repo (`~/.agents/.system/`)** — npm-shipped defaults, fully tracked:
-```
-commands/  hooks/  hooks.yaml  mcp/  permissions/  profiles/  rules/  skills/
-```
-Clone from `phnx-labs/.agents-system` to see exactly what ships. Nothing else belongs here.
+`CLAUDE.md`, `GEMINI.md` are symlinks (`ls -la *.md` confirms). **Edit `AGENTS.md` only** — editing the symlink targets directly will be stomped on the next sync. The sync writes the right file name per agent (`OPENCODE.md`, `.cursorrules`, etc.) — see [§Agent config matrix](#agent-config-matrix).
 
-**User repo (`~/.agents/`)** — your resources + all operational state:
-- **Your resources** (git-tracked, top-level): `commands/`, `skills/`, `hooks/`, `rules/`, `mcp/`, `permissions/`, `profiles/`, `subagents/`, `plugins/`, `workflows/`, `routines/`, `agents.yaml`
-- **Durable runtime** (under `~/.agents/.history/`): `versions/`, `sessions/`, `runs/`, `trash/`, `backups/`, `teams/agents/`
-- **Regenerable runtime** (under `~/.agents/.cache/`): `shims/`, `bin/`, `packages/`, `cloud/`, `drive/`, `logs/`, `helpers/`, `state/`, `companion/`, the migration sentinel `.migrated`
-- **Browser:** `browser/profiles/` (YAML configs) + `~/.agents/.cache/browser/<profile>/` (runtime: chrome-data, pids)
+### 3. Capability table gates per-agent writes
 
-**Plugins (`~/.agents/plugins/`) are user-authored.** Each plugin is a directory with a `.claude-plugin/plugin.json` manifest, optionally containing `skills/`, `commands/`, `hooks/`, `subagents/`, `.mcp.json`. The CLI never migrates this directory into `.cache/` — that was the [issue #20](https://github.com/phnx-labs/agents-cli/issues/20) regression in 1.16.x–1.17.6, fixed in 1.18.0. Treat `plugins/` exactly like `skills/`.
+`supports(agent, cap, version?)` in [`src/lib/capabilities.ts`](src/lib/capabilities.ts) is the only place that decides whether an agent+version can receive a resource. Out-of-range versions are **skipped silently** — do not add per-call agent checks elsewhere; route through `supports()`.
 
-**No `secrets/` directory anywhere.** Bundle metadata lives in macOS Keychain, not on disk.
+### 4. No fallback logic for legacy layouts
 
-**CLI binaries (`~/.agents/cli/<name>.yaml`)** declare host-level command-line tools the user wants installed (e.g. `higgsfield`, `gh`). One YAML per tool with `install:` methods tried in order (`npm`/`brew`/`script`/`binary`). Unlike skills/commands/hooks, CLI manifests are NOT copied into per-agent version homes — they install binaries onto the host PATH. Manage via `agents cli list|install|check|view|add`. `agents repo refresh` lists missing entries and prompts to install them.
+[`src/lib/migrate.ts`](src/lib/migrate.ts) folds legacy paths ONCE at install time (`runMigration()` writes a `.migrated` sentinel). Downstream code assumes the post-fold layout. "Just-in-case" branches re-introduce drift bugs; the migrator is the single source of truth for legacy handling.
 
-These `$HOME`-level directories (plus an optional `.agents/` at project root) are called **DotAgents repos** — they live outside this codebase and are managed by the CLI. Each has a canonical layout: `commands/`, `skills/`, `hooks/`, `rules/`, `mcp/`, `cli/`, `permissions/`, `profiles/`, `subagents/`. The typed items inside are called **resources** (concept-only — there is no top-level `agents resources` command; use the per-kind listers like `agents skills list`, `agents commands list`, etc.). Resolution order is project > user > extra repos > system; same-named resource at a higher layer wins, everything else unions in. See `docs/00-concepts.md` for the full model.
+### 5. Hooks live in a single layered `hooks.yaml`
+
+System (`~/.agents/.system/hooks.yaml`) + user (`~/.agents/hooks.yaml`) merged, user wins on same name. Per-entry `matches:` predicates (`prompt_contains`, `prompt_matches`, `tool_name`, `tool_args_match`, `cwd_includes`, `project_has`, `git_dirty`) AND together at fire time. Per-entry `enabled: false` disables a system-shipped hook from the user side.
+
+The `agents:` field in `ManifestHook` is `@deprecated` ([`src/lib/types.ts:176-177`](src/lib/types.ts)) — capability table decides which agents register a hook. Promptcuts are hook data (`hooks/promptcuts.yaml`), not a top-level resource.
+
+### 6. Multi-agent work → `agents teams`
+
+DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, optional `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams (`migrateLegacySwarmToTeams()` in `src/lib/migrate.ts`). Don't reach for Swarm — it's gone.
+
+---
+
+## Directory layout
+
+**System repo (`~/.agents/.system/`)** — npm-shipped, fully tracked. Layout: `commands/  hooks/  hooks.yaml  mcp/  permissions/  profiles/  rules/  skills/`. Clone `gh:phnx-labs/.agents-system` to inspect what ships. Nothing else belongs here.
+
+**User repo (`~/.agents/`):**
+
+- **Resources** (git-tracked, top-level): `commands/`, `skills/`, `hooks/`, `rules/`, `mcp/`, `permissions/`, `profiles/`, `subagents/`, `plugins/`, `workflows/`, `routines/`, `cli/`, `agents.yaml`
+- **Durable runtime** (`~/.agents/.history/`): `versions/`, `sessions/`, `runs/`, `trash/`, `backups/`, `teams/agents/`
+- **Regenerable runtime** (`~/.agents/.cache/`): `shims/`, `bin/`, `packages/`, `cloud/`, `drive/`, `logs/`, `helpers/`, `state/`, `companion/`, `.migrated`
+- **Browser:** `browser/profiles/` (configs) + `~/.agents/.cache/browser/<profile>/` (chrome-data, pids)
+
+**Plugins (`~/.agents/plugins/`) are user-authored, NOT regenerable.** Each plugin = a directory with `.claude-plugin/plugin.json`, optionally `skills/`, `commands/`, `hooks/`, `subagents/`, `.mcp.json`. The CLI never moves `plugins/` into `.cache/`. Treat exactly like `skills/`.
+
+**No `secrets/` directory anywhere** — bundle metadata lives in macOS Keychain.
+
+**CLI binaries (`~/.agents/cli/<name>.yaml`)** declare host-level tools (e.g. `gh`, `higgsfield`). `install:` methods tried in order (`npm` / `brew` / `script` / `binary`). Unlike skills/commands/hooks, CLI manifests are NOT copied into per-agent version homes — they install to host PATH. Manage via `agents cli list|install|check|view|add`. `agents repo refresh` reports missing entries and prompts to install.
+
+See [`docs/00-concepts.md`](docs/00-concepts.md) for the full mental model and resolution semantics.
+
+## Agent config matrix
+
+| Agent | Commands dir | Memory file |
+|-------|--------------|-------------|
+| Claude | `commands/` (md) | `CLAUDE.md` → `AGENTS.md` |
+| Codex | `prompts/` (md) | `AGENTS.md` (native) |
+| Gemini | `commands/` (toml) | `GEMINI.md` → `AGENTS.md` |
+| Cursor | `commands/` (md) | `.cursorrules` |
+| OpenCode | `commands/` (md) | `OPENCODE.md` |
+| Grok | skills + `.grok/` (hooks, plugins, agents, `config.toml`) | `AGENTS.md` + `~/.grok/memory/` |
 
 ## Source layout
 
 ```
 src/
-  index.ts           # CLI entry (commander.js)
-  commands/          # Command implementations
+  index.ts             # CLI entry (commander.js)
+  commands/            # User-facing subcommands (one file per `agents <cmd>`)
   lib/
-    state.ts         # Path constants for both repos; agents.yaml read/write
-    resources.ts     # resolveResource() / listResources() — project > user > system
-    migrate.ts       # One-shot idempotent migrations (postinstall + command-time)
-    agents.ts        # Per-agent capability table
-    capabilities.ts  # supports() gate
-    versions.ts      # Install, remove, syncResourcesToVersion
-    shims.ts         # Shim generation, config symlink switching
-    hooks.ts         # Layered hooks.yaml parser + per-agent registrar
-    hooks/match.ts   # matches: predicate evaluator
-    session/         # Session discovery, parsing, rendering
-    cloud/           # Multi-provider cloud dispatch (rush, codex, factory)
-    teams/           # `agents teams` orchestration
-    profiles.ts      # Host CLI + endpoint + model bundles
+    state.ts           # Path constants; agents.yaml read/write
+    resources.ts       # resolveResource() / listResources() — layered resolution
+    capabilities.ts    # supports() — the per-agent write gate
+    agents.ts          # Per-agent capability table
+    versions.ts        # Install, remove, syncResourcesToVersion
+    shims.ts           # Shim generation, config symlink switching
+    hooks.ts           # hooks.yaml parser + per-agent registrar
+    hooks/match.ts     # `matches:` predicate evaluator
+    migrate.ts         # One-shot idempotent migrations
+    session/           # Discovery, parsing, rendering (Claude / Codex / Gemini / OpenCode)
+    cloud/             # Provider registry (Rush / Codex / Factory)
+    teams/             # `agents teams` orchestration
+    profiles.ts        # Host CLI + endpoint + model bundles
 ```
 
-## Key concepts
-
-- **Version management** — install/switch agent CLI versions (binaries live under `~/.agents/versions/`).
-- **Resource sync** — symlink resolved resources into each version's home dir.
-- **Layered config** — system repo ships defaults, user repo overrides by name. Hooks and promptcuts both layer this way.
-- **Capability gating** — `supports(agent, cap, version?)` decides whether a write is safe; out-of-range versions are skipped silently.
-- **Session reading** — unified normalized view across Claude, Codex, Gemini.
-- **Cloud dispatch** — provider registry resolves Rush / Codex Cloud / Factory.
-
-## Hook model
-
-`hooks.yaml` is a central manifest, read from system + user (user wins). Each entry has `script`, `events`, optional `timeout`, optional `matches:` predicates, optional `enabled: false` to disable a system-shipped hook from the user side. The `agents:` field is deprecated — the registrar uses the capability table to decide which agents register the hook. Predicates (`prompt_contains`, `prompt_matches`, `tool_name`, `tool_args_match`, `cwd_includes`, `project_has`, `git_dirty`) AND together at fire time.
-
-Promptcuts are hook data, not a top-level resource — `~/.agents/.system/hooks/promptcuts.yaml` (defaults) and `~/.agents/hooks/promptcuts.yaml` (user) are merged by the expand-promptcuts script with user precedence.
-
-## Agent config
-
-| Agent | Commands | Memory file |
-|-------|----------|-------------|
-| Claude | `commands/` (md) | CLAUDE.md |
-| Codex | `prompts/` (md) | AGENTS.md |
-| Gemini | `commands/` (toml) | GEMINI.md |
-| Cursor | `commands/` (md) | .cursorrules |
-| OpenCode | `commands/` (md) | OPENCODE.md |
-| Grok | skills + `.grok/` (hooks, plugins, agents, config.toml) | AGENTS.md + `~/.grok/memory/` |
-
-`AGENTS.md` is the canonical source — synced to each agent's expected name. Grok also has native support for project `.grok/` resources.
-
-## Build
+## Build, test, dev
 
 ```bash
 bun install && bun run build && bun test
 ```
 
-## Local development (`scripts/install.sh`)
+Tests are `*.test.ts` next to source; integration in `tests/`. CI runs Node 22 + 24 on every PR ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-`scripts/install.sh` installs the working tree as a side-by-side dev build at `$HOME/.local/agents-cli-dev/`, binary symlinked into `$HOME/.local/bin/agents`. The registry-installed global `agents` is **never** touched. Version is stamped `0.0.0-dev.<sha>[-dirty]` so `agents --version` always tells you which build is on PATH.
+**Local dev build:** `scripts/install.sh --skip-tests` builds the working tree and installs at `$HOME/.local/agents-cli-dev/`, symlinked into `$HOME/.local/bin/agents`. The npm-installed global is never touched. Version stamps as `0.0.0-dev.<sha>[-dirty]` so `agents --version` disambiguates which build is on PATH.
 
 ```bash
-scripts/install.sh --skip-tests   # build + install at ~/.local/agents-cli-dev
-# put $HOME/.local/bin ahead of nvm's bin dir on PATH to use the dev build
+scripts/install.sh --skip-tests
+# Put $HOME/.local/bin ahead of nvm's bin dir on PATH to use the dev build.
+# Revert: drop the PATH entry, or `rm -rf ~/.local/agents-cli-dev`.
 ```
 
-Reverting: drop `$HOME/.local/bin` from PATH (or `rm -rf ~/.local/agents-cli-dev` to wipe entirely). The registry release at `$(npm root -g)/@phnx-labs/agents-cli/` is untouched.
+**Why two prefixes?** Issue #20-class regressions ship to npm and silently break auto-updaters; side-by-side dev installs let you iterate without risking the working install.
 
-**Why two prefixes?** Issue #20-class regressions ship to npm and silently break every install that auto-updates. Side-by-side dev installs let you iterate on the CLI without risking the working install on your machine, and let you `agents --version` to disambiguate immediately.
-
-**Bin entrypoints must be executable.** `scripts/build.sh` runs `chmod 0o755` on every file declared in `package.json#bin` after `tsc` emits dist/. Newer npm versions preserve file mode from the tarball and do NOT auto-chmod the bin target, so 644 entrypoints surface to users as `zsh: permission denied: agents`. Do not skip this step.
-
-## Detailed design
-
-See `docs/`:
-- `00-concepts.md` — DotAgents repos, resource kinds, layered resolution model
-- `01-version-management.md` — install, switching, isolation
-- `02-resource-sync.md` — layered resource resolution and sync
-- `03-routines.md` — scheduled jobs with sandboxed permissions
-- `04-landscape.md` — competitive landscape
-- `05-sessions.md` — session DB + indexer
-- `06-observability.md` — JSON outputs as an observability layer
+**Bin entrypoints need `chmod 755`.** [`scripts/build.sh`](scripts/build.sh) chmods every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball file mode and does NOT auto-chmod — 644 surfaces as `zsh: permission denied: agents`. Do not skip this step.
 
 ## Conventions
 
-- Memory file is `AGENTS.md`; `CLAUDE.md` and `GEMINI.md` are symlinks.
-- Tests in codebase as `*.test.ts` next to source; integration tests in `tests/`.
-- Don't add fallback logic for the legacy single-root model — the migrator handles it once at install.
-- `agents repo push`/`pull` operates on `~/.agents/` only; system updates ride `npm update -g agents-cli`.
-
-## Running Tests
-
-Use `bun run test` to run the full vitest suite. Tests are designed to be fast
-and run cleanly on any local machine with Node 22+ and bun installed.
-
-CI runs the matrix (Node 22 + 24 on ubuntu-latest) on every PR. See
-`.github/workflows/ci.yml`.
+- `AGENTS.md` is canonical; `CLAUDE.md` / `GEMINI.md` are symlinks. **Edit `AGENTS.md` only.**
+- `agents repo push` / `pull` operates on `~/.agents/` only. System updates ride `npm update -g @phnx-labs/agents-cli`.
+- Real services only — no mocking. Tests must exercise the actual critical path (see [CLAUDE.md](CLAUDE.md) testing rules).
 
 ## Security
 
-**No sensitive data in any DotAgents repo.** All three repos (project, user, system) are designed to be safely version-controlled:
+**No sensitive data in any DotAgents repo.** All three repos are designed to be safely version-controlled.
 
-- Use `agents secrets` — bundle metadata lives in macOS Keychain, never on disk.
-- Browser profile configs reference secrets bundles by name, not raw credentials.
-- If you accidentally commit a secret, rotate it immediately — git history persists.
+- Use `agents secrets` — bundle metadata in macOS Keychain, never on disk.
+- Browser profile configs reference bundles by name, not raw credentials.
+- Accidentally committed a secret? Rotate immediately — git history persists.
+
+## Detailed design
+
+[`docs/`](docs/README.md) is source-grounded reference. Start with [`00-concepts.md`](docs/00-concepts.md). Index covers core (concepts, version mgmt, sync, sessions, observability), credentials (profiles, secrets), orchestration (teams, cloud, routines), extensibility (plugins, workflows, subagents, hooks), automation (browser, pty, computer).
+
+---
+
+## Brand identity
+
+`agents-cli` is a Phoenix Labs OSS product (MIT). **NOT part of the Rush brand.** Phoenix Horizon, Inc. owns several brands; agents-cli sits in the OSS lane, Rush in the consumer-product lane.
+
+When working on this repo or the sibling `agent-cli-web` landing:
+
+- **No Rush styling** — no gold sheen, cream paper, falcon mark, Cormorant Garamond serif, "Interface for the future" voice. The Rush plugin at `~/.agents/plugins/rush/` is a tool to call, not a brand to import.
+- **No `~/Rush/Brand/` writes** for agents-cli renders, screenshots, or videos. Use `~/Phoenix/agents-cli/` or this repo's `assets/` / `demo/out/`.
+- **Visual language is terminal-coded** — `#0a0a0a` bg, `#a3e635` lime accent, JetBrains Mono for wordmark + code, Inter for prose. See [`assets/`](assets/), [`demo/src/`](demo/src/), [`website/`](website/).
+- **Voice is direct-developer** — verb + artifact, no marketing claims. Closer to a `man` page than a landing pitch.
+- **Composer + animator skills (`~/.agents/plugins/rush/skills/`)** can be USED here — but ignore their §Brand voice sections (Rush-only). Override destination to `~/Phoenix/agents-cli/launches/` and use this repo's color/type tokens.
+
+If any agent starts pulling Rush styling, paths, or voice into agents-cli work, stop and reread this block.

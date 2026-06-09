@@ -177,6 +177,10 @@ export function registerPackagesCommands(program: Command): void {
         }
         console.log();
       }
+
+      console.log(
+        chalk.gray("  See also: agents plugins marketplaces — plugin marketplaces (managed via 'agents repo')")
+      );
     });
 
   registryCmd

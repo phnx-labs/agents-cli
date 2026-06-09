@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
-import { AGENTS } from '../../agents.js';
+import { AGENTS, agentConfigDirName } from '../../agents.js';
 import { capableAgents } from '../../capabilities.js';
 import { safeJoin } from '../../paths.js';
 import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
@@ -45,7 +45,7 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
     kind: 'skills',
     agent,
     write({ versionHome, selection }: WriteArgs<string[]>): WriteResult {
-      const agentDir = path.join(versionHome, `.${agent}`);
+      const agentDir = path.join(versionHome, agentConfigDirName(agent));
       const skillsTarget = path.join(agentDir, 'skills');
       try {
         if (fs.lstatSync(skillsTarget).isSymbolicLink()) {

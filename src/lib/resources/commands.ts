@@ -15,7 +15,7 @@ import {
   getSystemAgentsDir,
   getEnabledExtraRepos,
 } from '../state.js';
-import { AGENTS } from '../agents.js';
+import { AGENTS, agentConfigDirName } from '../agents.js';
 import { markdownToToml } from '../convert.js';
 
 /** Command item metadata. */
@@ -196,7 +196,7 @@ export class CommandsHandler implements ResourceHandler<CommandItem> {
   sync(agent: AgentId, versionHome: string, cwd?: string): void {
     const agentConfig = AGENTS[agent];
     const targetFormat = this.format(agent);
-    const targetDir = path.join(versionHome, `.${agent}`, this.targetDir(agent));
+    const targetDir = path.join(versionHome, agentConfigDirName(agent), this.targetDir(agent));
 
     // Ensure target directory exists
     fs.mkdirSync(targetDir, { recursive: true });

@@ -9,7 +9,7 @@
 import { extractFileOpsFromBash } from './file_ops.js';
 
 /** Supported agent CLI types for team spawning. */
-export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 'grok' | 'antigravity';
+export type AgentType = 'codex' | 'gemini' | 'cursor' | 'claude' | 'opencode' | 'grok' | 'antigravity' | 'kimi';
 
 const claudeToolUseMap = new Map<string, { tool: string; command?: string; path?: string }>();
 

@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { AGENTS } from '../agents.js';
+import { AGENTS, agentConfigDirName } from '../agents.js';
 import type { AgentId } from '../types.js';
 import { getResolvedRulesDir, getVersionsDir } from '../state.js';
 import { composeRules, composeRulesFromState, type RulesLayer } from './compose.js';
@@ -126,7 +126,7 @@ export function supportsRulesImports(agentId: AgentId): boolean {
 function getCompiledRulesPath(agentId: AgentId, version: string): string {
   const agentConfig = AGENTS[agentId];
   const versionHome = path.join(getVersionsDir(), agentId, version, 'home');
-  return path.join(versionHome, `.${agentId}`, agentConfig.instructionsFile);
+  return path.join(versionHome, agentConfigDirName(agentId), agentConfig.instructionsFile);
 }
 
 function getManifestPath(compiledPath: string): string {

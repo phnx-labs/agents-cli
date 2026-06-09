@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
+import { agentConfigDirName } from '../../agents.js';
 import { capableAgents } from '../../capabilities.js';
 import { resolveHookSource } from '../writers/sources.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
@@ -15,7 +16,7 @@ function buildHooksDetector(agent: AgentId): ResourceDetector {
     kind: 'hooks',
     agent,
     list({ versionHome }: DetectArgs): string[] {
-      const hooksDir = path.join(versionHome, `.${agent}`, 'hooks');
+      const hooksDir = path.join(versionHome, agentConfigDirName(agent), 'hooks');
       if (!fs.existsSync(hooksDir)) return [];
       const installed = fs.readdirSync(hooksDir).filter(f => !f.startsWith('.'));
 

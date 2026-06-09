@@ -52,6 +52,26 @@ import { DEFAULT_SYSTEM_REPO } from '../lib/types.js';
 import type { AgentId, ExtraRepoConfig } from '../lib/types.js';
 import { ALL_AGENT_IDS, isAgentName, resolveAgentName } from '../lib/agents.js';
 import { refresh } from '../lib/refresh.js';
+import { capableAgents } from '../lib/capabilities.js';
+import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/versions.js';
+import { syncAllMarketplaces } from '../lib/plugin-marketplace.js';
+
+/**
+ * After a repo add/remove/enable/disable, reconcile each plugins-capable
+ * agent's default version against the new marketplace set. Re-synthesizes
+ * catalogs and known_marketplaces.json entries. Source-copy of plugins is
+ * out of scope here — full sync still goes through `agents repo refresh`.
+ */
+function syncMarketplacesForDefaults(): void {
+  for (const agent of capableAgents('plugins')) {
+    const def = getGlobalDefault(agent);
+    if (!def) continue;
+    if (!listInstalledVersions(agent).includes(def)) continue;
+    try {
+      syncAllMarketplaces(agent, getVersionHomePath(agent, def));
+    } catch { /* best-effort */ }
+  }
+}
 
 const ALIAS_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
@@ -327,6 +347,7 @@ export function registerRepoCommands(program: Command): void {
       if (parsed.type === 'local') {
         extras[alias] = { url: parsed.url, path: parsed.url, enabled: true };
         updateMeta({ extraRepos: extras });
+        syncMarketplacesForDefaults();
         console.log(chalk.green(`Registered local repo "${alias}" -> ${parsed.url}`));
         return;
       }
@@ -363,6 +384,7 @@ export function registerRepoCommands(program: Command): void {
 
       extras[alias] = { url: parsed.url, path: targetDir, enabled: true };
       updateMeta({ extraRepos: extras });
+      syncMarketplacesForDefaults();
 
       console.log(chalk.gray(`\nRegistered as "${alias}". Skills and commands from this repo will be`));
       console.log(chalk.gray(`picked up automatically the next time you launch any agent.`));
@@ -403,6 +425,7 @@ export function registerRepoCommands(program: Command): void {
 
       delete extras[alias];
       updateMeta({ extraRepos: extras });
+      syncMarketplacesForDefaults();
       console.log(chalk.green(`Removed "${alias}"`));
     });
 
@@ -628,5 +651,6 @@ async function toggle(alias: string, enabled: boolean): Promise<void> {
   }
   extras[alias] = { ...extras[alias], enabled };
   updateMeta({ extraRepos: extras });
+  syncMarketplacesForDefaults();
   console.log(chalk.green(`${enabled ? 'Enabled' : 'Disabled'} "${alias}"`));
 }

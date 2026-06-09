@@ -74,6 +74,13 @@ function writeFakeNpmInstaller(home: string, version: string): string {
     npmPath,
     [
       '#!/bin/sh',
+      // Production install probes `npm --version` before `npm install` —
+      // respond so the install path proceeds instead of bailing with
+      // "npm is not installed". See src/lib/versions.ts:1124.
+      'if [ "$1" = "--version" ]; then',
+      '  echo "10.0.0"',
+      '  exit 0',
+      'fi',
       'if [ "$1" = "install" ]; then',
       '  mkdir -p node_modules/@openai/codex node_modules/.bin',
       `  printf '{"version":"${version}"}' > node_modules/@openai/codex/package.json`,

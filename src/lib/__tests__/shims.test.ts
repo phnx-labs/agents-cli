@@ -87,8 +87,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 16 (launch shims call sync --launch on hot path, never foreground)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(16);
+  it('is 17 (launch sync wrapped in a bash skip-fast sentinel gate)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(17);
   });
 });
 
@@ -119,6 +119,12 @@ describe('generateShimScript — config-dir env vars', () => {
     expect(script).toContain('export CODEX_HOME=');
     expect(script).toContain('"$VERSION_DIR/home/.codex"');
     expect(script).not.toContain('export CLAUDE_CONFIG_DIR=');
+  });
+
+  it('exports KIMI_CODE_HOME for kimi so config/sessions/skills are versioned', () => {
+    const script = generateShimScript('kimi');
+    expect(script).toContain('export KIMI_CODE_HOME=');
+    expect(script).toContain('"$VERSION_DIR/home/.kimi-code"');
   });
 
   it('does not export a managed config-dir var for other agents', () => {

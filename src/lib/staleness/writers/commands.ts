@@ -20,7 +20,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
-import { AGENTS } from '../../agents.js';
+import { AGENTS, agentConfigDirName } from '../../agents.js';
 import { supports } from '../../capabilities.js';
 import { safeJoin } from '../../paths.js';
 import { markdownToToml } from '../../convert.js';
@@ -36,7 +36,7 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
     agent,
     write({ version, versionHome, selection }: WriteArgs<string[]>): WriteResult {
       const agentConfig = AGENTS[agent];
-      const agentDir = path.join(versionHome, `.${agent}`);
+      const agentDir = path.join(versionHome, agentConfigDirName(agent));
       const commandsAsSkills = shouldInstallCommandAsSkill(agent, version);
       const supportsCommands = supports(agent, 'commands', version).ok;
 

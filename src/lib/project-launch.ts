@@ -43,8 +43,9 @@
 
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import type { AgentId } from './types.js';
+import type { AgentId, MarketplaceSpec } from './types.js';
 import { supports } from './capabilities.js';
 import {
   getEnabledExtraRepos,
@@ -56,19 +57,19 @@ import {
 } from './state.js';
 import { getVersionHomePath } from './versions.js';
 import { compileRulesForProject } from './rules/compile.js';
-import { discoverPluginsInDir } from './plugins.js';
+import { discoverPluginsInDir, hasPluginExecSurfaces, inspectPluginCapabilities } from './plugins.js';
 import type { DiscoveredPlugin } from './types.js';
 import {
   MARKETPLACE_NAME,
   PROJECT_MARKETPLACE_NAME,
   SYSTEM_MARKETPLACE_NAME,
+  addPluginToSettings,
   copyPluginToMarketplace,
-  disablePluginInSettings,
-  enablePluginInSettings,
-  extrasMarketplaceName,
+  marketplaceNameFor,
   marketplaceRoot,
   pluginInstallDir,
   registerMarketplace,
+  removePluginFromSettings,
   syncMarketplaceManifest,
 } from './plugin-marketplace.js';
 
@@ -92,6 +93,11 @@ export interface LaunchSyncResult {
 /**
  * Run the launch-time project compile. Safe to call on every agent launch:
  * each step is idempotent and skips when its inputs are missing.
+ *
+ * After a successful run, touches the shim-side skip-fast sentinel at
+ * `~/.agents/.cache/launch-sync/<agent>@<version>@<projectslug>` so the next
+ * shim invocation can skip the node spawn entirely when no source dir is
+ * newer than the sentinel (shim schema v17+).
  */
 export function runLaunchSync(opts: LaunchSyncOptions): LaunchSyncResult {
   const result: LaunchSyncResult = {
@@ -117,7 +123,40 @@ export function runLaunchSync(opts: LaunchSyncOptions): LaunchSyncResult {
   // Step 3: scoped plugin marketplaces
   result.marketplaces = synthesizeScopedMarketplaces(opts.agent, opts.version, opts.cwd);
 
+  // Touch the shim's skip-fast sentinel. Best-effort — if this fails the
+  // shim just won't skip on the next launch, which is correct fallback.
+  touchLaunchSentinel(opts.agent, opts.version, opts.cwd);
+
   return result;
+}
+
+/**
+ * Path of the shim's skip-fast sentinel for this (agent, version, cwd) tuple.
+ * Must match the SHIM-SIDE format in src/lib/shims.ts (PROJECT_SLUG derivation):
+ *   slug = PWD with `/` → `_` and ` ` → `_`
+ *
+ * Cache leak note: this dir accumulates one zero-byte file per
+ * (agent, version, project) tuple ever launched. Disk impact is negligible
+ * (inodes only). A periodic GC belongs in `agents prune` — follow-up.
+ */
+function launchSentinelPath(agent: AgentId, version: string, cwd: string): string {
+  const slug = cwd.replace(/\//g, '_').replace(/ /g, '_');
+  // Prefer $HOME (respects test overrides + matches bash's $HOME expansion in
+  // the shim), fall back to os.homedir() so the lookup never resolves to '/'
+  // if HOME is somehow unset.
+  const home = process.env.HOME || os.homedir();
+  return path.join(home, '.agents', '.cache', 'launch-sync', `${agent}@${version}@${slug}`);
+}
+
+function touchLaunchSentinel(agent: AgentId, version: string, cwd: string): void {
+  try {
+    const sentinel = launchSentinelPath(agent, version, cwd);
+    fs.mkdirSync(path.dirname(sentinel), { recursive: true });
+    // Empty content — purely an mtime carrier for the shim's `[ -nt ]` compare.
+    fs.writeFileSync(sentinel, '');
+  } catch {
+    // best-effort
+  }
 }
 
 // ─── Step 2: workspace resource mirror ────────────────────────────────────────
@@ -232,6 +271,7 @@ function replaceWithSymlinkIfOwned(srcPath: string, destPath: string, projectAge
 // ─── Step 3: scoped plugin marketplaces ───────────────────────────────────────
 
 interface PluginScope {
+  spec: MarketplaceSpec;
   marketplaceName: string;
   pluginsDir: string;
   /**
@@ -245,25 +285,31 @@ interface PluginScope {
   precedence: number;
 }
 
+function makeScope(
+  spec: MarketplaceSpec,
+  pluginsDir: string,
+  autoEnableExecSurfaces: boolean,
+  precedence: number,
+): PluginScope {
+  return { spec, marketplaceName: marketplaceNameFor(spec), pluginsDir, autoEnableExecSurfaces, precedence };
+}
+
 function collectPluginScopes(cwd: string): PluginScope[] {
   const scopes: PluginScope[] = [];
 
   // Precedence: project > extras > user > system. Same direction the rules
   // composition uses (project layer shadows base layers).
-  scopes.push({ marketplaceName: SYSTEM_MARKETPLACE_NAME, pluginsDir: getSystemPluginsDir(),
-    autoEnableExecSurfaces: true, precedence: 0 });
-  scopes.push({ marketplaceName: MARKETPLACE_NAME,        pluginsDir: getPluginsDir(),
-    autoEnableExecSurfaces: true, precedence: 1 });
+  scopes.push(makeScope({ kind: 'system', root: getSystemPluginsDir() }, getSystemPluginsDir(), true, 0));
+  scopes.push(makeScope({ kind: 'user' }, getPluginsDir(), true, 1));
 
   for (const extra of getEnabledExtraRepos()) {
-    scopes.push({ marketplaceName: extrasMarketplaceName(extra.alias), pluginsDir: getExtraPluginsDir(extra.alias),
-      autoEnableExecSurfaces: false, precedence: 2 });
+    const root = getExtraPluginsDir(extra.alias);
+    scopes.push(makeScope({ kind: 'extra', alias: extra.alias, root }, root, false, 2));
   }
 
   const projectPluginsDir = getProjectPluginsDir(cwd);
   if (projectPluginsDir) {
-    scopes.push({ marketplaceName: PROJECT_MARKETPLACE_NAME, pluginsDir: projectPluginsDir,
-      autoEnableExecSurfaces: false, precedence: 3 });
+    scopes.push(makeScope({ kind: 'project', root: projectPluginsDir }, projectPluginsDir, false, 3));
   }
 
   return scopes;
@@ -330,7 +376,7 @@ function installScope(
   plugins: DiscoveredPlugin[],
 ): string[] {
   const newHash = computeScopeHash(plugins);
-  const sentinelPath = path.join(marketplaceRoot(agent, versionHome, scope.marketplaceName), '.agents-launch-sync');
+  const sentinelPath = path.join(marketplaceRoot(scope.spec, agent, versionHome), '.agents-launch-sync');
   const existingHash = readScopeHash(sentinelPath);
 
   if (existingHash === newHash) {
@@ -344,7 +390,7 @@ function installScope(
   const installed: string[] = [];
   for (const plugin of plugins) {
     try {
-      copyPluginToMarketplace(plugin, agent, versionHome, scope.marketplaceName);
+      copyPluginToMarketplace(plugin, scope.spec, agent, versionHome);
       installed.push(plugin.name);
     } catch {
       // Individual plugin copy failure — keep going on the others.
@@ -352,14 +398,15 @@ function installScope(
   }
   if (installed.length === 0) return [];
 
-  syncMarketplaceManifest(agent, versionHome, scope.marketplaceName);
-  registerMarketplace(agent, versionHome, scope.marketplaceName);
+  syncMarketplaceManifest(scope.spec, agent, versionHome);
+  registerMarketplace(scope.spec, agent, versionHome);
 
-  for (const name of installed) {
-    enablePluginInSettings(name, agent, versionHome, {
-      allowExecSurfaces: scope.autoEnableExecSurfaces,
-      marketplaceName: scope.marketplaceName,
-    });
+  // Enable each plugin in settings unless the scope withholds auto-enable for
+  // exec surfaces (project + extras) AND the plugin actually ships any.
+  for (const plugin of plugins) {
+    if (!installed.includes(plugin.name)) continue;
+    if (!scope.autoEnableExecSurfaces && hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root))) continue;
+    addPluginToSettings(plugin.name, scope.marketplaceName, agent, versionHome);
   }
 
   writeScopeHash(sentinelPath, newHash);
@@ -375,13 +422,13 @@ function pruneLosingScopeEnables(
     SYSTEM_MARKETPLACE_NAME,
     MARKETPLACE_NAME,
     PROJECT_MARKETPLACE_NAME,
-    ...getEnabledExtraRepos().map((e) => extrasMarketplaceName(e.alias)),
+    ...getEnabledExtraRepos().map((e) => marketplaceNameFor({ kind: 'extra', alias: e.alias, root: getExtraPluginsDir(e.alias) })),
   ]);
 
   for (const [name, { scope: winningScope }] of winner) {
     for (const candidateScope of ourScopeNames) {
       if (candidateScope === winningScope.marketplaceName) continue;
-      disablePluginInSettings(name, agent, versionHome, candidateScope);
+      removePluginFromSettings(name, candidateScope, agent, versionHome);
     }
   }
 }

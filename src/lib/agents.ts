@@ -469,13 +469,18 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       rulesImports: true,
     },
   },
+  // Kimi Code CLI (`kimi`) — Moonshot AI coding agent.
+  // Install: `curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash`
+  //    or: `npm install -g @moonshot-ai/kimi-code`
+  // Config: `~/.kimi-code/config.toml`, `~/.kimi-code/mcp.json`,
+  //         `~/.kimi-code/skills/`, `~/.kimi-code/hooks/`
   kimi: {
     id: 'kimi',
     name: 'Kimi',
     color: 'magentaBright',
-    cliCommand: 'kimi-code',
-    npmPackage: '',
-    installScript: '',
+    cliCommand: 'kimi',
+    npmPackage: '@moonshot-ai/kimi-code',
+    installScript: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
     configDir: path.join(HOME, '.kimi-code'),
     commandsDir: '',
     commandsSubdir: '',
@@ -488,14 +493,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     capabilities: {
       hooks: true,
       mcp: true,
-      allowlist: false,
-      skills: false,
+      allowlist: true,
+      skills: true,
       commands: false,
-      plugins: false,
+      plugins: true,
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
-      modes: ['plan', 'edit', 'skip'],
+      modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,
     },
   },
@@ -733,6 +738,21 @@ export function ensureSkillsDir(agentId: AgentId): void {
   if (!fs.existsSync(agent.skillsDir)) {
     fs.mkdirSync(agent.skillsDir, { recursive: true });
   }
+}
+
+/**
+ * The agent's config-dir name relative to $HOME — e.g. '.claude',
+ * '.gemini/antigravity-cli', '.config/amp', '.kimi-code'.
+ *
+ * This is the path segment to join onto a (version) home root when locating an
+ * agent's commands/skills/plugins. Do NOT hardcode `.${agentId}`: it is wrong
+ * for every agent whose config dir is nested or lives under ~/.config —
+ * antigravity (~/.gemini/antigravity-cli), amp (~/.config/amp),
+ * goose (~/.config/goose), kimi (~/.kimi-code). Mirrors the shim `configDirName`
+ * derivation in shims.ts.
+ */
+export function agentConfigDirName(agentId: AgentId): string {
+  return path.relative(os.homedir(), AGENTS[agentId].configDir);
 }
 
 /** Account identity and billing information extracted from an agent's auth config. */
@@ -1473,7 +1493,7 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
     case 'grok':
       return path.join(home, '.grok', 'config.toml');
     default:
-      return path.join(home, `.${agentId}`, 'settings.json');
+      return path.join(home, agentConfigDirName(agentId), 'settings.json');
   }
 }
 

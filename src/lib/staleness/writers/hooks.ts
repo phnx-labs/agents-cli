@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
+import { agentConfigDirName } from '../../agents.js';
 import { capableAgents } from '../../capabilities.js';
 import { safeJoin } from '../../paths.js';
 import { registerHooksToSettings } from '../../hooks.js';
@@ -19,7 +20,7 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
     kind: 'hooks',
     agent,
     write({ versionHome, selection }: WriteArgs<string[]>): WriteResult {
-      const agentDir = path.join(versionHome, `.${agent}`);
+      const agentDir = path.join(versionHome, agentConfigDirName(agent));
       const hooksTarget = path.join(agentDir, 'hooks');
       fs.mkdirSync(hooksTarget, { recursive: true });
 

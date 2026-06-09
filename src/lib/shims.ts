@@ -221,8 +221,16 @@ async function promptConflictStrategy(
  *         scoped plugin marketplaces (agents-cli/agents-system/extras-<alias>/
  *         agents-project). Version-home reconciliation stays out of the hot
  *         path — management commands still own that.
+ *   v17 — bash-side skip-fast sentinel under ~/.agents/.cache/launch-sync/.
+ *         When the sentinel mtime is newer than every source dir, exec the
+ *         agent binary directly without spawning node. Cuts steady-state
+ *         hot-path latency from ~680ms (node startup + module init) to ~11ms
+ *         (a few stat calls). Node writes the sentinel after each successful
+ *         sync. Documented limitation: POSIX dir mtime only updates on
+ *         top-level entry add/remove — deep edits to plugin contents won't
+ *         trigger auto-resync, run `agents sync` for that.
  */
-export const SHIM_SCHEMA_VERSION = 16;
+export const SHIM_SCHEMA_VERSION = 17;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -283,7 +291,13 @@ export COPILOT_HOME="$VERSION_DIR/home/${configDirName}"
 # This gives agents-cli full versioned isolation + resource sync for grok.
 export GROK_HOME="$VERSION_DIR/home/.grok"
 `
-          : '';
+          : agent === 'kimi'
+            ? `
+# Kimi Code CLI honors KIMI_CODE_HOME to relocate ~/.kimi-code (config.toml,
+# mcp.json, sessions, skills, hooks). Point it at the versioned home.
+export KIMI_CODE_HOME="$VERSION_DIR/home/${configDirName}"
+`
+            : '';
 
   const launchArgs = agent === 'codex' ? ' -c check_for_update_on_startup=false' : '';
 
@@ -424,6 +438,16 @@ if [ "$AGENT" = "grok" ]; then
     # Last resort: whatever is on PATH (user may have installed grok globally)
     BINARY=$(command -v grok 2>/dev/null || echo "")
   fi
+# Kimi special case: binary lives in ~/.kimi-code/bin/, not node_modules.
+# We still use the agents-cli version dir purely for KIMI_CODE_HOME isolation.
+elif [ "$AGENT" = "kimi" ]; then
+  KIMI_BINARY="$HOME/.kimi-code/bin/kimi"
+  if [ -x "$KIMI_BINARY" ]; then
+    BINARY="$KIMI_BINARY"
+  else
+    # Last resort: whatever is on PATH
+    BINARY=$(command -v kimi 2>/dev/null || echo "")
+  fi
 else
   BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
 fi
@@ -492,8 +516,32 @@ fi
 ${managedEnv}
 
 # Project-scoped compile (rules, workspace resources, scoped plugin marketplaces).
-# Filesystem-only — sub-50ms steady state. Never blocks launch on failure.
-"$AGENTS_BIN" sync --agent "$AGENT" --agent-version "$VERSION" --launch --cwd "$PWD" --quiet 2>/dev/null || true
+# Skip-fast: if a sentinel from the last sync exists and is newer than all
+# source dirs (project .agents/, user plugins, system plugins), exec the
+# agent binary directly without spawning node. Cuts steady-state hot-path
+# latency from ~680ms (node startup + agents-cli module init) to ~11ms (a
+# handful of stat calls). Never blocks launch on failure of the sync itself.
+#
+# Known limitation: POSIX dir mtime updates only on entry add/remove at that
+# level. Deep edits to existing plugin contents (e.g. editing a SKILL.md
+# inside a plugin) won't bump the parent dir's mtime — the marketplace copy
+# stays stale until \`agents sync\` runs explicitly or a top-level entry
+# changes. Advanced users hot-iterating on plugins know to run sync.
+PROJECT_SLUG=\$(printf '%s' "\$PWD" | tr / _ | tr ' ' _)
+LAUNCH_SENTINEL="\$AGENTS_USER_DIR/.cache/launch-sync/\${AGENT}@\${VERSION}@\${PROJECT_SLUG}"
+LAUNCH_SKIP=0
+if [ -f "\$LAUNCH_SENTINEL" ]; then
+  LAUNCH_SKIP=1
+  for LAUNCH_SRC in "\$PWD/.agents" "\$AGENTS_USER_DIR/plugins" "\$AGENTS_USER_DIR/.system/plugins"; do
+    if [ -e "\$LAUNCH_SRC" ] && [ "\$LAUNCH_SRC" -nt "\$LAUNCH_SENTINEL" ]; then
+      LAUNCH_SKIP=0
+      break
+    fi
+  done
+fi
+if [ "\$LAUNCH_SKIP" = "0" ]; then
+  "\$AGENTS_BIN" sync --agent "\$AGENT" --agent-version "\$VERSION" --launch --cwd "\$PWD" --quiet 2>/dev/null || true
+fi
 
 exec "$BINARY"${launchArgs} "$@"
 `;
@@ -595,7 +643,13 @@ export CODEX_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${co
 # version MCP and session state are isolated.
 export COPILOT_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
-        : '';
+        : agent === 'kimi'
+          ? `
+# Kimi Code CLI honors KIMI_CODE_HOME to relocate ~/.kimi-code (config.toml,
+# mcp.json, sessions, skills, hooks). Point direct aliases at the versioned home.
+export KIMI_CODE_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+`
+          : '';
   const launchArgs = agent === 'codex' ? ' -c check_for_update_on_startup=false' : '';
 
   return `#!/bin/bash

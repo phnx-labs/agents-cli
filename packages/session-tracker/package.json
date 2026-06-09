@@ -1,0 +1,24 @@
+{
+  "name": "@agents/session-tracker",
+  "version": "0.0.1",
+  "description": "Per-agent SessionStart hook + descendant-pid lookup. One state-file format for every coding-agent CLI.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "src/hook.sh"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:smoke": "vitest run tests/smoke.test.ts",
+    "test:cold-spawn": "vitest run tests/scenarios/cold-spawn.test.ts",
+    "test:report": "tsx tests/run-report.ts",
+    "install-hook": "tsx src/install-hook.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

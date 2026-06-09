@@ -294,6 +294,11 @@ describe('PermissionsHandler', () => {
       expect(result).toBe('/test/home/.opencode/opencode.jsonc');
     });
 
+    it('returns correct path for Kimi', () => {
+      const result = PermissionsHandler.configPath!('kimi', '/test/home');
+      expect(result).toBe('/test/home/.kimi-code/config.toml');
+    });
+
     it('returns null for unsupported agents', () => {
       const result = PermissionsHandler.configPath!('gemini', '/test/home');
       expect(result).toBeNull();

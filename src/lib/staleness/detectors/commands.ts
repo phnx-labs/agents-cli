@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
-import { AGENTS } from '../../agents.js';
+import { AGENTS, agentConfigDirName } from '../../agents.js';
 import { shouldInstallCommandAsSkill, listCommandSkillsInVersion } from '../../command-skills.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
 import { lazyAgentMap } from '../writers/lazy-map.js';
@@ -18,7 +18,7 @@ function buildCommandsDetector(agent: AgentId): ResourceDetector {
     agent,
     list({ version, versionHome }: DetectArgs): string[] {
       const agentConfig = AGENTS[agent];
-      const agentDir = path.join(versionHome, `.${agent}`);
+      const agentDir = path.join(versionHome, agentConfigDirName(agent));
 
       if (shouldInstallCommandAsSkill(agent, version)) {
         return listCommandSkillsInVersion(agentDir);

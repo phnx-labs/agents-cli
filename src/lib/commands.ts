@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { AGENTS, ensureCommandsDir, resolveAgentName } from './agents.js';
+import { AGENTS, ensureCommandsDir, agentConfigDirName, resolveAgentName } from './agents.js';
 import { capableAgents, isCapable, supports } from './capabilities.js';
 import { markdownToToml } from './convert.js';
 import { getCommandsDir, getUserCommandsDir, getEnabledExtraRepos, getProjectAgentsDir, getSkillsDir, getTrashCommandsDir } from './state.js';
@@ -305,7 +305,7 @@ export function installCommand(
   ensureCommandsDir(agentId);
 
   const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
+  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
   fs.mkdirSync(commandsDir, { recursive: true });
 
   const ext = agent.format === 'toml' ? '.toml' : '.md';
@@ -340,7 +340,7 @@ export function installCommand(
  */
 export function getVersionCommandsDir(agent: AgentId, version: string): string {
   const home = getVersionHomePath(agent, version);
-  return path.join(home, `.${agent}`, AGENTS[agent].commandsSubdir);
+  return path.join(home, agentConfigDirName(agent), AGENTS[agent].commandsSubdir);
 }
 
 /**
@@ -348,7 +348,7 @@ export function getVersionCommandsDir(agent: AgentId, version: string): string {
  */
 export function listCommandsInVersionHome(agent: AgentId, version: string): string[] {
   const versionHome = getVersionHomePath(agent, version);
-  const agentDir = path.join(versionHome, `.${agent}`);
+  const agentDir = path.join(versionHome, agentConfigDirName(agent));
   if (shouldInstallCommandAsSkill(agent, version)) {
     return listCommandSkillsInVersion(agentDir);
   }
@@ -371,7 +371,7 @@ function versionCommandMatches(agent: AgentId, version: string, commandName: str
   if (!fs.existsSync(sourcePath)) return false;
 
   const versionHome = getVersionHomePath(agent, version);
-  const agentDir = path.join(versionHome, `.${agent}`);
+  const agentDir = path.join(versionHome, agentConfigDirName(agent));
   if (shouldInstallCommandAsSkill(agent, version)) {
     return commandSkillMatches(agentDir, commandName, sourcePath);
   }
@@ -478,7 +478,7 @@ export function installCommandToVersion(
   }
 
   const versionHome = getVersionHomePath(agent, version);
-  const agentDir = path.join(versionHome, `.${agent}`);
+  const agentDir = path.join(versionHome, agentConfigDirName(agent));
   if (shouldInstallCommandAsSkill(agent, version)) {
     return installCommandSkillToVersion(
       agentDir,
@@ -527,7 +527,7 @@ export function removeCommandFromVersion(
   commandName: string
 ): { success: boolean; error?: string } {
   const versionHome = getVersionHomePath(agent, version);
-  const agentDir = path.join(versionHome, `.${agent}`);
+  const agentDir = path.join(versionHome, agentConfigDirName(agent));
   if (shouldInstallCommandAsSkill(agent, version)) {
     return removeCommandSkillFromVersion(agentDir, commandName);
   }
@@ -570,7 +570,7 @@ export function iterCommandsCapableVersions(filter?: { agent?: AgentId; version?
 export function uninstallCommand(agentId: AgentId, commandName: string): boolean {
   const agent = AGENTS[agentId];
   const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
+  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
   const ext = agent.format === 'toml' ? '.toml' : '.md';
   const targetPath = path.join(commandsDir, `${commandName}${ext}`);
 
@@ -585,7 +585,7 @@ export function uninstallCommand(agentId: AgentId, commandName: string): boolean
 function listInstalledCommands(agentId: AgentId): string[] {
   const agent = AGENTS[agentId];
   const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
+  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
   if (!fs.existsSync(commandsDir)) {
     return [];
   }
@@ -603,7 +603,7 @@ function listInstalledCommands(agentId: AgentId): string[] {
 function commandExists(agentId: AgentId, commandName: string): boolean {
   const agent = AGENTS[agentId];
   const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
+  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
   const ext = agent.format === 'toml' ? '.toml' : '.md';
   const targetPath = path.join(commandsDir, `${commandName}${ext}`);
   return fs.existsSync(targetPath);
@@ -627,7 +627,7 @@ function commandContentMatches(
 ): boolean {
   const agent = AGENTS[agentId];
   const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
+  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
   const ext = agent.format === 'toml' ? '.toml' : '.md';
   const installedPath = path.join(commandsDir, `${commandName}${ext}`);
 
@@ -725,7 +725,7 @@ export function listInstalledCommandsWithScope(
 
   // User-scoped commands (version-aware when home is provided)
   const home = options?.home || getEffectiveHome(agentId);
-  const userCommandsDir = path.join(home, `.${agentId}`, agent.commandsSubdir);
+  const userCommandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
   const userExts = [ext];
   const userCommands = listCommandsFromDir(userCommandsDir, userExts);
   for (const name of userCommands) {

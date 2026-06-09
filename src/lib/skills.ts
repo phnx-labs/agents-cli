@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
 import type { AgentId, SkillMetadata, InstalledSkill } from './types.js';
-import { AGENTS, ensureSkillsDir } from './agents.js';
+import { AGENTS, ensureSkillsDir, agentConfigDirName } from './agents.js';
 import { capableAgents, isCapable } from './capabilities.js';
 import { getAgentsDir, getUserSkillsDir, getSkillsDir as getSystemSkillsDir, getProjectAgentsDir, getEnabledExtraRepos, getTrashSkillsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './versions.js';
@@ -34,7 +34,7 @@ export function ensureCentralSkillsDir(): void {
 
 export function getAgentSkillsDir(agentId: AgentId): string {
   const home = getEffectiveHome(agentId);
-  return path.join(home, `.${agentId}`, 'skills');
+  return path.join(home, agentConfigDirName(agentId), 'skills');
 }
 
 export function getProjectSkillsDir(agentId: AgentId, cwd: string = process.cwd()): string {
@@ -457,7 +457,7 @@ export function listAllSkills(): string[] {
  */
 export function getVersionSkillsDir(agent: AgentId, version: string): string {
   const home = getVersionHomePath(agent, version);
-  return path.join(home, `.${agent}`, 'skills');
+  return path.join(home, agentConfigDirName(agent), 'skills');
 }
 
 /**
@@ -823,7 +823,7 @@ export function listInstalledSkillsWithScope(
 
   // User-scoped skills (version-aware when home is provided)
   const userSkillsDir = options?.home
-    ? path.join(options.home, `.${agentId}`, 'skills')
+    ? path.join(options.home, agentConfigDirName(agentId), 'skills')
     : getAgentSkillsDir(agentId);
   if (fs.existsSync(userSkillsDir)) {
     try {

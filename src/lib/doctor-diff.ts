@@ -22,7 +22,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { AGENTS } from './agents.js';
+import { AGENTS, agentConfigDirName } from './agents.js';
 import type { AgentId } from './types.js';
 import {
   getProjectAgentsDir,
@@ -392,7 +392,7 @@ function expectedRuleContent(agent: AgentId, name: string, sourcePath: string): 
 function diffRules(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
   const agentConfig = AGENTS[agent];
   const versionHome = getVersionHomePath(agent, version);
-  const configDir = path.join(versionHome, `.${agent}`);
+  const configDir = path.join(versionHome, agentConfigDirName(agent));
   const sourcesByName = listRulesNames(cwd);
 
   // Files actually present in the version home.

@@ -135,7 +135,7 @@ describe('discoverPlugins', () => {
     vi.resetModules();
     vi.doMock('./state.js', async (importOriginal) => {
       const actual = await importOriginal<typeof import('./state.js')>();
-      return { ...actual, getPluginsDir: () => pluginsDir };
+      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null };
     });
 
     try {
@@ -143,6 +143,8 @@ describe('discoverPlugins', () => {
       const plugins = discover();
       expect(plugins.map((plugin) => plugin.name)).toEqual(['linked-plugin']);
       expect(plugins[0]?.root).toBe(path.join(pluginsDir, 'linked-plugin'));
+      // Provenance: a user-repo plugin is stamped with the canonical marketplace.
+      expect(plugins[0]?.marketplace).toBe('agents-cli');
     } finally {
       vi.doUnmock('./state.js');
       vi.resetModules();
@@ -155,7 +157,7 @@ describe('discoverPlugins', () => {
     vi.resetModules();
     vi.doMock('./state.js', async (importOriginal) => {
       const actual = await importOriginal<typeof import('./state.js')>();
-      return { ...actual, getPluginsDir: () => pluginsDir };
+      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null };
     });
 
     try {
@@ -165,6 +167,118 @@ describe('discoverPlugins', () => {
       vi.doUnmock('./state.js');
       vi.resetModules();
     }
+  });
+});
+
+// ─── discoverPlugins across all marketplaces ──────────────────────────────────
+
+describe('discoverPlugins across marketplaces', () => {
+  let tmpDir: string;
+  let userDir: string;
+  let extraRepo: string;
+  let projectDir: string;
+
+  function writePlugin(pluginsDir: string, name: string): string {
+    const root = path.join(pluginsDir, name);
+    fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: `${name} plugin` })
+    );
+    return root;
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+    userDir = path.join(tmpDir, 'user', 'plugins');
+    extraRepo = path.join(tmpDir, 'extras-repo');           // ~/.agents-extras/
+    projectDir = path.join(tmpDir, 'project', '.agents', 'plugins');
+    fs.mkdirSync(userDir, { recursive: true });
+    fs.mkdirSync(path.join(extraRepo, 'plugins'), { recursive: true });
+    fs.mkdirSync(projectDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.doUnmock('./state.js');
+    vi.resetModules();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  async function withState(
+    overrides: Partial<typeof import('./state.js')>,
+    fn: (mod: typeof import('./plugins.js')) => Promise<void> | void
+  ) {
+    vi.resetModules();
+    vi.doMock('./state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./state.js')>();
+      return { ...actual, ...overrides };
+    });
+    try {
+      const mod = await import('./plugins.js');
+      await fn(mod);
+    } finally {
+      vi.doUnmock('./state.js');
+      vi.resetModules();
+    }
+  }
+
+  it('returns plugins from user + extra + project repos with marketplace provenance', async () => {
+    writePlugin(userDir, 'alpha');
+    writePlugin(path.join(extraRepo, 'plugins'), 'beta');
+    writePlugin(projectDir, 'gamma');
+
+    await withState(
+      {
+        getPluginsDir: () => userDir,
+        getEnabledExtraRepos: () => [{ alias: 'extras', dir: extraRepo, url: '' }],
+        getProjectPluginsDir: () => projectDir,
+      },
+      ({ discoverPlugins }) => {
+        const byName = new Map(discoverPlugins().map((p) => [p.name, p.marketplace]));
+        expect(byName.get('alpha')).toBe('agents-cli');
+        expect(byName.get('beta')).toBe('agents-extras');
+        expect(byName.get('gamma')).toBe('agents-project');
+        expect(byName.size).toBe(3);
+      }
+    );
+  });
+
+  it('keeps both plugins on a name collision across marketplaces, distinguished by marketplace', async () => {
+    writePlugin(userDir, 'code');
+    writePlugin(path.join(extraRepo, 'plugins'), 'code');
+
+    await withState(
+      {
+        getPluginsDir: () => userDir,
+        getEnabledExtraRepos: () => [{ alias: 'extras', dir: extraRepo, url: '' }],
+        getProjectPluginsDir: () => null,
+      },
+      ({ discoverPlugins }) => {
+        const code = discoverPlugins().filter((p) => p.name === 'code');
+        expect(code).toHaveLength(2);
+        expect(code.map((p) => p.marketplace).sort()).toEqual(['agents-cli', 'agents-extras']);
+      }
+    );
+  });
+
+  it('does NOT discover plugins from a disabled (filtered-out) extra repo', async () => {
+    writePlugin(userDir, 'alpha');
+    // The disabled repo's plugin exists on disk, but getEnabledExtraRepos (which
+    // filters enabled:false) never returns it, so discovery must skip it.
+    writePlugin(path.join(extraRepo, 'plugins'), 'beta');
+
+    await withState(
+      {
+        getPluginsDir: () => userDir,
+        getEnabledExtraRepos: () => [],          // extra repo disabled in agents.yaml
+        getProjectPluginsDir: () => null,
+      },
+      ({ discoverPlugins }) => {
+        const names = discoverPlugins().map((p) => p.name);
+        expect(names).toContain('alpha');
+        expect(names).not.toContain('beta');
+      }
+    );
   });
 });
 
@@ -657,6 +771,117 @@ describe('syncPluginToVersion (native marketplace install)', () => {
 
     expect(fs.existsSync(legacySkill)).toBe(false);
     expect(fs.existsSync(legacyCmd)).toBe(false);
+  });
+});
+
+// ─── syncPluginToVersion: per-marketplace routing ────────────────────────────
+
+describe('syncPluginToVersion (per-marketplace routing)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makePluginInMarketplace(name: string, marketplace: string): { plugin: DiscoveredPlugin; versionHome: string } {
+    const pluginRoot = path.join(tmpDir, `${marketplace}-${name}`);
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: 'routed' })
+    );
+    const versionHome = path.join(tmpDir, `${marketplace}-${name}-home`);
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    const plugin: DiscoveredPlugin = {
+      name, root: pluginRoot,
+      manifest: { name, version: '1.0.0', description: 'routed' },
+      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], bin: [],
+      mcpServers: [], lspServers: [], monitors: [],
+      hasMcp: false, hasSettings: false,
+      marketplace,
+    };
+    return { plugin, versionHome };
+  }
+
+  it('installs an extra-repo plugin under marketplaces/agents-extras/, not the user marketplace', async () => {
+    const { plugin, versionHome } = makePluginInMarketplace('tool', 'agents-extras');
+    const { syncPluginToVersion } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'claude', versionHome);
+
+    const extraDir = path.join(versionHome, '.claude', 'plugins', 'marketplaces', 'agents-extras', 'plugins', 'tool');
+    const userDir = path.join(versionHome, '.claude', 'plugins', 'marketplaces', 'agents-cli', 'plugins', 'tool');
+    expect(fs.existsSync(path.join(extraDir, '.claude-plugin', 'plugin.json'))).toBe(true);
+    expect(fs.existsSync(userDir)).toBe(false);
+
+    // Catalog is synthesized under the extra marketplace with its own name.
+    const manifest = JSON.parse(fs.readFileSync(
+      path.join(versionHome, '.claude', 'plugins', 'marketplaces', 'agents-extras', '.claude-plugin', 'marketplace.json'), 'utf-8'
+    ));
+    expect(manifest.name).toBe('agents-extras');
+    expect(manifest.plugins.map((p: { name: string }) => p.name)).toEqual(['tool']);
+  });
+
+  it('enables an extra-repo plugin as <plugin>@agents-extras, not @agents-cli', async () => {
+    const { plugin, versionHome } = makePluginInMarketplace('tool', 'agents-extras');
+    const { syncPluginToVersion } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'claude', versionHome);
+
+    const settings = JSON.parse(fs.readFileSync(path.join(versionHome, '.claude', 'settings.json'), 'utf-8'));
+    expect(settings.enabledPlugins).toEqual({ 'tool@agents-extras': true });
+    expect(settings.enabledPlugins['tool@agents-cli']).toBeUndefined();
+  });
+
+  it('installs a project-repo plugin under marketplaces/agents-project/ with key <plugin>@agents-project', async () => {
+    const { plugin, versionHome } = makePluginInMarketplace('proj', 'agents-project');
+    const { syncPluginToVersion } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'claude', versionHome);
+
+    const projDir = path.join(versionHome, '.claude', 'plugins', 'marketplaces', 'agents-project', 'plugins', 'proj');
+    expect(fs.existsSync(path.join(projDir, '.claude-plugin', 'plugin.json'))).toBe(true);
+
+    const settings = JSON.parse(fs.readFileSync(path.join(versionHome, '.claude', 'settings.json'), 'utf-8'));
+    expect(settings.enabledPlugins).toEqual({ 'proj@agents-project': true });
+
+    const known = JSON.parse(fs.readFileSync(
+      path.join(versionHome, '.claude', 'plugins', 'known_marketplaces.json'), 'utf-8'
+    ));
+    expect(known['agents-project']).toBeDefined();
+  });
+
+  it('routes collided plugin names into separate marketplace dirs', async () => {
+    // Same plugin name "code" from two repos → two install dirs, two settings keys.
+    const versionHome = path.join(tmpDir, 'collide-home');
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    const { syncPluginToVersion } = await import('./plugins.js');
+
+    for (const marketplace of ['agents-cli', 'agents-extras']) {
+      const pluginRoot = path.join(tmpDir, `${marketplace}-code`);
+      fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+        JSON.stringify({ name: 'code', version: '1.0.0', description: marketplace })
+      );
+      syncPluginToVersion(
+        {
+          name: 'code', root: pluginRoot,
+          manifest: { name: 'code', version: '1.0.0', description: marketplace },
+          skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], bin: [],
+          mcpServers: [], lspServers: [], monitors: [], hasMcp: false, hasSettings: false,
+          marketplace,
+        },
+        'claude', versionHome
+      );
+    }
+
+    const base = path.join(versionHome, '.claude', 'plugins', 'marketplaces');
+    expect(fs.existsSync(path.join(base, 'agents-cli', 'plugins', 'code', '.claude-plugin', 'plugin.json'))).toBe(true);
+    expect(fs.existsSync(path.join(base, 'agents-extras', 'plugins', 'code', '.claude-plugin', 'plugin.json'))).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(path.join(versionHome, '.claude', 'settings.json'), 'utf-8'));
+    expect(settings.enabledPlugins).toEqual({ 'code@agents-cli': true, 'code@agents-extras': true });
   });
 });
 

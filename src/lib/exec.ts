@@ -383,14 +383,15 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modelFlag: '--model',
   },
   kimi: {
-    base: ['kimi-code'],
+    base: ['kimi'],
     promptFlag: '-p',
     modeFlags: {
-      plan: [],
+      plan: ['--plan'],
       edit: [],
-      skip: [],
+      auto: ['--auto'],
+      skip: ['--yolo'],
     },
-    jsonFlags: [],
+    jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
   },
 };

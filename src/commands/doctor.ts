@@ -367,7 +367,7 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
     console.log(chalk.green(`  Verdict: ${ok} resource${ok === 1 ? '' : 's'} reconciled. Version home matches resolved sources.`));
   } else {
     console.log(`  Verdict: ${verdictParts.join(', ')}.`);
-    console.log(chalk.gray(`  Run \`agents sync --agent ${report.agent} --agent-version ${report.version}\` to reconcile, or \`agents prune cleanup\` to drop extras.`));
+    console.log(chalk.gray(`  Run \`agents sync ${report.agent}@${report.version}\` to reconcile, or \`agents prune cleanup\` to drop extras.`));
   }
 }
 

@@ -56,6 +56,7 @@ import {
 } from './resource-view.js';
 import { getPluginsDir } from '../lib/state.js';
 import { safeJoin } from '../lib/paths.js';
+import { discoverMarketplaces } from '../lib/plugin-marketplace.js';
 
 /** Replace the home directory prefix with ~ for display. */
 function formatPath(p: string): string {
@@ -111,6 +112,7 @@ When to use:
       resourcePlural: 'plugins',
       resourceSingular: 'plugin',
       extraLabel: 'Version',
+      extra2Label: 'Marketplace',
       rows: buildPluginRows(plugins),
       emptyMessage: 'No plugins in ~/.agents/plugins/.',
       centralPath: getPluginsDir(),
@@ -125,6 +127,53 @@ When to use:
     .command('list')
     .description('Show plugins in a table with sync status across agent versions')
     .action(runList);
+
+  // agents plugins marketplaces
+  const marketplacesCmd = pluginsCmd
+    .command('marketplaces')
+    .description('List plugin marketplaces — one per DotAgents repo with a plugins/ directory')
+    .option('--json', 'Emit machine-readable JSON')
+    .action((options: { json?: boolean }) => {
+      const rows = collectMarketplaceRows();
+
+      if (options.json) {
+        console.log(JSON.stringify(rows, null, 2));
+        return;
+      }
+
+      if (rows.length === 0) {
+        console.log(chalk.gray('No plugin marketplaces found.'));
+        console.log(chalk.gray('Add one with: agents repo add <path|gh:user/repo>'));
+        return;
+      }
+
+      const nameW = Math.max(12, ...rows.map((r) => r.name.length));
+      const srcW = Math.max(20, ...rows.map((r) => formatPath(r.source).length));
+      console.log();
+      console.log(
+        `  ${chalk.bold(padCol('NAME', nameW))}  ${chalk.bold(padCol('SOURCE', srcW))}  ${chalk.bold(padCol('PLUGINS', 7))}  ${chalk.bold('ENABLED')}`
+      );
+      for (const r of rows) {
+        console.log(
+          `  ${chalk.cyan(padCol(r.name, nameW))}  ${chalk.gray(padCol(formatPath(r.source), srcW))}  ${padCol(String(r.plugins), 7)}  ${r.enabled}`
+        );
+      }
+      console.log();
+      console.log(chalk.gray(`${rows.length} marketplace(s) — manage via 'agents repo'.`));
+    });
+
+  // Redirect add/remove/etc. on marketplaces to repo commands.
+  const marketplaceRedirect = (verb: string) => () => {
+    console.log(
+      chalk.gray(`Use 'agents repo ${verb === 'add' ? 'add' : verb} <path|gh:user/repo>' to ${verb} a marketplace (one repo = one marketplace).`)
+    );
+  };
+  for (const verb of ['add', 'remove', 'enable', 'disable', 'install', 'rm']) {
+    marketplacesCmd
+      .command(`${verb} [target]`)
+      .description(`Redirects to 'agents repo ${verb}' — marketplaces follow repos`)
+      .action(marketplaceRedirect(verb));
+  }
 
   // agents plugins info [name]
   pluginsCmd
@@ -673,6 +722,66 @@ async function promptUserConfig(
   return result;
 }
 
+function padCol(s: string, w: number): string {
+  const raw = s.replace(/\x1b\[[0-9;]*m/g, '');
+  if (raw.length >= w) return s;
+  return s + ' '.repeat(w - raw.length);
+}
+
+interface MarketplaceRow {
+  name: string;
+  source: string;
+  plugins: number;
+  enabled: number;
+}
+
+/**
+ * Build one row per discovered marketplace. `plugins` counts plugin manifests
+ * under the marketplace's source pluginsRoot; `enabled` counts entries in the
+ * default Claude version's settings.json#enabledPlugins keyed on @<marketplace>.
+ */
+export function collectMarketplaceRows(): MarketplaceRow[] {
+  const marketplaces = discoverMarketplaces();
+  const rows: MarketplaceRow[] = [];
+
+  // Find the default Claude version (if any) and read its enabledPlugins map.
+  const claudeDefault = isCapable('claude', 'plugins') ? getGlobalDefault('claude') : null;
+  let enabledMap: Record<string, boolean> = {};
+  if (claudeDefault) {
+    const versionHome = getVersionHomePath('claude', claudeDefault);
+    const settingsPath = path.join(versionHome, '.claude', 'settings.json');
+    if (fs.existsSync(settingsPath)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8')) as {
+          enabledPlugins?: Record<string, boolean>;
+        };
+        enabledMap = parsed.enabledPlugins ?? {};
+      } catch { /* ignore parse errors */ }
+    }
+  }
+
+  for (const m of marketplaces) {
+    let pluginCount = 0;
+    try {
+      for (const entry of fs.readdirSync(m.pluginsRoot, { withFileTypes: true })) {
+        if (entry.name.startsWith('.')) continue;
+        const root = path.join(m.pluginsRoot, entry.name);
+        const manifestFile = path.join(root, '.claude-plugin', 'plugin.json');
+        if (fs.existsSync(manifestFile)) pluginCount++;
+      }
+    } catch { /* ignore unreadable dir */ }
+
+    const suffix = `@${m.name}`;
+    const enabled = Object.entries(enabledMap)
+      .filter(([key, val]) => val === true && key.endsWith(suffix))
+      .length;
+
+    rows.push({ name: m.name, source: m.pluginsRoot, plugins: pluginCount, enabled });
+  }
+
+  return rows;
+}
+
 /** Convert discovered plugins into rows suitable for the resource list view. */
 function buildPluginRows(plugins: DiscoveredPlugin[]): ResourceRow[] {
   const rows: ResourceRow[] = [];
@@ -706,6 +815,7 @@ function buildPluginRows(plugins: DiscoveredPlugin[]): ResourceRow[] {
       name: plugin.name,
       description: plugin.manifest.description,
       extra: plugin.manifest.version ? `v${plugin.manifest.version}` : '-',
+      extra2: plugin.marketplace ?? '-',
       targets,
       buildDetail: () => formatPluginDetail(plugin, targets),
     });

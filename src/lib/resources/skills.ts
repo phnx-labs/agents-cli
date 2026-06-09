@@ -16,6 +16,7 @@ import {
   getProjectAgentsDir,
   getEnabledExtraRepos,
 } from '../state.js';
+import { agentConfigDirName } from '../agents.js';
 
 /**
  * Layer directory provider for dependency injection in tests.
@@ -243,7 +244,7 @@ export function createSkillsHandler(provider: LayerDirProvider = defaultProvider
     },
 
     sync(agent: AgentId, versionHome: string, cwd?: string): void {
-      const targetDir = path.join(versionHome, `.${agent}`, 'skills');
+      const targetDir = path.join(versionHome, agentConfigDirName(agent), 'skills');
 
       // Ensure target directory exists
       if (!fs.existsSync(targetDir)) {
@@ -278,7 +279,7 @@ export function createSkillsHandler(provider: LayerDirProvider = defaultProvider
     },
 
     targetDir(agent: AgentId): string {
-      return `.${agent}/skills`;
+      return `${agentConfigDirName(agent)}/skills`;
     },
   };
 }

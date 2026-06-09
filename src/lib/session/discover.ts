@@ -19,7 +19,7 @@ import { getAgentsDir, getUserAgentsDir, getHistoryDir } from '../state.js';
 const execFileAsync = promisify(execFile);
 import type { SessionAgentId, SessionMeta } from './types.js';
 import type { AgentId } from '../types.js';
-import { AGENTS, getCliVersion } from '../agents.js';
+import { AGENTS, agentConfigDirName, getCliVersion } from '../agents.js';
 import { walkForFiles } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
@@ -315,22 +315,19 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
     dirs.push(dir);
   }
 
-  if (agent === 'kimi') {
-    addDir(path.join(HOME, '.kimi-code', subdir));
-  } else {
-    addDir(path.join(HOME, `.${agent}`, subdir));
-  }
+  // Config-dir name relative to home — handles nested layouts (antigravity →
+  // .gemini/antigravity-cli) and ~/.config agents (amp, goose) as well as kimi
+  // (.kimi-code). Falls back to `.${agent}` for ids not in the registry.
+  const configDirName = agent in AGENTS ? agentConfigDirName(agent as AgentId) : `.${agent}`;
+
+  addDir(path.join(HOME, configDirName, subdir));
 
   for (const root of VERSIONS_ROOTS) {
     const versionsBase = path.join(root, 'versions', agent);
     if (!fs.existsSync(versionsBase)) continue;
     try {
       for (const version of fs.readdirSync(versionsBase)) {
-        if (agent === 'kimi') {
-          addDir(path.join(versionsBase, version, 'home', '.kimi-code', subdir));
-        } else {
-          addDir(path.join(versionsBase, version, 'home', `.${agent}`, subdir));
-        }
+        addDir(path.join(versionsBase, version, 'home', configDirName, subdir));
       }
     } catch { /* dir unreadable */ }
   }
