@@ -13,7 +13,7 @@ import {
   getEndpointPresets,
   type BrowserProfile,
 } from '../lib/browser/profiles.js';
-import { findBrowserPath, getPortOccupant } from '../lib/browser/chrome.js';
+import { findBrowserPath, getPortOccupant, isLauncherScript } from '../lib/browser/chrome.js';
 import {
   listProfileCacheDirs,
   removeProfileCache,
@@ -352,10 +352,28 @@ function registerProfilesCommands(browser: Command): void {
 
       const checks: Array<{ label: string; ok: boolean; detail: string }> = [];
 
-      // 1. Binary exists for declared browser type
+      // 1. Binary exists for declared browser type, and is a real executable we
+      //    can drive — not a distro launcher script. findBrowserPath already
+      //    unwraps the known Chromium wrappers to their ELF; if it still hands
+      //    back a shebang script we couldn't resolve, `start` would fail with
+      //    `CDP connection closed` (the wrapper re-execs the browser as a child,
+      //    breaking the --remote-debugging-pipe transport — issue #229). Flag it
+      //    here instead of letting launch fail opaquely.
       try {
         const binPath = findBrowserPath(profile.browser, profile.binary);
-        checks.push({ label: 'binary', ok: true, detail: binPath });
+        if (isLauncherScript(binPath)) {
+          checks.push({
+            label: 'binary',
+            ok: false,
+            detail:
+              `${binPath} is a launcher script, not the browser executable — ` +
+              `agents browser drives the browser over --remote-debugging-pipe and ` +
+              `can't attach to a wrapper that re-execs it. Point the profile at the ` +
+              `real binary (\`--binary /path/to/browser\`) or reinstall the standard package.`,
+          });
+        } else {
+          checks.push({ label: 'binary', ok: true, detail: binPath });
+        }
       } catch (err) {
         checks.push({
           label: 'binary',
@@ -390,7 +408,16 @@ function registerProfilesCommands(browser: Command): void {
       } else {
         const occupant = getPortOccupant(port);
         if (!occupant) {
-          checks.push({ label: 'port', ok: true, detail: `${port} is free` });
+          // A free port doesn't mean "ready to launch here": for a local
+          // profile we self-launch over an internal --remote-debugging-pipe and
+          // never bind this port. The port is consulted only to attach to a
+          // browser someone already started on it. Say so, so a green doctor
+          // can't be read as "the port is what launch depends on" (#229).
+          checks.push({
+            label: 'port',
+            ok: true,
+            detail: `${port} free — will self-launch over an internal pipe (port used only to attach to an already-running browser)`,
+          });
         } else {
           try {
             const { browser } = await discoverBrowserWsUrl(port, 'localhost', profile.name);

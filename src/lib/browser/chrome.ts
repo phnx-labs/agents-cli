@@ -72,24 +72,40 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
  * Returns the original path untouched when it's already an ELF, when it's not
  * a resolvable wrapper, or on any non-Linux platform.
  */
-export function resolveBrowserBinary(binaryPath: string): string {
-  if (os.platform() !== 'linux') return binaryPath;
+function readsAsShebangScript(binaryPath: string): boolean {
   let fd: number;
   try {
     fd = fs.openSync(binaryPath, 'r');
   } catch {
-    return binaryPath;
+    return false;
   }
-  let head: Buffer;
   try {
-    head = Buffer.alloc(2);
+    const head = Buffer.alloc(2);
     fs.readSync(fd, head, 0, 2, 0);
+    // ELF binaries start with 0x7f 'E'; shebang scripts with '#!'.
+    return head[0] === 0x23 && head[1] === 0x21;
   } finally {
     fs.closeSync(fd);
   }
-  // ELF binaries start with 0x7f 'E'; shebang scripts with '#!'. Only scripts
-  // need unwrapping.
-  if (!(head[0] === 0x23 && head[1] === 0x21)) return binaryPath;
+}
+
+/**
+ * True when `binaryPath` is a shebang script rather than a native browser
+ * executable. The Linux distro launchers (`/usr/bin/brave-browser`, …) are such
+ * scripts; `launchBrowser` can't drive one over `--remote-debugging-pipe` (see
+ * resolveBrowserBinary). `profiles doctor` uses this to flag a profile whose
+ * binary resolves to a wrapper we couldn't unwrap. Shebang scripts are a
+ * Linux/Unix concept — returns false on Windows/macOS app bundles.
+ */
+export function isLauncherScript(binaryPath: string): boolean {
+  if (os.platform() === 'win32') return false;
+  return readsAsShebangScript(binaryPath);
+}
+
+export function resolveBrowserBinary(binaryPath: string): string {
+  if (os.platform() !== 'linux') return binaryPath;
+  // Only shebang scripts need unwrapping; a real ELF passes straight through.
+  if (!readsAsShebangScript(binaryPath)) return binaryPath;
 
   let script: string;
   let realScriptPath: string;

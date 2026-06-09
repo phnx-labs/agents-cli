@@ -14,7 +14,7 @@ vi.mock('fs', async () => {
   };
 });
 
-import { findFirstInstalledBrowser, resolveBrowserBinary } from './chrome.js';
+import { findFirstInstalledBrowser, resolveBrowserBinary, isLauncherScript } from './chrome.js';
 
 describe('findFirstInstalledBrowser', () => {
   beforeEach(() => {
@@ -149,5 +149,30 @@ describe.skipIf(os.platform() !== 'linux')('resolveBrowserBinary', () => {
     fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n');
 
     expect(resolveBrowserBinary(scriptPath)).toBe(scriptPath);
+  });
+});
+
+describe.skipIf(os.platform() === 'win32')('isLauncherScript', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    presentPaths.clear();
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-launcher-'));
+  });
+
+  it('reports true for a shebang wrapper script', () => {
+    const p = path.join(dir, 'brave-browser');
+    fs.writeFileSync(p, '#!/bin/bash\n"$HERE/brave" "$@"\n');
+    expect(isLauncherScript(p)).toBe(true);
+  });
+
+  it('reports false for a real ELF binary', () => {
+    const p = path.join(dir, 'brave');
+    fs.writeFileSync(p, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00]));
+    expect(isLauncherScript(p)).toBe(false);
+  });
+
+  it('reports false for a missing path', () => {
+    expect(isLauncherScript(path.join(dir, 'nope'))).toBe(false);
   });
 });
