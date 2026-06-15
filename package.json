@@ -86,7 +86,7 @@
     "commander": "15.0.0",
     "croner": "10.0.1",
     "diff": "9.0.0",
-    "marked": "15.0.12",
+    "marked": "18.0.5",
     "marked-terminal": "7.3.0",
     "ora": "9.4.0",
     "proper-lockfile": "4.1.2",
