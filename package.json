@@ -97,7 +97,7 @@
   "devDependencies": {
     "@types/diff": "8.0.0",
     "@types/marked-terminal": "6.1.1",
-    "@types/node": "25.9.2",
+    "@types/node": "25.9.3",
     "tsx": "4.22.4",
     "typescript": "6.0.3",
     "vitest": "4.1.8"
