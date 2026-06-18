@@ -33,7 +33,12 @@ function compareVersions(a: string, b: string): number {
 }
 
 function getCapability(agent: AgentId, cap: CapabilityName): Capability | RulesCapability {
-  return AGENTS[agent].capabilities[cap];
+  // Guard against unknown agent ids (e.g. a caller passing "claude@2.1.168"
+  // instead of "claude"). Without this, AGENTS[agent] is undefined and the
+  // property access throws an opaque TypeError instead of reporting false.
+  const def = AGENTS[agent];
+  if (!def) return false;
+  return def.capabilities[cap];
 }
 
 /**

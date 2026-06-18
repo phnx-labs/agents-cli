@@ -347,14 +347,17 @@ Examples:
   // agents plugins sync <name> [agent]
   pluginsCmd
     .command('sync <name> [agent]')
-    .description('Apply a plugin to the default version of an agent (or all supported agents if none specified)')
+    .description('Apply a plugin to an agent. Syncs every installed version (pass agent@version to target one).')
     .option('--allow-exec-surfaces', 'Enable the plugin even when it ships hooks/, .mcp.json, bin/, scripts/, settings.json, or permissions/')
     .addHelpText('after', `
 Examples:
-  # Sync a plugin to a specific agent (default version)
+  # Sync a plugin to every installed version of an agent
   agents plugins sync rush-toolkit claude
 
-  # Sync to all supported agents
+  # Sync to one specific version (parity with 'agents sync')
+  agents plugins sync rush-toolkit claude@2.1.142
+
+  # Sync to all supported agents (every installed version of each)
   agents plugins sync rush-toolkit
 
   # Re-affirm consent for a hooks-bearing plugin
@@ -367,12 +370,23 @@ Examples:
         process.exit(1);
       }
 
+      // Accept the same "agent@version" form as `agents sync`. Splitting here
+      // also means an unknown spec is reported cleanly rather than crashing
+      // isCapable() with a bare "claude@2.1.168".
+      let versionArg: string | undefined;
+      let agentName: string | undefined = agentArg;
+      if (agentArg && agentArg.includes('@')) {
+        const at = agentArg.lastIndexOf('@');
+        agentName = agentArg.slice(0, at);
+        versionArg = agentArg.slice(at + 1);
+      }
+
       // Determine target agents
       let targetAgents: AgentId[];
-      if (agentArg) {
-        const agentId = agentArg as AgentId;
+      if (agentName) {
+        const agentId = agentName as AgentId;
         if (!isCapable(agentId, 'plugins')) {
-          console.log(chalk.red(`Agent '${agentArg}' does not support plugins`));
+          console.log(chalk.red(`Agent '${agentName}' does not support plugins`));
           process.exit(1);
         }
         if (!pluginSupportsAgent(plugin, agentId)) {
@@ -381,6 +395,10 @@ Examples:
         }
         targetAgents = [agentId];
       } else {
+        if (versionArg) {
+          console.log(chalk.red(`A version (@${versionArg}) requires naming the agent, e.g. claude@${versionArg}`));
+          process.exit(1);
+        }
         targetAgents = capableAgents('plugins').filter(a => pluginSupportsAgent(plugin, a));
       }
 
@@ -390,8 +408,20 @@ Examples:
         const versions = listInstalledVersions(agentId);
         if (versions.length === 0) continue;
 
-        const defaultVer = getGlobalDefault(agentId);
-        const targetVersions = defaultVer ? [defaultVer] : [versions[versions.length - 1]];
+        // Default to EVERY installed version. The previous behaviour synced only
+        // the global default, which silently skipped non-default versions used
+        // by balanced rotation -- so a rotated version would lack the plugin's
+        // slash commands. An explicit agent@version narrows back to one.
+        let targetVersions: string[];
+        if (versionArg) {
+          if (!versions.includes(versionArg)) {
+            console.log(chalk.red(`${agentLabel(agentId)} has no installed version ${versionArg} (installed: ${versions.join(', ')})`));
+            process.exit(1);
+          }
+          targetVersions = [versionArg];
+        } else {
+          targetVersions = versions;
+        }
 
         for (const version of targetVersions) {
           const didSync = allowExec

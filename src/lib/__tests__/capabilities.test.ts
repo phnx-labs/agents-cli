@@ -92,6 +92,15 @@ describe('isCapable()', () => {
     expect(isCapable('cursor', 'hooks')).toBe(false);
     expect(isCapable('opencode', 'plugins')).toBe(false);
   });
+
+  it('reports false for an unknown agent id instead of throwing (RUSH-1153)', () => {
+    // A caller passing "claude@2.1.168" (the agent@version form) instead of a
+    // bare "claude" must not crash with "Cannot read properties of undefined
+    // (reading 'capabilities')". getCapability() guards the unknown id.
+    expect(() => isCapable('claude@2.1.168' as never, 'plugins')).not.toThrow();
+    expect(isCapable('claude@2.1.168' as never, 'plugins')).toBe(false);
+    expect(supports('not-an-agent' as never, 'plugins')).toEqual({ ok: false, reason: 'unsupported' });
+  });
 });
 
 describe('capableAgents()', () => {
