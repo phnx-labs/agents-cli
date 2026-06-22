@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildExecCommand,
+  resolveInteractive,
   buildExecEnv,
   buildFallbackPrompt,
   detectRateLimit,
@@ -278,14 +279,62 @@ describe('buildExecCommand', () => {
       expect(cmd).toContain('fix auth');
     });
 
-    it('no prompt behaves as interactive by default (no --print)', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: undefined, headless: true }));
+    it('no prompt and no flag behaves as interactive by default (no --print)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: undefined }));
       expect(cmd).not.toContain('--print');
     });
 
     it('prompt without interactive behaves as headless (adds --print)', () => {
       const cmd = buildExecCommand(opts({ agent: 'claude', prompt: 'fix auth', headless: true }));
       expect(cmd).toContain('--print');
+    });
+
+    it('--headless with no prompt forces headless (adds --print, reads stdin)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: undefined, headless: true }));
+      expect(cmd).toContain('--print');
+    });
+
+    it('--headless with no prompt keeps codex in headless exec subcommand', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', prompt: undefined, headless: true }));
+      expect(cmd.slice(0, 2)).toEqual(['codex', 'exec']);
+    });
+
+    it('no flag and no prompt drops the codex exec subcommand (interactive TUI)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', prompt: undefined }));
+      expect(cmd[0]).toBe('codex');
+      expect(cmd).not.toContain('exec');
+    });
+  });
+
+  // --- resolveInteractive precedence ---
+
+  describe('resolveInteractive precedence', () => {
+    it('no flags + no prompt -> interactive', () => {
+      expect(resolveInteractive({ prompt: undefined })).toBe(true);
+    });
+
+    it('no flags + prompt -> headless', () => {
+      expect(resolveInteractive({ prompt: 'do x' })).toBe(false);
+    });
+
+    it('--headless + no prompt -> headless (definitive)', () => {
+      expect(resolveInteractive({ prompt: undefined, headless: true })).toBe(false);
+    });
+
+    it('--headless + prompt -> headless', () => {
+      expect(resolveInteractive({ prompt: 'do x', headless: true })).toBe(false);
+    });
+
+    it('--interactive + no prompt -> interactive', () => {
+      expect(resolveInteractive({ prompt: undefined, interactive: true })).toBe(true);
+    });
+
+    it('--interactive + prompt -> interactive (definitive)', () => {
+      expect(resolveInteractive({ prompt: 'do x', interactive: true })).toBe(true);
+    });
+
+    it('--interactive wins over --headless at the resolver level', () => {
+      expect(resolveInteractive({ prompt: 'do x', interactive: true, headless: true })).toBe(true);
     });
   });
 

@@ -92,11 +92,12 @@ export interface ExecOptions {
   version?: string;
   /** Omit to launch the CLI interactively -- no prompt, no --print, stdio fully inherited. */
   prompt?: string;
-  /** Force interactive mode even when a prompt is provided. */
+  /** Force interactive mode even when a prompt is provided. Wins over `headless`. */
   interactive?: boolean;
   mode: ExecMode;
   effort: ExecEffort;
   cwd?: string;
+  /** Force headless mode even when no prompt is provided (e.g. piping via stdin). */
   headless?: boolean;
   json?: boolean;
   model?: string;
@@ -105,6 +106,20 @@ export interface ExecOptions {
   sessionId?: string;
   verbose?: boolean;
   env?: Record<string, string>;
+}
+
+/**
+ * Resolve interactive vs headless. Explicit flags are definitive and win over
+ * inference: `--interactive` forces interactive, `--headless` forces headless.
+ * With neither flag, prompt presence decides (prompt -> headless, none -> interactive).
+ * `--interactive` takes precedence over `--headless`; the CLI layer rejects passing both.
+ */
+export function resolveInteractive(
+  options: Pick<ExecOptions, 'interactive' | 'headless' | 'prompt'>,
+): boolean {
+  if (options.interactive === true) return true;
+  if (options.headless === true) return false;
+  return options.prompt === undefined;
 }
 
 /** Pattern for valid environment variable names (C identifier rules). */
@@ -435,7 +450,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
 export function buildExecCommand(options: ExecOptions): string[] {
   const template = AGENT_COMMANDS[options.agent];
   const cmd: string[] = [...template.base];
-  const interactive = options.interactive === true || options.prompt === undefined;
+  const interactive = resolveInteractive(options);
 
   // For Codex and Droid, 'exec' is the headless subcommand -- drop it for
   // interactive mode so we run the TUI ('codex' / 'droid') instead of the
@@ -631,7 +646,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
 
   const timeoutMs = options.timeout ? parseTimeout(options.timeout) : undefined;
   const piped = !process.stdout.isTTY;
-  const interactive = options.interactive === true || options.prompt === undefined;
+  const interactive = resolveInteractive(options);
 
   maybeRotate();
   const timer = createTimer('agent.run', {

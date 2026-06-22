@@ -12,8 +12,14 @@ Dispatch a single agent for a one-off task. `agents run` is the fundamental comm
 
 ## Headless vs interactive
 
-- **Prompt provided** → headless. Pipes stdout, no TTY, exits when the agent finishes.
-- **Prompt omitted** → interactive. Launches the agent's TUI with full stdio inheritance.
+Explicit flags are definitive; otherwise the mode is inferred from prompt presence:
+
+- `--interactive` (`-i`) → always interactive, even with a prompt (the prompt is forwarded as the first message).
+- `--headless` → always headless, even with no prompt (the prompt is read from stdin).
+- Neither flag, **prompt provided** → headless. Pipes stdout, no TTY, exits when the agent finishes.
+- Neither flag, **prompt omitted** → interactive. Launches the agent's TUI with full stdio inheritance.
+
+`--interactive` and `--headless` are mutually exclusive — passing both errors out.
 
 ```bash
 # Interactive (TUI)

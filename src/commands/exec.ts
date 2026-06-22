@@ -85,8 +85,8 @@ export function registerRunCommand(program: Command): void {
     )
     .option('--json', 'Stream events as JSON lines (for parsing by other tools)')
     .option('--quiet', 'Suppress preamble (rotation banner, "Running:" line). Useful when piping JSON events to a parser.', false)
-    .option('--headless', 'Non-interactive mode (auto-enabled when prompt provided)', false)
-    .option('-i, --interactive', 'Force interactive mode even when a prompt is provided')
+    .option('--headless', 'Force headless mode. Auto-enabled when a prompt is provided; pass explicitly to stay headless with no prompt (reads the prompt from stdin).', false)
+    .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
     .option('--session-id <id>', 'Resume a previous conversation (Claude only)')
     .option('--verbose', 'Show detailed execution logs')
     .option('--timeout <duration>', 'Kill the agent after this duration (e.g., 30m, 1h, 2h30m)')
@@ -443,12 +443,17 @@ export function registerRunCommand(program: Command): void {
         model,
         addDirs: options.addDir,
         json: options.json,
-        headless: options.headless ?? true,
+        headless: options.headless,
         sessionId: options.sessionId,
         verbose: options.verbose,
         timeout: options.timeout,
         env,
       };
+
+      if (options.interactive && options.headless) {
+        console.error(chalk.red('--interactive and --headless are mutually exclusive. Pass one, or neither (mode is inferred from prompt presence).'));
+        process.exit(1);
+      }
 
       if (options.interactive) {
         if (options.fallback) {
