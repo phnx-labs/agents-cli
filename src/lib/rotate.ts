@@ -28,6 +28,13 @@ export interface RotateCandidate {
   agent: AgentId;
   version: string;
   email: string | null;
+  /**
+   * Per-org usage/quota key (e.g. `claude:org=<orgUuid>`) — the unit rate
+   * limits are actually measured in. Distinct orgs signed in under the same
+   * email have distinct keys, so this is the correct dedup boundary; null when
+   * no usage identity is available (then we fall back to email).
+   */
+  usageKey: string | null;
   usageStatus: AccountInfo['usageStatus'];
   usageSnapshot: UsageSnapshot | null;
   authValid: boolean;
@@ -138,19 +145,30 @@ function compareCandidates(a: RotateCandidate, b: RotateCandidate): number {
   return Math.random() - 0.5;
 }
 
+/**
+ * Identity a candidate dedups on. Quota is tracked per-org, so two versions
+ * that share an org are the same rate-limit bucket and must collapse — but two
+ * orgs under the same email (e.g. Enterprise + Personal on one Google identity)
+ * are genuinely separate buckets and must stay distinct. Prefer the org usage
+ * key; fall back to email only when no usage identity is available.
+ */
+function candidateIdentity(c: RotateCandidate): string {
+  return c.usageKey ?? c.email!;
+}
+
 function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate[] {
-  const byEmail = new Map<string, RotateCandidate>();
+  const byIdentity = new Map<string, RotateCandidate>();
   for (const c of candidates) {
-    const email = c.email!;
-    const existing = byEmail.get(email);
+    const id = candidateIdentity(c);
+    const existing = byIdentity.get(id);
     if (!existing) {
-      byEmail.set(email, c);
+      byIdentity.set(id, c);
       continue;
     }
-    if (compareCandidates(c, existing) < 0) byEmail.set(email, c);
+    if (compareCandidates(c, existing) < 0) byIdentity.set(id, c);
   }
 
-  return [...byEmail.values()].sort(compareCandidates);
+  return [...byIdentity.values()].sort(compareCandidates);
 }
 
 /**
@@ -297,7 +315,7 @@ async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> 
     const usageSnapshot = usageKey
       ? usageByKey.get(usageKey)?.snapshot ?? null
       : null;
-    return { ...candidate, usageSnapshot };
+    return { ...candidate, usageKey, usageSnapshot };
   });
 }
 
