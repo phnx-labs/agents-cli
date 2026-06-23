@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Regression coverage: resource sync from extras repos**
+
+- Added end-to-end regression tests (`src/lib/__tests__/extras-sync.test.ts`) locking in two behaviors for repos registered via `agents repo add` (`~/.agents-<alias>/`): a top-level `commands/<name>.md` is written into the agent's version home on `agents sync`, and plugins under `plugins/<name>/` are synthesized into a registered `agents-<alias>` marketplace on launch. Both already work in `main`; the tests exercise the real sync path (no mocking, isolated `$HOME`) so the extras-repo behavior can't silently regress (#313, #314).
+
 **Windows: `agents` is discoverable right after `npm i -g`**
 
 - On a global Windows install, postinstall now prepends npm's global-bin dir (where `agents.cmd`/`agents.ps1` live) to the **User PATH** via the .NET environment API. Node's installer normally adds it, but winget / portable / nvm-windows setups often don't — and then `npm i -g @phnx-labs/agents-cli` succeeds yet `agents` is "not recognized". The shims dir (claude/codex/…) is still left to `agents setup`, which the user can now run because `agents` resolves.
