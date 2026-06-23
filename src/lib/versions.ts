@@ -1160,6 +1160,8 @@ export async function installVersion(
   const packageSpec = version === 'latest'
     ? agentConfig.npmPackage
     : `${agentConfig.npmPackage}@${version}`;
+  // The `${agentConfig.npmPackage}@` prefix is load-bearing: it ensures `version`
+  // (which VERSION_RE permits to start with `-`) is never passed as a standalone npm CLI flag.
 
   try {
     // Check npm is available
