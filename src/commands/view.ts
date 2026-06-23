@@ -59,6 +59,7 @@ import {
   removeShim,
 } from '../lib/shims.js';
 import { getAgentResources, listResources } from '../lib/resources.js';
+import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins.js';
 import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts } from '../lib/state.js';
@@ -181,9 +182,10 @@ export interface ViewSectionFilter {
   rules?: boolean;
   hooks?: boolean;
   promptcuts?: boolean;
+  cli?: boolean;
 }
 
-const SECTION_KEYS = ['commands', 'skills', 'mcp', 'workflows', 'plugins', 'rules', 'hooks', 'promptcuts'] as const;
+const SECTION_KEYS = ['commands', 'skills', 'mcp', 'workflows', 'plugins', 'rules', 'hooks', 'promptcuts', 'cli'] as const;
 type SectionKey = (typeof SECTION_KEYS)[number];
 
 /**
@@ -244,6 +246,48 @@ function renderProfilesSection(profiles: ProfileSummary[]): void {
  * Show installed versions for one or all agents.
  * Called when: `agents view` or `agents view claude`
  */
+/** Color the source-layer tag for a host CLI, matching the rules-section convention. */
+function hostCliSourceTag(source: string): string {
+  if (source === 'project') return chalk.blue('[project]');
+  if (source === 'user') return chalk.cyan('[user]');
+  if (source === 'system') return chalk.gray('[system]');
+  // Anything else is an extra repo, tagged by its alias.
+  return chalk.magenta(`[${source}]`);
+}
+
+/**
+ * Render the host-CLI section. Host CLIs are host-global: declared in any
+ * DotAgents repo's `cli/` (project > user > system > extras), installed to PATH
+ * rather than copied into a version home. They render identically in the overview
+ * and in a per-agent detail view because every agent on the host shares them.
+ * The source tag shows which repo layer declared each — so user-level and
+ * extra-repo manifests are visibly supported.
+ */
+function renderHostClisSection(cwd: string): void {
+  const { statuses, errors } = listCliStatus(cwd);
+  console.log(chalk.bold('\nHost CLIs\n'));
+  if (statuses.length === 0) {
+    console.log(`  ${chalk.gray('none declared')} ${chalk.gray('— add one with `agents cli add <name>`')}`);
+  } else {
+    const nameWidth = Math.max(...statuses.map((s) => s.manifest.name.length));
+    let anyMissing = false;
+    for (const { manifest, installed } of statuses) {
+      if (!installed) anyMissing = true;
+      const status = installed ? chalk.green('installed') : chalk.red('missing  ');
+      const linkedName = termLink(manifest.name.padEnd(nameWidth), linkTarget(manifest.path));
+      const tag = hostCliSourceTag(manifest.source);
+      const desc = manifest.description ? chalk.gray(`  ${summarizeDescription(manifest.description, 60)}`) : '';
+      console.log(`  ${status}  ${chalk.cyan(linkedName)} ${tag}${desc}`);
+    }
+    if (anyMissing) {
+      console.log(chalk.gray('  Install missing with `agents cli install`'));
+    }
+  }
+  for (const err of errors) {
+    console.log(`  ${chalk.red('error')}      ${chalk.gray(err.file)}: ${chalk.gray(err.reason)}`);
+  }
+}
+
 async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
   const spinnerText = filterAgentId
     ? `Checking ${agentLabel(filterAgentId)} agents...`
@@ -639,7 +683,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
     console.log();
   }
 
-
+  // Host CLIs are host-global, not per-agent — show them once in the overview.
+  if (!filterAgentId) {
+    renderHostClisSection(process.cwd());
+  }
 
   // Check for new resources when viewing a specific agent
   if (filterAgentId && versionManaged.length > 0) {
@@ -1027,6 +1074,9 @@ async function showAgentResources(
   if (shouldRenderSection('promptcuts', filter)) {
     renderPromptcuts();
   }
+  if (shouldRenderSection('cli', filter)) {
+    renderHostClisSection(cwd);
+  }
 
   // Show legend at the end if git repo exists and we showed all sections.
   // Filtered single-section views skip it — noise for promptcuts or plugins.
@@ -1403,6 +1453,7 @@ export async function viewAction(
     rules: options?.rules,
     hooks: options?.hooks,
     promptcuts: options?.promptcuts,
+    cli: options?.cli,
   };
   const filterIsSet = SECTION_KEYS.some((k) => filter[k]);
 
@@ -1488,6 +1539,7 @@ export function registerViewCommand(program: Command): void {
     .option('--rules', 'Show only rules in the detail view.')
     .option('--hooks', 'Show only hooks in the detail view.')
     .option('--promptcuts', 'Show only promptcuts in the detail view.')
+    .option('--cli', 'Show only host CLIs (declared in cli/, installed to PATH).')
     .addHelpText('after', `
 Examples:
   # Show all installed agents with versions, accounts, and usage
