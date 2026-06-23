@@ -559,7 +559,13 @@ export function registerVersionsCommands(program: Command): void {
     });
 
   configureVersionPruneCommand(program.command('prune <specs...>'), 'prune');
-  configureVersionPruneCommand(program.command('remove <specs...>', { hidden: true }), 'remove');
+  // `rm` and `purge` are commander aliases for `remove` (which is itself an
+  // alias for `prune`). Native `.aliases()` keeps them in lockstep — same
+  // action, same options, no duplicate registration.
+  configureVersionPruneCommand(
+    program.command('remove <specs...>', { hidden: true }).aliases(['rm', 'purge']),
+    'remove',
+  );
 
   const useCmd = program
     .command('use <agent> [version]')

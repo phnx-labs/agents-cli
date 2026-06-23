@@ -89,7 +89,7 @@ import { registerRunCommand } from './commands/exec.js';
 import { registerModelsCommand } from './commands/models.js';
 import { registerDefaultsCommands } from './commands/defaults.js';
 import { registerPruneCommand } from './commands/prune.js';
-import { registerTrashCommands } from './commands/trash.js';
+import { registerTrashCommands, registerRestoreCommand } from './commands/trash.js';
 import { registerDoctorCommand } from './commands/doctor.js';
 import { registerSubagentsCommands } from './commands/subagents.js';
 import { registerPluginsCommands } from './commands/plugins.js';
@@ -716,6 +716,7 @@ registerDefaultsCommands(program);
 registerModelsCommand(program);
 registerPruneCommand(program);
 registerTrashCommands(program);
+registerRestoreCommand(program);
 registerDoctorCommand(program);
 
 // Deprecated 'exec' alias for 'run'

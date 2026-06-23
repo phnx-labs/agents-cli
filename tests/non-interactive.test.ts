@@ -253,7 +253,7 @@ describe('non-interactive CLI usage', () => {
     expect(result.status).toBe(0);
     expect(combined).toContain(`Moved Claude@${version} to trash`);
     expect(combined).toContain('Sessions remain accessible via `agents sessions`.');
-    expect(combined).toContain(`Restore with: agents trash restore claude@${version}`);
+    expect(combined).toContain(`Restore with: agents restore claude@${version}`);
     expect(fs.existsSync(versionDir)).toBe(false);
 
     const trashAgentDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'claude', version);
@@ -285,6 +285,56 @@ describe('non-interactive CLI usage', () => {
     expect(combined).toContain(`Moved Codex@${version} to trash`);
     expect(fs.existsSync(versionDir)).toBe(false);
     expect(fs.existsSync(path.join(home, '.agents', '.history', 'trash', 'versions', 'codex', version))).toBe(true);
+  });
+
+  it.each(['rm', 'purge'])('treats %s as an alias for version prune', (verb) => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    const version = '0.131.0';
+    writeFakeManagedVersion(home, 'codex', version, 'codex');
+
+    const versionDir = path.join(home, '.agents', '.history', 'versions', 'codex', version);
+    const result = runAgents(home, [verb, `codex@${version}`]);
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status).toBe(0);
+    expect(combined).toContain(`Moved Codex@${version} to trash`);
+    expect(fs.existsSync(versionDir)).toBe(false);
+    expect(fs.existsSync(path.join(home, '.agents', '.history', 'trash', 'versions', 'codex', version))).toBe(true);
+  });
+
+  it('restores a soft-deleted version via the top-level restore command', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    const version = '0.132.0';
+    writeFakeManagedVersion(home, 'codex', version, 'codex');
+
+    const versionDir = path.join(home, '.agents', '.history', 'versions', 'codex', version);
+    expect(runAgents(home, ['remove', `codex@${version}`]).status).toBe(0);
+    expect(fs.existsSync(versionDir)).toBe(false);
+
+    const result = runAgents(home, ['restore', `codex@${version}`]);
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status).toBe(0);
+    expect(combined).toContain(`Restored Codex@${version}`);
+    // Version directory is back where it was, binary intact.
+    expect(fs.existsSync(versionDir)).toBe(true);
+    expect(fs.existsSync(path.join(versionDir, 'node_modules', '.bin', 'codex'))).toBe(true);
+    // Trash entry for this version is emptied out after the move.
+    const trashVersionDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'codex', version);
+    expect(fs.existsSync(trashVersionDir)).toBe(false);
+  });
+
+  it('exits non-zero when restoring a version that is not in trash', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+
+    const result = runAgents(home, ['restore', 'codex@9.9.9']);
+    const combined = `${result.stdout}\n${result.stderr}`;
+
+    expect(result.status).toBe(1);
+    expect(combined).toContain('No trashed copy found for codex@9.9.9');
   });
 
   it('does not hard-delete trash entries through cleanup', () => {

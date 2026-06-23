@@ -113,6 +113,59 @@ function humanSize(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+/**
+ * Restore a soft-deleted version back into ~/.agents/.history/versions/.
+ * Shared by `agents trash restore` and the top-level `agents restore` alias.
+ * Exits the process with a non-zero code on any failure.
+ */
+export function restoreVersion(target: string): void {
+  const parsed = parseAgentVersion(target);
+  if (!parsed) {
+    console.error(chalk.red(`Expected <agent>@<version>, got: ${target}`));
+    process.exit(1);
+  }
+  const { agent, version } = parsed;
+  const entries = listTrashEntries(agent);
+  const entry = pickLatest(entries, agent, version);
+  if (!entry) {
+    console.error(chalk.red(`No trashed copy found for ${agent}@${version}`));
+    console.error(chalk.gray('Run `agents trash list` to see what exists.'));
+    process.exit(1);
+  }
+  const dest = getVersionDir(agent, version);
+  if (fs.existsSync(dest)) {
+    console.error(chalk.red(`Cannot restore: ${dest} already exists.`));
+    console.error(chalk.gray('Move or remove the existing dir first, then re-run restore.'));
+    process.exit(1);
+  }
+  try {
+    fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
+    fs.renameSync(entry.trashPath, dest);
+  } catch (err) {
+    console.error(chalk.red(`Restore failed: ${(err as Error).message}`));
+    process.exit(1);
+  }
+  // Best-effort cleanup of empty stamp/version parents in trash.
+  try {
+    const verDir = path.dirname(entry.trashPath);
+    if (fs.readdirSync(verDir).length === 0) fs.rmdirSync(verDir);
+    const agentDir = path.dirname(verDir);
+    if (fs.readdirSync(agentDir).length === 0) fs.rmdirSync(agentDir);
+  } catch { /* best-effort */ }
+  console.log(chalk.green(`Restored ${agentLabel(agent)}@${version} to ${dest}`));
+}
+
+/**
+ * Register the top-level `agents restore` command — a shorthand for
+ * `agents trash restore` so users can undo a `remove`/`prune` directly.
+ */
+export function registerRestoreCommand(program: Command): void {
+  program
+    .command('restore <target>')
+    .description('Restore a soft-deleted agent version (e.g. "codex@0.141.0") removed via prune/remove')
+    .action((target: string) => restoreVersion(target));
+}
+
 export function registerTrashCommands(program: Command): void {
   const trash = program
     .command('trash')
@@ -145,46 +198,11 @@ export function registerTrashCommands(program: Command): void {
         );
       }
       console.log();
-      console.log(chalk.gray('Restore with: agents trash restore <agent>@<version>'));
+      console.log(chalk.gray('Restore with: agents restore <agent>@<version>'));
     });
 
   trash
     .command('restore <target>')
     .description('Restore a soft-deleted version (e.g. "claude@2.1.110") back to ~/.agents/.history/versions/')
-    .action((target: string) => {
-      const parsed = parseAgentVersion(target);
-      if (!parsed) {
-        console.error(chalk.red(`Expected <agent>@<version>, got: ${target}`));
-        process.exit(1);
-      }
-      const { agent, version } = parsed;
-      const entries = listTrashEntries(agent);
-      const entry = pickLatest(entries, agent, version);
-      if (!entry) {
-        console.error(chalk.red(`No trashed copy found for ${agent}@${version}`));
-        console.error(chalk.gray('Run `agents trash list` to see what exists.'));
-        process.exit(1);
-      }
-      const dest = getVersionDir(agent, version);
-      if (fs.existsSync(dest)) {
-        console.error(chalk.red(`Cannot restore: ${dest} already exists.`));
-        console.error(chalk.gray('Move or remove the existing dir first, then re-run restore.'));
-        process.exit(1);
-      }
-      try {
-        fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
-        fs.renameSync(entry.trashPath, dest);
-      } catch (err) {
-        console.error(chalk.red(`Restore failed: ${(err as Error).message}`));
-        process.exit(1);
-      }
-      // Best-effort cleanup of empty stamp/version parents in trash.
-      try {
-        const verDir = path.dirname(entry.trashPath);
-        if (fs.readdirSync(verDir).length === 0) fs.rmdirSync(verDir);
-        const agentDir = path.dirname(verDir);
-        if (fs.readdirSync(agentDir).length === 0) fs.rmdirSync(agentDir);
-      } catch { /* best-effort */ }
-      console.log(chalk.green(`Restored ${agentLabel(agent)}@${version} to ${dest}`));
-    });
+    .action((target: string) => restoreVersion(target));
 }
