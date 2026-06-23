@@ -305,6 +305,33 @@ describe('buildExecCommand', () => {
       expect(cmd[0]).toBe('codex');
       expect(cmd).not.toContain('exec');
     });
+
+    it('no flag and no prompt drops the opencode run subcommand (interactive TUI)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'opencode', prompt: undefined }));
+      expect(cmd[0]).toBe('opencode');
+      expect(cmd).not.toContain('run');
+    });
+
+    it('--headless with no prompt keeps opencode in headless run subcommand', () => {
+      const cmd = buildExecCommand(opts({ agent: 'opencode', prompt: undefined, headless: true }));
+      expect(cmd.slice(0, 2)).toEqual(['opencode', 'run']);
+    });
+
+    it('prompt without flags keeps opencode headless with the prompt as a positional', () => {
+      const cmd = buildExecCommand(opts({ agent: 'opencode', prompt: 'fix auth' }));
+      expect(cmd.slice(0, 2)).toEqual(['opencode', 'run']);
+      expect(cmd[cmd.length - 1]).toBe('fix auth');
+      expect(cmd).not.toContain('--prompt');
+    });
+
+    it('--interactive with a prompt launches the opencode TUI and forwards via --prompt', () => {
+      const cmd = buildExecCommand(opts({ agent: 'opencode', prompt: 'fix auth', interactive: true }));
+      expect(cmd[0]).toBe('opencode');
+      expect(cmd).not.toContain('run');
+      const flagIdx = cmd.indexOf('--prompt');
+      expect(flagIdx).toBeGreaterThan(-1);
+      expect(cmd[flagIdx + 1]).toBe('fix auth');
+    });
   });
 
   // --- resolveInteractive precedence ---

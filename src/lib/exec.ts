@@ -484,11 +484,16 @@ export function buildExecCommand(options: ExecOptions): string[] {
   const cmd: string[] = [...template.base];
   const interactive = resolveInteractive(options);
 
-  // For Codex and Droid, 'exec' is the headless subcommand -- drop it for
-  // interactive mode so we run the TUI ('codex' / 'droid') instead of the
-  // one-shot 'codex exec' / 'droid exec'.
-  if ((options.agent === 'codex' || options.agent === 'droid') && interactive && cmd[1] === 'exec') {
-    cmd.splice(1, 1);
+  // For Codex and Droid, 'exec' is the headless subcommand; for OpenCode, 'run'
+  // is. Drop it for interactive mode so we launch the TUI (`codex` / `droid` /
+  // `opencode`, each agent's default command) instead of the one-shot headless
+  // subcommand ('codex exec' / 'droid exec' / 'opencode run').
+  if (interactive) {
+    if ((options.agent === 'codex' || options.agent === 'droid') && cmd[1] === 'exec') {
+      cmd.splice(1, 1);
+    } else if (options.agent === 'opencode' && cmd[1] === 'run') {
+      cmd.splice(1, 1);
+    }
   }
 
   // Use versioned alias if a specific version was requested (e.g., claude@2.1.98).
@@ -589,7 +594,11 @@ export function buildExecCommand(options: ExecOptions): string[] {
   // so the CLI launches its TUI. When --interactive is passed alongside a prompt
   // we still forward the prompt so the agent receives it as the first message.
   if (options.prompt !== undefined) {
-    if (template.promptFlag === 'positional') {
+    if (interactive && options.agent === 'opencode') {
+      // The OpenCode TUI takes an initial prompt via --prompt; a bare positional
+      // on the default command is parsed as a project path, not a message.
+      cmd.push('--prompt', options.prompt);
+    } else if (template.promptFlag === 'positional') {
       cmd.push(options.prompt);
     } else {
       cmd.push(template.promptFlag, options.prompt);
