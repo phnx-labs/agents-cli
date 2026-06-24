@@ -2,10 +2,17 @@
  * `agents sync` — synchronize central resources into an installed agent version.
  *
  * Forms:
- *   agents sync claude                                  # uses default/sole installed version
- *   agents sync claude@2.1.142                          # explicit version
- *   agents sync claude@latest                           # newest installed
+ *   agents sync                                         # umbrella: fetch remote (repos+secrets+sessions) -> reconcile all
+ *   agents sync --repos|--secrets|--sessions            # umbrella: fetch only those, then reconcile
+ *   agents sync --cloud                                 # umbrella: fetch all, skip reconcile
+ *   agents sync --local                                 # umbrella: reconcile all, no fetch
+ *   agents sync claude                                  # one agent: uses default/sole installed version
+ *   agents sync claude@2.1.142                          # one agent: explicit version
+ *   agents sync claude@latest                           # one agent: newest installed
  *   agents sync --agent claude --agent-version 2.1.142  # legacy form, still supported
+ *
+ * The umbrella stages live in lib/sync-umbrella.ts; this file dispatches to them
+ * when no agent is given.
  *
  * In a TTY the command previews available/new resources and lets the user
  * select what to sync (same prompts shown after `agents add`). Pass
@@ -44,6 +51,7 @@ import {
 import { compileRulesForProject } from '../lib/rules/compile.js';
 import { runLaunchSync } from '../lib/project-launch.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
 
 interface SyncOpts {
   agent?: string;
@@ -54,14 +62,20 @@ interface SyncOpts {
   yes?: boolean;
   force?: boolean;
   quiet?: boolean;
+  // Umbrella-verb flags (only meaningful when no agent is given).
+  repos?: boolean;
+  secrets?: boolean;
+  sessions?: boolean;
+  cloud?: boolean;
+  local?: boolean;
 }
 
 /** Register the `agents sync` command. */
 export function registerSyncCommand(program: Command): void {
   program
     .command('sync [agentSpec]')
-    .summary('Sync resources into an installed agent version')
-    .description('Sync resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into an installed agent version. Previews what will change and lets you pick.\n\n[agentSpec] is the agent name with an optional @version, e.g. "claude" or "claude@2.1.142". Omit the version to sync into the active (or sole installed) one.')
+    .summary('Make this machine current, or sync resources into one agent')
+    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude" or "claude@2.1.142".\n\nWith NO agent, runs the umbrella verb: fetch remote state (config repos + secrets + sessions) then reconcile it into every installed agent. Scope it with --repos / --secrets / --sessions, --cloud (fetch only), or --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
     .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version")')
     .option('--project-dir <path>', 'Path to project-level .agents/ directory containing project-scoped resources')
@@ -70,9 +84,69 @@ export function registerSyncCommand(program: Command): void {
     .option('-y, --yes', 'Skip the interactive preview and auto-sync all detected resources', false)
     .option('--force', 'Re-sync even if no changes are detected since the last sync', false)
     .option('--quiet', 'Suppress all output (exit code indicates success)', false)
+    // Umbrella verb (no agent given): make this machine current.
+    .option('--repos', 'Umbrella: git-pull ~/.agents + enabled ~/.agents-* extras', false)
+    .option('--secrets', 'Umbrella: pull encrypted secret bundles from the remote', false)
+    .option('--sessions', 'Umbrella: sync session transcripts across machines', false)
+    .option('--cloud', 'Umbrella: fetch all remote state but skip the local reconcile', false)
+    .option('--local', "Umbrella: reconcile resources into installed agents only (no fetch)", false)
     .action(async (agentSpec: string | undefined, opts: SyncOpts) => {
       await runSync(agentSpec, opts);
     });
+}
+
+/**
+ * The umbrella verb: bare `agents sync` (no agent) makes this machine current.
+ * Resolves the flags + a secrets passphrase (env-only for now; tokenized auth
+ * arrives with `agents login`) and runs the fetch+reconcile stages, then prints
+ * a one-line summary. Stage failures are non-fatal and surfaced as warnings.
+ */
+async function runUmbrella(
+  opts: SyncOpts,
+  quiet: boolean,
+  outLog: (msg: string) => void,
+  errLog: (msg: string) => void,
+): Promise<void> {
+  const flags: UmbrellaFlags = {
+    repos: opts.repos,
+    secrets: opts.secrets,
+    sessions: opts.sessions,
+    cloud: opts.cloud,
+    local: opts.local,
+  };
+  const passphrase = process.env.AGENTS_SECRETS_PASSPHRASE || undefined;
+
+  if (!quiet) outLog(chalk.bold('Syncing this machine…'));
+  try {
+    const result = await runUmbrellaSync({
+      flags,
+      yes: !!opts.yes,
+      passphrase,
+      log: (msg) => { if (!quiet) outLog(chalk.gray(`  ${msg}`)); },
+    });
+
+    if (!quiet) {
+      const parts: string[] = [];
+      if (result.repos) {
+        parts.push(`repos ${result.repos.pulled} pulled` +
+          (result.repos.errors.length ? `, ${result.repos.errors.length} failed` : ''));
+      }
+      if (result.secrets) {
+        parts.push(result.secrets.skipped ? 'secrets skipped' : `secrets ${result.secrets.pulled} pulled`);
+      }
+      if (result.sessions) {
+        parts.push(result.sessions.ran ? `sessions ${result.sessions.merged} merged` : 'sessions off');
+      }
+      if (result.reconciled) parts.push('reconciled');
+      outLog(chalk.green(`✓ sync: ${parts.join(' · ') || 'nothing to do'}`));
+
+      const errs = [...(result.repos?.errors ?? []), ...(result.secrets?.errors ?? [])];
+      for (const e of errs) errLog(chalk.yellow(`  ! ${e}`));
+    }
+  } catch (err) {
+    errLog(chalk.red(`sync failed: ${(err as Error).message}`));
+    process.exitCode = 1;
+  }
 }
 
 async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<void> {
@@ -110,10 +184,9 @@ async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<v
   }
 
   if (!agentId) {
-    errLog(chalk.red('Usage: agents sync <agent>[@version]'));
-    errLog(chalk.gray('       agents sync claude'));
-    errLog(chalk.gray('       agents sync claude@2.1.142'));
-    process.exitCode = 1;
+    // No agent specified → the umbrella verb: make this machine current
+    // (fetch repos + secrets + sessions, then reconcile all installed agents).
+    await runUmbrella(opts, quiet, outLog, errLog);
     return;
   }
 
