@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+**`agents secrets get/set <item>`: raw, cross-platform keychain access for hooks**
+
+- New `agents secrets get <item>` / `agents secrets set <item>` read and write a single keychain item **by bare name** (outside the bundle namespace), so shell hooks and automation have one platform-agnostic credential primitive to call instead of hardcoding `/usr/bin/security` (macOS-only) or `secret-tool` (Linux-only). `get` prints the value to stdout (newline-terminated for clean `$(…)` capture), sends diagnostics to stderr, and exits 1 with empty stdout when the item is missing — exactly what a `SessionStart` hook needs to probe-and-fallback quietly. Routing goes through the existing cross-platform keychain layer: macOS via `/usr/bin/security`, Linux via `secret-tool` with the encrypted-file fallback.
+- `setKeychainToken` now writes bare (non-`agents-cli.`) items on macOS **without** the biometry ACL, mirroring the existing no-prompt read path for such items. This is what lets a hook read e.g. `linear-api-key` silently on every launch — routing it through the Touch ID helper would attach an ACL the `/usr/bin/security` read can't satisfy without popping the legacy password sheet. The change is purely additive: every existing caller passes an `agents-cli.`-namespaced item and is unaffected (still biometry-gated via the signed helper).
+
 **`agents inspect` summary: expanded detail for hooks, plugins, and MCP**
 
 - The bare `agents inspect <agent>` / `agents inspect <repo>` summary no longer collapses everything to a count table. Simple kinds (commands, skills, rules, subagents, workflows) keep a count line but now preview a few names; the rich kinds get their own expanded sections: **hooks** show their events + `matches:` predicates + cache (`PreToolUse(Bash) · git_dirty · prompt~"deploy" (5m cache)`), **plugins** show version + bundle contents (`v2.1.0  skills:6 commands:5 hooks:2 mcp:1`), and **MCP** show transport + url/command. Drill-down flags (`--hooks`, `--plugins`, `--mcp`) and `--brief` are unchanged; `--json` gains the structured detail additively (existing keys retained).

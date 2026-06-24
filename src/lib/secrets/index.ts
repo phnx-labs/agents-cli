@@ -258,6 +258,27 @@ export function setKeychainToken(item: string, value: string): void {
 
   if (isLinux()) { linuxBackend.set(item, value); return; }
 
+  // Bare (non-`agents-cli.`) items are written WITHOUT the biometry ACL so
+  // they round-trip with the no-prompt read path in getKeychainToken (which
+  // also uses /usr/bin/security for non-our items). This is what lets a
+  // SessionStart hook read e.g. `linear-api-key` silently on every launch.
+  // Routing these through the helper would attach a Touch ID ACL that the
+  // /usr/bin/security read can't satisfy without popping the legacy password
+  // sheet. -U upserts so repeated sets overwrite in place.
+  if (!isOurItem(item)) {
+    const sec = spawnSync('/usr/bin/security', [
+      'add-generic-password', '-U',
+      '-a', os.userInfo().username,
+      '-s', item,
+      '-w', value,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    if (sec.status !== 0) {
+      const msg = sec.stderr?.toString().trim();
+      throw new Error(msg || `Failed to write keychain item '${item}'.`);
+    }
+    return;
+  }
+
   const bin = getKeychainHelperPath();
   const result = spawnSync(bin, ['set', item, os.userInfo().username], {
     input: value,
