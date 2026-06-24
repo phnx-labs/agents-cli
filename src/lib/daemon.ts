@@ -19,7 +19,7 @@ import { executeJobDetached, monitorRunningJobs } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from './overdue.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
-import { secretsKeychainItem, hasKeychainToken, getKeychainToken } from './secrets/index.js';
+import { readAndResolveBundleEnv } from './secrets/bundles.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -260,16 +260,17 @@ export async function runDaemon(): Promise<void> {
 
 /**
  * Read the long-lived Claude OAuth token (from `claude setup-token`) that the
- * user stored under the `claude` secrets bundle. Returns null when it isn't
+ * user stored under the `claude` secrets bundle. Resolves the bundle the same
+ * way `agents run --secrets` does, so the token is found whether it was stored
+ * keychain-backed or as a literal. Returns null when the bundle/key isn't
  * configured, the Keychain read is cancelled, or the platform has no keychain —
  * the daemon then behaves exactly as before (relying on the interactive OAuth
  * session). Never throws: a misconfigured token must not block daemon startup.
  */
 export function readDaemonClaudeOAuthToken(): string | null {
-  const item = secretsKeychainItem(DAEMON_OAUTH_BUNDLE, DAEMON_OAUTH_KEY);
   try {
-    if (!hasKeychainToken(item)) return null;
-    const token = getKeychainToken(item).trim();
+    const { env } = readAndResolveBundleEnv(DAEMON_OAUTH_BUNDLE, { caller: 'daemon' });
+    const token = (env[DAEMON_OAUTH_KEY] ?? '').trim();
     return token.length > 0 ? token : null;
   } catch {
     return null;

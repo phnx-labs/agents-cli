@@ -17,11 +17,11 @@ import {
 } from './daemon.js';
 import {
   secretsKeychainItem,
+  setKeychainToken,
   setKeychainBackendForTest,
   type KeychainBackend,
 } from './secrets/index.js';
-
-const OAUTH_ITEM = secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN');
+import { writeBundle, deleteBundle } from './secrets/bundles.js';
 
 function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, string> } {
   const store = new Map<string, string>();
@@ -39,36 +39,51 @@ function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, str
   return { backend, store };
 }
 
+/** Seed the `claude` bundle with a keychain-backed CLAUDE_CODE_OAUTH_TOKEN. */
+function seedKeychainBacked(value: string): void {
+  writeBundle({ name: 'claude', vars: { CLAUDE_CODE_OAUTH_TOKEN: 'keychain:CLAUDE_CODE_OAUTH_TOKEN' } });
+  setKeychainToken(secretsKeychainItem('claude', 'CLAUDE_CODE_OAUTH_TOKEN'), value);
+}
+
+/** Seed the `claude` bundle with a literal CLAUDE_CODE_OAUTH_TOKEN. */
+function seedLiteral(value: string): void {
+  writeBundle({ name: 'claude', vars: { CLAUDE_CODE_OAUTH_TOKEN: value } });
+}
+
 let restore: KeychainBackend | null = null;
-let store: Map<string, string>;
 
 beforeEach(() => {
   const m = makeMemoryBackend();
-  store = m.store;
   restore = setKeychainBackendForTest(m.backend);
 });
 
 afterEach(() => {
+  try { deleteBundle('claude'); } catch { /* not created */ }
   setKeychainBackendForTest(restore);
 });
 
 describe('readDaemonClaudeOAuthToken', () => {
-  it('returns null when no token is configured', () => {
+  it('returns null when the bundle does not exist', () => {
     expect(readDaemonClaudeOAuthToken()).toBeNull();
   });
 
-  it('returns the stored token', () => {
-    store.set(OAUTH_ITEM, 'sk-ant-oat01-abc123');
+  it('returns a keychain-backed token', () => {
+    seedKeychainBacked('sk-ant-oat01-abc123');
     expect(readDaemonClaudeOAuthToken()).toBe('sk-ant-oat01-abc123');
   });
 
+  it('returns a token stored as a literal (the no-op footgun fix)', () => {
+    seedLiteral('sk-ant-oat01-literal');
+    expect(readDaemonClaudeOAuthToken()).toBe('sk-ant-oat01-literal');
+  });
+
   it('trims surrounding whitespace from the stored token', () => {
-    store.set(OAUTH_ITEM, '  sk-ant-oat01-abc123\n');
+    seedKeychainBacked('  sk-ant-oat01-abc123\n');
     expect(readDaemonClaudeOAuthToken()).toBe('sk-ant-oat01-abc123');
   });
 
   it('treats an empty/whitespace-only token as absent', () => {
-    store.set(OAUTH_ITEM, '   ');
+    seedKeychainBacked('   ');
     expect(readDaemonClaudeOAuthToken()).toBeNull();
   });
 });
@@ -82,7 +97,7 @@ describe('generateLaunchdPlist', () => {
   });
 
   it('injects the token into EnvironmentVariables when configured', () => {
-    store.set(OAUTH_ITEM, 'sk-ant-oat01-abc123');
+    seedKeychainBacked('sk-ant-oat01-abc123');
     const plist = generateLaunchdPlist();
     expect(plist).toContain('<key>CLAUDE_CODE_OAUTH_TOKEN</key>');
     expect(plist).toContain('<string>sk-ant-oat01-abc123</string>');
@@ -94,7 +109,7 @@ describe('generateLaunchdPlist', () => {
   });
 
   it('XML-escapes special characters in the token value', () => {
-    store.set(OAUTH_ITEM, 'tok&en<x>');
+    seedKeychainBacked('tok&en<x>');
     const plist = generateLaunchdPlist();
     expect(plist).toContain('<string>tok&amp;en&lt;x&gt;</string>');
     expect(plist).not.toContain('<string>tok&en<x></string>');
@@ -107,7 +122,7 @@ describe('generateSystemdUnit', () => {
   });
 
   it('adds an Environment line for the token when configured', () => {
-    store.set(OAUTH_ITEM, 'sk-ant-oat01-abc123');
+    seedKeychainBacked('sk-ant-oat01-abc123');
     expect(generateSystemdUnit()).toContain(
       'Environment=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc123',
     );
