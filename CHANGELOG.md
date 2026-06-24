@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Headless Linux: `agents secrets` works out of the box when the keyring is locked**
+
+- On a headless server the libsecret/GNOME-keyring collection is locked, so the encrypted-file fallback is the only option — but it previously hard-failed unless `AGENTS_SECRETS_PASSPHRASE` was set, leaving `agents secrets` silently unusable. Now, on a headless run with no passphrase set, a random machine-local passphrase is auto-provisioned once at `~/.agents/.cache/secrets/.passphrase` (mode 0600) so the encrypted-file store just works. `AGENTS_SECRETS_PASSPHRASE` still takes precedence (off-disk key), an existing `.passphrase` is reused for stable interactive/headless behavior, and interactive TTY sessions are still prompted. Security model + resolution order documented in `docs/secrets.md`. (#371)
+
 **`agents secrets get/set <item>`: raw, cross-platform keychain access for hooks**
 
 - New `agents secrets get <item>` / `agents secrets set <item>` read and write a single keychain item **by bare name** (outside the bundle namespace), so shell hooks and automation have one platform-agnostic credential primitive to call instead of hardcoding `/usr/bin/security` (macOS-only) or `secret-tool` (Linux-only). `get` prints the value to stdout (newline-terminated for clean `$(…)` capture), sends diagnostics to stderr, and exits 1 with empty stdout when the item is missing — exactly what a `SessionStart` hook needs to probe-and-fallback quietly. Routing goes through the existing cross-platform keychain layer: macOS via `/usr/bin/security`, Linux via `secret-tool` with the encrypted-file fallback.

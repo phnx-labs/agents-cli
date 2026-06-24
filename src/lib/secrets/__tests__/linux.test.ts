@@ -208,3 +208,75 @@ describe('linuxBackend (via forced file fallback)', () => {
     expect(linuxBackend.list('agents-cli.secrets.persisted-probe.')).toEqual(['agents-cli.secrets.persisted-probe.API_KEY']);
   });
 });
+
+/**
+ * The reported bug (#371): on a headless box the keyring is locked AND no
+ * AGENTS_SECRETS_PASSPHRASE is set, so the file fallback's getPassphrase() used
+ * to hard-throw — `agents secrets` was unusable out of the box. The fix
+ * auto-provisions a machine-local passphrase (0600 file) instead.
+ *
+ * isTTY is stubbed false so these are deterministic regardless of how the test
+ * runner is launched (a real TTY would otherwise hit the interactive prompt).
+ */
+describe('headless auto-provisioned passphrase (no env, locked keyring)', () => {
+  let tmpDir: string;
+  let prevTty: boolean | undefined;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-autopass-'));
+    delete process.env.AGENTS_SECRETS_PASSPHRASE;
+    prevTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    // No `passphrase` passed → cachedPassphrase stays null, forcing the real
+    // getPassphrase() resolution path. Force the file fallback so we don't need
+    // a real secret-tool (the closest proxy for "headless, locked collection").
+    _resetForTest({ fileDir: tmpDir, forceFileFallback: true });
+  });
+
+  afterEach(() => {
+    delete process.env.AGENTS_SECRETS_PASSPHRASE;
+    Object.defineProperty(process.stdin, 'isTTY', { value: prevTty, configurable: true });
+    _resetForTest();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('set/get works without env or keyring, and writes a 0600 .passphrase', () => {
+    // Previously this threw "no AGENTS_SECRETS_PASSPHRASE is set".
+    linuxBackend.set('agents-cli.secrets.work.API_KEY', 'sk-headless-123');
+    expect(linuxBackend.get('agents-cli.secrets.work.API_KEY')).toBe('sk-headless-123');
+
+    const passFp = path.join(tmpDir, '.passphrase');
+    expect(fs.existsSync(passFp)).toBe(true);
+    expect(fs.statSync(passFp).mode & 0o777).toBe(0o600);
+    // The on-disk item is ciphertext, not the plaintext value.
+    const enc = fs.readFileSync(path.join(tmpDir, 'agents-cli.secrets.work.API_KEY.enc'), 'utf8');
+    expect(enc).not.toContain('sk-headless-123');
+  });
+
+  it('the .passphrase file is stable across processes (decrypts later)', () => {
+    linuxBackend.set('agents-cli.secrets.work.API_KEY', 'persisted');
+    const provisioned = fs.readFileSync(path.join(tmpDir, '.passphrase'), 'utf8');
+
+    // Fresh process: clear in-memory cache, keep the same store dir.
+    _resetForTest({ fileDir: tmpDir, forceFileFallback: true });
+    expect(linuxBackend.get('agents-cli.secrets.work.API_KEY')).toBe('persisted');
+    // Same passphrase reused, not regenerated.
+    expect(fs.readFileSync(path.join(tmpDir, '.passphrase'), 'utf8')).toBe(provisioned);
+  });
+
+  it('.passphrase is not surfaced as a secret item', () => {
+    linuxBackend.set('agents-cli.secrets.work.A', 'a');
+    expect(linuxBackend.list('').filter((n) => n.includes('passphrase'))).toEqual([]);
+    expect(linuxBackend.has('.passphrase')).toBe(false);
+  });
+
+  it('AGENTS_SECRETS_PASSPHRASE still takes precedence over a provisioned file', () => {
+    // Provision a machine-local passphrase by writing under no env.
+    linuxBackend.set('agents-cli.secrets.work.A', 'under-machine-pass');
+    // Now a process with an explicit env passphrase must use THAT, so it cannot
+    // decrypt the item written under the machine passphrase.
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'explicit-different-pass';
+    _resetForTest({ fileDir: tmpDir, forceFileFallback: true });
+    expect(() => linuxBackend.get('agents-cli.secrets.work.A')).toThrow(/decrypt|passphrase/i);
+  });
+});

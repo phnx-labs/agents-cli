@@ -287,6 +287,39 @@ What we don't protect against:
 - A user who approves a Touch ID prompt for an attacker-controlled binary.
 - Cross-user attacks where the attacker is `root` (the OS keychain is owned at user scope).
 
+## Linux: headless servers and the encrypted-file fallback
+
+On Linux, secrets are stored via `libsecret` / `secret-tool` (the GNOME Keyring
+Secret Service). On a **headless server** there is no graphical login, so the
+default keyring collection is **locked** and `secret-tool` can't write to it.
+When that happens (or when `secret-tool` isn't installed), `agents secrets`
+transparently falls back to an **AES-256-GCM encrypted-file store** under
+`~/.agents/.cache/secrets/` (one `<item>.enc` file per secret, mode 0600).
+
+The encryption key (passphrase) is resolved in this order:
+
+1. **`AGENTS_SECRETS_PASSPHRASE`** — if set, always used. This is the way to
+   keep the key **off disk** (e.g. exported from a password manager, or sourced
+   into the shell per session). Recommended for shared/CI machines.
+2. **An existing machine-local passphrase** — `~/.agents/.cache/secrets/.passphrase`
+   (mode 0600), if one was provisioned earlier. Used for both interactive and
+   headless runs so they always agree.
+3. **A TTY prompt** — interactive sessions are asked for the passphrase.
+4. **Auto-provisioned** — on a headless run (no TTY) with none of the above, a
+   random passphrase is generated once and written to
+   `~/.agents/.cache/secrets/.passphrase` (mode 0600). This is what makes
+   `agents secrets` work out of the box on a server.
+
+**Security model of the file store.** The auto-provisioned passphrase is
+encryption-at-rest with the key held in a 0600 file — the same posture as an SSH
+private key, and identical to the common `export AGENTS_SECRETS_PASSPHRASE=… ` in
+`~/.zshenv` (chmod 600) workaround. It protects against on-disk plaintext
+exposure (backups, accidental commits, `.env` leaks), not against another
+process running as the same user. For a key held **off disk**, set
+`AGENTS_SECRETS_PASSPHRASE` (it always takes precedence) or unlock the keyring
+(e.g. configure `pam_gnome_keyring` for SSH login). To rotate, set a new
+`AGENTS_SECRETS_PASSPHRASE`, re-add the secrets, and delete `.passphrase`.
+
 ## See Also
 
 - `docs/00-concepts.md` — DotAgents repos and resource model

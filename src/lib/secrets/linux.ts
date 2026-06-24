@@ -46,6 +46,7 @@ let isAvailable = false;
 
 let useFileFallback = false;
 let warnedFallback = false;
+let warnedAutoPassphrase = false;
 let fileDirOverride: string | null = null;
 let cachedPassphrase: string | null = null;
 
@@ -99,7 +100,13 @@ function preflight(): 'file' | 'secret-tool' {
     checkedAvailability = true;
   }
   if (!isAvailable) {
-    if (process.env.AGENTS_SECRETS_PASSPHRASE) {
+    // No secret-tool. Route to the encrypted-file fallback whenever a passphrase
+    // source exists or can be auto-provisioned: an explicit
+    // AGENTS_SECRETS_PASSPHRASE, an already-provisioned machine-local passphrase,
+    // or a headless context (no TTY) where getPassphrase() auto-provisions one.
+    // Only an INTERACTIVE session with none of these gets the install hint —
+    // installing libsecret is the better fix when someone is at the keyboard.
+    if (process.env.AGENTS_SECRETS_PASSPHRASE || machinePassphraseExists() || !process.stdin.isTTY) {
       activateFileFallback();
       return 'file';
     }
@@ -148,6 +155,69 @@ function readPassphraseFromTty(): string {
   }
 }
 
+/** Path of the auto-provisioned machine-local passphrase. Lives alongside the
+ *  encrypted items but is never itself an item (no `.enc` suffix, so it's
+ *  excluded from list/has/get and from fileFallbackPreviouslyActivated). */
+function passphraseFilePath(): string {
+  return path.join(fileDir(), '.passphrase');
+}
+
+/** True if a machine-local passphrase has already been provisioned. */
+function machinePassphraseExists(): boolean {
+  try {
+    return fs.readFileSync(passphraseFilePath(), 'utf8').trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function readMachinePassphrase(): string | null {
+  try {
+    const p = fs.readFileSync(passphraseFilePath(), 'utf8').trim();
+    return p.length > 0 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Provision (or read back) a stable machine-local passphrase for the encrypted
+ * file store, so `agents secrets` works out of the box on a headless box where
+ * the keyring is locked and no AGENTS_SECRETS_PASSPHRASE is set.
+ *
+ * Security model: this is encryption-at-rest with the key held in a 0600 file —
+ * the same posture as an SSH private key, and identical to the common
+ * "export AGENTS_SECRETS_PASSPHRASE=… in ~/.zshenv (chmod 600)" workaround. The
+ * keyring (key in a daemon's locked memory) is stronger but is unavailable
+ * without a graphical/unlocked session. For an off-disk key, set
+ * AGENTS_SECRETS_PASSPHRASE (it always takes precedence) or unlock the keyring.
+ */
+function provisionMachinePassphrase(): string {
+  const existing = readMachinePassphrase();
+  if (existing) return existing;
+
+  ensureFileDir();
+  const generated = randomBytes(32).toString('base64');
+  const fp = passphraseFilePath();
+  try {
+    // wx: fail if a concurrent process created it first (then we read theirs).
+    fs.writeFileSync(fp, generated, { mode: 0o600, flag: 'wx' });
+  } catch {
+    const raced = readMachinePassphrase();
+    if (raced) return raced;
+    throw new Error(`Failed to provision machine-local passphrase at ${fp}.`);
+  }
+  if (!warnedAutoPassphrase) {
+    warnedAutoPassphrase = true;
+    process.stderr.write(
+      `[agents] keyring locked and no AGENTS_SECRETS_PASSPHRASE set; provisioned a ` +
+      `machine-local passphrase at ${fp} (mode 0600). Set AGENTS_SECRETS_PASSPHRASE ` +
+      `for a key held off disk.\n`
+    );
+  }
+  return generated;
+}
+
 function getPassphrase(): string {
   if (cachedPassphrase !== null) return cachedPassphrase;
   const env = process.env.AGENTS_SECRETS_PASSPHRASE;
@@ -155,17 +225,24 @@ function getPassphrase(): string {
     cachedPassphrase = env;
     return env;
   }
-  if (!process.stdin.isTTY) {
-    throw new Error(
-      'Secret-service collection is locked and no AGENTS_SECRETS_PASSPHRASE is set.\n' +
-      'Set AGENTS_SECRETS_PASSPHRASE in your environment to use the encrypted-file fallback,\n' +
-      'or unlock the keyring (e.g. configure pam_gnome_keyring for SSH login).'
-    );
+  // A previously-provisioned machine-local passphrase is this machine's stable
+  // file-store key — prefer it for both interactive and headless runs so they
+  // always agree (a TTY run won't re-prompt once the file exists).
+  const onDisk = readMachinePassphrase();
+  if (onDisk) {
+    cachedPassphrase = onDisk;
+    return onDisk;
   }
-  const p = readPassphraseFromTty();
-  if (!p) throw new Error('No passphrase entered.');
-  cachedPassphrase = p;
-  return p;
+  // First run, no env, no provisioned key: prompt when interactive, otherwise
+  // (headless — the reported bug) auto-provision instead of hard-failing.
+  if (process.stdin.isTTY) {
+    const p = readPassphraseFromTty();
+    if (!p) throw new Error('No passphrase entered.');
+    cachedPassphrase = p;
+    return p;
+  }
+  cachedPassphrase = provisionMachinePassphrase();
+  return cachedPassphrase;
 }
 
 // ---------- AES-256-GCM ----------
@@ -462,6 +539,7 @@ export function _resetForTest(opts: {
   fileDirOverride = opts.fileDir ?? null;
   useFileFallback = opts.forceFileFallback ?? false;
   warnedFallback = false;
+  warnedAutoPassphrase = false;
   cachedPassphrase = opts.passphrase ?? null;
   checkedAvailability = false;
   isAvailable = false;
