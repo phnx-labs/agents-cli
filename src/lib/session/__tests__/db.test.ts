@@ -10,7 +10,17 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-test-'));
 process.env.HOME = TEST_HOME;
 
-const { getDB, getDBPath, querySessions, closeDB } = await import('../db.js');
+const {
+  getDB,
+  getDBPath,
+  querySessions,
+  closeDB,
+  upsertSession,
+  queryUsageRollup,
+  topSessionsByCost,
+} = await import('../db.js');
+const { costOfUsage } = await import('../../pricing/index.js');
+type SessionMeta = import('../types.js').SessionMeta;
 
 // JSONL files live under TEST_HOME so they're isolated and torn down with it.
 // querySessions filters out rows whose file_path no longer exists on disk
@@ -51,11 +61,6 @@ describe('querySessions version filter', () => {
     seed('s4-null',  null,      '2026-04-19T13:00:00.000Z');
   });
 
-  afterAll(() => {
-    closeDB();
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
-  });
-
   it('returns only sessions matching the requested version', () => {
     const rows = querySessions({ version: '2.1.112' });
     expect(rows.map(r => r.id).sort()).toEqual(['s2-newer', 's3-same']);
@@ -78,5 +83,137 @@ describe('querySessions version filter', () => {
   it('filters by version even when agent is also set', () => {
     const rows = querySessions({ agent: 'claude', version: '2.1.111' });
     expect(rows.map(r => r.id)).toEqual(['s1-older']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cost + duration (issue #323) — real SQLite, migration v6 columns, sort,
+// rollup grouping for a multi-model session.
+// ---------------------------------------------------------------------------
+
+// Single teardown for the whole file (the per-describe teardown was removed so
+// later describe blocks still have a live DB and an intact TEST_HOME).
+afterAll(() => {
+  closeDB();
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+});
+
+const COST_FILES_DIR = path.join(TEST_HOME, 'cost-files');
+fs.mkdirSync(COST_FILES_DIR, { recursive: true });
+
+/** Upsert a costed session through the public API (exercises the v6 schema). */
+function seedCosted(
+  id: string,
+  agent: SessionMeta['agent'],
+  timestamp: string,
+  costUsd: number | undefined,
+  durationMs: number | undefined,
+  project = 'agents-cli',
+): void {
+  const filePath = path.join(COST_FILES_DIR, `${id}.jsonl`);
+  fs.writeFileSync(filePath, '');
+  const meta: SessionMeta = {
+    id,
+    shortId: id.slice(0, 8),
+    agent,
+    timestamp,
+    project,
+    cwd: COST_FILES_DIR,
+    filePath,
+    costUsd,
+    durationMs,
+  };
+  upsertSession(meta, '');
+}
+
+describe('migration v5 -> v6 adds cost/duration columns', () => {
+  it('sessions table has cost_usd and duration_ms columns', () => {
+    const db = getDB();
+    const cols = (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('cost_usd');
+    expect(cols).toContain('duration_ms');
+  });
+
+  it('schema_version is recorded as 6', () => {
+    const db = getDB();
+    const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
+    expect(row.value).toBe('6');
+  });
+});
+
+describe('cost/duration upsert round-trip', () => {
+  beforeAll(() => {
+    seedCosted('c1-cheap', 'claude', '2026-05-01T10:00:00.000Z', 0.50, 60_000, 'proj-a');
+    seedCosted('c2-pricey', 'claude', '2026-05-02T10:00:00.000Z', 12.34, 3_600_000, 'proj-b');
+    seedCosted('c3-mid', 'codex', '2026-05-03T10:00:00.000Z', 3.00, 600_000, 'proj-a');
+    seedCosted('c4-null', 'claude', '2026-05-04T10:00:00.000Z', undefined, undefined, 'proj-b');
+  });
+
+  it('round-trips cost_usd and duration_ms through SQLite', () => {
+    const rows = querySessions({ cwdPrefix: COST_FILES_DIR });
+    const pricey = rows.find(r => r.id === 'c2-pricey')!;
+    expect(pricey.costUsd).toBeCloseTo(12.34, 10);
+    expect(pricey.durationMs).toBe(3_600_000);
+    const nullRow = rows.find(r => r.id === 'c4-null')!;
+    expect(nullRow.costUsd).toBeUndefined();
+    expect(nullRow.durationMs).toBeUndefined();
+  });
+
+  it('--sort cost orders by cost desc with NULLs last', () => {
+    const rows = querySessions({ cwdPrefix: COST_FILES_DIR, sortBy: 'cost' });
+    expect(rows.map(r => r.id)).toEqual(['c2-pricey', 'c3-mid', 'c1-cheap', 'c4-null']);
+  });
+
+  it('--sort duration orders by duration desc with NULLs last', () => {
+    const rows = querySessions({ cwdPrefix: COST_FILES_DIR, sortBy: 'duration' });
+    expect(rows.map(r => r.id)).toEqual(['c2-pricey', 'c3-mid', 'c1-cheap', 'c4-null']);
+  });
+
+  it('topSessionsByCost returns priciest first and excludes NULL-cost rows', () => {
+    const top = topSessionsByCost(10, { cwdPrefix: COST_FILES_DIR });
+    expect(top.map(t => t.meta.id)).toEqual(['c2-pricey', 'c3-mid', 'c1-cheap']);
+    expect(top[0].costUsd).toBeCloseTo(12.34, 10);
+  });
+
+  it('queryUsageRollup groups by agent with summed cost', () => {
+    const rows = queryUsageRollup({ cwdPrefix: COST_FILES_DIR, groupBy: 'agent' });
+    const byKey = new Map(rows.map(r => [r.key, r]));
+    expect(byKey.get('claude')!.costUsd).toBeCloseTo(0.50 + 12.34, 10);
+    expect(byKey.get('claude')!.sessionCount).toBe(3);
+    expect(byKey.get('codex')!.costUsd).toBeCloseTo(3.00, 10);
+  });
+
+  it('queryUsageRollup groups by project across agents', () => {
+    const rows = queryUsageRollup({ cwdPrefix: COST_FILES_DIR, groupBy: 'project' });
+    const byKey = new Map(rows.map(r => [r.key, r]));
+    // proj-a = c1-cheap (claude) + c3-mid (codex) = 0.50 + 3.00
+    expect(byKey.get('proj-a')!.costUsd).toBeCloseTo(3.50, 10);
+    expect(byKey.get('proj-a')!.sessionCount).toBe(2);
+    // proj-b = c2-pricey + c4-null (null cost contributes 0)
+    expect(byKey.get('proj-b')!.costUsd).toBeCloseTo(12.34, 10);
+    expect(byKey.get('proj-b')!.sessionCount).toBe(2);
+  });
+
+  it('queryUsageRollup groups by day (ISO date prefix)', () => {
+    const rows = queryUsageRollup({ cwdPrefix: COST_FILES_DIR, groupBy: 'day' });
+    const keys = rows.map(r => r.key);
+    expect(keys).toContain('2026-05-01');
+    expect(keys).toContain('2026-05-02');
+  });
+});
+
+describe('multi-model session cost equals sum of per-model usage', () => {
+  it('an opus+haiku session sums to the sum of each model cost', () => {
+    // Simulate a session that ran two models; the scanner accumulates per-model
+    // cost into one costUsd. Verify the rollup reflects that exact sum.
+    const opus = costOfUsage({ model: 'claude-opus-4', inputTokens: 10_000, outputTokens: 5_000 });
+    const haiku = costOfUsage({ model: 'claude-haiku-4', inputTokens: 20_000, outputTokens: 8_000 });
+    const sessionCost = opus + haiku;
+    seedCosted('mm1', 'claude', '2026-05-10T10:00:00.000Z', sessionCost, 120_000, 'proj-mm');
+
+    const rows = queryUsageRollup({ cwdPrefix: COST_FILES_DIR, groupBy: 'project' });
+    const projMm = rows.find(r => r.key === 'proj-mm')!;
+    expect(projMm.costUsd).toBeCloseTo(opus + haiku, 10);
+    expect(projMm.costUsd).toBeGreaterThan(0);
   });
 });

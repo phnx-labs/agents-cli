@@ -2,7 +2,7 @@
 name: sessions
 description: "Search, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode. Use this skill to find previous sessions, recover context, or inspect what agents have done."
 argument-hint: "[search query or session ID]"
-allowed-tools: Bash(agents sessions*)
+allowed-tools: Bash(agents sessions*), Bash(agents cost*)
 user-invocable: true
 ---
 
@@ -36,6 +36,7 @@ agents sessions --project agents-cli --all
 | `--since` | `--since 2h` | Only sessions newer than this |
 | `--until` | `--until 2026-01-01` | Only sessions older than this |
 | `--limit` | `--limit 10` | Maximum sessions to return |
+| `--sort` | `--sort cost` | Order by `cost`, `duration`, or `recent` (default) |
 | `--active` | `--active` | Only currently running sessions |
 | `--teams` | `--teams` | Include team-spawned sessions |
 
@@ -73,9 +74,41 @@ agents sessions tail <session-id>
 # Press Ctrl+C to stop
 ```
 
+## Cost & Duration
+
+Every session is priced offline at scan time (`costUsd`) and its wall-clock
+runtime is stored (`durationMs`). Both appear in `--json` output, and the list
+can be sorted by either.
+
+```bash
+# The 10 most expensive sessions, anywhere
+agents sessions --all --sort cost --limit 10
+
+# Longest-running sessions in this project
+agents sessions --sort duration
+
+# Per-session cost in JSON
+agents sessions --all --sort cost --json | jq '.[] | {shortId, agent, costUsd, durationMs}'
+```
+
+Use `agents cost` for a fleet-wide rollup (daily $ histogram, top sessions,
+per-agent/project/day breakdown):
+
+```bash
+agents cost                  # daily histogram + top-10 + per-agent breakdown
+agents cost --since 30d       # last 30 days
+agents cost --by project      # group by project instead of agent
+agents cost --by day --json   # machine-readable daily rollup
+```
+
+`agents cost` answers "how much did this cost?"; `agents usage` answers "how
+much quota / rate limit is left?" — different commands.
+
 ## Tips
 
 - Use `--active` to find sessions running right now across terminals, teams, cloud, and headless agents
 - Use `--teams` to see what team-spawned agents are doing
 - Use `--since 1h` for recent activity
+- Use `--sort cost` / `--sort duration` to find your priciest or longest sessions
+- `agents cost` for spend rollups; `agents usage` for rate-limit status
 - Combine filters: `agents sessions --project myapp --since 1d --agent claude`

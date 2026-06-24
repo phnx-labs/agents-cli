@@ -114,6 +114,49 @@ agents sessions <id> --json --last 50 --include tools,assistant
 agents sessions <id> --markdown
 ```
 
+## Cost & Duration Rollup (`agents cost`)
+
+Every session is priced at scan time: `cost_usd = Σ tokens × per-model price`
+and `duration_ms = lastTs − firstTs` are persisted on the session row (schema
+v6). The price table is offline and versioned — no API calls, no telemetry —
+covering current Claude, OpenAI, and Gemini models. Unknown/unpriced models
+contribute `$0`, never `NaN`.
+
+`agents cost` rolls those figures up across the local, cross-agent index:
+
+```bash
+# Daily $ histogram + top-10 sessions by cost + per-agent breakdown
+agents cost
+
+# Last 30 days, grouped by project instead of agent
+agents cost --since 30d --by project
+
+# Machine-readable daily rollup for a dashboard
+agents cost --by day --json
+```
+
+Output sections:
+
+- **Daily** — a zero-dependency unicode-block sparkline of $/day plus the
+  priciest days.
+- **Top sessions by cost** — the 10 most expensive sessions with short id,
+  agent, topic, project, and wall-clock duration.
+- **By agent / project / day** — grouped totals (`--by`), summed cost,
+  session count, and total duration.
+
+`agents cost` is distinct from [`agents usage`](#), which reports live
+rate-limit / quota status per agent — different question, different command.
+
+For per-session figures, `agents sessions --json` now carries `costUsd` and
+`durationMs`, and `agents sessions --sort cost|duration` orders the list by
+spend or wall-clock time (NULLs last).
+
+```bash
+# The 10 most expensive sessions, anywhere
+agents sessions --all --sort cost --limit 10 --json | \
+  jq '.[] | {shortId, agent, costUsd, durationMs, topic}'
+```
+
 ## Environment Variables That Matter
 
 External tools observing live sessions should know about these env vars, set

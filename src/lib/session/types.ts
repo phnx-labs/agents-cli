@@ -59,6 +59,10 @@ export interface SessionMeta {
   gitBranch?: string;
   messageCount?: number;
   tokenCount?: number;
+  /** Total USD cost, computed at scan time from per-model token usage (issue #323). */
+  costUsd?: number;
+  /** Wall-clock duration in ms (lastTs − firstTs), persisted at scan time. */
+  durationMs?: number;
   version?: string;
   account?: string;
   topic?: string;

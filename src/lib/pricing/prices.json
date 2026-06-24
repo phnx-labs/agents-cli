@@ -1,0 +1,138 @@
+{
+  "version": "2026-06-24",
+  "models": {
+    "claude-opus-4": {
+      "inputPerToken": 0.000005,
+      "outputPerToken": 0.000025,
+      "cacheReadPerToken": 0.0000005,
+      "cacheWritePerToken": 0.00000625
+    },
+    "claude-sonnet-4": {
+      "inputPerToken": 0.000003,
+      "outputPerToken": 0.000015,
+      "cacheReadPerToken": 0.0000003,
+      "cacheWritePerToken": 0.00000375
+    },
+    "claude-haiku-4": {
+      "inputPerToken": 0.000001,
+      "outputPerToken": 0.000005,
+      "cacheReadPerToken": 0.0000001,
+      "cacheWritePerToken": 0.00000125
+    },
+    "claude-fable-5": {
+      "inputPerToken": 0.00001,
+      "outputPerToken": 0.00005,
+      "cacheReadPerToken": 0.000001,
+      "cacheWritePerToken": 0.0000125
+    },
+    "claude-mythos-5": {
+      "inputPerToken": 0.00001,
+      "outputPerToken": 0.00005,
+      "cacheReadPerToken": 0.000001,
+      "cacheWritePerToken": 0.0000125
+    },
+    "claude-3-5-sonnet": {
+      "inputPerToken": 0.000003,
+      "outputPerToken": 0.000015,
+      "cacheReadPerToken": 0.0000003,
+      "cacheWritePerToken": 0.00000375
+    },
+    "claude-3-5-haiku": {
+      "inputPerToken": 0.0000008,
+      "outputPerToken": 0.000004,
+      "cacheReadPerToken": 0.00000008,
+      "cacheWritePerToken": 0.000001
+    },
+    "claude-3-opus": {
+      "inputPerToken": 0.000015,
+      "outputPerToken": 0.000075,
+      "cacheReadPerToken": 0.0000015,
+      "cacheWritePerToken": 0.00001875
+    },
+    "gpt-5.5": {
+      "inputPerToken": 0.000005,
+      "outputPerToken": 0.00003,
+      "cacheReadPerToken": 0.0000005
+    },
+    "gpt-5.4": {
+      "inputPerToken": 0.0000025,
+      "outputPerToken": 0.000015,
+      "cacheReadPerToken": 0.00000025
+    },
+    "gpt-5.4-mini": {
+      "inputPerToken": 0.00000075,
+      "outputPerToken": 0.0000045,
+      "cacheReadPerToken": 0.000000075
+    },
+    "gpt-5.4-nano": {
+      "inputPerToken": 0.0000002,
+      "outputPerToken": 0.00000125,
+      "cacheReadPerToken": 0.00000002
+    },
+    "gpt-5": {
+      "inputPerToken": 0.00000125,
+      "outputPerToken": 0.00001,
+      "cacheReadPerToken": 0.000000125
+    },
+    "gpt-4.1": {
+      "inputPerToken": 0.000002,
+      "outputPerToken": 0.000008,
+      "cacheReadPerToken": 0.0000005
+    },
+    "gpt-4.1-mini": {
+      "inputPerToken": 0.0000004,
+      "outputPerToken": 0.0000016,
+      "cacheReadPerToken": 0.0000001
+    },
+    "gpt-4.1-nano": {
+      "inputPerToken": 0.0000001,
+      "outputPerToken": 0.0000004,
+      "cacheReadPerToken": 0.000000025
+    },
+    "gpt-4o": {
+      "inputPerToken": 0.0000025,
+      "outputPerToken": 0.00001,
+      "cacheReadPerToken": 0.00000125
+    },
+    "gpt-4o-mini": {
+      "inputPerToken": 0.00000015,
+      "outputPerToken": 0.0000006,
+      "cacheReadPerToken": 0.000000075
+    },
+    "o3": {
+      "inputPerToken": 0.000002,
+      "outputPerToken": 0.000008,
+      "cacheReadPerToken": 0.0000005
+    },
+    "o4-mini": {
+      "inputPerToken": 0.0000011,
+      "outputPerToken": 0.0000044,
+      "cacheReadPerToken": 0.000000275
+    },
+    "gemini-2.5-pro": {
+      "inputPerToken": 0.00000125,
+      "outputPerToken": 0.00001,
+      "cacheReadPerToken": 0.0000003125
+    },
+    "gemini-2.5-flash": {
+      "inputPerToken": 0.0000003,
+      "outputPerToken": 0.0000025,
+      "cacheReadPerToken": 0.000000075
+    },
+    "gemini-2.5-flash-lite": {
+      "inputPerToken": 0.0000001,
+      "outputPerToken": 0.0000004,
+      "cacheReadPerToken": 0.000000025
+    },
+    "gemini-1.5-pro": {
+      "inputPerToken": 0.00000125,
+      "outputPerToken": 0.000005,
+      "cacheReadPerToken": 0.0000003125
+    },
+    "gemini-1.5-flash": {
+      "inputPerToken": 0.000000075,
+      "outputPerToken": 0.0000003,
+      "cacheReadPerToken": 0.00000001875
+    }
+  }
+}
