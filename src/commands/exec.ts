@@ -16,6 +16,7 @@ import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -158,6 +159,8 @@ export function registerRunCommand(program: Command): void {
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef },
         { resolveRunDefaults },
+        { getMcpServersByName, buildWorkflowMcpConfig },
+        { supports },
       ] = await Promise.all([
         import('../lib/exec.js'),
         import('../lib/agents.js'),
@@ -168,6 +171,8 @@ export function registerRunCommand(program: Command): void {
         import('../lib/plugins.js'),
         import('../lib/workflows.js'),
         import('../lib/run-defaults.js'),
+        import('../lib/mcp.js'),
+        import('../lib/capabilities.js'),
       ]);
       const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);
 
@@ -178,6 +183,10 @@ export function registerRunCommand(program: Command): void {
       let profileEnv: Record<string, string> | undefined;
       let fromProfile = false;
       let workflowModel: string | undefined;
+      // WORKFLOW.md capability scoping, translated to Claude headless flags below.
+      let workflowAllowedTools: string[] | undefined;
+      let workflowMcpConfigPath: string | undefined;
+      let workflowAgentsJson: string | undefined;
       const cwd = options.cwd ?? process.cwd();
 
       if (isValidAgent(rawAgent)) {
@@ -277,6 +286,53 @@ export function registerRunCommand(program: Command): void {
             if (added.length > 0) {
               process.stderr.write(chalk.gray(`[workflow] auto-injecting secrets from ${rawAgent}: ${added.join(', ')}\n`));
             }
+          }
+        }
+
+        // Capability scoping: translate WORKFLOW.md `tools:` / `mcpServers:` /
+        // `allowedAgents:` into Claude headless flags so the declared boundary is
+        // actually enforced at run time (not just parsed/displayed). Gated behind
+        // the `allowlist` capability — if the resolved agent lacks it, warn loudly
+        // rather than silently dropping the declaration (issue #324).
+        const scopeVersion = resolveVersionAlias('claude', version) ?? getGlobalDefault('claude') ?? undefined;
+        const allowlist = supports('claude', 'allowlist', scopeVersion);
+        const tools = workflowFrontmatter?.tools;
+        const mcpServerNames = workflowFrontmatter?.mcpServers;
+        const allowedAgents = workflowFrontmatter?.allowedAgents;
+        const hasScoping = (tools && tools.length > 0)
+          || (mcpServerNames && mcpServerNames.length > 0)
+          || (allowedAgents && allowedAgents.length > 0);
+
+        if (hasScoping && !allowlist.ok) {
+          process.stderr.write(chalk.yellow(
+            `[workflow] tools/mcpServers/allowedAgents declared but unenforceable on claude${scopeVersion ? `@${scopeVersion}` : ''} (allowlist ${allowlist.reason ?? 'unsupported'}) — running unscoped\n`,
+          ));
+        } else if (hasScoping) {
+          if (tools && tools.length > 0) {
+            workflowAllowedTools = tools;
+            process.stderr.write(chalk.gray(`[workflow] scoping tools to: ${tools.join(', ')}\n`));
+          }
+          if (mcpServerNames && mcpServerNames.length > 0) {
+            const servers = getMcpServersByName(mcpServerNames, { cwd });
+            const found = new Set(servers.map(s => s.name));
+            const missing = mcpServerNames.filter(n => !found.has(n));
+            if (missing.length > 0) {
+              process.stderr.write(chalk.yellow(`[workflow] mcpServers not found in registry, skipped: ${missing.join(', ')}\n`));
+            }
+            if (servers.length > 0) {
+              const mcpConfig = buildWorkflowMcpConfig(servers);
+              const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-workflow-mcp-'));
+              workflowMcpConfigPath = path.join(configDir, 'mcp-config.json');
+              fs.writeFileSync(workflowMcpConfigPath, mcpConfig);
+              process.stderr.write(chalk.gray(`[workflow] scoping MCP servers to: ${servers.map(s => s.name).join(', ')}\n`));
+            }
+          }
+          if (allowedAgents && allowedAgents.length > 0) {
+            // Claude's --agents takes inline JSON keyed by subagent name.
+            const agentsObj: Record<string, Record<string, unknown>> = {};
+            for (const a of allowedAgents) agentsObj[a] = {};
+            workflowAgentsJson = JSON.stringify(agentsObj);
+            process.stderr.write(chalk.gray(`[workflow] scoping subagents to: ${allowedAgents.join(', ')}\n`));
           }
         }
 
@@ -472,6 +528,9 @@ export function registerRunCommand(program: Command): void {
         verbose: options.verbose,
         timeout: options.timeout,
         env,
+        allowedTools: workflowAllowedTools,
+        mcpConfigPath: workflowMcpConfigPath,
+        agentsJson: workflowAgentsJson,
       };
 
       if (options.interactive && options.headless) {

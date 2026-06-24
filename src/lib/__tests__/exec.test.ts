@@ -541,6 +541,48 @@ describe('buildExecCommand', () => {
     });
   });
 
+  // WORKFLOW.md frontmatter tools/mcpServers/allowedAgents → Claude headless
+  // capability flags (issue #324). buildExecCommand is pure: the command layer
+  // resolves the registry / writes the mcp-config file and gates on `allowlist`;
+  // here we assert the string-building and the Claude-only guard.
+  describe('workflow capability scoping', () => {
+    it('claude allowedTools produces --allowedTools with a space-joined list', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', allowedTools: ['Read', 'Grep'] }));
+      expect(cmd).toContain('--allowedTools');
+      expect(cmd[cmd.indexOf('--allowedTools') + 1]).toBe('Read Grep');
+    });
+
+    it('claude mcpConfigPath produces --mcp-config with the file path', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', mcpConfigPath: '/tmp/x/mcp-config.json' }));
+      expect(cmd).toContain('--mcp-config');
+      expect(cmd[cmd.indexOf('--mcp-config') + 1]).toBe('/tmp/x/mcp-config.json');
+    });
+
+    it('claude agentsJson produces --agents with the inline JSON', () => {
+      const json = JSON.stringify({ security: {}, correctness: {} });
+      const cmd = buildExecCommand(opts({ agent: 'claude', agentsJson: json }));
+      expect(cmd).toContain('--agents');
+      expect(cmd[cmd.indexOf('--agents') + 1]).toBe(json);
+    });
+
+    it('empty allowedTools does not emit the flag', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', allowedTools: [] }));
+      expect(cmd).not.toContain('--allowedTools');
+    });
+
+    it('non-claude agent (codex) ignores all scoping options — the guard', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'codex',
+        allowedTools: ['Read', 'Grep'],
+        mcpConfigPath: '/tmp/x/mcp-config.json',
+        agentsJson: JSON.stringify({ security: {} }),
+      }));
+      expect(cmd).not.toContain('--allowedTools');
+      expect(cmd).not.toContain('--mcp-config');
+      expect(cmd).not.toContain('--agents');
+    });
+  });
+
   describe('exec env', () => {
     it('parses repeated KEY=VALUE entries', () => {
       expect(parseExecEnv(['ANTHROPIC_BASE_URL=https://ollama.example.com', 'ANTHROPIC_MODEL=qwen3.6:35b'])).toEqual({

@@ -74,15 +74,21 @@ export function parseWorkflowFrontmatter(workflowDir: string): WorkflowFrontmatt
     const parsed = yaml.parse(frontmatter);
     if (!parsed || typeof parsed !== 'object') return null;
 
+    // Capability-scoping fields are wired into the run (see src/commands/exec.ts);
+    // coerce to string arrays defensively so a malformed `tools: foo` (scalar) or
+    // `tools: [Read, 3]` (mixed) never reaches buildExecCommand as a bad shape.
+    const asStringArray = (v: unknown): string[] | undefined =>
+      Array.isArray(v) && v.every((x) => typeof x === 'string') ? v : undefined;
+
     return {
       name: parsed.name || '',
       description: parsed.description || '',
       model: parsed.model,
-      tools: parsed.tools,
-      skills: parsed.skills,
-      mcpServers: parsed.mcpServers,
-      allowedAgents: parsed.allowedAgents,
-      secrets: parsed.secrets,
+      tools: asStringArray(parsed.tools),
+      skills: asStringArray(parsed.skills),
+      mcpServers: asStringArray(parsed.mcpServers),
+      allowedAgents: asStringArray(parsed.allowedAgents),
+      secrets: asStringArray(parsed.secrets),
     };
   } catch {
     return null;

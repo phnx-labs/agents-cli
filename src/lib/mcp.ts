@@ -212,6 +212,28 @@ export function getMcpServersByName(names?: string[], options: { cwd?: string } 
 }
 
 /**
+ * Assemble the JSON payload Claude's `--mcp-config` flag expects from a set of
+ * installed MCP servers: `{ "mcpServers": { "<name>": { command, args, env } | { url } } }`.
+ * Pure — takes servers, returns a JSON string. The caller writes it to an
+ * ephemeral file and passes the path to buildExecCommand.
+ */
+export function buildWorkflowMcpConfig(servers: InstalledMcpServer[]): string {
+  const mcpServers: Record<string, Record<string, unknown>> = {};
+  for (const server of servers) {
+    const cfg = server.config;
+    if (cfg.transport === 'http') {
+      mcpServers[server.name] = { url: cfg.url };
+    } else {
+      const entry: Record<string, unknown> = { command: cfg.command };
+      if (cfg.args && cfg.args.length > 0) entry.args = cfg.args;
+      if (cfg.env && Object.keys(cfg.env).length > 0) entry.env = cfg.env;
+      mcpServers[server.name] = entry;
+    }
+  }
+  return JSON.stringify({ mcpServers });
+}
+
+/**
  * Install MCP server using Claude CLI.
  * Uses: claude mcp add --scope user --transport <type> <name> [--env K=V]... -- <cmd> [args...]
  */

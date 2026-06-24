@@ -138,6 +138,14 @@ export interface ExecOptions {
   sessionId?: string;
   verbose?: boolean;
   env?: Record<string, string>;
+  /**
+   * Workflow capability scoping (Claude only). Sourced from WORKFLOW.md
+   * frontmatter `tools:` / `mcpServers:` / `allowedAgents:` and translated to
+   * Claude headless flags in buildExecCommand. Other agents ignore these.
+   */
+  allowedTools?: string[];
+  mcpConfigPath?: string;
+  agentsJson?: string;
 }
 
 /**
@@ -609,6 +617,23 @@ export function buildExecCommand(options: ExecOptions): string[] {
   if (options.agent === 'claude' && options.addDirs) {
     for (const dir of options.addDirs) {
       cmd.push('--add-dir', dir);
+    }
+  }
+
+  // Claude-specific: workflow capability scoping. WORKFLOW.md frontmatter
+  // `tools:` / `mcpServers:` / `allowedAgents:` is translated to the headless
+  // flags that actually restrict the run. The command layer is responsible for
+  // gating these behind the `allowlist` capability and assembling the mcp-config
+  // file; buildExecCommand stays a pure string-builder so it remains unit-testable.
+  if (options.agent === 'claude') {
+    if (options.allowedTools && options.allowedTools.length > 0) {
+      cmd.push('--allowedTools', options.allowedTools.join(' '));
+    }
+    if (options.mcpConfigPath) {
+      cmd.push('--mcp-config', options.mcpConfigPath);
+    }
+    if (options.agentsJson) {
+      cmd.push('--agents', options.agentsJson);
     }
   }
 

@@ -4,7 +4,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseMcpServerConfig } from './mcp.js';
+import { parseMcpServerConfig, buildWorkflowMcpConfig, type InstalledMcpServer } from './mcp.js';
 
 const tempDirs: string[] = [];
 
@@ -98,5 +98,39 @@ describe('MCP sync execution', () => {
     expect(log).toContain('ARG:mcp\nARG:add\nARG:demo');
     expect(log).toContain('ARG:/bin/echo; touch');
     expect(log).toContain(`ARG:${pwnedPath}`);
+  });
+});
+
+describe('buildWorkflowMcpConfig', () => {
+  const stdio = (name: string, extra: Partial<InstalledMcpServer['config']> = {}): InstalledMcpServer => ({
+    name,
+    path: `/x/${name}.yaml`,
+    config: { name, transport: 'stdio', command: 'node', ...extra },
+  });
+
+  it('emits the { mcpServers: { name: { command, args, env } } } shape Claude expects', () => {
+    const json = buildWorkflowMcpConfig([
+      stdio('github', { args: ['server.js'], env: { TOKEN: 'x' } }),
+    ]);
+    expect(JSON.parse(json)).toEqual({
+      mcpServers: { github: { command: 'node', args: ['server.js'], env: { TOKEN: 'x' } } },
+    });
+  });
+
+  it('omits empty args/env and maps http transport to { url }', () => {
+    const json = buildWorkflowMcpConfig([
+      stdio('bare'),
+      { name: 'remote', path: '/x/remote.yaml', config: { name: 'remote', transport: 'http', url: 'https://e.x/mcp' } },
+    ]);
+    expect(JSON.parse(json)).toEqual({
+      mcpServers: {
+        bare: { command: 'node' },
+        remote: { url: 'https://e.x/mcp' },
+      },
+    });
+  });
+
+  it('returns an empty mcpServers map for no servers', () => {
+    expect(JSON.parse(buildWorkflowMcpConfig([]))).toEqual({ mcpServers: {} });
   });
 });

@@ -167,18 +167,42 @@ agents workflows remove code-review      # remove (interactive picker if no name
 name: <string>              # display name (also used for `view` output)
 description: <string>       # one-line summary shown in `list`
 model: <string>             # claude-opus-4-7, claude-sonnet-4-6, etc.
-tools:                      # tool allowlist for the orchestrator
+tools:                      # tool allowlist — ENFORCED at run time (Claude)
   - Read
   - Bash
 skills:                     # extra skills to load for this run
   - debug
-mcpServers:                 # MCP servers to enable
+mcpServers:                 # MCP servers to enable — ENFORCED (Claude)
   - github
-allowedAgents:              # restrict which agents can run this workflow
-  - claude                  # (only claude supports workflows today)
+allowedAgents:              # subagent names the orchestrator may dispatch to — ENFORCED (Claude)
+  - security
+  - correctness
 ```
 
 All fields are optional. A workflow with no frontmatter beyond `---` fences still works — the Markdown body alone is enough.
+
+### Scoping & security (enforced at run time, Claude)
+
+These fields are not just displayed — on Claude they translate to headless flags that actually scope the run:
+
+| Frontmatter | Claude flag | Effect |
+|---|---|---|
+| `tools: [Read, Grep]` | `--allowedTools Read Grep` | Read-only sandbox — `Write` and `Bash` are denied |
+| `mcpServers: [github]` | `--mcp-config <ephemeral json>` | Only the named registry servers are connected |
+| `allowedAgents: [security]` | `--agents <json>` | Restricts which subagents the orchestrator can dispatch |
+
+Read-only review example — this workflow can read and search but cannot write files or shell out:
+
+```yaml
+name: ro-review
+description: read-only review
+tools:
+  - Read
+  - Grep
+  - Glob
+```
+
+If you run a workflow declaring these fields on an agent without the tool-allowlist capability (`allowlist` in `src/lib/agents.ts` — today only Claude), the run proceeds *unscoped* and prints a `declared but unenforceable on <agent>` warning. The boundary is never silently dropped.
 
 ## "What else can I do?"
 
