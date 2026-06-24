@@ -27,6 +27,7 @@ import {
   unregisterMarketplace,
   addPluginToSettings,
   removePluginFromSettings,
+  validateClaudePluginManifest,
 } from './plugin-marketplace.js';
 import type { DiscoveredPlugin, MarketplaceSpec } from './types.js';
 
@@ -240,6 +241,31 @@ describe('syncMarketplaceManifest', () => {
     const manifest = syncMarketplaceManifest(SPECS.user, 'claude', versionHome);
     expect(manifest!.plugins.map(p => p.name)).toEqual(['beta', 'zeta']);
   });
+
+  it('WIRING: warns to stderr when a synced plugin ships a Claude-invalid manifest', () => {
+    // The real bug: a plugin.json with bare-name skills syncs "successfully" but
+    // Claude rejects the whole plugin. The sync path must surface it loudly.
+    installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'badplug', { skills: ['loop'] }), 'badplug'), versionHome);
+    // A valid neighbour must NOT warn.
+    installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'goodplug'), 'goodplug'), versionHome);
+
+    const origWrite = process.stderr.write.bind(process.stderr);
+    const captured: string[] = [];
+    process.stderr.write = ((chunk: unknown) => { captured.push(String(chunk)); return true; }) as typeof process.stderr.write;
+    try {
+      const manifest = syncMarketplaceManifest(SPECS.user, 'claude', versionHome);
+      // Sync still completes and catalogues both plugins — the warning is advisory, not fatal.
+      expect(manifest!.plugins.map(p => p.name)).toEqual(['badplug', 'goodplug']);
+    } finally {
+      process.stderr.write = origWrite;
+    }
+
+    const out = captured.join('');
+    expect(out).toContain("plugin 'badplug'");
+    expect(out).toContain('"skills"');
+    expect(out).toContain('"./');
+    expect(out).not.toContain('goodplug');
+  });
 });
 
 // ─── registerMarketplace / unregisterMarketplace ─────────────────────────────
@@ -421,5 +447,54 @@ describe('add/removePluginFromSettings', () => {
     removePluginFromSettings('alpha', 'agents-cli', 'claude', versionHome);
     const s = JSON.parse(fs.readFileSync(settingsFile(), 'utf-8'));
     expect(s.enabledPlugins).toBeUndefined();
+  });
+});
+
+describe('validateClaudePluginManifest', () => {
+  it('passes a manifest with no resource fields (the common case — skills auto-discover)', () => {
+    expect(validateClaudePluginManifest({ name: 'code', version: '1.0.0', description: 'x' })).toEqual([]);
+  });
+
+  it('flags skills declared as bare names — the real bug that breaks Claude plugin loading', () => {
+    const warnings = validateClaudePluginManifest({
+      name: 'code',
+      skills: ['dispatch', 'loop', 'review'],
+    });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('"skills"');
+    expect(warnings[0]).toContain('"dispatch"');
+    expect(warnings[0]).toContain('"./');
+  });
+
+  it('passes skills given as proper relative "./" paths', () => {
+    expect(
+      validateClaudePluginManifest({ name: 'code', skills: ['./skills/loop', './skills/review'] })
+    ).toEqual([]);
+  });
+
+  it('passes a single-string resource field that starts with "./"', () => {
+    expect(validateClaudePluginManifest({ name: 'c', commands: './commands/commit' })).toEqual([]);
+  });
+
+  it('flags commands and agents with the same "./" rule', () => {
+    expect(validateClaudePluginManifest({ name: 'c', commands: ['commit'] })[0]).toContain('"commands"');
+    expect(validateClaudePluginManifest({ name: 'c', agents: ['reviewer'] })[0]).toContain('"agents"');
+  });
+
+  it('flags non-string entries', () => {
+    const warnings = validateClaudePluginManifest({ name: 'c', skills: [{ path: './skills/loop' }] });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('non-string');
+  });
+
+  it('does NOT touch hooks/mcpServers (they legitimately accept inline objects)', () => {
+    expect(
+      validateClaudePluginManifest({ name: 'c', hooks: { PreToolUse: [] }, mcpServers: { x: {} } })
+    ).toEqual([]);
+  });
+
+  it('is null/garbage safe', () => {
+    expect(validateClaudePluginManifest(null)).toEqual([]);
+    expect(validateClaudePluginManifest('nope')).toEqual([]);
   });
 });
