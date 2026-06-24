@@ -7,6 +7,8 @@ import {
   loopSignalPath,
   readLoopSignal,
   clearLoopSignal,
+  parseLoopInterval,
+  buildLoopContinuePrompt,
   type LoopContext,
   type IterationResult,
 } from './loop.js';
@@ -63,7 +65,7 @@ describe('runLoop — termination by max_iterations', () => {
     expect(checkpoints[checkpoints.length - 1].iteration).toBe(3);
   });
 
-  it('pins --session-id from iteration 2 onward so the conversation resumes', async () => {
+  it('pins a DISTINCT session id per iteration and threads continuity via /continue', async () => {
     const runDir = tmpRunDir();
     const rec = recordingRun();
     await runLoop(baseExec, { maxIterations: 3, interval: '0' }, baseCtx(runDir), {
@@ -71,11 +73,31 @@ describe('runLoop — termination by max_iterations', () => {
       sleep: noSleep,
       writeCheckpoint: () => {},
     });
-    // Every iteration carries a session id; iterations 2+ carry the SAME pinned id.
     const ids = rec.calls.map((c) => c.sessionId);
+    const prompts = rec.calls.map((c) => c.prompt);
+    // `--session-id` CREATES a session — re-passing one errors "already in use".
+    // So every iteration must pin a UNIQUE id.
     expect(ids.every((id) => typeof id === 'string' && id.length > 0)).toBe(true);
-    expect(ids[1]).toBe(ids[2]);
-    expect(ids[0]).toBe(ids[1]); // fresh run mints one id reused throughout
+    expect(new Set(ids).size).toBe(3);
+    // Iteration 1 gets the bare entrypoint.
+    expect(prompts[0]).toBe('iterate');
+    // Iterations 2+ thread the PRIOR iteration's session via /continue, then
+    // re-append the entrypoint. The id referenced must be the previous turn's.
+    expect(prompts[1]).toBe(`/continue ${ids[0]}\n\niterate`);
+    expect(prompts[2]).toBe(`/continue ${ids[1]}\n\niterate`);
+  });
+
+  it('non-claude loops run independent conversations (no /continue injection)', async () => {
+    const runDir = tmpRunDir();
+    const rec = recordingRun();
+    await runLoop(
+      { ...baseExec, agent: 'codex' },
+      { maxIterations: 3, interval: '0' },
+      baseCtx(runDir, { agent: 'codex' }),
+      { runIteration: rec.fn, sleep: noSleep, writeCheckpoint: () => {} },
+    );
+    // Every iteration re-injects the bare entrypoint — no /continue handoff.
+    expect(rec.calls.every((c) => c.prompt === 'iterate')).toBe(true);
   });
 });
 
@@ -203,6 +225,82 @@ describe('runLoop — error handling', () => {
   });
 });
 
+describe('runLoop — signal classification (FIX 2)', () => {
+  it('classifies a non-zero exit AFTER SIGINT as signal, not error', async () => {
+    const runDir = tmpRunDir();
+    // Ctrl-C kills the child mid-iteration: the iteration returns a non-zero
+    // exit, but a SIGINT arrived first. That must be 'signal' (exit 130), not
+    // 'error'. Emit SIGINT during the iteration, then return exit 130.
+    const result = await runLoop(baseExec, { maxIterations: 5, interval: '0' }, baseCtx(runDir), {
+      runIteration: async () => {
+        process.emit('SIGINT' as any);
+        return { exitCode: 130, tokens: 0 };
+      },
+      sleep: noSleep,
+      writeCheckpoint: () => {},
+    });
+    expect(result.stoppedBy).toBe('signal');
+  });
+
+  it('classifies a throw AFTER SIGINT as signal, not error', async () => {
+    const runDir = tmpRunDir();
+    // A SIGINT that kills the child can surface as a spawn rejection rather than
+    // a clean non-zero exit. With the stop flag set, that is still a signal.
+    const result = await runLoop(baseExec, { maxIterations: 5, interval: '0' }, baseCtx(runDir), {
+      runIteration: async () => {
+        process.emit('SIGINT' as any);
+        throw new Error('killed by signal');
+      },
+      sleep: noSleep,
+      writeCheckpoint: () => {},
+    });
+    expect(result.stoppedBy).toBe('signal');
+  });
+
+  it('a genuine non-zero exit with NO signal is still error', async () => {
+    const runDir = tmpRunDir();
+    const result = await runLoop(baseExec, { maxIterations: 5, interval: '0' }, baseCtx(runDir), {
+      runIteration: async () => ({ exitCode: 2, tokens: 0 }),
+      sleep: noSleep,
+      writeCheckpoint: () => {},
+    });
+    expect(result.stoppedBy).toBe('error');
+  });
+});
+
+describe('buildLoopContinuePrompt (FIX 1)', () => {
+  it('prepends the /continue skill directive then re-appends the entrypoint', () => {
+    expect(buildLoopContinuePrompt('abc-123', 'do the work')).toBe(
+      '/continue abc-123\n\ndo the work',
+    );
+  });
+});
+
+describe('parseLoopInterval (FIX 3)', () => {
+  it('accepts "0" as explicit back-to-back (0ms)', () => {
+    expect(parseLoopInterval('0')).toBe(0);
+    expect(parseLoopInterval(' 0 ')).toBe(0);
+  });
+
+  it('accepts valid durations', () => {
+    expect(parseLoopInterval('30m')).toBe(30 * 60 * 1000);
+    expect(parseLoopInterval('1h')).toBe(60 * 60 * 1000);
+    expect(parseLoopInterval('2h30m')).toBe((2 * 60 + 30) * 60 * 1000);
+  });
+
+  it('returns 0 for undefined (no interval configured)', () => {
+    expect(parseLoopInterval(undefined)).toBe(0);
+  });
+
+  it('THROWS on unparseable input instead of silently coalescing to 0', () => {
+    // The bug: "30s" / "5" / "abc" parsed to null then coalesced to 0ms, so a
+    // typo ran the loop full-speed. Each must now throw.
+    expect(() => parseLoopInterval('30s')).toThrow(/Invalid loop interval/);
+    expect(() => parseLoopInterval('5')).toThrow(/Invalid loop interval/);
+    expect(() => parseLoopInterval('abc')).toThrow(/Invalid loop interval/);
+  });
+});
+
 describe('runLoop — resume from checkpoint', () => {
   it('starts at checkpoint.iteration+1 and carries token count forward', async () => {
     const runDir = tmpRunDir();
@@ -225,11 +323,19 @@ describe('runLoop — resume from checkpoint', () => {
     expect(result.stoppedBy).toBe('max');
     // Token count continued from 300: 300 + 2*100 = 500.
     expect(result.tokens).toBe(500);
-    // Resumed runs reuse the carried session id (conversation continuity).
-    expect(rec.calls.every((c) => c.sessionId === 'resumed-session-id')).toBe(true);
-    // The final checkpoint records the real iteration number, not a fresh count.
+    // The FIRST resumed iteration continues the killed run's conversation via
+    // /continue <carried id>; it pins its own fresh session id (not the carried
+    // one — re-passing would error "already in use").
+    expect(rec.calls[0].prompt).toBe('/continue resumed-session-id\n\niterate');
+    expect(rec.calls[0].sessionId).not.toBe('resumed-session-id');
+    // The second resumed iteration continues from the first resumed iteration.
+    expect(rec.calls[1].prompt).toBe(`/continue ${rec.calls[0].sessionId}\n\niterate`);
+    expect(rec.calls[1].sessionId).not.toBe(rec.calls[0].sessionId);
+    // The final checkpoint records the real iteration number and the LAST
+    // iteration's session id (what a future resume continues from).
     expect(checkpoints[checkpoints.length - 1].iteration).toBe(4);
     expect(checkpoints[checkpoints.length - 1].cumulativeTokens).toBe(500);
+    expect(checkpoints[checkpoints.length - 1].sessionId).toBe(rec.calls[1].sessionId);
   });
 });
 

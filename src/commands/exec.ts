@@ -12,6 +12,7 @@ import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/ex
 import type { AgentId } from '../lib/types.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
+import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
 import * as fs from 'fs';
@@ -111,9 +112,20 @@ export function buildLoopConfig(
     cfg.budget = workflowLoop.budget;
   }
 
-  // interval: CLI > workflow.
+  // interval: CLI > workflow. Validate eagerly — an unparseable interval
+  // (e.g. "30s", "5", "abc") must be rejected here, not silently coalesced to
+  // 0ms (back-to-back) at run time. "0" is the one accepted non-duration value.
   const interval = flags.interval ?? workflowLoop?.interval;
-  if (interval !== undefined) cfg.interval = interval;
+  if (interval !== undefined) {
+    try {
+      parseLoopInterval(interval);
+    } catch {
+      throw new Error(
+        `Invalid --interval '${interval}'. Use "0" for back-to-back or a duration like "30m", "1h", "2h30m" (units: w/d/h/m).`,
+      );
+    }
+    cfg.interval = interval;
+  }
 
   return cfg;
 }
@@ -308,7 +320,15 @@ export function registerRunCommand(program: Command): void {
           }
           resumeLoop.budget = b;
         }
-        if (options.interval !== undefined) resumeLoop.interval = options.interval;
+        if (options.interval !== undefined) {
+          try {
+            parseLoopInterval(options.interval);
+          } catch {
+            console.error(chalk.red(`Invalid --interval '${options.interval}'. Use "0" for back-to-back or a duration like "30m", "1h", "2h30m" (units: w/d/h/m).`));
+            process.exit(1);
+          }
+          resumeLoop.interval = options.interval;
+        }
         if (options.until !== undefined) {
           if (options.until !== 'signal') {
             console.error(chalk.red(`Invalid --until '${options.until}'. Only 'signal' is supported.`));

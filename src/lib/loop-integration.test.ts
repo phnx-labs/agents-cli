@@ -141,6 +141,11 @@ describe('loop driver — checkpoint write + resume continuity', () => {
     const finalCp = readCheckpoint(cpFile)!;
     expect(finalCp.iteration).toBe(4);
     expect(finalCp.cumulativeTokens).toBe(640);
-    expect(finalCp.sessionId).toBe(cp!.sessionId); // conversation continuity
+    // Each iteration pins a DISTINCT session id (`--session-id` CREATES a
+    // session; re-passing one errors "already in use"). Continuity is threaded
+    // via /continue, not a shared id — so the final checkpoint records the LAST
+    // iteration's fresh id, which differs from the resumed-from id.
+    expect(typeof finalCp.sessionId).toBe('string');
+    expect(finalCp.sessionId).not.toBe(cp!.sessionId);
   });
 });

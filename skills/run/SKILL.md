@@ -187,9 +187,9 @@ agents run claude "drive the migration to green" \
 | `--max-iterations <n>` | `max` | Hard cap on iterations. |
 | `--budget <tokens>` | `budget` | Cumulative-token cap, enforced outside the agent (exit 7). |
 | `--until signal` | `condition-met` | Reads `<runDir>/loop-signal.json` `{continue,reason}` each turn; absent or `continue:false` stops (fail-closed). |
-| `--interval <dur>` | — | Delay between turns (`0` back-to-back, `30m` paces). |
+| `--interval <dur>` | — | Delay between turns (`0` back-to-back, `30m` paces; units `w/d/h/m`, `30s`/bare numbers rejected). |
 
-Iteration 2+ pins the same `--session-id` so the conversation resumes; the prompt is re-injected every turn. The driver hands the entrypoint `AGENTS_LOOP_SIGNAL` (path to write its `{continue, reason}` vote), `AGENTS_RUN_DIR`, and `AGENTS_LOOP_ITERATION`.
+Each iteration pins its **own fresh `--session-id`** (`--session-id` *creates* a session — re-passing one errors `Session ID already in use`). To carry memory forward, iteration 2+ prepends `/continue <prior session id>` to the re-injected prompt so the agent recalls the prior turn first. Continuity is **claude-only**; other agents loop as independent fresh conversations (the driver warns). The driver hands the entrypoint `AGENTS_LOOP_SIGNAL` (path to write its `{continue, reason}` vote), `AGENTS_RUN_DIR`, and `AGENTS_LOOP_ITERATION`.
 
 **Checkpoint/resume.** A `checkpoint.json` is written under `~/.agents/.history/runs/<runId>/` after every iteration (and on SIGINT/SIGTERM). Resume a killed run:
 
@@ -197,7 +197,7 @@ Iteration 2+ pins the same `--session-id` so the conversation resumes; the promp
 agents run claude --resume-checkpoint ~/.agents/.history/runs/<runId>/checkpoint.json --max-iterations 10
 ```
 
-Resume continues from the last completed iteration with the same runId, session id, prompt, and carried token count. CLI loop flags on a resume RAISE the checkpoint's bounds (e.g. a higher `--max-iterations`), so "continue, run more" is one command. This is harness state — distinct from `--session-id`, which only resumes the provider-side conversation.
+Resume continues from the last completed iteration with the same runId, prompt, and carried token count; the first resumed iteration `/continue`s from the checkpoint's recorded session id (the last completed iteration's). CLI loop flags on a resume RAISE the checkpoint's bounds (e.g. a higher `--max-iterations`), so "continue, run more" is one command.
 
 ## Budget guardrails (pre-flight estimate + hard kill)
 

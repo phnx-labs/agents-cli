@@ -89,7 +89,11 @@ export interface LoopContext {
   startIteration?: number;
   /** Tokens already consumed before this driver started (carried across a resume). */
   startTokens?: number;
-  /** Session id to pin so the agent resumes its conversation across iterations. */
+  /**
+   * On a resume, the killed run's LAST iteration session id. The first resumed
+   * iteration `/continue`s from it to thread conversation memory forward.
+   * Undefined on a fresh run (iteration 1 mints its own id, no prior to continue).
+   */
   sessionId?: string;
 }
 
@@ -109,6 +113,47 @@ const defaultSleep = (ms: number): Promise<void> =>
 /** Path to a run's loop-signal.json. */
 export function loopSignalPath(runDir: string): string {
   return path.join(runDir, 'loop-signal.json');
+}
+
+/**
+ * Build the prompt for iteration >= 2 so the agent CONTINUES the prior
+ * iteration's conversation instead of starting fresh.
+ *
+ * This reuses the repo's established cross-process Claude-continuity mechanism —
+ * the `/continue <id>` skill (see `buildFallbackPrompt` in exec.ts, which hands
+ * a rate-limit successor `/continue ${prevSessionId}`). The skill loads the
+ * prior transcript via `agents sessions <id>`, so continuity does NOT depend on
+ * the provider's native session being "active"; it reads the transcript off
+ * disk. That is why each loop iteration can safely pin a FRESH session id (the
+ * `--session-id` flag CREATES a session — re-passing one errors "Session ID
+ * already in use") while still threading the conversation forward via the
+ * prior id.
+ *
+ * The original entrypoint is re-appended after the continue directive so the
+ * agent both recalls the prior turn AND knows what to do this iteration.
+ */
+export function buildLoopContinuePrompt(prevSessionId: string, entrypoint: string): string {
+  return `/continue ${prevSessionId}\n\n${entrypoint}`;
+}
+
+/**
+ * Resolve a loop interval string to milliseconds. `"0"` is an explicit
+ * back-to-back run (0ms). Any other string must parse via parseTimeout
+ * (e.g. "30m", "1h"); an unparseable value (e.g. "30s", "5", "abc") is a
+ * configuration error and must NOT silently coalesce to 0 (which would run the
+ * loop full-speed on a typo). Throws on bad input; validate at config build
+ * time (validateLoopInterval) so the error surfaces before the loop starts.
+ */
+export function parseLoopInterval(interval: string | undefined): number {
+  if (interval === undefined) return 0;
+  if (interval.trim() === '0') return 0;
+  const ms = parseTimeout(interval);
+  if (ms === null) {
+    throw new Error(
+      `Invalid loop interval '${interval}'. Use "0" for back-to-back or a duration like "30m", "1h", "2h30m" (units: w/d/h/m).`,
+    );
+  }
+  return ms;
 }
 
 /**
@@ -213,14 +258,40 @@ export async function runLoop(
 
   const startedAt = Date.now();
   const maxIterations = loop.maxIterations ?? 1000;
-  const intervalMs = loop.interval !== undefined ? (parseTimeout(loop.interval) ?? 0) : 0;
-  // "0" interval is intentional back-to-back; parseTimeout returns null for "0"
-  // (it rejects zero/negative), so coalesce null → 0 above.
+  const intervalMs = parseLoopInterval(loop.interval);
 
-  // Pin a session id so iteration >= 2 resumes the same conversation. A resume
-  // carries the prior session id in via ctx.sessionId; a fresh run mints one.
-  const sessionId = ctx.sessionId ?? randomUUID();
+  // Per-iteration session pinning (issue #332). `--session-id` CREATES a
+  // session, so each iteration must pin a DISTINCT id — re-passing one errors
+  // "Session ID already in use". Iteration 1 pins `firstSessionId`; iteration
+  // >= 2 mints a fresh id AND injects `/continue <prior id>` so the agent
+  // threads the prior conversation forward (see buildLoopContinuePrompt).
+  //
+  // `prevSessionId` is the id whose transcript the NEXT iteration continues
+  // from. On a resume it is ctx.sessionId (the killed run's last session);
+  // on a fresh run it starts undefined and is set after iteration 1.
+  const firstSessionId = randomUUID();
+  let prevSessionId = ctx.sessionId;
+  // The session id recorded in the checkpoint is the most recent iteration's id
+  // (what a resume must continue from). Seeded to the resume id or iter-1 id.
+  let lastIterationSessionId = ctx.sessionId ?? firstSessionId;
   const startIteration = ctx.startIteration ?? 1;
+  // The loop re-injects the entrypoint every iteration, so a prompt is required.
+  // The command layer enforces this before dispatch; assert it here so the
+  // continuity prompt-builder has a defined entrypoint to thread.
+  if (execOptions.prompt === undefined) {
+    throw new Error('runLoop requires execOptions.prompt — the loop re-injects the entrypoint each iteration.');
+  }
+  const entrypointPrompt = execOptions.prompt;
+  // `/continue` continuity only applies to claude (the skill + native resume
+  // surface). Other agents run each iteration as an independent fresh
+  // conversation — warn so the lost continuity is never silent.
+  const continuitySupported = ctx.agent === 'claude';
+  if (!continuitySupported && maxIterations !== 1) {
+    process.stderr.write(
+      `[loop] WARNING: cross-iteration conversation continuity applies to claude only. ` +
+      `Each ${ctx.agent} iteration runs as an independent fresh conversation (no /continue handoff).\n`,
+    );
+  }
 
   let tokens = ctx.startTokens ?? 0;
   let lastSignal: LoopSignal | undefined;
@@ -236,8 +307,11 @@ export async function runLoop(
       id: ctx.runId,
       agent: ctx.agent,
       version: ctx.version,
-      prompt: execOptions.prompt,
-      sessionId,
+      prompt: entrypointPrompt,
+      // Resume must continue from the LAST iteration's conversation, so the
+      // checkpoint records that iteration's session id (the one a future
+      // `/continue` should thread from), not a single pinned id.
+      sessionId: lastIterationSessionId,
       iteration,
       loop,
       loopSignal: lastSignal,
@@ -263,16 +337,30 @@ export async function runLoop(
         return done(iteration - startIteration, 'signal');
       }
 
-      // Iteration >= 2 (counting from the very first run, not the resume offset)
-      // pins --session-id so Claude resumes its conversation. Re-inject the
-      // prompt every iteration.
-      //
+      // Pin a DISTINCT session id every iteration (`--session-id` CREATES a
+      // session; re-passing one errors "Session ID already in use"). The first
+      // executed iteration of a fresh run reuses firstSessionId; every later
+      // iteration mints a new id.
+      const iterationSessionId =
+        prevSessionId === undefined ? firstSessionId : randomUUID();
+
+      // Continuity: when a prior iteration exists (prevSessionId set) and the
+      // agent supports it, thread the conversation forward via the established
+      // `/continue <prior id>` prompt-injection. Otherwise re-inject the bare
+      // entrypoint. prevSessionId is set after iteration 1 of a fresh run, or
+      // carried in from ctx.sessionId on a resume.
+      const iterationPrompt =
+        prevSessionId !== undefined && continuitySupported
+          ? buildLoopContinuePrompt(prevSessionId, entrypointPrompt)
+          : entrypointPrompt;
+
       // AGENTS_LOOP_SIGNAL / AGENTS_RUN_DIR: tell the entrypoint where to write
       // loop-signal.json so the guard (read OUTSIDE the agent) can see it. The
       // agent never decides whether to continue — it only writes its vote.
       const iterOptions: ExecOptions = {
         ...execOptions,
-        sessionId: iteration >= 2 ? sessionId : (execOptions.sessionId ?? sessionId),
+        prompt: iterationPrompt,
+        sessionId: iterationSessionId,
         env: {
           ...execOptions.env,
           AGENTS_RUN_DIR: ctx.runDir,
@@ -285,10 +373,21 @@ export async function runLoop(
       try {
         result = await runIteration(iterOptions);
       } catch (err) {
+        // A SIGINT/SIGTERM mid-iteration kills the child; the resulting throw
+        // is a signal stop, not an error. Check the stop flag first.
+        if (stopSignal) {
+          checkpoint(iteration - 1);
+          return done(iteration - startIteration, 'signal');
+        }
         checkpoint(iteration - 1);
         process.stderr.write(`[loop] iteration ${iteration} failed: ${(err as Error).message}\n`);
         return done(iteration - startIteration, 'error');
       }
+
+      // This iteration's conversation is now on disk under iterationSessionId.
+      // The next iteration continues from it; a checkpoint records it for resume.
+      prevSessionId = iterationSessionId;
+      lastIterationSessionId = iterationSessionId;
 
       tokens += result.tokens;
       const completed = iteration - startIteration + 1;
@@ -310,8 +409,14 @@ export async function runLoop(
         return done(completed, 'budget');
       }
 
-      // A non-zero exit is a hard error — don't keep re-injecting into a broken run.
+      // A non-zero exit is a hard error — UNLESS a signal arrived mid-iteration.
+      // Ctrl-C kills the child (non-zero exit / SIGINT exit code); that is a
+      // 'signal' stop (exit 130), not an 'error'. Check the stop flag first.
       if (result.exitCode !== 0) {
+        if (stopSignal) {
+          checkpoint(iteration);
+          return done(completed, 'signal');
+        }
         checkpoint(iteration);
         process.stderr.write(`[loop] iteration ${iteration} exited ${result.exitCode}\n`);
         return done(completed, 'error');

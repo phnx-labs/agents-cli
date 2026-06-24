@@ -40,6 +40,20 @@ describe('buildLoopConfig — flag/frontmatter merge (issue #332)', () => {
   it('rejects a non-positive --budget', () => {
     expect(() => buildLoopConfig({ loop: true, budget: '-5' })).toThrow(/positive token/);
   });
+
+  it('accepts "0" and valid durations for --interval', () => {
+    expect(buildLoopConfig({ loop: true, interval: '0' })).toEqual({ interval: '0' });
+    expect(buildLoopConfig({ loop: true, interval: '30m' })).toEqual({ interval: '30m' });
+    expect(buildLoopConfig({ loop: true, interval: '2h30m' })).toEqual({ interval: '2h30m' });
+  });
+
+  it('rejects an unparseable --interval instead of silently running back-to-back (FIX 3)', () => {
+    // Before: parseTimeout returned null for these and the driver coalesced to
+    // 0ms, so a typo ran the loop full-speed. Now they're rejected at config build.
+    expect(() => buildLoopConfig({ loop: true, interval: '30s' })).toThrow(/Invalid --interval/);
+    expect(() => buildLoopConfig({ loop: true, interval: '5' })).toThrow(/Invalid --interval/);
+    expect(() => buildLoopConfig({ loop: true, interval: 'abc' })).toThrow(/Invalid --interval/);
+  });
 });
 
 describe('loopExitCode', () => {

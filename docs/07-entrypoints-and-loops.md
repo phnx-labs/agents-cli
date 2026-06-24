@@ -126,20 +126,21 @@ agents run claude "drive the migration to green" \
 | `--max-iterations <n>` | `max_iterations` | Hard cap on iterations (`stoppedBy: max`). |
 | `--budget <tokens>` | `budget` | Cumulative-token hard cap (`stoppedBy: budget`), enforced outside the agent. |
 | `--until signal` | `until` | Read `<runDir>/loop-signal.json` each turn; absent or `continue:false` stops (`stoppedBy: condition-met`, fail-closed). |
-| `--interval <dur>` | `interval` | Delay between iterations (`0` back-to-back, `30m` paces). |
+| `--interval <dur>` | `interval` | Delay between iterations (`0` back-to-back, `30m` paces). Units `w/d/h/m` — `30s` and bare numbers are rejected at config build, never silently run full-speed. |
 | `--resume-checkpoint <file>` | resume | Continue a killed run from its `checkpoint.json`. |
 
-**Each iteration** spawns one headless turn (`--json` stream). Iteration 2+ pins the same `--session-id` so the agent resumes its conversation; the prompt is re-injected every turn. The driver exposes the signal path to the entrypoint via the `AGENTS_LOOP_SIGNAL` env var (plus `AGENTS_RUN_DIR` and `AGENTS_LOOP_ITERATION`) — the agent writes its `{continue, reason}` vote there; the driver, OUTSIDE the agent, decides whether to continue.
+**Each iteration** spawns one headless turn (`--json` stream) and **pins its own fresh `--session-id`** — `--session-id` *creates* a session, so re-passing one errors `Session ID already in use`. To carry conversation memory forward, iteration 2+ injects the established `/continue <prior session id>` directive (the same mechanism the rate-limit fallback chain uses) ahead of the re-injected entrypoint, so the agent recalls the prior turn before doing this iteration's work. Cross-iteration continuity applies to **claude only**; other agents run each iteration as an independent fresh conversation (the driver warns when `--loop` is paired with a non-claude agent). The driver exposes the signal path to the entrypoint via the `AGENTS_LOOP_SIGNAL` env var (plus `AGENTS_RUN_DIR` and `AGENTS_LOOP_ITERATION`) — the agent writes its `{continue, reason}` vote there; the driver, OUTSIDE the agent, decides whether to continue.
 
 A workflow may declare a `loop:` block in its WORKFLOW.md frontmatter; `agents run <workflow>` then honors it **without** a `--loop` flag. CLI flags override the workflow's declared fields one-by-one.
 
 ### Checkpoint / resume
 
-The driver writes `<runsDir>/<runId>/checkpoint.json` **after every iteration** (atomic temp+rename) and inside the SIGINT/SIGTERM handler. The checkpoint records `{ id, agent, version, prompt, sessionId, iteration, loop, loopSignal, cumulativeTokens }` — the harness state a kill would otherwise destroy. This is distinct from `--session-id`, which resumes only the provider-side *conversation*; the checkpoint resumes the *harness* (iteration count, prompt chain, token tally).
+The driver writes `<runsDir>/<runId>/checkpoint.json` **after every iteration** (atomic temp+rename) and inside the SIGINT/SIGTERM handler. The checkpoint records `{ id, agent, version, prompt, sessionId, iteration, loop, loopSignal, cumulativeTokens }` — the harness state a kill would otherwise destroy. `sessionId` is the **last completed iteration's** session id; resume threads the *conversation* forward by `/continue`-ing from it, while the rest of the checkpoint resumes the *harness* (iteration count, prompt chain, token tally).
 
 ```bash
 # A SIGTERM/timeout/machine-sleep killed the run mid-loop. Continue from the
-# last completed iteration — same runId, same session, carried token count.
+# last completed iteration — same runId, /continue from the last session,
+# carried token count.
 agents run claude --resume-checkpoint ~/.agents/.history/runs/<runId>/checkpoint.json --max-iterations 10
 ```
 
