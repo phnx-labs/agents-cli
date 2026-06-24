@@ -1,18 +1,17 @@
 /**
- * Remote sync client for secrets bundles.
+ * Remote sync for secrets bundles — backend-agnostic.
  *
  * Replaces the previous "leave it to iCloud Keychain" model with explicit
- * push/pull against api.prix.dev. Bundle contents (vars + secret values) are
- * encrypted client-side with AES-256-GCM under a key derived from a
- * user-supplied passphrase via PBKDF2-SHA256. Plaintext never leaves the
- * machine — api.prix.dev only ever sees the ciphertext + KDF parameters.
+ * push/pull. Bundle contents (vars + secret values) are encrypted client-side
+ * with AES-256-GCM under a key derived from a user-supplied passphrase via
+ * PBKDF2-SHA256; only the resulting ciphertext envelope is handed to the
+ * transport. The transport itself is a pluggable `SyncBackend` (see
+ * `sync-backend.ts`) — the Rush driver (`drivers/rush.ts`, api.prix.dev) is the
+ * default for backwards compatibility, swappable via `setSyncBackend`. Plaintext
+ * never leaves this module; the backend only ever sees ciphertext + KDF params.
  */
 
 import * as crypto from 'crypto';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import * as yaml from 'yaml';
 import {
   getKeychainToken,
   hasKeychainToken,
@@ -26,10 +25,12 @@ import {
   validateBundleName,
   type SecretsBundle,
 } from './bundles.js';
+import { rushSyncBackend } from './drivers/rush.js';
+import type { SyncBackend, SyncEnvelope, RemoteBundleSummary, EncryptedEnvelope } from './sync-backend.js';
 
-const PROXY_BASE = 'https://api.prix.dev';
-const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
-const BUNDLE_ENDPOINT = '/api/v1/secrets/bundles';
+// Re-export the envelope + summary types so existing importers of this module
+// keep resolving them from here.
+export type { EncryptedEnvelope, RemoteBundleSummary } from './sync-backend.js';
 
 // PBKDF2 cost. 600k SHA-256 iters matches OWASP 2023+ guidance and keeps a
 // passphrase prompt under a second on the hardware the CLI targets.
@@ -39,57 +40,20 @@ const KEY_LEN = 32;
 const SALT_LEN = 16;
 const IV_LEN = 12;
 
-/** Envelope for an encrypted bundle. All byte fields are base64. */
-export interface EncryptedEnvelope {
-  v: 1;
-  kdf: 'pbkdf2-sha256';
-  iter: number;
-  salt: string;
-  iv: string;
-  ct: string;
-  tag: string;
-}
+/**
+ * Active transport backend. Defaults to the Rush driver for backwards
+ * compatibility with bundles already pushed to api.prix.dev; `setSyncBackend`
+ * swaps it (a future Supabase driver, or an in-memory double in tests). The
+ * crypto + snapshot/restore below stay backend-agnostic — the backend only
+ * ever moves ciphertext envelopes, never plaintext.
+ */
+let backend: SyncBackend = rushSyncBackend;
 
-interface PushPayload {
-  envelope: EncryptedEnvelope;
-  updated_at: string;
-}
-
-interface RemoteBundleSummary {
-  name: string;
-  updated_at: string;
-}
-
-interface RushUserYaml {
-  session?: {
-    access_token?: string;
-  };
-}
-
-function readRushToken(): string {
-  if (!fs.existsSync(USER_YAML)) {
-    throw new Error('Not logged in to Rush. Run `rush login` first.');
-  }
-  const raw = fs.readFileSync(USER_YAML, 'utf-8');
-  const data = yaml.parse(raw) as RushUserYaml;
-  const token = data?.session?.access_token;
-  if (!token) {
-    throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
-  }
-  return token;
-}
-
-async function api(method: string, endpoint: string, body?: unknown): Promise<Response> {
-  const token = readRushToken();
-  const url = endpoint.startsWith('http') ? endpoint : `${PROXY_BASE}${endpoint}`;
-  return fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+/** Override the sync transport. Returns the previous backend (restore in tests). */
+export function setSyncBackend(next: SyncBackend): SyncBackend {
+  const prev = backend;
+  backend = next;
+  return prev;
 }
 
 function deriveKey(passphrase: string, salt: Buffer): Buffer {
@@ -174,18 +138,14 @@ export interface PushOptions {
   passphrase: string;
 }
 
-/** Push a local bundle to api.prix.dev. Encrypts client-side; server only sees ciphertext. */
+/** Push a local bundle to the remote. Encrypts client-side; the backend only sees ciphertext. */
 export async function pushBundle(name: string, opts: PushOptions): Promise<{ updated_at: string }> {
   validateBundleName(name);
   const snap = snapshotBundle(name);
   const envelope = encryptBlob(JSON.stringify(snap), opts.passphrase);
   const updated_at = new Date().toISOString();
-  const payload: PushPayload = { envelope, updated_at };
-  const res = await api('PUT', `${BUNDLE_ENDPOINT}/${encodeURIComponent(name)}`, payload);
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Push failed (${res.status} ${res.statusText}): ${body}`);
-  }
+  const payload: SyncEnvelope = { envelope, updated_at };
+  await backend.putEnvelope(name, payload);
   return { updated_at };
 }
 
@@ -196,18 +156,13 @@ export interface PullOptions {
   force?: boolean;
 }
 
-/** Pull a bundle by name from api.prix.dev and materialize it locally. */
+/** Pull a bundle by name from the remote and materialize it locally. */
 export async function pullBundle(name: string, opts: PullOptions): Promise<SecretsBundle> {
   validateBundleName(name);
-  const res = await api('GET', `${BUNDLE_ENDPOINT}/${encodeURIComponent(name)}`);
-  if (res.status === 404) {
-    throw new Error(`Remote bundle '${name}' not found on api.prix.dev.`);
+  const data = await backend.getEnvelope(name);
+  if (!data) {
+    throw new Error(`Remote bundle '${name}' not found.`);
   }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Pull failed (${res.status} ${res.statusText}): ${body}`);
-  }
-  const data = await res.json() as PushPayload;
   const plaintext = decryptBlob(data.envelope, opts.passphrase);
   const snap = JSON.parse(plaintext) as BundleSnapshot;
   if (!snap || !snap.bundle || snap.bundle.name !== name) {
@@ -227,22 +182,10 @@ export async function pullBundle(name: string, opts: PullOptions): Promise<Secre
 /** Delete a bundle on the remote. */
 export async function deleteRemoteBundle(name: string): Promise<boolean> {
   validateBundleName(name);
-  const res = await api('DELETE', `${BUNDLE_ENDPOINT}/${encodeURIComponent(name)}`);
-  if (res.status === 404) return false;
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Delete failed (${res.status} ${res.statusText}): ${body}`);
-  }
-  return true;
+  return backend.deleteEnvelope(name);
 }
 
-/** List bundles currently stored on api.prix.dev for this user. */
+/** List bundles currently stored on the remote for this user. */
 export async function listRemoteBundles(): Promise<RemoteBundleSummary[]> {
-  const res = await api('GET', BUNDLE_ENDPOINT);
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`List failed (${res.status} ${res.statusText}): ${body}`);
-  }
-  const data = await res.json() as { bundles?: RemoteBundleSummary[] };
-  return data.bundles ?? [];
+  return backend.listEnvelopes();
 }
