@@ -117,6 +117,19 @@ scripts/install.sh --skip-tests
 
 **Bin entrypoints need `chmod 755`.** [`scripts/build.sh`](scripts/build.sh) chmods every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball file mode and does NOT auto-chmod — 644 surfaces as `zsh: permission denied: agents`. Do not skip this step.
 
+## Releasing
+
+**Releases are cut locally on macOS — there is no CI publish.** Run from a clean, in-sync `main`:
+
+```bash
+scripts/release.sh <version>          # dry-run: validates bump, type-checks, builds, tests, previews tarball
+scripts/release.sh <version> --apply  # commits chore(release), tags v<version>, npm publish, pushes
+```
+
+`release.sh` reads the npm token from the `npmjs.com` secrets bundle (`agents secrets`), so no 2FA prompt and no token on disk.
+
+**Why not CI?** The package bundles `dist/lib/secrets/Agents CLI.app` — a native keychain helper that must be compiled with `swiftc`, codesigned with the Developer ID identity, and notarized (`xcrun notarytool`); see [`scripts/build-keychain-helper.sh`](scripts/build-keychain-helper.sh). `prepack` ([`scripts/verify-keychain-helper.sh`](scripts/verify-keychain-helper.sh)) refuses to pack unless that signed binary matches the sha pinned in `scripts/Agents CLI.app.sha256`. CI runners are Linux and cannot produce it, so publishing stays on a macOS machine that holds the signed helper. The keychain helper itself is rebuilt only when [`src/lib/secrets/keychain-helper.swift`](src/lib/secrets/keychain-helper.swift) changes — rerun `scripts/build-keychain-helper.sh` (needs `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID`) and update the pinned sha.
+
 ## Conventions
 
 - `AGENTS.md` is canonical; `CLAUDE.md` / `GEMINI.md` are symlinks. **Edit `AGENTS.md` only.**
