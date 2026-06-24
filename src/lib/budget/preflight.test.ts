@@ -113,6 +113,24 @@ describe('enforcePreflight', () => {
     expect(d.needsConfirm).toBe(false);
     expect(d.blockedCap).toBe('per_run');
   });
+
+  it('does NOT silently allow an UNPRICED model when caps are set — requires confirm (#346)', () => {
+    // The estimate is $0 because the model is unpriced, so no per_run/per_day
+    // cap can trip. Without the guard this would be a silent $0 wave-through;
+    // it must instead require confirmation so the user knows the cap cannot be
+    // enforced for this model.
+    const unpricedEst = { estUsd: 0, basis: 'none' as const, priced: false, estInputTokens: 0, estOutputTokens: 0 };
+    const d = enforcePreflight({ per_run: 0.01, on_exceed: 'block' }, state, unpricedEst);
+    expect(d.needsConfirm).toBe(true);
+    expect(d.reason).toMatch(/unpriced/);
+  });
+
+  it('a PRICED $0-ish estimate under caps is allowed without forced confirm', () => {
+    // Sanity: the unpriced guard must not fire for genuinely priced runs.
+    const d = enforcePreflight({ per_run: 5, on_exceed: 'block' }, state, est(0.001));
+    expect(d.allow).toBe(true);
+    expect(d.needsConfirm).toBe(false);
+  });
 });
 
 describe('ledgerStateFor', () => {

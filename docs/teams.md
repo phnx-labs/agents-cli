@@ -293,6 +293,12 @@ vendors, a Claude teammate and a Codex teammate draw down the *same*
 `per_project` / `per_day` pool — one budget governs the whole team regardless of
 which CLIs it uses.
 
+Teammate budgeting is **pre-flight only** in v1: a teammate is estimated and
+blocked *before* it spawns, but there is **no live mid-run hard-cap kill** for
+teammates (they spawn through the teams runner, not the headless `agents run`
+kill path). The live mid-run kill applies to local headless `agents run` today;
+extending it to teams is a planned follow-up.
+
 Set caps in the project's `agents.yaml`:
 
 ```yaml

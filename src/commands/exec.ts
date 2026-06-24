@@ -661,9 +661,19 @@ export function registerRunCommand(program: Command): void {
       // --yes skips ONLY the interactive confirm threshold, never a hard block.
       {
         const { runPreflightGate } = await import('../lib/budget/preflight.js');
+        const { resolveEffectiveModel } = await import('../lib/models.js');
+        // Estimate against the model that will ACTUALLY run, not an unpriced
+        // `${agent}-default` placeholder (which made estimateCost return $0 and
+        // silently neutered the per_run/per_day gate for the common no-`--model`
+        // case). When `model` is undefined the spawned CLI uses its built-in
+        // default, which we recover from the extracted catalog. If we still can't
+        // resolve a concrete model, pass the placeholder — the gate now treats an
+        // unpriced estimate under active caps as needing confirmation, so it is
+        // never a silent $0 wave-through.
+        const effectiveModel = resolveEffectiveModel(agent, version ?? '', model) ?? `${agent}-default`;
         const gate = runPreflightGate({
           agent,
-          model: model ?? `${agent}-default`,
+          model: effectiveModel,
           mode,
           prompt,
           project: cwd,

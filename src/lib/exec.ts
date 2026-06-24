@@ -171,6 +171,29 @@ export function resolveInteractive(
   return options.prompt === undefined;
 }
 
+/**
+ * Decide whether spawnAgent must capture (PIPE + tee) the child's stdout so the
+ * live budget watcher can parse it (issue #346, FIX 3).
+ *
+ * The bug this fixes: stdout used to be PIPED only when downstream output was
+ * piped (`piped = !isTTY`). For a normal headless run AT A TERMINAL, stdout was
+ * 'inherit', so `child.stdout` was null and the watcher — hence the mid-run
+ * hard-cap kill — was silently skipped. We now tap stdout for ALL
+ * non-interactive runs when caps are active, regardless of TTY, and tee it back
+ * so the user still sees output. Interactive REPLs are never tapped (the human
+ * owns the TTY; they rely on the pre-flight gate).
+ *
+ * @param interactive  resolveInteractive() result for the run
+ * @param piped        true when the parent's stdout is NOT a TTY (output piped)
+ * @param capsActive   true when a budget watcher is attached (caps configured)
+ */
+export function shouldTapStdout(interactive: boolean, piped: boolean, capsActive: boolean): boolean {
+  if (interactive) return false;
+  // Always pipe when the caller pipes us downstream (preserve composability),
+  // OR when caps are active so the watcher can read the stream at a TTY.
+  return piped || capsActive;
+}
+
 /** Pattern for valid environment variable names (C identifier rules). */
 const EXEC_ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -769,9 +792,13 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     // rendering, raw-mode keystrokes, colored output). Headless mode pipes
     // stderr so we can scan for rate limits and feed fallback. stdout stays
     // inherited for TTY, piped when the caller pipes us downstream.
+    // PIPE (and later tee) stdout whenever the live budget watcher must read it
+    // — for ALL non-interactive runs when caps are active, regardless of TTY.
+    // See shouldTapStdout() for the rationale (FIX 3, issue #346).
+    const tapStdout = shouldTapStdout(interactive, piped, watcherState !== null);
     const stdio: ('inherit' | 'pipe')[] = interactive
       ? ['inherit', 'inherit', 'inherit']
-      : ['inherit', piped ? 'pipe' : 'inherit', 'pipe'];
+      : ['inherit', tapStdout ? 'pipe' : 'inherit', 'pipe'];
 
     // On Windows, .cmd batch wrappers (npm-installed CLIs) require shell:true
     // whether addressed by name or absolute path.
@@ -789,7 +816,10 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     timer.mark('startup');
 
     let budgetKilled = false;
-    if (!interactive && piped && child.stdout) {
+    let budgetKillTimer: ReturnType<typeof setTimeout> | undefined;
+    if (!interactive && tapStdout && child.stdout) {
+      // TEE the child's stdout back to the parent's so the user still sees
+      // output (mirrors stdio:'inherit') while we tap the same stream for usage.
       child.stdout.pipe(process.stdout);
       // Tap the same stream for budget usage events without consuming the pipe
       // (a 'data' listener and .pipe() both receive every chunk). Kill on breach.
@@ -803,7 +833,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
             budgetKilled = true;
             process.stderr.write(`[budget] hard cap exceeded — terminating ${options.agent} run\n`);
             child.kill('SIGTERM');
-            setTimeout(() => child.kill('SIGKILL'), 5000);
+            budgetKillTimer = setTimeout(() => child.kill('SIGKILL'), 5000);
           }
         });
       }
@@ -838,10 +868,16 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     });
     child.on('close', (code) => {
       if (timeoutTimer) clearTimeout(timeoutTimer);
+      // Clear the budget-kill SIGKILL escalation timer (mirror the --timeout
+      // timer cleanup) so a programmatic caller reusing execAgent (the #332 loop
+      // driver) never sees a stray 5s kill event fire after the child has exited.
+      if (budgetKillTimer) clearTimeout(budgetKillTimer);
       // Record final spend to the shared ledger (issue #346). Best-effort: a
       // ledger write must never mask the run's own outcome.
       if (watcherState) {
         try { watcherState.finalize(); } catch { /* ledger write is non-critical */ }
+        // Release the watcher's references / stop accepting events (symmetry).
+        try { watcherState.watcher.dispose(); } catch { /* dispose is best-effort */ }
       }
       // Budget kill resolves with a DISTINCT non-zero exit so CI/headless and
       // teams/cloud can tell a budget termination apart from a normal failure.

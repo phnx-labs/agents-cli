@@ -183,8 +183,12 @@ run is gated:
   / `per_project`). A block exits **non-zero (code 2)** — CI/headless inherit it.
 - **`-y` / `--yes`** skips the interactive `require_confirm_over` confirm prompt
   for scripts. It does **NOT** skip a hard block — a cap breach blocks regardless.
-- **Live kill-switch.** Headless runs hard-stop the moment accumulated spend
-  crosses a cap (SIGTERM → SIGKILL), resolving with a distinct exit code (7).
+- **Live kill-switch.** Local **non-interactive** (`-p` / headless) runs
+  hard-stop the moment accumulated spend crosses a cap (SIGTERM → SIGKILL),
+  resolving with a distinct exit code (7) — attached whether or not output is
+  piped. Interactive REPL sessions rely on the pre-flight gate, not live kill.
+  (`agents teams` teammates and `agents cloud` dispatch are gated **pre-flight
+  only** in v1 — no live mid-run kill there yet.)
 
 ```bash
 # Tiny per_run cap blocks before the agent ever starts:

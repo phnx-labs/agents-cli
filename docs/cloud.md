@@ -243,9 +243,12 @@ client-side** with a `[budget] BLOCKED cloud dispatch …` error — the run nev
 starts. The target repo slug is the project attribution key, so caps span every
 agent dispatched against that repo.
 
-Server-side spend is authoritative for live enforcement once a cloud task is
-running; the client-side pre-flight is the deterministic "don't even start it"
-guard.
+Cloud budgeting is **pre-flight only** in v1: the client-side estimate blocks a
+dispatch before it is POSTed, but agents-cli does **not** apply its own live
+mid-run hard-cap kill to a running cloud task — once a task starts on the
+provider, the provider's own controls govern it. The agents-cli live mid-run
+kill applies to local headless `agents run` today; a live cloud kill is a
+planned follow-up.
 
 ## Demo
 

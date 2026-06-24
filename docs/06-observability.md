@@ -161,9 +161,16 @@ agents sessions --all --sort cost --limit 10 --json | \
 
 `agents cost` is the observability half — it tells you what you already spent.
 **Budget guardrails are the enforcement half**: they estimate a run's cost
-*before* it starts, can block it, attribute live spend, and **hard-kill a
-running agent the moment a cap is crossed.** Observability can't reach back in
-time and stop the call that blew the budget; this can.
+*before* it starts and can block it, and — for local headless `agents run` —
+attribute live spend and **hard-kill the running agent the moment a cap is
+crossed.** Observability can't reach back in time and stop the call that blew
+the budget; this can.
+
+**Scope (v1).** The pre-flight estimate/block applies to `agents run`, `agents
+teams`, and `agents cloud`. The **live mid-run hard-cap kill currently applies
+to local `agents run` headless runs only**; teams and cloud dispatch are gated
+**pre-flight** (estimate + block before spawn) — live mid-run kill for
+teams/cloud is a planned follow-up.
 
 The guardrail is **cross-vendor by construction** — one cap spans every agent
 the CLI dispatches (Claude + Codex + Gemini + …), which no single-vendor
@@ -212,14 +219,21 @@ back to a prompt-size heuristic when there's no history.
 `-y` / `--yes` skips the interactive `require_confirm_over` prompt for scripts,
 but **never skips a hard block** — a cap breach blocks regardless of `--yes`.
 
-### Live spend + hard-cap kill-switch
+### Live spend + hard-cap kill-switch (local `agents run` only)
 
-For headless runs, spend is parsed off the stream as it happens and accumulated
-against the caps. The moment a cap is crossed the child is terminated
-(`SIGTERM`, then `SIGKILL` after 5s — the same mechanism as `--timeout`) and the
-run resolves with a **distinct exit code (7)** so a budget kill is
-distinguishable from a normal failure or a timeout. Final spend is written to
-the shared ledger.
+For local **non-interactive** (`-p` / `--print` / headless) `agents run`
+invocations, spend is parsed off the agent's stdout stream as it happens and
+accumulated against the caps — this is attached whether or not output is being
+piped (the child's stdout is captured and tee'd back so you still see it). The
+moment a cap is crossed the child is terminated (`SIGTERM`, then `SIGKILL` after
+5s — the same mechanism as `--timeout`) and the run resolves with a **distinct
+exit code (7)** so a budget kill is distinguishable from a normal failure or a
+timeout. Final spend is written to the shared ledger.
+
+Interactive REPL sessions are **not** live-killed (the human owns the TTY); they
+rely on the pre-flight gate. **`agents teams` teammates and `agents cloud`
+dispatch are also not live-killed in v1** — they are gated pre-flight only. Live
+mid-run kill for teams/cloud is a planned follow-up.
 
 ### Spend ledger
 

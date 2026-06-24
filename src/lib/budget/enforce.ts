@@ -196,6 +196,14 @@ export function extractUsageEvents(
 }
 
 function usageFromObject(obj: any, fallbackModel?: string, fallbackAgent?: string): UsageEvent | null {
+  // Claude emits a final `type:"result"` event carrying a TOP-LEVEL cumulative
+  // `usage` that already sums every per-turn `message.usage`. Counting both the
+  // per-turn turns AND this cumulative total double-counts a multi-turn run
+  // (~2x). The canonical session parser (src/lib/session/parse.ts) reads usage
+  // ONLY from `message.usage` and extracts nothing from the result line — mirror
+  // that here: skip result lines entirely for usage.
+  if (obj?.type === 'result') return null;
+
   // Claude stream-json assistant turn.
   const mu = obj?.message?.usage;
   if (mu && (typeof mu.input_tokens === 'number' || typeof mu.output_tokens === 'number')) {
@@ -208,7 +216,9 @@ function usageFromObject(obj: any, fallbackModel?: string, fallbackAgent?: strin
       cacheCreationTokens: mu.cache_creation_input_tokens,
     };
   }
-  // Flatter usage.record / usage shape.
+  // Flatter usage.record / usage shape (Codex / `usage.record`). The result-line
+  // guard above already excludes Claude's cumulative result usage, so this only
+  // matches genuine per-event usage records.
   const u = obj?.usage;
   if (u && (typeof u.input_tokens === 'number' || typeof u.output === 'number' || typeof u.output_tokens === 'number')) {
     return {

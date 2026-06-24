@@ -798,6 +798,31 @@ export function resolveModel(agent: AgentId, version: string, requested: string)
   };
 }
 
+/**
+ * Resolve the model id an `agents run` will ACTUALLY use, for cost estimation
+ * (issue #346). The run path resolves the model in this precedence:
+ *   1. explicit `--model` (or profile/workflow/runDefaults value) — `requested`
+ *   2. otherwise the agent CLI's own built-in default, which we read from the
+ *      extracted catalog's `isDefault` model.
+ * Returns null only when we have neither — the caller must then treat the
+ * estimate as unpriced rather than silently using an unpriced placeholder id
+ * like `${agent}-default`.
+ */
+export function resolveEffectiveModel(
+  agent: AgentId,
+  version: string,
+  requested?: string,
+): string | null {
+  if (requested && requested.trim() !== '') {
+    const resolved = resolveModel(agent, version, requested);
+    return resolved.canonical ?? resolved.forwarded;
+  }
+  const catalog = getModelCatalog(agent, version);
+  if (!catalog) return null;
+  const def = catalog.models.find((m) => m.isDefault);
+  return def?.id ?? null;
+}
+
 /** Find the closest matching model ids/aliases using edit distance. */
 function pickSuggestions(requested: string, catalog: ModelCatalog): string[] {
   const all = [...catalog.models.map((m) => m.id), ...Object.keys(catalog.aliases)];

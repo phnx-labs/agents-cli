@@ -1,24 +1,38 @@
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// state.ts captures HOME at module load, so we point HOME at a temp dir and
-// dynamic-import the budget config AFTER, giving us an isolated user agents.yaml.
-let fakeHome: string;
-let userYaml: string;
-let resolveBudgetConfig: typeof import('./config.js').resolveBudgetConfig;
-let hasAnyCap: typeof import('./config.js').hasAnyCap;
+// state.ts FREEZES HOME (-> getUserAgentsDir()) at first import. Under a
+// shared-process runner (e.g. `bun test`) another test file may import state.ts
+// before this one, freezing HOME at a DIFFERENT temp dir. So we (1) set HOME at
+// module TOP-LEVEL — before ANY import of ./config.js (which pulls in
+// state.ts), mirroring budget.test.ts — and (2) derive the user agents.yaml
+// path from the SAME getUserAgentsDir() the code actually reads, after import,
+// so the test writes where the resolver reads regardless of which file froze
+// HOME first. This makes the test robust under both vitest and `bun test`.
+const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-home-'));
+process.env.HOME = fakeHome;
+fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
 
-beforeAll(async () => {
-  fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-home-'));
-  process.env.HOME = fakeHome;
-  fs.mkdirSync(path.join(fakeHome, '.agents'), { recursive: true });
-  userYaml = path.join(fakeHome, '.agents', 'agents.yaml');
-  const mod = await import('./config.js');
-  resolveBudgetConfig = mod.resolveBudgetConfig;
-  hasAnyCap = mod.hasAnyCap;
-});
+const { resolveBudgetConfig, hasAnyCap } = await import('./config.js');
+const { getUserAgentsDir } = await import('../state.js');
+const userAgentsDir = getUserAgentsDir();
+fs.mkdirSync(userAgentsDir, { recursive: true });
+const userYaml = path.join(userAgentsDir, 'agents.yaml');
+
+// state.readMeta() memoizes the parsed user agents.yaml against its mtime
+// (ms-resolution). Successive writes within the same millisecond — common under
+// a fast shared-process runner like `bun test` — leave the mtime unchanged, so
+// the resolver returns a STALE cached budget. Bump the mtime forward
+// monotonically on every write so the cache stamp always changes and the
+// resolver re-reads. Robust under both vitest and `bun test`.
+let mtimeTick = 0;
+function writeUserYaml(body: string): void {
+  fs.writeFileSync(userYaml, body);
+  const future = Date.now() / 1000 + ++mtimeTick;
+  fs.utimesSync(userYaml, future, future);
+}
 
 afterAll(() => {
   fs.rmSync(fakeHome, { recursive: true, force: true });
@@ -28,13 +42,13 @@ let projectDir: string;
 
 beforeEach(() => {
   // Fresh user agents.yaml each test.
-  fs.writeFileSync(userYaml, '');
+  writeUserYaml('');
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'budget-config-proj-'));
 });
 
 describe('resolveBudgetConfig', () => {
   it('reads the user-global budget when no project block exists', () => {
-    fs.writeFileSync(userYaml, 'budget:\n  per_run: 5\n  per_day: 50\n  on_exceed: block\n');
+    writeUserYaml('budget:\n  per_run: 5\n  per_day: 50\n  on_exceed: block\n');
     const cfg = resolveBudgetConfig(projectDir);
     expect(cfg.per_run).toBe(5);
     expect(cfg.per_day).toBe(50);
@@ -42,7 +56,7 @@ describe('resolveBudgetConfig', () => {
   });
 
   it('project block OVERRIDES user on set fields, INHERITS unset ones', () => {
-    fs.writeFileSync(userYaml, 'budget:\n  per_run: 5\n  per_day: 50\n  per_project: 100\n');
+    writeUserYaml('budget:\n  per_run: 5\n  per_day: 50\n  per_project: 100\n');
     fs.writeFileSync(path.join(projectDir, 'agents.yaml'), 'budget:\n  per_run: 1\n');
     const cfg = resolveBudgetConfig(projectDir);
     expect(cfg.per_run).toBe(1);   // project wins
@@ -60,26 +74,26 @@ describe('resolveBudgetConfig', () => {
   });
 
   it('merges per_agent maps key-by-key (project adds a key without wiping user keys)', () => {
-    fs.writeFileSync(userYaml, 'budget:\n  per_agent:\n    claude: 30\n    codex: 20\n');
+    writeUserYaml('budget:\n  per_agent:\n    claude: 30\n    codex: 20\n');
     fs.writeFileSync(path.join(projectDir, 'agents.yaml'), 'budget:\n  per_agent:\n    codex: 5\n');
     const cfg = resolveBudgetConfig(projectDir);
     expect(cfg.per_agent).toEqual({ claude: 30, codex: 5 });
   });
 
   it('defaults on_exceed to block (fail-closed) when nothing sets it', () => {
-    fs.writeFileSync(userYaml, 'budget:\n  per_run: 5\n');
+    writeUserYaml('budget:\n  per_run: 5\n');
     expect(resolveBudgetConfig(projectDir).on_exceed).toBe('block');
   });
 
   it('ignores a malformed project agents.yaml and keeps the user budget', () => {
-    fs.writeFileSync(userYaml, 'budget:\n  per_run: 5\n');
+    writeUserYaml('budget:\n  per_run: 5\n');
     fs.writeFileSync(path.join(projectDir, 'agents.yaml'), 'budget:\n  per_run: [this: is: broken\n');
     const cfg = resolveBudgetConfig(projectDir);
     expect(cfg.per_run).toBe(5);
   });
 
   it('drops a cap whose value is the wrong type (string instead of number)', () => {
-    fs.writeFileSync(userYaml, 'budget:\n  per_run: "lots"\n  per_day: 50\n');
+    writeUserYaml('budget:\n  per_run: "lots"\n  per_day: 50\n');
     const cfg = resolveBudgetConfig(projectDir);
     expect(cfg.per_run).toBeUndefined();
     expect(cfg.per_day).toBe(50);

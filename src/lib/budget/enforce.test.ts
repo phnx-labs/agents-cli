@@ -133,4 +133,31 @@ describe('extractUsageEvents', () => {
     const { events } = extractUsageEvents(chunk, '');
     expect(events).toHaveLength(0);
   });
+
+  it('ignores the Claude type:"result" line so its cumulative usage is not double-counted (#346)', () => {
+    // Claude emits per-turn `message.usage` AND a final `type:"result"` event
+    // with a TOP-LEVEL cumulative `usage` summing every turn. Counting both
+    // double-counts (~2x). The result line must contribute ZERO usage events.
+    const resultLine = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      usage: { input_tokens: 999_999, output_tokens: 555_555, cache_read_input_tokens: 1234 },
+    });
+    const { events } = extractUsageEvents(resultLine + '\n', '');
+    expect(events).toHaveLength(0);
+  });
+
+  it('a result line adds ZERO spend on top of the per-turn usage it summarizes (#346)', () => {
+    // Two assistant turns ($5 each on claude-opus-4 = $10), then a result line
+    // whose cumulative usage equals the sum. Only $10 must be counted.
+    const turn = JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-4', usage: { input_tokens: 1_000_000 } } });
+    const result = JSON.stringify({ type: 'result', subtype: 'success', usage: { input_tokens: 2_000_000 } });
+    const stream = turn + '\n' + turn + '\n' + result + '\n';
+    const { events } = extractUsageEvents(stream, '');
+    const w = makeLiveSpendWatcher({ caps: {}, onBreach: () => {} });
+    for (const ev of events) w.feedUsage(ev);
+    // $5/Mtok input on claude-opus-4 * 2M tokens across two turns = $10; the
+    // result line (which would add another $10) contributes nothing.
+    expect(w.runSpend()).toBeCloseTo(10, 6);
+  });
 });

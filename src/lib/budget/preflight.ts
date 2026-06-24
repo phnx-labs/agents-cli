@@ -189,8 +189,24 @@ export function enforcePreflight(
   }
 
   // require_confirm_over only governs interactive confirm, not a hard block.
-  const needsConfirm =
+  let needsConfirm =
     cfg.require_confirm_over !== undefined && est.estUsd >= cfg.require_confirm_over;
+
+  // Unpriced model + active caps: the estimate is $0 because we have no price
+  // for this model, so NONE of the per_run/per_day caps above can ever trip and
+  // we'd silently wave the run through. Never $0-wave-through (#346): when caps
+  // are set but the model is unpriced, require confirmation so the user is told
+  // the cap cannot be enforced for this model rather than getting a false pass.
+  if (!est.priced && hasAnyCap(cfg) && breaches.length === 0) {
+    needsConfirm = true;
+    return {
+      allow: true,
+      needsConfirm: true,
+      reason: `model is unpriced — budget caps cannot be enforced for this run (estimate is $0); confirm to proceed`,
+      projectedDaySpend,
+      projectedProjectSpend,
+    };
+  }
 
   if (breaches.length > 0) {
     const first = breaches[0];

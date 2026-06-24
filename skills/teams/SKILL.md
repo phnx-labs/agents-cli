@@ -101,6 +101,11 @@ spend; under `on_exceed: block`, a teammate that would breach a cap is
 **cross-vendor**: a Claude teammate and a Codex teammate draw down the *same*
 `per_project` / `per_day` pool — one budget governs the whole team.
 
+Teammate budgeting is **pre-flight only** in v1 — a teammate is estimated and
+blocked *before* it spawns, but there is **no live mid-run hard-cap kill** for
+teammates (that applies to local headless `agents run` today; teams is a planned
+follow-up).
+
 ```yaml
 # project agents.yaml
 budget:
