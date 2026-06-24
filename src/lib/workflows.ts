@@ -24,6 +24,22 @@ import { listInstalledVersions, getVersionHomePath } from './versions.js';
 // lib/capabilities.ts. The capability matrix on AgentConfig is the single
 // source of truth.
 
+/**
+ * The `loop:` block as it appears in WORKFLOW.md frontmatter (YAML, snake_case).
+ * Parsed defensively and translated to the camelCase LoopConfig the driver
+ * consumes (src/lib/loop.ts). See docs/07-entrypoints-and-loops.md.
+ */
+export interface LoopConfigRaw {
+  /** Stop condition. Only `signal` is supported today. */
+  until?: 'signal';
+  /** Hard cap on iterations. */
+  max_iterations?: number;
+  /** Token hard-cap, enforced outside the agent. */
+  budget?: number;
+  /** Delay between iterations ("0" back-to-back, "30m" paces). */
+  interval?: string;
+}
+
 /** Parsed WORKFLOW.md frontmatter. */
 export interface WorkflowFrontmatter {
   name: string;
@@ -40,6 +56,12 @@ export interface WorkflowFrontmatter {
    * Pass `--no-auto-secrets` to skip this injection.
    */
   secrets?: string[];
+  /**
+   * Optional loop block: wraps the workflow in a bounded until-condition loop
+   * (issue #332). When present, `agents run <workflow>` honors it without a
+   * `--loop` flag. Validated/coerced in parseWorkflowFrontmatter.
+   */
+  loop?: LoopConfigRaw;
 }
 
 /** A workflow found during repo discovery. */
@@ -89,10 +111,49 @@ export function parseWorkflowFrontmatter(workflowDir: string): WorkflowFrontmatt
       mcpServers: asStringArray(parsed.mcpServers),
       allowedAgents: asStringArray(parsed.allowedAgents),
       secrets: asStringArray(parsed.secrets),
+      loop: parseLoopBlock(parsed.loop),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Defensively coerce a frontmatter `loop:` value into a LoopConfigRaw.
+ *
+ * Mirrors the asStringArray discipline above: a malformed field is dropped to
+ * undefined rather than passed through, so the loop driver never sees a bad
+ * shape. Returns undefined when `loop:` is absent or not an object, or when no
+ * recognized field survives coercion (an all-garbage block is treated as
+ * "no loop", not "empty loop").
+ *
+ * Field rules:
+ *   - until:          only the literal `signal` is accepted; anything else dropped.
+ *   - max_iterations: a finite positive integer; non-numbers/<=0 dropped.
+ *   - budget:         a finite positive number (tokens); non-numbers/<=0 dropped.
+ *   - interval:       a string (e.g. "0", "30m"); non-strings dropped.
+ */
+export function parseLoopBlock(v: unknown): LoopConfigRaw | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const raw = v as Record<string, unknown>;
+  const out: LoopConfigRaw = {};
+
+  if (raw.until === 'signal') out.until = 'signal';
+
+  if (typeof raw.max_iterations === 'number'
+    && Number.isFinite(raw.max_iterations)
+    && Number.isInteger(raw.max_iterations)
+    && raw.max_iterations > 0) {
+    out.max_iterations = raw.max_iterations;
+  }
+
+  if (typeof raw.budget === 'number' && Number.isFinite(raw.budget) && raw.budget > 0) {
+    out.budget = raw.budget;
+  }
+
+  if (typeof raw.interval === 'string') out.interval = raw.interval;
+
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**

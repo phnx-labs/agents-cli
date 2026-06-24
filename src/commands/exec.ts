@@ -39,6 +39,12 @@ interface ExecCommandActionOptions {
   strategy?: string;
   acp?: boolean;
   yes?: boolean;
+  loop?: boolean;
+  resumeCheckpoint?: string;
+  maxIterations?: string;
+  budget?: string;
+  until?: string;
+  interval?: string;
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -52,6 +58,81 @@ function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): 
   const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
   return `[agents] ${verb} picked ${label} (${ratio})`;
+}
+
+/**
+ * Build the LoopConfig the driver consumes from CLI flags and/or a workflow's
+ * `loop:` frontmatter block (issue #332). Returns undefined when neither source
+ * activates a loop (the common single-shot run). CLI flags take precedence over
+ * the workflow's declared values field-by-field, so `--max-iterations 5`
+ * overrides a workflow's `max_iterations: 3`.
+ *
+ * `--loop` with no sub-options is a valid bare loop (driver applies its own
+ * maxIterations safety cap). A workflow `loop:` block activates a loop even
+ * without `--loop` so `agents run <workflow>` honors a declared loop.
+ */
+export function buildLoopConfig(
+  flags: { loop?: boolean; maxIterations?: string; budget?: string; until?: string; interval?: string },
+  workflowLoop?: import('../lib/workflows.js').LoopConfigRaw,
+): import('../lib/loop.js').LoopConfig | undefined {
+  const active = flags.loop === true || workflowLoop !== undefined;
+  if (!active) return undefined;
+
+  const cfg: import('../lib/loop.js').LoopConfig = {};
+
+  // until: CLI > workflow. Only `signal` is supported.
+  const until = flags.until ?? workflowLoop?.until;
+  if (until !== undefined) {
+    if (until !== 'signal') {
+      throw new Error(`Invalid --until '${until}'. Only 'signal' is supported.`);
+    }
+    cfg.until = 'signal';
+  }
+
+  // max_iterations: CLI > workflow.
+  if (flags.maxIterations !== undefined) {
+    const n = Number(flags.maxIterations);
+    if (!Number.isInteger(n) || n <= 0) {
+      throw new Error(`Invalid --max-iterations '${flags.maxIterations}'. Use a positive integer.`);
+    }
+    cfg.maxIterations = n;
+  } else if (workflowLoop?.max_iterations !== undefined) {
+    cfg.maxIterations = workflowLoop.max_iterations;
+  }
+
+  // budget (tokens): CLI > workflow.
+  if (flags.budget !== undefined) {
+    const b = Number(flags.budget);
+    if (!Number.isFinite(b) || b <= 0) {
+      throw new Error(`Invalid --budget '${flags.budget}'. Use a positive token count.`);
+    }
+    cfg.budget = b;
+  } else if (workflowLoop?.budget !== undefined) {
+    cfg.budget = workflowLoop.budget;
+  }
+
+  // interval: CLI > workflow.
+  const interval = flags.interval ?? workflowLoop?.interval;
+  if (interval !== undefined) cfg.interval = interval;
+
+  return cfg;
+}
+
+/** Map a loop stop reason to a process exit code. condition-met/max are clean exits. */
+export function loopExitCode(stoppedBy: import('../lib/loop.js').LoopStoppedBy): number {
+  switch (stoppedBy) {
+    case 'condition-met':
+    case 'max':
+      return 0;
+    case 'budget':
+      return 7; // mirrors BUDGET_KILL_EXIT_CODE so CI can tell a budget stop apart
+    case 'signal':
+      return 130; // 128 + SIGINT(2)
+    case 'stalled':
+    case 'error':
+    default:
+      return 1;
+  }
 }
 
 /** Register the `agents run <agent> [prompt]` command. */
@@ -112,6 +193,30 @@ export function registerRunCommand(program: Command): void {
       '-y, --yes',
       'Skip the interactive budget-confirm prompt (require_confirm_over). Never skips a hard budget block.',
       false,
+    )
+    .option(
+      '--loop',
+      'Re-inject the prompt/entrypoint each iteration until a stop condition (issue #332). Guards (--max-iterations, --budget, --until) are enforced outside the agent. Writes a checkpoint after every iteration for --resume-checkpoint.',
+    )
+    .option(
+      '--resume-checkpoint <file>',
+      'Resume a killed loop run from its checkpoint.json. Continues from the last completed iteration, reusing the same runId, session id, prompt, and loop config.',
+    )
+    .option(
+      '--max-iterations <n>',
+      'Loop hard cap: stop after N iterations (stoppedBy: max). Loop only.',
+    )
+    .option(
+      '--budget <tokens>',
+      'Loop token hard-cap: stop once cumulative tokens reach this (stoppedBy: budget), enforced outside the agent. Loop only.',
+    )
+    .option(
+      '--until <signal>',
+      'Loop stop condition. `signal` reads <runDir>/loop-signal.json {continue,reason} each iteration; absent or continue:false stops (fail-closed). Loop only.',
+    )
+    .option(
+      '--interval <dur>',
+      'Loop delay between iterations ("0" back-to-back, "30m" paces). Loop only.',
     );
 
   setHelpSections(runCmd, {
@@ -155,6 +260,76 @@ export function registerRunCommand(program: Command): void {
   });
 
   runCmd.action(async (agentSpec: string, prompt: string | undefined, options: ExecCommandActionOptions) => {
+      // --resume-checkpoint short-circuits normal dispatch entirely: the
+      // checkpoint already carries the agent, version, prompt, session id,
+      // iteration, and loop config of the killed run. Reconstruct ExecOptions
+      // straight from it and continue the loop from the last completed
+      // iteration, reusing the SAME runId/runDir (issue #332).
+      if (options.resumeCheckpoint) {
+        const { readCheckpoint } = await import('../lib/checkpoint.js');
+        const { runLoop } = await import('../lib/loop.js');
+        const { getRunsDir } = await import('../lib/state.js');
+        const cp = readCheckpoint(options.resumeCheckpoint);
+        if (!cp) {
+          console.error(chalk.red(`Checkpoint not found or unreadable: ${options.resumeCheckpoint}`));
+          process.exit(1);
+        }
+        const runDir = path.join(getRunsDir(), cp.id);
+        fs.mkdirSync(runDir, { recursive: true });
+        const resumeExec: ExecOptions = {
+          agent: cp.agent,
+          version: cp.version,
+          prompt: cp.prompt,
+          mode: options.mode,
+          effort: options.effort,
+          cwd: options.cwd,
+          sessionId: cp.sessionId,
+          json: true,
+          headless: true,
+        };
+        // Resume honors the checkpoint's loop config, but lets the resume
+        // command RAISE the bounds field-by-field — `--max-iterations 4` on a
+        // checkpoint capped at 2 is the natural "continue, run more" gesture.
+        // Flags override; unspecified fields fall through from the checkpoint.
+        const resumeLoop = { ...cp.loop };
+        if (options.maxIterations !== undefined) {
+          const n = Number(options.maxIterations);
+          if (!Number.isInteger(n) || n <= 0) {
+            console.error(chalk.red(`Invalid --max-iterations '${options.maxIterations}'. Use a positive integer.`));
+            process.exit(1);
+          }
+          resumeLoop.maxIterations = n;
+        }
+        if (options.budget !== undefined) {
+          const b = Number(options.budget);
+          if (!Number.isFinite(b) || b <= 0) {
+            console.error(chalk.red(`Invalid --budget '${options.budget}'. Use a positive token count.`));
+            process.exit(1);
+          }
+          resumeLoop.budget = b;
+        }
+        if (options.interval !== undefined) resumeLoop.interval = options.interval;
+        if (options.until !== undefined) {
+          if (options.until !== 'signal') {
+            console.error(chalk.red(`Invalid --until '${options.until}'. Only 'signal' is supported.`));
+            process.exit(1);
+          }
+          resumeLoop.until = 'signal';
+        }
+        process.stderr.write(chalk.gray(`[loop] resuming ${cp.agent} run ${cp.id} from iteration ${cp.iteration + 1} (session ${(cp.sessionId ?? '').slice(0, 8)})\n`));
+        const result = await runLoop(resumeExec, resumeLoop, {
+          runId: cp.id,
+          runDir,
+          agent: cp.agent,
+          version: cp.version,
+          startIteration: cp.iteration + 1,
+          startTokens: cp.cumulativeTokens ?? 0,
+          sessionId: cp.sessionId,
+        });
+        process.stderr.write(chalk.gray(`[loop] stopped: ${result.stoppedBy} after ${result.iterations} iteration(s), ${result.tokens} tokens\n`));
+        process.exit(loopExitCode(result.stoppedBy));
+      }
+
       const [
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, defaultModeFor, headlessPlanStallCommand },
         { ALL_AGENT_IDS },
@@ -192,6 +367,9 @@ export function registerRunCommand(program: Command): void {
       // WORKFLOW.md capability scoping, translated to Claude headless flags below.
       let workflowToolsRestrict: string[] | undefined;
       let workflowMcpConfigPath: string | undefined;
+      // WORKFLOW.md `loop:` block (issue #332). When a workflow declares it,
+      // `agents run <workflow>` honors the loop without a --loop flag.
+      let workflowLoop: import('../lib/workflows.js').LoopConfigRaw | undefined;
       const cwd = options.cwd ?? process.cwd();
 
       if (isValidAgent(rawAgent)) {
@@ -224,6 +402,7 @@ export function registerRunCommand(program: Command): void {
         if (typeof workflowFrontmatter?.model === 'string' && workflowFrontmatter.model.trim() !== '') {
           workflowModel = workflowFrontmatter.model.trim();
         }
+        workflowLoop = workflowFrontmatter?.loop;
 
         const resolvedVersion = resolveVersionAlias('claude', version);
         const versionHome = getVersionHomePath('claude', resolvedVersion ?? getGlobalDefault('claude') ?? '');
@@ -728,6 +907,53 @@ export function registerRunCommand(program: Command): void {
           // best-effort: nothing actionable if the temp dir is already gone.
         }
       };
+
+      // Loop dispatch (issue #332). Active when --loop is passed OR a workflow
+      // declares a `loop:` block. The loop path runs AFTER the #346 pre-flight
+      // gate above (which fired once) — the loop's token budget is an ADDITIONAL
+      // guard, not a replacement. Composable, not bypassing.
+      let loopConfig: import('../lib/loop.js').LoopConfig | undefined;
+      try {
+        loopConfig = buildLoopConfig(options, workflowLoop);
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+      if (loopConfig) {
+        if (prompt === undefined) {
+          console.error(chalk.red('--loop requires a prompt (or a workflow whose loop is paired with a prompt). The loop re-injects the prompt each iteration.'));
+          process.exit(1);
+        }
+        if (options.interactive) {
+          console.error(chalk.red('--loop is headless-only. The loop re-injects programmatically; an interactive TUI cannot be re-driven.'));
+          process.exit(1);
+        }
+        if (fallback.length > 0) {
+          console.error(chalk.red('--loop is not compatible with --fallback yet. Drop one.'));
+          process.exit(1);
+        }
+        const { runLoop } = await import('../lib/loop.js');
+        const { getRunsDir } = await import('../lib/state.js');
+        const runId = `loop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const runDir = path.join(getRunsDir(), runId);
+        fs.mkdirSync(runDir, { recursive: true });
+        process.stderr.write(chalk.gray(`[loop] run ${runId} — max ${loopConfig.maxIterations ?? '∞'}${loopConfig.budget ? `, budget ${loopConfig.budget} tokens` : ''}${loopConfig.until ? `, until ${loopConfig.until}` : ''}${loopConfig.interval ? `, interval ${loopConfig.interval}` : ''}\n`));
+        try {
+          const result = await runLoop({ ...execOptions, json: true, headless: true }, loopConfig, {
+            runId,
+            runDir,
+            agent,
+            version,
+          });
+          cleanupWorkflowMcpConfig();
+          process.stderr.write(chalk.gray(`[loop] stopped: ${result.stoppedBy} after ${result.iterations} iteration(s), ${result.tokens} tokens (checkpoint: ${path.join(runDir, 'checkpoint.json')})\n`));
+          process.exit(loopExitCode(result.stoppedBy));
+        } catch (err) {
+          cleanupWorkflowMcpConfig();
+          console.error(chalk.red(`Loop failed for ${agent}: ${(err as Error).message}`));
+          process.exit(1);
+        }
+      }
 
       try {
         let exitCode: number;

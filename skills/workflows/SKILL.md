@@ -177,9 +177,27 @@ mcpServers:                 # MCP servers to enable — ENFORCED (Claude, --stri
 allowedAgents:              # subagents the orchestrator may dispatch to — ENFORCED (Claude, file filter)
   - security
   - correctness
+loop:                       # optional autonomous loop (issue #332)
+  until: signal             #   stop when loop-signal.json says continue:false (absent = fail-closed)
+  max_iterations: 3         #   hard cap on iterations
+  budget: 500000            #   cumulative-token hard cap, enforced outside the agent
+  interval: "0"             #   delay between iterations ("0" back-to-back, "30m" paces)
 ```
 
 All fields are optional. A workflow with no frontmatter beyond `---` fences still works — the Markdown body alone is enough.
+
+### Looping a workflow (`loop:` block)
+
+A `loop:` block wraps the workflow in a bounded until-condition loop. `agents run <workflow>` then re-injects the orchestrator each iteration **without a `--loop` flag** — the declared block is honored automatically. CLI loop flags (`--max-iterations`, `--budget`, `--until`, `--interval`) override the declared fields one-by-one.
+
+| Field | Stop reason | Meaning |
+|---|---|---|
+| `until: signal` | `condition-met` | Reads `<runDir>/loop-signal.json` `{continue,reason}` each turn; absent or `continue:false` stops (fail-closed). The orchestrator writes its vote to the path in `AGENTS_LOOP_SIGNAL`. |
+| `max_iterations: <n>` | `max` | Hard cap on iterations. |
+| `budget: <tokens>` | `budget` | Cumulative-token cap, enforced OUTSIDE the agent (the agent cannot vote past it). |
+| `interval: "<dur>"` | — | Delay between iterations. |
+
+A malformed `loop:` field (bad `until`, non-positive `max_iterations`/`budget`, non-string `interval`) is dropped defensively rather than passed to the driver — same discipline as the `tools:`/`mcpServers:` coercion. A `checkpoint.json` is written after every iteration; resume a killed run with `agents run <workflow> --resume-checkpoint <file>`. See [docs/07-entrypoints-and-loops.md](../../docs/07-entrypoints-and-loops.md) for the full loop model.
 
 ### Scoping & security (enforced at run time, Claude)
 
