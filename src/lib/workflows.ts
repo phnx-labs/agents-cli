@@ -95,6 +95,37 @@ export function parseWorkflowFrontmatter(workflowDir: string): WorkflowFrontmatt
   }
 }
 
+/**
+ * Decide which subagent .md stems a workflow may use, given the discovered
+ * subagent files and the parsed `allowedAgents` frontmatter. This is the
+ * fail-closed security boundary for issue #324:
+ *
+ *   - `allowedAgents === undefined` (field absent)  -> NO restriction; allow all.
+ *   - `allowedAgents === []`        (present, empty) -> allow ZERO; copy none.
+ *   - `allowedAgents = [a, b]`                       -> allow only those stems.
+ *
+ * An explicit empty array must NEVER widen to "allow all" — that would copy
+ * every subagent definition into the run, granting MORE access than declared.
+ *
+ * `available` are the .md filenames found in subagents/ (e.g. `security.md`).
+ * Returns the stems to copy and any allowedAgents entries with no matching file.
+ */
+export function resolveAllowedSubagents(
+  available: string[],
+  allowedAgents: string[] | undefined,
+): { allowedStems: string[]; missing: string[] } {
+  const stems = available.filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, ''));
+  if (allowedAgents === undefined) {
+    return { allowedStems: stems, missing: [] };
+  }
+  const allow = new Set(allowedAgents);
+  const present = new Set(stems);
+  return {
+    allowedStems: stems.filter(s => allow.has(s)),
+    missing: allowedAgents.filter(a => !present.has(a)),
+  };
+}
+
 /** Count subagent .md files in a workflow's subagents/ directory. */
 export function countWorkflowSubagents(workflowDir: string): number {
   const subagentsDir = path.join(workflowDir, 'subagents');

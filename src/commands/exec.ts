@@ -157,7 +157,7 @@ export function registerRunCommand(program: Command): void {
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
-        { parseWorkflowFrontmatter, resolveWorkflowRef },
+        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
         { supports },
@@ -234,27 +234,27 @@ export function registerRunCommand(program: Command): void {
         const allowedAgents = workflowFrontmatter?.allowedAgents;
         if (fs.existsSync(subagentsDir)) {
           fs.mkdirSync(claudeAgentsDir, { recursive: true });
-          const allowSet = (allowedAgents && allowedAgents.length > 0)
-            ? new Set(allowedAgents)
-            : null;
+          // Fail-closed subagent scoping (issue #324). resolveAllowedSubagents
+          // distinguishes "allowedAgents absent" (undefined -> copy all) from
+          // "present but empty" (=> copy ZERO). An explicit `allowedAgents: []`
+          // must mean "allow none", never silently widen to "allow all".
+          const allFiles = fs.readdirSync(subagentsDir).filter(f => f.endsWith('.md'));
+          const { allowedStems, missing } = resolveAllowedSubagents(allFiles, allowedAgents);
+          const allowStemSet = new Set(allowedStems);
           let copied = 0;
           let skipped = 0;
-          for (const file of fs.readdirSync(subagentsDir).filter(f => f.endsWith('.md'))) {
+          for (const file of allFiles) {
             const stem = file.replace(/\.md$/, '');
-            if (allowSet && !allowSet.has(stem)) {
+            if (!allowStemSet.has(stem)) {
               skipped++;
               continue;
             }
             fs.copyFileSync(path.join(subagentsDir, file), path.join(claudeAgentsDir, file));
             copied++;
           }
-          if (allowSet) {
+          if (allowedAgents !== undefined) {
             // Surface any allowedAgents entry with no matching subagent file, and
             // report how many were filtered out, so the scope is auditable.
-            const present = new Set(
-              fs.readdirSync(subagentsDir).filter(f => f.endsWith('.md')).map(f => f.replace(/\.md$/, '')),
-            );
-            const missing = [...allowSet].filter(a => !present.has(a));
             if (missing.length > 0) {
               process.stderr.write(chalk.yellow(`[workflow] allowedAgents not found in subagents/: ${missing.join(', ')}\n`));
             }
@@ -350,25 +350,33 @@ export function registerRunCommand(program: Command): void {
             if (missing.length > 0) {
               process.stderr.write(chalk.yellow(`[workflow] mcpServers not found in registry, skipped: ${missing.join(', ')}\n`));
             }
+            // Fail-closed: `mcpServers:` was declared, so the run MUST be scoped to
+            // a config — never fall through to the user's ambient MCP set. When
+            // zero declared names resolve to installed servers, write a locked-down
+            // empty config (`{ "mcpServers": {} }`); with `--strict-mcp-config` the
+            // run gets NO MCP servers, which is LESS access than ambient (issue #324).
+            const mcpConfig = buildWorkflowMcpConfig(servers);
+            const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-workflow-mcp-'));
+            workflowMcpConfigPath = path.join(configDir, 'mcp-config.json');
+            // 0o600: the config embeds server `env` which can carry tokens.
+            // Cleaned up after the run (finally block below).
+            fs.writeFileSync(workflowMcpConfigPath, mcpConfig, { mode: 0o600 });
             if (servers.length > 0) {
-              const mcpConfig = buildWorkflowMcpConfig(servers);
-              const configDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-workflow-mcp-'));
-              workflowMcpConfigPath = path.join(configDir, 'mcp-config.json');
-              // 0o600: the config embeds server `env` which can carry tokens.
-              // Cleaned up after the run (finally block below).
-              fs.writeFileSync(workflowMcpConfigPath, mcpConfig, { mode: 0o600 });
               process.stderr.write(chalk.gray(`[workflow] scoping MCP servers to ONLY: ${servers.map(s => s.name).join(', ')}\n`));
+            } else {
+              process.stderr.write(chalk.yellow(`[workflow] no declared mcpServers resolved — scoping run to NO MCP servers (fail-closed)\n`));
             }
           }
         }
 
         // Count the subagents THIS workflow made available (after allowedAgents
-        // filtering), not every file in the shared agents dir.
+        // filtering), not every file in the shared agents dir. Same fail-closed
+        // semantics as the copy above: `allowedAgents: []` -> 0.
         const subagentCount = fs.existsSync(subagentsDir)
-          ? fs.readdirSync(subagentsDir)
-              .filter(f => f.endsWith('.md'))
-              .filter(f => !(allowedAgents && allowedAgents.length > 0) || allowedAgents.includes(f.replace(/\.md$/, '')))
-              .length
+          ? resolveAllowedSubagents(
+              fs.readdirSync(subagentsDir).filter(f => f.endsWith('.md')),
+              allowedAgents,
+            ).allowedStems.length
           : 0;
         process.stderr.write(chalk.gray(`Workflow '${rawAgent}' → claude (${subagentCount} subagents)\n`));
       } else {

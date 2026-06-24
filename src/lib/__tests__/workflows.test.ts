@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { resolveWorkflowRef } from '../workflows.js';
+import { resolveWorkflowRef, resolveAllowedSubagents } from '../workflows.js';
 
 const tmpDirs: string[] = [];
 
@@ -41,5 +41,40 @@ describe('resolveWorkflowRef', () => {
     const dir = path.join(tmpRoot(), 'not-a-workflow');
     fs.mkdirSync(dir, { recursive: true });
     expect(resolveWorkflowRef(dir, '/')).toBeNull();
+  });
+});
+
+// Fail-closed subagent scoping (issue #324). The security-critical edge is that
+// an EXPLICIT empty `allowedAgents: []` must copy ZERO subagents — never widen
+// to "allow all", which is what the old `allowedAgents.length > 0` check did.
+describe('resolveAllowedSubagents (fail-closed allowedAgents)', () => {
+  const files = ['security.md', 'reviewer.md', 'planner.md'];
+
+  it('undefined allowedAgents (field absent) allows ALL subagents', () => {
+    const { allowedStems, missing } = resolveAllowedSubagents(files, undefined);
+    expect(allowedStems.sort()).toEqual(['planner', 'reviewer', 'security']);
+    expect(missing).toEqual([]);
+  });
+
+  it('explicit empty allowedAgents: [] allows ZERO subagents (fail-closed)', () => {
+    const { allowedStems, missing } = resolveAllowedSubagents(files, []);
+    expect(allowedStems).toEqual([]);
+    expect(missing).toEqual([]);
+  });
+
+  it('named allowedAgents copies only the named stems', () => {
+    const { allowedStems } = resolveAllowedSubagents(files, ['security']);
+    expect(allowedStems).toEqual(['security']);
+  });
+
+  it('reports allowedAgents entries with no matching subagent file', () => {
+    const { allowedStems, missing } = resolveAllowedSubagents(files, ['security', 'ghost']);
+    expect(allowedStems).toEqual(['security']);
+    expect(missing).toEqual(['ghost']);
+  });
+
+  it('ignores non-.md files when computing available stems', () => {
+    const { allowedStems } = resolveAllowedSubagents([...files, 'README.txt'], undefined);
+    expect(allowedStems).not.toContain('README');
   });
 });

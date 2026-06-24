@@ -15,6 +15,10 @@ import {
 } from '../exec.js';
 import type { AgentId, Mode } from '../types.js';
 import { AGENTS } from '../agents.js';
+import { buildWorkflowMcpConfig, getMcpServersByName } from '../mcp.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 function opts(overrides: Partial<ExecOptions>): ExecOptions {
   return {
@@ -613,6 +617,36 @@ describe('buildExecCommand', () => {
       expect(cmd).not.toContain('--mcp-config');
       expect(cmd).not.toContain('--strict-mcp-config');
       expect(cmd).not.toContain('--agents');
+    });
+
+    // Fail-closed mcpServers (issue #324): when a workflow DECLARES `mcpServers:`
+    // but none of the names resolve to installed servers, the run must STILL be
+    // locked down to an EMPTY config — never fall through to the user's ambient
+    // MCP set (which would be MORE access than declared). This composes the real
+    // command-layer steps: resolve names -> [], build the empty map, write it,
+    // feed the path to buildExecCommand, and assert both scoping flags fire.
+    it('declared-but-all-unresolved mcpServers => empty {} map + --mcp-config + --strict-mcp-config (no ambient)', () => {
+      // No installed server matches these names, so resolution yields zero.
+      const servers = getMcpServersByName(['__definitely_missing_a__', '__definitely_missing_b__']);
+      expect(servers).toEqual([]);
+
+      const mcpConfig = buildWorkflowMcpConfig(servers);
+      // The locked-down payload: NO servers, not the ambient set.
+      expect(JSON.parse(mcpConfig)).toEqual({ mcpServers: {} });
+
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-failclosed-mcp-'));
+      const configPath = path.join(dir, 'mcp-config.json');
+      fs.writeFileSync(configPath, mcpConfig, { mode: 0o600 });
+      try {
+        const cmd = buildExecCommand(opts({ agent: 'claude', mcpConfigPath: configPath }));
+        expect(cmd).toContain('--mcp-config');
+        expect(cmd[cmd.indexOf('--mcp-config') + 1]).toBe(configPath);
+        // --strict-mcp-config is what makes the empty map mean "ONLY these (none)"
+        // rather than "these PLUS ambient".
+        expect(cmd).toContain('--strict-mcp-config');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 
