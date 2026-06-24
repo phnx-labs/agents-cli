@@ -109,7 +109,7 @@ if [[ -z "${NPM_TOKEN:-}" ]]; then
 fi
 [[ -n "$NPM_TOKEN" ]] || die "NPM_TOKEN resolved to empty string"
 
-NPMRC_TMP="$(mktemp -t agents-cli-npmrc)"
+NPMRC_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-npmrc.XXXXXX")"
 chmod 600 "$NPMRC_TMP"
 # Use ${NPM_TOKEN} env var reference - npm expands it at runtime.
 # Writing the token directly causes 404 errors for scoped packages.
@@ -232,7 +232,7 @@ fi
 # real build's filesystem operations. This catches anything strict-mode
 # tsconfig.json complains about (unused locals, implicit any, etc.).
 bold "Type-checking (tsc --noEmit)..."
-TSC_LOG="$(mktemp -t agents-cli-tsc)"
+TSC_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-tsc.XXXXXX")"
 if ! npx --no-install tsc --noEmit --pretty false > "$TSC_LOG" 2>&1; then
   red "TypeScript errors:"
   cat "$TSC_LOG" >&2
@@ -253,7 +253,7 @@ green "Type check clean."
 # ----- Build (real artifacts) -----
 bold "Building (bun run build)..."
 rm -rf dist
-BUILD_LOG="$(mktemp -t agents-cli-build)"
+BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-build.XXXXXX")"
 if ! bun run build > "$BUILD_LOG" 2>&1; then
   red "Build failed:"
   cat "$BUILD_LOG" >&2
@@ -280,7 +280,7 @@ else
   # through any individual failure. The summary line is captured for the
   # tarball-preview section regardless.
   bold "Running tests (npm test)..."
-  TEST_LOG="$(mktemp -t agents-cli-test)"
+  TEST_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-test.XXXXXX")"
   if ! npm test 2>&1 | tee "$TEST_LOG"; then
     red "Tests failed."
     rm -f "$TEST_LOG"
@@ -307,7 +307,7 @@ echo
 # ----- Build the shim package on disk so we can preview/publish it -----
 bold "Building $SWARMIFY_PKG@$TARGET shim..."
 SHIM_SRC="$ROOT/scripts/companion-shim"
-SHIM_TMP="$(mktemp -d -t agents-cli-shim)"
+SHIM_TMP="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-shim.XXXXXX")"
 # Cleanup of SHIM_TMP layered onto the existing EXIT trap (which restores
 # package.json on abort). bash only keeps the most recent EXIT trap, so we
 # define a combined cleanup function.
