@@ -33,7 +33,7 @@ export function registerCostCommand(program: Command): void {
     .description('Roll up $ cost and duration across local agent sessions')
     .option('--json', 'Output the rollup as JSON')
     .option('--since <time>', 'Only sessions newer than this (e.g., 7d, 4w, or ISO date)')
-    .option('--by <dimension>', 'Group the breakdown by: agent (default), project, day, or model')
+    .option('--by <dimension>', 'Group the breakdown by: agent (default), project, or day')
     .addHelpText('after', `
 Examples:
   agents cost                   Daily histogram + top sessions + per-agent breakdown
@@ -48,11 +48,12 @@ Cost is computed offline from a versioned per-model price table (${PRICING_VERSI
     });
 }
 
-/** Map the --by flag to a rollup group; 'model' is handled separately (no DB column). */
+/** Map the --by flag to a rollup group, rejecting unknown values. */
 function resolveGroup(by: string | undefined): UsageRollupGroup {
-  if (by === 'project') return 'project';
-  if (by === 'day') return 'day';
-  return 'agent';
+  if (by === undefined) return 'agent';
+  if (by === 'agent' || by === 'project' || by === 'day') return by;
+  console.error(chalk.red('error: --by must be one of: agent, project, day'));
+  process.exit(1);
 }
 
 async function costAction(options: CostOptions): Promise<void> {
@@ -64,9 +65,6 @@ async function costAction(options: CostOptions): Promise<void> {
   const filter: QueryOptions = {};
   if (typeof sinceMs === 'number') filter.sinceMs = sinceMs;
 
-  // --by model is computed over the top sessions' per-row data is not stored;
-  // model lives on usage events, not the session row. We approximate model
-  // grouping by agent for now and surface daily/agent/project from the DB.
   const groupBy = resolveGroup(options.by);
 
   const daily = queryUsageRollup({ ...filter, groupBy: 'day' });

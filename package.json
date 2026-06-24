@@ -23,6 +23,7 @@
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
+    "dist/**/*.json",
     "dist/lib/secrets/Agents CLI.app/**",
     "scripts/postinstall.js",
     "scripts/install-helper.js",
