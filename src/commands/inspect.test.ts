@@ -10,7 +10,11 @@ import {
   repoGitInfo,
   pathSize,
   formatBytes,
+  summarizeHook,
+  summarizeMcp,
+  hookManifestByScript,
 } from './inspect.js';
+import type { ManifestHook } from '../lib/types.js';
 import { getUserAgentsDir, getSystemAgentsDir } from '../lib/state.js';
 
 const tempDirs: string[] = [];
@@ -167,6 +171,71 @@ describe('formatBytes', () => {
     expect(formatBytes(1024)).toBe('1.0 KB');
     expect(formatBytes(86 * 1024)).toBe('86 KB');
     expect(formatBytes(3.1 * 1024 * 1024)).toBe('3.1 MB');
+  });
+});
+
+describe('summarizeHook', () => {
+  it('shows events only when there is no matcher or predicate', () => {
+    expect(summarizeHook({ script: 'x.sh', events: ['SessionStart'] })).toBe('SessionStart');
+  });
+
+  it('joins multiple events with a slash', () => {
+    expect(summarizeHook({ script: 'x.sh', events: ['PreToolUse', 'PostToolUse'] }))
+      .toBe('PreToolUse/PostToolUse');
+  });
+
+  it('puts the matcher in parens after the events', () => {
+    expect(summarizeHook({ script: 'x.sh', events: ['PreToolUse'], matcher: 'Bash' }))
+      .toBe('PreToolUse(Bash)');
+  });
+
+  it('uses matches.tool_name as the matcher when no explicit matcher is set', () => {
+    expect(summarizeHook({ script: 'x.sh', events: ['PreToolUse'], matches: { tool_name: ['Bash', 'Edit'] } }))
+      .toBe('PreToolUse(Bash|Edit)');
+  });
+
+  it('appends a `·`-separated predicate summary from matches', () => {
+    const hook: ManifestHook = {
+      script: 'x.sh',
+      events: ['PreToolUse'],
+      matcher: 'Bash',
+      matches: { git_dirty: true, prompt_contains: 'deploy' },
+    };
+    expect(summarizeHook(hook)).toBe('PreToolUse(Bash) · git_dirty · prompt~"deploy"');
+  });
+
+  it('adds a cache tail, stripping the -bg background suffix', () => {
+    expect(summarizeHook({ script: 'x.sh', events: ['SessionStart'], cache: '5m-bg' }))
+      .toBe('SessionStart (5m cache)');
+    expect(summarizeHook({ script: 'x.sh', events: ['SessionStart'], cache: { ttl: '1h', key: 'per-cwd' } }))
+      .toBe('SessionStart (1h cache)');
+  });
+});
+
+describe('summarizeMcp', () => {
+  it('renders an http server as transport + url', () => {
+    expect(summarizeMcp({ name: 'posthog', transport: 'http', url: 'https://mcp.posthog.com' }))
+      .toBe('http   https://mcp.posthog.com');
+  });
+
+  it('renders a stdio server as transport + command line', () => {
+    expect(summarizeMcp({ name: 'linear', transport: 'stdio', command: 'npx', args: ['linear-mcp-server'] }))
+      .toBe('stdio  npx linear-mcp-server');
+  });
+});
+
+describe('hookManifestByScript', () => {
+  it('keys hooks by their script basename without extension, not the manifest key', () => {
+    const manifest: Record<string, ManifestHook> = {
+      'capture-session-start-metadata': { script: '04-capture-session-start-metadata.sh', events: ['SessionStart'] },
+      'git-guard': { script: 'git-guard.sh', events: ['PreToolUse'], matcher: 'Bash' },
+    };
+    const byScript = hookManifestByScript(manifest);
+    // Installed hook names equal the script basename, so that is the join key.
+    expect(byScript.get('04-capture-session-start-metadata')?.events).toEqual(['SessionStart']);
+    expect(byScript.get('git-guard')?.matcher).toBe('Bash');
+    // The manifest key itself is NOT a lookup key.
+    expect(byScript.get('capture-session-start-metadata')).toBeUndefined();
   });
 });
 

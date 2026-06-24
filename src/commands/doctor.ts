@@ -33,7 +33,7 @@ import {
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { diffVersionCommands, iterCommandsCapableVersions } from '../lib/commands.js';
 import { diffVersionSkills, iterSkillsCapableVersions } from '../lib/skills.js';
-import { diffVersionHooks, iterHooksCapableVersions } from '../lib/hooks.js';
+import { iterHooksCapableVersions, listUnmanagedHooksInVersionHome } from '../lib/hooks.js';
 import {
   diffVersionResources,
   DOCTOR_ALL_KINDS,
@@ -112,10 +112,14 @@ function countOrphans(): OrphanRow[] {
     const diff = diffVersionSkills(agent, version);
     if (diff.orphans.length > 0) ensure(agent, version).skills = diff.orphans.length;
   }
+  // Orphan hooks are scripts in the version home that no agents.yaml/hooks.yaml
+  // entry registers — so the registrar never wires them to an event and they
+  // never fire. (Distinct from the source-diff `diffVersionHooks().orphans`,
+  // which false-flags valid system-sourced registered hooks.)
   for (const { agent, version } of iterHooksCapableVersions()) {
     if (version !== getGlobalDefault(agent)) continue;
-    const diff = diffVersionHooks(agent, version);
-    if (diff.orphans.length > 0) ensure(agent, version).hooks = diff.orphans.length;
+    const dead = listUnmanagedHooksInVersionHome(agent, version);
+    if (dead.length > 0) ensure(agent, version).hooks = dead.length;
   }
 
   return Array.from(byKey.values()).filter((r) => r.commands + r.skills + r.hooks > 0);

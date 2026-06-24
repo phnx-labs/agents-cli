@@ -269,13 +269,25 @@ function discoverPluginSkills(pluginRoot: string): string[] {
     .map(d => d.name);
 }
 
-function discoverPluginHooks(pluginRoot: string): string[] {
+/**
+ * The lifecycle events a plugin hooks into, read from hooks/hooks.json.
+ *
+ * The official plugin format wraps the event map under a `hooks` key
+ * (`{ description, hooks: { SessionStart: [...], PreToolUse: [...] } }`), so the
+ * meaningful keys are the events — NOT the top-level keys (`description`,
+ * `hooks`). Older/flat files put the event names at the top level directly; we
+ * read whichever object actually holds the event map.
+ */
+export function discoverPluginHooks(pluginRoot: string): string[] {
   const hooksFile = path.join(pluginRoot, 'hooks', 'hooks.json');
   if (!fs.existsSync(hooksFile)) return [];
 
   try {
     const content = JSON.parse(fs.readFileSync(hooksFile, 'utf-8')) as Record<string, unknown>;
-    return Object.keys(content);
+    const eventMap = content.hooks && typeof content.hooks === 'object' && !Array.isArray(content.hooks)
+      ? content.hooks as Record<string, unknown>
+      : content;
+    return Object.keys(eventMap);
   } catch {
     return [];
   }

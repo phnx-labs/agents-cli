@@ -37,7 +37,7 @@ import {
   removeSkillFromVersion,
 } from '../lib/skills.js';
 import {
-  diffVersionHooks,
+  listUnmanagedHooksInVersionHome,
   iterHooksCapableVersions,
   removeHookFromVersion,
 } from '../lib/hooks.js';
@@ -113,9 +113,12 @@ function collectOrphans(types: ResourceType[], all: boolean): OrphanGroup[] {
 
   if (types.includes('hooks')) {
     for (const { agent, version } of scopePairs(iterHooksCapableVersions(), all)) {
-      const diff = diffVersionHooks(agent, version);
-      if (diff.orphans.length > 0) {
-        groups.push({ type: 'hooks', agent, version, orphans: diff.orphans });
+      // Orphan hooks = scripts present in the version home that no
+      // agents.yaml/hooks.yaml entry registers, so they never fire. Same
+      // definition the doctor overview reports.
+      const orphans = listUnmanagedHooksInVersionHome(agent, version);
+      if (orphans.length > 0) {
+        groups.push({ type: 'hooks', agent, version, orphans });
       }
     }
   }
@@ -283,7 +286,7 @@ async function runOrphanPrune(
 
   const total = groups.reduce((n, g) => n + g.orphans.length, 0);
 
-  console.log(chalk.bold('Orphans (in version home, not in any source)\n'));
+  console.log(chalk.bold('Orphans (in version home, unmanaged by any source)\n'));
   for (const g of groups) {
     const label = `${g.type} · ${g.agent}@${g.version}`;
     console.log(`  ${chalk.cyan(label)}  ${g.orphans.join(', ')}`);

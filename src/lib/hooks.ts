@@ -760,7 +760,8 @@ export function listCentralHooks(): HookEntry[] {
  *
  * Hooks marked `enabled: false` are dropped from the returned map.
  */
-export function parseHookManifest(): Record<string, ManifestHook> {
+export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string, ManifestHook> {
+  const warn = opts.warn !== false;
   const merged: Record<string, ManifestHook> = {};
   const systemHooks: Record<string, ManifestHook> = {};
 
@@ -782,7 +783,7 @@ export function parseHookManifest(): Record<string, ManifestHook> {
     try {
       const meta = yaml.parse(fs.readFileSync(userMetaPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
       if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) {
-        if (systemHooks[name] && def.override !== true) {
+        if (warn && systemHooks[name] && def.override !== true) {
           const action = def.enabled === false ? 'disables' : 'shadows';
           console.warn(
             `[agents hooks] User-layer hook '${name}' ${action} system-shipped hook. Set 'override: true' to silence this warning.`,
@@ -798,6 +799,36 @@ export function parseHookManifest(): Record<string, ManifestHook> {
     if (def.enabled === false) delete merged[name];
   }
   return merged;
+}
+
+/**
+ * Hook script files present on disk that no manifest entry declares — "dead"
+ * hooks. The registrar only wires manifest-declared hooks into an agent's
+ * native config (settings.json / config.toml), matching the installed file to a
+ * manifest entry by script basename. So a file whose basename matches no
+ * manifest `script:` is never registered: it occupies the hooks dir and shows
+ * up in listings, but no lifecycle event ever fires it.
+ *
+ * Pure on purpose (no disk reads) so it is trivially testable; callers pass the
+ * installed hook names and the manifest's script paths.
+ */
+export function unmanagedHookNames(installedHookNames: string[], manifestScripts: string[]): string[] {
+  const managed = new Set(manifestScripts.map((s) => path.basename(s).replace(/\.[^.]+$/, '')));
+  return installedHookNames.filter((name) => !managed.has(name)).sort();
+}
+
+/**
+ * The dead hooks (see {@link unmanagedHookNames}) sitting in one version home.
+ * Reads the merged hook manifest silently — a diagnostic must not emit the
+ * shadow/override warnings the registrar path prints.
+ */
+export function listUnmanagedHooksInVersionHome(agent: AgentId, version: string): string[] {
+  if (!AGENTS[agent].supportsHooks) return [];
+  const scripts = Object.values(parseHookManifest({ warn: false }))
+    .map((h) => h.script)
+    .filter((s): s is string => typeof s === 'string');
+  const installed = listHooksInVersionHome(agent, version).map((e) => e.name);
+  return unmanagedHookNames(installed, scripts);
 }
 
 // Codex events that support a matcher field (matches tool name or session type).
