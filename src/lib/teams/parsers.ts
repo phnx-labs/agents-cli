@@ -2,7 +2,7 @@
  * Agent event stream parsers.
  *
  * Normalizes the heterogeneous JSON event formats emitted by each agent CLI
- * (Claude, Codex, Gemini, Cursor, OpenCode, Grok, Antigravity) into a unified
+ * (Claude, Codex, Gemini, Cursor, OpenCode, Grok, Antigravity, Kimi) into a unified
  * event schema with consistent types: init, message, tool_use, bash,
  * file_read, file_write, file_create, file_delete, result, error, and others.
  */
@@ -29,6 +29,8 @@ export function normalizeEvents(agentType: AgentType, raw: any): any[] {
     return normalizeGrok(raw);
   } else if (agentType === 'antigravity') {
     return normalizeAntigravity(raw);
+  } else if (agentType === 'kimi') {
+    return normalizeKimi(raw);
   }
 
   // droid (Factory AI) intentionally falls through to the generic normalizer
@@ -933,6 +935,168 @@ function normalizeGrok(raw: any): any[] {
   return [{
     type: eventType,
     agent: 'grok',
+    raw: raw,
+    timestamp: timestamp,
+  }];
+}
+
+// --- Kimi parsing ---
+// Kimi's `--output-format stream-json` emits one JSON object per line with a
+// simple `role`-based schema:
+//   - {"role":"assistant","content":"..."}                          → final message
+//   - {"role":"assistant","tool_calls":[{"function":{"name":"Bash","arguments":"<json>"}}]} → tool use
+//   - {"role":"tool","tool_call_id":"...","content":"..."}            → tool result
+//   - {"role":"meta","type":"session.resume_hint","session_id":"..."} → init / session id
+// Tool arguments are JSON-stringified inside `function.arguments` and must be
+// parsed before extracting paths/commands. Verified against live `kimi` runs.
+function normalizeKimi(raw: any): any[] {
+  const timestamp = new Date().toISOString();
+
+  if (!raw || typeof raw !== 'object') {
+    return [{
+      type: 'unknown',
+      agent: 'kimi',
+      raw: raw,
+      timestamp: timestamp,
+    }];
+  }
+
+  const role = typeof raw.role === 'string' ? raw.role : '';
+
+  // Assistant message (final answer or tool-call request).
+  if (role === 'assistant') {
+    const events: any[] = [];
+
+    if (typeof raw.content === 'string' && raw.content) {
+      events.push({
+        type: 'message',
+        agent: 'kimi',
+        content: raw.content,
+        complete: true,
+        timestamp: timestamp,
+      });
+    }
+
+    const toolCalls = Array.isArray(raw.tool_calls) ? raw.tool_calls : [];
+    for (const toolCall of toolCalls) {
+      const fn = toolCall?.function || {};
+      const toolName = typeof fn.name === 'string' ? fn.name : 'unknown';
+      let toolArgs: any = {};
+      if (typeof fn.arguments === 'string') {
+        try {
+          toolArgs = JSON.parse(fn.arguments);
+        } catch {
+          toolArgs = { _raw: fn.arguments };
+        }
+      } else if (fn.arguments && typeof fn.arguments === 'object') {
+        toolArgs = fn.arguments;
+      }
+
+      const filePath = toolArgs?.path || toolArgs?.file_path || '';
+      const command = toolArgs?.command || '';
+
+      // Map known tools to structured events. If a known tool is missing the
+      // fields we need (e.g. unparseable arguments), fall back to tool_use so
+      // the event is still visible in summaries rather than dropped.
+      let normalized: any[] | null = null;
+      if (toolName === 'Bash' && command) {
+        const bashEvents: any[] = [{
+          type: 'bash',
+          agent: 'kimi',
+          tool: toolName,
+          command: command,
+          timestamp: timestamp,
+        }];
+        const [filesRead, filesWritten, filesDeleted] = extractFileOpsFromBash(command);
+        for (const p of filesRead) {
+          bashEvents.push({ type: 'file_read', agent: 'kimi', tool: 'bash', path: p, command, timestamp });
+        }
+        for (const p of filesWritten) {
+          bashEvents.push({ type: 'file_write', agent: 'kimi', tool: 'bash', path: p, command, timestamp });
+        }
+        for (const p of filesDeleted) {
+          bashEvents.push({ type: 'file_delete', agent: 'kimi', tool: 'bash', path: p, command, timestamp });
+        }
+        normalized = bashEvents;
+      } else if (toolName === 'Read' && filePath) {
+        normalized = [{
+          type: 'file_read',
+          agent: 'kimi',
+          tool: toolName,
+          path: filePath,
+          timestamp: timestamp,
+        }];
+      } else if (toolName === 'Edit' && filePath) {
+        normalized = [{
+          type: 'file_write',
+          agent: 'kimi',
+          tool: toolName,
+          path: filePath,
+          timestamp: timestamp,
+        }];
+      } else if (toolName === 'Write' && filePath) {
+        normalized = [{
+          type: 'file_create',
+          agent: 'kimi',
+          tool: toolName,
+          path: filePath,
+          timestamp: timestamp,
+        }];
+      }
+
+      if (normalized) {
+        events.push(...normalized);
+      } else {
+        events.push({
+          type: 'tool_use',
+          agent: 'kimi',
+          tool: toolName,
+          args: toolArgs,
+          timestamp: timestamp,
+        });
+      }
+    }
+
+    return events.length > 0 ? events : [];
+  }
+
+  // Tool result (response to an assistant tool_call).
+  if (role === 'tool') {
+    const content = typeof raw.content === 'string' ? raw.content : '';
+    const success = raw.isError !== true && !(content && content.startsWith('Error:'));
+    return [{
+      type: 'tool_result',
+      agent: 'kimi',
+      tool_call_id: typeof raw.tool_call_id === 'string' ? raw.tool_call_id : null,
+      success: success,
+      content: content,
+      timestamp: timestamp,
+    }];
+  }
+
+  // Meta events (session lifecycle).
+  if (role === 'meta') {
+    const metaType = typeof raw.type === 'string' ? raw.type : '';
+    if (metaType === 'session.resume_hint') {
+      return [{
+        type: 'init',
+        agent: 'kimi',
+        session_id: typeof raw.session_id === 'string' ? raw.session_id : null,
+        timestamp: timestamp,
+      }];
+    }
+    return [{
+      type: 'meta',
+      agent: 'kimi',
+      meta_type: metaType,
+      raw: raw,
+      timestamp: timestamp,
+    }];
+  }
+
+  return [{
+    type: raw.type || 'unknown',
+    agent: 'kimi',
     raw: raw,
     timestamp: timestamp,
   }];
