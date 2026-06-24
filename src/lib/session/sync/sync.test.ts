@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { selectSessionsToFetch, resolveMirrorWrite, type RemoteCopy } from './sync.js';
+import { selectSessionsToFetch, resolveMirrorWrite, reconcileCopies, type RemoteCopy } from './sync.js';
 import { sourceSignature } from './manifest.js';
 import { SYNC_AGENTS } from './agents.js';
 
@@ -76,5 +76,39 @@ describe('resolveMirrorWrite', () => {
     // union is the superset b (a ⊆ b), byte-identical regardless of arg order
     expect(r1.content).toBe(b);
     expect(r2.content).toBe(b);
+  });
+});
+
+describe('reconcileCopies', () => {
+  it('all copies present: unions and resolves a write', () => {
+    const list = [copy('zion', 's1', 'h1', 'p/zion.jsonl'), copy('s0', 's1', 'h2', 'p/s0.jsonl')];
+    const out = reconcileCopies(claude, list, ['a\n', 'a\nb\n']);
+    expect(out).not.toBeNull();
+    expect(out!.merged).toBe(true);
+    expect(out!.dest).toContain('backups/claude/s0/projects/p/s0.jsonl');
+  });
+
+  it('single complete copy: resolves a verbatim, non-merged write', () => {
+    const list = [copy('mac', 's1', 'h1')];
+    const out = reconcileCopies(claude, list, ['line1\n']);
+    expect(out).not.toBeNull();
+    expect(out!.content).toBe('line1\n');
+    expect(out!.merged).toBe(false);
+  });
+
+  // Regression for the pull-state poisoning bug: a fork where one copy 404s
+  // (null) must NOT resolve a write. The caller skips both the mirror write and
+  // the pull-state stamp, so the session retries next tick instead of
+  // persisting a partial union and abandoning the missing branch forever.
+  it('returns null when ANY listed copy is missing (incomplete fork fetch)', () => {
+    const list = [copy('zion', 's1', 'h1', 'p/zion.jsonl'), copy('s0', 's1', 'h2', 'p/s0.jsonl')];
+    expect(reconcileCopies(claude, list, ['a\n', null])).toBeNull();
+    expect(reconcileCopies(claude, list, [null, 'a\nb\n'])).toBeNull();
+    expect(reconcileCopies(claude, list, [null, null])).toBeNull();
+  });
+
+  it('returns null when nothing was fetched', () => {
+    const list = [copy('mac', 's1', 'h1')];
+    expect(reconcileCopies(claude, list, [null])).toBeNull();
   });
 });

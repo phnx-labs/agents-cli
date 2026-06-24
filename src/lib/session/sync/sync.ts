@@ -181,6 +181,32 @@ export function resolveMirrorWrite(
   };
 }
 
+/**
+ * Decide how to reconcile one session's fetched copies. Pure: no I/O.
+ *
+ * `fetched` is positionally aligned to `copies` — a `null` slot means that
+ * copy's object wasn't retrievable this tick (R2 404 / LIST→GET consistency
+ * lag / a transient get error). If ANY listed copy is missing, returns `null`:
+ * the caller must then skip the mirror write AND skip stamping pull-state, so
+ * the session is retried next tick. Writing a partial set instead would
+ * materialize a non-converged union and — because pull-state would record the
+ * full source signature — abandon the missing branch forever (the bug this
+ * guards: a signature match in selectSessionsToFetch never re-fetches it).
+ */
+export function reconcileCopies(
+  spec: SyncAgentSpec,
+  copies: RemoteCopy[],
+  fetched: Array<string | null>,
+): { dest: string; content: string; merged: boolean } | null {
+  const contents: string[] = [];
+  for (const text of fetched) {
+    if (text === null) return null; // incomplete fetch — retry next tick
+    contents.push(text);
+  }
+  if (contents.length === 0) return null;
+  return resolveMirrorWrite(spec, copies, contents);
+}
+
 /** Fetch other machines' manifests, union changed sessions into the mirror. */
 async function pullAndReconcile(r2: R2Client, me: string, opts: SyncOptions, result: SyncResult): Promise<void> {
   const prefixes = await r2.listPrefixes(SESSIONS_PREFIX); // sessions/<machine>/
@@ -226,21 +252,23 @@ async function pullAndReconcile(r2: R2Client, me: string, opts: SyncOptions, res
   for (const { agentId, sessionId, copies: list, sig } of pending) {
     const spec = specById(agentId)!;
 
-    // Download each copy (could be a fork across >1 machine).
-    const contents: string[] = [];
-    let ok = true;
+    // Download each copy (could be a fork across >1 machine), keeping the
+    // result positionally aligned to `list` — null marks a copy we couldn't
+    // fetch this tick (404 / consistency lag / error).
+    const fetched: Array<string | null> = [];
     for (const c of list) {
       try {
-        const text = await r2.get(objectKey(c.machine, agentId, sessionId));
-        if (text !== null) contents.push(text);
+        fetched.push(await r2.get(objectKey(c.machine, agentId, sessionId)));
       } catch (err) {
         result.errors.push(`get ${c.machine}/${sessionId}: ${(err as Error).message}`);
-        ok = false;
+        fetched.push(null);
       }
     }
-    if (!ok || contents.length === 0) continue;
-
-    const { dest, content, merged } = resolveMirrorWrite(spec, list, contents);
+    // null ⇒ an incomplete fetch: skip the write AND the pull-state stamp so we
+    // retry next tick instead of persisting a partial union / abandoning a branch.
+    const resolved = reconcileCopies(spec, list, fetched);
+    if (!resolved) continue;
+    const { dest, content, merged } = resolved;
 
     try {
       let existing: string | null = null;
