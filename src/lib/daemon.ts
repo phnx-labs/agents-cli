@@ -441,6 +441,23 @@ function startDaemonLocked(): { pid: number | null; method: string } {
   return startDetached();
 }
 
+/**
+ * Environment for the detached daemon fallback. The launchd/systemd paths
+ * deliver the long-lived OAuth token via the service manifest's environment;
+ * the detached path has no manifest, so inject it here. Read happens during an
+ * interactive `routines start`, so a Keychain Touch ID prompt can be satisfied;
+ * the daemon then passes it to every routine run it spawns. An already-set
+ * value (e.g. inherited from launchd) is left untouched.
+ */
+export function buildDetachedDaemonEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...baseEnv };
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
+    const token = readDaemonClaudeOAuthToken();
+    if (token) env.CLAUDE_CODE_OAUTH_TOKEN = token;
+  }
+  return env;
+}
+
 function startDetached(): { pid: number; method: string } {
   const agentsBin = getAgentsBinPath();
   const logPath = getLogPath();
@@ -449,6 +466,7 @@ function startDetached(): { pid: number; method: string } {
   const child = spawn(agentsBin, ['daemon', '_run'], {
     stdio: ['ignore', logFd, logFd],
     detached: true,
+    env: buildDetachedDaemonEnv(),
   });
 
   child.unref();

@@ -14,6 +14,7 @@ import {
   generateLaunchdPlist,
   generateSystemdUnit,
   readDaemonClaudeOAuthToken,
+  buildDetachedDaemonEnv,
 } from './daemon.js';
 import {
   secretsKeychainItem,
@@ -126,5 +127,25 @@ describe('generateSystemdUnit', () => {
     expect(generateSystemdUnit()).toContain(
       'Environment=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc123',
     );
+  });
+});
+
+describe('buildDetachedDaemonEnv', () => {
+  it('injects the token when configured and absent from the base env', () => {
+    seedKeychainBacked('sk-ant-oat01-detached');
+    const env = buildDetachedDaemonEnv({ PATH: '/usr/bin' });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-detached');
+    expect(env.PATH).toBe('/usr/bin');
+  });
+
+  it('leaves an already-set token untouched (launchd-provided wins)', () => {
+    seedKeychainBacked('sk-ant-oat01-fromKeychain');
+    const env = buildDetachedDaemonEnv({ CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-fromEnv' });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-fromEnv');
+  });
+
+  it('adds no token key when none is configured', () => {
+    const env = buildDetachedDaemonEnv({ PATH: '/usr/bin' });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
 });
