@@ -26,6 +26,7 @@ import {
 import type { AccountInfo } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
+  deriveUsageStatusFromSnapshot,
   formatUsageSection,
   formatUsageSummary,
   formatUsageStatusBadge,
@@ -389,7 +390,11 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
     return {
       ...info,
       plan: canon.plan,
-      usageStatus: canon.usageStatus,
+      // Throttle state comes from the live usage windows, not the pay-as-you-go
+      // overage flag that AccountInfo.usageStatus used to carry. A maxed window
+      // means rate-limited; no snapshot means no badge. See
+      // deriveUsageStatusFromSnapshot.
+      usageStatus: deriveUsageStatusFromSnapshot(usageByKey.get(key)?.snapshot),
       overageCredits: canon.overageCredits,
     };
   };
@@ -1150,7 +1155,11 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
     return {
       ...info,
       plan: canon.plan,
-      usageStatus: canon.usageStatus,
+      // Throttle state comes from the live usage windows, not the pay-as-you-go
+      // overage flag that AccountInfo.usageStatus used to carry. A maxed window
+      // means rate-limited; no snapshot means no badge. See
+      // deriveUsageStatusFromSnapshot.
+      usageStatus: deriveUsageStatusFromSnapshot(usageByKey.get(key)?.snapshot),
       overageCredits: canon.overageCredits,
     };
   };

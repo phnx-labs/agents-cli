@@ -373,6 +373,33 @@ export function formatUsageSummary(
 }
 
 /**
+ * Derive an account's real throttle state from its live usage windows — the
+ * same signal `agents usage` shows and balanced rotation trusts
+ * (`getRoutingUsedPercent` in rotate.ts). A window at 100% utilization means
+ * the account is throttled until that window resets.
+ *
+ * Returns `null` when there is no snapshot, so callers render no badge rather
+ * than a misleading one. This deliberately never consults
+ * `cachedExtraUsageDisabledReason`: that field describes why pay-as-you-go
+ * overage is disabled (`out_of_credits` = no overage credits purchased,
+ * `org_level_disabled` = an admin turned overage off), NOT whether the account
+ * can do work right now. A Pro account at 5% weekly usage with overage disabled
+ * is fully usable, yet that flag would mislabel it "out of credits".
+ *
+ * The model-specific `sonnet_week` sub-limit is excluded: hitting it throttles
+ * one model, not the account, so it shouldn't flip the whole row to throttled.
+ */
+export function deriveUsageStatusFromSnapshot(
+  snapshot: UsageSnapshot | null | undefined
+): 'available' | 'rate_limited' | null {
+  if (!snapshot || snapshot.windows.length === 0) return null;
+  const blocking = snapshot.windows.filter((window) => window.key !== 'sonnet_week');
+  const windows = blocking.length > 0 ? blocking : snapshot.windows;
+  const maxUsed = Math.max(...windows.map((window) => window.usedPercent));
+  return maxUsed >= 100 ? 'rate_limited' : 'available';
+}
+
+/**
  * Compact colored badge for the account's overall usage status. Renders only
  * when the account is throttled — `available` and `null` return ''.
  *

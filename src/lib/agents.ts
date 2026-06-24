@@ -887,11 +887,16 @@ export async function getAccountInfo(
           plan = oa.billingType;
         }
 
-        let usageStatus: AccountInfo['usageStatus'] = null;
-        const reason = data.cachedExtraUsageDisabledReason;
-        if (reason === 'out_of_credits') usageStatus = 'out_of_credits';
-        else if (reason) usageStatus = 'rate_limited';
-        else usageStatus = 'available';
+        // usageStatus is NOT derived from cachedExtraUsageDisabledReason. That
+        // field reports why pay-as-you-go overage is off (out_of_credits = no
+        // overage credits purchased; org_level_disabled = admin turned overage
+        // off), which says nothing about whether the account is throttled — a
+        // Pro account at 5% weekly usage with overage disabled is fully usable.
+        // Real throttle state comes from the live usage windows; callers derive
+        // it via deriveUsageStatusFromSnapshot(). Here we only report whether
+        // the account is signed in at all. Overage state stays visible through
+        // overageCredits below.
+        const usageStatus: AccountInfo['usageStatus'] = email ? 'available' : null;
 
         let overageCredits: AccountInfo['overageCredits'] = null;
         const orgId = oa?.organizationUuid;
