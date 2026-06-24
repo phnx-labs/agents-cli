@@ -15,6 +15,7 @@ import { execFileSync } from 'child_process';
 import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec } from './types.js';
 import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir } from './state.js';
 import { IS_WINDOWS, isWindowsAbsolutePath, homeDir } from './platform/index.js';
+import { assertSafeGitTransport } from './git.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
 import { AGENTS, agentConfigDirName } from './agents.js';
 import { capableAgents, isCapable } from './capabilities.js';
@@ -1205,11 +1206,13 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
     }
     fs.cpSync(resolvedSource, targetRoot, { recursive: true });
   } else {
-    // Git clone
+    // Git clone. Validate the transport (blocks ext::/file:///http:///leading-"-")
+    // and pass "--" so the source can never be parsed as a git option.
+    assertSafeGitTransport(resolvedSource);
     if (fs.existsSync(targetRoot)) {
       fs.rmSync(targetRoot, { recursive: true, force: true });
     }
-    execFileSync('git', ['clone', '--depth', '1', resolvedSource, targetRoot], {
+    execFileSync('git', ['clone', '--depth', '1', '--', resolvedSource, targetRoot], {
       stdio: 'pipe',
     });
   }

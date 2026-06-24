@@ -640,7 +640,7 @@ describe('installPlugin validation', () => {
     'evil; rm -rf /tmp/SHOULD_NOT_DELETE',
     '$(touch /tmp/SHOULD_NOT_EXIST)',
     '`touch /tmp/SHOULD_NOT_EXIST`',
-  ])('passes git clone input through execFileSync argv form: %s', async (source) => {
+  ])('passes git clone input through execFileSync argv form after "--": %s', async (source) => {
     const { installPlugin } = await import('./plugins.js');
 
     await expect(installPlugin(`safe@${source}`)).rejects.toThrow('Installed source has no valid .claude-plugin/plugin.json');
@@ -648,9 +648,23 @@ describe('installPlugin validation', () => {
     expect(execFileSyncMock).toHaveBeenCalledOnce();
     const [bin, args, opts] = execFileSyncMock.mock.calls[0];
     expect(bin).toBe('git');
-    expect(args.slice(0, 4)).toEqual(['clone', '--depth', '1', source]);
-    expect(args[4]).toMatch(/\/safe$/);
+    // "--" separates options from operands so the source can never be parsed
+    // as a git flag; the metacharacters above are inert in argv form.
+    expect(args.slice(0, 4)).toEqual(['clone', '--depth', '1', '--']);
+    expect(args[4]).toBe(source);
+    expect(args[5]).toMatch(/\/safe$/);
     expect(opts).toEqual({ stdio: 'pipe' });
+  });
+
+  it.each([
+    'ext::sh -c id',
+    '-oProxyCommand=evil',
+    'http://example.com/repo.git',
+  ])('rejects unsafe git transport before cloning: %s', async (source) => {
+    const { installPlugin } = await import('./plugins.js');
+
+    await expect(installPlugin(`safe@${source}`)).rejects.toThrow(/Refusing to use git source/);
+    expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 
   it('rejects path-traversal plugin names before copying a local source', async () => {

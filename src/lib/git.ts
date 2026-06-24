@@ -13,15 +13,88 @@ import { getPackageLocalPath } from './state.js';
 import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 
 /**
+ * Validate that a clone/pull source uses a safe git transport before it is
+ * handed to `git`.
+ *
+ * Git's remote-helper transports (`ext::`, `fd::`, …) execute arbitrary
+ * commands at clone time, `file://`/`git://` are unauthenticated, and a source
+ * beginning with `-` is parsed by `git` as a command-line flag (option
+ * injection). We therefore allow only:
+ *   - `https://`                         (encrypted + authenticated)
+ *   - `ssh://` and SCP-style `git@host:path` / `host:path`
+ *   - local filesystem paths (callers handle these before reaching `git clone`)
+ *
+ * Pure string inspection — no filesystem or platform calls — so it behaves
+ * identically on Linux, macOS, and Windows.
+ *
+ * @throws Error if the source uses a disallowed transport.
+ */
+export function assertSafeGitTransport(source: string): void {
+  const s = source.trim();
+
+  // A leading dash is interpreted by git as an option, not a source.
+  if (s.startsWith('-')) {
+    throw new Error(
+      `Refusing to use git source "${source}": a source starting with "-" is interpreted as a git option.`,
+    );
+  }
+
+  // Remote-helper transports look like "<name>::…" (ext::, fd::, …). SCP-style
+  // "git@host:path" uses a single ":" and is intentionally not matched here.
+  const helper = s.match(/^[a-zA-Z][a-zA-Z0-9+.-]*::/);
+  if (helper) {
+    throw new Error(
+      `Refusing to use git source "${source}": git remote-helper transports (ext::, fd::, …) are not allowed.`,
+    );
+  }
+
+  // Explicit "<scheme>://" URLs: permit only https and ssh.
+  const scheme = s.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
+  if (scheme) {
+    const name = scheme[1].toLowerCase();
+    if (name !== 'https' && name !== 'ssh') {
+      throw new Error(
+        `Refusing to use git source "${source}": "${name}://" is not an allowed transport (use https:// or ssh://).`,
+      );
+    }
+  }
+  // No scheme -> SCP-style SSH ("git@host:path") or a local path; both safe.
+}
+
+/**
+ * Whether installing a cloned/pulled repo's `.githooks/` is enabled.
+ *
+ * Installing hooks wires those scripts into `.git/hooks/`, so `git` EXECUTES
+ * them on the next commit/checkout/merge. A repo added via `agents repo add
+ * <source>` is untrusted, so auto-installing its hooks is remote code
+ * execution. We require explicit opt-in via `AGENTS_ENABLE_GITHOOKS=1`.
+ */
+function githooksEnabled(): boolean {
+  const v = process.env.AGENTS_ENABLE_GITHOOKS;
+  return v === '1' || v === 'true';
+}
+
+/**
  * Install hooks from `.githooks/` by symlinking each entry into `.git/hooks/`.
  *
- * Why: `git config core.hooksPath` is a known sandbox-escape vector and is
- * blocked by some sandboxed environments (e.g. Claude Code). Symlinks inside
- * `.git/hooks/` sidestep that restriction entirely -- Git runs them the same way.
+ * Gated behind `AGENTS_ENABLE_GITHOOKS=1` (see {@link githooksEnabled}) because
+ * the hooks run code on git operations and the source repo may be untrusted.
+ *
+ * Why symlinks rather than `git config core.hooksPath`: `core.hooksPath` is a
+ * known sandbox-escape vector and is blocked by some sandboxed environments
+ * (e.g. Claude Code). Symlinks inside `.git/hooks/` run the same way.
  */
 function installGithooksSymlinks(repoDir: string): void {
   const githooksDir = path.join(repoDir, '.githooks');
   if (!fs.existsSync(githooksDir)) return;
+
+  if (!githooksEnabled()) {
+    console.error(
+      `Skipped installing git hooks from ${githooksDir} (they run code on git operations).\n` +
+        `  Set AGENTS_ENABLE_GITHOOKS=1 to enable hooks for repos you trust.`,
+    );
+    return;
+  }
 
   const hooksDir = path.join(repoDir, '.git', 'hooks');
   fs.mkdirSync(hooksDir, { recursive: true });
@@ -137,7 +210,9 @@ export function parseSource(source: string): GitSource {
       };
     }
 
-    // Generic URL
+    // Generic URL -- must be an encrypted, authenticated transport
+    // (rejects http://, file://, git://, ext::, and leading "-").
+    assertSafeGitTransport(cleanSource);
     return {
       type: 'url',
       url: cleanSource.endsWith('.git') ? cleanSource : `${cleanSource}.git`,
@@ -214,6 +289,7 @@ export async function cloneOrPull(
     return { isNew: false, commit: log.latest?.hash.slice(0, 8) || 'unknown' };
   }
 
+  assertSafeGitTransport(source.url);
   fs.mkdirSync(targetDir, { recursive: true });
   await git.clone(source.url, targetDir);
 
@@ -426,6 +502,7 @@ export async function cloneIntoExisting(
   const tempDir = path.join(targetDir, '.git-clone-temp');
 
   try {
+    assertSafeGitTransport(parsed.url);
     // Clone to temp directory
     fs.mkdirSync(tempDir, { recursive: true });
     await git.clone(parsed.url, tempDir);
