@@ -47,6 +47,7 @@ interface SessionFilterOptions {
 
 interface SessionsOptions extends SessionFilterOptions {
   limit?: string;
+  sort?: string;
   json?: boolean;
   markdown?: boolean;
   noRedact?: boolean;
@@ -472,6 +473,10 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     // Without this, a dev dir with heavy SDK spawn activity (Task subagents,
     // `agents run`, team agents) can fill the top-N window entirely with
     // hidden rows and make real CLI sessions appear to vanish.
+    // 'recent' is the user-facing alias for the default timestamp sort.
+    const sortBy: DiscoverOptions['sortBy'] =
+      options.sort === 'cost' ? 'cost' : options.sort === 'duration' ? 'duration' : 'timestamp';
+
     const scope: DiscoverOptions = {
       agent,
       version,
@@ -481,6 +486,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       project: options.project,
       since,
       until: options.until,
+      sortBy,
     };
 
     let sessions = await discoverSessions({
@@ -1271,6 +1277,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
     .option('--until <time>', 'Only sessions older than this (ISO timestamp)')
     .option('-n, --limit <n>', 'Maximum number of sessions to return', '50')
+    .option('--sort <field>', 'Sort the list by: recent (default), cost, or duration')
     .option('--markdown', 'Render the session as markdown (user, assistant, thinking, tool calls)')
     .option('--no-redact', 'Disable default secret redaction in markdown session output')
     .option('--json', 'Output JSON (session list when browsing, event array when rendering one session)')

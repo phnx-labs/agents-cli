@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -58,6 +58,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   label TEXT,
   message_count INTEGER,
   token_count INTEGER,
+  cost_usd REAL,
+  duration_ms INTEGER,
   file_path TEXT NOT NULL,
   file_mtime_ms INTEGER,
   file_size INTEGER,
@@ -110,6 +112,8 @@ export interface SessionRow {
   label: string | null;
   message_count: number | null;
   token_count: number | null;
+  cost_usd: number | null;
+  duration_ms: number | null;
   file_path: string;
   file_mtime_ms: number | null;
   file_size: number | null;
@@ -139,6 +143,12 @@ export interface QueryOptions {
   excludeTeamOrigin?: boolean;
   /** Keep only team-origin rows (for hidden-count queries). */
   onlyTeamOrigin?: boolean;
+  /**
+   * Column to order by, all descending. 'timestamp' (default) sorts newest
+   * first; 'cost' and 'duration' put the priciest / longest sessions on top,
+   * with NULLs sorted last so unpriced rows never crowd out real data.
+   */
+  sortBy?: 'timestamp' | 'cost' | 'duration';
 }
 
 let dbInstance: Database.Database | null = null;
@@ -192,6 +202,19 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // path, so symlink/version-relative aliases for the same physical file
     // collapse to one row. Old aliased rows are dropped — next scan will
     // repopulate under canonical keys.
+    db.exec(`DELETE FROM scan_ledger;`);
+  }
+  if (fromVersion < 6) {
+    // v5 → v6: cost ($) and wall-clock duration are now computed at scan time
+    // from raw per-model token usage. Add the columns and force a full rescan
+    // so every existing session gets its cost_usd / duration_ms populated.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'cost_usd')) {
+      db.exec(`ALTER TABLE sessions ADD COLUMN cost_usd REAL`);
+    }
+    if (!cols.some(c => c.name === 'duration_ms')) {
+      db.exec(`ALTER TABLE sessions ADD COLUMN duration_ms INTEGER`);
+    }
     db.exec(`DELETE FROM scan_ledger;`);
   }
 }
@@ -414,10 +437,12 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, version, account, timestamp,
     project, cwd, git_branch, topic, label, message_count, token_count,
+    cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin
   ) VALUES (
     @id, @short_id, @agent, @version, @account, @timestamp,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
+    @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin
   )
   ON CONFLICT(id) DO UPDATE SET
@@ -433,6 +458,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     label = excluded.label,
     message_count = excluded.message_count,
     token_count = excluded.token_count,
+    cost_usd = excluded.cost_usd,
+    duration_ms = excluded.duration_ms,
     file_path = excluded.file_path,
     file_mtime_ms = excluded.file_mtime_ms,
     file_size = excluded.file_size,
@@ -483,6 +510,8 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     label: meta.label ?? null,
     message_count: meta.messageCount ?? null,
     token_count: meta.tokenCount ?? null,
+    cost_usd: meta.costUsd ?? null,
+    duration_ms: meta.durationMs ?? null,
     file_path: meta.filePath,
     file_mtime_ms: scan?.fileMtimeMs ?? null,
     file_size: scan?.fileSize ?? null,
@@ -569,6 +598,8 @@ export function upsertSessionsBatch(
         label: meta.label ?? null,
         message_count: meta.messageCount ?? null,
         token_count: meta.tokenCount ?? null,
+        cost_usd: meta.costUsd ?? null,
+        duration_ms: meta.durationMs ?? null,
         file_path: meta.filePath,
         file_mtime_ms: scan?.fileMtimeMs ?? null,
         file_size: scan?.fileSize ?? null,
@@ -644,6 +675,8 @@ function rowToMeta(row: SessionRow): SessionMeta {
     gitBranch: row.git_branch ?? undefined,
     messageCount: row.message_count ?? undefined,
     tokenCount: row.token_count ?? undefined,
+    costUsd: row.cost_usd ?? undefined,
+    durationMs: row.duration_ms ?? undefined,
     version: row.version ?? undefined,
     account: row.account ?? undefined,
     topic: row.topic ?? undefined,
@@ -717,7 +750,15 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const limitClause = options.limit
     ? `LIMIT ${Math.max(1, Math.floor(options.limit)) + 16}`
     : '';
-  const sql = `SELECT * FROM sessions ${clause} ORDER BY timestamp DESC ${limitClause}`;
+  // NULLs last so unpriced / duration-less rows never crowd out real data when
+  // sorting by cost or duration. timestamp is never null (NOT NULL column).
+  const orderClause =
+    options.sortBy === 'cost'
+      ? 'ORDER BY cost_usd IS NULL, cost_usd DESC, timestamp DESC'
+      : options.sortBy === 'duration'
+        ? 'ORDER BY duration_ms IS NULL, duration_ms DESC, timestamp DESC'
+        : 'ORDER BY timestamp DESC';
+  const sql = `SELECT * FROM sessions ${clause} ${orderClause} ${limitClause}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
   // Belt-and-suspenders: drop rows whose JSONL no longer exists on disk. The
   // authoritative fix is to keep file_path in sync (see updateSessionFilePaths
@@ -737,6 +778,85 @@ export function countSessions(options: QueryOptions = {}): number {
   const sql = `SELECT COUNT(*) AS n FROM sessions ${clause}`;
   const row = db.prepare(sql).get(...params) as { n: number } | undefined;
   return row ? row.n : 0;
+}
+
+/** One grouped row in a cost/duration rollup. */
+export interface UsageRollupRow {
+  /** Grouping key value: the agent id, project name, or ISO date (YYYY-MM-DD). */
+  key: string;
+  costUsd: number;
+  durationMs: number;
+  sessionCount: number;
+  tokenCount: number;
+}
+
+/** What to group a usage rollup by. */
+export type UsageRollupGroup = 'agent' | 'project' | 'day';
+
+/**
+ * Aggregate cost / duration / tokens across sessions, grouped by agent,
+ * project, or calendar day. Honors the same filter shape as querySessions
+ * (agent, since/until, team-origin) so `agents cost --since 7d --by day`
+ * lines up with what `agents sessions` would list. Ordered by cost desc.
+ */
+export function queryUsageRollup(
+  options: QueryOptions & { groupBy: UsageRollupGroup },
+): UsageRollupRow[] {
+  const db = getDB();
+  const { clause, params } = buildSessionWhere(options);
+  const keyExpr =
+    options.groupBy === 'agent'
+      ? 'agent'
+      : options.groupBy === 'project'
+        ? `IFNULL(NULLIF(project, ''), '(no project)')`
+        // ISO timestamps are lexicographically date-sortable; the date is the
+        // first 10 chars (YYYY-MM-DD).
+        : `substr(timestamp, 1, 10)`;
+
+  const sql = `
+    SELECT
+      ${keyExpr} AS key,
+      IFNULL(SUM(cost_usd), 0) AS costUsd,
+      IFNULL(SUM(duration_ms), 0) AS durationMs,
+      COUNT(*) AS sessionCount,
+      IFNULL(SUM(token_count), 0) AS tokenCount
+    FROM sessions
+    ${clause}
+    GROUP BY key
+    ORDER BY costUsd DESC, key ASC
+  `;
+  return db.prepare(sql).all(...params) as UsageRollupRow[];
+}
+
+/** A session with its cost, for the top-N-by-cost listing. */
+export interface TopCostSession {
+  meta: SessionMeta;
+  costUsd: number;
+  durationMs: number;
+}
+
+/**
+ * Return the N most expensive sessions (cost_usd DESC, NULLs excluded),
+ * honoring the same filter shape as querySessions. Drops rows whose JSONL
+ * vanished, mirroring querySessions' liveness filter.
+ */
+export function topSessionsByCost(
+  n: number,
+  options: QueryOptions = {},
+): TopCostSession[] {
+  const db = getDB();
+  const { clause, params } = buildSessionWhere(options);
+  const whereCost = clause ? `${clause} AND cost_usd IS NOT NULL` : 'WHERE cost_usd IS NOT NULL';
+  const limit = Math.max(1, Math.floor(n));
+  // Over-fetch a small buffer to survive the on-disk liveness filter below.
+  const sql = `SELECT * FROM sessions ${whereCost} ORDER BY cost_usd DESC, timestamp DESC LIMIT ${limit + 16}`;
+  const rows = db.prepare(sql).all(...params) as SessionRow[];
+  const live = rows.filter(r => !r.file_path || fs.existsSync(r.file_path));
+  return live.slice(0, limit).map(r => ({
+    meta: rowToMeta(r),
+    costUsd: r.cost_usd ?? 0,
+    durationMs: r.duration_ms ?? 0,
+  }));
 }
 
 /** Return the set of all file paths currently tracked in the sessions table. */

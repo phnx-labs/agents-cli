@@ -63,6 +63,8 @@ active sessions get refreshed each call because their mtime keeps advancing.
   "label": null,
   "messageCount": 9,
   "tokenCount": 537397,
+  "costUsd": 2.81,
+  "durationMs": 742000,
   "isTeamOrigin": false,
   "filePath": "/Users/you/.claude/projects/-Users-.../c07ec355-....jsonl"
 }
@@ -82,6 +84,8 @@ Fields:
 | `topic` | First user prompt (truncated) | Best headline for a session |
 | `label` | User-set name | Claude's `/rename` command only |
 | `tokenCount` | Parsed from usage events | `null` for agents that don't log it |
+| `costUsd` | Σ tokens × per-model price, at scan time | `null` when the model is unknown/unpriced; see `agents cost` |
+| `durationMs` | `lastTs − firstTs` over timestamped events | `null` for single-event sessions |
 | `isTeamOrigin` | Set when spawned by `agents teams` | JSONL `entrypoint: 'sdk-cli'` |
 
 ## SessionEvent (detail output)
@@ -132,6 +136,10 @@ agents sessions "auth refactor"
 # Include team-spawned sessions (hidden by default)
 agents sessions --teams
 
+# Sort the list by cost or duration (default: recent)
+agents sessions --sort cost --limit 10
+agents sessions --sort duration --all
+
 # Replay one session as markdown
 agents sessions c07ec355 --markdown
 
@@ -163,8 +171,10 @@ content 1.0   # everything else
 
 ## Schema Version
 
-Schema version is currently `4`. Migrations run on connection open; old DBs
-get upgraded in place. The `meta` table tracks `schema_version`.
+Schema version is currently `6`. Migrations run on connection open; old DBs
+get upgraded in place. The `meta` table tracks `schema_version`. The `v5 → v6`
+migration adds the `cost_usd` and `duration_ms` columns and forces a full
+rescan so every existing session is re-priced.
 
 ## Related
 

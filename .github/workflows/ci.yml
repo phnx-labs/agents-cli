@@ -37,37 +37,18 @@ jobs:
       - name: Test
         run: bun run test
 
-  publish:
-    needs: build
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # required for `npm publish --provenance`
-
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-
-      - name: Use Node.js 24
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build
-        run: bun run build
-
-      - name: Test
-        run: bun run test
-
-      - name: Publish to npm
-        run: |
-          npm run prepack
-          npm publish --provenance --access=public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  # No CI publish job — publishing happens locally on macOS via
+  # `scripts/release.sh <version> --apply`.
+  #
+  # The npm package bundles `dist/lib/secrets/Agents CLI.app` (package.json
+  # `files`), a native macOS keychain helper that must be compiled with swiftc,
+  # codesigned with the "Developer ID Application" identity, and notarized via
+  # `xcrun notarytool` (see scripts/build-keychain-helper.sh). `prepack`
+  # (scripts/verify-keychain-helper.sh) refuses to pack unless that signed
+  # binary matches the pinned sha in scripts/Agents CLI.app.sha256.
+  #
+  # GitHub-hosted and the phnx-labs self-hosted runners are Linux — they have no
+  # swiftc/codesign/notarytool and cannot produce the helper, so a CI publish
+  # would either fail at prepack or ship a macOS-broken tarball. Releasing stays
+  # on a macOS machine that holds the signed helper and the npm token. The build
+  # job above still runs on tag pushes as a sanity check.

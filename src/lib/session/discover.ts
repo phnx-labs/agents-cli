@@ -24,6 +24,7 @@ import { walkForFiles } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { extractSessionTopic } from './prompt.js';
+import { costOfUsage } from '../pricing/index.js';
 import {
   getDB,
   getScanStampByPath,
@@ -74,6 +75,8 @@ export interface DiscoverOptions {
   excludeTeamOrigin?: boolean;
   /** Keep only team-spawned sessions (used for hidden-count queries). */
   onlyTeamOrigin?: boolean;
+  /** Column to order results by (all descending): 'timestamp' (default), 'cost', or 'duration'. */
+  sortBy?: 'timestamp' | 'cost' | 'duration';
   /** Called as each agent makes parsing progress. Totals count only files that need re-parsing (cache misses). */
   onProgress?: (progress: ScanProgress) => void;
 }
@@ -94,6 +97,10 @@ interface ClaudeSessionScan {
   topic?: string;
   messageCount: number;
   tokenCount?: number;
+  /** Total USD cost accumulated from per-(model, direction) token usage. */
+  costUsd?: number;
+  /** Wall-clock duration in ms between the first and last timestamped event. */
+  durationMs?: number;
   /**
    * Value of the JSONL `entrypoint` field on the first event that carries it.
    * 'cli' for real interactive sessions, 'sdk-cli' for team-spawned ones.
@@ -113,6 +120,8 @@ interface CodexSessionScan {
   topic?: string;
   messageCount: number;
   tokenCount?: number;
+  costUsd?: number;
+  durationMs?: number;
   contentText?: string;
 }
 
@@ -209,6 +218,7 @@ function buildQueryOptions(
     limit: opts.includeLimit ? (options?.limit ?? 50) : undefined,
     excludeTeamOrigin: options?.excludeTeamOrigin,
     onlyTeamOrigin: options?.onlyTeamOrigin,
+    sortBy: options?.sortBy,
   };
 }
 
@@ -528,6 +538,8 @@ async function readClaudeMeta(
       label,
       messageCount: scan.messageCount,
       tokenCount: scan.tokenCount,
+      costUsd: scan.costUsd,
+      durationMs: scan.durationMs,
       isTeamOrigin,
     };
   } else {
@@ -542,6 +554,8 @@ async function readClaudeMeta(
       label,
       messageCount: scan.messageCount,
       tokenCount: scan.tokenCount,
+      costUsd: scan.costUsd,
+      durationMs: scan.durationMs,
       topic: scan.topic,
       isTeamOrigin,
     };
@@ -666,6 +680,8 @@ async function readCodexMeta(
     topic: scan.topic,
     messageCount: scan.messageCount,
     tokenCount: scan.tokenCount,
+    costUsd: scan.costUsd,
+    durationMs: scan.durationMs,
     account,
   };
   return { meta, content: scan.contentText || '' };
@@ -791,10 +807,15 @@ function readGeminiMeta(
   const stat = safeStatSync(filePath);
 
   const messages = Array.isArray(session.messages) ? session.messages : [];
+  const sessionModel = typeof session.model === 'string' ? session.model : undefined;
   let topic: string | undefined;
   let messageCount = 0;
   let tokenCount = 0;
   let sawTokenCount = false;
+  let costUsd = 0;
+  let sawCost = false;
+  let firstTsMs: number | undefined;
+  let lastTsMs: number | undefined;
   const userTexts: string[] = [];
 
   for (const message of messages) {
@@ -811,12 +832,46 @@ function readGeminiMeta(
       }
     }
 
+    // Duration: messages carry a `timestamp` on most Gemini CLI versions.
+    const tsRaw = message.timestamp ?? message.time;
+    if (typeof tsRaw === 'string' || typeof tsRaw === 'number') {
+      const ms = new Date(tsRaw).getTime();
+      if (!Number.isNaN(ms)) {
+        if (firstTsMs === undefined || ms < firstTsMs) firstTsMs = ms;
+        if (lastTsMs === undefined || ms > lastTsMs) lastTsMs = ms;
+      }
+    }
+
     const total = getGeminiTokenCount(message.tokens);
     if (total !== null) {
       tokenCount += total;
       sawTokenCount = true;
     }
+
+    // Per-message cost: directional tokens × this message's model price.
+    const msgModel = (typeof message.model === 'string' ? message.model : undefined) || sessionModel;
+    const tk = message.tokens;
+    if (msgModel && tk && typeof tk === 'object') {
+      const c = costOfUsage({
+        model: msgModel,
+        inputTokens: typeof tk.input === 'number' ? tk.input : undefined,
+        outputTokens:
+          (typeof tk.output === 'number' ? tk.output : 0) +
+          (typeof tk.thoughts === 'number' ? tk.thoughts : 0) +
+          (typeof tk.tool === 'number' ? tk.tool : 0),
+        cacheReadTokens: typeof tk.cached === 'number' ? tk.cached : undefined,
+      });
+      if (c > 0) {
+        costUsd += c;
+        sawCost = true;
+      }
+    }
   }
+
+  const durationMs =
+    firstTsMs !== undefined && lastTsMs !== undefined && lastTsMs > firstTsMs
+      ? lastTsMs - firstTsMs
+      : undefined;
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -830,6 +885,8 @@ function readGeminiMeta(
     topic,
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
+    costUsd: sawCost ? costUsd : undefined,
+    durationMs,
   };
   return { meta, content: userTexts.join('\n') };
 }
@@ -1403,6 +1460,11 @@ async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
   let messageCount = 0;
   let tokenCount = 0;
   let sawTokenCount = false;
+  let costUsd = 0;
+  let sawCost = false;
+  // Track the first and last timestamped event to derive wall-clock duration.
+  let firstTsMs: number | undefined;
+  let lastTsMs: number | undefined;
   const seenAssistantIds = new Set<string>();
   const userTexts: string[] = [];
 
@@ -1421,6 +1483,15 @@ async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
       // and is the clean structural signal for "was this a team spawn?"
       if (!entrypoint && typeof parsed.entrypoint === 'string') {
         entrypoint = parsed.entrypoint;
+      }
+
+      // Track duration across every timestamped event, not just the first.
+      if (typeof parsed.timestamp === 'string') {
+        const ms = new Date(parsed.timestamp).getTime();
+        if (!Number.isNaN(ms)) {
+          if (firstTsMs === undefined || ms < firstTsMs) firstTsMs = ms;
+          if (lastTsMs === undefined || ms > lastTsMs) lastTsMs = ms;
+        }
       }
 
       if (!timestamp && (parsed.type === 'user' || parsed.type === 'assistant') && parsed.timestamp) {
@@ -1453,16 +1524,38 @@ async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
       seenAssistantIds.add(logicalId);
       messageCount++;
 
-      const usage = getClaudeUsageTotal(parsed.message?.usage || parsed.usage);
+      const usageObj = parsed.message?.usage || parsed.usage;
+      const usage = getClaudeUsageTotal(usageObj);
       if (usage !== null) {
         tokenCount += usage;
         sawTokenCount = true;
+      }
+      // Per-assistant-message cost: each event carries its own model, so we
+      // multiply that event's raw token directions by that model's price.
+      const model = parsed.message?.model;
+      if (model && usageObj && typeof usageObj === 'object') {
+        const eventCost = costOfUsage({
+          model,
+          inputTokens: usageObj.input_tokens,
+          outputTokens: usageObj.output_tokens,
+          cacheReadTokens: usageObj.cache_read_input_tokens,
+          cacheCreationTokens: usageObj.cache_creation_input_tokens,
+        });
+        if (eventCost > 0) {
+          costUsd += eventCost;
+          sawCost = true;
+        }
       }
     }
   } finally {
     rl.close();
     stream.destroy();
   }
+
+  const durationMs =
+    firstTsMs !== undefined && lastTsMs !== undefined && lastTsMs > firstTsMs
+      ? lastTsMs - firstTsMs
+      : undefined;
 
   return {
     timestamp,
@@ -1473,6 +1566,8 @@ async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
     entrypoint,
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
+    costUsd: sawCost ? costUsd : undefined,
+    durationMs,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
   };
 }
@@ -1490,6 +1585,10 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
   let topic: string | undefined;
   let messageCount = 0;
   let tokenCount: number | undefined;
+  let model: string | undefined;
+  let lastTotalTokenUsage: any;
+  let firstTsMs: number | undefined;
+  let lastTsMs: number | undefined;
   const userTexts: string[] = [];
 
   try {
@@ -1503,6 +1602,15 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
         continue;
       }
 
+      // Track duration across every timestamped event.
+      if (typeof parsed.timestamp === 'string') {
+        const ms = new Date(parsed.timestamp).getTime();
+        if (!Number.isNaN(ms)) {
+          if (firstTsMs === undefined || ms < firstTsMs) firstTsMs = ms;
+          if (lastTsMs === undefined || ms > lastTsMs) lastTsMs = ms;
+        }
+      }
+
       if (parsed.type === 'session_meta') {
         const payload = parsed.payload || {};
         sessionId = payload.id || sessionId;
@@ -1510,6 +1618,7 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
         cwd = payload.cwd || cwd;
         gitBranch = payload.git?.branch || gitBranch;
         version = payload.cli_version || payload.version || version;
+        model = payload.model || model;
         continue;
       }
 
@@ -1528,14 +1637,38 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
       }
 
       if (parsed.type === 'event_msg' && parsed.payload?.type === 'token_count') {
-        const total = getCodexTokenCount(parsed.payload.info?.total_token_usage);
+        const totalUsage = parsed.payload.info?.total_token_usage;
+        const total = getCodexTokenCount(totalUsage);
         if (total !== null) tokenCount = total;
+        // token_count is cumulative — keep the latest snapshot and price it once
+        // after the stream, so we don't double-count across intermediate events.
+        if (totalUsage && typeof totalUsage === 'object') lastTotalTokenUsage = totalUsage;
+        // Codex also stamps the model on the rate_limits/token_count payload on
+        // some versions; prefer session_meta but fall back to it.
+        if (!model && typeof parsed.payload.info?.model === 'string') model = parsed.payload.info.model;
       }
     }
   } finally {
     rl.close();
     stream.destroy();
   }
+
+  // Price the final cumulative token snapshot once, against the session model.
+  let costUsd: number | undefined;
+  if (model && lastTotalTokenUsage) {
+    const c = costOfUsage({
+      model,
+      inputTokens: lastTotalTokenUsage.input_tokens,
+      outputTokens: (lastTotalTokenUsage.output_tokens ?? 0) + (lastTotalTokenUsage.reasoning_output_tokens ?? 0),
+      cacheReadTokens: lastTotalTokenUsage.cached_input_tokens,
+    });
+    if (c > 0) costUsd = c;
+  }
+
+  const durationMs =
+    firstTsMs !== undefined && lastTsMs !== undefined && lastTsMs > firstTsMs
+      ? lastTsMs - firstTsMs
+      : undefined;
 
   return {
     sessionId,
@@ -1546,6 +1679,8 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
     topic,
     messageCount,
     tokenCount,
+    costUsd,
+    durationMs,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
   };
 }

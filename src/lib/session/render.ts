@@ -249,7 +249,7 @@ function formatTokenCount(n: number): string {
 }
 
 /** Format a duration in milliseconds as a human-readable string (e.g. '12 min', '2h 30min'). */
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   const totalMin = Math.round(ms / 60_000);
   if (totalMin < 1) return 'under 1 min';
   if (totalMin < 60) return `${totalMin} min`;
