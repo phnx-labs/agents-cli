@@ -12,6 +12,7 @@ import {
   discoverPluginCommands,
   discoverPluginAgentDefs,
   discoverPluginBin,
+  discoverPluginHooks,
   expandPluginVars,
   loadUserConfig,
   saveUserConfig,
@@ -341,6 +342,47 @@ describe('discoverPluginAgentDefs', () => {
 
     const defs = discoverPluginAgentDefs(tmpDir);
     expect(defs).toEqual(['reviewer']);
+  });
+});
+
+// ─── discoverPluginHooks ──────────────────────────────────────────────────────
+
+describe('discoverPluginHooks', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns empty array when hooks/hooks.json does not exist', () => {
+    expect(discoverPluginHooks(tmpDir)).toEqual([]);
+  });
+
+  it('reads the event names from the official `hooks`-wrapped format', () => {
+    const hooksDir = path.join(tmpDir, 'hooks');
+    fs.mkdirSync(hooksDir);
+    fs.writeFileSync(path.join(hooksDir, 'hooks.json'), JSON.stringify({
+      description: 'Memory plugin',
+      hooks: {
+        SessionStart: [{ hooks: [{ type: 'command', command: 'node x.js' }] }],
+        PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'node y.js' }] }],
+      },
+    }));
+    // The events are surfaced — NOT the top-level `description` / `hooks` keys.
+    expect(discoverPluginHooks(tmpDir)).toEqual(['SessionStart', 'PreToolUse']);
+  });
+
+  it('reads top-level keys for the flat (unwrapped) format', () => {
+    const hooksDir = path.join(tmpDir, 'hooks');
+    fs.mkdirSync(hooksDir);
+    fs.writeFileSync(path.join(hooksDir, 'hooks.json'), JSON.stringify({
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'guard.sh' }] }],
+    }));
+    expect(discoverPluginHooks(tmpDir)).toEqual(['PreToolUse']);
   });
 });
 

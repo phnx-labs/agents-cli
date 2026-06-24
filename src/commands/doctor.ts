@@ -33,7 +33,7 @@ import {
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { diffVersionCommands, iterCommandsCapableVersions } from '../lib/commands.js';
 import { diffVersionSkills, iterSkillsCapableVersions } from '../lib/skills.js';
-import { diffVersionHooks, iterHooksCapableVersions } from '../lib/hooks.js';
+import { iterHooksCapableVersions, listUnmanagedHooksInVersionHome } from '../lib/hooks.js';
 import {
   diffVersionResources,
   DOCTOR_ALL_KINDS,
@@ -42,6 +42,7 @@ import {
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
+import { listCliStatus } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import * as fs from 'fs';
 
@@ -111,10 +112,14 @@ function countOrphans(): OrphanRow[] {
     const diff = diffVersionSkills(agent, version);
     if (diff.orphans.length > 0) ensure(agent, version).skills = diff.orphans.length;
   }
+  // Orphan hooks are scripts in the version home that no agents.yaml/hooks.yaml
+  // entry registers — so the registrar never wires them to an event and they
+  // never fire. (Distinct from the source-diff `diffVersionHooks().orphans`,
+  // which false-flags valid system-sourced registered hooks.)
   for (const { agent, version } of iterHooksCapableVersions()) {
     if (version !== getGlobalDefault(agent)) continue;
-    const diff = diffVersionHooks(agent, version);
-    if (diff.orphans.length > 0) ensure(agent, version).hooks = diff.orphans.length;
+    const dead = listUnmanagedHooksInVersionHome(agent, version);
+    if (dead.length > 0) ensure(agent, version).hooks = dead.length;
   }
 
   return Array.from(byKey.values()).filter((r) => r.commands + r.skills + r.hooks > 0);
@@ -124,6 +129,7 @@ function renderOverviewText(
   clis: ReturnType<typeof checkAllClis>,
   syncRows: SyncStatusRow[],
   orphanRows: OrphanRow[],
+  hostClis: ReturnType<typeof listCliStatus>,
 ): void {
   console.log(chalk.bold('Agent CLIs'));
   if (Object.keys(clis).length === 0) {
@@ -170,6 +176,30 @@ function renderOverviewText(
       console.log(`  ${chalk.yellow('warn ')}  ${label}  ${chalk.gray(parts.join(', '))}`);
     }
     console.log(chalk.gray('  Run `agents prune cleanup` to remove.'));
+  }
+  console.log();
+
+  // Host CLIs are host-global (declared in any DotAgents repo's cli/, installed
+  // to PATH — not synced into version homes), so they live in the overview, not
+  // the per-version resource diff. Source tag shows which repo layer declared
+  // each, including user-level and extra repos.
+  console.log(chalk.bold('Host CLIs'));
+  if (hostClis.statuses.length === 0) {
+    console.log(chalk.gray('  (none declared — add one with `agents cli add <name>`)'));
+  } else {
+    const nameWidth = Math.max(...hostClis.statuses.map((s) => s.manifest.name.length));
+    for (const { manifest, installed } of hostClis.statuses) {
+      const label = manifest.name.padEnd(nameWidth);
+      const src = chalk.gray(`[${manifest.source}]`);
+      if (installed) {
+        console.log(`  ${chalk.green('ready')}  ${label}  ${src}  ${chalk.gray(manifest.description || '')}`);
+      } else {
+        console.log(`  ${chalk.red('miss ')}  ${label}  ${src}  ${chalk.gray(`not installed — run \`agents cli install ${manifest.name}\``)}`);
+      }
+    }
+  }
+  for (const err of hostClis.errors) {
+    console.log(`  ${chalk.red('err  ')}  ${chalk.gray(err.file)}: ${chalk.gray(err.reason)}`);
   }
 }
 
@@ -408,11 +438,25 @@ export function registerDoctorCommand(program: Command): void {
         const clis = checkAllClis();
         const syncRows = checkSyncStatus(cwd);
         const orphanRows = countOrphans();
+        const hostClis = listCliStatus(cwd);
         if (opts.json) {
-          console.log(JSON.stringify({ clis, sync: syncRows, orphans: orphanRows }, null, 2));
+          console.log(JSON.stringify({
+            clis,
+            sync: syncRows,
+            orphans: orphanRows,
+            hostClis: {
+              statuses: hostClis.statuses.map((s) => ({
+                name: s.manifest.name,
+                source: s.manifest.source,
+                description: s.manifest.description ?? null,
+                installed: s.installed,
+              })),
+              errors: hostClis.errors,
+            },
+          }, null, 2));
           return;
         }
-        renderOverviewText(clis, syncRows, orphanRows);
+        renderOverviewText(clis, syncRows, orphanRows, hostClis);
         return;
       }
 

@@ -807,6 +807,75 @@ export function ensureVersionResourcePatterns(
   if (changed) writeMeta(meta);
 }
 
+/**
+ * Resource types that resolve across the extra-repo layer. Mirrors
+ * `defaultPatterns()`: extras feed commands/skills/hooks/subagents/plugins/
+ * workflows, but never permissions (`system:*`) or mcp (`user:*`).
+ */
+const EXTRA_ELIGIBLE_TYPES: readonly (keyof VersionResources)[] = [
+  'commands', 'skills', 'hooks', 'subagents', 'plugins', 'workflows',
+];
+
+/**
+ * Insert `<alias>:*` at the canonical position (after the system/user/other-extra
+ * includes, before `project:*`), unless the alias is already referenced — as an
+ * include (`alias:...`) or an exclude (`!alias:...`). Returns a new array when it
+ * changes, otherwise the same reference (so callers can detect no-ops cheaply).
+ */
+export function withAlias(list: ResourcePattern[], alias: string): ResourcePattern[] {
+  const prefix = `${alias}:`;
+  if (list.some(p => p === `${alias}:*` || p.startsWith(prefix) || p.startsWith(`!${prefix}`))) {
+    return list;
+  }
+  const next = [...list];
+  const projIdx = next.findIndex(p => p === 'project:*' || p.startsWith('project:'));
+  if (projIdx >= 0) next.splice(projIdx, 0, `${alias}:*`);
+  else next.push(`${alias}:*`);
+  return next;
+}
+
+/** Strip every reference to `<alias>:...` / `!<alias>:...` from a selector list. */
+export function withoutAlias(list: ResourcePattern[], alias: string): ResourcePattern[] {
+  const prefix = `${alias}:`;
+  const next = list.filter(p => !(p.startsWith(prefix) || p.startsWith(`!${prefix}`)));
+  return next.length === list.length ? list : next;
+}
+
+/**
+ * Backfill (add=true) or strip (add=false) an extra-repo alias across every
+ * already-installed version's selectors. New versions get the alias via
+ * `defaultPatterns()` at scaffold time; this keeps existing versions in sync
+ * when an extra repo is registered/enabled or removed. Only touches selector
+ * lists that are already set — an unset list is left for `defaultPatterns()`.
+ * Returns the number of (agent, version) pairs changed.
+ */
+export function applyExtraAliasToVersions(alias: string, add: boolean): number {
+  const meta = readMeta();
+  if (!meta.versions) return 0;
+  let changed = false;
+  let count = 0;
+  for (const versions of Object.values(meta.versions)) {
+    if (!versions) continue;
+    for (const vr of Object.values(versions)) {
+      if (!vr) continue;
+      let touched = false;
+      for (const type of EXTRA_ELIGIBLE_TYPES) {
+        const cur = (vr as Record<string, ResourcePattern[] | undefined>)[type];
+        if (!Array.isArray(cur) || cur.length === 0) continue;
+        const next = add ? withAlias(cur, alias) : withoutAlias(cur, alias);
+        if (next !== cur) {
+          (vr as Record<string, ResourcePattern[]>)[type] = next;
+          touched = true;
+          changed = true;
+        }
+      }
+      if (touched) count++;
+    }
+  }
+  if (changed) writeMeta(meta);
+  return count;
+}
+
 export function getVersionResources(
   agent: AgentId,
   version: string

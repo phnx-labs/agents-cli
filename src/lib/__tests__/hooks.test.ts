@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { registerHooksToSettings } from '../hooks.js';
+import { registerHooksToSettings, unmanagedHookNames } from '../hooks.js';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
 import { compareVersions } from '../versions.js';
 import type { ManifestHook } from '../types.js';
@@ -24,6 +24,36 @@ function makeVersionHome(): string {
   fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
   return home;
 }
+
+describe('unmanagedHookNames', () => {
+  it('flags installed hooks whose name matches no manifest script basename', () => {
+    const installed = [
+      '00-agent-verify-work-complete', // system script, no manifest entry → dead
+      '02-expand-prompt-bang-commands', // dead
+      '03-linear-inject-tasks-context', // manifest-declared → registered
+      'git-guard', // manifest-declared → registered
+    ];
+    const manifestScripts = ['03-linear-inject-tasks-context.sh', 'git-guard.sh', 'rm-guard.sh'];
+    expect(unmanagedHookNames(installed, manifestScripts)).toEqual([
+      '00-agent-verify-work-complete',
+      '02-expand-prompt-bang-commands',
+    ]);
+  });
+
+  it('matches on script basename regardless of extension (.sh, .py)', () => {
+    // Manifest scripts can carry any extension; the installed name is ext-stripped.
+    expect(unmanagedHookNames(['guard'], ['guard.py'])).toEqual([]);
+    expect(unmanagedHookNames(['guard'], ['guard.sh'])).toEqual([]);
+  });
+
+  it('returns nothing when every installed hook is declared', () => {
+    expect(unmanagedHookNames(['a', 'b'], ['a.sh', 'b.sh'])).toEqual([]);
+  });
+
+  it('returns all installed hooks when the manifest is empty', () => {
+    expect(unmanagedHookNames(['a', 'b'], [])).toEqual(['a', 'b']);
+  });
+});
 
 describe('registerHooksToSettings - Codex', () => {
   beforeEach(() => {

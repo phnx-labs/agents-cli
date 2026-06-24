@@ -1,6 +1,0 @@
-{
-  "name": "agc",
-  "description": "agents-cli project plugin: skills + commands specific to this repo and its website (agents-cli.sh).",
-  "version": "0.1.0",
-  "author": "Muqsit Nawaz <muqsit@phnx-labs.com>"
-}

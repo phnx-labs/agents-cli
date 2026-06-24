@@ -27,7 +27,7 @@ import type { AgentId, VersionResources } from './types.js';
 import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset } from './state.js';
 import { defaultPatterns, expandPatterns } from './resource-patterns.js';
 import { resolveResource, listResources } from './resources.js';
-import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError } from './agents.js';
+import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath } from './agents.js';
 import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
 import { installMcpServers, parseMcpServerConfig } from './mcp.js';
 import { markdownToToml } from './convert.js';
@@ -894,6 +894,14 @@ export function getBinaryPath(agent: AgentId, version: string): string {
     } catch {}
     return path.join(grokDownloads, `grok-${version}`);
   }
+  if (agent === 'droid') {
+    // Factory's installer drops a standalone native binary at ~/.local/bin/droid
+    // (no npm package, nothing in node_modules/.bin). The binary is global, not
+    // per-version — config isolation rides the ~/.factory symlink switch, not a
+    // separate binary per version. Mirror the shim's `droid` branch so
+    // isVersionInstalled/`agents view` agree with what actually executes.
+    return path.join(os.homedir(), '.local', 'bin', 'droid');
+  }
   const versionDir = getVersionDir(agent, version);
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);
 }
@@ -1102,23 +1110,33 @@ export async function installVersion(
     // but `agents view` shows the agent under "Not Managed" because
     // listInstalledVersions returns [] — the installer drops the binary in
     // ~/.local/bin (or similar) rather than the version's node_modules/.bin.
-    // Grok is special-cased in getBinaryPath itself (binary lives in
-    // ~/.grok/downloads), so we skip the symlink there.
-    if (agent !== 'grok') {
-      try {
-        const { stdout: whichOut } = await execFileAsync(process.platform === 'win32' ? 'where' : 'which', [agentConfig.cliCommand]);
-        const installedBinary = whichOut.trim().split('\n')[0];
-        if (installedBinary && fs.existsSync(installedBinary)) {
-          importInstallScriptBinary(
-            { agentId: agent, npmPackage: agentConfig.npmPackage, cliCommand: agentConfig.cliCommand },
-            installedVersion,
-            installedBinary,
-            versionDir
-          );
-        }
-      } catch {
-        /* binary missing from PATH — install script failed silently; surface via the existing version.install error path below isn't possible here since the script returned 0. Leave the version dir empty so getBinaryPath check correctly reports it uninstalled. */
+    //
+    // Agents whose binary is special-cased in getBinaryPath (grok ->
+    // ~/.grok/downloads, droid -> ~/.local/bin/droid) need no symlink — and
+    // creating one is actively harmful: `which <cli>` can resolve to OUR OWN
+    // dispatcher shim, because ~/.agents/.cache/shims sits ahead of ~/.local/bin
+    // on PATH. Symlinking node_modules/.bin/<cli> at the shim makes the shim
+    // exec itself forever. So we skip the resolver-backed agents here AND, for
+    // everyone else, filter the shims dir out of the `which` candidates so the
+    // same race can't bite a non-special-cased installScript agent.
+    if (agent !== 'grok' && agent !== 'droid') {
+      // findInPath is a pure-Node PATH scan that already skips our own shims
+      // dir — so it returns the genuine install, never our dispatcher shim
+      // (which sits ahead of ~/.local/bin on PATH and would otherwise be
+      // captured, producing a self-referential node_modules/.bin/<cli> link
+      // that exec-loops forever).
+      const installedBinary = findInPath(agentConfig.cliCommand);
+      if (installedBinary) {
+        importInstallScriptBinary(
+          { agentId: agent, npmPackage: agentConfig.npmPackage, cliCommand: agentConfig.cliCommand },
+          installedVersion,
+          installedBinary,
+          versionDir
+        );
       }
+      /* If null: binary missing from PATH (install script failed silently) or
+         only our shim is present. Leave the version dir empty so getBinaryPath
+         correctly reports it uninstalled. */
     }
 
     createVersionedAlias(agent, installedVersion);
@@ -1160,6 +1178,8 @@ export async function installVersion(
   const packageSpec = version === 'latest'
     ? agentConfig.npmPackage
     : `${agentConfig.npmPackage}@${version}`;
+  // The `${agentConfig.npmPackage}@` prefix is load-bearing: it ensures `version`
+  // (which VERSION_RE permits to start with `-`) is never passed as a standalone npm CLI flag.
 
   try {
     // Check npm is available

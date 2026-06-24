@@ -242,6 +242,54 @@ export function copyPluginToMarketplace(
   return dest;
 }
 
+// ─── Manifest validation ─────────────────────────────────────────────────────
+
+/**
+ * Claude Code's plugin-manifest schema requires the resource path fields to be
+ * relative paths starting with "./" — `skills`/`commands`/`agents` are
+ * `union([startsWith("./"), array(startsWith("./"))])` (verified against the
+ * Claude Code binary). Bare names like "loop" fail validation and Claude rejects
+ * the ENTIRE plugin at load time, surfacing only in its `/plugin` > Errors tab.
+ *
+ * agents-cli copies plugin.json verbatim into the marketplace, so a malformed
+ * manifest ships looking fully installed while loading nothing. This catches the
+ * unambiguous type violation (non-"./" string entries) and returns one warning
+ * per offending field so the caller can surface it loudly. `hooks`/`mcpServers`
+ * are intentionally skipped — they legitimately accept inline objects, so a path
+ * check would false-positive.
+ */
+export function validateClaudePluginManifest(manifest: unknown): string[] {
+  const warnings: string[] = [];
+  if (!manifest || typeof manifest !== 'object') return warnings;
+  const m = manifest as Record<string, unknown>;
+
+  for (const field of ['skills', 'commands', 'agents'] as const) {
+    const value = m[field];
+    if (value === undefined || value === null) continue;
+
+    const entries = Array.isArray(value) ? value : [value];
+    for (const entry of entries) {
+      if (typeof entry !== 'string') {
+        warnings.push(
+          `plugin.json field "${field}" must contain relative paths starting with "./" ` +
+          `(e.g. "./${field}/<name>"); found a non-string value. Claude Code will reject the whole plugin.`
+        );
+        break;
+      }
+      if (!entry.startsWith('./')) {
+        warnings.push(
+          `plugin.json field "${field}" entry "${entry}" must be a relative path starting with "./" ` +
+          `(e.g. "./${field}/${entry}"). Claude Code rejects the entire plugin otherwise — ` +
+          `remove the field to auto-discover from ${field}/, or use relative paths.`
+        );
+        break;
+      }
+    }
+  }
+
+  return warnings;
+}
+
 // ─── Catalog synthesis ──────────────────────────────────────────────────────
 
 /**
@@ -276,6 +324,10 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
       manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
     } catch {
       continue;
+    }
+
+    for (const warning of validateClaudePluginManifest(manifest)) {
+      process.stderr.write(`agents-cli: plugin '${manifest.name ?? entry.name}': ${warning}\n`);
     }
 
     entries.push({

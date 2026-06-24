@@ -19,6 +19,7 @@ import { executeJobDetached, monitorRunningJobs } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from './overdue.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
+import { readAndResolveBundleEnv } from './secrets/bundles.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -27,6 +28,13 @@ const LOG_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
+
+// A long-lived `claude setup-token` value stored in this secrets bundle/key is
+// baked into the daemon's service-manager environment so headless routine runs
+// authenticate without depending on the short-lived interactive Keychain OAuth
+// session (which expires between runs and produces intermittent 401s).
+const DAEMON_OAUTH_BUNDLE = 'claude';
+const DAEMON_OAUTH_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
 
 function getDaemonDir(): string {
   const dir = getDaemonDirRoot();
@@ -276,10 +284,43 @@ export async function runDaemon(): Promise<void> {
   await new Promise(() => {});
 }
 
+/**
+ * Read the long-lived Claude OAuth token (from `claude setup-token`) that the
+ * user stored under the `claude` secrets bundle. Resolves the bundle the same
+ * way `agents run --secrets` does, so the token is found whether it was stored
+ * keychain-backed or as a literal. Returns null when the bundle/key isn't
+ * configured, the Keychain read is cancelled, or the platform has no keychain —
+ * the daemon then behaves exactly as before (relying on the interactive OAuth
+ * session). Never throws: a misconfigured token must not block daemon startup.
+ */
+export function readDaemonClaudeOAuthToken(): string | null {
+  try {
+    const { env } = readAndResolveBundleEnv(DAEMON_OAUTH_BUNDLE, { caller: 'daemon' });
+    const token = (env[DAEMON_OAUTH_KEY] ?? '').trim();
+    return token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Escape a string for safe inclusion in an XML <string> node. */
+function xmlEscape(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /** Generate a macOS launchd plist for auto-starting the daemon. */
 export function generateLaunchdPlist(): string {
   const agentsBin = getAgentsBinPath();
   const logPath = getLogPath();
+  const oauthToken = readDaemonClaudeOAuthToken();
+  const oauthEntry = oauthToken
+    ? `
+    <key>${DAEMON_OAUTH_KEY}</key>
+    <string>${xmlEscape(oauthToken)}</string>`
+    : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -304,7 +345,7 @@ export function generateLaunchdPlist(): string {
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin</string>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin</string>${oauthEntry}
   </dict>
 </dict>
 </plist>`;
@@ -313,6 +354,10 @@ export function generateLaunchdPlist(): string {
 /** Generate a Linux systemd user unit for auto-starting the daemon. */
 export function generateSystemdUnit(): string {
   const agentsBin = getAgentsBinPath();
+  const oauthToken = readDaemonClaudeOAuthToken();
+  const oauthLine = oauthToken
+    ? `\nEnvironment=${DAEMON_OAUTH_KEY}=${oauthToken}`
+    : '';
 
   return `[Unit]
 Description=Agents Daemon - Scheduled Job Runner
@@ -323,7 +368,7 @@ Type=simple
 ExecStart=${agentsBin} daemon _run
 Restart=always
 RestartSec=10
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin${oauthLine}
 
 [Install]
 WantedBy=default.target`;
@@ -376,6 +421,9 @@ function startDaemonLocked(): { pid: number | null; method: string } {
         fs.mkdirSync(plistDir, { recursive: true });
       }
       fs.writeFileSync(plistPath, generateLaunchdPlist(), 'utf-8');
+      // The plist may embed a long-lived OAuth token in EnvironmentVariables;
+      // keep it owner-only so it isn't world/group readable on disk.
+      fs.chmodSync(plistPath, 0o600);
 
       try {
         execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -402,6 +450,8 @@ function startDaemonLocked(): { pid: number | null; method: string } {
         fs.mkdirSync(unitDir, { recursive: true });
       }
       fs.writeFileSync(unitPath, generateSystemdUnit(), 'utf-8');
+      // May embed a long-lived OAuth token in an Environment= line; owner-only.
+      fs.chmodSync(unitPath, 0o600);
 
       execFileSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
       execFileSync('systemctl', ['--user', 'enable', SYSTEMD_UNIT], { encoding: 'utf-8' });
@@ -417,6 +467,23 @@ function startDaemonLocked(): { pid: number | null; method: string } {
   return startDetached();
 }
 
+/**
+ * Environment for the detached daemon fallback. The launchd/systemd paths
+ * deliver the long-lived OAuth token via the service manifest's environment;
+ * the detached path has no manifest, so inject it here. Read happens during an
+ * interactive `routines start`, so a Keychain Touch ID prompt can be satisfied;
+ * the daemon then passes it to every routine run it spawns. An already-set
+ * value (e.g. inherited from launchd) is left untouched.
+ */
+export function buildDetachedDaemonEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env = { ...baseEnv };
+  if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
+    const token = readDaemonClaudeOAuthToken();
+    if (token) env.CLAUDE_CODE_OAUTH_TOKEN = token;
+  }
+  return env;
+}
+
 function startDetached(): { pid: number; method: string } {
   const agentsBin = getAgentsBinPath();
   const logPath = getLogPath();
@@ -425,6 +492,7 @@ function startDetached(): { pid: number; method: string } {
   const child = spawn(agentsBin, ['daemon', '_run'], {
     stdio: ['ignore', logFd, logFd],
     detached: true,
+    env: buildDetachedDaemonEnv(),
   });
 
   child.unref();

@@ -31,6 +31,7 @@ import {
 } from '../lib/secrets/bundles.js';
 import {
   deleteKeychainToken,
+  getKeychainToken,
   getKeychainTokens,
   hasKeychainToken,
   secretsKeychainItem,
@@ -397,6 +398,7 @@ export function registerSecretsCommands(program: Command): void {
   registerCommandGroups(cmd, [
     { title: 'Bundle commands', names: ['list', 'view', 'create', 'rename', 'describe', 'delete'] },
     { title: 'Secret commands', names: ['add', 'rotate', 'remove', 'import', 'export'] },
+    { title: 'Raw item commands', names: ['get', 'set'] },
     { title: 'Sync commands', names: ['push', 'pull', 'remote-list'] },
     { title: 'Utilities', names: ['exec', 'generate', 'migrate-acl'] },
   ]);
@@ -484,6 +486,53 @@ export function registerSecretsCommands(program: Command): void {
           const metaLine = renderMetaLine(bundle.meta?.[e.key], reveal);
           if (metaLine) console.log(metaLine);
         }
+      } catch (err) {
+        if (isPromptCancelled(err)) return;
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('get <item>')
+    .description('Print a raw keychain item by name (for shell hooks/automation). Cross-platform; no bundle required.')
+    .action((item: string) => {
+      try {
+        // Routes through the platform keychain layer: macOS reads bare items
+        // via /usr/bin/security (no Touch ID), Linux via secret-tool with the
+        // encrypted-file fallback. The value goes to stdout (newline-terminated
+        // so `$(agents secrets get NAME)` captures it cleanly); diagnostics go
+        // to stderr so they never pollute the captured value.
+        const value = getKeychainToken(item);
+        process.stdout.write(value.endsWith('\n') ? value : `${value}\n`);
+      } catch {
+        // Missing item is a normal, quiet outcome for a hook probe: exit 1,
+        // print nothing to stdout. Callers test the exit code / empty capture.
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('set <item>')
+    .description('Store a raw keychain item by name (for shell hooks/automation). Cross-platform; no bundle required.')
+    .option('--value <v>', 'Value to store (omit to read from stdin or be prompted)')
+    .option('--value-stdin', 'Read the value from stdin')
+    .action(async (item: string, opts: { value?: string; valueStdin?: boolean }) => {
+      try {
+        let value: string;
+        if (opts.value !== undefined) {
+          value = opts.value;
+        } else if (opts.valueStdin) {
+          value = readStdinSync();
+          if (!value) throw new Error('No value received on stdin.');
+        } else {
+          value = await promptForSecret(`Enter value for ${item}`);
+        }
+        // setKeychainToken stores bare items WITHOUT the biometry ACL on macOS
+        // so `agents secrets get` can read them back without a password sheet;
+        // on Linux it goes through secret-tool / encrypted-file fallback.
+        setKeychainToken(item, value);
+        console.error(chalk.green(`Stored keychain item '${item}'.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));

@@ -7,6 +7,7 @@ import type { AccountInfo } from '../agents.js';
 import * as state from '../state.js';
 import {
   buildCanonicalUsageContext,
+  deriveUsageStatusFromSnapshot,
   formatUsageSummary,
   formatUsageStatusBadge,
   getClaudeKeychainService,
@@ -15,6 +16,7 @@ import {
   isClaudeUsageOrgMatch,
   writeClaudeUsageCache,
   type UsageSnapshot,
+  type UsageWindow,
 } from '../usage.js';
 
 function makeAccountInfo(overrides: Partial<AccountInfo> = {}): AccountInfo {
@@ -83,6 +85,49 @@ describe('usage formatting', () => {
     expect(formatUsageStatusBadge('available')).toBe('');
     expect(stripAnsi(formatUsageStatusBadge('rate_limited'))).toBe('rate-limited');
     expect(stripAnsi(formatUsageStatusBadge('out_of_credits'))).toBe('out of credits');
+  });
+});
+
+describe('deriveUsageStatusFromSnapshot', () => {
+  function win(key: UsageWindow['key'], usedPercent: number): UsageWindow {
+    return {
+      key,
+      label: key,
+      shortLabel: key === 'week' ? 'W' : key === 'session' ? 'S' : 'So',
+      usedPercent,
+      resetsAt: null,
+      windowMinutes: null,
+    };
+  }
+  function snap(windows: UsageWindow[]): UsageSnapshot {
+    return { source: 'live', sourceLabel: 'live account data', capturedAt: new Date('2026-04-17T12:00:00Z'), windows };
+  }
+
+  it('returns null when there is no snapshot or no windows', () => {
+    expect(deriveUsageStatusFromSnapshot(null)).toBeNull();
+    expect(deriveUsageStatusFromSnapshot(undefined)).toBeNull();
+    expect(deriveUsageStatusFromSnapshot(snap([]))).toBeNull();
+  });
+
+  it('is available when every blocking window is below 100%', () => {
+    expect(deriveUsageStatusFromSnapshot(snap([win('session', 5), win('week', 5)]))).toBe('available');
+  });
+
+  it('is rate_limited when any blocking window is maxed', () => {
+    expect(deriveUsageStatusFromSnapshot(snap([win('session', 100), win('week', 40)]))).toBe('rate_limited');
+    expect(deriveUsageStatusFromSnapshot(snap([win('session', 10), win('week', 100)]))).toBe('rate_limited');
+  });
+
+  it('ignores a maxed sonnet_week sub-limit when other windows are fine', () => {
+    expect(
+      deriveUsageStatusFromSnapshot(snap([win('session', 10), win('week', 20), win('sonnet_week', 100)]))
+    ).toBe('available');
+  });
+
+  it('does not regress to "out of credits" for a usable account with overage disabled', () => {
+    // The real-world bug: a Pro account at 5% weekly usage whose pay-as-you-go
+    // overage is disabled must read as available, never out_of_credits.
+    expect(deriveUsageStatusFromSnapshot(snap([win('session', 2), win('week', 5)]))).toBe('available');
   });
 });
 

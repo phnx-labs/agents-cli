@@ -32,6 +32,9 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# Generated test reports (session-tracker scenario recorder, run-report aggregator)
+**/tests/reports/
+
 # Internal plans (not shipped)
 .agents/plans/
 .agents/worktrees/

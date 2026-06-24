@@ -90,7 +90,7 @@ export function parseSession(filePath: string, agent?: SessionAgentId): SessionE
     case 'rush': events = parseRush(filePath); break;
     case 'openclaw': events = []; break; // OpenClaw sessions don't have parseable files yet
     case 'hermes': events = parseHermes(filePath); break;
-    case 'kimi': events = []; break; // Kimi event parsing not implemented yet — discover.ts builds metadata only
+    case 'kimi': events = parseKimi(filePath); break;
   }
 
   // Chokepoint: every string field that originated in an untrusted session
@@ -108,6 +108,7 @@ export function detectAgent(filePath: string): SessionAgentId | null {
   if (filePath.includes('/.grok/') || filePath.includes('\\.grok\\')) return 'grok';
   if (filePath.includes('/.rush/') || filePath.includes('\\.rush\\')) return 'rush';
   if (filePath.includes('/.hermes/') || filePath.includes('\\.hermes\\')) return 'hermes';
+  if (filePath.includes('/.kimi-code/') || filePath.includes('\\.kimi-code\\')) return 'kimi';
   // Cloud convention: cloud-sessions/<id>/session.<format>.jsonl
   const cloudMatch = filePath.match(/session\.(claude|codex|rush)\.jsonl(?:$|[?#])/);
   if (cloudMatch) return cloudMatch[1] as SessionAgentId;
@@ -960,4 +961,176 @@ function hermesContentToText(content: any): string {
     })
     .join('\n')
     .trim();
+}
+
+// ---------------------------------------------------------------------------
+// Kimi parser
+//
+// Kimi stores session metadata in state.json and the conversation transcript
+// in agents/main/wire.jsonl under ~/.kimi-code/sessions/<workdir>/session_<uuid>/.
+// wire.jsonl uses a role-based schema:
+//   - "context.append_message" with role=user/assistant -> messages
+//   - "context.append_loop_event" with content.part type=text/think -> message/thinking
+//   - "context.append_loop_event" with event.type=tool.call -> tool_use
+//   - "context.append_loop_event" with event.type=tool.result -> tool_result
+//   - "usage.record" -> usage
+// ---------------------------------------------------------------------------
+
+/** Parse a Kimi session state.json file by reading its agents/main/wire.jsonl. */
+export function parseKimi(filePath: string): SessionEvent[] {
+  const sessionDir = path.dirname(filePath);
+  const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
+  if (!fs.existsSync(wirePath)) {
+    return [];
+  }
+
+  const content = safeReadSessionFile(wirePath);
+  const lines = content.split('\n').filter(l => l.trim());
+  const events: SessionEvent[] = [];
+
+  // Map tool.call uuid -> tool name so tool.result can carry the tool name.
+  const toolCallMap = new Map<string, string>();
+
+  function extractMessageText(rawContent: any): string {
+    if (typeof rawContent === 'string') return rawContent.trim();
+    if (Array.isArray(rawContent)) {
+      return rawContent
+        .map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+        .join('')
+        .trim();
+    }
+    return '';
+  }
+
+  function timestampFrom(raw: any): string {
+    const t = raw?.time;
+    if (typeof t === 'number' && t > 0) {
+      return new Date(t).toISOString();
+    }
+    return new Date().toISOString();
+  }
+
+  for (const line of lines) {
+    let raw: any;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const type = raw?.type;
+    const timestamp = timestampFrom(raw);
+
+    if (type === 'context.append_message') {
+      const message = raw.message || {};
+      const role = message.role === 'user' ? 'user' : 'assistant';
+      const text = extractMessageText(message.content);
+      if (!text) continue;
+
+      events.push({
+        type: 'message',
+        agent: 'kimi',
+        timestamp,
+        role,
+        content: text,
+      });
+    } else if (type === 'context.append_loop_event') {
+      const event = raw.event || {};
+      const eventType = event.type;
+
+      if (eventType === 'content.part') {
+        const part = event.part || {};
+        const partType = part.type;
+
+        if (partType === 'text') {
+          const text = typeof part.text === 'string' ? part.text.trim() : '';
+          if (text) {
+            events.push({
+              type: 'message',
+              agent: 'kimi',
+              timestamp,
+              role: 'assistant',
+              content: text,
+            });
+          }
+        } else if (partType === 'think') {
+          const think = typeof part.think === 'string' ? part.think.trim() : '';
+          if (think) {
+            events.push({
+              type: 'thinking',
+              agent: 'kimi',
+              timestamp,
+              content: think,
+            });
+          }
+        }
+      } else if (eventType === 'tool.call') {
+        const fn = event.function || {};
+        const toolName = typeof event.name === 'string' ? event.name : (fn.name || 'unknown');
+        let args: Record<string, any> = {};
+        if (typeof fn.arguments === 'string') {
+          try {
+            args = JSON.parse(fn.arguments);
+          } catch {
+            args = { _raw: fn.arguments };
+          }
+        } else if (fn.arguments && typeof fn.arguments === 'object') {
+          args = fn.arguments;
+        }
+
+        const callId = event.toolCallId || event.uuid;
+        if (callId) {
+          toolCallMap.set(callId, toolName);
+        }
+
+        events.push({
+          type: 'tool_use',
+          agent: 'kimi',
+          timestamp,
+          tool: toolName,
+          args,
+          path: args.path || args.file_path || undefined,
+          command: toolName === 'Bash' ? args.command : undefined,
+        });
+      } else if (eventType === 'tool.result') {
+        const callId = event.toolCallId || event.parentUuid;
+        const toolName = (callId && toolCallMap.get(callId)) || 'unknown';
+        const result = event.result || {};
+        const output = typeof result.output === 'string' ? result.output : '';
+        const isError = result.isError === true || (output && output.startsWith('Error:'));
+
+        events.push({
+          type: isError ? 'error' : 'tool_result',
+          agent: 'kimi',
+          timestamp,
+          tool: toolName,
+          success: !isError,
+          output: output.length > 500 ? output.slice(0, 497) + '...' : output,
+        });
+
+        if (callId) {
+          toolCallMap.delete(callId);
+        }
+      }
+    } else if (type === 'usage.record') {
+      const usage = raw.usage || {};
+      const inputTokens = usage.inputOther ?? usage.input_tokens;
+      const outputTokens = usage.output ?? usage.output_tokens;
+      if (
+        (typeof inputTokens === 'number' && inputTokens >= 0) ||
+        (typeof outputTokens === 'number' && outputTokens >= 0)
+      ) {
+        events.push({
+          type: 'usage',
+          agent: 'kimi',
+          timestamp,
+          model: raw.model || usage.model,
+          inputTokens: typeof inputTokens === 'number' ? inputTokens : undefined,
+          outputTokens: typeof outputTokens === 'number' ? outputTokens : undefined,
+        });
+      }
+    }
+  }
+
+  return events;
 }

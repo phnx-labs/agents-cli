@@ -10,7 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
-import { AGENTS, agentConfigDirName } from './agents.js';
+import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -646,6 +646,99 @@ function repairAgentConfigSymlinks(): void {
 
   if (repaired > 0) {
     console.error(`Repaired ${repaired} agent config symlink${repaired === 1 ? '' : 's'} to point at ~/.agents/versions/`);
+  }
+}
+
+/**
+ * Repair self-referential agent binary symlinks.
+ *
+ * Some installScript-based agents — notably Factory's `droid`, whose installer
+ * drops a standalone native binary at ~/.local/bin/droid — were registered at
+ * install time by resolving the post-install binary with `which <cli>`. Because
+ * ~/.agents/.cache/shims sits ahead of ~/.local/bin on PATH, `which` could
+ * return OUR OWN dispatcher shim, and the install step symlinked
+ *   ~/.agents/.history/versions/<agent>/<version>/node_modules/.bin/<cli>
+ * back at ~/.agents/.cache/shims/<cli>. Launching that agent then re-execs the
+ * dispatcher forever (an infinite exec loop that hangs the terminal).
+ *
+ * This walks every installed version's node_modules/.bin and, for any entry
+ * whose symlink resolves into the shims dir, re-points it at the real binary
+ * (found on PATH with the shims dir excluded) — or removes it when no real
+ * binary can be found, letting getBinaryPath's per-agent resolver take over.
+ * Idempotent: a correctly-pointed link is left untouched on re-run.
+ *
+ * Params default to the real on-disk locations; they are injectable so tests
+ * can drive a fixture tree without touching the user's ~/.agents.
+ */
+export function repairSelfReferentialBinShims(
+  versionsRoot: string = path.join(HISTORY_DIR, 'versions'),
+  shimsDir: string = path.resolve(CACHE_DIR, 'shims')
+): void {
+  // Normalize the shims dir through realpath so the prefix check below survives
+  // a symlinked ~/.agents (or macOS's /tmp -> /private/tmp): fs.realpathSync on
+  // the link target resolves those symlinks, so the dir we compare against must
+  // too, or every loop would read as "points at a real binary" and be skipped.
+  shimsDir = path.resolve(shimsDir);
+  try {
+    shimsDir = fs.realpathSync(shimsDir);
+  } catch {
+    /* shims dir absent — leave the resolved path; nothing will match it */
+  }
+  let agents: string[];
+  try {
+    agents = fs.readdirSync(versionsRoot);
+  } catch {
+    return; // no versions installed yet
+  }
+
+  let repaired = 0;
+  for (const agent of agents) {
+    const cli = agent in AGENTS ? AGENTS[agent as AgentId].cliCommand : agent;
+    let versions: string[];
+    try {
+      versions = fs.readdirSync(path.join(versionsRoot, agent));
+    } catch {
+      continue;
+    }
+    for (const version of versions) {
+      const binLink = path.join(versionsRoot, agent, version, 'node_modules', '.bin', cli);
+      let stat: fs.Stats;
+      try {
+        stat = fs.lstatSync(binLink);
+      } catch {
+        continue; // no .bin entry for this version
+      }
+      if (!stat.isSymbolicLink()) continue;
+
+      let real: string;
+      try {
+        real = fs.realpathSync(binLink);
+      } catch {
+        // Dangling symlink — if it was aimed at the shims dir it's the loop
+        // residue; drop it either way so getBinaryPath reports honestly.
+        try {
+          fs.unlinkSync(binLink);
+          repaired++;
+        } catch { /* best-effort */ }
+        continue;
+      }
+
+      if (!path.resolve(real).startsWith(shimsDir + path.sep)) continue; // points at a real binary — fine
+
+      // Self-referential: the link resolves back into our own shims dir.
+      // findInPath does a pure-Node PATH scan (no subprocess) and already
+      // skips our shims dir, so it returns the genuine install if one exists.
+      const realBinary = findInPath(cli);
+      try {
+        fs.unlinkSync(binLink);
+        if (realBinary) fs.symlinkSync(realBinary, binLink);
+        repaired++;
+      } catch { /* best-effort */ }
+    }
+  }
+
+  if (repaired > 0) {
+    console.error(`Repaired ${repaired} self-referential agent binary symlink${repaired === 1 ? '' : 's'} (infinite exec-loop fix).`);
   }
 }
 
@@ -1590,4 +1683,8 @@ export async function runMigration(): Promise<void> {
 
   // Symlink repair runs LAST so it can find the post-move version homes.
   repairAgentConfigSymlinks();
+  // Repair self-referential node_modules/.bin/<cli> symlinks (the droid
+  // infinite-exec-loop). Also runs after the bucket moves so it scans the
+  // canonical HISTORY_DIR/versions tree.
+  repairSelfReferentialBinShims();
 }

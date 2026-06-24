@@ -231,7 +231,7 @@ async function promptConflictStrategy(
  *         top-level entry add/remove — deep edits to plugin contents won't
  *         trigger auto-resync, run `agents sync` for that.
  */
-export const SHIM_SCHEMA_VERSION = 18;
+export const SHIM_SCHEMA_VERSION = 19;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -448,6 +448,22 @@ elif [ "$AGENT" = "kimi" ]; then
   else
     # Last resort: whatever is on PATH
     BINARY=$(command -v kimi 2>/dev/null || echo "")
+  fi
+# Droid (Factory AI) special case: the official installer drops a standalone
+# native binary at ~/.local/bin/droid — there is no npm package and nothing
+# lands in node_modules/.bin. Resolve the fixed install path directly. The
+# PATH fallback explicitly refuses anything under our own shims dir: that path
+# IS this dispatcher, so exec'ing it would re-enter and spin in an infinite
+# re-exec loop (the bug this branch fixes).
+elif [ "$AGENT" = "droid" ]; then
+  DROID_BINARY="$HOME/.local/bin/droid"
+  if [ -x "$DROID_BINARY" ]; then
+    BINARY="$DROID_BINARY"
+  else
+    BINARY=$(command -v droid 2>/dev/null || echo "")
+    case "$BINARY" in
+      "$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;
+    esac
   fi
 else
   BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
@@ -730,7 +746,10 @@ export function ensureVersionedAliasCurrent(agent: AgentId, version: string): 'c
     createVersionedAlias(agent, version);
     return 'created';
   }
-  if (!isVersionedAliasCurrent(agent, version)) {
+  // Upgrade-only (newest-wins), same rationale as ensureShimCurrent: never
+  // downgrade an alias stamped by a newer install sharing the shims dir.
+  const onDisk = readVersionedAliasSchemaVersion(agent, version);
+  if (onDisk === null || onDisk < VERSIONED_ALIAS_SCHEMA_VERSION) {
     createVersionedAlias(agent, version);
     return 'updated';
   }
@@ -1366,7 +1385,14 @@ export function ensureShimCurrent(agent: AgentId): 'created' | 'updated' | 'curr
     createShim(agent);
     return 'created';
   }
-  if (!isShimCurrent(agent)) {
+  // Upgrade-only (newest-wins): regenerate only when the on-disk shim is
+  // unversioned/unreadable (null) or OLDER than this binary. Never downgrade a
+  // shim stamped by a NEWER agents-cli install. Two installs at different
+  // SHIM_SCHEMA_VERSION sharing ~/.agents/.cache/shims/ (e.g. a dev build on
+  // PATH alongside a Hermes-bundled published copy) otherwise ping-pong —
+  // rewriting every shim on each alternating launch and adding boot latency.
+  const onDisk = readShimSchemaVersion(agent);
+  if (onDisk === null || onDisk < SHIM_SCHEMA_VERSION) {
     createShim(agent);
     return 'updated';
   }

@@ -239,3 +239,66 @@ describe('version resource sync path handling', () => {
     expect(result).toEqual(['0.2.33']);
   });
 });
+
+// `installVersion` derives an `npm install <pkg>@<version>` spec from `version`,
+// which originates from the `agents add pkg@<version>` CLI arg or a
+// `.agents-version` pin. The argv-form execFile call cannot be reached for a
+// tainted version because VERSION_RE rejects it at the source (versions.ts).
+// These tests assert the rejection happens before any npm exec, so a malicious
+// version can never escape into a shell.
+function runInstallVersion(home: string, agent: string, version: string): { ok: boolean; error?: string } {
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const tsxBin = path.resolve('node_modules/.bin/tsx');
+  const child = spawnSync(tsxBin, ['-e', `
+    import { installVersion } from ${JSON.stringify(moduleUrl)};
+    (async () => {
+      try {
+        const r = await installVersion(${JSON.stringify(agent)}, ${JSON.stringify(version)});
+        console.log(JSON.stringify({ ok: true, result: r }));
+      } catch (err) {
+        console.log(JSON.stringify({ ok: false, error: err.message }));
+      }
+    })();
+  `], {
+    env: { ...process.env, HOME: home },
+    encoding: 'utf-8',
+  });
+  expect(child.status, child.stderr).toBe(0);
+  return JSON.parse(child.stdout.trim());
+}
+
+describe('installVersion version validation', () => {
+  const malicious = [
+    'latest; touch /tmp/pwned',
+    '1.0.0 && rm -rf ~',
+    '$(touch /tmp/pwned)',
+    '`touch /tmp/pwned`',
+    '1.0.0|cat /etc/passwd',
+    '--registry=http://evil.example.com',
+  ];
+
+  for (const version of malicious) {
+    it(`rejects malicious version before any npm exec: ${JSON.stringify(version)}`, () => {
+      const home = makeTempHome();
+      const outcome = runInstallVersion(home, 'codex', version);
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toContain('Invalid version');
+      // No version dir was created — rejection happened at the source, before
+      // ensureAgentsDir / npm install could run.
+      expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'codex'))).toBe(false);
+    });
+  }
+
+  it('accepts a well-formed semver version through the validation guard', () => {
+    const home = makeTempHome();
+    // A valid version passes VERSION_RE. `kiro` has no npmPackage and a
+    // non-VERSION installScript, so installVersion returns a benign,
+    // network-free error AFTER the guard — proving valid input is not rejected.
+    const outcome = runInstallVersion(home, 'kiro', '0.0.0-rc.1');
+    expect(outcome.ok).toBe(true);
+    const result = (outcome as { result?: { success: boolean; error?: string } }).result;
+    expect(result?.success).toBe(false);
+    expect(result?.error ?? '').not.toContain('Invalid version');
+    expect(result?.error ?? '').toContain('does not support version-pinned installs');
+  });
+});

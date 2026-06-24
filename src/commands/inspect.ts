@@ -19,7 +19,7 @@ import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as yaml from 'yaml';
-import type { AgentId, CapabilityName, DiscoveredPlugin } from '../lib/types.js';
+import type { AgentId, CapabilityName, DiscoveredPlugin, ManifestHook, HookMatches, HookCache } from '../lib/types.js';
 import { AGENTS, getCliState, resolveAgentName } from '../lib/agents.js';
 import { supports } from '../lib/capabilities.js';
 import {
@@ -37,6 +37,8 @@ import {
   type ResourceEntry,
   type SkillResourceEntry,
 } from '../lib/resources.js';
+import { listHookEntriesFromDir } from '../lib/hooks.js';
+import { listMcpServerConfigs, discoverMcpConfigsFromRepo, type McpYamlConfig } from '../lib/mcp.js';
 import { discoverPlugins, discoverPluginsInDir, pluginResourceGroups, type PluginResourceGroup } from '../lib/plugins.js';
 import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
@@ -55,6 +57,15 @@ const DRILLABLE_KINDS = [
   'subagents',
 ] as const;
 type DrillableKind = typeof DRILLABLE_KINDS[number];
+
+/**
+ * Summary-view partition. SIMPLE kinds render as a one-line count + name preview;
+ * RICH kinds (hooks/plugins/mcp) get their own expanded section showing each
+ * item's key detail (events/predicates, bundle contents, transport/url). Together
+ * they cover every DrillableKind.
+ */
+const SIMPLE_KINDS = ['commands', 'skills', 'rules', 'subagents', 'workflows'] as const;
+const RICH_KINDS = ['hooks', 'plugins', 'mcp'] as const;
 
 /**
  * Singular aliases for the plural drill-down flags. `--plugin code` reads as
@@ -421,6 +432,9 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
 
   const kindData = {} as Record<DrillableKind, { items: ResourceItem[]; size: { bytes: number; files: number } }>;
   let totalBytes = 0, totalFiles = 0;
+  let repoHookByScript: Map<string, ManifestHook> = new Map();
+  let repoHookItemList: ResourceItem[] = [];
+  let repoMcpConfigs: Map<string, McpYamlConfig> = new Map();
   if (!options.brief) {
     for (const kind of DRILLABLE_KINDS) {
       const items = collectRepoKind(repo, kind);
@@ -428,6 +442,9 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       kindData[kind] = { items, size };
       totalBytes += size.bytes; totalFiles += size.files;
     }
+    repoHookByScript = hookManifestByScript(hookManifestFromFile(path.join(repo.root, 'agents.yaml')));
+    repoHookItemList = repoHookItems(repo);
+    repoMcpConfigs = new Map(discoverMcpConfigsFromRepo(repo.root).map(s => [s.name, s.config]));
   }
 
   if (options.json) {
@@ -439,12 +456,31 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
       manifest,
       size: options.brief ? null : { bytes: totalBytes, files: totalFiles },
       resources: options.brief ? null : Object.fromEntries(
-        DRILLABLE_KINDS.map(kind => [kind, {
-          count: kindData[kind].items.length,
-          bytes: kindData[kind].size.bytes,
-          files: kindData[kind].size.files,
-          names: kindData[kind].items.map(i => i.name),
-        }]),
+        DRILLABLE_KINDS.map(kind => {
+          const size = kindData[kind].size;
+          // Hooks use the grouped reader (clean names) instead of the raw readdir.
+          const items = kind === 'hooks' ? repoHookItemList : kindData[kind].items;
+          const base = {
+            count: items.length,
+            bytes: size.bytes,
+            files: size.files,
+            names: items.map(i => i.name),
+          };
+          if (kind === 'hooks') return [kind, { ...base, items: items.map(i => {
+            const h = repoHookByScript.get(i.name);
+            return { name: i.name, events: h?.events ?? [], matcher: h?.matcher, matches: h?.matches, cache: h?.cache };
+          }) }];
+          if (kind === 'mcp') return [kind, { ...base, items: items.map(i => {
+            const c = repoMcpConfigs.get(i.name);
+            return { name: i.name, transport: c?.transport, url: c?.url, command: c?.command, args: c?.args };
+          }) }];
+          if (kind === 'plugins') return [kind, { ...base, items: items.map(i => ({
+            name: i.name,
+            version: i.extra?.find(([k]) => k === 'version')?.[1],
+            groups: Object.fromEntries((i.groups ?? []).map(g => [g.label, g.items.length])),
+          })) }];
+          return [kind, base];
+        }),
       ),
     }, null, 2));
     return;
@@ -491,13 +527,17 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
     console.log(`  ${'size'.padEnd(10)} ${formatBytes(totalBytes)} ${chalk.gray('·')} ${totalFiles} files`);
 
     console.log('\n' + chalk.bold('Resources'));
-    for (const kind of DRILLABLE_KINDS) {
+    for (const kind of SIMPLE_KINDS) {
       const { items, size } = kindData[kind];
       const count = String(items.length).padStart(4);
       const sz = items.length > 0 ? formatBytes(size.bytes).padStart(8) : ''.padEnd(8);
       const preview = items.length > 0 ? chalk.gray(truncate(previewNames(items, 4), 60)) : '';
       console.log(`  ${kind.padEnd(10)} ${count}  ${sz}  ${preview}`.trimEnd());
     }
+
+    printExpandedSection('Hooks', hookRows(repoHookItemList, repoHookByScript));
+    printExpandedSection('Plugins', pluginRows(kindData.plugins.items));
+    printExpandedSection('MCP', mcpRows(kindData.mcp.items, repoMcpConfigs));
   }
 
   console.log('');
@@ -566,7 +606,9 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
 
   const capabilities = collectCapabilities(agent, version);
 
-  const counts = options.brief ? null : collectCounts(agent, versionHome);
+  const itemsByKind = options.brief ? null : collectItemsByKind(agent, versionHome);
+  const hookByScript = options.brief ? null : hookManifestByScript(loadCentralHookManifest());
+  const mcpConfigs = options.brief ? null : new Map(listMcpServerConfigs().map(s => [s.name, s.config]));
 
   const sessions = options.brief ? null : {
     total: safeCountSessions(agent),
@@ -584,7 +626,7 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
       strategy,
       installedShim: cliState?.installed === true ? cliState.path : null,
       capabilities,
-      resources: counts,
+      resources: itemsByKind ? summaryResourcesJson(itemsByKind, hookByScript!, mcpConfigs!) : null,
       sessions,
     };
     console.log(JSON.stringify(json, null, 2));
@@ -612,14 +654,14 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
     console.log(`  ${cap.padEnd(10)} ${mark} ${reason}`);
   }
 
-  if (counts) {
+  if (itemsByKind) {
     console.log('\n' + chalk.bold('Resources'));
-    for (const kind of DRILLABLE_KINDS) {
-      const c = counts[kind];
-      if (!c) continue;
-      const breakdown = formatScopeBreakdown(c.bySource);
-      console.log(`  ${kind.padEnd(10)} ${String(c.total).padStart(4)}   ${chalk.gray(breakdown)}`);
+    for (const kind of SIMPLE_KINDS) {
+      printSimpleResourceRow(kind, itemsByKind[kind]);
     }
+    printExpandedSection('Hooks', hookRows(itemsByKind.hooks, hookByScript!));
+    printExpandedSection('Plugins', pluginRows(itemsByKind.plugins));
+    printExpandedSection('MCP', mcpRows(itemsByKind.mcp, mcpConfigs!));
   }
 
   if (sessions) {
@@ -755,13 +797,54 @@ function collectCapabilities(agent: AgentId, version: string): Record<Capability
   return out;
 }
 
-function collectCounts(agent: AgentId, versionHome: string): Record<DrillableKind, { total: number; bySource: Record<string, number> }> {
-  const out = {} as Record<DrillableKind, { total: number; bySource: Record<string, number> }>;
+function collectItemsByKind(agent: AgentId, versionHome: string): Record<DrillableKind, ResourceItem[]> {
+  const out = {} as Record<DrillableKind, ResourceItem[]>;
+  for (const kind of DRILLABLE_KINDS) out[kind] = collectKind(agent, versionHome, kind);
+  return out;
+}
+
+/** A simple-kind count row: `kind  N   user:30 system:12   name, name …(+K)`. */
+function printSimpleResourceRow(kind: string, items: ResourceItem[]): void {
+  const count = String(items.length).padStart(4);
+  const breakdown = chalk.gray(scopeBreakdownPlain(countBySource(items.map(i => i.source))).padEnd(18));
+  const preview = items.length > 0 ? chalk.gray(truncate(previewNames(items, 3), 48)) : '';
+  console.log(`  ${kind.padEnd(10)} ${count}   ${breakdown}  ${preview}`.trimEnd());
+}
+
+/**
+ * Build the `resources` JSON: every kind keeps `total` + `bySource` (back-compat),
+ * simple kinds add `names`, and the rich kinds add structured `items` (hook
+ * events/predicates, mcp transport/url/command, plugin version + group counts).
+ */
+function summaryResourcesJson(
+  itemsByKind: Record<DrillableKind, ResourceItem[]>,
+  hookByScript: Map<string, ManifestHook>,
+  mcpConfigs: Map<string, McpYamlConfig>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   for (const kind of DRILLABLE_KINDS) {
-    const items = collectKind(agent, versionHome, kind);
-    const bySource: Record<string, number> = {};
-    for (const item of items) bySource[item.source] = (bySource[item.source] || 0) + 1;
-    out[kind] = { total: items.length, bySource };
+    const items = itemsByKind[kind];
+    const base = { total: items.length, bySource: countBySource(items.map(i => i.source)) };
+    if (kind === 'hooks') {
+      out[kind] = { ...base, items: items.map(i => {
+        const h = hookByScript.get(i.name);
+        return { name: i.name, source: i.source, events: h?.events ?? [], matcher: h?.matcher, matches: h?.matches, cache: h?.cache };
+      }) };
+    } else if (kind === 'mcp') {
+      out[kind] = { ...base, items: items.map(i => {
+        const c = mcpConfigs.get(i.name);
+        return { name: i.name, source: i.source, transport: c?.transport, url: c?.url, command: c?.command, args: c?.args };
+      }) };
+    } else if (kind === 'plugins') {
+      out[kind] = { ...base, items: items.map(i => ({
+        name: i.name,
+        source: i.source,
+        version: i.extra?.find(([k]) => k === 'version')?.[1],
+        groups: Object.fromEntries((i.groups ?? []).map(g => [g.label, g.items.length])),
+      })) };
+    } else {
+      out[kind] = { ...base, names: items.map(i => i.name) };
+    }
   }
   return out;
 }
@@ -886,6 +969,193 @@ function buildDetailRows(item: ResourceItem, kind: DrillableKind): Array<[string
     if (item.extra) rows.push(...item.extra);
   }
   return rows;
+}
+
+// ─── Rich expanded sections (summary view) ───────────────────────────────────
+
+/** One row in an expanded section: a source tag, a clickable name, and a detail string. */
+interface RichRow {
+  source: string;
+  name: string;
+  detail: string;
+  linkTarget?: string;
+}
+
+/** `system` → `sys`; everything else unchanged. Keeps the tag column narrow. */
+function abbrevSource(s: string): string {
+  return s === 'system' ? 'sys' : s;
+}
+
+/**
+ * Compact one-liner for a hook from its manifest entry: the firing events (with
+ * the matcher/tool-name in parens), then a `·`-separated predicate summary, then
+ * an optional cache tail. Plain text — the caller applies color.
+ */
+export function summarizeHook(hook: ManifestHook): string {
+  const events = (hook.events ?? []).join('/') || '(no event)';
+  let matcher = hook.matcher;
+  if (!matcher && hook.matches?.tool_name) {
+    const tn = hook.matches.tool_name;
+    matcher = Array.isArray(tn) ? tn.join('|') : tn;
+  }
+  const head = matcher ? `${events}(${matcher})` : events;
+
+  const parts = [head];
+  const preds = summarizeMatches(hook.matches);
+  if (preds) parts.push(preds);
+  let line = parts.join(' · ');
+
+  const ttl = hookCacheTtl(hook.cache);
+  if (ttl) line += ` (${ttl} cache)`;
+  return line;
+}
+
+/** `·`-separated predicate summary from a hook's `matches:` block (tool_name omitted — shown in the matcher parens). */
+function summarizeMatches(m?: HookMatches): string {
+  if (!m) return '';
+  const bits: string[] = [];
+  if (m.git_dirty) bits.push('git_dirty');
+  if (m.prompt_contains) bits.push(`prompt~"${truncate(m.prompt_contains, 24)}"`);
+  if (m.prompt_matches) bits.push(`prompt=/${truncate(m.prompt_matches, 24)}/`);
+  if (m.tool_args_match) bits.push(`args=/${truncate(m.tool_args_match, 20)}/`);
+  if (m.cwd_includes) {
+    const c = Array.isArray(m.cwd_includes) ? m.cwd_includes.join('|') : m.cwd_includes;
+    bits.push(`cwd~${truncate(c, 24)}`);
+  }
+  if (m.project_has) bits.push(`has ${m.project_has}`);
+  return bits.join(' · ');
+}
+
+/** Normalize a hook cache shorthand/object to a display ttl ("5m", "1h"); null when uncached. */
+function hookCacheTtl(cache?: HookCache): string | null {
+  if (cache === undefined || cache === null) return null;
+  if (typeof cache === 'string') return cache.replace(/-bg$/, '');
+  return String(cache.ttl);
+}
+
+/** Compact one-liner for an MCP server: padded transport + the url (http) or command line (stdio). */
+export function summarizeMcp(cfg: McpYamlConfig): string {
+  const target = cfg.transport === 'http'
+    ? (cfg.url ?? '')
+    : [cfg.command, ...(cfg.args ?? [])].filter(Boolean).join(' ');
+  return `${cfg.transport.padEnd(5)}  ${truncate(target, 60)}`.trimEnd();
+}
+
+/** Print `Title (N)` then up to `max` aligned `[source] name  detail` rows with a `…(+K)` tail. */
+function printExpandedSection(title: string, rows: RichRow[], max = 6): void {
+  console.log('\n' + chalk.bold(title) + chalk.gray(` (${rows.length})`));
+  if (rows.length === 0) {
+    console.log(chalk.gray('  (none)'));
+    return;
+  }
+  const shown = rows.slice(0, max);
+  const nameW = Math.max(...shown.map(r => r.name.length));
+  for (const r of shown) {
+    const tag = chalk.gray(`[${abbrevSource(r.source)}]`.padEnd(8));
+    const padded = r.name.padEnd(nameW);
+    const name = r.linkTarget ? termLink(chalk.cyan(padded), r.linkTarget) : chalk.cyan(padded);
+    const detail = r.detail ? '  ' + chalk.gray(r.detail) : '';
+    console.log(`  ${tag} ${name}${detail}`);
+  }
+  if (rows.length > max) console.log(chalk.gray(`  …(+${rows.length - max})`));
+}
+
+/** Tally a source list into `{user: n, system: m}`. */
+function countBySource(sources: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const s of sources) out[s] = (out[s] || 0) + 1;
+  return out;
+}
+
+/** Unbracketed scope breakdown for the simple count rows: `user:30 system:12`. */
+function scopeBreakdownPlain(bySource: Record<string, number>): string {
+  return Object.entries(bySource).map(([k, v]) => `${k}:${v}`).join(' ');
+}
+
+/**
+ * Index a hook manifest by script basename (no extension). Installed hooks are
+ * named after their script file (`04-capture-…`), while the manifest is keyed by
+ * logical name (`capture-…`) with the filename in `script:` — so we join on the
+ * script basename, not the manifest key.
+ */
+export function hookManifestByScript(manifest: Record<string, ManifestHook>): Map<string, ManifestHook> {
+  const out = new Map<string, ManifestHook>();
+  for (const hook of Object.values(manifest)) {
+    if (hook && typeof hook.script === 'string') {
+      out.set(path.basename(hook.script).replace(/\.[^.]+$/, ''), hook);
+    }
+  }
+  return out;
+}
+
+/** Build hook rows by enriching the installed hook items with manifest events/predicates. */
+function hookRows(items: ResourceItem[], byScript: Map<string, ManifestHook>): RichRow[] {
+  return items.map(item => {
+    const hook = byScript.get(item.name);
+    return {
+      source: item.source,
+      name: item.name,
+      linkTarget: item.linkTarget,
+      // Hooks are shell scripts with no human description — show events/predicates
+      // from the manifest, or nothing rather than a meaningless shebang line.
+      detail: hook ? summarizeHook(hook) : '',
+    };
+  });
+}
+
+/** Build plugin rows: `vVERSION  skills:6 commands:5 …` from the bundle's groups. */
+function pluginRows(items: ResourceItem[]): RichRow[] {
+  return items.map(item => {
+    const version = item.extra?.find(([k]) => k === 'version')?.[1];
+    const counts = (item.groups ?? []).map(g => `${g.label}:${g.items.length}`).join(' ');
+    const detail = [version ? `v${version}` : '', counts].filter(Boolean).join('  ');
+    return { source: item.source, name: item.name, detail, linkTarget: item.linkTarget };
+  });
+}
+
+/** Build MCP rows by joining the installed mcp items with their full configs (transport/url/command). */
+function mcpRows(items: ResourceItem[], configs: Map<string, McpYamlConfig>): RichRow[] {
+  return items.map(item => {
+    const cfg = configs.get(item.name);
+    return { source: item.source, name: item.name, detail: cfg ? summarizeMcp(cfg) : item.description };
+  });
+}
+
+/** Read a repo/agents.yaml `hooks:` section into a name→ManifestHook map (best-effort). */
+function hookManifestFromFile(agentsYamlPath: string): Record<string, ManifestHook> {
+  try {
+    const meta = yaml.parse(fs.readFileSync(agentsYamlPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
+    return meta?.hooks ?? {};
+  } catch { return {}; }
+}
+
+/**
+ * Merge the system + user `agents.yaml` hook manifests (user wins on key
+ * collision). Built directly from the two layer files rather than via
+ * `parseHookManifest()` so inspecting never emits the shadow/override warnings
+ * that the registrar path prints.
+ */
+function loadCentralHookManifest(): Record<string, ManifestHook> {
+  return {
+    ...hookManifestFromFile(path.join(getSystemAgentsDir(), 'agents.yaml')),
+    ...hookManifestFromFile(path.join(getUserAgentsDir(), 'agents.yaml')),
+  };
+}
+
+/**
+ * Hook items for a repo's Hooks section. Uses the grouped hook reader (script +
+ * data file collapsed into one entry, non-hook files like promptcuts.yaml or
+ * README.md filtered out) rather than a naive readdir, so names are clean and
+ * join cleanly against the manifest by script basename.
+ */
+function repoHookItems(repo: RepoTarget): ResourceItem[] {
+  return listHookEntriesFromDir(path.join(repo.root, 'hooks')).map(h => ({
+    name: h.name,
+    source: repo.label,
+    path: h.scriptPath,
+    linkTarget: h.scriptPath,
+    description: '',
+  }));
 }
 
 // ─── Fuzzy matching ──────────────────────────────────────────────────────────
@@ -1056,10 +1326,4 @@ function safeCountSessions(agent: AgentId): number {
 function truncate(s: string, n: number): string {
   if (s.length <= n) return s;
   return s.slice(0, n - 1) + '…';
-}
-
-function formatScopeBreakdown(bySource: Record<string, number>): string {
-  const entries = Object.entries(bySource);
-  if (entries.length === 0) return '';
-  return '[' + entries.map(([k, v]) => `${k}:${v}`).join(' ') + ']';
 }

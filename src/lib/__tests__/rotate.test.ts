@@ -64,6 +64,7 @@ function cand(overrides: Partial<RotateCandidate>): RotateCandidate {
     agent: 'claude',
     version: '0.0.0',
     email: 'a@b.com',
+    usageKey: null,
     usageStatus: 'available',
     usageSnapshot: null,
     authValid: true,
@@ -285,6 +286,55 @@ describe('pickBalancedCandidate', () => {
     // Among the user-a@example.com versions, the older lastActive wins.
     const survivor = result!.healthy.find((x) => x.email === 'user-a@example.com');
     expect(survivor!.version).toBe('2.1.118');
+  });
+
+  it('keeps two orgs under one email as distinct candidates (dedup by org, not email)', () => {
+    // Same Google identity signed into a Personal org on one version and an
+    // Enterprise org on another. Quota is per-org, so these are separate
+    // rate-limit buckets and must both stay healthy — the email collision is
+    // not an account collision. Regression for #309.
+    const personal = cand({
+      version: '2.1.170',
+      email: 'taylor@example.com',
+      usageKey: 'claude:org=e93db6f2',
+      usageSnapshot: claudeUsage(0, 0),
+    });
+    const enterprise = cand({
+      version: '2.1.183',
+      email: 'taylor@example.com',
+      usageKey: 'claude:org=8763a87b',
+      usageSnapshot: claudeUsage(0, 64),
+    });
+
+    const result = pickBalancedCandidate([personal, enterprise]);
+    expect(result!.healthy).toHaveLength(2);
+    expect(result!.excluded).toHaveLength(0);
+    expect(result!.healthy.map((c) => c.version).sort()).toEqual(['2.1.170', '2.1.183']);
+  });
+
+  it('still collapses two versions sharing one org (same usage key)', () => {
+    // Two installed versions, same org → same quota bucket → must dedup to one
+    // even though they are distinct versions. The lower-used / older-active one
+    // survives per compareCandidates.
+    const a = cand({
+      version: '2.1.170',
+      email: 'taylor@example.com',
+      usageKey: 'claude:org=e93db6f2',
+      lastActive: new Date('2026-04-20T10:00:00Z'),
+    });
+    const b = cand({
+      version: '2.1.183',
+      email: 'taylor@example.com',
+      usageKey: 'claude:org=e93db6f2',
+      lastActive: new Date('2026-04-20T05:00:00Z'),
+    });
+
+    const result = pickBalancedCandidate([a, b]);
+    expect(result!.healthy).toHaveLength(1);
+    expect(result!.excluded).toHaveLength(1);
+    // Older lastActive wins (compareCandidates tiebreak), newer is excluded.
+    expect(result!.healthy[0].version).toBe('2.1.183');
+    expect(result!.excluded[0].version).toBe('2.1.170');
   });
 
   it('parallel selection fans out across unique accounts even when versions share emails', () => {

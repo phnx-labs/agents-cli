@@ -2116,23 +2116,34 @@ export class BrowserService {
       flatten: true,
     })) as { sessionId: string };
 
-    // Inject a one-shot stealth shim before any page script runs. Chromium
-    // unconditionally exposes navigator.webdriver = true when a remote-debug
-    // transport is attached; Cloudflare Turnstile, hCaptcha, and similar bot
-    // checks read that property first. For browsers agents-cli spawns the
-    // --disable-blink-features=AutomationControlled launch flag already
-    // covers this, but for attach-to-running profiles (the Comet / Arc /
-    // Brave case where the user launched the browser themselves) the flag
-    // is unavailable — Page.addScriptToEvaluateOnNewDocument is the only
-    // lever. Non-page targets (workers, service workers) will reject these
-    // calls; we swallow the error and keep going.
-    try {
-      await conn.cdp.send('Page.enable', {}, sessionId);
-      await conn.cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-        source: "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});",
-      }, sessionId);
-    } catch {
-      // Target doesn't support Page domain — nothing to inject.
+    // Inject a stealth shim before any page script runs. Chromium exposes
+    // navigator.webdriver = true whenever a remote-debug transport is attached;
+    // Cloudflare Turnstile, hCaptcha, and similar bot checks read it first.
+    //
+    // Only attach-to-running profiles (conn.pid === 0 — Comet / Arc / Brave the
+    // user launched themselves) need this. Browsers agents-cli spawns already
+    // carry the --disable-blink-features=AutomationControlled launch flag, which
+    // makes navigator.webdriver a native Navigator.prototype getter returning
+    // false — indistinguishable from an untouched browser. Injecting on top of
+    // that is actively harmful: it defines an OWN getter on the instance, and an
+    // own `webdriver` descriptor (native lives on the prototype) returning
+    // `undefined` (native returns `false`) is itself a tampering signal that
+    // bot.sannysoft.com and similar tests flag as "WebDriver present".
+    //
+    // When we do inject (attach mode), mirror native semantics exactly: define
+    // on Navigator.prototype and return false, so no own descriptor leaks and
+    // the value matches a real browser. Non-page targets (workers, service
+    // workers) reject these calls; swallow the error and keep going.
+    if (conn.pid === 0) {
+      try {
+        await conn.cdp.send('Page.enable', {}, sessionId);
+        await conn.cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+          source:
+            "Object.defineProperty(Navigator.prototype,'webdriver',{get:()=>false,configurable:true});",
+        }, sessionId);
+      } catch {
+        // Target doesn't support Page domain — nothing to inject.
+      }
     }
 
     conn.sessionCache.set(tabId, sessionId);

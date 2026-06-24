@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { migrateExtrasExtrasToAgentsExtras } from './migrate.js';
+import { migrateExtrasExtrasToAgentsExtras, repairSelfReferentialBinShims } from './migrate.js';
 
 const tempDirs: string[] = [];
 
@@ -177,5 +177,103 @@ describe('migrateExtrasExtrasToAgentsExtras', () => {
       expect(fs.existsSync(path.join(marketplacesDir, 'extras-extras'))).toBe(false);
       expect(fs.existsSync(path.join(marketplacesDir, 'agents-extras'))).toBe(true);
     }
+  });
+});
+
+describe('repairSelfReferentialBinShims', () => {
+  function makeTempRoot(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-binshim-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  // Build a fixture: a versions tree whose node_modules/.bin/<cli> symlink
+  // points back into a fake shims dir (the self-referential loop), plus a
+  // fake dispatcher shim to be the loop target.
+  function seedSelfRefLoop(root: string, agent: string, cli: string): {
+    versionsRoot: string;
+    shimsDir: string;
+    binLink: string;
+  } {
+    const versionsRoot = path.join(root, 'versions');
+    const shimsDir = path.join(root, 'shims');
+    fs.mkdirSync(shimsDir, { recursive: true });
+    const shim = path.join(shimsDir, cli);
+    fs.writeFileSync(shim, '#!/bin/sh\n# fake dispatcher\n');
+    fs.chmodSync(shim, 0o755);
+
+    const binDir = path.join(versionsRoot, agent, 'latest', 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const binLink = path.join(binDir, cli);
+    fs.symlinkSync(shim, binLink); // <-- the loop
+    return { versionsRoot, shimsDir, binLink };
+  }
+
+  function withPath<T>(dirs: string[], fn: () => T): T {
+    const prev = process.env.PATH;
+    process.env.PATH = dirs.join(path.delimiter);
+    try {
+      return fn();
+    } finally {
+      process.env.PATH = prev;
+    }
+  }
+
+  it('re-points a self-referential .bin symlink at the real PATH binary', () => {
+    const root = makeTempRoot();
+    // Use a real agent id ('droid' -> cliCommand 'droid') to exercise the
+    // AGENTS cliCommand lookup path.
+    const { versionsRoot, shimsDir, binLink } = seedSelfRefLoop(root, 'droid', 'droid');
+
+    // A genuine binary on PATH, in a dir that is NOT the shims dir.
+    const realBinDir = makeTempRoot();
+    const realBin = path.join(realBinDir, 'droid');
+    fs.writeFileSync(realBin, '#!/bin/sh\n# real droid\n');
+    fs.chmodSync(realBin, 0o755);
+
+    // Sanity: before repair the link resolves into the shims dir (the loop).
+    expect(fs.realpathSync(binLink)).toBe(fs.realpathSync(path.join(shimsDir, 'droid')));
+
+    withPath([realBinDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
+
+    // After repair it resolves to the real binary, not the shim.
+    expect(fs.realpathSync(binLink)).toBe(fs.realpathSync(realBin));
+  });
+
+  it('removes the self-referential symlink when no real binary is on PATH', () => {
+    const root = makeTempRoot();
+    // Unknown agent id -> cli falls back to the dir name; guaranteed absent from PATH.
+    const cli = 'zzz-no-such-cli';
+    const { versionsRoot, shimsDir, binLink } = seedSelfRefLoop(root, cli, cli);
+    const emptyDir = makeTempRoot();
+
+    withPath([emptyDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
+
+    // No real binary to point at -> the loop link is removed entirely.
+    let exists = true;
+    try { fs.lstatSync(binLink); } catch { exists = false; }
+    expect(exists).toBe(false);
+  });
+
+  it('leaves a correctly-pointed symlink untouched', () => {
+    const root = makeTempRoot();
+    const versionsRoot = path.join(root, 'versions');
+    const shimsDir = path.join(root, 'shims');
+    fs.mkdirSync(shimsDir, { recursive: true });
+
+    const realBinDir = makeTempRoot();
+    const realBin = path.join(realBinDir, 'droid');
+    fs.writeFileSync(realBin, '#!/bin/sh\n');
+    fs.chmodSync(realBin, 0o755);
+
+    const binDir = path.join(versionsRoot, 'droid', 'latest', 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const binLink = path.join(binDir, 'droid');
+    fs.symlinkSync(realBin, binLink); // already correct — points at a real binary
+
+    withPath([realBinDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
+
+    // Untouched: still the same symlink target.
+    expect(fs.readlinkSync(binLink)).toBe(realBin);
   });
 });
