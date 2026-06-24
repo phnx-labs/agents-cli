@@ -91,6 +91,14 @@ function isManagedHookCommand(command: string, prefixes: string[]): boolean {
 
   for (const prefix of prefixes) {
     if (resolved.startsWith(prefix)) return true;
+    // The command dir above is realpath-resolved, but a raw prefix may still
+    // point through a symlink (macOS TMPDIR /var -> /private/var, or a
+    // symlinked ~/.agents). Compare against a realpath-normalized prefix too
+    // so the two sides match. Strip the trailing sep, resolve the dir, re-add.
+    const rawPrefixDir = prefix.endsWith(path.sep) ? prefix.slice(0, -path.sep.length) : prefix;
+    let resolvedPrefix = prefix;
+    try { resolvedPrefix = fs.realpathSync(rawPrefixDir) + path.sep; } catch { /* absent or broken link */ }
+    if (resolvedPrefix !== prefix && resolved.startsWith(resolvedPrefix)) return true;
   }
   return false;
 }

@@ -511,6 +511,41 @@ describe('registerHooksToSettings - Antigravity', () => {
     expect(settings.hooks.before_tool_call[0].command).toContain('a.sh');
   });
 
+  it('prunes managed entries when the hooks root is reached through a symlink (GC realpath invariant)', () => {
+    // Deterministic, cross-platform repro of the macOS bug where the managed
+    // prefix points through a symlink: isManagedHookCommand realpath-resolves
+    // the command dir, so the raw prefix must be realpath-resolved too or GC
+    // silently no-ops. Build an explicit symlinked hooks root so this fails on
+    // Linux CI too (not just where TMPDIR is /var -> /private/var).
+    const realRoot = path.join(tmpDir, 'real-agents');
+    fs.mkdirSync(path.join(realRoot, 'hooks'), { recursive: true });
+    for (const n of ['a.sh', 'b.sh']) {
+      const p = path.join(realRoot, 'hooks', n);
+      fs.writeFileSync(p, '#!/bin/sh\necho hi\n', 'utf-8');
+      fs.chmodSync(p, 0o755);
+    }
+    const linkRoot = path.join(tmpDir, 'link-agents');
+    fs.symlinkSync(realRoot, linkRoot);
+
+    const versionHome = makeAgyVersionHome();
+    const firstManifest: Record<string, ManifestHook> = {
+      a: { script: 'a.sh', events: ['PreToolUse'] },
+      b: { script: 'b.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('antigravity', versionHome, firstManifest, linkRoot);
+    let settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call).toHaveLength(2);
+
+    // 'b' removed upstream — must be pruned despite the symlinked managed root.
+    const secondManifest: Record<string, ManifestHook> = {
+      a: { script: 'a.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('antigravity', versionHome, secondManifest, linkRoot);
+    settings = readAgySettings(versionHome);
+    expect(settings.hooks.before_tool_call).toHaveLength(1);
+    expect(settings.hooks.before_tool_call[0].command).toContain('a.sh');
+  });
+
   it('never touches user-authored entries outside managedPrefixes', () => {
     const versionHome = makeAgyVersionHome();
     const settingsPath = path.join(versionHome, '.gemini', 'antigravity-cli', 'settings.json');
