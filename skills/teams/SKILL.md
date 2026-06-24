@@ -91,6 +91,25 @@ agents teams logs my-feature frontend
 - **Run in parallel** — most tasks don't depend on each other
 - **Name teammates** with `--name` for easy reference
 
+## Budget Guardrails
+
+Teammates **inherit the project's budget caps** from `agents.yaml` (see
+[docs/06-observability.md](../../docs/06-observability.md#budget-guardrails-agents-budget)).
+Before each teammate launches, its estimated cost is projected onto current
+spend; under `on_exceed: block`, a teammate that would breach a cap is
+**refused** (the spawn fails with `[budget] BLOCKED teammate …`). Caps are
+**cross-vendor**: a Claude teammate and a Codex teammate draw down the *same*
+`per_project` / `per_day` pool — one budget governs the whole team.
+
+```yaml
+# project agents.yaml
+budget:
+  per_project: 100.00   # shared by every teammate, regardless of agent
+  on_exceed: block
+```
+
+Check spend-to-cap any time with `agents budget`.
+
 ## Short Aliases
 
 ```

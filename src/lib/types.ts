@@ -28,6 +28,45 @@ export type RunConfig = Partial<Record<AgentId, AgentRunConfig>> & {
   defaults?: Record<string, RunDefaults>;
 };
 
+/**
+ * What to do when a configured budget cap would be exceeded (issue #346).
+ * `block` refuses to launch (or kills a running child) and exits non-zero so
+ * CI/headless/teams/cloud all inherit the decision. `warn` prints the overrun
+ * but proceeds — useful for soft rollout / observability-only.
+ */
+export type BudgetOnExceed = 'block' | 'warn';
+
+/**
+ * `budget:` block in agents.yaml — cross-vendor spend guardrails (issue #346).
+ *
+ * Resolution is project > user (same precedence as `run:`); see
+ * `resolveBudgetConfig` in lib/budget/config.ts. Every cap is in USD. A cap is
+ * "unset" when undefined — only set caps are enforced. `per_agent` caps apply
+ * to one agent's spend; the top-level caps (`per_run`, `per_day`,
+ * `per_project`) aggregate ACROSS every vendor the CLI dispatches, which is the
+ * cross-vendor property no single-vendor control has.
+ */
+export interface BudgetConfig {
+  /** Display currency. Only "USD" is priced today; carried for forward-compat. */
+  currency?: string;
+  /** Hard cap on the estimated/actual cost of a single run. */
+  per_run?: number;
+  /** Hard cap on total spend attributed to the current day (local date). */
+  per_day?: number;
+  /** Per-agent daily caps, keyed by agent id (e.g. { claude: 30, codex: 20 }). */
+  per_agent?: Partial<Record<AgentId, number>>;
+  /** Hard cap on cumulative spend attributed to the current project. */
+  per_project?: number;
+  /** block (refuse/kill) or warn (proceed). Defaults to block. */
+  on_exceed?: BudgetOnExceed;
+  /**
+   * Interactive confirm threshold (USD). When a run's pre-flight estimate is at
+   * or above this, prompt before launching (unless --yes). Does NOT gate a hard
+   * block — a cap breach always blocks regardless of this value.
+   */
+  require_confirm_over?: number;
+}
+
 /** Preview features that users can opt into via `agents beta`. */
 export type BetaFeatureName = 'drive' | 'factory';
 
@@ -227,6 +266,8 @@ export interface InstalledHook {
 export interface Manifest {
   agents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
+  /** Spend guardrails (issue #346). Project-local block overrides user. */
+  budget?: BudgetConfig;
   beta?: {
     enabled?: BetaFeatureName[];
   };
@@ -575,6 +616,8 @@ export interface ExtraRepoConfig {
 export interface Meta {
   agents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
+  /** Spend guardrails (issue #346). User-global caps; project agents.yaml overrides. */
+  budget?: BudgetConfig;
   beta?: {
     enabled?: BetaFeatureName[];
   };

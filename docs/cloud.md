@@ -233,6 +233,20 @@ agents cloud status tsk_4f2a91
 agents cloud message tsk_4f2a91 "Looks good — also update the OpenAPI spec"
 ```
 
+## Budget Guardrails
+
+Cloud dispatches **inherit the local project's budget caps** (see
+[docs/06-observability.md](./06-observability.md#budget-guardrails-agents-budget)).
+Before a run is POSTed, its estimated cost is projected onto current spend;
+under `on_exceed: block`, a dispatch that would breach a cap is **refused
+client-side** with a `[budget] BLOCKED cloud dispatch …` error — the run never
+starts. The target repo slug is the project attribution key, so caps span every
+agent dispatched against that repo.
+
+Server-side spend is authoritative for live enforcement once a cloud task is
+running; the client-side pre-flight is the deterministic "don't even start it"
+guard.
+
 ## Demo
 
 <video autoplay loop muted playsinline width="100%" src="../assets/videos/cloud.mp4"></video>

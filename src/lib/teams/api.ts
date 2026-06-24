@@ -309,6 +309,27 @@ export async function handleSpawn(
     `[spawn] Spawning ${agentType} agent for task "${taskName}" [${resolvedMode}] effort=${resolvedEffort}${profileName ? ` profile=${profileName}` : ''}...`
   );
 
+  // Budget pre-flight gate (issue #346). Teammates inherit the project's caps:
+  // before launching one, project its estimated cost onto current spend and
+  // refuse when on_exceed:block would be breached. Cross-vendor by construction
+  // — a Claude teammate and a Codex teammate draw down the same per_project /
+  // per_day pool. Dormant (no-op) when no caps are configured.
+  {
+    const gateCwd = cwd || workspaceDir || worktreePath || process.cwd();
+    const { runPreflightGate } = await import('../budget/preflight.js');
+    const gate = runPreflightGate({
+      agent: agentType,
+      model: model ?? `${agentType}-default`,
+      mode: resolvedMode,
+      prompt,
+      project: gateCwd,
+      cwd: gateCwd,
+    });
+    if (!gate.dormant && !gate.decision.allow) {
+      throw new Error(`[budget] BLOCKED teammate "${taskName}" (${agentType}): ${gate.decision.reason}`);
+    }
+  }
+
   const agent = await manager.spawn(
     taskName,
     agentType,

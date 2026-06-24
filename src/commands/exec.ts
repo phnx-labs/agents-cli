@@ -38,6 +38,7 @@ interface ExecCommandActionOptions {
   balanced?: boolean;
   strategy?: string;
   acp?: boolean;
+  yes?: boolean;
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -106,6 +107,11 @@ export function registerRunCommand(program: Command): void {
     .option(
       '--acp',
       'Route through the Agent Client Protocol instead of direct exec. Supported for gemini, claude (via @zed-industries/claude-code-acp adapter). Unified event stream; emits ndjson when --json.',
+    )
+    .option(
+      '-y, --yes',
+      'Skip the interactive budget-confirm prompt (require_confirm_over). Never skips a hard budget block.',
+      false,
     );
 
   setHelpSections(runCmd, {
@@ -646,6 +652,53 @@ export function registerRunCommand(program: Command): void {
         } catch (err) {
           console.error(chalk.red(`ACP run failed for ${agent}: ${(err as Error).message}`));
           process.exit(1);
+        }
+      }
+
+      // Budget pre-flight gate (issue #346). Estimate the run's cost and, when a
+      // cap is configured with on_exceed:block, refuse to launch if it would push
+      // a cap over the line — exiting non-zero so CI/headless inherit the block.
+      // --yes skips ONLY the interactive confirm threshold, never a hard block.
+      {
+        const { runPreflightGate } = await import('../lib/budget/preflight.js');
+        const gate = runPreflightGate({
+          agent,
+          model: model ?? `${agent}-default`,
+          mode,
+          prompt,
+          project: cwd,
+          cwd,
+        });
+        if (!gate.dormant) {
+          if (!options.quiet) {
+            process.stderr.write(chalk.gray(gate.banner + '\n'));
+          }
+          if (!gate.decision.allow) {
+            // Hard block. --yes does NOT override (acceptance criterion).
+            console.error(chalk.red(`[budget] BLOCKED: ${gate.decision.reason}`));
+            console.error(chalk.gray(`Raise the cap in agents.yaml budget: or set on_exceed: warn to proceed.`));
+            process.exit(2);
+          }
+          if (gate.decision.needsConfirm && !options.yes) {
+            if (!process.stdin.isTTY) {
+              // Non-interactive (CI/headless) and no --yes: cannot confirm — refuse.
+              console.error(chalk.red(`[budget] ${gate.decision.reason}`));
+              console.error(chalk.gray(`Re-run with --yes to confirm the spend, or lower require_confirm_over.`));
+              process.exit(2);
+            }
+            const { confirm } = await import('@inquirer/prompts');
+            const proceed = await confirm({
+              message: `${gate.decision.reason}. Proceed?`,
+              default: false,
+            });
+            if (!proceed) {
+              console.error(chalk.yellow('[budget] aborted by user.'));
+              process.exit(2);
+            }
+          } else if (gate.decision.blockedCap && gate.decision.allow && !options.quiet) {
+            // on_exceed:warn overrun notice (allowed but reported).
+            process.stderr.write(chalk.yellow(`[budget] WARN: ${gate.decision.reason}\n`));
+          }
         }
       }
 

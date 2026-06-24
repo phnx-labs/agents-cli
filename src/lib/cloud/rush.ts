@@ -434,6 +434,25 @@ export class RushCloudProvider implements CloudProvider {
       throw new Error('Rush Cloud requires --repo <owner/repo> (or --repo repeated for multi-repo).');
     }
 
+    // Budget pre-flight gate (issue #346). Cloud dispatches inherit the local
+    // project's caps; we refuse to POST a run that would breach an on_exceed:block
+    // cap. The repo slug is the project attribution key. Server-side spend is
+    // authoritative for live enforcement; this pre-flight is the deterministic
+    // "don't even start it" guard. Dormant when no caps are configured.
+    {
+      const { runPreflightGate } = await import('../budget/preflight.js');
+      const projectKey = repos[0] ?? process.cwd();
+      const gate = runPreflightGate({
+        agent: options.agent ?? 'cloud',
+        model: options.model ?? `${options.agent ?? 'cloud'}-default`,
+        prompt: options.prompt,
+        project: projectKey,
+      });
+      if (!gate.dormant && !gate.decision.allow) {
+        throw new Error(`[budget] BLOCKED cloud dispatch (${projectKey}): ${gate.decision.reason}`);
+      }
+    }
+
     // Validate each repo's shape and resolve its installation_id up front.
     // Any bad entry fails the whole dispatch — we never want a half-started
     // multi-repo run that only found installations for some of the repos.

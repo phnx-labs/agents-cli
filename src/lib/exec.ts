@@ -740,6 +740,16 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   const piped = !process.stdout.isTTY;
   const interactive = resolveInteractive(options);
 
+  // Budget live kill-switch (issue #346). For headless runs we incrementally
+  // parse stream-json usage off stdout, accumulate cost, and kill the child the
+  // moment a configured cap is crossed — exactly like the --timeout path, but
+  // resolving with a DISTINCT exit code so CI/headless can tell budget-kill from
+  // timeout. Spend is recorded to the shared ledger in the close handler. The
+  // watcher is dormant (and zero-cost) when no caps are configured.
+  const cwd = options.cwd || process.cwd();
+  const runId = randomUUID();
+  const watcherState = await setupBudgetWatcher(options, cwd, runId);
+
   maybeRotate();
   const timer = createTimer('agent.run', {
     agent: options.agent,
@@ -778,8 +788,25 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     // Mark startup time (time from function call to process spawn)
     timer.mark('startup');
 
+    let budgetKilled = false;
     if (!interactive && piped && child.stdout) {
       child.stdout.pipe(process.stdout);
+      // Tap the same stream for budget usage events without consuming the pipe
+      // (a 'data' listener and .pipe() both receive every chunk). Kill on breach.
+      if (watcherState) {
+        let pendingLine = '';
+        child.stdout.on('data', (chunk: Buffer) => {
+          const { events, rest } = watcherState.extract(chunk.toString('utf-8'), pendingLine);
+          pendingLine = rest;
+          for (const ev of events) watcherState.watcher.feedUsage(ev);
+          if (watcherState.watcher.breached() && !budgetKilled) {
+            budgetKilled = true;
+            process.stderr.write(`[budget] hard cap exceeded — terminating ${options.agent} run\n`);
+            child.kill('SIGTERM');
+            setTimeout(() => child.kill('SIGKILL'), 5000);
+          }
+        });
+      }
     }
 
     let stderrBuffer = '';
@@ -811,10 +838,92 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     });
     child.on('close', (code) => {
       if (timeoutTimer) clearTimeout(timeoutTimer);
-      timer.end({ exitCode: code ?? 0, status: code === 0 ? 'success' : 'failed' });
-      resolve({ exitCode: code ?? 0, stderr: stderrBuffer });
+      // Record final spend to the shared ledger (issue #346). Best-effort: a
+      // ledger write must never mask the run's own outcome.
+      if (watcherState) {
+        try { watcherState.finalize(); } catch { /* ledger write is non-critical */ }
+      }
+      // Budget kill resolves with a DISTINCT non-zero exit so CI/headless and
+      // teams/cloud can tell a budget termination apart from a normal failure.
+      const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0);
+      timer.end({ exitCode, status: budgetKilled ? 'budget_killed' : code === 0 ? 'success' : 'failed' });
+      resolve({ exitCode, stderr: stderrBuffer });
     });
   });
+}
+
+/** Exit code spawnAgent resolves with when a run is killed for crossing a budget cap. */
+export const BUDGET_KILL_EXIT_CODE = 7;
+
+/**
+ * Resolve the budget watcher for a run. Returns null (watcher dormant) when no
+ * caps are configured, so non-budget users pay nothing. When caps exist, builds
+ * a live watcher seeded with the day/project spend already on the ledger, plus
+ * a finalize() that appends this run's accumulated spend.
+ */
+async function setupBudgetWatcher(
+  options: ExecOptions,
+  cwd: string,
+  runId: string,
+): Promise<{
+  watcher: import('./budget/enforce.js').LiveSpendWatcher;
+  extract: (chunk: string, pending: string) => { events: import('./budget/enforce.js').UsageEvent[]; rest: string };
+  finalize: () => void;
+} | null> {
+  const interactive = resolveInteractive(options);
+  if (interactive) return null;
+  const [{ resolveBudgetConfig, hasAnyCap }, { makeLiveSpendWatcher, capsFromConfig, extractUsageEvents }, ledger] =
+    await Promise.all([
+      import('./budget/config.js'),
+      import('./budget/enforce.js'),
+      import('./budget/ledger.js'),
+    ]);
+  const cfg = resolveBudgetConfig(cwd);
+  if (!hasAnyCap(cfg)) return null;
+
+  const today = ledger.localDay();
+  const entries = ledger.loadLedger();
+  const caps = capsFromConfig(cfg, {
+    daySpend: ledger.spendForDay(today, entries),
+    projectSpend: ledger.spendForProject(cwd, entries),
+    agentDaySpend: { [options.agent]: ledger.spendForAgentDay(options.agent, today, entries) },
+  });
+  const watcher = makeLiveSpendWatcher({ caps, onBreach: () => { /* kill handled in stdout tap */ } });
+
+  // Accumulate per-(model) usage for a clean final ledger record.
+  const seen: Array<{ model: string; usage: import('./budget/ledger.js').UsageObservation }> = [];
+  const model = options.model ?? `${options.agent}-default`;
+
+  return {
+    watcher,
+    extract: (chunk: string, pending: string) => {
+      const res = extractUsageEvents(chunk, pending, model, options.agent);
+      for (const ev of res.events) {
+        seen.push({
+          model: ev.model ?? model,
+          usage: {
+            inputTokens: ev.inputTokens,
+            outputTokens: ev.outputTokens,
+            cacheReadTokens: ev.cacheReadTokens,
+            cacheCreationTokens: ev.cacheCreationTokens,
+          },
+        });
+      }
+      return res;
+    },
+    finalize: () => {
+      for (const s of seen) {
+        ledger.recordSpend({
+          runId,
+          agent: options.agent,
+          project: cwd,
+          model: s.model,
+          usage: s.usage,
+          source: 'run',
+        });
+      }
+    },
+  };
 }
 
 /**

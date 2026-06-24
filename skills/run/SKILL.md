@@ -172,6 +172,35 @@ agents run claude "generate sales report" --timeout 30m
 agents run claude "..." --timeout 2h30m
 ```
 
+## Budget guardrails (pre-flight estimate + hard kill)
+
+When a `budget:` block is configured in `agents.yaml` (project > user), every
+run is gated:
+
+- **Pre-flight estimate.** Before spawn, `agents run` prints
+  `[budget] est. $X for this <agent> run` and, under `on_exceed: block`, refuses
+  to launch if the run would breach any cap (`per_run` / `per_day` / `per_agent`
+  / `per_project`). A block exits **non-zero (code 2)** — CI/headless inherit it.
+- **`-y` / `--yes`** skips the interactive `require_confirm_over` confirm prompt
+  for scripts. It does **NOT** skip a hard block — a cap breach blocks regardless.
+- **Live kill-switch.** Headless runs hard-stop the moment accumulated spend
+  crosses a cap (SIGTERM → SIGKILL), resolving with a distinct exit code (7).
+
+```bash
+# Tiny per_run cap blocks before the agent ever starts:
+$ agents run claude "huge refactor" --model claude-opus-4
+[budget] est. $2.48 for this claude run (claude-opus-4, prompt size)
+[budget] BLOCKED: estimated $2.48 exceeds per_run cap $0.01
+$ echo $?   # 2
+
+# Skip the confirm prompt in a script (still blocks on a hard cap):
+agents run claude "..." --yes
+```
+
+Caps are **cross-vendor**: one `per_project` / `per_day` cap spans Claude,
+Codex, Gemini, and every other agent the CLI dispatches. View and set them with
+`agents budget`. Full reference: [docs/06-observability.md](../../docs/06-observability.md#budget-guardrails-agents-budget).
+
 ## Grant access to extra directories (Claude only)
 
 ```bash
@@ -215,5 +244,6 @@ Emits a unified event stream; ndjson when combined with `--json`.
 | `-b, --balanced` | Shortcut for `--strategy balanced` |
 | `--strategy pinned\|available\|balanced` | Version selection |
 | `--acp` | Route via Agent Client Protocol |
+| `-y, --yes` | Skip the budget confirm prompt (never skips a hard block) |
 
 For everything else, run `agents run --help`.
