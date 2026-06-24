@@ -730,7 +730,10 @@ export function ensureVersionedAliasCurrent(agent: AgentId, version: string): 'c
     createVersionedAlias(agent, version);
     return 'created';
   }
-  if (!isVersionedAliasCurrent(agent, version)) {
+  // Upgrade-only (newest-wins), same rationale as ensureShimCurrent: never
+  // downgrade an alias stamped by a newer install sharing the shims dir.
+  const onDisk = readVersionedAliasSchemaVersion(agent, version);
+  if (onDisk === null || onDisk < VERSIONED_ALIAS_SCHEMA_VERSION) {
     createVersionedAlias(agent, version);
     return 'updated';
   }
@@ -1366,7 +1369,14 @@ export function ensureShimCurrent(agent: AgentId): 'created' | 'updated' | 'curr
     createShim(agent);
     return 'created';
   }
-  if (!isShimCurrent(agent)) {
+  // Upgrade-only (newest-wins): regenerate only when the on-disk shim is
+  // unversioned/unreadable (null) or OLDER than this binary. Never downgrade a
+  // shim stamped by a NEWER agents-cli install. Two installs at different
+  // SHIM_SCHEMA_VERSION sharing ~/.agents/.cache/shims/ (e.g. a dev build on
+  // PATH alongside a Hermes-bundled published copy) otherwise ping-pong —
+  // rewriting every shim on each alternating launch and adding boot latency.
+  const onDisk = readShimSchemaVersion(agent);
+  if (onDisk === null || onDisk < SHIM_SCHEMA_VERSION) {
     createShim(agent);
     return 'updated';
   }

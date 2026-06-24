@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -315,5 +315,69 @@ describe('hasAliasShadowingShim', () => {
       'utf8',
     );
     expect(hasAliasShadowingShim('codex', { homeDir: home })).toBe(false);
+  });
+});
+
+// Regression: two agents-cli installs with different SHIM_SCHEMA_VERSION sharing
+// ~/.agents/.cache/shims/ used to ping-pong — each regenerated every shim whose
+// embedded marker !== its own constant, so they took turns rewriting all shims
+// on every launch. ensureShimCurrent is now upgrade-only: it never downgrades a
+// shim stamped by a newer install. (SHIMS_DIR is derived from HOME at module
+// load, so re-import under a temp HOME to keep the real shims dir untouched.)
+describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-current-'));
+    process.env.HOME = home;
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    vi.resetModules();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  function writeShim(shimPath: string, marker: string): void {
+    fs.mkdirSync(path.dirname(shimPath), { recursive: true });
+    fs.writeFileSync(shimPath, `#!/bin/bash\n# ${marker}\nexec true\n`, { mode: 0o755 });
+  }
+
+  it('does NOT downgrade a shim stamped by a newer install', async () => {
+    const mod = await import('../shims.js');
+    const shimPath = mod.getShimPath('claude');
+    const newer = mod.SHIM_SCHEMA_VERSION + 1;
+    writeShim(shimPath, `agents-shim-version: ${newer}`);
+    const before = fs.readFileSync(shimPath, 'utf8');
+
+    expect(mod.ensureShimCurrent('claude')).toBe('current');
+    expect(fs.readFileSync(shimPath, 'utf8')).toBe(before); // left untouched
+  });
+
+  it('regenerates a shim from an older install (upgrade)', async () => {
+    const mod = await import('../shims.js');
+    const shimPath = mod.getShimPath('claude');
+    writeShim(shimPath, 'agents-shim-version: 1');
+
+    expect(mod.ensureShimCurrent('claude')).toBe('updated');
+    expect(fs.readFileSync(shimPath, 'utf8')).toContain(
+      `agents-shim-version: ${mod.SHIM_SCHEMA_VERSION}`,
+    );
+  });
+
+  it('regenerates an unversioned (pre-marker) shim', async () => {
+    const mod = await import('../shims.js');
+    const shimPath = mod.getShimPath('claude');
+    writeShim(shimPath, 'no marker here');
+
+    expect(mod.ensureShimCurrent('claude')).toBe('updated');
+  });
+
+  it('leaves a current shim untouched', async () => {
+    const mod = await import('../shims.js');
+    mod.createShim('claude');
+    expect(mod.ensureShimCurrent('claude')).toBe('current');
   });
 });
