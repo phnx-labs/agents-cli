@@ -541,44 +541,77 @@ describe('buildExecCommand', () => {
     });
   });
 
-  // WORKFLOW.md frontmatter tools/mcpServers/allowedAgents → Claude headless
-  // capability flags (issue #324). buildExecCommand is pure: the command layer
-  // resolves the registry / writes the mcp-config file and gates on `allowlist`;
-  // here we assert the string-building and the Claude-only guard.
+  // WORKFLOW.md frontmatter tools/mcpServers → Claude headless capability flags
+  // (issue #324). buildExecCommand is pure: the command layer resolves the
+  // registry / writes the mcp-config file and gates on `allowlist`; here we
+  // assert the string-building and the Claude-only guard. These assertions
+  // encode the SECURITY-correct flags verified against `claude --help`:
+  //   - `--tools <names...>` restricts the AVAILABLE tool set (the boundary);
+  //     `--allowedTools` only auto-approves and is emitted alongside.
+  //   - `--strict-mcp-config` makes the run use ONLY the named MCP servers.
+  //   - `--agents` is NOT emitted (it defines agents, doesn't restrict dispatch).
   describe('workflow capability scoping', () => {
-    it('claude allowedTools produces --allowedTools with a space-joined list', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', allowedTools: ['Read', 'Grep'] }));
-      expect(cmd).toContain('--allowedTools');
-      expect(cmd[cmd.indexOf('--allowedTools') + 1]).toBe('Read Grep');
+    it('claude toolsRestrict emits --tools as SEPARATE variadic tokens (the restriction)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', toolsRestrict: ['Read', 'Grep'] }));
+      const i = cmd.indexOf('--tools');
+      expect(i).toBeGreaterThan(-1);
+      // Separate argv tokens, NOT a single "Read Grep" string.
+      expect(cmd[i + 1]).toBe('Read');
+      expect(cmd[i + 2]).toBe('Grep');
+      expect(cmd).not.toContain('Read Grep');
     });
 
-    it('claude mcpConfigPath produces --mcp-config with the file path', () => {
+    it('claude toolsRestrict also emits --allowedTools (auto-approve permitted tools in headless)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', toolsRestrict: ['Read', 'Grep'] }));
+      const i = cmd.indexOf('--allowedTools');
+      expect(i).toBeGreaterThan(-1);
+      expect(cmd[i + 1]).toBe('Read');
+      expect(cmd[i + 2]).toBe('Grep');
+    });
+
+    it('claude mcpConfigPath emits --mcp-config AND --strict-mcp-config (only named servers)', () => {
       const cmd = buildExecCommand(opts({ agent: 'claude', mcpConfigPath: '/tmp/x/mcp-config.json' }));
       expect(cmd).toContain('--mcp-config');
       expect(cmd[cmd.indexOf('--mcp-config') + 1]).toBe('/tmp/x/mcp-config.json');
+      expect(cmd).toContain('--strict-mcp-config');
     });
 
-    it('claude agentsJson produces --agents with the inline JSON', () => {
-      const json = JSON.stringify({ security: {}, correctness: {} });
-      const cmd = buildExecCommand(opts({ agent: 'claude', agentsJson: json }));
-      expect(cmd).toContain('--agents');
-      expect(cmd[cmd.indexOf('--agents') + 1]).toBe(json);
+    it('never emits the inert --agents flag', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'claude',
+        toolsRestrict: ['Read', 'Grep'],
+        mcpConfigPath: '/tmp/x/mcp-config.json',
+      }));
+      expect(cmd).not.toContain('--agents');
     });
 
-    it('empty allowedTools does not emit the flag', () => {
-      const cmd = buildExecCommand(opts({ agent: 'claude', allowedTools: [] }));
+    it('empty toolsRestrict does not emit --tools', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', toolsRestrict: [] }));
+      expect(cmd).not.toContain('--tools');
       expect(cmd).not.toContain('--allowedTools');
+    });
+
+    it('--tools is emitted after the positional prompt so the variadic never swallows it', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: 'write a file', headless: true, toolsRestrict: ['Read', 'Grep'] }));
+      // The prompt is a positional appended before the scoping flags; --tools
+      // must come strictly after it (verified against claude --help: a trailing
+      // variadic --tools would otherwise consume the positional prompt).
+      const promptIdx = cmd.indexOf('write a file');
+      const toolsIdx = cmd.indexOf('--tools');
+      expect(promptIdx).toBeGreaterThan(-1);
+      expect(toolsIdx).toBeGreaterThan(promptIdx);
     });
 
     it('non-claude agent (codex) ignores all scoping options — the guard', () => {
       const cmd = buildExecCommand(opts({
         agent: 'codex',
-        allowedTools: ['Read', 'Grep'],
+        toolsRestrict: ['Read', 'Grep'],
         mcpConfigPath: '/tmp/x/mcp-config.json',
-        agentsJson: JSON.stringify({ security: {} }),
       }));
+      expect(cmd).not.toContain('--tools');
       expect(cmd).not.toContain('--allowedTools');
       expect(cmd).not.toContain('--mcp-config');
+      expect(cmd).not.toContain('--strict-mcp-config');
       expect(cmd).not.toContain('--agents');
     });
   });

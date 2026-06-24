@@ -167,14 +167,14 @@ agents workflows remove code-review      # remove (interactive picker if no name
 name: <string>              # display name (also used for `view` output)
 description: <string>       # one-line summary shown in `list`
 model: <string>             # claude-opus-4-7, claude-sonnet-4-6, etc.
-tools:                      # tool allowlist — ENFORCED at run time (Claude)
+tools:                      # available-tool restriction — ENFORCED (Claude, --tools)
   - Read
   - Bash
 skills:                     # extra skills to load for this run
   - debug
-mcpServers:                 # MCP servers to enable — ENFORCED (Claude)
+mcpServers:                 # MCP servers to enable — ENFORCED (Claude, --strict-mcp-config)
   - github
-allowedAgents:              # subagent names the orchestrator may dispatch to — ENFORCED (Claude)
+allowedAgents:              # subagents the orchestrator may dispatch to — ENFORCED (Claude, file filter)
   - security
   - correctness
 ```
@@ -187,9 +187,9 @@ These fields are not just displayed — on Claude they translate to headless fla
 
 | Frontmatter | Claude flag | Effect |
 |---|---|---|
-| `tools: [Read, Grep]` | `--allowedTools Read Grep` | Read-only sandbox — `Write` and `Bash` are denied |
-| `mcpServers: [github]` | `--mcp-config <ephemeral json>` | Only the named registry servers are connected |
-| `allowedAgents: [security]` | `--agents <json>` | Restricts which subagents the orchestrator can dispatch |
+| `tools: [Read, Grep]` | `--tools Read Grep` (+ matching `--allowedTools`) | Read-only sandbox — `Write`, `Bash`, and `Edit` are unavailable in the session |
+| `mcpServers: [github]` | `--mcp-config <ephemeral json>` + `--strict-mcp-config` | ONLY the named registry servers load (the config flag alone would merely add them) |
+| `allowedAgents: [security]` | copies only `security.md` into the run's agents dir | Unlisted subagents have no definition on disk, so the orchestrator can't dispatch them. (A subagent left over from a prior unrestricted run can persist in the shared dir — not removed here.) |
 
 Read-only review example — this workflow can read and search but cannot write files or shell out:
 

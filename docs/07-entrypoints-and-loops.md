@@ -121,7 +121,7 @@ Without `loop:`, a routine fires its entrypoint once per cadence — the current
 | `agents run <subagent>` / `<command>` as the top-level target | no — only agent / profile / workflow | yes — unified entrypoint dispatch |
 | Routine target | `agent` or `workflow` | any entrypoint via `run:` |
 | Per-routine / per-run plugin scoping | no — global enablement, or `sandbox: false` for all | `plugins: [...]` / `--plugins` |
-| Workflow frontmatter `model` / `tools` / `mcpServers` / `allowedAgents` enforced | yes (Claude) — `model` → `--model`, `tools` → `--allowedTools`, `mcpServers` → ephemeral `--mcp-config`, `allowedAgents` → `--agents`; unenforceable declarations warn, never silently drop | yes |
+| Workflow frontmatter `model` / `tools` / `mcpServers` / `allowedAgents` enforced | yes (Claude) — `model` → `--model`, `tools` → `--tools` (restricts available tools), `mcpServers` → ephemeral `--mcp-config` + `--strict-mcp-config` (only named servers), `allowedAgents` → only listed subagent definitions copied into the run; unenforceable declarations warn, never silently drop | yes |
 | `run` target qualifiers | n/a — auto-detect (agent > profile > workflow) | `[<type>:]<name>[@<source>]` |
 | Loop a workflow on a *cadence* | yes — routine with `workflow:` | — |
 | Loop an entrypoint *until a condition* | no | `loop:` block / `agents loop <entrypoint>` |

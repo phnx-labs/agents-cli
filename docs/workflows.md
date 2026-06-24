@@ -95,15 +95,15 @@ review of pending changes...
 | `name` | string | Display name shown in `agents workflows view` |
 | `description` | string | One-line description shown in `agents workflows list` |
 | `model` | string | Model identifier used by the orchestrator agent |
-| `tools` | `string[]` | Tool allowlist — enforced at run time (Claude) via `--allowedTools`. Declaring `tools: [Read, Grep]` scopes the run to those tools and denies Write/Bash |
-| `mcpServers` | `string[]` | MCP server names to connect at run time — enforced (Claude) via an ephemeral `--mcp-config` assembled from the MCP registry. Names not in the registry are skipped with a warning |
+| `tools` | `string[]` | Available-tool restriction — enforced at run time (Claude) via `--tools`. Declaring `tools: [Read, Grep]` makes only those tools available; `Write`, `Bash`, and `Edit` are unavailable for the whole run |
+| `mcpServers` | `string[]` | MCP server names to connect at run time — enforced (Claude) via an ephemeral `--mcp-config` **plus** `--strict-mcp-config`, so only the named servers load. Names not in the registry are skipped with a warning |
 | `skills` | `string[]` | Skills to load into context |
-| `allowedAgents` | `string[]` | Subagent names the orchestrator can dispatch to (from `subagents/` dir) — enforced (Claude) via `--agents` |
+| `allowedAgents` | `string[]` | Subagent names the orchestrator can dispatch to (from `subagents/` dir) — enforced (Claude) by copying only the listed subagent definition files into the run, so unlisted subagents have no definition to dispatch |
 | `secrets` | `string[]` | Secrets bundle names injected from macOS Keychain at run time; pass `--no-auto-secrets` to skip |
 
 ### Scoping & security
 
-`tools`, `mcpServers`, and `allowedAgents` are not just documentation — they scope the actual run on Claude. `tools: [Read, Grep]` produces `--allowedTools Read Grep`, which denies `Write` and `Bash`, so a review workflow declared read-only really is read-only. `mcpServers` translates to an ephemeral `--mcp-config` JSON built from the MCP registry, so only the named servers are connected. `allowedAgents` maps to `--agents`.
+`tools`, `mcpServers`, and `allowedAgents` are not just documentation — they scope the actual run on Claude. `tools: [Read, Grep]` produces `--tools Read Grep`, which restricts the *available* built-in tool set — `Write`, `Bash`, and `Edit` are not present in the session — so a review workflow declared read-only really is read-only. (`--allowedTools` is also emitted for the same set so the permitted tools don't prompt in headless runs.) `mcpServers` translates to an ephemeral `--mcp-config` JSON built from the MCP registry, emitted together with `--strict-mcp-config`, so *only* the named servers are connected. `allowedAgents` is enforced by copying only the listed subagent definition files into the run directory: a subagent whose `.md` definition isn't present cannot be dispatched. (Note: subagents copied by a prior run of a different, unrestricted workflow can remain in the shared agents dir; for a hard guarantee, scope per version home.)
 
 On an agent that lacks the tool-allowlist capability (`allowlist` in `src/lib/agents.ts` — today only Claude has it), a workflow that declares any of these fields runs *unscoped* and emits a `declared but unenforceable on <agent>` warning rather than silently dropping the boundary.
 

@@ -135,7 +135,7 @@ Pass a workflow name in the agent slot. agents-cli resolves the workflow directo
 agents run code-review "review PR #42 on acme/api" --mode edit
 ```
 
-A workflow's `tools:` and `mcpServers:` frontmatter now *scope the run* (Claude): `tools: [Read, Grep]` runs with `--allowedTools Read Grep` — Write/Bash are denied — and `mcpServers:` connects only the named registry servers via an ephemeral `--mcp-config`. Declarations on an agent without the allowlist capability warn rather than silently run unscoped.
+A workflow's `tools:` and `mcpServers:` frontmatter now *scope the run* (Claude): `tools: [Read, Grep]` runs with `--tools Read Grep`, which restricts the available tool set — Write/Bash/Edit are unavailable in the session — and `mcpServers:` connects only the named registry servers via an ephemeral `--mcp-config` paired with `--strict-mcp-config`. Declarations on an agent without the allowlist capability warn rather than silently run unscoped.
 
 See the `workflows` skill for authoring workflows.
 

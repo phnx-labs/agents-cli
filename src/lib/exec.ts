@@ -140,12 +140,21 @@ export interface ExecOptions {
   env?: Record<string, string>;
   /**
    * Workflow capability scoping (Claude only). Sourced from WORKFLOW.md
-   * frontmatter `tools:` / `mcpServers:` / `allowedAgents:` and translated to
-   * Claude headless flags in buildExecCommand. Other agents ignore these.
+   * frontmatter `tools:` / `mcpServers:` and translated to Claude headless
+   * flags in buildExecCommand. Other agents ignore these.
+   *
+   * `toolsRestrict` is the AVAILABLE-tool allowlist: it maps to `--tools`, which
+   * restricts the built-in tool set the run can use at all (NOT `--allowedTools`,
+   * which only auto-approves without restricting availability). Declaring
+   * `[Read, Grep]` makes Write/Bash/Edit unavailable for the whole run.
    */
-  allowedTools?: string[];
+  toolsRestrict?: string[];
+  /**
+   * Path to an ephemeral mcp-config JSON. Emitted as `--mcp-config <path>`
+   * together with `--strict-mcp-config` so ONLY the named servers load (the
+   * flag alone merely ADDS to the existing server set).
+   */
   mcpConfigPath?: string;
-  agentsJson?: string;
 }
 
 /**
@@ -621,19 +630,36 @@ export function buildExecCommand(options: ExecOptions): string[] {
   }
 
   // Claude-specific: workflow capability scoping. WORKFLOW.md frontmatter
-  // `tools:` / `mcpServers:` / `allowedAgents:` is translated to the headless
-  // flags that actually restrict the run. The command layer is responsible for
-  // gating these behind the `allowlist` capability and assembling the mcp-config
-  // file; buildExecCommand stays a pure string-builder so it remains unit-testable.
+  // `tools:` / `mcpServers:` is translated to the headless flags that ACTUALLY
+  // restrict the run (verified against `claude --help` on the installed CLI):
+  //
+  //   tools:       -> `--tools <names...>` — restricts the AVAILABLE built-in
+  //                   tool set. This is the security boundary: tools NOT named
+  //                   here (e.g. Write, Bash, Edit) are unavailable for the whole
+  //                   run. `--allowedTools` would only auto-approve without
+  //                   restricting, so it is the WRONG flag for sandboxing.
+  //                   We also emit `--allowedTools <names...>` for the same set so
+  //                   the permitted tools don't prompt in headless `-p` mode.
+  //   mcpServers:  -> `--mcp-config <path>` PLUS `--strict-mcp-config`. The
+  //                   config flag alone ADDS servers to the existing set; only
+  //                   `--strict-mcp-config` makes the run use *only* the named
+  //                   servers, which is what scoping means.
+  //
+  // The command layer gates this behind the `allowlist` capability and assembles
+  // the mcp-config file; buildExecCommand stays a pure string-builder.
+  //
+  // `<tools...>` is variadic. Emit the names as separate argv tokens. The flags
+  // here are appended AFTER the positional prompt (added above), so the variadic
+  // never swallows the prompt; the trailing `--allowedTools` / `--strict-mcp-config`
+  // tokens also terminate the `--tools` variadic cleanly.
   if (options.agent === 'claude') {
-    if (options.allowedTools && options.allowedTools.length > 0) {
-      cmd.push('--allowedTools', options.allowedTools.join(' '));
+    if (options.toolsRestrict && options.toolsRestrict.length > 0) {
+      cmd.push('--tools', ...options.toolsRestrict);
+      cmd.push('--allowedTools', ...options.toolsRestrict);
     }
     if (options.mcpConfigPath) {
       cmd.push('--mcp-config', options.mcpConfigPath);
-    }
-    if (options.agentsJson) {
-      cmd.push('--agents', options.agentsJson);
+      cmd.push('--strict-mcp-config');
     }
   }
 
@@ -888,6 +914,24 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
   ];
   let prevAgent: AgentId | undefined;
   let prevSessionId: string | undefined;
+
+  // Workflow capability scoping only takes effect on claude (buildExecCommand
+  // guards `--tools` / `--mcp-config` / `--strict-mcp-config` on agent==='claude').
+  // A fallback to any non-claude agent would run with NONE of that scoping — the
+  // declared sandbox silently evaporates. Warn loudly so a rate-limit handoff to
+  // an unscoped agent is never silent (issue #324 fail-open).
+  const scopingActive = (options.toolsRestrict && options.toolsRestrict.length > 0)
+    || !!options.mcpConfigPath;
+  if (scopingActive) {
+    const unscoped = options.fallback.filter(f => f.agent !== 'claude').map(f => f.agent);
+    if (unscoped.length > 0) {
+      process.stderr.write(
+        `[agents] WARNING: workflow tool/MCP scoping is enforced on claude only. ` +
+        `Fallback agent(s) ${[...new Set(unscoped)].join(', ')} would run UNSCOPED ` +
+        `(no --tools / --strict-mcp-config restriction) if claude hits a rate limit.\n`,
+      );
+    }
+  }
 
   for (let i = 0; i < chain.length; i++) {
     const { agent, version } = chain[i];
