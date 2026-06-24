@@ -39,6 +39,7 @@ function resolveRepoPath(target?: string): string {
 }
 
 import {
+  applyExtraAliasToVersions,
   ensureAgentsDir,
   getExtraRepoDir,
   getSystemAgentsDir,
@@ -299,6 +300,7 @@ export function registerRepoCommands(program: Command): void {
         const commit = log.latest?.hash.slice(0, 8) || 'unknown';
         extras[alias] = { url: targetDir, path: targetDir, enabled: true };
         updateMeta({ extraRepos: extras });
+        syncExtraAliasAcrossVersions(alias, true);
         spinner.succeed(`Created ${targetDir} (${commit})`);
         console.log(chalk.gray(`\nRegistered as "${alias}". Edit files there, then add your own git remote when ready.`));
       } catch (err) {
@@ -347,6 +349,7 @@ export function registerRepoCommands(program: Command): void {
       if (parsed.type === 'local') {
         extras[alias] = { url: parsed.url, path: parsed.url, enabled: true };
         updateMeta({ extraRepos: extras });
+        syncExtraAliasAcrossVersions(alias, true);
         syncMarketplacesForDefaults();
         console.log(chalk.green(`Registered local repo "${alias}" -> ${parsed.url}`));
         return;
@@ -384,6 +387,7 @@ export function registerRepoCommands(program: Command): void {
 
       extras[alias] = { url: parsed.url, path: targetDir, enabled: true };
       updateMeta({ extraRepos: extras });
+      syncExtraAliasAcrossVersions(alias, true);
       syncMarketplacesForDefaults();
 
       console.log(chalk.gray(`\nRegistered as "${alias}". Skills and commands from this repo will be`));
@@ -425,6 +429,7 @@ export function registerRepoCommands(program: Command): void {
 
       delete extras[alias];
       updateMeta({ extraRepos: extras });
+      syncExtraAliasAcrossVersions(alias, false);
       syncMarketplacesForDefaults();
       console.log(chalk.green(`Removed "${alias}"`));
     });
@@ -637,6 +642,20 @@ function collectRepoTargets(alias: string | undefined): RepoTarget[] | null {
   return [found];
 }
 
+/**
+ * Keep already-installed versions' selectors in sync with an extra-repo change:
+ * add `<alias>:*` when the repo is registered/enabled, strip it when removed.
+ * Newly-installed versions inherit it from `defaultPatterns()` at scaffold time,
+ * so without this a repo added after install is invisible to existing versions.
+ */
+function syncExtraAliasAcrossVersions(alias: string, add: boolean): void {
+  const n = applyExtraAliasToVersions(alias, add);
+  if (n > 0) {
+    const verb = add ? 'Added to' : 'Removed from';
+    console.log(chalk.gray(`${verb} ${n} existing version selector${n === 1 ? '' : 's'}.`));
+  }
+}
+
 async function toggle(alias: string, enabled: boolean): Promise<void> {
   const meta = readMeta();
   const extras: Record<string, ExtraRepoConfig> = { ...(meta.extraRepos || {}) };
@@ -651,6 +670,9 @@ async function toggle(alias: string, enabled: boolean): Promise<void> {
   }
   extras[alias] = { ...extras[alias], enabled };
   updateMeta({ extraRepos: extras });
+  // Re-enabling backfills the alias into existing versions; disabling leaves the
+  // selectors (resolution skips disabled extras) so a later enable is a no-op.
+  if (enabled) syncExtraAliasAcrossVersions(alias, true);
   syncMarketplacesForDefaults();
   console.log(chalk.green(`${enabled ? 'Enabled' : 'Disabled'} "${alias}"`));
 }
