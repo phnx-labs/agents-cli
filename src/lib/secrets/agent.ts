@@ -28,7 +28,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn, spawnSync, execFileSync, type ChildProcess } from 'child_process';
-import { getHelpersDir } from '../state.js';
+import { getHelpersDir, readMeta } from '../state.js';
 import { isAlive } from '../platform/process.js';
 import { getKeychainHelperPath } from './install-helper.js';
 import type { SecretsBundle } from './bundles.js';
@@ -368,6 +368,79 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
     return { bundle: o.bundle, env: o.env };
   } catch {
     return null;
+  }
+}
+
+/** True when `secrets.agent.auto` is enabled in agents.yaml. Best-effort; a
+ * missing/unreadable meta reads as off. */
+export function secretsAgentAutoEnabled(): boolean {
+  try {
+    return readMeta().secrets?.agent?.auto === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Inline node program that loads one bundle into the broker, started detached
+ * from the hot path. Reads the JSON payload from stdin (so secret values never
+ * appear in argv / `ps`), retries the socket for a few seconds to absorb a
+ * cold-started agent, sends the load, and exits. argv after -e: [execPath, <socket>].
+ */
+const DETACHED_LOAD_PROGRAM = `
+const net = require('net');
+const sock = process.argv[1];
+let input = '';
+process.stdin.setEncoding('utf-8');
+process.stdin.on('data', (d) => { input += d; });
+process.stdin.on('end', () => {
+  let payload; try { payload = JSON.parse(input); } catch (e) { process.exit(1); }
+  let attempts = 0;
+  const tryConnect = () => {
+    const c = net.createConnection(sock);
+    c.on('connect', () => {
+      c.write(JSON.stringify({ cmd: 'load', name: payload.name, bundle: payload.bundle, env: payload.env, ttlMs: payload.ttlMs }) + '\\n');
+    });
+    c.setEncoding('utf-8');
+    c.on('data', () => { try { c.destroy(); } catch (e) {} process.exit(0); });
+    c.on('error', () => {
+      try { c.destroy(); } catch (e) {}
+      if (++attempts >= 30) process.exit(1);
+      setTimeout(tryConnect, 100);
+    });
+  };
+  tryConnect();
+});
+`;
+
+/**
+ * Fire-and-forget: populate the broker with a freshly-resolved bundle so the
+ * NEXT process reads it without a prompt. Used by the auto-cache path after a
+ * real keychain read of a `session`-tier bundle. Adds no latency to the caller
+ * — it spawns the agent (if needed) and a detached loader, both unref'd, then
+ * returns immediately. Entirely best-effort; never throws. macOS only.
+ */
+export function agentAutoLoadSync(
+  name: string,
+  bundle: SecretsBundle,
+  env: Record<string, string>,
+  ttlMs: number,
+): void {
+  if (!onDarwin()) return;
+  try {
+    if (!agentSocketExists()) {
+      const { cmd, args } = brokerSpawn();
+      spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
+    }
+    const loader = spawn(process.execPath, ['-e', DETACHED_LOAD_PROGRAM, socketPath()], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      detached: true,
+    });
+    loader.stdin?.write(JSON.stringify({ name, bundle, env, ttlMs }));
+    loader.stdin?.end();
+    loader.unref();
+  } catch {
+    // best-effort: the next read just pops Touch ID as it would today
   }
 }
 

@@ -101,6 +101,8 @@ The batch-read design means `agents secrets list` pops Touch ID once for all bun
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 24h) | `agents secrets unlock prod --ttl 30m` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
+| `secrets tier <bundle> [tier]` | Show or set a bundle's tier: `biometry` (default) or `session` | `agents secrets tier dev session` |
+| `secrets create <name> --tier session` | Create a bundle that's eligible for the agent | `agents secrets create dev --tier session` |
 
 See [The secrets-agent](#the-secrets-agent-macos) below for the model and the security trade-off.
 
@@ -310,6 +312,22 @@ The secrets-agent is the ssh-agent answer:
 - The hold ends when its TTL expires (default 24h, `--ttl` to change), you run `agents secrets lock`, or the screen locks / the machine sleeps. Nothing is ever written to disk.
 
 It is **opt-in by construction**: if you never run `unlock`, resolution is byte-for-byte today's keychain path. Audit events tag broker-served reads with `"source":"agent"` so you can tell them apart from real keychain reads.
+
+### Tiers and auto-cache
+
+Each bundle has a tier (`agents secrets tier <bundle> [biometry|session]`, also `--tier` on `create`):
+
+- **`biometry`** (default): only an explicit `unlock` ever puts it in the agent; every other read pops Touch ID. Use for high-value bundles you want to confirm each session.
+- **`session`**: eligible for the agent. You can `unlock` it, and — if you set `secrets.agent.auto: true` in `agents.yaml` — the **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all.
+
+```yaml
+# ~/.agents/agents.yaml
+secrets:
+  agent:
+    auto: true   # session-tier bundles self-cache on first prompt
+```
+
+Auto-cache is **off by default** and only ever applies to `session`-tier bundles — a `biometry` bundle is never auto-held. (A third `none` tier — items stored without the biometry ACL for fully silent reads with no agent — is intentionally not offered yet; it needs a separate signed-helper change and is the global downgrade the agent is designed to avoid.)
 
 **The trade-off (read this):** while a bundle is unlocked, a same-user process that can reach the socket reads it **silently** — today it would at least have to pop a visible "Unlock agents-cli secrets" prompt you might notice. That is the same trust boundary the keychain already concedes above ("any same-user process can pop the prompt and read"), minus the prompt. Bound it by unlocking only the bundles you need, keeping a short TTL, locking when you step away, and never unlocking high-value bundles you'd rather always confirm.
 

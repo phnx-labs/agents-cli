@@ -616,6 +616,13 @@ export interface ExtraRepoConfig {
 export interface Meta {
   agents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
+  /** macOS secrets-agent config. `auto` makes the first real keychain read of a
+   * `session`-tier bundle populate the broker so concurrent runs read silently. */
+  secrets?: {
+    agent?: {
+      auto?: boolean;
+    };
+  };
   /** Spend guardrails (issue #346). User-global caps; project agents.yaml overrides. */
   budget?: BudgetConfig;
   beta?: {
