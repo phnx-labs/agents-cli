@@ -147,6 +147,27 @@ function hasTransitiveDep(
 export type { AgentType } from './parsers.js';
 
 /**
+ * Single-quote a string for safe interpolation into a POSIX `sh -c` command.
+ * Wraps in single quotes and escapes embedded single quotes via the standard
+ * `'\''` close-escape-reopen idiom, so arbitrary prompts/paths can't break out
+ * of quoting or inject shell syntax.
+ */
+function shSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Wrap a teammate argv in a POSIX shell command that runs it and then records
+ * the real exit code to `exitCodePath`. `echo $?` captures the status of the
+ * preceding command, so the sentinel reflects the underlying CLI's exit code,
+ * not the shell's. Single source of truth shared by launchProcess() and its
+ * test. See reapProcess() for how the sentinel is consumed.
+ */
+export function buildSentinelCommand(cmd: string[], exitCodePath: string): string {
+  return `${cmd.map(shSingleQuote).join(' ')}; echo $? > ${shSingleQuote(exitCodePath)}`;
+}
+
+/**
  * Capture a stable identifier for a process at the moment it was started.
  * Used to defeat PID reuse: a kill(pid, ...) is only safe when the process
  * still occupies the PID we observed at spawn time. A bare kill(pid, 0)
@@ -543,6 +564,16 @@ export class AgentProcess {
     return path.join(await this.getAgentDir(), 'meta.json');
   }
 
+  /**
+   * Path to the exit-code sentinel. The launcher wraps the teammate command in
+   * a shell that writes the underlying CLI's `$?` here once it exits. Detached
+   * teammates can't be wait()ed on by the parent, so this file is the only
+   * durable record of the real exit status — see reapProcess().
+   */
+  async getExitCodePath(): Promise<string> {
+    return path.join(await this.getAgentDir(), 'exit_code');
+  }
+
   toDict(): any {
     return {
       agent_id: this.agentId,
@@ -886,12 +917,35 @@ export class AgentProcess {
     await this.saveMeta();
   }
 
+  /**
+   * Recover the teammate's exit status after its process is gone.
+   *
+   * The teammate is spawned detached + unref()'d (see launchProcess), so the
+   * parent never gets the child's exit code from the OS. Instead the launcher
+   * wraps the command in a shell that records `$?` to the exit-code sentinel.
+   * This reads that file:
+   *   - still alive            -> null (no verdict yet)
+   *   - sentinel present       -> the real exit code (0 = success)
+   *   - sentinel absent        -> 1 (the shell was killed before it could write
+   *                                  it, e.g. SIGKILL on timeout/stop — a real
+   *                                  failure)
+   *
+   * Returning a real code (not a hardcoded 1) is what lets agents whose stream
+   * never emits a parsed terminal event — kimi, antigravity, droid — be marked
+   * completed on success instead of falsely failed.
+   */
   private async reapProcess(): Promise<number | null> {
     if (!this.pid) return null;
+    // isProcessAlive() applies the start-time guard, so a recycled PID now
+    // owned by an unrelated process doesn't read as still-alive.
+    if (this.isProcessAlive()) return null;
+
     try {
-      process.kill(this.pid, 0);
-      return null;
+      const raw = (await fs.readFile(await this.getExitCodePath(), 'utf-8')).trim();
+      const code = Number.parseInt(raw, 10);
+      return Number.isNaN(code) ? 1 : code;
     } catch {
+      // No sentinel: the shell died before recording $? (killed mid-run).
       return 1;
     }
   }
@@ -1247,7 +1301,20 @@ export class AgentManager {
       const stdoutFile = await fs.open(stdoutPath, 'w');
       const stdoutFd = stdoutFile.fd;
 
-      const childProcess = spawn(cmd[0], cmd.slice(1), {
+      // Wrap the teammate command in a shell that records the underlying CLI's
+      // exit code to a sentinel file. Detached + unref()'d children can't be
+      // wait()ed on by this parent, so the sentinel is the only durable record
+      // of the real exit status — reapProcess() reads it to decide
+      // completed-vs-failed for agents whose stream emits no parsed terminal
+      // event (kimi, antigravity, droid). Remove any stale sentinel from a
+      // prior run of the same agent id first so a restart can't read it.
+      const exitCodePath = await agent.getExitCodePath();
+      await fs.rm(exitCodePath, { force: true }).catch(() => {});
+      const wrappedCmd = buildSentinelCommand(cmd, exitCodePath);
+
+      // detached:true makes the shell the process-group leader, so stop()'s
+      // `kill(-pid)` still reaches the underlying CLI through the group.
+      const childProcess = spawn('/bin/sh', ['-c', wrappedCmd], {
         stdio: ['ignore', stdoutFd, stdoutFd],
         cwd: agent.cwd || undefined,
         detached: true,
