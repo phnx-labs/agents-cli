@@ -38,7 +38,7 @@ import type { SecretsBundle } from './bundles.js';
 const PROTOCOL_VERSION = 1;
 
 /** Default lifetime of an unlocked bundle when `--ttl` is not given. */
-export const DEFAULT_TTL_MS = 8 * 60 * 60 * 1000; // 8h
+export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 /** After the store goes empty (all bundles locked or expired) for this long,
  * the broker exits so no idle process lingers holding a socket. */

@@ -98,7 +98,7 @@ The batch-read design means `agents secrets list` pops Touch ID once for all bun
 |---------|-------------|---------|
 | `secrets unlock [names...]` | Read a bundle once (one Touch ID) and hold it in the secrets-agent so later runs read it silently | `agents secrets unlock prod` |
 | `secrets unlock --all` | Unlock every configured bundle | `agents secrets unlock --all` |
-| `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 8h) | `agents secrets unlock prod --ttl 30m` |
+| `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 24h) | `agents secrets unlock prod --ttl 30m` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
 
@@ -307,7 +307,7 @@ The secrets-agent is the ssh-agent answer:
 
 - `agents secrets unlock <bundle>` reads the bundle from the keychain **once** (one Touch ID) and hands the resolved env to a small local broker that holds it in memory.
 - Every later resolution of that bundle — by any `agents run`, teammate, browser profile, or the routines daemon — is served from the broker over a user-only Unix socket (dir `~/.agents/.cache/helpers/secrets-agent/`, mode `0700`). No prompt.
-- The hold ends when its TTL expires (default 8h, `--ttl` to change), you run `agents secrets lock`, or the screen locks / the machine sleeps. Nothing is ever written to disk.
+- The hold ends when its TTL expires (default 24h, `--ttl` to change), you run `agents secrets lock`, or the screen locks / the machine sleeps. Nothing is ever written to disk.
 
 It is **opt-in by construction**: if you never run `unlock`, resolution is byte-for-byte today's keychain path. Audit events tag broker-served reads with `"source":"agent"` so you can tell them apart from real keychain reads.
 

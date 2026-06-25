@@ -399,7 +399,7 @@ export function registerSecretsCommands(program: Command): void {
       Touch ID noise: macOS pops a prompt per bundle per process, so concurrent
       agents each re-prompt. 'agents secrets unlock <bundle>' holds the resolved
       bundle in a local agent after one prompt; later runs read it silently until
-      it expires (default 8h), you 'lock' it, or the screen locks. Nothing on disk.
+      it expires (default 24h), you 'lock' it, or the screen locks. Nothing on disk.
 
       See also:
         agents secrets unlock <bundle>                 hold a bundle after one Touch ID
@@ -1183,7 +1183,7 @@ Examples:
   cmd
     .command('unlock [names...]')
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS).')
-    .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h). Default 8h.')
+    .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h). Default 24h.')
     .option('--all', 'Unlock every configured bundle')
     .action(async (names: string[], opts: { ttl?: string; all?: boolean }) => {
       if (process.platform !== 'darwin') {
