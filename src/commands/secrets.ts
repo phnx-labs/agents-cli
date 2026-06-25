@@ -9,6 +9,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
+import { spawnSync } from 'child_process';
 import {
   bundleExists,
   deleteBundle,
@@ -166,6 +167,45 @@ function readStdinSync(): string {
     chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
   }
   return Buffer.concat(chunks).toString('utf-8').trim();
+}
+
+/**
+ * SSH target for `export --to-ssh`: a bare ssh-config host alias (e.g. `yosemite-s0`)
+ * or `user@host`. The strict allowlist blocks shell metacharacters and a leading `-`
+ * so a target can't be smuggled in as an ssh argv flag.
+ */
+export const SSH_TARGET_RE = /^[a-zA-Z0-9._-]+(@[a-zA-Z0-9._-]+)?$/;
+
+export function assertValidSshTarget(host: string): void {
+  if (!SSH_TARGET_RE.test(host)) {
+    throw new Error(`Invalid SSH target ${JSON.stringify(host)}. Expected a host alias or user@host (letters, digits, '.', '_', '-').`);
+  }
+}
+
+/** POSIX single-quote a string for safe interpolation into a remote shell command. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Serialize a resolved env map to `.env` lines that round-trip losslessly through
+ * `parseDotenv` on the remote: `KEY="VALUE"`. parseDotenv strips exactly one outer
+ * quote pair and takes the inner bytes verbatim (no unescaping), so any single-line
+ * value survives unchanged with no escaping. Newlines would break its line-based
+ * parse, so multi-line values are rejected rather than silently corrupted.
+ */
+export function bundleEnvToDotenv(env: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(env)) {
+    if (/[\r\n]/.test(v)) {
+      throw new Error(
+        `Key '${k}' has a multi-line value; the SSH .env transport can't carry newlines. ` +
+        `Set it directly on the remote with 'agents secrets add ${k} --value-stdin'.`,
+      );
+    }
+    lines.push(`${k}="${v}"`);
+  }
+  return lines.join('\n') + '\n';
 }
 
 /** Strip ANSI escape sequences so padding can be computed on visible width. */
@@ -377,6 +417,9 @@ export function registerSecretsCommands(program: Command): void {
 
       # Eval the bundle into your current shell
       eval "$(agents secrets export prod --plaintext)"
+
+      # Push the bundle to remote machine(s) over SSH (lands as a native bundle there)
+      agents secrets export prod --to-ssh --host yosemite-s0 --host yosemite-s1 --force
 
       # Run a one-off command with secrets injected
       agents secrets exec prod -- ./deploy.sh
@@ -984,20 +1027,68 @@ Examples:
 
   cmd
     .command('export [bundle]')
-    .description('Resolve a bundle and print KEY=VALUE lines, or push it to a 1Password vault with --to-1password.')
+    .description('Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --to-ssh.')
     .option('--plaintext', 'Acknowledge that the resolved values will be printed in the clear (shell export mode)')
     .option('--to-1password', 'Push every key in the bundle as a PASSWORD item in a 1Password vault')
     .option('--vault <name>', '1Password vault name (used with --to-1password)')
-    .option('--force', 'Overwrite existing 1Password items (used with --to-1password)')
+    .option('--to-ssh', 'Push the bundle to remote machine(s) over SSH via their native agents-cli import')
+    .option('--host <target...>', 'SSH target(s) for --to-ssh: host alias or user@host (repeatable)')
+    .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --to-ssh)')
     .action(async (bundleName: string | undefined, opts: {
       plaintext?: boolean;
       to1password?: boolean;
       vault?: string;
+      toSsh?: boolean;
+      host?: string[];
       force?: boolean;
     }) => {
       try {
         const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
+
+        if (opts.toSsh) {
+          const hosts = opts.host ?? [];
+          if (hosts.length === 0) {
+            throw new Error('--to-ssh requires at least one --host <target>.');
+          }
+          for (const h of hosts) assertValidSshTarget(h);
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export` });
+          const dotenv = bundleEnvToDotenv(env);
+          const keyCount = Object.keys(env).length;
+          // Drive the remote's own `agents secrets` CLI so values land in its native
+          // backend (Keychain on macOS, libsecret / encrypted-file on Linux). Create
+          // the bundle if missing, then import the piped .env. `bash -lc` so the login
+          // PATH resolves `agents`; the .env flows over ssh stdin and is never parsed
+          // by a remote shell.
+          const force = opts.force ? ' --force' : '';
+          const remoteAgents =
+            `agents secrets create ${shellQuote(resolvedBundleName)} >/dev/null 2>&1 || true; ` +
+            `agents secrets import ${shellQuote(resolvedBundleName)} --from /dev/stdin${force}`;
+          const remoteCmd = `bash -lc ${shellQuote(remoteAgents)}`;
+          let failures = 0;
+          for (const host of hosts) {
+            const res = spawnSync('ssh', ['-o', 'BatchMode=yes', host, remoteCmd], {
+              input: dotenv,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              encoding: 'utf-8',
+            });
+            if (res.error) {
+              failures++;
+              console.error(chalk.red(`${host}: ${res.error.message}`));
+              continue;
+            }
+            if (res.status !== 0) {
+              failures++;
+              const msg = (res.stderr || res.stdout || '').trim();
+              console.error(chalk.red(`${host}: remote import failed (exit ${res.status ?? 'signal'})${msg ? `: ${msg}` : ''}`));
+              continue;
+            }
+            const remoteMsg = (res.stdout || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).pop();
+            console.log(chalk.green(`${host} -> '${resolvedBundleName}': ${remoteMsg || `${keyCount} key(s) exported`}`));
+          }
+          if (failures > 0) process.exit(1);
+          return;
+        }
 
         if (opts.to1password) {
           assertOpAvailable();
