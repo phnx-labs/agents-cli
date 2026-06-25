@@ -92,6 +92,18 @@ The batch-read design means `agents secrets list` pops Touch ID once for all bun
 | `secrets export [bundle] --to-1password --vault <name>` | Push bundle to a 1Password vault | `agents secrets export prod --to-1password --vault Team` |
 | `secrets export ... --force` | Overwrite existing 1Password items | `agents secrets export prod --to-1password --vault Team --force` |
 
+### Agent commands (macOS)
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `secrets unlock [names...]` | Read a bundle once (one Touch ID) and hold it in the secrets-agent so later runs read it silently | `agents secrets unlock prod` |
+| `secrets unlock --all` | Unlock every configured bundle | `agents secrets unlock --all` |
+| `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 8h) | `agents secrets unlock prod --ttl 30m` |
+| `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
+| `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
+
+See [The secrets-agent](#the-secrets-agent-macos) below for the model and the security trade-off.
+
 ### Sync commands
 
 | Command | Description | Example |
@@ -286,6 +298,24 @@ What we don't protect against:
 - Other same-user processes (you control your user account).
 - A user who approves a Touch ID prompt for an attacker-controlled binary.
 - Cross-user attacks where the attacker is `root` (the OS keychain is owned at user scope).
+
+## The secrets-agent (macOS)
+
+macOS pops a Touch ID prompt **per bundle, per process** — the biometry assertion is cached only within a single process and only for ~10s (Apple's cap), and macOS refuses "Always Allow" for items with a `kSecAccessControl`+biometry ACL. So running several agents concurrently (`agents teams`, or parallel `agents run --secrets`) re-prompts once per process. There is no OS setting to quiet this.
+
+The secrets-agent is the ssh-agent answer:
+
+- `agents secrets unlock <bundle>` reads the bundle from the keychain **once** (one Touch ID) and hands the resolved env to a small local broker that holds it in memory.
+- Every later resolution of that bundle — by any `agents run`, teammate, browser profile, or the routines daemon — is served from the broker over a user-only Unix socket (dir `~/.agents/.cache/helpers/secrets-agent/`, mode `0700`). No prompt.
+- The hold ends when its TTL expires (default 8h, `--ttl` to change), you run `agents secrets lock`, or the screen locks / the machine sleeps. Nothing is ever written to disk.
+
+It is **opt-in by construction**: if you never run `unlock`, resolution is byte-for-byte today's keychain path. Audit events tag broker-served reads with `"source":"agent"` so you can tell them apart from real keychain reads.
+
+**The trade-off (read this):** while a bundle is unlocked, a same-user process that can reach the socket reads it **silently** — today it would at least have to pop a visible "Unlock agents-cli secrets" prompt you might notice. That is the same trust boundary the keychain already concedes above ("any same-user process can pop the prompt and read"), minus the prompt. Bound it by unlocking only the bundles you need, keeping a short TTL, locking when you step away, and never unlocking high-value bundles you'd rather always confirm.
+
+Snapshot semantics: `unlock` stores the **resolved** env, so a bundle's dynamic refs (`exec:`, `env:`, `file:`) are frozen at unlock time until you re-unlock. Keychain and literal values — the overwhelming majority — are unaffected.
+
+Source: `src/lib/secrets/agent.ts`. Auto-lock on screen-lock/sleep uses the signed keychain helper's `watch-lock` mode (`src/lib/secrets/keychain-helper.swift`); with an older helper that predates it, the agent degrades to TTL-only locking.
 
 ## Linux: headless servers and the encrypted-file fallback
 

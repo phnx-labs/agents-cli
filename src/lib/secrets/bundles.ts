@@ -30,6 +30,7 @@ import {
   type SecretRef,
 } from './index.js';
 import { emit } from '../events.js';
+import { agentGetSync } from './agent.js';
 
 /** Allowed values for a secret's `type` metadata field. */
 export const SECRET_TYPES = [
@@ -363,6 +364,13 @@ export interface ResolveBundleOptions {
    * about to read the bundle.
    */
   caller?: string;
+  /**
+   * Skip the secrets-agent fast-path and read straight from the keychain
+   * (popping Touch ID). Set by callers that must NOT serve a cached snapshot —
+   * `unlock` (which populates the agent in the first place) and any flow that
+   * needs live values. Also honored via AGENTS_SECRETS_NO_AGENT=1.
+   */
+  noAgent?: boolean;
 }
 
 // Walk the bundle and produce a flat env map. Every keychain: ref is gathered
@@ -441,6 +449,26 @@ export function readAndResolveBundleEnv(
   opts: ResolveBundleOptions = {},
 ): { bundle: SecretsBundle; env: Record<string, string> } {
   validateBundleName(name);
+
+  // Fast-path: if the secrets-agent holds this bundle (user ran
+  // `agents secrets unlock <name>`), return the cached snapshot with no Touch
+  // ID. Soft — any failure falls through to the real keychain read below. macOS
+  // only; the never-unlocked path is a single stat (agentSocketExists) so it
+  // costs nothing when the agent isn't running.
+  if (!opts.noAgent && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
+    const hit = agentGetSync(name);
+    if (hit) {
+      stampLastUsed(hit.bundle);
+      emit('secrets.get', {
+        bundle: name,
+        caller: opts.caller,
+        status: 'success',
+        source: 'agent',
+        keyCount: Object.keys(hit.env).length,
+      });
+      return hit;
+    }
+  }
 
   const metaItem = bundleMetaItem(name);
   const bundleSecretPrefix = `${SECRETS_ITEM_PREFIX}${name}.`;

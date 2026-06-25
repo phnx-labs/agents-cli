@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**`agents secrets unlock`: a secrets-agent that ends Touch ID prompt spam (macOS)**
+
+- macOS pops a Touch ID prompt **per bundle, per process** — the biometry assertion is process-local and macOS refuses to cache `kSecAccessControl`+biometry items, so running several agents at once (`agents teams`, parallel `agents run --secrets`) re-prompts once per process. New `agents secrets unlock <bundle>` reads the bundle once (one prompt) and holds the resolved env in a local broker; every later resolution — `agents run`, teammates, browser profiles, the routines daemon — is served from memory over a user-only Unix socket (`~/.agents/.cache/helpers/secrets-agent/`, `0700`) with no prompt. `agents secrets lock` wipes it; `agents secrets status` shows what's held and when it locks. The hold also ends on TTL expiry (default 8h, `--ttl`) and on screen-lock / sleep.
+- **Opt-in by construction:** if you never `unlock`, resolution is byte-for-byte the existing keychain path — guarded behind a single `agentSocketExists()` stat. The single integration point is `readAndResolveBundleEnv`, so every consumer benefits without per-call-site changes. Broker-served reads are tagged `"source":"agent"` in the audit log.
+- **Security trade-off (documented in `docs/secrets.md`):** while unlocked, a same-user process that can reach the socket reads the bundle silently — the same trust boundary the keychain already concedes (the ACL is user-presence, not code-identity), minus the visible prompt. Bounded by explicit per-bundle opt-in, TTL, screen-lock/sleep auto-lock, and `lock`.
+- Snapshot semantics: `unlock` freezes a bundle's dynamic `exec:`/`env:`/`file:` refs at unlock time; keychain and literal values are unaffected.
+- **Release note:** auto-lock on screen-lock/sleep adds a `watch-lock` subcommand to `keychain-helper.swift`. The signed helper must be rebuilt + re-notarized and its sha re-pinned (`scripts/build-keychain-helper.sh`, `scripts/Agents CLI.app.sha256`) for that path to ship; until then the agent degrades gracefully to TTL-only locking. Source: `src/lib/secrets/agent.ts`.
+
 **Headless Linux: `agents secrets` works out of the box when the keyring is locked**
 
 - On a headless server the libsecret/GNOME-keyring collection is locked, so the encrypted-file fallback is the only option — but it previously hard-failed unless `AGENTS_SECRETS_PASSPHRASE` was set, leaving `agents secrets` silently unusable. Now, on a headless run with no passphrase set, a random machine-local passphrase is auto-provisioned once at `~/.agents/.cache/secrets/.passphrase` (mode 0600) so the encrypted-file store just works. `AGENTS_SECRETS_PASSPHRASE` still takes precedence (off-disk key), an existing `.passphrase` is reused for stable interactive/headless behavior, and interactive TTY sessions are still prompted. Security model + resolution order documented in `docs/secrets.md`. (#371)

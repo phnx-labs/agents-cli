@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import LocalAuthentication
+import AppKit
 
 func writeStderr(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -346,6 +347,33 @@ case "migrate-acl":
     ]
     let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
     guard addStatus == errSecSuccess else { die(2, "Failed to rewrite item with biometry ACL (OSStatus \(addStatus))") }
+
+case "watch-lock":
+    // watch-lock — long-running. Emit a line to stdout whenever the screen
+    // locks or the machine sleeps, so the secrets-agent broker can wipe its
+    // in-memory store. Lines: "LOCK" (screen locked / screensaver) and "SLEEP"
+    // (system about to sleep). Never decrypts anything, never prompts.
+    //
+    // The broker spawns this as a child and kills it on shutdown. As a
+    // belt-and-suspenders against an orphaned watcher (broker SIGKILL'd), we
+    // exit once reparented to launchd (getppid() == 1).
+    func emitEvent(_ name: String) {
+        FileHandle.standardOutput.write(Data((name + "\n").utf8))
+    }
+    let center = DistributedNotificationCenter.default()
+    center.addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"), object: nil, queue: nil) { _ in
+        emitEvent("LOCK")
+    }
+    center.addObserver(forName: NSNotification.Name("com.apple.screensaver.didstart"), object: nil, queue: nil) { _ in
+        emitEvent("LOCK")
+    }
+    NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: nil) { _ in
+        emitEvent("SLEEP")
+    }
+    Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+        if getppid() == 1 { exit(0) }
+    }
+    RunLoop.current.run()
 
 default:
     die(2, "Unknown command: \(cmd)")
