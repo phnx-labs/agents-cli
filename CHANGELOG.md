@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Fix: secrets-agent auto-cache now survives a slow broker cold-start under load**
+
+- `secrets.agent.auto` (auto-cache on first read of a `session`-tier bundle) used a fire-and-forget inline loader that gave up connecting to the broker after 3s. But the broker it spawns is itself a full CLI cold-starting; under heavy load (many concurrent agents) that can exceed 3s, so the loader quit before the broker bound and the cache silently never populated — every read kept prompting. The auto-load now runs through a detached `secrets _agent-load` worker that reuses the robust `ensureAgentRunning` path (spawn-then-ping, 20s budget) and loads synchronously, so it reliably populates even when the broker is slow to start. Manual `agents secrets unlock` was always reliable and is unchanged. (secret values still travel over stdin, never argv.)
+
 **`agents secrets unlock`: a secrets-agent that ends Touch ID prompt spam (macOS)**
 
 - macOS pops a Touch ID prompt **per bundle, per process** — the biometry assertion is process-local and macOS refuses to cache `kSecAccessControl`+biometry items, so running several agents at once (`agents teams`, parallel `agents run --secrets`) re-prompts once per process. New `agents secrets unlock <bundle>` reads the bundle once (one prompt) and holds the resolved env in a local broker; every later resolution — `agents run`, teammates, browser profiles, the routines daemon — is served from memory over a user-only Unix socket (`~/.agents/.cache/helpers/secrets-agent/`, `0700`) with no prompt. `agents secrets lock` wipes it; `agents secrets status` shows what's held and when it locks. The hold also ends on TTL expiry (default 24h, `--ttl`) and on screen-lock / sleep.

@@ -84,20 +84,24 @@ function pidPath(): string {
 }
 
 /**
- * Argv for re-invoking THIS cli to run the broker, so a side-by-side dev build
- * spawns its own broker rather than the registry-installed one. We always go
- * through `process.execPath` (the node binary) with the JS entrypoint as the
- * first arg — the entrypoint isn't reliably executable in dev builds (invoked
- * as `node dist/index.js`, no +x), so spawning it directly EACCES'd.
+ * Argv for re-invoking THIS cli with a hidden subcommand, so a side-by-side dev
+ * build spawns its own helpers rather than the registry-installed one. We always
+ * go through `process.execPath` (the node binary) with the JS entrypoint as the
+ * first arg — the entrypoint isn't reliably executable in dev builds (invoked as
+ * `node dist/index.js`, no +x), so spawning it directly EACCES'd.
  */
-function brokerSpawn(): { cmd: string; args: string[] } {
+function cliSpawn(sub: string[]): { cmd: string; args: string[] } {
   const argv1 = process.argv[1];
   const entry = argv1 && fs.existsSync(argv1) ? argv1 : null;
-  if (entry) return { cmd: process.execPath, args: [entry, 'secrets', '_agent-run'] };
+  if (entry) return { cmd: process.execPath, args: [entry, ...sub] };
   // No resolvable entrypoint (unusual) — fall back to the PATH shim.
   let bin = 'agents';
   try { bin = execFileSync('which', ['agents'], { encoding: 'utf-8' }).trim(); } catch { /* default */ }
-  return { cmd: bin, args: ['secrets', '_agent-run'] };
+  return { cmd: bin, args: sub };
+}
+
+function brokerSpawn(): { cmd: string; args: string[] } {
+  return cliSpawn(['secrets', '_agent-run']);
 }
 
 // ─── Wire protocol ───────────────────────────────────────────────────────────
@@ -382,43 +386,17 @@ export function secretsAgentAutoEnabled(): boolean {
 }
 
 /**
- * Inline node program that loads one bundle into the broker, started detached
- * from the hot path. Reads the JSON payload from stdin (so secret values never
- * appear in argv / `ps`), retries the socket for a few seconds to absorb a
- * cold-started agent, sends the load, and exits. argv after -e: [execPath, <socket>].
- */
-const DETACHED_LOAD_PROGRAM = `
-const net = require('net');
-const sock = process.argv[1];
-let input = '';
-process.stdin.setEncoding('utf-8');
-process.stdin.on('data', (d) => { input += d; });
-process.stdin.on('end', () => {
-  let payload; try { payload = JSON.parse(input); } catch (e) { process.exit(1); }
-  let attempts = 0;
-  const tryConnect = () => {
-    const c = net.createConnection(sock);
-    c.on('connect', () => {
-      c.write(JSON.stringify({ cmd: 'load', name: payload.name, bundle: payload.bundle, env: payload.env, ttlMs: payload.ttlMs }) + '\\n');
-    });
-    c.setEncoding('utf-8');
-    c.on('data', () => { try { c.destroy(); } catch (e) {} process.exit(0); });
-    c.on('error', () => {
-      try { c.destroy(); } catch (e) {}
-      if (++attempts >= 30) process.exit(1);
-      setTimeout(tryConnect, 100);
-    });
-  };
-  tryConnect();
-});
-`;
-
-/**
  * Fire-and-forget: populate the broker with a freshly-resolved bundle so the
  * NEXT process reads it without a prompt. Used by the auto-cache path after a
  * real keychain read of a `session`-tier bundle. Adds no latency to the caller
- * — it spawns the agent (if needed) and a detached loader, both unref'd, then
- * returns immediately. Entirely best-effort; never throws. macOS only.
+ * — it spawns a detached `secrets _agent-load` worker (passing the resolved env
+ * over stdin, never argv) and returns immediately.
+ *
+ * The worker reuses the robust `ensureAgentRunning` path (spawn-then-ping with a
+ * generous budget) rather than a tight inline retry loop: under heavy load the
+ * broker is itself a cold-starting full CLI and can take several seconds to bind
+ * the socket, so a short fixed budget would give up before it's ready and the
+ * cache would silently never populate. Best-effort; never throws. macOS only.
  */
 export function agentAutoLoadSync(
   name: string,
@@ -428,20 +406,37 @@ export function agentAutoLoadSync(
 ): void {
   if (!onDarwin()) return;
   try {
-    if (!agentSocketExists()) {
-      const { cmd, args } = brokerSpawn();
-      spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
-    }
-    const loader = spawn(process.execPath, ['-e', DETACHED_LOAD_PROGRAM, socketPath()], {
-      stdio: ['pipe', 'ignore', 'ignore'],
-      detached: true,
-    });
-    loader.stdin?.write(JSON.stringify({ name, bundle, env, ttlMs }));
-    loader.stdin?.end();
-    loader.unref();
+    const { cmd, args } = cliSpawn(['secrets', '_agent-load']);
+    const worker = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+    worker.stdin?.write(JSON.stringify({ name, bundle, env, ttlMs }));
+    worker.stdin?.end();
+    worker.unref();
   } catch {
     // best-effort: the next read just pops Touch ID as it would today
   }
+}
+
+/**
+ * Body of the hidden `secrets _agent-load` worker. Reads one `{name, bundle,
+ * env, ttlMs}` payload from stdin, ensures the broker is up (robust, generous
+ * budget), and loads the bundle into it. Detached from the originating read, so
+ * its latency is invisible — which is why it can afford a long ensure budget.
+ */
+export async function runAgentLoadFromStdin(): Promise<void> {
+  if (!onDarwin()) return;
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  let payload: { name?: string; bundle?: SecretsBundle; env?: Record<string, string>; ttlMs?: number };
+  try {
+    payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+  } catch {
+    return; // malformed payload — nothing to load
+  }
+  if (!payload || !payload.name || !payload.bundle || !payload.env) return;
+  // Generous budget: the broker is a cold-starting full CLI; under load it can
+  // take several seconds to bind. We're detached, so waiting costs nothing.
+  if (!(await ensureAgentRunning(20000))) return;
+  await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS);
 }
 
 /** Store a resolved bundle in the broker. Returns false on transport failure. */

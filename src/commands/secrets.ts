@@ -59,6 +59,7 @@ import {
   agentLock,
   agentStatus,
   ensureAgentRunning,
+  runAgentLoadFromStdin,
   runSecretsAgent,
 } from '../lib/secrets/agent.js';
 import { parseDuration } from '../lib/hooks/cache.js';
@@ -1463,6 +1464,13 @@ Examples:
     .description('Run the secrets-agent broker in the foreground (internal)')
     .action(async () => {
       await runSecretsAgent();
+    });
+
+  cmd
+    .command('_agent-load', { hidden: true })
+    .description('Detached auto-cache worker: load a bundle from stdin into the broker (internal)')
+    .action(async () => {
+      await runAgentLoadFromStdin();
     });
 
   registerSecretsSyncCommands(cmd);
