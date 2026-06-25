@@ -11,7 +11,9 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import {
+  bundleBackend,
   bundleExists,
+  bundleItemStore,
   bundleTier,
   deleteBundle,
   describeBundle,
@@ -29,12 +31,12 @@ import {
   validateExpiresFutureDated,
   validateSecretType,
   writeBundle,
+  type SecretsBackend,
   type SecretsBundle,
   type SecretsTier,
   type VarMeta,
 } from '../lib/secrets/bundles.js';
 import {
-  deleteKeychainToken,
   getKeychainToken,
   getKeychainTokens,
   hasKeychainToken,
@@ -284,7 +286,11 @@ function renderBundleRow(b: SecretsBundle): string {
     `${padVisible(created, 9)} ` +
     `${padVisible(updated, 9)} ` +
     `${padVisible(used, 7)}`;
-  return b.description ? `${head} ${chalk.gray(safePrint(b.description))}` : head.trimEnd();
+  // Mark file-backed bundles so `list` distinguishes them from keychain ones.
+  const tag = b.backend === 'file' ? chalk.magenta('[file] ') : '';
+  const desc = b.description ? chalk.gray(safePrint(b.description)) : '';
+  const trailer = `${tag}${desc}`.trimEnd();
+  return trailer ? `${head} ${trailer}` : head.trimEnd();
 }
 
 /** Colorize a variable source kind (literal, keychain, env, file, exec). */
@@ -500,6 +506,7 @@ export function registerSecretsCommands(program: Command): void {
         console.log(chalk.bold(bundle.name));
         if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
+        if (bundle.backend === 'file') console.log(chalk.gray('backend: file (passphrase-encrypted; reads need AGENTS_SECRETS_PASSPHRASE, no Touch ID)'));
         if (bundleTier(bundle) === 'session') console.log(chalk.gray('tier: session (secrets-agent eligible)'));
         if (bundle.created_at) console.log(chalk.gray(`created_at: ${bundle.created_at} (${humanAge(bundle.created_at)})`));
         if (bundle.updated_at) console.log(chalk.gray(`updated_at: ${bundle.updated_at} (${humanAge(bundle.updated_at)})`));
@@ -611,12 +618,14 @@ export function registerSecretsCommands(program: Command): void {
     .option('--description <text>', 'Free-form description')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
     .option('--tier <tier>', 'secrets-agent tier: biometry (default) or session', 'biometry')
+    .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
     .option('--force', 'Overwrite an existing bundle')
-    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; tier?: string; force?: boolean }) => {
+    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; tier?: string; backend?: string; force?: boolean }) => {
       try {
         const resolvedName = name ?? (await promptBundleName());
         validateBundleName(resolvedName);
         const tier = parseTierOpt(opts.tier);
+        const backend = parseBackendOpt(opts.backend);
         if (bundleExists(resolvedName) && !opts.force) {
           console.error(chalk.red(`Bundle '${resolvedName}' already exists. Use --force to overwrite.`));
           process.exit(1);
@@ -625,11 +634,16 @@ export function registerSecretsCommands(program: Command): void {
           name: resolvedName,
           description: opts.description,
           allow_exec: opts.allowExec,
+          backend: backend === 'file' ? 'file' : undefined,
           tier,
           vars: {},
         };
         writeBundle(bundle);
-        console.log(chalk.green(`Bundle '${resolvedName}' created${tier === 'session' ? ' (tier: session)' : ''}.`));
+        const tags = [tier === 'session' ? 'tier: session' : null, backend === 'file' ? 'backend: file' : null].filter(Boolean);
+        console.log(chalk.green(`Bundle '${resolvedName}' created${tags.length ? ` (${tags.join(', ')})` : ''}.`));
+        if (backend === 'file') {
+          console.log(chalk.gray('File-backed: items are AES-256-GCM encrypted under AGENTS_SECRETS_PASSPHRASE (no Touch ID).'));
+        }
         console.log(chalk.gray(`Try: agents secrets add ${resolvedName} MY_KEY`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
@@ -756,7 +770,7 @@ export function registerSecretsCommands(program: Command): void {
           console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} = <literal>`));
           return;
         }
-        // Default path: keychain-backed.
+        // Default path: stored in the bundle's backend (keychain or file).
         let secretValue: string;
         if (opts.valueStdin) {
           secretValue = readStdinSync();
@@ -765,11 +779,12 @@ export function registerSecretsCommands(program: Command): void {
           secretValue = await promptForSecret(`Enter value for ${resolvedBundleName}.${resolvedKey}`);
         }
         const item = secretsKeychainItem(resolvedBundleName, resolvedKey);
-        setKeychainToken(item, secretValue);
+        bundleItemStore(bundle.backend).set(item, secretValue);
         bundle.vars[resolvedKey] = keychainRef(resolvedKey);
         applyMeta();
         writeBundle(bundle);
-        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} stored in keychain (${item}).`));
+        const where = bundle.backend === 'file' ? 'encrypted file store' : 'keychain';
+        console.log(chalk.green(`${resolvedBundleName}.${resolvedKey} stored in ${where} (${item}).`));
       } catch (err) {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
@@ -878,9 +893,10 @@ Examples:
         writeBundle(bundle);
         if (willPurge) {
           const item = secretsKeychainItem(resolvedBundleName, raw.slice('keychain:'.length));
-          const removed = deleteKeychainToken(item);
+          const removed = bundleItemStore(bundle.backend).delete(item);
           if (removed) {
-            console.log(chalk.green(`Removed ${resolvedBundleName}.${resolvedKey} and purged keychain item.`));
+            const where = bundle.backend === 'file' ? 'encrypted file item' : 'keychain item';
+            console.log(chalk.green(`Removed ${resolvedBundleName}.${resolvedKey} and purged ${where}.`));
             return;
           }
         }
@@ -921,8 +937,9 @@ Examples:
           }
         }
         if (!opts.keepSecrets) {
+          const store = bundleItemStore(bundle.backend);
           for (const { item } of keychainItemsForBundle(bundle)) {
-            deleteKeychainToken(item);
+            store.delete(item);
           }
         }
         const existed = deleteBundle(resolvedName);
@@ -973,17 +990,19 @@ Examples:
 
   cmd
     .command('import [bundle]')
-    .description('Import keys from a .env file or a 1Password vault into a bundle. By default every key is stored in keychain.')
+    .description('Import keys from a .env file or a 1Password vault into a bundle. The bundle is created if it does not exist. Values are stored in the bundle\'s backend (keychain by default).')
     .option('--from <path>', 'Path to a .env file')
     .option('--from-1password', 'Import secrets from a 1Password vault (requires the op CLI)')
     .option('--vault <name>', '1Password vault name (used with --from-1password)')
     .option('--all-plaintext', 'Store every imported value as a literal in the bundle metadata (skip keychain item creation)')
+    .option('--backend <backend>', 'When creating the bundle: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
     .option('--force', 'Overwrite an existing key in the bundle')
     .action(async (bundleName: string | undefined, opts: {
       from?: string;
       from1password?: boolean;
       vault?: string;
       allPlaintext?: boolean;
+      backend?: string;
       force?: boolean;
     }) => {
       try {
@@ -995,7 +1014,28 @@ Examples:
         }
 
         const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-        const bundle = readBundle(resolvedBundleName);
+        const requestedBackend = parseBackendOpt(opts.backend);
+        // Read the bundle if it exists (inheriting its backend); otherwise
+        // create it with the requested backend so a single `import --backend
+        // file` works (this is what `export --to-ssh --remote-backend file`
+        // drives on the remote).
+        let bundle: SecretsBundle;
+        if (bundleExists(resolvedBundleName)) {
+          bundle = readBundle(resolvedBundleName);
+          if (requestedBackend === 'file' && bundle.backend !== 'file') {
+            throw new Error(
+              `Bundle '${resolvedBundleName}' already exists with a keychain backend; ` +
+              `--backend file cannot change it. Delete it first to recreate as file-backed.`
+            );
+          }
+        } else {
+          bundle = {
+            name: resolvedBundleName,
+            backend: requestedBackend === 'file' ? 'file' : undefined,
+            vars: {},
+          };
+        }
+        const store = bundleItemStore(bundle.backend);
         let added = 0;
         let skipped = 0;
 
@@ -1013,7 +1053,7 @@ Examples:
               bundle.vars[envKey] = { value };
             } else {
               const item = secretsKeychainItem(resolvedBundleName, envKey);
-              setKeychainToken(item, value);
+              store.set(item, value);
               bundle.vars[envKey] = keychainRef(envKey);
             }
             added++;
@@ -1035,7 +1075,7 @@ Examples:
               bundle.vars[key] = { value };
             } else {
               const item = secretsKeychainItem(resolvedBundleName, key);
-              setKeychainToken(item, value);
+              store.set(item, value);
               bundle.vars[key] = keychainRef(key);
             }
             added++;
@@ -1058,6 +1098,7 @@ Examples:
     .option('--vault <name>', '1Password vault name (used with --to-1password)')
     .option('--to-ssh', 'Push the bundle to remote machine(s) over SSH via their native agents-cli import')
     .option('--host <target...>', 'SSH target(s) for --to-ssh: host alias or user@host (repeatable)')
+    .option('--remote-backend <backend>', 'Backend for the bundle on the remote: keychain (default) or file (passphrase-encrypted, headless-readable). file forwards AGENTS_SECRETS_PASSPHRASE over stdin.', 'keychain')
     .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --to-ssh)')
     .action(async (bundleName: string | undefined, opts: {
       plaintext?: boolean;
@@ -1065,6 +1106,7 @@ Examples:
       vault?: string;
       toSsh?: boolean;
       host?: string[];
+      remoteBackend?: string;
       force?: boolean;
     }) => {
       try {
@@ -1077,23 +1119,52 @@ Examples:
             throw new Error('--to-ssh requires at least one --host <target>.');
           }
           for (const h of hosts) assertValidSshTarget(h);
+          const remoteBackend = parseBackendOpt(opts.remoteBackend);
+          // For a file-backed remote bundle the remote must encrypt at rest with
+          // a passphrase. We forward the LOCAL AGENTS_SECRETS_PASSPHRASE — the
+          // operator unlocks it once on this (trusted, biometry-gated) machine —
+          // and ship it as the FIRST stdin line so it never lands in argv / `ps`
+          // / the remote shell history. The remote `read -r` consumes that line;
+          // `agents secrets import --from /dev/stdin` reads the .env remainder.
+          let remotePassphrase = '';
+          if (remoteBackend === 'file') {
+            remotePassphrase = process.env.AGENTS_SECRETS_PASSPHRASE ?? '';
+            if (!remotePassphrase) {
+              throw new Error(
+                '--remote-backend file needs AGENTS_SECRETS_PASSPHRASE set locally to encrypt the ' +
+                'bundle at rest on the remote. Set it for this command, then unlock it the same way per run.'
+              );
+            }
+          }
           const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export` });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
-          // Drive the remote's own `agents secrets` CLI so values land in its native
-          // backend (Keychain on macOS, libsecret / encrypted-file on Linux). Create
-          // the bundle if missing, then import the piped .env. `bash -lc` so the login
-          // PATH resolves `agents`; the .env flows over ssh stdin and is never parsed
-          // by a remote shell.
+          // Drive the remote's own `agents secrets` CLI so values land in its
+          // chosen backend. `bash -lc` so the login PATH resolves `agents`; the
+          // .env (and, for file, the passphrase) flow over ssh stdin and are
+          // never parsed by a remote shell.
           const force = opts.force ? ' --force' : '';
-          const remoteAgents =
-            `agents secrets create ${shellQuote(resolvedBundleName)} >/dev/null 2>&1 || true; ` +
-            `agents secrets import ${shellQuote(resolvedBundleName)} --from /dev/stdin${force}`;
+          const backendFlag = remoteBackend === 'file' ? ' --backend file' : '';
+          let remoteAgents: string;
+          let input: string;
+          if (remoteBackend === 'file') {
+            // import --backend file auto-creates the file-backed bundle; no
+            // separate `create` needed.
+            remoteAgents =
+              `IFS= read -r AGENTS_SECRETS_PASSPHRASE; export AGENTS_SECRETS_PASSPHRASE; ` +
+              `agents secrets import ${shellQuote(resolvedBundleName)} --from /dev/stdin${backendFlag}${force}`;
+            input = `${remotePassphrase}\n${dotenv}`;
+          } else {
+            remoteAgents =
+              `agents secrets create ${shellQuote(resolvedBundleName)} >/dev/null 2>&1 || true; ` +
+              `agents secrets import ${shellQuote(resolvedBundleName)} --from /dev/stdin${force}`;
+            input = dotenv;
+          }
           const remoteCmd = `bash -lc ${shellQuote(remoteAgents)}`;
           let failures = 0;
           for (const host of hosts) {
             const res = spawnSync('ssh', ['-o', 'BatchMode=yes', host, remoteCmd], {
-              input: dotenv,
+              input,
               stdio: ['pipe', 'pipe', 'pipe'],
               encoding: 'utf-8',
             });
@@ -1409,6 +1480,14 @@ function parseTierOpt(raw: string | undefined): SecretsTier {
     process.exit(1);
   }
   console.error(chalk.red(`Invalid --tier '${raw}'. Use 'biometry' or 'session'.`));
+  process.exit(1);
+}
+
+/** Validate a --backend value, exiting with a clear message on a bad one. */
+function parseBackendOpt(raw: string | undefined): SecretsBackend {
+  const v = (raw ?? 'keychain').toLowerCase();
+  if (v === 'keychain' || v === 'file') return v;
+  console.error(chalk.red(`Invalid --backend '${raw}'. Use 'keychain' or 'file'.`));
   process.exit(1);
 }
 

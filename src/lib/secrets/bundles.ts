@@ -1,12 +1,18 @@
 /**
- * Secret bundles — named sets of keychain-backed environment variables.
+ * Secret bundles — named sets of environment variables backed by a secret store.
  *
- * Bundle metadata (name, description, vars map) is stored in the macOS
- * Keychain as a JSON blob under `agents-cli.bundles.<name>`. Secret values
- * live one per keychain item under `agents-cli.secrets.<bundle>.<key>`.
- * Every item is device-local and gated by Touch ID / device passcode — see
- * src/lib/secrets/index.ts for the access-control story. Nothing about
- * secrets ever lives in plaintext on disk.
+ * Bundle metadata (name, description, vars map) is stored as a JSON blob under
+ * `agents-cli.bundles.<name>`; secret values live one per item under
+ * `agents-cli.secrets.<bundle>.<key>`. Two backends carry those items:
+ *
+ *  - `keychain` (default): the macOS Keychain (device-local, Touch ID / device
+ *    passcode gated) or Linux libsecret — see src/lib/secrets/index.ts.
+ *  - `file`: an AES-256-GCM encrypted-file store keyed by a passphrase
+ *    (src/lib/secrets/filestore.ts). Opt-in, for headless / remote runs where
+ *    no biometry prompt can be satisfied (e.g. a release on a remote Mac over
+ *    SSH). The item-name scheme is identical, so the only difference is where
+ *    bytes land. A file-backed bundle is discovered by the presence of its
+ *    metadata item in the file store.
  *
  * Cross-machine sync is handled by src/lib/secrets/sync.ts via an explicit
  * encrypted export/import flow; the bundle layer is sync-agnostic.
@@ -29,8 +35,93 @@ import {
   type BundleValue,
   type SecretRef,
 } from './index.js';
+import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
 import { agentGetSync, agentAutoLoadSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
+
+/** Which store carries a bundle's items. */
+export type SecretsBackend = 'keychain' | 'file';
+
+/**
+ * Uniform read/write surface over a secret store, so the bundle functions
+ * don't branch on backend at every call site.
+ */
+interface ItemStore {
+  has(item: string): boolean;
+  get(item: string): string;
+  getBatch(items: string[]): Map<string, string>;
+  set(item: string, value: string): void;
+  delete(item: string): boolean;
+  list(prefix: string): string[];
+}
+
+const keychainStore: ItemStore = {
+  has: hasKeychainToken,
+  get: getKeychainToken,
+  getBatch: getKeychainTokens,
+  set: setKeychainToken,
+  delete: deleteKeychainToken,
+  list: listKeychainItems,
+};
+
+// The file store auto-provisions a machine-local passphrase on Linux (the
+// existing headless-libsecret fallback) but NEVER on macOS: a file-backed
+// bundle on a Mac must be unlocked with an explicit AGENTS_SECRETS_PASSPHRASE
+// supplied per run, so the box holds ciphertext only. assertFileBackendUsable()
+// enforces that the passphrase is present before we touch the store.
+const FILE_ALLOW_AUTO_PROVISION = process.platform !== 'darwin';
+
+const fileItemStore: ItemStore = {
+  has: (item) => fileStore.has(item),
+  get: (item) => fileStore.get(item, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION }),
+  getBatch: (items) => {
+    const out = new Map<string, string>();
+    for (const item of items) {
+      try {
+        out.set(item, fileStore.get(item, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION }));
+      } catch {
+        // Missing/undecryptable item — absent from the map, mirroring
+        // getKeychainTokens (caller decides whether that's an error).
+      }
+    }
+    return out;
+  },
+  set: (item, value) => fileStore.set(item, value, { allowAutoProvision: FILE_ALLOW_AUTO_PROVISION }),
+  delete: (item) => fileStore.delete(item),
+  list: (prefix) => fileStore.list(prefix),
+};
+
+function itemStore(backend: SecretsBackend): ItemStore {
+  return backend === 'file' ? fileItemStore : keychainStore;
+}
+
+/**
+ * Discover a bundle's backend by location: a file-backed bundle's metadata
+ * item exists in the encrypted-file store. This is a plain file-existence
+ * check — no passphrase, no Touch ID — so it sidesteps the chicken-and-egg of
+ * "read metadata to learn where metadata lives." Absent ⇒ keychain.
+ */
+export function bundleBackend(name: string): SecretsBackend {
+  return fileStore.has(BUNDLE_META_PREFIX + name) ? 'file' : 'keychain';
+}
+
+/**
+ * Guard a file-backed bundle operation. On macOS the file store must be
+ * unlocked with an explicit passphrase (env or interactive prompt) — we refuse
+ * to silently auto-provision a machine-local key there, so a remote/headless
+ * Mac cannot decrypt on its own. Linux keeps the existing auto-provision
+ * behavior, so this is a no-op there.
+ */
+function assertFileBackendUsable(name: string): void {
+  if (process.platform !== 'darwin') return;
+  if (process.env.AGENTS_SECRETS_PASSPHRASE && process.env.AGENTS_SECRETS_PASSPHRASE.length > 0) return;
+  if (process.stdin.isTTY) return;
+  throw new Error(
+    `File-backed bundle '${name}' needs AGENTS_SECRETS_PASSPHRASE to be set on macOS ` +
+    `(no biometry prompt is available headlessly). Set it for this run, e.g.\n` +
+    `  AGENTS_SECRETS_PASSPHRASE=… agents secrets exec ${name} -- <command>`
+  );
+}
 
 /** Allowed values for a secret's `type` metadata field. */
 export const SECRET_TYPES = [
@@ -71,6 +162,8 @@ export interface SecretsBundle {
   name: string;
   description?: string;
   allow_exec?: boolean;
+  /** Which store carries this bundle's items. Absent ⇒ `keychain` (the default). */
+  backend?: SecretsBackend;
   /** Secrets-agent interaction tier. Absent ⇒ `biometry` (the safe default). */
   tier?: SecretsTier;
   /** ISO 8601 UTC timestamp. Set once on the first writeBundle() for a bundle. */
@@ -185,15 +278,24 @@ function bundleMetaItem(name: string): string {
 
 export function bundleExists(name: string): boolean {
   validateBundleName(name);
-  return hasKeychainToken(bundleMetaItem(name));
+  return itemStore(bundleBackend(name)).has(bundleMetaItem(name));
 }
 
 export function readBundle(name: string): SecretsBundle {
   validateBundleName(name);
+  const backend = bundleBackend(name);
+  if (backend === 'file') assertFileBackendUsable(name);
   let json: string;
   try {
-    json = getKeychainToken(bundleMetaItem(name));
-  } catch {
+    json = itemStore(backend).get(bundleMetaItem(name));
+  } catch (err) {
+    // A file-backed bundle whose metadata is on disk but fails to decrypt is a
+    // wrong-passphrase error, not a missing bundle — surface that clearly.
+    if (backend === 'file' && fileStore.has(bundleMetaItem(name))) {
+      throw new Error(
+        `Bundle '${name}': failed to decrypt — wrong AGENTS_SECRETS_PASSPHRASE or tampered file store. (${(err as Error).message})`,
+      );
+    }
     throw new Error(`Secrets bundle '${name}' not found.`);
   }
   let parsed: Partial<SecretsBundle>;
@@ -206,11 +308,15 @@ export function readBundle(name: string): SecretsBundle {
     throw new Error(`Bundle '${name}' is malformed.`);
   }
   // Unknown fields on the JSON (e.g. legacy sync flags) are silently dropped
-  // here; the SecretsBundle shape is the only source of truth.
+  // here; the SecretsBundle shape is the only source of truth. `backend` is
+  // authoritative from location discovery, not the persisted field.
   const bundle: SecretsBundle = {
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
+    // Absent ⇒ keychain (mirrors `tier`); only set when file-backed so a
+    // keychain bundle round-trips byte-for-byte.
+    backend: backend === 'file' ? 'file' : undefined,
     tier: parseTier(parsed.tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
@@ -238,6 +344,8 @@ export function bundleTier(bundle: SecretsBundle): SecretsTier {
 
 export function writeBundle(bundle: SecretsBundle): void {
   validateBundleName(bundle.name);
+  const backend: SecretsBackend = bundle.backend ?? 'keychain';
+  if (backend === 'file') assertFileBackendUsable(bundle.name);
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);
   }
@@ -264,6 +372,7 @@ export function writeBundle(bundle: SecretsBundle): void {
   const payload = {
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
+    backend: backend === 'file' ? 'file' : undefined,
     tier: bundle.tier === 'session' ? 'session' : undefined,
     created_at: bundle.created_at,
     updated_at: bundle.updated_at,
@@ -272,72 +381,103 @@ export function writeBundle(bundle: SecretsBundle): void {
     meta,
   };
   const json = JSON.stringify(payload);
-  setKeychainToken(bundleMetaItem(bundle.name), json);
+  itemStore(backend).set(bundleMetaItem(bundle.name), json);
   emit('secrets.set', { bundle: bundle.name });
 }
 
 export function deleteBundle(name: string): boolean {
   validateBundleName(name);
-  const deleted = deleteKeychainToken(bundleMetaItem(name));
+  const deleted = itemStore(bundleBackend(name)).delete(bundleMetaItem(name));
   if (deleted) {
     emit('secrets.delete', { bundle: name });
   }
   return deleted;
 }
 
-export function listBundles(): SecretsBundle[] {
-  let services: string[];
+/**
+ * Parse a stored metadata JSON blob into a SecretsBundle, applying the lenient
+ * posture listBundles wants (skip malformed / invalid-key bundles rather than
+ * throw). `backend` is authoritative from where the item was found. Returns
+ * null to skip.
+ */
+function parseBundleMeta(name: string, json: string, backend: SecretsBackend): SecretsBundle | null {
+  let parsed: Partial<SecretsBundle>;
   try {
-    services = listKeychainItems(BUNDLE_META_PREFIX);
+    parsed = JSON.parse(json) as Partial<SecretsBundle>;
   } catch {
-    return [];
+    return null;
   }
-  const names = services
+  if (!parsed || typeof parsed !== 'object') return null;
+  const bundle: SecretsBundle = {
+    name,
+    description: parsed.description,
+    allow_exec: Boolean(parsed.allow_exec),
+    backend: backend === 'file' ? 'file' : undefined,
+    tier: parseTier(parsed.tier),
+    vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
+  };
+  if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
+  if (typeof parsed.updated_at === 'string') bundle.updated_at = parsed.updated_at;
+  if (typeof parsed.last_used === 'string') bundle.last_used = parsed.last_used;
+  if (parsed.meta && typeof parsed.meta === 'object') bundle.meta = parsed.meta;
+  for (const key of Object.keys(bundle.vars)) {
+    if (!ENV_KEY_PATTERN.test(key)) return null;
+  }
+  return bundle;
+}
+
+export function listBundles(): SecretsBundle[] {
+  const out: SecretsBundle[] = [];
+
+  // Keychain-backed bundles: batch all metadata reads behind ONE Touch ID
+  // prompt instead of N. Bundle metadata items carry user-presence ACLs (same
+  // as secret values), so a naive loop over readBundle() spawns a fresh
+  // LAContext per item — meaning N biometric prompts for `secrets list`.
+  let keychainServices: string[] = [];
+  try {
+    keychainServices = listKeychainItems(BUNDLE_META_PREFIX);
+  } catch {
+    keychainServices = [];
+  }
+  const keychainNames = keychainServices
     .map((s) => s.slice(BUNDLE_META_PREFIX.length))
     .filter((n) => BUNDLE_NAME_PATTERN.test(n));
-  if (names.length === 0) return [];
+  if (keychainNames.length > 0) {
+    const fetched = getKeychainTokens(keychainNames.map(bundleMetaItem));
+    for (const name of keychainNames) {
+      const json = fetched.get(bundleMetaItem(name));
+      if (json === undefined) continue;
+      const bundle = parseBundleMeta(name, json, 'keychain');
+      if (bundle) out.push(bundle);
+    }
+  }
 
-  // Batch all metadata reads behind ONE Touch ID prompt instead of N. Bundle
-  // metadata items carry user-presence ACLs (same as secret values), so a naive
-  // loop over readBundle() spawns a fresh LAContext per item — meaning N
-  // biometric prompts for `secrets list`. Sharing a single context across all
-  // SecItemCopyMatching calls collapses the prompt to one. Mirrors the pattern
-  // already used by resolveBundleEnv for runtime secret injection.
-  const itemsToFetch = names.map(bundleMetaItem);
-  const fetched = getKeychainTokens(itemsToFetch);
-
-  const out: SecretsBundle[] = [];
-  for (const name of names) {
-    const json = fetched.get(bundleMetaItem(name));
-    if (json === undefined) continue;
-    let parsed: Partial<SecretsBundle>;
+  // File-backed bundles live in the encrypted-file store. Enumeration is a
+  // silent directory listing; only decryption needs the passphrase, so a
+  // `secrets list` without one still shows the names (values stay sealed).
+  let fileServices: string[] = [];
+  try {
+    fileServices = fileStore.list(BUNDLE_META_PREFIX);
+  } catch {
+    fileServices = [];
+  }
+  const fileNames = fileServices
+    .map((s) => s.slice(BUNDLE_META_PREFIX.length))
+    .filter((n) => BUNDLE_NAME_PATTERN.test(n));
+  for (const name of fileNames) {
+    let json: string;
     try {
-      parsed = JSON.parse(json) as Partial<SecretsBundle>;
+      json = fileItemStore.get(bundleMetaItem(name));
     } catch {
-      // Skip malformed bundles; surfaced via `agents secrets view <name>`.
+      // No passphrase (or wrong one): surface the bundle by name so it isn't
+      // invisible, with empty vars. `agents secrets view` reports the error.
+      out.push({ name, backend: 'file', vars: {} });
       continue;
     }
-    if (!parsed || typeof parsed !== 'object') continue;
-    const bundle: SecretsBundle = {
-      name,
-      description: parsed.description,
-      allow_exec: Boolean(parsed.allow_exec),
-      tier: parseTier(parsed.tier),
-      vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
-    };
-    if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
-    if (typeof parsed.updated_at === 'string') bundle.updated_at = parsed.updated_at;
-    if (typeof parsed.last_used === 'string') bundle.last_used = parsed.last_used;
-    if (parsed.meta && typeof parsed.meta === 'object') bundle.meta = parsed.meta;
-    // Skip bundles with invalid env keys rather than throwing — same lenient
-    // posture readBundle had via the outer catch.
-    let valid = true;
-    for (const key of Object.keys(bundle.vars)) {
-      if (!ENV_KEY_PATTERN.test(key)) { valid = false; break; }
-    }
-    if (!valid) continue;
-    out.push(bundle);
+    const bundle = parseBundleMeta(name, json, 'file');
+    if (bundle) out.push(bundle);
   }
+
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
@@ -420,8 +560,9 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
     }
   }
 
+  const store = itemStore(bundle.backend ?? 'keychain');
   const fetched = keychainItemsToFetch.length > 0
-    ? getKeychainTokens(keychainItemsToFetch)
+    ? store.getBatch(keychainItemsToFetch)
     : new Map<string, string>();
 
   const env: Record<string, string> = {};
@@ -436,7 +577,7 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
       const value = fetched.get(item);
       if (value === undefined) {
         throw new Error(
-          `Bundle '${bundle.name}' key '${key}': keychain item '${item}' not found. ` +
+          `Bundle '${bundle.name}' key '${key}': stored item '${item}' not found. ` +
           `Run: agents secrets add ${bundle.name} ${key}`
         );
       }
@@ -476,12 +617,15 @@ export function readAndResolveBundleEnv(
 ): { bundle: SecretsBundle; env: Record<string, string> } {
   validateBundleName(name);
 
+  const backend = bundleBackend(name);
+
   // Fast-path: if the secrets-agent holds this bundle (user ran
   // `agents secrets unlock <name>`), return the cached snapshot with no Touch
   // ID. Soft — any failure falls through to the real keychain read below. macOS
-  // only; the never-unlocked path is a single stat (agentSocketExists) so it
-  // costs nothing when the agent isn't running.
-  if (!opts.noAgent && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
+  // / keychain only — the agent exists to dedup Touch ID prompts, and a
+  // file-backed bundle has none to dedup. The never-unlocked path is a single
+  // stat (agentSocketExists) so it costs nothing when the agent isn't running.
+  if (backend === 'keychain' && !opts.noAgent && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
     const hit = agentGetSync(name);
     if (hit) {
       stampLastUsed(hit.bundle);
@@ -496,11 +640,14 @@ export function readAndResolveBundleEnv(
     }
   }
 
+  if (backend === 'file') assertFileBackendUsable(name);
+  const store = itemStore(backend);
+
   const metaItem = bundleMetaItem(name);
   const bundleSecretPrefix = `${SECRETS_ITEM_PREFIX}${name}.`;
   let secretItems: string[];
   try {
-    secretItems = listKeychainItems(bundleSecretPrefix);
+    secretItems = store.list(bundleSecretPrefix);
   } catch {
     secretItems = [];
   }
@@ -510,10 +657,19 @@ export function readAndResolveBundleEnv(
     : `read ${name} secrets`;
 
   void reason;
-  const fetched = getKeychainTokens([metaItem, ...secretItems]);
+  const fetched = store.getBatch([metaItem, ...secretItems]);
 
   const json = fetched.get(metaItem);
   if (json === undefined) {
+    // For a file-backed bundle the metadata item is on disk (that's how
+    // bundleBackend resolved to 'file'); a missing decrypt means the wrong
+    // passphrase, not a missing bundle. getBatch swallowed the decrypt error,
+    // so distinguish here rather than report a misleading "not found".
+    if (backend === 'file' && fileStore.has(metaItem)) {
+      throw new Error(
+        `Bundle '${name}': failed to decrypt — wrong AGENTS_SECRETS_PASSPHRASE or tampered file store.`,
+      );
+    }
     throw new Error(`Secrets bundle '${name}' not found.`);
   }
   let parsed: Partial<SecretsBundle>;
@@ -529,6 +685,7 @@ export function readAndResolveBundleEnv(
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
+    backend: backend === 'file' ? 'file' : undefined,
     tier: parseTier(parsed.tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
@@ -584,7 +741,7 @@ export function readAndResolveBundleEnv(
         const value = fetched.get(item);
         if (value === undefined) {
           throw new Error(
-            `Bundle '${bundle.name}' key '${key}': keychain item '${item}' not found. ` +
+            `Bundle '${bundle.name}' key '${key}': stored item '${item}' not found. ` +
             `Run: agents secrets add ${bundle.name} ${key}`,
           );
         }
@@ -607,6 +764,7 @@ export function readAndResolveBundleEnv(
     // next concurrent run reads silently. Skipped when noAgent (e.g. `unlock`,
     // which loads the agent itself). Fire-and-forget — never blocks this read.
     if (
+      backend === 'keychain' &&
       !opts.noAgent &&
       process.env.AGENTS_SECRETS_NO_AGENT !== '1' &&
       bundleTier(bundle) === 'session' &&
@@ -655,7 +813,7 @@ export function rotateBundleSecret(bundle: SecretsBundle, key: string, opts: Rot
   }
   const shortId = raw.slice('keychain:'.length);
   const item = secretsKeychainItem(bundle.name, shortId);
-  setKeychainToken(item, opts.newValue);
+  itemStore(bundle.backend ?? 'keychain').set(item, opts.newValue);
 
   if (opts.clearMeta) {
     if (bundle.meta) delete bundle.meta[key];
@@ -701,14 +859,18 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
     throw new Error(`Bundle '${oldName}' not found.`);
   }
   const source = readBundle(oldName);
+  // Rename stays within the source's backend. The store carries both the
+  // per-key secret items and (via writeBundle/deleteBundle) the metadata.
+  const store = itemStore(source.backend ?? 'keychain');
 
   if (bundleExists(newName)) {
     if (!opts.force) {
       throw new Error(`Bundle '${newName}' already exists. Use --force to overwrite.`);
     }
     const dest = readBundle(newName);
+    const destStore = itemStore(dest.backend ?? 'keychain');
     for (const { item } of keychainItemsForBundle(dest)) {
-      deleteKeychainToken(item);
+      destStore.delete(item);
     }
     deleteBundle(newName);
   }
@@ -721,21 +883,38 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
     if (typeof raw !== 'string' || !raw.startsWith('keychain:')) continue;
     const shortId = raw.slice('keychain:'.length);
     const newItem = secretsKeychainItem(newName, shortId);
-    const value = getKeychainToken(oldItem);
-    setKeychainToken(newItem, value);
+    const value = store.get(oldItem);
+    store.set(newItem, value);
   }
 
-  // writeBundle preserves source.created_at and refreshes updated_at.
+  // writeBundle preserves source.created_at, refreshes updated_at, and keeps
+  // the source backend (spread carries source.backend).
   const renamed: SecretsBundle = { ...source, name: newName };
   writeBundle(renamed);
 
-  // Cleanup: delete the old per-key keychain items, then the old metadata.
+  // Cleanup: delete the old per-key items, then the old metadata.
   for (const { item: oldItem } of sourceItems) {
-    deleteKeychainToken(oldItem);
+    store.delete(oldItem);
   }
   deleteBundle(oldName);
 
   emit('secrets.rename', { from: oldName, to: newName });
+}
+
+/**
+ * The store (keychain or encrypted file) that carries a bundle's items. The
+ * CLI uses this to read/write/delete per-key items (built with
+ * secretsKeychainItem) in the same store as the bundle's metadata, for `add` /
+ * `import` / `remove` / `delete`. Pass the bundle's resolved backend
+ * (`bundle.backend ?? 'keychain'`).
+ */
+export function bundleItemStore(backend: SecretsBackend | undefined): {
+  set(item: string, value: string): void;
+  delete(item: string): boolean;
+  get(item: string): string;
+  has(item: string): boolean;
+} {
+  return itemStore(backend ?? 'keychain');
 }
 
 // Iterate all keychain-backed keys in a bundle for cleanup on rm/unset.

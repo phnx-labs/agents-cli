@@ -7,26 +7,35 @@
  * (common on server-class Linux — no graphical login means the keyring
  * passphrase never enters the daemon, so `secret-tool store` fails with
  * "Cannot create an item in a locked collection"), we transparently switch
- * to a file-based AES-256-GCM encrypted store under
- * `~/.agents/.cache/secrets/`. The encryption key is scrypt-derived from a
- * passphrase read from `AGENTS_SECRETS_PASSPHRASE` (preferred) or a TTY
- * prompt. The decision is cached per process; one stderr line is emitted
- * the first time the fallback activates.
+ * to the AES-256-GCM encrypted-file store in ./filestore.ts. The decision is
+ * cached per process; one stderr line is emitted the first time the fallback
+ * activates.
  *
  * Secrets stored via secret-tool use:
  *   service = "agents-cli"
  *   account = username
  *   item    = the secret identifier
- *
- * File-fallback layout: one `<item>.enc` JSON file per item, mode 0600.
  */
 
-import { spawnSync, execSync } from 'child_process';
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
-import * as fs from 'fs';
+import { spawnSync } from 'child_process';
 import * as os from 'os';
-import * as path from 'path';
 import type { KeychainBackend } from './index.js';
+import {
+  fileStore,
+  fileDir,
+  fileStoreHasItems,
+  machinePassphraseExists,
+  _resetFileStoreForTest,
+} from './filestore.js';
+
+// Re-exported so existing importers (and tests) can keep reaching these via
+// './linux.js'. The implementations live in ./filestore.ts.
+export {
+  encryptForFallback,
+  decryptForFallback,
+  fileBackend,
+  type EncFile,
+} from './filestore.js';
 
 const SERVICE = 'agents-cli';
 
@@ -46,13 +55,6 @@ let isAvailable = false;
 
 let useFileFallback = false;
 let warnedFallback = false;
-let warnedAutoPassphrase = false;
-let fileDirOverride: string | null = null;
-let cachedPassphrase: string | null = null;
-
-function fileDir(): string {
-  return fileDirOverride ?? path.join(os.homedir(), '.agents', '.cache', 'secrets');
-}
 
 function activateFileFallback(): void {
   if (useFileFallback) return;
@@ -70,18 +72,6 @@ function isLockedCollectionError(stderr: string): boolean {
          /Prompt was dismissed/i.test(stderr);
 }
 
-/** True if the fallback dir has any committed encrypted items. Means an
- *  earlier process (this one or another) already routed writes to the file
- *  store, so this process must keep reading/writing from the same store —
- *  otherwise `list` / `get` / `has` would silently miss them. */
-function fileFallbackPreviouslyActivated(): boolean {
-  try {
-    return fs.readdirSync(fileDir()).some((e) => e.endsWith('.enc'));
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Decide which backend a given op should use. Activates file fallback if
  * `secret-tool` is missing and `AGENTS_SECRETS_PASSPHRASE` is set, OR if a
@@ -91,7 +81,7 @@ function fileFallbackPreviouslyActivated(): boolean {
  */
 function preflight(): 'file' | 'secret-tool' {
   if (useFileFallback) return 'file';
-  if (fileFallbackPreviouslyActivated()) {
+  if (fileStoreHasItems()) {
     activateFileFallback();
     return 'file';
   }
@@ -122,246 +112,12 @@ function preflight(): 'file' | 'secret-tool' {
   return 'secret-tool';
 }
 
-// ---------- passphrase ----------
-
-function readPassphraseFromTty(): string {
-  const fd = fs.openSync('/dev/tty', 'r+');
-  let echoDisabled = false;
-  try {
-    fs.writeSync(fd, 'Enter AGENTS_SECRETS_PASSPHRASE: ');
-    try {
-      execSync('stty -echo < /dev/tty', { stdio: 'ignore' });
-      echoDisabled = true;
-    } catch {
-      // stty not available — fall through; passphrase will echo. Better
-      // than refusing to function.
-    }
-    let pass = '';
-    const buf = Buffer.alloc(1);
-    while (true) {
-      const n = fs.readSync(fd, buf, 0, 1, null);
-      if (n === 0) break;
-      const ch = buf.toString('utf8', 0, n);
-      if (ch === '\n' || ch === '\r') break;
-      pass += ch;
-    }
-    return pass;
-  } finally {
-    if (echoDisabled) {
-      try { execSync('stty echo < /dev/tty', { stdio: 'ignore' }); } catch { /* best effort */ }
-    }
-    try { fs.writeSync(fd, '\n'); } catch { /* best effort */ }
-    fs.closeSync(fd);
-  }
-}
-
-/** Path of the auto-provisioned machine-local passphrase. Lives alongside the
- *  encrypted items but is never itself an item (no `.enc` suffix, so it's
- *  excluded from list/has/get and from fileFallbackPreviouslyActivated). */
-function passphraseFilePath(): string {
-  return path.join(fileDir(), '.passphrase');
-}
-
-/** True if a machine-local passphrase has already been provisioned. */
-function machinePassphraseExists(): boolean {
-  try {
-    return fs.readFileSync(passphraseFilePath(), 'utf8').trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
-function readMachinePassphrase(): string | null {
-  try {
-    const p = fs.readFileSync(passphraseFilePath(), 'utf8').trim();
-    return p.length > 0 ? p : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Provision (or read back) a stable machine-local passphrase for the encrypted
- * file store, so `agents secrets` works out of the box on a headless box where
- * the keyring is locked and no AGENTS_SECRETS_PASSPHRASE is set.
- *
- * Security model: this is encryption-at-rest with the key held in a 0600 file —
- * the same posture as an SSH private key, and identical to the common
- * "export AGENTS_SECRETS_PASSPHRASE=… in ~/.zshenv (chmod 600)" workaround. The
- * keyring (key in a daemon's locked memory) is stronger but is unavailable
- * without a graphical/unlocked session. For an off-disk key, set
- * AGENTS_SECRETS_PASSPHRASE (it always takes precedence) or unlock the keyring.
- */
-function provisionMachinePassphrase(): string {
-  const existing = readMachinePassphrase();
-  if (existing) return existing;
-
-  ensureFileDir();
-  const generated = randomBytes(32).toString('base64');
-  const fp = passphraseFilePath();
-  try {
-    // wx: fail if a concurrent process created it first (then we read theirs).
-    fs.writeFileSync(fp, generated, { mode: 0o600, flag: 'wx' });
-  } catch {
-    const raced = readMachinePassphrase();
-    if (raced) return raced;
-    throw new Error(`Failed to provision machine-local passphrase at ${fp}.`);
-  }
-  if (!warnedAutoPassphrase) {
-    warnedAutoPassphrase = true;
-    process.stderr.write(
-      `[agents] keyring locked and no AGENTS_SECRETS_PASSPHRASE set; provisioned a ` +
-      `machine-local passphrase at ${fp} (mode 0600). Set AGENTS_SECRETS_PASSPHRASE ` +
-      `for a key held off disk.\n`
-    );
-  }
-  return generated;
-}
-
-function getPassphrase(): string {
-  if (cachedPassphrase !== null) return cachedPassphrase;
-  const env = process.env.AGENTS_SECRETS_PASSPHRASE;
-  if (env && env.length > 0) {
-    cachedPassphrase = env;
-    return env;
-  }
-  // A previously-provisioned machine-local passphrase is this machine's stable
-  // file-store key — prefer it for both interactive and headless runs so they
-  // always agree (a TTY run won't re-prompt once the file exists).
-  const onDisk = readMachinePassphrase();
-  if (onDisk) {
-    cachedPassphrase = onDisk;
-    return onDisk;
-  }
-  // First run, no env, no provisioned key: prompt when interactive, otherwise
-  // (headless — the reported bug) auto-provision instead of hard-failing.
-  if (process.stdin.isTTY) {
-    const p = readPassphraseFromTty();
-    if (!p) throw new Error('No passphrase entered.');
-    cachedPassphrase = p;
-    return p;
-  }
-  cachedPassphrase = provisionMachinePassphrase();
-  return cachedPassphrase;
-}
-
-// ---------- AES-256-GCM ----------
-
-/** Encrypted-file on-disk shape. Exported for tests. */
-export interface EncFile {
-  salt: string;
-  iv: string;
-  authTag: string;
-  ciphertext: string;
-}
-
-function deriveKey(passphrase: string, salt: Buffer): Buffer {
-  return scryptSync(passphrase, salt, 32);
-}
-
-/** Encrypt plaintext under a passphrase using AES-256-GCM with a random
- *  scrypt salt and a random 96-bit IV. Exported for tests. */
-export function encryptForFallback(plaintext: string, passphrase: string): EncFile {
-  const salt = randomBytes(16);
-  const iv = randomBytes(12);
-  const key = deriveKey(passphrase, salt);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  return {
-    salt: salt.toString('hex'),
-    iv: iv.toString('hex'),
-    authTag: cipher.getAuthTag().toString('hex'),
-    ciphertext: ciphertext.toString('hex'),
-  };
-}
-
-/** Decrypt an EncFile under a passphrase. Throws on wrong key or tampered
- *  ciphertext (auth-tag mismatch). Exported for tests. */
-export function decryptForFallback(enc: EncFile, passphrase: string): string {
-  const salt = Buffer.from(enc.salt, 'hex');
-  const iv = Buffer.from(enc.iv, 'hex');
-  const authTag = Buffer.from(enc.authTag, 'hex');
-  const ciphertext = Buffer.from(enc.ciphertext, 'hex');
-  const key = deriveKey(passphrase, salt);
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return plaintext.toString('utf8');
-}
-
-// ---------- file backend ----------
-
-function fileFor(item: string): string {
-  return path.join(fileDir(), `${item}.enc`);
-}
-
-function ensureFileDir(): void {
-  fs.mkdirSync(fileDir(), { recursive: true, mode: 0o700 });
-}
-
-function fileHas(item: string): boolean {
-  return fs.existsSync(fileFor(item));
-}
-
-function fileGet(item: string): string {
-  const fp = fileFor(item);
-  if (!fs.existsSync(fp)) {
-    throw new Error(`Secret '${item}' not found in encrypted store.`);
-  }
-  const raw = fs.readFileSync(fp, 'utf8');
-  let parsed: EncFile;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`Encrypted secret file ${fp} is corrupt (not valid JSON).`);
-  }
-  try {
-    return decryptForFallback(parsed, getPassphrase());
-  } catch {
-    throw new Error(
-      `Failed to decrypt '${item}'. Wrong AGENTS_SECRETS_PASSPHRASE or tampered file.`
-    );
-  }
-}
-
-function fileSet(item: string, value: string): void {
-  ensureFileDir();
-  const enc = encryptForFallback(value, getPassphrase());
-  fs.writeFileSync(fileFor(item), JSON.stringify(enc), { mode: 0o600 });
-}
-
-function fileDelete(item: string): boolean {
-  const fp = fileFor(item);
-  if (!fs.existsSync(fp)) return true; // idempotent, matches secret-tool clear
-  fs.unlinkSync(fp);
-  return true;
-}
-
-function fileList(prefix: string): string[] {
-  const dir = fileDir();
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter((f) => f.endsWith('.enc'))
-    .map((f) => f.slice(0, -'.enc'.length))
-    .filter((name) => name.startsWith(prefix));
-}
-
-/** File-only KeychainBackend (exported for tests; the public surface uses
- *  the secret-tool-with-fallback `linuxBackend` below). */
-export const fileBackend: KeychainBackend = {
-  has: fileHas,
-  get: fileGet,
-  set: fileSet,
-  delete: fileDelete,
-  list: fileList,
-};
-
 // ---------- secret-tool ops with fallback ----------
 
 /** secret-tool lookup attributes:
  *   service=agents-cli account=<user> item=<itemName> */
 export function hasSecretToolToken(item: string): boolean {
-  if (preflight() === 'file') return fileHas(item);
+  if (preflight() === 'file') return fileStore.has(item);
   const user = os.userInfo().username;
   const result = spawnSync('secret-tool', [
     'lookup',
@@ -375,13 +131,13 @@ export function hasSecretToolToken(item: string): boolean {
   const stderr = result.stderr?.toString() ?? '';
   if (isLockedCollectionError(stderr)) {
     activateFileFallback();
-    return fileHas(item);
+    return fileStore.has(item);
   }
   return false;
 }
 
 export function getSecretToolToken(item: string): string {
-  if (preflight() === 'file') return fileGet(item);
+  if (preflight() === 'file') return fileStore.get(item);
   const user = os.userInfo().username;
   const result = spawnSync('secret-tool', [
     'lookup',
@@ -397,14 +153,14 @@ export function getSecretToolToken(item: string): string {
   const stderr = result.stderr?.toString() ?? '';
   if (isLockedCollectionError(stderr)) {
     activateFileFallback();
-    return fileGet(item);
+    return fileStore.get(item);
   }
   throw new Error(`Secret '${item}' not found in keyring.`);
 }
 
 export function setSecretToolToken(item: string, value: string): void {
   if (!value || !value.trim()) throw new Error('Secret value is empty.');
-  if (preflight() === 'file') return fileSet(item, value);
+  if (preflight() === 'file') return fileStore.set(item, value);
 
   const user = os.userInfo().username;
   const label = `agents-cli: ${item}`;
@@ -422,7 +178,7 @@ export function setSecretToolToken(item: string, value: string): void {
   const stderr = result.stderr?.toString().trim() ?? '';
   if (isLockedCollectionError(stderr)) {
     activateFileFallback();
-    fileSet(item, value);
+    fileStore.set(item, value);
     return;
   }
   throw new Error(
@@ -433,7 +189,7 @@ export function setSecretToolToken(item: string, value: string): void {
 }
 
 export function deleteSecretToolToken(item: string): boolean {
-  if (preflight() === 'file') return fileDelete(item);
+  if (preflight() === 'file') return fileStore.delete(item);
   const user = os.userInfo().username;
   const result = spawnSync('secret-tool', [
     'clear',
@@ -445,7 +201,7 @@ export function deleteSecretToolToken(item: string): boolean {
   const stderr = result.stderr?.toString() ?? '';
   if (isLockedCollectionError(stderr)) {
     activateFileFallback();
-    return fileDelete(item);
+    return fileStore.delete(item);
   }
   // secret-tool clear returns 0 whether the item existed or not.
   // A non-zero exit that isn't a locked-collection error is a real failure;
@@ -487,7 +243,7 @@ export function parseSecretToolItems(output: string, prefix: string): string[] {
  * so we use secret-tool search which outputs in a specific format.
  */
 export function listSecretToolItems(prefix: string): string[] {
-  if (preflight() === 'file') return fileList(prefix);
+  if (preflight() === 'file') return fileStore.list(prefix);
   const result = spawnSync('secret-tool', [
     'search',
     '--all',
@@ -498,7 +254,7 @@ export function listSecretToolItems(prefix: string): string[] {
     const stderr = result.stderr?.toString() ?? '';
     if (isLockedCollectionError(stderr)) {
       activateFileFallback();
-      return fileList(prefix);
+      return fileStore.list(prefix);
     }
     return [];
   }
@@ -530,17 +286,16 @@ export const linuxBackend: KeychainBackend = {
 };
 
 /** Test-only: reset module state so independent test cases don't bleed
- *  passphrase / fallback decisions across each other. */
+ *  passphrase / fallback decisions across each other. File-store state (file
+ *  dir + cached passphrase) lives in ./filestore.ts and is reset there. */
 export function _resetForTest(opts: {
   fileDir?: string | null;
   forceFileFallback?: boolean;
   passphrase?: string | null;
 } = {}): void {
-  fileDirOverride = opts.fileDir ?? null;
+  _resetFileStoreForTest({ fileDir: opts.fileDir ?? null, passphrase: opts.passphrase ?? null });
   useFileFallback = opts.forceFileFallback ?? false;
   warnedFallback = false;
-  warnedAutoPassphrase = false;
-  cachedPassphrase = opts.passphrase ?? null;
   checkedAvailability = false;
   isAvailable = false;
 }
