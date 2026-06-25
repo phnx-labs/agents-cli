@@ -137,6 +137,31 @@ agents secrets add prod LOG_LEVEL --env LOG_LEVEL
 
 (Exec refs require creating the bundle with `--allow-exec`.)
 
+## "Touch ID pops on every run — especially with multiple agents"
+
+macOS prompts Touch ID **per bundle, per process**, so running several agents at once (`agents teams`, parallel `agents run --secrets`) re-prompts once each. There's no OS setting to quiet it — but the **secrets-agent** does (macOS only):
+
+```bash
+agents secrets unlock prod        # one Touch ID; held for 24h
+agents teams start my-feature     # every teammate reads prod silently
+agents secrets status             # what's held, and when it locks
+agents secrets lock               # wipe it; next read re-prompts
+```
+
+`unlock` reads the bundle once and keeps the resolved values in a local broker behind a user-only socket; later runs read from memory with no prompt. The hold ends on its TTL (default 24h, `--ttl 30m`), when you `lock`, or when the screen locks / the machine sleeps. Nothing is written to disk.
+
+**Skip `unlock` entirely** — mark a bundle `session` tier and turn on auto-cache, then the first prompt of a run populates the broker for you:
+
+```bash
+agents secrets tier prod session            # or: secrets create prod --tier session
+# in ~/.agents/agents.yaml:
+#   secrets:
+#     agent:
+#       auto: true
+```
+
+A `biometry`-tier bundle (the default) is never auto-held — keep high-value bundles there so every read is confirmed. While a bundle is unlocked, any process running as you can read it from the socket without a prompt; that's the trade-off, so keep TTLs short and `lock` when you step away.
+
 ## "What else can I do?"
 
 Run `agents secrets --help` — there's more: viewing/revealing values, rotating secrets with preserved metadata, exporting to shell, organizing by environment or service.
