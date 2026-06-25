@@ -9,7 +9,14 @@
  * structured summaries for Kimi teammates.
  */
 import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import { normalizeEvents } from '../parsers.js';
+
+function fixtureLines(name: string): any[] {
+  const p = fileURLToPath(new URL(`./testdata/${name}`, import.meta.url));
+  return fs.readFileSync(p, 'utf-8').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+}
 
 describe('normalizeEvents(kimi)', () => {
   it('maps assistant content to a complete message', () => {
@@ -216,7 +223,7 @@ describe('normalizeEvents(kimi)', () => {
     expect(events[0].success).toBe(false);
   });
 
-  it('maps session.resume_hint meta events to init with session_id', () => {
+  it('maps session.resume_hint (kimi terminal marker) to a success result with session_id', () => {
     const events = normalizeEvents('kimi', {
       role: 'meta',
       type: 'session.resume_hint',
@@ -227,8 +234,9 @@ describe('normalizeEvents(kimi)', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
-      type: 'init',
+      type: 'result',
       agent: 'kimi',
+      status: 'success',
       session_id: 'sess-123',
     });
   });
@@ -287,4 +295,25 @@ describe('normalizeEvents(kimi)', () => {
     });
     expect(events[0].args).toMatchObject({ _raw: 'not-json' });
   });
+});
+
+// Captured from live `kimi` runs via `agents teams` (no-tool and tool-using).
+// Confirms session.resume_hint is the LAST event and the only terminal event —
+// so a real kimi stream resolves to exactly one success result.
+describe('normalizeEvents(kimi) — real captured streams', () => {
+  for (const fixture of ['kimi-stream-notool.jsonl', 'kimi-stream-tool.jsonl']) {
+    it(`${fixture}: emits exactly one terminal result (success), and it is last`, () => {
+      const raws = fixtureLines(fixture);
+      const events = raws.flatMap((r) => normalizeEvents('kimi', r));
+
+      const results = events.filter((e) => e.type === 'result');
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({ agent: 'kimi', status: 'success' });
+
+      // The terminal result must be the final normalized event of the stream.
+      expect(events[events.length - 1].type).toBe('result');
+      // And there is no `init` event — kimi emits none.
+      expect(events.some((e) => e.type === 'init')).toBe(false);
+    });
+  }
 });

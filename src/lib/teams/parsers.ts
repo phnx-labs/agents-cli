@@ -946,9 +946,16 @@ function normalizeGrok(raw: any): any[] {
 //   - {"role":"assistant","content":"..."}                          → final message
 //   - {"role":"assistant","tool_calls":[{"function":{"name":"Bash","arguments":"<json>"}}]} → tool use
 //   - {"role":"tool","tool_call_id":"...","content":"..."}            → tool result
-//   - {"role":"meta","type":"session.resume_hint","session_id":"..."} → init / session id
-// Tool arguments are JSON-stringified inside `function.arguments` and must be
-// parsed before extracting paths/commands. Verified against live `kimi` runs.
+//   - {"role":"meta","type":"session.resume_hint","session_id":"..."} → terminal/result
+// Kimi emits NO dedicated result/turn-complete event and NO init event. The
+// `session.resume_hint` meta is its terminal marker: emitted exactly once, as
+// the LAST line, on clean completion (it carries the `kimi -r <id>` resume
+// command). We map it to a success `result` so the team runner resolves status
+// from the stream; the run's exit code remains the safety net for crashes that
+// never reach the hint. Tool arguments are JSON-stringified inside
+// `function.arguments` and must be parsed before extracting paths/commands.
+// Verified against live `kimi` runs (no-tool and tool-using) — see
+// __tests__/testdata/kimi-stream-*.jsonl.
 function normalizeKimi(raw: any): any[] {
   const timestamp = new Date().toISOString();
 
@@ -1078,9 +1085,14 @@ function normalizeKimi(raw: any): any[] {
   if (role === 'meta') {
     const metaType = typeof raw.type === 'string' ? raw.type : '';
     if (metaType === 'session.resume_hint') {
+      // Kimi's terminal marker (see header). Emit a success `result` so the
+      // team runner's terminal-event detection resolves the teammate to
+      // COMPLETED from the stream. session_id is preserved for cross-
+      // referencing — readNewEvents() captures it off any event.
       return [{
-        type: 'init',
+        type: 'result',
         agent: 'kimi',
+        status: 'success',
         session_id: typeof raw.session_id === 'string' ? raw.session_id : null,
         timestamp: timestamp,
       }];
