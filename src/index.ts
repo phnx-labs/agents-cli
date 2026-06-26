@@ -31,7 +31,9 @@ const VERSION = packageJson.version;
 import {
   NPM_PACKAGE_NAME,
   deriveGlobalPrefix,
+  detectPackageManager,
   installPackageIntoPrefix,
+  installPackageWithBun,
   verifyInstalledVersion,
   refreshAliasShims,
 } from './lib/self-update.js';
@@ -391,8 +393,16 @@ function printResolvedPackage(metadata: NpmPackageMetadata): void {
 
 async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<void> {
   const packageRoot = path.resolve(__dirname, '..');
-  const prefix = deriveGlobalPrefix(packageRoot);
-  await installPackageIntoPrefix(`${NPM_PACKAGE_NAME}@${metadata.version}`, prefix);
+  const spec = `${NPM_PACKAGE_NAME}@${metadata.version}`;
+  // Upgrade with the package manager that owns this install. A bun global
+  // install lives at <bunGlobalDir>/node_modules/... (no `lib` segment), so an
+  // `npm install --prefix` would write to <bunGlobalDir>/lib/node_modules and
+  // never touch the running copy — npm exits 0, the verify below fails.
+  if (detectPackageManager(packageRoot) === 'bun') {
+    await installPackageWithBun(spec);
+  } else {
+    await installPackageIntoPrefix(spec, deriveGlobalPrefix(packageRoot));
+  }
   verifyInstalledVersion(packageRoot, metadata.version);
   refreshAliasShims(packageRoot);
   // The npm install above runs with --ignore-scripts, so the postinstall that

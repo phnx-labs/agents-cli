@@ -13,11 +13,59 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { compareVersions } from './versions.js';
 
 export const NPM_PACKAGE_NAME = '@phnx-labs/agents-cli';
+
+export type PackageManager = 'npm' | 'bun';
+
+/**
+ * The directory bun installs global packages into:
+ *   <BUN_INSTALL>/install/global   (BUN_INSTALL defaults to ~/.bun)
+ *
+ * A globally-installed scoped package then lives at
+ * `<bunGlobalDir>/node_modules/@phnx-labs/agents-cli` — note there is NO `lib`
+ * segment, unlike npm's POSIX layout. That single difference is why an
+ * npm-based upgrade silently misses a bun install (see deriveGlobalPrefix).
+ */
+export function bunGlobalDir(): string {
+  const bunInstall = process.env.BUN_INSTALL || path.join(os.homedir(), '.bun');
+  return path.join(bunInstall, 'install', 'global');
+}
+
+/**
+ * Identify which package manager owns the install at `packageRoot`, so the
+ * upgrade can shell out to the one that actually replaces this copy.
+ *
+ * bun lays a global package out as `<bunGlobalDir>/node_modules/<scoped pkg>`,
+ * so the prefix (the parent of `node_modules`) is the bun global dir itself.
+ * Everything else — npm's `<prefix>/lib/node_modules` and the Windows
+ * `<prefix>/node_modules` — is treated as npm.
+ *
+ * Detection is path-based (no subprocess): it matches the resolved bun global
+ * dir from BUN_INSTALL/$HOME, and falls back to the structural `.bun/install/
+ * global` tail for a relocated BUN_INSTALL not exported into this process.
+ */
+export function detectPackageManager(packageRoot: string): PackageManager {
+  const resolved = path.resolve(packageRoot);
+  const prefix = path.dirname(path.dirname(path.dirname(resolved))); // strip <scope>/<pkg>/node_modules
+  if (prefix === path.resolve(bunGlobalDir())) return 'bun';
+  const parts = prefix.split(path.sep);
+  const n = parts.length;
+  if (n >= 3 && parts[n - 1] === 'global' && parts[n - 2] === 'install' && parts[n - 3] === '.bun') {
+    return 'bun';
+  }
+  return 'npm';
+}
+
+/** The shell command a user can run by hand to reproduce the upgrade for `manager`. */
+function manualInstallHint(manager: PackageManager, packageRoot: string, spec: string): string {
+  if (manager === 'bun') return `bun add -g ${spec}`;
+  return `npm install -g --prefix ${deriveGlobalPrefix(packageRoot)} ${spec}`;
+}
 
 export interface UpdateCheckCache {
   lastCheck: number;
@@ -121,6 +169,21 @@ export async function installPackageIntoPrefix(spec: string, prefix: string): Pr
   await execFileAsync('npm', ['install', '-g', '--prefix', prefix, spec, '--ignore-scripts']);
 }
 
+/**
+ * Install `spec` into bun's global store with `bun add -g`. bun writes to
+ * `<bunGlobalDir>/node_modules/<pkg>`, which is exactly the running package
+ * root for a bun install — so verifyInstalledVersion() sees the new version
+ * in place. bun skips untrusted lifecycle scripts, so the caller refreshes
+ * alias shims afterwards via refreshAliasShims() rather than relying on the
+ * package's postinstall hook.
+ */
+export async function installPackageWithBun(spec: string): Promise<void> {
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFileAsync = promisify(execFile);
+  await execFileAsync('bun', ['add', '-g', spec]);
+}
+
 /** Read the version field of the package.json at `packageRoot`, fresh from disk. */
 export function readInstalledVersion(packageRoot: string): string {
   return JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf-8')).version;
@@ -133,9 +196,11 @@ export function readInstalledVersion(packageRoot: string): string {
 export function verifyInstalledVersion(packageRoot: string, expectedVersion: string): void {
   const actual = readInstalledVersion(packageRoot);
   if (actual !== expectedVersion) {
+    const manager = detectPackageManager(packageRoot);
+    const hint = manualInstallHint(manager, packageRoot, `${NPM_PACKAGE_NAME}@${expectedVersion}`);
     throw new Error(
-      `npm reported success but ${packageRoot} is still ${actual} (expected ${expectedVersion}). ` +
-        `Run manually: npm install -g --prefix ${deriveGlobalPrefix(packageRoot)} ${NPM_PACKAGE_NAME}@${expectedVersion}`,
+      `the package manager reported success but ${packageRoot} is still ${actual} (expected ${expectedVersion}). ` +
+        `Run manually: ${hint}`,
     );
   }
 }

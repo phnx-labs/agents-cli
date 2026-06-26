@@ -4,7 +4,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  bunGlobalDir,
   deriveGlobalPrefix,
+  detectPackageManager,
   dismissUpdateVersion,
   findAgentsCliInstalls,
   installPackageIntoPrefix,
@@ -52,6 +54,40 @@ describe('deriveGlobalPrefix', () => {
   });
 });
 
+describe('detectPackageManager', () => {
+  const savedBunInstall = process.env.BUN_INSTALL;
+  afterEach(() => {
+    if (savedBunInstall === undefined) delete process.env.BUN_INSTALL;
+    else process.env.BUN_INSTALL = savedBunInstall;
+  });
+
+  it('detects bun from the BUN_INSTALL global layout (no lib segment)', () => {
+    process.env.BUN_INSTALL = '/Users/x/.bun';
+    const root = path.join(bunGlobalDir(), 'node_modules', '@phnx-labs', 'agents-cli');
+    expect(root).toBe('/Users/x/.bun/install/global/node_modules/@phnx-labs/agents-cli');
+    expect(detectPackageManager(root)).toBe('bun');
+  });
+
+  it('detects bun structurally when BUN_INSTALL is not exported (default ~/.bun)', () => {
+    delete process.env.BUN_INSTALL;
+    // A bun install rooted at a `.bun` dir other than the current $HOME's.
+    const root = path.join('/opt/someuser/.bun/install/global', 'node_modules', '@phnx-labs', 'agents-cli');
+    expect(detectPackageManager(root)).toBe('bun');
+  });
+
+  it('treats the npm POSIX layout (<prefix>/lib/node_modules) as npm', () => {
+    delete process.env.BUN_INSTALL;
+    const root = path.join('/Users/x/.nvm/versions/node/v24.15.0', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    expect(detectPackageManager(root)).toBe('npm');
+  });
+
+  it('does not mistake a non-bun "global" dir for a bun install', () => {
+    process.env.BUN_INSTALL = '/Users/x/.bun';
+    const root = path.join('/srv/global', 'node_modules', '@phnx-labs', 'agents-cli');
+    expect(detectPackageManager(root)).toBe('npm');
+  });
+});
+
 describe('verifyInstalledVersion', () => {
   function writePackage(dir: string, version: string): string {
     const root = path.join(dir, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
@@ -70,6 +106,28 @@ describe('verifyInstalledVersion', () => {
     // prefix, while the running copy's root still carries the old version.
     const root = writePackage(makeTempDir('verify-stale'), '1.20.4');
     expect(() => verifyInstalledVersion(root, '1.20.7')).toThrow(/still 1\.20\.4 \(expected 1\.20\.7\)/);
+  });
+
+  it('suggests `bun add -g` (not npm --prefix) when the stale install is bun-managed', () => {
+    // The bun incident: the npm --prefix command in the hint is exactly what
+    // could not update a bun install, so the manual hint must use bun instead.
+    const saved = process.env.BUN_INSTALL;
+    const base = makeTempDir('verify-bun');
+    process.env.BUN_INSTALL = base;
+    try {
+      const root = path.join(base, 'install', 'global', 'node_modules', '@phnx-labs', 'agents-cli');
+      fs.mkdirSync(root, { recursive: true });
+      fs.writeFileSync(
+        path.join(root, 'package.json'),
+        JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.20.17' }),
+      );
+      expect(() => verifyInstalledVersion(root, '1.20.19')).toThrow(
+        /Run manually: bun add -g @phnx-labs\/agents-cli@1\.20\.19/,
+      );
+    } finally {
+      if (saved === undefined) delete process.env.BUN_INSTALL;
+      else process.env.BUN_INSTALL = saved;
+    }
   });
 });
 
