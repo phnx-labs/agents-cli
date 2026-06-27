@@ -94,7 +94,7 @@
     "ora": "9.4.0",
     "proper-lockfile": "4.1.2",
     "simple-git": "3.36.0",
-    "smol-toml": "1.6.1",
+    "smol-toml": "1.7.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {
