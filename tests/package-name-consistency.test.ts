@@ -48,7 +48,9 @@ describe('package-name consistency (@phnx-labs canonical)', () => {
     expect(selfUpdate).toContain(`export const NPM_PACKAGE_NAME = '${NPM_PACKAGE}';`);
     expect(selfUpdate).not.toContain('@companion');
     const src = read('src/index.ts');
-    const specs = src.match(/installPackageIntoPrefix\(`\$\{NPM_PACKAGE_NAME\}@/g) ?? [];
+    // The install spec is built once from the shared constant, then handed to
+    // the package-manager-specific installer (npm --prefix or `bun add -g`).
+    const specs = src.match(/const spec = `\$\{NPM_PACKAGE_NAME\}@/g) ?? [];
     expect(specs.length).toBeGreaterThan(0);
   });
 
