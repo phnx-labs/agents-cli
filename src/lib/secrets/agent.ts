@@ -31,6 +31,7 @@ import { spawn, spawnSync, execFileSync, type ChildProcess } from 'child_process
 import { getHelpersDir, readMeta } from '../state.js';
 import { isAlive } from '../platform/process.js';
 import { getKeychainHelperPath } from './install-helper.js';
+import { getCliVersion, getCliVersionFresh } from '../version.js';
 import type { SecretsBundle } from './bundles.js';
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
@@ -181,10 +182,24 @@ export async function installSecretsAgentService(timeoutMs = 30000): Promise<boo
   try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* best effort */ }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await agentPing()) return true;
+    if ((await agentPing()).reachable) return true;
     await new Promise((r) => setTimeout(r, 200));
   }
   return false;
+}
+
+/**
+ * Kickstart the already-installed persistent broker so launchd relaunches it
+ * onto the current on-disk code. Used by postinstall heal-on-upgrade. No-op if
+ * the service isn't installed; never rewrites the plist or waits, so it's safe
+ * and fast to call from an installer.
+ */
+export function kickstartSecretsAgentService(): void {
+  if (!onDarwin() || !secretsAgentServiceInstalled()) return;
+  const uid = process.getuid?.() ?? 0;
+  try {
+    execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch { /* best effort */ }
 }
 
 /** Stop + remove the persistent broker service, and wipe whatever it held. */
@@ -209,7 +224,7 @@ export type Request =
   | { cmd: 'status' };
 
 export type Response =
-  | { ok: true; cmd: 'ping'; version: number }
+  | { ok: true; cmd: 'ping'; version: number; cliVersion: string }
   | { ok: true; cmd: 'get'; hit: false }
   | { ok: true; cmd: 'get'; hit: true; bundle: SecretsBundle; env: Record<string, string> }
   | { ok: true; cmd: 'load' }
@@ -232,7 +247,11 @@ export function handleAgentRequest(
 ): Response {
   switch (req.cmd) {
     case 'ping':
-      return { ok: true, cmd: 'ping', version: PROTOCOL_VERSION };
+      // Report the version of the code this broker is RUNNING (getCliVersion
+      // caches the value from the broker's startup), not the on-disk version.
+      // A client compares this to its own fresh on-disk read; a mismatch means
+      // the broker is running pre-upgrade code and should be restarted.
+      return { ok: true, cmd: 'ping', version: PROTOCOL_VERSION, cliVersion: getCliVersion() };
     case 'get': {
       const e = store.get(req.name);
       if (!e || now >= e.expiresAt) {
@@ -301,9 +320,24 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   const sock = socketPath();
   try { fs.unlinkSync(sock); } catch { /* no stale socket */ }
 
+  // Capture the version of the code we're running so the sweep can detect when
+  // an in-place upgrade has landed and self-heal onto it. getCliVersion caches
+  // this value for the process lifetime; getCliVersionFresh re-reads on disk.
+  const runningVersion = getCliVersion();
+
   const sweep = () => {
     const now = Date.now();
     for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
+    // Self-heal: a newer version was installed in place — exit so launchd
+    // relaunches us on the new code. Only meaningful when launchd will restart
+    // us (persistent); a one-off broker just keeps serving until idle.
+    if (persistent) {
+      const onDisk = getCliVersionFresh();
+      if (onDisk !== 'unknown' && runningVersion !== 'unknown' && onDisk !== runningVersion) {
+        shutdown(0); // KeepAlive relaunches on the new code
+        return;
+      }
+    }
     if (store.size === 0) {
       if (!persistent && now - emptySince >= IDLE_EXIT_MS) shutdown(0);
     } else {
@@ -561,11 +595,15 @@ export async function agentStatus(): Promise<AgentStatusEntry[]> {
   return r?.ok === true && r.cmd === 'status' ? r.entries : [];
 }
 
-/** Is a broker live and speaking our protocol version? */
-async function agentPing(): Promise<boolean> {
-  if (!agentSocketExists()) return false;
+/** Ping result: whether a broker is reachable + speaking our protocol, and the
+ * version of the code it's running (for staleness detection). */
+async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
+  if (!agentSocketExists()) return { reachable: false };
   const r = await request({ cmd: 'ping' });
-  return r?.ok === true && r.cmd === 'ping' && r.version === PROTOCOL_VERSION;
+  if (r?.ok === true && r.cmd === 'ping' && r.version === PROTOCOL_VERSION) {
+    return { reachable: true, cliVersion: r.cliVersion };
+  }
+  return { reachable: false };
 }
 
 /**
@@ -580,7 +618,16 @@ async function agentPing(): Promise<boolean> {
  */
 export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   if (!onDarwin()) return false;
-  if (await agentPing()) return true;
+
+  // Self-heal: if a broker is reachable but running pre-upgrade code (its
+  // reported version != the version on disk now), tear it down so the paths
+  // below bring up a fresh one on current code. A current, reachable broker is
+  // accepted immediately.
+  const ping = await agentPing();
+  if (ping.reachable) {
+    if (ping.cliVersion === undefined || ping.cliVersion === getCliVersionFresh()) return true;
+    await teardownStaleBroker();
+  }
 
   // Path 1: the persistent service. installSecretsAgentService is idempotent and
   // waits for the socket; for an already-installed service we kickstart and wait.
@@ -591,7 +638,7 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
       const uid = process.getuid?.() ?? 0;
       try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* may already be running */ }
       const d = Date.now() + timeoutMs;
-      while (Date.now() < d) { if (await agentPing()) return true; await new Promise((r) => setTimeout(r, 150)); }
+      while (Date.now() < d) { if ((await agentPing()).reachable) return true; await new Promise((r) => setTimeout(r, 150)); }
     }
   } catch { /* fall through to the one-off spawn */ }
 
@@ -611,8 +658,25 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await agentPing()) return true;
+    if ((await agentPing()).reachable) return true;
     await new Promise((r) => setTimeout(r, 100));
   }
   return false;
+}
+
+/**
+ * Tear down a stale broker (running pre-upgrade code) so a fresh one can take
+ * over. If the persistent service is installed, bootout makes launchd relaunch
+ * it on the new code; otherwise kill the process and clear its socket/pid.
+ */
+async function teardownStaleBroker(): Promise<void> {
+  if (secretsAgentServiceInstalled()) {
+    const uid = process.getuid?.() ?? 0;
+    try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* best effort */ }
+    return; // kickstart -k restarts the service onto current code; socket/pid managed by it
+  }
+  const pid = (() => { try { return parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10); } catch { return NaN; } })();
+  if (!isNaN(pid) && isAlive(pid)) { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
+  try { fs.unlinkSync(socketPath()); } catch { /* gone */ }
+  try { fs.unlinkSync(pidPath()); } catch { /* gone */ }
 }

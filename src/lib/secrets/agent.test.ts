@@ -94,9 +94,14 @@ describe('handleAgentRequest', () => {
     expect(r).toMatchObject({ hit: true, env: { K: 'new' } });
   });
 
-  it('ping reports the protocol version', () => {
+  it('ping reports the protocol version and the running CLI version', () => {
     const r = handleAgentRequest(freshStore(), { cmd: 'ping' }, 0);
     expect(r).toMatchObject({ ok: true, cmd: 'ping' });
-    if (r.ok && r.cmd === 'ping') expect(typeof r.version).toBe('number');
+    if (r.ok && r.cmd === 'ping') {
+      expect(typeof r.version).toBe('number');
+      // cliVersion drives staleness detection — a client compares it to its own
+      // fresh on-disk read and restarts the broker on mismatch.
+      expect(typeof r.cliVersion).toBe('string');
+    }
   });
 });

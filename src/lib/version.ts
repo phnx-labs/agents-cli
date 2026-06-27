@@ -24,3 +24,23 @@ export function getCliVersion(): string {
   }
   return cached;
 }
+
+/**
+ * Read the version from package.json on disk every call, bypassing the cache.
+ *
+ * `getCliVersion()` memoizes the version a long-running process *started* with.
+ * After `npm i -g` overwrites the install in place, the on-disk package.json
+ * changes but the running process keeps its old in-memory code. Comparing this
+ * fresh read against the cached startup value is how a daemon/broker detects it
+ * is now stale and should reload onto the new code (self-healing). Returns
+ * 'unknown' on any error.
+ */
+export function getCliVersionFresh(): string {
+  try {
+    const pkgPath = path.join(__dirname, '..', '..', 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    return String(pkg.version || 'unknown');
+  } catch {
+    return 'unknown';
+  }
+}

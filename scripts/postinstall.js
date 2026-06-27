@@ -239,6 +239,8 @@ To enable version-aware shims, add this to your shell config:
     console.log(`  Installed shorthands: ${written.join(', ')}`);
   }
 
+  await healLongRunningProcesses();
+
   const version = getVersion();
   if (version) {
     const section = getChangelogSection(version);
@@ -248,6 +250,39 @@ To enable version-aware shims, add this to your shell config:
       console.log('');
     }
   }
+}
+
+/**
+ * Self-heal long-running processes onto the just-installed code (macOS).
+ *
+ * The root cause behind stale-behavior bugs is a daemon/broker that keeps
+ * running pre-upgrade code for days. An in-place `npm i -g` swaps the files but
+ * not the running processes — so we bounce them here, the one moment we know the
+ * code just changed. Best-effort and non-fatal: a failure must never break the
+ * install. Skipped in CI and when AGENTS_NO_HEAL=1.
+ */
+async function healLongRunningProcesses() {
+  if (process.platform !== 'darwin') return;
+  if (process.env.CI || process.env.AGENTS_NO_HEAL === '1') return;
+  // Routines daemon: restart so it reloads new code (e.g. picks up keychain
+  // read-memoization / broker fast-path that a stale daemon wouldn't have).
+  try {
+    const d = await import('../dist/lib/daemon.js');
+    if (d.isDaemonRunning?.()) {
+      d.stopDaemon?.();
+      d.startDaemon?.();
+      console.log('  Restarted the routines daemon onto this version.');
+    }
+  } catch { /* best effort */ }
+  // Persistent secrets-agent broker: kickstart so launchd relaunches it on the
+  // new code. No-op if the service isn't installed; never blocks.
+  try {
+    const a = await import('../dist/lib/secrets/agent.js');
+    if (a.secretsAgentServiceInstalled?.()) {
+      a.kickstartSecretsAgentService?.();
+      console.log('  Reloaded the secrets-agent service onto this version.');
+    }
+  } catch { /* best effort */ }
 }
 
 main().catch((err) => {

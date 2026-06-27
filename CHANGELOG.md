@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**Self-healing: long-running processes reload onto new code after an upgrade**
+
+- Root cause behind a class of "stale behavior" bugs: a routines daemon or secrets-agent broker keeps running **pre-upgrade code** for days. An in-place `npm i -g` swaps the files but not the running processes, so fixes (keychain read-memoization, the broker fast-path, etc.) silently never take effect — the daemon kept popping Touch ID from the keychain because it predated the fix.
+- **Heal-on-upgrade:** `postinstall` now bounces the routines daemon and kickstarts the persistent secrets-agent broker onto the just-installed code — the one moment we know the code changed. Best-effort, non-fatal, skipped in CI / with `AGENTS_NO_HEAL=1`.
+- **Broker version-skew self-heal:** the broker's `ping` reports the version of the code it's running; `ensureAgentRunning` (the unlock / auto-cache path, never per-read) restarts a broker found running stale code, and a persistent broker self-exits on detecting an in-place upgrade so launchd relaunches it fresh. New `getCliVersionFresh()` re-reads `package.json` to detect the swap.
+- No hot-path cost: all checks live on existing control-plane paths (postinstall, the broker sweep, `ensureAgentRunning`), never on a per-secret-read. macOS only. Complements #412 (daemon session-sync memoization) by ensuring the daemon actually *runs* that code.
+
 **`agents secrets start`: persistent secrets-agent service (fixes the broker under heavy load)**
 
 - On a heavily-loaded machine (many concurrent agents, high load average) the on-demand broker — a full CLI cold-start — couldn't get scheduled enough CPU to finish booting and bind its socket, so `unlock`/auto-cache silently failed and reads kept prompting. New `agents secrets start` installs the broker as a **launchd user service** (`RunAtLoad` + `KeepAlive`, `ProcessType: Interactive` for foreground scheduling priority): it starts once and stays up for the whole login session, so every read just connects — the cold start happens once (and launchd retries until it wins), never per read. `agents secrets stop` removes it; `agents secrets status` shows whether it's installed.
