@@ -24,7 +24,7 @@ export interface R2Config {
  * actionable error if the bundle or any key is missing — sync cannot proceed
  * without real credentials (no silent fallback).
  */
-export function loadR2Config(): R2Config {
+function resolveR2Config(): R2Config {
   const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync' });
   const accountId = env.R2_ACCOUNT_ID?.trim();
   const bucket = env.R2_BUCKET_NAME?.trim();
@@ -53,12 +53,58 @@ export function loadR2Config(): R2Config {
   };
 }
 
-/** True when the sync bundle exists and looks resolvable, without throwing. */
-export function isSyncConfigured(): boolean {
+// ── Resolution cache ────────────────────────────────────────────────────────
+// The daemon calls isSyncConfigured() + syncSessions() every ~90s, and each used
+// to trigger a fresh read of the biometry-gated `r2.backups` keychain items —
+// one Touch ID prompt per gated item, every cycle, forever. We instead resolve
+// at most once per process: a success is memoized for the process lifetime
+// (cleared on daemon SIGHUP via clearR2ConfigCache), so subsequent cycles never
+// touch the keychain again. A *prompt-bearing* failure (cancelled Touch ID, etc.)
+// starts a cooldown so a dismissed prompt is not re-issued every cycle. A simply
+// absent bundle never prompts, so it is re-checked each cycle (fast pickup when
+// the user later adds credentials).
+let cachedConfig: R2Config | null = null;
+let lastPromptFailureAt = 0;
+/** Window after a prompt-bearing resolution failure during which we skip
+ *  re-attempting (and thus re-prompting). SIGHUP / restart bypasses it. */
+export const RESOLVE_RETRY_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+
+/** Drop the cached resolution so the next call reads the bundle fresh. Called on
+ *  daemon SIGHUP (to pick up rotated credentials) and between tests. */
+export function clearR2ConfigCache(): void {
+  cachedConfig = null;
+  lastPromptFailureAt = 0;
+}
+
+/**
+ * Resolve R2 credentials, reading the keychain at most once per process. The
+ * first call reads (and may prompt for Touch ID); every later call returns the
+ * memoized result. Throws if the bundle/keys are missing — failures are not
+ * memoized, but see isSyncConfigured for the re-prompt cooldown.
+ */
+export function loadR2Config(): R2Config {
+  if (cachedConfig) return cachedConfig;
+  cachedConfig = resolveR2Config();
+  return cachedConfig;
+}
+
+/**
+ * True when the sync bundle exists and resolves, without throwing. After a
+ * prompt-bearing failure (e.g. a cancelled Touch ID) it returns false without
+ * re-reading the keychain for RESOLVE_RETRY_COOLDOWN_MS, so a dismissed prompt
+ * does not re-storm every cycle. `now` is injectable for tests.
+ */
+export function isSyncConfigured(now: number = Date.now()): boolean {
+  if (cachedConfig) return true;
+  if (lastPromptFailureAt && now - lastPromptFailureAt < RESOLVE_RETRY_COOLDOWN_MS) return false;
   try {
     loadR2Config();
     return true;
-  } catch {
+  } catch (err) {
+    // A missing bundle never prompts, so keep re-checking it each cycle (so a
+    // later `agents secrets add` is picked up quickly). Any other failure may
+    // have cost a prompt (cancelled Touch ID, keychain error) — back off.
+    if (!/not found/i.test((err as Error).message)) lastPromptFailureAt = now;
     return false;
   }
 }

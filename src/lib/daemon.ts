@@ -265,6 +265,9 @@ export async function runDaemon(): Promise<void> {
     scheduler.reloadAll();
     const reloaded = scheduler.listScheduled();
     log('INFO', `Reloaded ${reloaded.length} jobs`);
+    // Drop the memoized R2 config so rotated/added sync credentials are re-read
+    // on the next cycle instead of waiting for a restart.
+    void import('./session/sync/config.js').then(m => m.clearR2ConfigCache());
   };
 
   const handleShutdown = async () => {
