@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { composeRules, type RulesLayer } from './compose.js';
+import { composeRules, collectSubruleHooks, type RulesLayer } from './compose.js';
 
 let tmpDir: string;
 
@@ -220,5 +220,132 @@ describe('composeRules — output sanity', () => {
 
     const result = composeRules({ layers: [user, sys] });
     expect(result.subrules.map((s) => s.name)).toEqual(['real']);
+  });
+});
+
+describe('composeRules — dir-form subrules', () => {
+  it('composes a dir-form subrule (subrules/foo/rule.md) like a flat one', () => {
+    const sys = makeLayer('system', 'system');
+    writeFile('system/subrules/foo/rule.md', 'FOO body');
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo]\n');
+
+    const result = composeRules({ layers: [sys] });
+    expect(result.subrules.map((s) => s.name)).toEqual(['foo']);
+    expect(result.content).toBe('FOO body\n');
+    expect(result.subrules[0].subruleDir).toBe(
+      path.join(sys.rulesDir, 'subrules', 'foo')
+    );
+    expect(result.subrules[0].sourcePath).toBe(
+      path.join(sys.rulesDir, 'subrules', 'foo', 'rule.md')
+    );
+  });
+
+  it('flat and dir forms coexist; a dir-form shadows a lower-layer flat one', () => {
+    const sys = makeLayer('system', 'system');
+    const user = makeLayer('user', 'user');
+    // Lower layer (system) has flat foo; higher layer (user) has dir-form foo.
+    writeFile('system/subrules/foo.md', 'SYS FLAT FOO');
+    writeFile('user/subrules/foo/rule.md', 'USER DIR FOO');
+    // A coexisting flat subrule in the same higher layer.
+    writeFile('user/subrules/bar.md', 'USER BAR');
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo, bar]\n');
+
+    const result = composeRules({ layers: [user, sys] });
+    expect(result.content).toContain('USER DIR FOO');
+    expect(result.content).not.toContain('SYS FLAT FOO');
+    expect(result.content).toContain('USER BAR');
+    const foo = result.subrules.find((s) => s.name === 'foo')!;
+    expect(foo.layerScope).toBe('user');
+    expect(foo.subruleDir).toBe(path.join(user.rulesDir, 'subrules', 'foo'));
+    const bar = result.subrules.find((s) => s.name === 'bar')!;
+    expect(bar.subruleDir).toBeUndefined();
+  });
+
+  it('auto-appends a dir-form subrule not named by the preset', () => {
+    const sys = makeLayer('system', 'system');
+    const user = makeLayer('user', 'user');
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: []\n');
+    writeFile('user/subrules/extra/rule.md', 'EXTRA DIR');
+
+    const result = composeRules({ layers: [user, sys] });
+    expect(result.subrules.map((s) => s.name)).toEqual(['extra']);
+    expect(result.content).toBe('EXTRA DIR\n');
+    expect(result.subrules[0].subruleDir).toBe(
+      path.join(user.rulesDir, 'subrules', 'extra')
+    );
+  });
+
+  it('ignores a subrule directory that has no rule.md', () => {
+    const sys = makeLayer('system', 'system');
+    const user = makeLayer('user', 'user');
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: []\n');
+    writeFile('user/subrules/notarule/hooks.yaml', 'x: {}\n');
+    writeFile('user/subrules/real.md', 'REAL');
+
+    const result = composeRules({ layers: [user, sys] });
+    expect(result.subrules.map((s) => s.name)).toEqual(['real']);
+  });
+});
+
+describe('collectSubruleHooks', () => {
+  it('returns an absolute-script entry for a dir subrule with hooks.yaml', () => {
+    const sys = makeLayer('system', 'system');
+    writeFile('system/subrules/foo/rule.md', 'FOO');
+    writeFile('system/subrules/foo/enforce.sh', '#!/bin/sh\necho hi\n');
+    writeFile(
+      'system/subrules/foo/hooks.yaml',
+      'enforce:\n  script: enforce.sh\n  events: [PreToolUse]\n  matcher: "Edit|Write"\n'
+    );
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo]\n');
+
+    const hooks = collectSubruleHooks([sys]);
+    expect(Object.keys(hooks)).toEqual(['foo__enforce']);
+    const entry = hooks['foo__enforce'];
+    expect(entry.script).toBe(
+      path.join(sys.rulesDir, 'subrules', 'foo', 'enforce.sh')
+    );
+    expect(path.isAbsolute(entry.script)).toBe(true);
+    expect(entry.events).toEqual(['PreToolUse']);
+    expect(entry.matcher).toBe('Edit|Write');
+  });
+
+  it('accepts the wrapped { hooks: { ... } } shape too', () => {
+    const sys = makeLayer('system', 'system');
+    writeFile('system/subrules/foo/rule.md', 'FOO');
+    writeFile('system/subrules/foo/enforce.sh', '#!/bin/sh\n');
+    writeFile(
+      'system/subrules/foo/hooks.yaml',
+      'hooks:\n  enforce:\n    script: enforce.sh\n    events: [Stop]\n'
+    );
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo]\n');
+
+    const hooks = collectSubruleHooks([sys]);
+    expect(Object.keys(hooks)).toEqual(['foo__enforce']);
+    expect(hooks['foo__enforce'].events).toEqual(['Stop']);
+  });
+
+  it('returns nothing for flat subrules', () => {
+    const sys = makeLayer('system', 'system');
+    writeFile('system/subrules/foo.md', 'FOO');
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo]\n');
+
+    expect(collectSubruleHooks([sys])).toEqual({});
+  });
+
+  it('returns nothing for a dir subrule without hooks.yaml', () => {
+    const sys = makeLayer('system', 'system');
+    writeFile('system/subrules/foo/rule.md', 'FOO');
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo]\n');
+
+    expect(collectSubruleHooks([sys])).toEqual({});
+  });
+
+  it('does not throw on a malformed hooks.yaml — skips that subrule', () => {
+    const sys = makeLayer('system', 'system');
+    writeFile('system/subrules/foo/rule.md', 'FOO');
+    writeFile('system/subrules/foo/hooks.yaml', ': : not : valid : yaml :');
+    writeFile('system/rules.yaml', 'presets:\n  default:\n    subrules: [foo]\n');
+
+    expect(() => collectSubruleHooks([sys])).not.toThrow();
   });
 });

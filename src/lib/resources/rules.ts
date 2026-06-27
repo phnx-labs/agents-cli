@@ -23,6 +23,22 @@ import {
 
 const SUBRULES_DIR = 'subrules';
 const SUBRULES_README = 'README.md';
+/** Inside a dir-form subrule, the prose file. */
+const SUBRULE_RULE_FILE = 'rule.md';
+
+/**
+ * Resolve the prose file path for a subrule named `name` under `subrulesDir`.
+ *
+ * Dir form `<name>/rule.md` wins when present; otherwise the flat `<name>.md`.
+ * Returns null when neither exists.
+ */
+function resolveSubruleFile(subrulesDir: string, name: string): string | null {
+  const dirForm = path.join(subrulesDir, name, SUBRULE_RULE_FILE);
+  if (fs.existsSync(dirForm)) return dirForm;
+  const flatForm = path.join(subrulesDir, `${name}.md`);
+  if (fs.existsSync(flatForm)) return flatForm;
+  return null;
+}
 
 /** A rule item is a subrule markdown fragment. */
 export interface RuleItem {
@@ -39,17 +55,26 @@ export interface RulesLayerDir {
 }
 
 /**
- * List subrule markdown files in a directory.
- * Returns names without the .md extension.
+ * List subrule names in a directory.
+ *
+ * A name comes from either the flat form `<name>.md` OR the dir form
+ * `<name>/rule.md`; a directory without `rule.md` is not a subrule. Returns
+ * names without the .md extension.
  */
 export function listSubrulesInDir(subrulesDir: string): string[] {
   if (!fs.existsSync(subrulesDir)) return [];
   try {
-    return fs
-      .readdirSync(subrulesDir)
-      .filter((f) => f.endsWith('.md') && f !== SUBRULES_README)
-      .map((f) => f.slice(0, -3))
-      .sort();
+    const names = new Set<string>();
+    for (const entry of fs.readdirSync(subrulesDir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (fs.existsSync(path.join(subrulesDir, entry.name, SUBRULE_RULE_FILE))) {
+          names.add(entry.name);
+        }
+      } else if (entry.name.endsWith('.md') && entry.name !== SUBRULES_README) {
+        names.add(entry.name.slice(0, -3));
+      }
+    }
+    return [...names].sort();
   } catch {
     return [];
   }
@@ -107,7 +132,8 @@ export function listAllRules(layers: RulesLayerDir[]): ResolvedItem<RuleItem>[] 
       if (seen.has(name)) continue;
       seen.add(name);
 
-      const filePath = path.join(subrulesDir, `${name}.md`);
+      const filePath = resolveSubruleFile(subrulesDir, name);
+      if (!filePath) continue;
       let content = '';
       try {
         content = fs.readFileSync(filePath, 'utf-8');
@@ -133,8 +159,8 @@ export function listAllRules(layers: RulesLayerDir[]): ResolvedItem<RuleItem>[] 
  */
 export function resolveRule(name: string, layers: RulesLayerDir[]): ResolvedItem<RuleItem> | null {
   for (const { layer, dir } of layers) {
-    const filePath = path.join(dir, SUBRULES_DIR, `${name}.md`);
-    if (fs.existsSync(filePath)) {
+    const filePath = resolveSubruleFile(path.join(dir, SUBRULES_DIR), name);
+    if (filePath) {
       let content = '';
       try {
         content = fs.readFileSync(filePath, 'utf-8');
