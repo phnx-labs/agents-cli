@@ -1,6 +1,6 @@
 # Secrets-agent process model (design decision)
 
-> Status: **proposed** · Supersedes nothing · Related: [secrets.md](secrets.md), [03-routines.md](03-routines.md)
+> Status: **accepted** · Supersedes nothing · Related: [secrets.md](secrets.md), [03-routines.md](03-routines.md)
 
 A design record for *where the secrets-agent broker should live as a process* —
 its own service, or folded into the routines daemon. Written after a stretch of
@@ -51,53 +51,64 @@ A reliability/security primitive that *everything* depends on should have the
 **fewest dependencies and the lightest footprint**, and must not inherit the
 failure modes of unrelated subsystems.
 
+A note on an argument we explicitly **reject**: "the daemon is flaky, so keep the
+broker out of it." A daemon is *defined* by being the supervised, always-on,
+bounce-back backbone — robustness is its job. The PID-null / duplicate /
+cold-start incidents are **bugs to fix in the daemon**, not properties to design
+around. Routing a critical service *around* the daemon to dodge its bugs is
+backwards; the fix is to make the daemon worthy of hosting critical services.
+And the reliability isolation a separate broker seems to buy is largely illusory:
+both a standalone broker and the daemon recover the same way — launchd
+`KeepAlive` — so splitting them adds a second thing to supervise without adding
+real resilience.
+
 ## Options
 
-1. **Fold into the routines daemon.** Host the broker next to `BrowserIPCServer`.
-   - Fewer processes; reuses one lifecycle; matches an existing pattern.
-   - **But** couples secrets availability to a heavy, only-runs-with-routines,
-     empirically-flaky host; and forces secrets-only users to run the whole
-     scheduler/browser/sync stack they don't need. It makes the *more* critical
-     thing depend on the *less* reliable thing.
-2. **Keep the broker as its own minimal service.**
-   - Fault-isolated, lightweight, independently available, fast cold-start.
-   - **But** two persistent services with (currently) two different lifecycle
-     mechanisms — untidy unless both are auto-managed + self-healing.
-3. **Unify into a light supervisor.** One always-on, lightweight background
-   process that hosts only fast services in-process (broker; scheduler
-   *triggers*) and spawns heavy work (job *runs*, browser automation, session
-   sync) as separate on-demand children.
-   - One background presence + a light, reliable core + isolation of heavy work.
-   - **But** the largest refactor: today the daemon runs browser+sync in-process.
+1. **Fold into the daemon, and harden the daemon.** Host the broker in the
+   daemon next to `BrowserIPCServer`; make the daemon the always-on,
+   single-instance, self-healing backbone it is meant to be.
+   - One supervised backbone for all background services; one lifecycle; one
+     self-heal path; the broker inherits the daemon's robustness.
+   - Requires real work: the daemon must (a) be **always-on**, not gated on
+     having routines; (b) enforce **single-instance** (no duplicates); (c) start
+     the **broker socket first/fast** so secrets availability never waits on
+     browser/sync init; (d) keep heavy/risky work (browser automation, job runs)
+     in **spawned children** so a crash there can't take the backbone down.
+2. **Keep the broker as its own minimal service.** Fault-isolated, but two
+   services on two lifecycle mechanisms, and the "isolation" is mostly illusory
+   (both rely on `KeepAlive`). Rejected — it treats daemon bugs as permanent.
 
 ## Decision
 
-**Do not fold the broker into today's daemon (reject Option 1).**
+**Fold the broker into the daemon — and harden the daemon into the robust,
+always-on, self-healing backbone (Option 1).** A daemon is the right home for a
+persistent, critical background service precisely *because* it is supposed to be
+the most reliable, supervised component. The broker's reliability should come
+*from* a reliable daemon, not from avoiding it.
 
-- **Short term — Option 2, made invisible.** Keep the broker its own minimal,
-  auto-started, self-healing service. The "two processes" cost is only a problem
-  if a human has to *manage* them; with auto-start + heal-on-upgrade +
-  version-skew self-heal (see [secrets.md](secrets.md#self-healing-across-upgrades)),
-  neither service needs hand-holding. Reliability isolation outweighs tidiness
-  for a security primitive.
-- **Long term — Option 3.** Evolve toward a light supervisor: move
-  `BrowserService`/IPC and session-sync out of the daemon core into spawned
-  children, leaving a light core that can host the broker too. *That* is the
-  legitimate "one daemon," and it's the right time to consolidate — not by
-  pushing the broker into the heavy daemon as it stands.
+The guiding principle (corrected): **make the host (the daemon) reliable enough
+to carry the critical service — don't route the critical service around the
+host.**
 
-The guiding principle: **consolidate processes by making the host light, not by
-making the critical service heavy.**
+This makes the daemon the single backbone that hosts the scheduler, browser IPC,
+and the secrets broker, with heavy/optional work spawned as children to bound
+blast radius.
 
 ## Consequences
 
-- The broker keeps its own `com.phnx-labs.agents-secrets-agent` service; the
-  redundancy is paid down by self-healing, not by merging.
-- The daemon's own fragility (PID-null, duplicates, cold-start) is fixed on its
-  own merits (single-instance enforcement, self-heal) rather than inherited by
-  secrets.
-- The two services should converge on **one** lifecycle convention (launchd
-  primary, detached fallback, version-skew self-heal) so they look and heal the
-  same way — a prerequisite for the eventual Option-3 merge.
-- Revisit this record when the supervisor refactor is scoped; at that point the
-  broker folds into the *light* core and this status moves to "superseded."
+- The standalone `com.phnx-labs.agents-secrets-agent` launchd service is retired;
+  the broker becomes a service hosted inside `com.phnx-labs.agents-daemon`. The
+  `secrets start/stop` surface either goes away or becomes thin aliases for
+  daemon lifecycle.
+- The daemon must become **always-on** (start for any background need, not only
+  `routines add`) and **single-instance** (the PID-null/duplicate bugs are
+  fixed, not tolerated).
+- In `runDaemon()`, **bind the broker socket before** the browser/session-sync
+  setup, so secrets resolution is available within milliseconds of daemon start
+  even while the heavier services initialize.
+- Heavy/crash-prone work stays in child processes so a failure there can't take
+  down the broker; the daemon core stays light enough to be trustworthy.
+- Self-heal (heal-on-upgrade + version-skew restart, PR #413) applies to the one
+  daemon, covering the broker for free.
+- Migration: on upgrade, `bootout` the old secrets-agent service and let the
+  daemon take over the socket.
