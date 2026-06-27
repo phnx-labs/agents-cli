@@ -13,7 +13,10 @@ import type { CloudProvider, CloudProviderId, CloudConfig } from './types.js';
 import { RushCloudProvider } from './rush.js';
 import { CodexCloudProvider } from './codex.js';
 import { FactoryCloudProvider } from './factory.js';
+import { AntigravityCloudProvider } from './antigravity.js';
 import { getUserAgentsDir } from '../state.js';
+import { AGENTS } from '../agents.js';
+import type { AgentId } from '../types.js';
 
 const META_FILE = path.join(getUserAgentsDir(), 'agents.yaml');
 
@@ -48,7 +51,18 @@ function initProviders(): void {
 
   providers.set('rush', new RushCloudProvider());
   providers.set('codex', new CodexCloudProvider(config.providers?.codex));
-  providers.set('factory', new FactoryCloudProvider());
+  providers.set('factory', new FactoryCloudProvider(config.providers?.factory));
+  providers.set('antigravity', new AntigravityCloudProvider(config.providers?.antigravity));
+}
+
+/**
+ * The cloud provider an agent dispatches to by default. Reads the canonical
+ * `cloudProvider` field on the agent registry entry — one source of truth, no
+ * side map. Returns undefined for agents with no native cloud.
+ */
+export function nativeProviderForAgent(agentId: string): CloudProviderId | undefined {
+  const agent = AGENTS[agentId as AgentId];
+  return agent?.cloudProvider;
 }
 
 /** Look up a provider by ID, throwing if the ID is unknown. */
@@ -73,8 +87,20 @@ export function getAllProviders(): CloudProvider[] {
   return [...providers.values()];
 }
 
-/** Resolve the active provider from an explicit flag or the configured default. */
-export function resolveProvider(explicit?: string): CloudProvider {
-  const id = (explicit ?? getDefaultProviderId()) as CloudProviderId;
+/**
+ * Resolve the active provider for a dispatch.
+ *
+ * Precedence: explicit `--provider` > the agent's native cloud
+ * (`cloudProvider`) > configured `cloud.default_provider` > `rush`. This is
+ * what makes `agents cloud run --agent droid` land on Factory and
+ * `--agent codex` land on Codex Cloud without the user naming a provider.
+ *
+ * Callers that already hold a concrete provider id (e.g. resolving a stored
+ * task's provider) pass it as `explicit` and the agent arg is ignored.
+ */
+export function resolveProvider(explicit?: string, agentId?: string): CloudProvider {
+  const id = (explicit
+    ?? (agentId ? nativeProviderForAgent(agentId) : undefined)
+    ?? getDefaultProviderId()) as CloudProviderId;
   return getProvider(id);
 }

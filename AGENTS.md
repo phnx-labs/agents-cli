@@ -92,7 +92,7 @@ src/
     hooks/match.ts     # `matches:` predicate evaluator
     migrate.ts         # One-shot idempotent migrations
     session/           # Discovery, parsing, rendering (Claude / Codex / Gemini / OpenCode)
-    cloud/             # Provider registry (Rush / Codex / Factory)
+    cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
     profiles.ts        # Host CLI + endpoint + model bundles
 ```

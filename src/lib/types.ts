@@ -6,6 +6,8 @@
  * formats for each supported agent.
  */
 
+import type { CloudProviderId } from './cloud/types.js';
+
 /** Unique identifier for a supported AI coding agent. */
 export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'roo' | 'antigravity' | 'grok' | 'kimi' | 'droid';
 
@@ -93,6 +95,13 @@ export interface AgentConfig {
   variableSyntax: string;
   supportsHooks: boolean;
   nativeAgentsSkillsDir?: boolean;
+  /**
+   * This agent's *own* cloud backend. `agents cloud run --agent <id>` routes
+   * here when no `--provider` is given (precedence: --provider > this >
+   * cloud.default_provider > rush). Undefined means the agent has no native
+   * cloud and falls back to the configured default.
+   */
+  cloudProvider?: CloudProviderId;
   capabilities: {
     hooks: Capability;
     mcp: Capability;

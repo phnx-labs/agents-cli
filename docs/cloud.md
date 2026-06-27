@@ -5,13 +5,30 @@ Run agent tasks on remote infrastructure across multiple cloud backends, with un
 ## Overview
 
 `agents cloud` dispatches tasks to remote agent environments without requiring
-a local CLI session. Three providers ship today: Rush Cloud (GitHub-repo-backed
-pods), Codex Cloud (pre-built Codex environments), and Factory (Droid +
-computer-use targets). Every dispatched task is tracked in a local SQLite store
+a local CLI session. **Each agent runs in its own cloud** — four providers ship
+today: Rush Cloud (Claude against a GitHub repo → PR), Codex Cloud (pre-built
+Codex environments), Factory (Droid on a cloud Droid Computer), and Antigravity
+(Gemini Managed Agents). Pass `--agent` and the provider is auto-selected;
+`--provider` overrides. Every dispatched task is tracked in a local SQLite store
 so `agents cloud list` shows the full history across all providers, and transient
 states (`queued`, `allocating`, `running`, `input_required`) are refreshed
 from the live provider API on each `list` call. Tasks continue running after
 you disconnect — reconnect any time with `agents cloud logs <id>`.
+
+### Agent auto-routing
+
+`agents cloud run --agent <id>` routes to that agent's native cloud unless you
+pass `--provider`. Resolution precedence (`resolveProvider` in
+`src/lib/cloud/registry.ts`): explicit `--provider` > the agent's `cloudProvider`
+(declared in the agent registry, `src/lib/agents.ts`) > `cloud.default_provider`
+in `~/.agents/agents.yaml` > `rush`.
+
+| Agent | Native cloud | Why |
+|---|---|---|
+| `claude` | `rush` | Claude Code has no headless Anthropic-hosted dispatch CLI (only `--remote-control`, which bridges a *local* session). Rush runs Claude against a repo → PR. |
+| `codex` | `codex` | `codex cloud exec` — first-class native CLI. |
+| `droid` | `factory` | Factory Droid Computer (cloud VM) via `droid computer ssh` + remote `droid exec`. |
+| `antigravity` | `antigravity` | Gemini Managed Agents Interactions API (remote sandbox). |
 
 ## Architecture
 
@@ -98,16 +115,32 @@ agents cloud providers
 
 ## Providers
 
-Three providers are registered at startup (`src/lib/cloud/registry.ts:49-51`):
+Four providers are registered at startup (`src/lib/cloud/registry.ts`):
 
 | ID | Name | Dispatch target | Multi-repo |
 |---|---|---|---|
 | `rush` | Rush Cloud | GitHub repo + branch | Yes — clones each repo into `/workspace/<owner>/<name>/` |
-| `codex` | Codex Cloud | Pre-built Codex environment | No — bundle the repos into the env |
-| `factory` | Factory | Droid + computer-use pod | No |
+| `codex` | Codex Cloud | Pre-built Codex environment (`--env`) | No — bundle the repos into the env |
+| `factory` | Factory (Droid) | Droid Computer (`--computer`) via relay SSH + `droid exec` | No |
+| `antigravity` | Antigravity (Gemini) | Gemini Managed Agents remote sandbox | No — raw sandbox, no repo → PR |
 
 The default provider is read from `cloud.default_provider` in
-`~/.agents/agents.yaml`. If unset, it falls back to `rush`.
+`~/.agents/agents.yaml`. If unset, it falls back to `rush`. Note that an
+agent's native cloud (via `--agent`) takes precedence over `default_provider`.
+
+**Factory (Droid).** `droid exec` is synchronous, so a Factory dispatch runs the
+remote exec to completion (no live SSE — output appears when the run finishes)
+and the task id is droid's own `session_id`. Requires the `droid` CLI, a Factory
+login, and a pre-provisioned Droid Computer (`--computer <name>`, or
+`cloud.providers.factory.computer`). Create one in Factory (Settings → Droid
+Computers) or register a machine with `droid computer register`.
+
+**Antigravity (Gemini).** Talks to the Interactions API
+(`POST /v1beta/interactions`, agent `antigravity-preview-05-2026`). The Gemini
+API key comes from an `agents secrets` bundle named in
+`cloud.providers.antigravity.secretsBundle` (or `GEMINI_API_KEY` /
+`GOOGLE_API_KEY` in the env). It is a raw sandbox — no GitHub repo → PR; pass a
+repo and it routes you to `--provider rush` instead.
 
 ### Provider configuration (`~/.agents/agents.yaml`)
 
@@ -119,7 +152,11 @@ cloud:
     codex:
       env: env_a1b2c3        # default Codex Cloud environment ID
     factory:
-      computer: linux-vm-1   # default computer target
+      computer: linux-vm-1   # default Droid Computer name
+      autonomy: high         # droid exec --auto level (low|medium|high; default high)
+    antigravity:
+      secretsBundle: gemini.com   # agents secrets bundle holding GEMINI_API_KEY
+      # model: antigravity-preview-05-2026   # optional managed-agent override
 ```
 
 Rush Cloud uses the session token injected by `agents` — no separate config
@@ -231,6 +268,28 @@ agents cloud status tsk_4f2a91
 
 # Unblock it
 agents cloud message tsk_4f2a91 "Looks good — also update the OpenAPI spec"
+```
+
+### 7. Dispatch to a droid's own cloud (Factory Droid Computer)
+
+`--agent droid` auto-routes to Factory; the run executes `droid exec` on the
+named Droid Computer.
+
+```bash
+agents cloud run "add a vitest for src/util/slug.ts" \
+  --agent droid \
+  --computer cloud-vm-1 \
+  --autonomy high
+```
+
+### 8. Dispatch to Antigravity (Gemini Managed Agents)
+
+`--agent antigravity` auto-routes to the Gemini Interactions API. No repo — it's
+a remote sandbox.
+
+```bash
+# key resolved from cloud.providers.antigravity.secretsBundle, or GEMINI_API_KEY
+agents cloud run "benchmark three JSON parsers and report the fastest" --agent antigravity
 ```
 
 ## Budget Guardrails

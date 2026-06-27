@@ -57,12 +57,16 @@ function isJsonMode(opts: { json?: boolean }): boolean {
 export function registerCloudCommands(program: Command): void {
   const cloud = program
     .command('cloud', { hidden: true })
-    .description('Dispatch and manage cloud agent tasks across providers (Rush Cloud, Codex Cloud, Factory).')
+    .description('Dispatch and manage cloud agent tasks across providers (Rush, Codex, Factory, Antigravity).')
     .addHelpText('after', `
+Each agent runs in its own cloud. Pass --agent and the provider is auto-selected
+(claude→rush, codex→codex, droid→factory, antigravity→antigravity); --provider overrides.
+
 Providers:
-  rush      Rush Cloud — dispatches against a GitHub repo + branch
-  codex     Codex Cloud — runs in a pre-built Codex environment
-  factory   Factory pods — Droid + computer-use targets
+  rush         Rush Cloud — Claude against a GitHub repo + branch → PR
+  codex        Codex Cloud — runs in a pre-built Codex environment (--env)
+  factory      Factory Droid Computer — droid exec on a cloud VM (--computer)
+  antigravity  Gemini Managed Agents — Antigravity harness in a remote sandbox
 
 Examples:
   # Dispatch a quick fix to Rush Cloud and stream the output
@@ -103,8 +107,8 @@ Examples:
   cloud
     .command('run [prompt]')
     .description('Dispatch a task to a cloud agent.')
-    .option('--provider <id>', 'Cloud backend: rush, codex, factory')
-    .option('--agent <name>', 'Agent to run: claude, codex, droid')
+    .option('--provider <id>', 'Cloud backend: rush, codex, factory, antigravity (overrides agent auto-routing)')
+    .option('--agent <name>', 'Agent to run: claude, codex, droid, antigravity (auto-routes to its native cloud)')
     .option(
       '--repo <owner/repo>',
       'GitHub repository. Repeatable for multi-repo dispatch (Rush Cloud only).',
@@ -120,6 +124,7 @@ Examples:
     .option('--model <model>', 'Model override')
     .option('--env <id>', 'Codex Cloud environment ID')
     .option('--computer <name>', 'Factory/Droid computer target')
+    .option('--autonomy <level>', 'Factory/Droid autonomy: low, medium, high (default high)')
     .option('--mode <mode>', 'Execution mode (e.g., plan, edit, full)')
     .option(
       '-b, --balanced',
@@ -168,7 +173,9 @@ Examples:
         }
       }
 
-      const provider = resolveProvider(options.provider as string | undefined);
+      // Agent-aware: with no --provider, the agent routes to its native cloud
+      // (claude→rush, codex→codex, droid→factory, antigravity→antigravity).
+      const provider = resolveProvider(options.provider as string | undefined, options.agent as string | undefined);
 
       // --repo is repeatable: commander gives us an array via our collector.
       // A single --repo value arrives as a one-element array; keep the legacy
@@ -193,6 +200,7 @@ Examples:
 
       if (options.env) dispatchOptions.providerOptions!.env = options.env as string;
       if (options.computer) dispatchOptions.providerOptions!.computer = options.computer as string;
+      if (options.autonomy) dispatchOptions.providerOptions!.autonomy = options.autonomy as string;
       if (options.mode) dispatchOptions.providerOptions!.mode = options.mode as string;
       if (options.balanced || (options.strategy as string) === 'balanced') {
         dispatchOptions.providerOptions!.strategy = 'balanced';

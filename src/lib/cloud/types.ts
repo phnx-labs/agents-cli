@@ -6,8 +6,19 @@
  * the dispatch pipeline.
  */
 
-/** Identifier for a supported cloud dispatch backend. */
-export type CloudProviderId = 'rush' | 'codex' | 'factory';
+/**
+ * Identifier for a supported cloud dispatch backend.
+ *
+ * Each id is one agent's *own* cloud:
+ *   - `rush`        — Rush Cloud (runs Claude against a GitHub repo → PR)
+ *   - `codex`       — OpenAI Codex Cloud (`codex cloud exec`)
+ *   - `factory`     — Factory Droid Computers (`droid computer ssh` + remote `droid exec`)
+ *   - `antigravity` — Google Gemini Managed Agents (Interactions API)
+ *
+ * Agents route to their native cloud automatically (see `cloudProvider` in the
+ * agent registry); `--provider` overrides.
+ */
+export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity';
 
 /**
  * Lifecycle state of a cloud-dispatched task.
@@ -192,11 +203,27 @@ export interface CloudProvider {
   message(taskId: string, content: string): Promise<void>;
 }
 
+/** Autonomy level passed to `droid exec --auto` for Factory cloud dispatches. */
+export type DroidAutonomy = 'low' | 'medium' | 'high';
+
 /** Per-provider configuration stored in the `cloud.providers` section of agents.yaml. */
 export interface CloudProviderConfig {
   rush?: Record<string, string>;
   codex?: { env?: string };
-  factory?: { computer?: string };
+  /**
+   * Factory (Droid) cloud. `computer` is the pre-provisioned Droid Computer
+   * name (managed in Factory's UI, or BYOM via `droid computer register`) —
+   * the Factory analogue of Codex's pre-built `env`. `autonomy` is the default
+   * `droid exec --auto` level for cloud runs (defaults to `high`).
+   */
+  factory?: { computer?: string; autonomy?: DroidAutonomy };
+  /**
+   * Antigravity (Gemini Managed Agents) cloud. The Gemini API key is read from
+   * an `agents secrets` bundle named here (never stored in agents.yaml); if
+   * unset, the provider falls back to GEMINI_API_KEY / GOOGLE_API_KEY in the
+   * environment. `model` overrides the default managed-agent id.
+   */
+  antigravity?: { secretsBundle?: string; model?: string };
 }
 
 /** Top-level `cloud` section of agents.yaml. */

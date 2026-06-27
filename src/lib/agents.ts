@@ -229,6 +229,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
+    // Claude Code has no headless Anthropic-hosted dispatch CLI (only
+    // --remote-control, which bridges a *local* session). Its cloud is Rush.
+    cloudProvider: 'rush',
     capabilities: { hooks: true, mcp: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true },
   },
   // codex hooks: gated to >= 0.116.0 (introduced [features] codex_hooks flag).
@@ -248,6 +251,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
+    cloudProvider: 'codex',
     capabilities: { hooks: { since: '0.116.0' }, mcp: true, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'skip'] },
   },
   gemini: {
@@ -434,6 +438,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '{{args}}',
     supportsHooks: true,
+    cloudProvider: 'antigravity',
     capabilities: { hooks: true, mcp: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit', 'skip'], rulesImports: false },
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
@@ -531,6 +536,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
+    // Factory Droid Computers (cloud VMs) reached via `droid computer ssh` +
+    // remote headless `droid exec`.
+    cloudProvider: 'factory',
     capabilities: {
       hooks: false,
       mcp: true,
