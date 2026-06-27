@@ -979,13 +979,35 @@ export async function isOldestInstalled(agent: AgentId): Promise<{ installed: bo
   return { installed: isVersionInstalled(agent, oldestVersion), version: oldestVersion };
 }
 
+// Per-process cache for listInstalledVersions. The agent's versions dir mtime
+// changes whenever a version dir is added or removed (install/remove), so a
+// stamp match means the installed set is unchanged and we skip the readdir +
+// N binary stats. Mirrors the readMeta() cache in state.ts. Hot path:
+// resolveAgentTargets and every enumerate-style consumer hit this.
+const installedVersionsCache = new Map<AgentId, { stamp: number; versions: string[] }>();
+
+/** Drop the installed-versions cache (call after install/remove mutations). */
+export function invalidateInstalledVersionsCache(agent?: AgentId): void {
+  if (agent) installedVersionsCache.delete(agent);
+  else installedVersionsCache.clear();
+}
+
 /**
- * List all installed versions for an agent.
+ * List all installed versions for an agent (cached by versions-dir mtime).
  */
 export function listInstalledVersions(agent: AgentId): string[] {
   const agentVersionsDir = path.join(getVersionsDir(), agent);
-  if (!fs.existsSync(agentVersionsDir)) {
+  let stamp: number;
+  try {
+    stamp = fs.statSync(agentVersionsDir).mtimeMs;
+  } catch {
+    installedVersionsCache.set(agent, { stamp: 0, versions: [] });
     return [];
+  }
+
+  const cached = installedVersionsCache.get(agent);
+  if (cached && cached.stamp === stamp) {
+    return cached.versions;
   }
 
   const entries = fs.readdirSync(agentVersionsDir, { withFileTypes: true });
@@ -1000,7 +1022,9 @@ export function listInstalledVersions(agent: AgentId): string[] {
     }
   }
 
-  return versions.sort(compareVersions);
+  versions.sort(compareVersions);
+  installedVersionsCache.set(agent, { stamp, versions });
+  return versions;
 }
 
 /**

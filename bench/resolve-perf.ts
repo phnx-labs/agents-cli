@@ -1,0 +1,80 @@
+#!/usr/bin/env tsx
+// Benchmark harness for centralized agent-spec resolution.
+//
+// Measures, against the host's real installed versions:
+//   A. listInstalledVersions — cold (cache busted each call) vs warm (cached)
+//   B. resolveAgentTargets fast paths (exact / @pinned / bare) — meta-only,
+//      no enumeration once warm
+//   C. resolveAgentTargets enumerate paths (@latest / @all)
+//   D. 1000x repeated resolution of the hot-path spec (simulates per-subcommand
+//      resolution across a session) — total + per-call
+//
+// The "fast paths perform zero readdir" invariant is asserted in the unit test
+// (agent-spec.test.ts, via vi.spyOn) — bun makes fs.readdirSync read-only so it
+// can't be instrumented here; this harness measures wall-clock instead.
+//
+// Output: JSON on stdout. Run before/after to diff: `bun bench/resolve-perf.ts`.
+
+import { performance } from 'perf_hooks';
+import { listInstalledVersions, invalidateInstalledVersionsCache, getGlobalDefault } from '../src/lib/versions.js';
+import { resolveAgentTargets } from '../src/lib/agent-spec.js';
+import { ALL_AGENT_IDS } from '../src/lib/agents.js';
+import type { AgentId } from '../src/lib/types.js';
+
+const agent: AgentId | undefined = ALL_AGENT_IDS.find((a) => listInstalledVersions(a).length > 0);
+if (!agent) {
+  console.log(JSON.stringify({ error: 'no agent has installed versions on this host' }, null, 2));
+  process.exit(0);
+}
+const installed = listInstalledVersions(agent);
+const exactVer = installed[installed.length - 1];
+const pinned = getGlobalDefault(agent);
+
+function time(fn: () => void, iters: number): { totalMs: number; perCallUs: number } {
+  for (let i = 0; i < Math.min(50, iters); i++) fn(); // warmup
+  const t0 = performance.now();
+  for (let i = 0; i < iters; i++) fn();
+  const totalMs = performance.now() - t0;
+  return { totalMs: +totalMs.toFixed(3), perCallUs: +((totalMs * 1000) / iters).toFixed(3) };
+}
+
+const results: Record<string, unknown> = {
+  host: { agent, installedCount: installed.length, exactVer, pinned },
+};
+
+// A. cold (cache busted each call) vs warm (cached)
+{
+  const cold = time(() => {
+    invalidateInstalledVersionsCache(agent);
+    listInstalledVersions(agent);
+  }, 2000);
+  const warm = time(() => listInstalledVersions(agent), 200000);
+  results.listInstalledVersions = {
+    cold,
+    warm,
+    speedup: +(cold.perCallUs / warm.perCallUs).toFixed(1),
+  };
+}
+
+// B. fast paths (meta-only; no enumeration warm)
+{
+  listInstalledVersions(agent); // warm
+  results.fastPaths = {
+    exact: time(() => resolveAgentTargets(`${agent}@${exactVer}`), 100000),
+    pinned: pinned ? time(() => resolveAgentTargets(`${agent}@pinned`), 100000) : 'no-default-set',
+    bare: time(() => resolveAgentTargets(`${agent}`), 100000),
+  };
+}
+
+// C. enumerate paths
+{
+  results.enumeratePaths = {
+    latest: time(() => resolveAgentTargets(`${agent}@latest`), 100000),
+    all: time(() => resolveAgentTargets(`${agent}@all`), 100000),
+  };
+}
+
+// D. 1000x hot-path spec
+results.hotPath1000x = time(() => resolveAgentTargets(`${agent}@${exactVer}`), 1000);
+
+console.log(JSON.stringify(results, null, 2));
