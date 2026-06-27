@@ -133,8 +133,8 @@ holds only ciphertext): see [Recipe 8](#8-headless-release-on-a-remote-mac).
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 24h) | `agents secrets unlock prod --ttl 30m` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
-| `secrets tier <bundle> [tier]` | Show or set a bundle's tier: `biometry` (default) or `session` | `agents secrets tier dev session` |
-| `secrets create <name> --tier session` | Create a bundle that's eligible for the agent | `agents secrets create dev --tier session` |
+| `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `always` (default) or `daily` | `agents secrets policy dev daily` |
+| `secrets create <name> --policy daily` | Create a bundle that's held after one prompt | `agents secrets create dev --policy daily` |
 
 See [The secrets-agent](#the-secrets-agent-macos) below for the model and the security trade-off.
 
@@ -390,21 +390,23 @@ A long-running daemon or broker keeps running the code it started with; an in-pl
 - **Heal-on-upgrade:** `postinstall` bounces the routines daemon and kickstarts the broker onto the just-installed code (best-effort; skip with `AGENTS_NO_HEAL=1`).
 - **Version-skew detection:** the broker's `ping` reports the version of the code it's running; `ensureAgentRunning` restarts a stale broker, and a persistent broker self-exits on detecting an in-place upgrade so launchd relaunches it fresh.
 
-### Tiers and auto-cache
+### Prompt policy and auto-cache
 
-Each bundle has a tier (`agents secrets tier <bundle> [biometry|session]`, also `--tier` on `create`):
+Each bundle has a **prompt policy** that controls how often macOS asks for Touch ID, shown in the `POLICY` column of `agents secrets list` and set with `agents secrets policy <bundle> [always|daily]` (also `--policy` on `create`):
 
-- **`biometry`** (default): only an explicit `unlock` ever puts it in the agent; every other read pops Touch ID. Use for high-value bundles you want to confirm each session.
-- **`session`**: eligible for the agent. You can `unlock` it, and — if you set `secrets.agent.auto: true` in `agents.yaml` — the **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all.
+- **`always`** (default): ask every time. Only an explicit `unlock` ever puts it in the agent; every other read pops Touch ID. Use for high-value bundles you want to confirm every time.
+- **`daily`**: ask once, then hold it silently. You can `unlock` it, and — if you set `secrets.agent.auto: true` in `agents.yaml` — the **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all. Held up to ~24h from that unlock (not refreshed on use) — re-asks sooner after screen-lock, sleep, logout, or `lock`. Despite the name, it is **not** tied to one calendar day or one login session; it's the rolling ~24h hold.
+
+> Wire-format note: the policy persists under the legacy `tier` key (`session` == `daily`; absent == `always`) so bundles stay readable across mixed CLI versions on synced machines. `--tier`/`agents secrets tier` and the old `biometry`/`session` values still work as aliases.
 
 ```yaml
 # ~/.agents/agents.yaml
 secrets:
   agent:
-    auto: true   # session-tier bundles self-cache on first prompt
+    auto: true   # daily-policy bundles self-cache on first prompt
 ```
 
-Auto-cache is **off by default** and only ever applies to `session`-tier bundles — a `biometry` bundle is never auto-held. (A third `none` tier — items stored without the biometry ACL for fully silent reads with no agent — is intentionally not offered yet; it needs a separate signed-helper change and is the global downgrade the agent is designed to avoid.)
+Auto-cache is **off by default** and only ever applies to `daily`-policy bundles — an `always` bundle is never auto-held. (A third `never` policy — items stored without the biometry ACL for fully silent reads with no agent — is intentionally not offered yet; it needs a separate signed-helper change and is the global downgrade the agent is designed to avoid. Tracked in [issue #421](https://github.com/phnx-labs/agents-cli/issues/421).)
 
 **The trade-off (read this):** while a bundle is unlocked, a same-user process that can reach the socket reads it **silently** — today it would at least have to pop a visible "Unlock agents-cli secrets" prompt you might notice. That is the same trust boundary the keychain already concedes above ("any same-user process can pop the prompt and read"), minus the prompt. Bound it by unlocking only the bundles you need, keeping a short TTL, locking when you step away, and never unlocking high-value bundles you'd rather always confirm.
 

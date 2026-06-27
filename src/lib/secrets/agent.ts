@@ -520,7 +520,7 @@ export function secretsAgentAutoEnabled(): boolean {
 /**
  * Fire-and-forget: populate the broker with a freshly-resolved bundle so the
  * NEXT process reads it without a prompt. Used by the auto-cache path after a
- * real keychain read of a `session`-tier bundle. Adds no latency to the caller
+ * real keychain read of a `daily`-policy bundle. Adds no latency to the caller
  * — it spawns a detached `secrets _agent-load` worker (passing the resolved env
  * over stdin, never argv) and returns immediately.
  *

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**Secrets prompt policy: human-readable `always` / `daily`, and `secrets list` now shows it**
+
+- Renamed the secrets-agent `tier` to a **prompt policy** with plain-language names: `biometry` → **`always`** (ask every time), `session` → **`daily`** (ask once, then held ~24h until screen-lock / sleep / logout). The old name `session` was misleading — it never meant "once per login session" — and collided with the half-dozen other "session" concepts in the CLI (`agents sessions`, sessions-sync, pty/browser sessions). Set it with `agents secrets policy <bundle> [always|daily]`.
+- **Disclosure fixed.** `agents secrets list` now has a `POLICY` column — previously there was no way to tell which bundles would Touch-ID-prompt you. `daily` bundles currently held by the agent show `daily · Nh left`. `agents secrets view` and `create` now always state the policy (before, only the quiet tier was shown; the noisy default printed nothing).
+- **Back-compat:** the policy still persists under the legacy `tier`/`session` token, so bundles stay readable across mixed CLI versions on synced machines. `agents secrets tier`, `--tier`, and the `biometry`/`session` values keep working as aliases.
+- A third **`never`** policy (silent, no biometry ACL) is tracked for later in #421.
+
 **Self-healing: long-running processes reload onto new code after an upgrade**
 
 - Root cause behind a class of "stale behavior" bugs: a routines daemon or secrets-agent broker keeps running **pre-upgrade code** for days. An in-place `npm i -g` swaps the files but not the running processes, so fixes (keychain read-memoization, the broker fast-path, etc.) silently never take effect — the daemon kept popping Touch ID from the keychain because it predated the fix.

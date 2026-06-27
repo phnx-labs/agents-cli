@@ -147,15 +147,21 @@ export interface VarMeta {
 }
 
 /**
- * How a bundle interacts with the macOS secrets-agent:
- * - `biometry` (default): only an explicit `agents secrets unlock` populates the
- *   agent; every other read pops Touch ID. Use for high-value bundles you want
- *   to confirm each session.
- * - `session`: eligible for the agent — `unlock`, and (when `secrets.agent.auto`
- *   is enabled) the first real keychain read auto-loads it so concurrent runs
- *   read it silently.
+ * A bundle's prompt policy — how often macOS asks for Touch ID to read it:
+ * - `always` (default): asks every time. Only an explicit `agents secrets
+ *   unlock` ever holds it in the secrets-agent; every other read pops Touch ID.
+ *   Use for high-value bundles you want to confirm every time.
+ * - `daily`: ask once, then hold it silently. Eligible for the secrets-agent —
+ *   `unlock` it, or (when `secrets.agent.auto` is enabled) the first real
+ *   keychain read auto-loads it so concurrent runs read it silently. Held up to
+ *   ~24h from that unlock (not refreshed on use); re-asks sooner after
+ *   screen-lock, sleep, logout, or `agents secrets lock`.
+ *
+ * Stored on disk under the legacy `tier` key (`session` == `daily`; absent ==
+ * `always`) so bundles stay readable across mixed CLI versions on synced
+ * machines. The in-memory and user-facing vocabulary is `policy`/`always`/`daily`.
  */
-export type SecretsTier = 'biometry' | 'session';
+export type SecretsPolicy = 'always' | 'daily';
 
 /** A named set of environment variable definitions backed by various secret providers. */
 export interface SecretsBundle {
@@ -164,8 +170,9 @@ export interface SecretsBundle {
   allow_exec?: boolean;
   /** Which store carries this bundle's items. Absent ⇒ `keychain` (the default). */
   backend?: SecretsBackend;
-  /** Secrets-agent interaction tier. Absent ⇒ `biometry` (the safe default). */
-  tier?: SecretsTier;
+  /** Prompt policy. Absent ⇒ `always` (the safe default). Serialized under the
+   * legacy `tier` key — see SecretsPolicy. */
+  policy?: SecretsPolicy;
   /** ISO 8601 UTC timestamp. Set once on the first writeBundle() for a bundle. */
   created_at?: string;
   /** ISO 8601 UTC timestamp. Refreshed on every writeBundle(). */
@@ -314,10 +321,11 @@ export function readBundle(name: string): SecretsBundle {
     name,
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
-    // Absent ⇒ keychain (mirrors `tier`); only set when file-backed so a
-    // keychain bundle round-trips byte-for-byte.
+    // Absent ⇒ keychain; only set when file-backed so a keychain bundle
+    // round-trips byte-for-byte.
     backend: backend === 'file' ? 'file' : undefined,
-    tier: parseTier(parsed.tier),
+    // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
+    policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
   if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -332,14 +340,17 @@ export function readBundle(name: string): SecretsBundle {
   return bundle;
 }
 
-/** Normalize a persisted `tier` value; anything but `session` ⇒ default tier. */
-function parseTier(raw: unknown): SecretsTier | undefined {
-  return raw === 'session' ? 'session' : undefined;
+/** Normalize the persisted prompt policy. The on-disk `tier` key uses the
+ * legacy `session` token for `daily` (and `biometry`/absent for the default),
+ * so accept both the legacy and current tokens. Anything but `daily`/`session`
+ * ⇒ undefined (resolves to the `always` default). */
+function parsePolicy(raw: unknown): SecretsPolicy | undefined {
+  return raw === 'daily' || raw === 'session' ? 'daily' : undefined;
 }
 
-/** The effective tier of a bundle (absent ⇒ `biometry`). */
-export function bundleTier(bundle: SecretsBundle): SecretsTier {
-  return bundle.tier ?? 'biometry';
+/** The effective prompt policy of a bundle (absent ⇒ `always`). */
+export function bundlePolicy(bundle: SecretsBundle): SecretsPolicy {
+  return bundle.policy ?? 'always';
 }
 
 export function writeBundle(bundle: SecretsBundle): void {
@@ -373,7 +384,9 @@ export function writeBundle(bundle: SecretsBundle): void {
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
     backend: backend === 'file' ? 'file' : undefined,
-    tier: bundle.tier === 'session' ? 'session' : undefined,
+    // Wire format: persist `daily` under the legacy `tier`/`session` token so
+    // older CLI versions on other synced machines keep reading the policy.
+    tier: bundle.policy === 'daily' ? 'session' : undefined,
     created_at: bundle.created_at,
     updated_at: bundle.updated_at,
     last_used: bundle.last_used,
@@ -413,7 +426,8 @@ function parseBundleMeta(name: string, json: string, backend: SecretsBackend): S
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
     backend: backend === 'file' ? 'file' : undefined,
-    tier: parseTier(parsed.tier),
+    // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
+    policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
   if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -686,7 +700,8 @@ export function readAndResolveBundleEnv(
     description: parsed.description,
     allow_exec: Boolean(parsed.allow_exec),
     backend: backend === 'file' ? 'file' : undefined,
-    tier: parseTier(parsed.tier),
+    // Legacy wire key: the policy is persisted under `tier` (`session` == `daily`).
+    policy: parsePolicy((parsed as { tier?: unknown }).tier),
     vars: parsed.vars && typeof parsed.vars === 'object' ? parsed.vars : {},
   };
   if (typeof parsed.created_at === 'string') bundle.created_at = parsed.created_at;
@@ -759,7 +774,7 @@ export function readAndResolveBundleEnv(
     }
     emitReadAudit('success');
     // Auto-cache: this was a real keychain read (the agent fast-path returned
-    // earlier on a hit). If the bundle opts into the session tier and the user
+    // earlier on a hit). If the bundle opts into the `daily` policy and the user
     // enabled `secrets.agent.auto`, populate the broker in the background so the
     // next concurrent run reads silently. Skipped when noAgent (e.g. `unlock`,
     // which loads the agent itself). Fire-and-forget — never blocks this read.
@@ -767,7 +782,7 @@ export function readAndResolveBundleEnv(
       backend === 'keychain' &&
       !opts.noAgent &&
       process.env.AGENTS_SECRETS_NO_AGENT !== '1' &&
-      bundleTier(bundle) === 'session' &&
+      bundlePolicy(bundle) === 'daily' &&
       secretsAgentAutoEnabled()
     ) {
       agentAutoLoadSync(name, bundle, env, DEFAULT_TTL_MS);

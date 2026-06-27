@@ -6,7 +6,7 @@
  * Keychain. Bundles are injected at run time via `agents run --secrets`.
  */
 
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
@@ -14,7 +14,7 @@ import {
   bundleBackend,
   bundleExists,
   bundleItemStore,
-  bundleTier,
+  bundlePolicy,
   deleteBundle,
   describeBundle,
   keychainItemsForBundle,
@@ -33,7 +33,7 @@ import {
   writeBundle,
   type SecretsBackend,
   type SecretsBundle,
-  type SecretsTier,
+  type SecretsPolicy,
   type VarMeta,
 } from '../lib/secrets/bundles.js';
 import {
@@ -266,8 +266,28 @@ function humanAge(iso: string): string {
   return `${age} ago`;
 }
 
+/** Compact remaining-time for the list POLICY column: "19h" / "45m" / "2d". */
+function compactRemaining(expiresAt: number): string {
+  const ms = expiresAt - Date.now();
+  if (ms <= 0) return 'expired';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
+}
+
+/** The POLICY column for `secrets list`: the prompt policy, plus a "Nh left"
+ * hint when a `daily` bundle is currently held by the secrets-agent. `held`
+ * maps bundle name → expiry epoch-ms (from agentStatus()). */
+function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
+  if (bundlePolicy(b) === 'always') return chalk.yellow('always ask');
+  const exp = held?.get(b.name);
+  return exp ? chalk.green(`daily · ${compactRemaining(exp)} left`) : chalk.gray('daily');
+}
+
 /** Format a single bundle as a table row for the `secrets list` output. */
-function renderBundleRow(b: SecretsBundle): string {
+function renderBundleRow(b: SecretsBundle, held?: Map<string, number>): string {
   const entries = describeBundle(b);
   const keys = entries.length;
   const expiringCount = countExpiringSoon(b.meta);
@@ -286,6 +306,7 @@ function renderBundleRow(b: SecretsBundle): string {
   const head =
     `${chalk.cyan(b.name.padEnd(20))} ` +
     `${String(keys).padEnd(5)} ` +
+    `${padVisible(renderPolicyCol(b, held), 18)} ` +
     `${padVisible(expiring, 9)} ` +
     `${padVisible(created, 9)} ` +
     `${padVisible(updated, 9)} ` +
@@ -434,8 +455,11 @@ export function registerSecretsCommands(program: Command): void {
       # Inject the bundle into an agent run
       agents run claude "deploy the worker" --secrets prod
 
-      # See what's in the bundle (values masked)
+      # See what's in the bundle (values masked); shows its prompt policy
       agents secrets view prod
+
+      # Stop a noisy automation bundle from prompting every run: ask once a day
+      agents secrets policy prod daily
 
       # Eval the bundle into your current shell
       eval "$(agents secrets export prod --plaintext)"
@@ -452,11 +476,16 @@ export function registerSecretsCommands(program: Command): void {
       or device passcode; cross-machine sync is handled by 'agents secrets push/pull'.
 
       Touch ID noise: macOS pops a prompt per bundle per process, so concurrent
-      agents each re-prompt. 'agents secrets unlock <bundle>' holds the resolved
-      bundle in a local agent after one prompt; later runs read it silently until
-      it expires (default 24h), you 'lock' it, or the screen locks. Nothing on disk.
+      agents each re-prompt. Each bundle has a prompt policy, shown in the POLICY
+      column of 'agents secrets list':
+        always (default)  ask for Touch ID every time — never auto-held.
+        daily             ask once, then hold it silently in the local agent up
+                          to ~24h, until screen-lock / sleep / logout or 'lock'.
+      Set it with 'agents secrets policy <bundle> daily'. 'agents secrets unlock
+      <bundle>' holds any bundle after one prompt regardless of policy. Nothing on disk.
 
       See also:
+        agents secrets policy <bundle> daily           ask once a day, not every run
         agents secrets unlock <bundle>                 hold a bundle after one Touch ID
         agents secrets lock                            wipe held bundles (re-prompt next read)
         agents secrets status                          show held bundles + when they lock
@@ -471,7 +500,7 @@ export function registerSecretsCommands(program: Command): void {
   registerCommandGroups(cmd, [
     { title: 'Bundle commands', names: ['list', 'view', 'create', 'rename', 'describe', 'delete'] },
     { title: 'Secret commands', names: ['add', 'rotate', 'remove', 'import', 'export'] },
-    { title: 'Agent commands', names: ['start', 'stop', 'unlock', 'lock', 'status', 'tier'] },
+    { title: 'Agent commands', names: ['start', 'stop', 'unlock', 'lock', 'status', 'policy'] },
     { title: 'Raw item commands', names: ['get', 'set'] },
     { title: 'Sync commands', names: ['push', 'pull', 'remote-list'] },
     { title: 'Utilities', names: ['exec', 'generate', 'migrate-acl'] },
@@ -481,18 +510,28 @@ export function registerSecretsCommands(program: Command): void {
     .command('list')
     .alias('ls')
     .description('List configured secrets bundles')
-    .action(() => {
+    .action(async () => {
       const bundles = listBundles();
       if (bundles.length === 0) {
         console.log(chalk.gray('No secrets bundles configured.'));
         console.log(chalk.gray('Try: agents secrets create <name>'));
         return;
       }
+      // Cross-reference the secrets-agent so `daily` bundles that are currently
+      // held can show "· Nh left". Soft-fails to no hint if the broker is down.
+      const held = new Map<string, number>();
+      if (process.platform === 'darwin') {
+        try {
+          for (const e of await agentStatus()) held.set(e.name, e.expiresAt);
+        } catch {
+          /* broker not running — render policy without the countdown */
+        }
+      }
       console.log(chalk.bold(
-        `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
+        `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'POLICY'.padEnd(18)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
       ));
       for (const b of bundles) {
-        console.log(renderBundleRow(b));
+        console.log(renderBundleRow(b, held));
       }
     });
 
@@ -511,7 +550,11 @@ export function registerSecretsCommands(program: Command): void {
         if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
         if (bundle.backend === 'file') console.log(chalk.gray('backend: file (passphrase-encrypted; reads need AGENTS_SECRETS_PASSPHRASE, no Touch ID)'));
-        if (bundleTier(bundle) === 'session') console.log(chalk.gray('tier: session (secrets-agent eligible)'));
+        console.log(
+          bundlePolicy(bundle) === 'daily'
+            ? chalk.gray('policy: daily (ask once, then held ~24h until screen-lock / sleep / logout)')
+            : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
+        );
         if (bundle.created_at) console.log(chalk.gray(`created_at: ${bundle.created_at} (${humanAge(bundle.created_at)})`));
         if (bundle.updated_at) console.log(chalk.gray(`updated_at: ${bundle.updated_at} (${humanAge(bundle.updated_at)})`));
         if (bundle.last_used) console.log(chalk.gray(`last_used:  ${bundle.last_used} (${humanAge(bundle.last_used)})`));
@@ -621,14 +664,15 @@ export function registerSecretsCommands(program: Command): void {
     .description('Create an empty bundle')
     .option('--description <text>', 'Free-form description')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
-    .option('--tier <tier>', 'secrets-agent tier: biometry (default) or session', 'biometry')
+    .option('--policy <policy>', 'prompt policy: always (default, ask every time) or daily (ask once a day)')
+    .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
     .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
     .option('--force', 'Overwrite an existing bundle')
-    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; tier?: string; backend?: string; force?: boolean }) => {
+    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; policy?: string; tier?: string; backend?: string; force?: boolean }) => {
       try {
         const resolvedName = name ?? (await promptBundleName());
         validateBundleName(resolvedName);
-        const tier = parseTierOpt(opts.tier);
+        const policy = parsePolicyOpt(opts.policy ?? opts.tier);
         const backend = parseBackendOpt(opts.backend);
         if (bundleExists(resolvedName) && !opts.force) {
           console.error(chalk.red(`Bundle '${resolvedName}' already exists. Use --force to overwrite.`));
@@ -639,12 +683,15 @@ export function registerSecretsCommands(program: Command): void {
           description: opts.description,
           allow_exec: opts.allowExec,
           backend: backend === 'file' ? 'file' : undefined,
-          tier,
+          policy,
           vars: {},
         };
         writeBundle(bundle);
-        const tags = [tier === 'session' ? 'tier: session' : null, backend === 'file' ? 'backend: file' : null].filter(Boolean);
-        console.log(chalk.green(`Bundle '${resolvedName}' created${tags.length ? ` (${tags.join(', ')})` : ''}.`));
+        const tags = [
+          policy === 'daily' ? 'policy: daily' : 'policy: always ask',
+          backend === 'file' ? 'backend: file' : null,
+        ].filter(Boolean);
+        console.log(chalk.green(`Bundle '${resolvedName}' created (${tags.join(', ')}).`));
         if (backend === 'file') {
           console.log(chalk.gray('File-backed: items are AES-256-GCM encrypted under AGENTS_SECRETS_PASSPHRASE (no Touch ID).'));
         }
@@ -1446,21 +1493,24 @@ Examples:
     });
 
   cmd
-    .command('tier <bundle> [tier]')
-    .description("Show or set a bundle's secrets-agent tier: biometry (default) or session.")
-    .action((bundleName: string, tier: string | undefined) => {
+    .command('policy <bundle> [policy]')
+    .alias('tier')
+    .description("Show or set a bundle's prompt policy: always (default, ask every time) or daily (ask once a day).")
+    .action((bundleName: string, policyArg: string | undefined) => {
       try {
         const bundle = readBundle(bundleName);
-        if (tier === undefined) {
-          console.log(`${chalk.cyan(bundle.name)} tier: ${chalk.bold(bundleTier(bundle))}`);
+        if (policyArg === undefined) {
+          console.log(`${chalk.cyan(bundle.name)} policy: ${chalk.bold(bundlePolicy(bundle))}`);
           return;
         }
-        const next = parseTierOpt(tier);
-        bundle.tier = next;
+        const next = parsePolicyOpt(policyArg);
+        bundle.policy = next;
         writeBundle(bundle);
-        console.log(chalk.green(`${bundle.name} tier set to ${next}.`));
-        if (next === 'session') {
-          console.log(chalk.gray('Eligible for the secrets-agent: unlock it, or enable auto-cache with `secrets.agent.auto: true` in agents.yaml.'));
+        console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
+        if (next === 'daily') {
+          console.log(chalk.gray('Held by the secrets-agent after one unlock: run `agents secrets unlock`, or enable auto-cache with `secrets.agent.auto: true` in agents.yaml.'));
+        } else {
+          console.log(chalk.gray('Asks for Touch ID every time — never auto-held.'));
         }
       } catch (err) {
         console.error(chalk.red((err as Error).message));
@@ -1478,7 +1528,7 @@ Examples:
       }
       process.stdout.write(chalk.gray('Installing launchd service…\n'));
       if (await installSecretsAgentService()) {
-        console.log(chalk.green('secrets-agent service running.') + chalk.gray(' It stays up across the session; unlock/auto-cache now connect instantly.'));
+        console.log(chalk.green('secrets-agent service running.') + chalk.gray(' It stays up across your macOS login session; unlock/auto-cache now connect instantly.'));
       } else {
         console.error(chalk.red('Service installed but did not become reachable in time (machine may be heavily loaded — launchd will keep retrying).'));
         process.exit(1);
@@ -1513,17 +1563,20 @@ Examples:
   registerSecretsMigrateAclCommand(cmd);
 }
 
-/** Validate a --tier value, exiting with a clear message on a bad one. `none`
- * is rejected explicitly: it would require storing items without the biometry
- * ACL (a separate signed-helper change), so it isn't offered yet. */
-function parseTierOpt(raw: string | undefined): SecretsTier {
-  const v = (raw ?? 'biometry').toLowerCase();
-  if (v === 'biometry' || v === 'session') return v;
-  if (v === 'none') {
-    console.error(chalk.red("tier 'none' (no biometry ACL) is not available yet — use 'biometry' or 'session'."));
+/** Validate a prompt-policy value, exiting with a clear message on a bad one.
+ * Accepts the legacy `biometry`/`session` tokens as aliases for `always`/`daily`
+ * so older flags and scripts keep working. `never`/`none` (no biometry ACL) is
+ * rejected explicitly — it needs a separate signed-helper change (see
+ * https://github.com/phnx-labs/agents-cli/issues/421). */
+function parsePolicyOpt(raw: string | undefined): SecretsPolicy {
+  const v = (raw ?? 'always').toLowerCase();
+  if (v === 'always' || v === 'biometry') return 'always';
+  if (v === 'daily' || v === 'session') return 'daily';
+  if (v === 'never' || v === 'none') {
+    console.error(chalk.red("policy 'never' (no biometry ACL) is not available yet — see https://github.com/phnx-labs/agents-cli/issues/421. Use 'always' or 'daily'."));
     process.exit(1);
   }
-  console.error(chalk.red(`Invalid --tier '${raw}'. Use 'biometry' or 'session'.`));
+  console.error(chalk.red(`Invalid policy '${raw}'. Use 'always' or 'daily'.`));
   process.exit(1);
 }
 
