@@ -59,8 +59,11 @@ import {
   agentLock,
   agentStatus,
   ensureAgentRunning,
+  installSecretsAgentService,
   runAgentLoadFromStdin,
   runSecretsAgent,
+  secretsAgentServiceInstalled,
+  uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
@@ -468,7 +471,7 @@ export function registerSecretsCommands(program: Command): void {
   registerCommandGroups(cmd, [
     { title: 'Bundle commands', names: ['list', 'view', 'create', 'rename', 'describe', 'delete'] },
     { title: 'Secret commands', names: ['add', 'rotate', 'remove', 'import', 'export'] },
-    { title: 'Agent commands', names: ['unlock', 'lock', 'status', 'tier'] },
+    { title: 'Agent commands', names: ['start', 'stop', 'unlock', 'lock', 'status', 'tier'] },
     { title: 'Raw item commands', names: ['get', 'set'] },
     { title: 'Sync commands', names: ['push', 'pull', 'remote-list'] },
     { title: 'Utilities', names: ['exec', 'generate', 'migrate-acl'] },
@@ -1424,6 +1427,12 @@ Examples:
         console.log(chalk.gray('secrets-agent is macOS-only.'));
         return;
       }
+      console.log(
+        chalk.gray('service: ') +
+        (secretsAgentServiceInstalled()
+          ? chalk.green('installed (persistent)')
+          : chalk.yellow('not installed — run `agents secrets start` for a persistent broker')),
+      );
       const entries = await agentStatus();
       if (entries.length === 0) {
         console.log(chalk.gray('No bundles unlocked. The secrets-agent is idle or not running.'));
@@ -1460,10 +1469,37 @@ Examples:
     });
 
   cmd
+    .command('start')
+    .description('Install + start the secrets-agent as a persistent background service (macOS). Survives heavy load; reads connect instantly.')
+    .action(async () => {
+      if (process.platform !== 'darwin') {
+        console.error(chalk.red('secrets-agent service is macOS-only.'));
+        process.exit(1);
+      }
+      process.stdout.write(chalk.gray('Installing launchd service…\n'));
+      if (await installSecretsAgentService()) {
+        console.log(chalk.green('secrets-agent service running.') + chalk.gray(' It stays up across the session; unlock/auto-cache now connect instantly.'));
+      } else {
+        console.error(chalk.red('Service installed but did not become reachable in time (machine may be heavily loaded — launchd will keep retrying).'));
+        process.exit(1);
+      }
+    });
+
+  cmd
+    .command('stop')
+    .description('Stop + remove the persistent secrets-agent service and wipe what it held.')
+    .action(async () => {
+      if (process.platform !== 'darwin') return;
+      await uninstallSecretsAgentService();
+      console.log(chalk.green('secrets-agent service stopped and removed.'));
+    });
+
+  cmd
     .command('_agent-run', { hidden: true })
     .description('Run the secrets-agent broker in the foreground (internal)')
-    .action(async () => {
-      await runSecretsAgent();
+    .option('--service', 'run as a persistent launchd service (never idle-exit)')
+    .action(async (opts: { service?: boolean }) => {
+      await runSecretsAgent({ service: Boolean(opts.service) });
     });
 
   cmd

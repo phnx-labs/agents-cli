@@ -104,6 +104,100 @@ function brokerSpawn(): { cmd: string; args: string[] } {
   return cliSpawn(['secrets', '_agent-run']);
 }
 
+// ─── Persistent launchd service ──────────────────────────────────────────────
+// On a heavily-loaded machine a freshly-spawned broker (a full CLI cold start)
+// can't get scheduled enough CPU to finish booting and bind its socket — so the
+// on-demand model fails exactly when there are many agents (the case we care
+// about). The fix is to run the broker as a launchd user service: started once
+// with RunAtLoad + KeepAlive, it stays up, and every read just connects. The
+// cold start happens once (and launchd retries until it wins), never per-read.
+
+const SERVICE_LABEL = 'com.phnx-labs.agents-secrets-agent';
+
+function servicePlistPath(): string {
+  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
+}
+
+/** True if the launchd plist for the persistent broker is installed. */
+export function secretsAgentServiceInstalled(): boolean {
+  return onDarwin() && fs.existsSync(servicePlistPath());
+}
+
+function generateServicePlist(): string {
+  const { cmd, args } = cliSpawn(['secrets', '_agent-run', '--service']);
+  const progArgs = [cmd, ...args]
+    .map((a) => `    <string>${a.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</string>`)
+    .join('\n');
+  const logPath = path.join(agentDir(), 'service.log');
+  const home = os.homedir();
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${SERVICE_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+${progArgs}
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>StandardOutPath</key>
+  <string>${logPath}</string>
+  <key>StandardErrorPath</key>
+  <string>${logPath}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${home}/.bun/bin</string>
+  </dict>
+</dict>
+</plist>`;
+}
+
+/**
+ * Install + start the persistent broker as a launchd user service (idempotent).
+ * Writes the plist, bootstraps it into the GUI domain, and waits for the socket.
+ * `ProcessType: Interactive` asks launchd to schedule it at foreground priority
+ * so it can boot even when the machine is loaded. Returns true once reachable.
+ */
+export async function installSecretsAgentService(timeoutMs = 30000): Promise<boolean> {
+  if (!onDarwin()) return false;
+  const plist = servicePlistPath();
+  fs.mkdirSync(path.dirname(plist), { recursive: true });
+  fs.writeFileSync(plist, generateServicePlist());
+  const uid = process.getuid?.() ?? 0;
+  // bootstrap is the modern API; fall back to legacy load. Both idempotent-ish.
+  try {
+    execFileSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch {
+    try { execFileSync('launchctl', ['load', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* may already be loaded */ }
+  }
+  // kickstart to force an immediate start even if already bootstrapped.
+  try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* best effort */ }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await agentPing()) return true;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return false;
+}
+
+/** Stop + remove the persistent broker service, and wipe whatever it held. */
+export async function uninstallSecretsAgentService(): Promise<void> {
+  if (!onDarwin()) return;
+  await agentLock(); // wipe the in-memory store before tearing down
+  const plist = servicePlistPath();
+  const uid = process.getuid?.() ?? 0;
+  try { execFileSync('launchctl', ['bootout', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
+  catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
+  try { fs.unlinkSync(plist); } catch { /* already gone */ }
+}
+
 // ─── Wire protocol ───────────────────────────────────────────────────────────
 // Newline-delimited JSON: one request object per line, one response line back.
 
@@ -174,8 +268,12 @@ export function handleAgentRequest(
  * `agents secrets _agent-run`. Holds the store in memory, serves the socket,
  * sweeps expired entries, wipes on screen-lock/sleep, and self-exits when idle.
  */
-export async function runSecretsAgent(): Promise<void> {
+export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise<void> {
   if (!onDarwin()) return; // nothing to broker without biometry prompts
+  // When launchd keeps us alive as a persistent service, never idle-exit:
+  // exiting would just make launchd cold-start us again, reintroducing the
+  // startup-under-load fragility the service exists to avoid.
+  const persistent = opts.service === true;
 
   // Single-instance guard: O_EXCL pid file. If a live broker already holds it,
   // exit quietly — the existing one keeps serving.
@@ -207,7 +305,7 @@ export async function runSecretsAgent(): Promise<void> {
     const now = Date.now();
     for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
     if (store.size === 0) {
-      if (now - emptySince >= IDLE_EXIT_MS) shutdown(0);
+      if (!persistent && now - emptySince >= IDLE_EXIT_MS) shutdown(0);
     } else {
       emptySince = now;
     }
@@ -471,15 +569,33 @@ async function agentPing(): Promise<boolean> {
 }
 
 /**
- * Ensure a broker is running and reachable, spawning one detached if not.
- * Returns true once the socket answers a ping. On protocol-version skew, kills
- * the stale broker and respawns. macOS only.
+ * Ensure a broker is running and reachable. Returns true once the socket answers
+ * a ping. macOS only.
+ *
+ * Prefers the persistent launchd service: if it isn't installed we install it
+ * (which makes the broker survive for the whole login session, so subsequent
+ * reads never cold-start); if it's installed but unreachable we kickstart it.
+ * Only when the service path can't be used do we fall back to a one-off detached
+ * broker — that's the model that gets starved under heavy load, so it's last.
  */
 export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   if (!onDarwin()) return false;
   if (await agentPing()) return true;
 
-  // Socket exists but ping failed → stale/old broker. Kill it before respawn.
+  // Path 1: the persistent service. installSecretsAgentService is idempotent and
+  // waits for the socket; for an already-installed service we kickstart and wait.
+  try {
+    if (!secretsAgentServiceInstalled()) {
+      if (await installSecretsAgentService(Math.max(timeoutMs, 20000))) return true;
+    } else {
+      const uid = process.getuid?.() ?? 0;
+      try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* may already be running */ }
+      const d = Date.now() + timeoutMs;
+      while (Date.now() < d) { if (await agentPing()) return true; await new Promise((r) => setTimeout(r, 150)); }
+    }
+  } catch { /* fall through to the one-off spawn */ }
+
+  // Path 2 (fallback): one-off detached broker. Clear a stale socket/pid first.
   const stalePid = (() => {
     try { return parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10); }
     catch { return NaN; }
@@ -491,11 +607,7 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   try { fs.unlinkSync(pidPath()); } catch { /* gone */ }
 
   const { cmd, args } = brokerSpawn();
-  const child = spawn(cmd, args, {
-    stdio: 'ignore',
-    detached: true,
-  });
-  child.unref();
+  spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

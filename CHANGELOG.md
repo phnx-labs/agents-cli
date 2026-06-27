@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**`agents secrets start`: persistent secrets-agent service (fixes the broker under heavy load)**
+
+- On a heavily-loaded machine (many concurrent agents, high load average) the on-demand broker — a full CLI cold-start — couldn't get scheduled enough CPU to finish booting and bind its socket, so `unlock`/auto-cache silently failed and reads kept prompting. New `agents secrets start` installs the broker as a **launchd user service** (`RunAtLoad` + `KeepAlive`, `ProcessType: Interactive` for foreground scheduling priority): it starts once and stays up for the whole login session, so every read just connects — the cold start happens once (and launchd retries until it wins), never per read. `agents secrets stop` removes it; `agents secrets status` shows whether it's installed.
+- `unlock` and the auto-cache worker now install/kickstart this service automatically via `ensureAgentRunning`, falling back to the old one-off detached spawn only if the service path is unavailable. So the persistent broker is set up on first use with no extra step.
+- macOS only. Security model unchanged: in-memory only, per-bundle TTL, wiped on screen-lock/sleep.
+
 **Fix: secrets-agent auto-cache now survives a slow broker cold-start under load**
 
 - `secrets.agent.auto` (auto-cache on first read of a `session`-tier bundle) used a fire-and-forget inline loader that gave up connecting to the broker after 3s. But the broker it spawns is itself a full CLI cold-starting; under heavy load (many concurrent agents) that can exceed 3s, so the loader quit before the broker bound and the cache silently never populated — every read kept prompting. The auto-load now runs through a detached `secrets _agent-load` worker that reuses the robust `ensureAgentRunning` path (spawn-then-ping, 20s budget) and loads synchronously, so it reliably populates even when the broker is slow to start. Manual `agents secrets unlock` was always reliable and is unchanged. (secret values still travel over stdin, never argv.)
