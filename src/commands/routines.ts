@@ -161,9 +161,14 @@ export function registerRoutinesCommands(program: Command): void {
   routinesCmd
     .command('list')
     .description('See all scheduled jobs, when they run next, and their last execution status')
-    .action(() => {
+    .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)')
+    .action((options: { json?: boolean }) => {
       const jobs = listAllJobs(process.cwd());
       if (jobs.length === 0) {
+        if (options.json) {
+          process.stdout.write('[]\n');
+          return;
+        }
         console.log(chalk.gray('No jobs configured'));
         console.log(chalk.gray('  Add a job: agents routines add <path-to-job.yml>'));
         return;
@@ -178,6 +183,35 @@ export function registerRoutinesCommands(program: Command): void {
         for (const j of detectOverdueJobs()) overdueSet.add(j.name);
       } catch {
         // Best-effort indicator; never block the list on detection errors.
+      }
+
+      // Machine-readable path: same data the table renders, but structured.
+      // The menu bar helper relies on this so it never reimplements cron math.
+      if (options.json) {
+        const nowJson = new Date();
+        const payload = jobs.map((job) => {
+          const nextRun = scheduler.getNextRun(job.name);
+          const latestRun = getLatestRun(job.name);
+          return {
+            name: job.name,
+            agent: job.agent ?? null,
+            workflow: job.workflow ?? null,
+            repo: job.repo ?? null,
+            schedule: job.schedule,
+            scheduleHuman: humanizeCron(job.schedule, job.timezone),
+            timezone: job.timezone ?? null,
+            enabled: job.enabled,
+            overdue: overdueSet.has(job.name),
+            nextRun: nextRun ? nextRun.toISOString() : null,
+            nextRunHuman: humanizeNextRun(nextRun ?? null, nowJson, job.timezone),
+            lastStatus: latestRun?.status ?? null,
+            lastRunStartedAt: latestRun?.startedAt ?? null,
+            lastRunCompletedAt: latestRun?.completedAt ?? null,
+          };
+        });
+        scheduler.stopAll();
+        process.stdout.write(JSON.stringify(payload) + '\n');
+        return;
       }
 
       console.log(chalk.bold('Scheduled Jobs\n'));

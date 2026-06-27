@@ -25,6 +25,7 @@
     "dist/**/*.d.ts",
     "dist/**/*.json",
     "dist/lib/secrets/Agents CLI.app/**",
+    "dist/lib/menubar/MenubarHelper.app/**",
     "scripts/postinstall.js",
     "scripts/install-helper.js",
     "CHANGELOG.md",
@@ -43,7 +44,7 @@
     "url": "https://github.com/phnx-labs/agents-cli/issues"
   },
   "scripts": {
-    "build": "tsc && rm -rf 'dist/lib/secrets/AgentsKeychain.app' 'dist/lib/secrets/Agents CLI.app' && ([ \"$(uname)\" = \"Darwin\" ] && cp -R 'bin/Agents CLI.app' 'dist/lib/secrets/Agents CLI.app' || true)",
+    "build": "tsc && rm -rf 'dist/lib/secrets/AgentsKeychain.app' 'dist/lib/secrets/Agents CLI.app' 'dist/lib/menubar/MenubarHelper.app' && ([ \"$(uname)\" = \"Darwin\" ] && cp -R 'bin/Agents CLI.app' 'dist/lib/secrets/Agents CLI.app' || true) && ([ \"$(uname)\" = \"Darwin\" ] && [ -d 'bin/MenubarHelper.app' ] && mkdir -p 'dist/lib/menubar' && cp -R 'bin/MenubarHelper.app' 'dist/lib/menubar/MenubarHelper.app' || true)",
     "prepack": "scripts/verify-keychain-helper.sh",
     "postinstall": "node scripts/postinstall.js",
     "dev": "tsx src/index.ts",

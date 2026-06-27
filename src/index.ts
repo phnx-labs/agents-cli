@@ -106,6 +106,7 @@ import { registerProfilesCommands } from './commands/profiles.js';
 import { registerSecretsCommands } from './commands/secrets.js';
 import { registerWalletCommands } from './commands/wallet.js';
 import { registerHelperCommand } from './commands/helper.js';
+import { registerMenubarCommands } from './commands/menubar.js';
 import { registerFactoryCommands } from './commands/factory.js';
 import { registerUsageCommand } from './commands/usage.js';
 import { registerCostCommand } from './commands/cost.js';
@@ -737,6 +738,7 @@ registerProfilesCommands(program);
 registerSecretsCommands(program);
 registerWalletCommands(program);
 registerHelperCommand(program);
+registerMenubarCommands(program);
 registerBetaCommands(program);
 registerSyncCommand(program);
 registerRefreshRulesCommand(program);
@@ -997,6 +999,20 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
       } catch { /* best-effort */ }
     }
   } catch { /* migration must never block CLI startup */ }
+}
+
+// Auto-enable the macOS menu-bar helper once, for every user. Best-effort and
+// idempotent: installMenubarLaunchAgentOnUpgrade() no-ops when not on darwin,
+// when the user ran `agents menubar disable` (sticky opt-out), when the service
+// is already installed, or when no helper bundle ships with this build. This is
+// a lightweight startup self-heal (two existsSync checks then return) rather
+// than a migration-sentinel bump, so it covers fresh installs AND upgrades
+// without re-running the full migration for the whole user base (issue #20).
+if (process.platform === 'darwin' && process.env.AGENTS_SKIP_MIGRATION !== '1') {
+  try {
+    const { installMenubarLaunchAgentOnUpgrade } = await import('./lib/menubar/install-menubar.js');
+    installMenubarLaunchAgentOnUpgrade();
+  } catch { /* never block CLI startup on the menu bar */ }
 }
 
 try {
