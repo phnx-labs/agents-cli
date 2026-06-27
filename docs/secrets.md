@@ -126,6 +126,8 @@ holds only ciphertext): see [Recipe 8](#8-headless-release-on-a-remote-mac).
 
 | Command | Description | Example |
 |---------|-------------|---------|
+| `secrets start` | Install + run the secrets-agent as a persistent background service (survives heavy load; reads connect instantly) | `agents secrets start` |
+| `secrets stop` | Stop + remove the persistent service and wipe what it held | `agents secrets stop` |
 | `secrets unlock [names...]` | Read a bundle once (one Touch ID) and hold it in the secrets-agent so later runs read it silently | `agents secrets unlock prod` |
 | `secrets unlock --all` | Unlock every configured bundle | `agents secrets unlock --all` |
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 24h) | `agents secrets unlock prod --ttl 30m` |
@@ -376,6 +378,17 @@ The secrets-agent is the ssh-agent answer:
 - The hold ends when its TTL expires (default 24h, `--ttl` to change), you run `agents secrets lock`, or the screen locks / the machine sleeps. Nothing is ever written to disk.
 
 It is **opt-in by construction**: if you never run `unlock`, resolution is byte-for-byte today's keychain path. Audit events tag broker-served reads with `"source":"agent"` so you can tell them apart from real keychain reads.
+
+### Persistent service
+
+`agents secrets start` installs the broker as a **launchd user service** (`RunAtLoad` + `KeepAlive`, `ProcessType: Interactive`). Without it, the broker is cold-started on demand — and on a heavily loaded machine a freshly spawned process can't get scheduled to finish booting and bind its socket, so reads silently fall back to the keychain and prompt. The service starts **once** and stays up for the whole login session, so every read just connects. `agents secrets stop` removes it; `agents secrets status` shows whether it's installed. `unlock` and auto-cache install/kickstart it automatically, so first use sets it up.
+
+### Self-healing across upgrades
+
+A long-running daemon or broker keeps running the code it started with; an in-place `npm i -g` swaps the files but not the running process, so a fix can silently fail to take effect (e.g. a pre-fix daemon keeps reading the keychain). The agent self-heals onto new code with no per-read cost:
+
+- **Heal-on-upgrade:** `postinstall` bounces the routines daemon and kickstarts the broker onto the just-installed code (best-effort; skip with `AGENTS_NO_HEAL=1`).
+- **Version-skew detection:** the broker's `ping` reports the version of the code it's running; `ensureAgentRunning` restarts a stale broker, and a persistent broker self-exits on detecting an in-place upgrade so launchd relaunches it fresh.
 
 ### Tiers and auto-cache
 

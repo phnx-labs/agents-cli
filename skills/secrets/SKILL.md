@@ -150,6 +150,8 @@ agents secrets lock               # wipe it; next read re-prompts
 
 `unlock` reads the bundle once and keeps the resolved values in a local broker behind a user-only socket; later runs read from memory with no prompt. The hold ends on its TTL (default 24h, `--ttl 30m`), when you `lock`, or when the screen locks / the machine sleeps. Nothing is written to disk.
 
+For a machine running lots of agents, run `agents secrets start` once — it installs the broker as a persistent background service (launchd) that stays up across the session, so a cold-started broker can't get starved under load. It self-heals onto new code after `npm i -g` upgrades. `agents secrets status` shows whether it's installed.
+
 **Skip `unlock` entirely** — mark a bundle `session` tier and turn on auto-cache, then the first prompt of a run populates the broker for you:
 
 ```bash
