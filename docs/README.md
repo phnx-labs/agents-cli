@@ -26,6 +26,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 |---|---|
 | [Profiles](profiles.md) | Named (host CLI, endpoint, model, keychain auth) bundles — run Kimi / MiniMax / GLM / DeepSeek / Qwen through Claude Code with no proxy. |
 | [Secrets](secrets.md) | Keychain-backed env-var bundles. Inject into runs via `agents run --secrets <name>`. 1Password import/export, encrypted push/pull. |
+| [Secrets-agent process model](08-secrets-agent-process-model.md) | Design decision: why the secrets broker is its own service, not folded into the routines daemon (and the path to a light supervisor). |
 
 ## Orchestration
 
