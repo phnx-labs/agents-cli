@@ -1091,6 +1091,9 @@ export async function installVersion(
 
       if (version === 'latest') {
         installedVersion = await getCliVersionFromPath(agent) || version;
+        // Fold any stale literal `latest` dir from an earlier probe-failed
+        // install into the real version so it stops shadowing `agents view`.
+        await reconcileStaleLatestDir(agent, installedVersion);
       }
 
       onProgress?.(`${agentConfig.name} installed. Setting up agents-cli version home for isolation...`);
@@ -1267,6 +1270,57 @@ function removeInstallArtifacts(versionDir: string): void {
     if (entry === 'home') continue;
     fs.rmSync(path.join(versionDir, entry), { recursive: true, force: true });
   }
+}
+
+/**
+ * Fold a stale literal `latest` version dir into the real resolved version.
+ *
+ * Script-installed agents (droid, grok) have no npm package to read a version
+ * from, so the installer resolves the version by probing `<cli> --version`
+ * after the install script runs. When that probe failed (3s timeout, or the
+ * freshly-dropped binary not yet resolvable on PATH) the installer fell back to
+ * the literal string `latest`, creating a `versions/<agent>/latest/` dir. A
+ * later install where the probe succeeded then created a SECOND dir at the real
+ * semver, orphaning `latest` — and because these agents' getBinaryPath points
+ * at a single global binary regardless of version dir, `latest` keeps showing
+ * up in `agents view` next to the real version forever.
+ *
+ * Call this once the install path has resolved a real version: if a stale
+ * `latest` dir exists, rename it onto the real version (preserving `home/`), or
+ * if the real dir already exists, soft-delete the `latest` dir to trash. No-op
+ * when nothing was resolved or no stale dir is present, so it is safe to call
+ * on every script-based install. Returns the action taken (for tests/logging).
+ */
+export async function reconcileStaleLatestDir(
+  agent: AgentId,
+  installedVersion: string,
+): Promise<'none' | 'renamed' | 'trashed'> {
+  if (installedVersion === 'latest') return 'none';
+
+  const staleLatestDir = getVersionDir(agent, 'latest');
+  const realVersionDir = getVersionDir(agent, installedVersion);
+  if (staleLatestDir === realVersionDir || !fs.existsSync(staleLatestDir)) {
+    return 'none';
+  }
+
+  if (!fs.existsSync(realVersionDir)) {
+    fs.renameSync(staleLatestDir, realVersionDir);
+    return 'renamed';
+  }
+
+  // Both dirs exist. Stripping install artifacts would not hide `latest` for
+  // global-binary agents (getBinaryPath ignores dir contents), so the whole
+  // dir must go. Soft-delete to trash so any `home/` data stays recoverable
+  // via `agents restore <agent>@latest`, then rewrite session file paths to
+  // point at the trashed location so history stays readable. The session-db
+  // module is imported lazily — it carries a top-level await that the CJS test
+  // harness can't statically transform, so it must stay out of the eager graph.
+  const trashPath = softDeleteVersionDir(agent, 'latest');
+  if (trashPath) {
+    const { updateSessionFilePaths } = await import('./session/db.js');
+    updateSessionFilePaths(staleLatestDir, trashPath);
+  }
+  return 'trashed';
 }
 
 /**

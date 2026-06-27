@@ -38,6 +38,79 @@ function runVersionSync(home: string, expression: string): unknown {
   return JSON.parse(child.stdout.trim());
 }
 
+function runReconcile(home: string, agent: string, installedVersion: string): string {
+  // tsx (Node) subprocess with an isolated HOME — exercises the real fs +
+  // session-db path that reconcileStaleLatestDir touches, no mocking.
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const tsxBin = path.resolve('node_modules/.bin/tsx');
+  const child = spawnSync(tsxBin, ['-e', `
+    import { reconcileStaleLatestDir } from ${JSON.stringify(moduleUrl)};
+    (async () => {
+      const result = await reconcileStaleLatestDir(${JSON.stringify(agent)}, ${JSON.stringify(installedVersion)});
+      console.log(JSON.stringify(result));
+    })();
+  `], {
+    env: { ...process.env, HOME: home },
+    encoding: 'utf-8',
+  });
+  expect(child.status, child.stderr).toBe(0);
+  return JSON.parse(child.stdout.trim());
+}
+
+function droidVersionDir(home: string, version: string): string {
+  return path.join(home, '.agents', '.history', 'versions', 'droid', version);
+}
+
+describe('reconcileStaleLatestDir', () => {
+  it('renames a stale literal `latest` dir onto the resolved version, preserving home/', () => {
+    const home = makeTempHome();
+    const latestHome = path.join(droidVersionDir(home, 'latest'), 'home');
+    fs.mkdirSync(latestHome, { recursive: true });
+    fs.writeFileSync(path.join(latestHome, 'marker.txt'), 'keep me', 'utf-8');
+
+    const action = runReconcile(home, 'droid', '0.158.0');
+
+    expect(action).toBe('renamed');
+    expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
+    expect(fs.readFileSync(path.join(droidVersionDir(home, '0.158.0'), 'home', 'marker.txt'), 'utf-8')).toBe('keep me');
+  });
+
+  it('trashes the stale `latest` dir when the resolved version dir already exists', () => {
+    const home = makeTempHome();
+    fs.mkdirSync(path.join(droidVersionDir(home, 'latest'), 'home'), { recursive: true });
+    fs.mkdirSync(path.join(droidVersionDir(home, '0.158.0'), 'home'), { recursive: true });
+
+    const action = runReconcile(home, 'droid', '0.158.0');
+
+    expect(action).toBe('trashed');
+    expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
+    expect(fs.existsSync(droidVersionDir(home, '0.158.0'))).toBe(true);
+    // Soft-deleted, not hard-deleted — recoverable from trash.
+    const trashDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'droid', 'latest');
+    expect(fs.existsSync(trashDir)).toBe(true);
+  });
+
+  it('is a no-op when no stale `latest` dir exists', () => {
+    const home = makeTempHome();
+    fs.mkdirSync(path.join(droidVersionDir(home, '0.158.0'), 'home'), { recursive: true });
+
+    const action = runReconcile(home, 'droid', '0.158.0');
+
+    expect(action).toBe('none');
+    expect(fs.existsSync(droidVersionDir(home, '0.158.0'))).toBe(true);
+  });
+
+  it('is a no-op when the resolved version is itself `latest` (probe failed)', () => {
+    const home = makeTempHome();
+    fs.mkdirSync(path.join(droidVersionDir(home, 'latest'), 'home'), { recursive: true });
+
+    const action = runReconcile(home, 'droid', 'latest');
+
+    expect(action).toBe('none');
+    expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(true);
+  });
+});
+
 describe('version resource sync path handling', () => {
   it('intersects explicit resource selections with discovered resources before syncing', async () => {
     const home = makeTempHome();

@@ -173,7 +173,15 @@ async function versionPruneAction(
     const { agent, version } = parsed;
     const agentConfig = AGENTS[agent];
 
-    if (version === 'latest' || version === 'oldest' || !spec.includes('@')) {
+    // Script-installed agents (droid, grok) can have a *literal* `latest`
+    // version dir on disk when the post-install version probe failed. An
+    // explicit `<agent>@latest` should remove that dir directly rather than
+    // routing to the interactive picker (which can't run non-interactively),
+    // so treat an installed literal `latest` as a concrete pinned version.
+    const isLiteralLatestInstalled =
+      version === 'latest' && spec.includes('@') && isVersionInstalled(agent, 'latest');
+
+    if (!isLiteralLatestInstalled && (version === 'latest' || version === 'oldest' || !spec.includes('@'))) {
       const versions = listInstalledVersions(agent);
       if (versions.length === 0) {
         console.log(chalk.gray(`No versions of ${agentLabel(agentConfig.id)} installed`));
