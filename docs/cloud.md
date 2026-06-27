@@ -30,6 +30,36 @@ in `~/.agents/agents.yaml` > `rush`.
 | `droid` | `factory` | Factory Droid Computer (cloud VM) via `droid computer ssh` + remote `droid exec`. |
 | `antigravity` | `antigravity` | Gemini Managed Agents Interactions API (remote sandbox). |
 
+### Pre-provisioned targets (env / computer)
+
+Two of the clouds don't clone a repo per dispatch — they run *inside* something
+you provision once:
+
+- **Codex** runs in an **environment** (`env_…`) created in the Codex web UI,
+  which bundles a repo + base image + setup scripts. `codex cloud exec` requires
+  `--env`.
+- **Factory** runs on a **Droid Computer** (a persistent cloud VM). Dispatch
+  requires `--computer`.
+
+(Rush is per-repo via `--repo`; Antigravity spins up an on-demand sandbox — no
+pre-provisioned target.)
+
+So you supply the target one of three ways: per-run (`--env` / `--computer`), a
+default in `agents.yaml` (`cloud.providers.codex.env` /
+`cloud.providers.factory.computer`), or — interactively — let the CLI pick it.
+
+**Discover targets:** `agents cloud envs [--provider <id>]` lists what you can
+dispatch into. Factory enumerates Droid Computers via `droid computer list`
+(surfacing the sign-in error verbatim if you're not authenticated). Codex has no
+list-environments CLI, so it prints guidance to browse them with the interactive
+`codex cloud` instead.
+
+**Interactive picker:** if a dispatch is missing its target and you're in a TTY,
+`agents cloud run` offers a picker rather than erroring — a `select` of your
+Droid Computers (Factory), or, where the backend can't enumerate (Codex), the
+actionable guidance. The picker falls back to a free-text prompt if the listing
+is empty, so a dispatch is never hard-blocked.
+
 ## Architecture
 
 ```
@@ -70,6 +100,7 @@ agents cloud providers
 | `agents cloud cancel <id>` | Cancel a running task |
 | `agents cloud message <id> <text>` | Send a follow-up to a finished or needs-review task |
 | `agents cloud providers` | List available providers and their status |
+| `agents cloud envs` | List the pre-provisioned targets (Codex environments / Droid Computers) you can dispatch into |
 
 ### `cloud run` options
 

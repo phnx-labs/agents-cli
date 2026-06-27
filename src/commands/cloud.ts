@@ -12,7 +12,8 @@ import ora from 'ora';
 import { resolveProvider, getAllProviders, getDefaultProviderId } from '../lib/cloud/registry.js';
 import { insertTask, updateTaskStatus, getTaskById, listTasks as listStoredTasks, listActiveTasks } from '../lib/cloud/store.js';
 import { renderStream } from '../lib/cloud/stream.js';
-import type { CloudProviderId, CloudTaskStatus, DispatchOptions } from '../lib/cloud/types.js';
+import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions } from '../lib/cloud/types.js';
+import { MissingTargetError } from '../lib/cloud/types.js';
 
 /** Print an error message to stderr and exit. */
 function die(msg: string, code = 1): never {
@@ -51,6 +52,51 @@ function statusColor(status: string): (s: string) => string {
 
 function isJsonMode(opts: { json?: boolean }): boolean {
   return Boolean(opts.json) || !process.stdout.isTTY;
+}
+
+/**
+ * After a `MissingTargetError`, try to resolve the target interactively.
+ * Returns the chosen id, or undefined when no interactive resolution is
+ * possible (non-TTY/JSON, provider can't enumerate, or user cancels) — the
+ * caller then prints the error's guidance.
+ *
+ * Codex has no `listTargets` (no list-environments CLI), so it always returns
+ * undefined here and the user sees the `codex cloud` guidance. Factory lists
+ * Droid Computers; if listing fails (not signed in) or parses to nothing, we
+ * fall back to a free-text prompt so a dispatch is never hard-blocked.
+ */
+async function pickMissingTarget(
+  provider: CloudProvider,
+  err: MissingTargetError,
+  json: boolean,
+): Promise<string | undefined> {
+  if (json || !process.stdout.isTTY) return undefined;
+  if (!provider.listTargets) return undefined;
+
+  const { select, input } = await import('@inquirer/prompts');
+  const promptName = err.kind === 'env' ? 'environment' : 'computer';
+
+  let targets: CloudTarget[];
+  try {
+    targets = await provider.listTargets();
+  } catch (listErr) {
+    process.stderr.write(chalk.dim(`Could not list ${promptName}s: ${(listErr as Error).message}\n`));
+    targets = [];
+  }
+
+  try {
+    if (targets.length > 0) {
+      return await select({
+        message: `Select a ${promptName}`,
+        choices: targets.map((t) => ({ value: t.id, name: t.label ? `${t.id}  ${chalk.dim(t.label)}` : t.id })),
+      });
+    }
+    const typed = (await input({ message: `No ${promptName}s found. Enter a ${promptName} name (blank to cancel):` })).trim();
+    return typed || undefined;
+  } catch {
+    // User hit Ctrl-C / Esc on the prompt.
+    return undefined;
+  }
 }
 
 /** Register the `agents cloud` command tree (run, list, status, logs, cancel, message, providers). */
@@ -207,15 +253,38 @@ Examples:
       }
       if (options.uploadAccountTokens) dispatchOptions.providerOptions!.uploadAccountTokens = true;
 
-      // Dispatch
-      const spinner = ora({ text: `Dispatching to ${provider.name}...`, stream: process.stderr }).start();
+      // Dispatch. On a missing pre-provisioned target (Codex env / Factory
+      // computer), offer an interactive picker instead of a raw error.
+      const dispatchOnce = async () => {
+        const spinner = ora({ text: `Dispatching to ${provider.name}...`, stream: process.stderr }).start();
+        try {
+          const t = await provider.dispatch(dispatchOptions);
+          spinner.succeed(`Task ${t.id} dispatched to ${provider.name}`);
+          return t;
+        } catch (err) {
+          spinner.fail('Dispatch failed');
+          throw err;
+        }
+      };
+
       let task;
       try {
-        task = await provider.dispatch(dispatchOptions);
-        spinner.succeed(`Task ${task.id} dispatched to ${provider.name}`);
+        task = await dispatchOnce();
       } catch (err) {
-        spinner.fail('Dispatch failed');
-        die((err as Error).message);
+        if (err instanceof MissingTargetError) {
+          const picked = await pickMissingTarget(provider, err, json);
+          if (!picked) {
+            die(err.guidance ? `${err.message}\n\n${err.guidance}` : err.message);
+          }
+          dispatchOptions.providerOptions![err.kind] = picked;
+          try {
+            task = await dispatchOnce();
+          } catch (err2) {
+            die((err2 as Error).message);
+          }
+        } else {
+          die((err as Error).message);
+        }
       }
 
       // Persist locally
@@ -459,6 +528,62 @@ Examples:
         const status = available ? chalk.green('ready') : chalk.dim('not configured');
         const defaultTag = isDefault ? chalk.cyan(' (default)') : '';
         console.log(`  ${p.id.padEnd(12)} ${p.name.padEnd(20)} ${status}${defaultTag}`);
+      }
+    });
+
+  // ── agents cloud envs ─────────────────────────────────────────────────
+  // Discover the pre-provisioned targets a provider runs inside — Codex
+  // environments, Factory Droid Computers — so users don't copy opaque IDs
+  // out of a web UI.
+  cloud
+    .command('envs')
+    .alias('targets')
+    .description('List the pre-provisioned targets (Codex environments / Droid Computers) you can dispatch into.')
+    .option('--provider <id>', 'Only this provider (codex, factory, ...)')
+    .option('--json', 'JSON output')
+    .action(async (options: Record<string, unknown>) => {
+      const json = isJsonMode(options as { json?: boolean });
+      const only = options.provider as CloudProviderId | undefined;
+
+      // Providers that run inside a pre-provisioned target declare targetKind.
+      const providers = getAllProviders().filter((p) => p.targetKind && (!only || p.id === only));
+      if (only && providers.length === 0) {
+        die(`Provider '${only}' has no pre-provisioned targets (or is unknown). Targets apply to: codex, factory.`);
+      }
+
+      const results: Array<{ provider: CloudProviderId; kind: string; targets: { id: string; label?: string }[]; note?: string }> = [];
+      for (const p of providers) {
+        const kind = p.targetKind!;
+        if (!p.listTargets) {
+          // Not enumerable (Codex). Surface guidance instead of a list.
+          const guidance = kind === 'env'
+            ? 'Codex environments are not listable from the CLI. Browse/create them with `codex cloud` (interactive), then use --env <id>.'
+            : 'Not enumerable from the CLI.';
+          results.push({ provider: p.id, kind, targets: [], note: guidance });
+          continue;
+        }
+        try {
+          const targets = await p.listTargets();
+          results.push({ provider: p.id, kind, targets: targets.map((t) => ({ id: t.id, label: t.label })) });
+        } catch (err) {
+          results.push({ provider: p.id, kind, targets: [], note: (err as Error).message });
+        }
+      }
+
+      if (json) {
+        process.stdout.write(JSON.stringify(results, null, 2) + '\n');
+        return;
+      }
+
+      for (const r of results) {
+        console.log(chalk.bold(`\n${r.provider}`) + chalk.dim(` (${r.kind})`));
+        if (r.targets.length > 0) {
+          for (const t of r.targets) {
+            console.log(`  ${t.id}${t.label ? '  ' + chalk.dim(t.label) : ''}`);
+          }
+        } else {
+          console.log(chalk.dim(`  ${r.note ?? 'none'}`));
+        }
       }
     });
 }

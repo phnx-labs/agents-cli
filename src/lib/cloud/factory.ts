@@ -28,10 +28,12 @@ import type {
   CloudTask,
   CloudTaskStatus,
   CloudEvent,
+  CloudTarget,
   DispatchOptions,
   ProviderCapabilities,
   DroidAutonomy,
 } from './types.js';
+import { MissingTargetError } from './types.js';
 import { getShimsDir } from '../state.js';
 
 const SHIMS_DIR = getShimsDir();
@@ -55,6 +57,42 @@ export function resolveAutonomy(value: unknown, fallback: DroidAutonomy = DEFAUL
   return typeof value === 'string' && VALID_AUTONOMY.has(value as DroidAutonomy)
     ? (value as DroidAutonomy)
     : fallback;
+}
+
+/** Run the droid CLI and capture output (used for `computer list`). */
+function runDroid(bin: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+  return new Promise((resolve) => {
+    const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    proc.on('error', (e) => resolve({ stdout, stderr: stderr + String(e), code: 127 }));
+    proc.on('close', (code) => resolve({ stdout, stderr, code: code ?? 1 }));
+  });
+}
+
+/**
+ * Parse `droid computer list` text into targets. Defensive: the exact column
+ * layout isn't documented, so we take the first whitespace token of each data
+ * row as the computer name and keep the remainder as a label, skipping headers,
+ * separators, and status messages. The interactive picker degrades to free-text
+ * entry if this yields nothing, so an unexpected layout never blocks a dispatch.
+ */
+export function parseComputerList(text: string): CloudTarget[] {
+  const out: CloudTarget[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^(name|computer|status|id)\b/i.test(line)) continue;   // header row
+    if (/^[-=_\s|]+$/.test(line)) continue;                      // separator rule
+    if (/^(no |failed|error|warning)\b/i.test(line)) continue;   // status message
+    const name = line.split(/\s+/)[0];
+    if (!name) continue;
+    const label = line.slice(name.length).trim() || undefined;
+    out.push({ id: name, label, kind: 'computer' });
+  }
+  return out;
 }
 
 /**
@@ -178,6 +216,7 @@ interface BufferedRun {
 export class FactoryCloudProvider implements CloudProvider {
   id = 'factory' as const;
   name = 'Factory (Droid)';
+  targetKind = 'computer' as const;
 
   private defaultComputer?: string;
   private defaultAutonomy: DroidAutonomy;
@@ -208,6 +247,21 @@ export class FactoryCloudProvider implements CloudProvider {
     };
   }
 
+  /** Enumerate Droid Computers via `droid computer list`. Throws if not signed in. */
+  async listTargets(): Promise<CloudTarget[]> {
+    const droidBin = findDroidBinary();
+    if (!droidBin) {
+      throw new Error('droid CLI not found. Install it: curl -fsSL https://app.factory.ai/cli | sh');
+    }
+    const { stdout, stderr, code } = await runDroid(droidBin, ['computer', 'list']);
+    if (code !== 0) {
+      // Surface droid's own message verbatim — e.g. "No authenticated user with
+      // organization available" when the user hasn't logged in.
+      throw new Error((stderr.trim() || stdout.trim() || `droid computer list exited ${code}`));
+    }
+    return parseComputerList(stdout);
+  }
+
   async dispatch(options: DispatchOptions): Promise<CloudTask> {
     const droidBin = findDroidBinary();
     if (!droidBin) {
@@ -216,10 +270,12 @@ export class FactoryCloudProvider implements CloudProvider {
 
     const computer = (options.providerOptions?.computer as string | undefined) ?? this.defaultComputer;
     if (!computer) {
-      throw new Error(
-        'Factory cloud requires a Droid Computer. Pass --computer <name>, or set ' +
-          'cloud.providers.factory.computer in ~/.agents/agents.yaml. Create one in ' +
-          'Factory (Settings → Droid Computers), or register a machine with `droid computer register`.',
+      throw new MissingTargetError(
+        'computer',
+        'Factory cloud requires a Droid Computer.',
+        'Pass --computer <name>, or set cloud.providers.factory.computer in ~/.agents/agents.yaml. ' +
+          'Create one in Factory (Settings → Droid Computers), or register a machine with `droid computer register`. ' +
+          'List yours with `agents cloud envs --provider factory`.',
       );
     }
 

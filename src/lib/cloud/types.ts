@@ -176,6 +176,37 @@ export interface ProviderCapabilities {
 }
 
 /**
+ * A pre-provisioned dispatch target a provider runs *inside* — a Codex
+ * environment (`env_…`) or a Factory Droid Computer (a name). Surfaced by
+ * `agents cloud envs` and the missing-target picker so users don't have to
+ * copy opaque IDs out of a web UI.
+ */
+export interface CloudTarget {
+  /** The value passed to dispatch (env id / computer name). */
+  id: string;
+  /** Human label — repo, description, or status. */
+  label?: string;
+  kind: TargetKind;
+}
+
+/** Which dispatch option a provider's pre-provisioned target maps to. */
+export type TargetKind = 'env' | 'computer';
+
+/**
+ * Thrown by a provider's `dispatch()` when it needs a pre-provisioned target
+ * (Codex env / Factory computer) and none was supplied. The CLI catches this
+ * to offer a picker (`listTargets`) or actionable guidance, instead of a raw
+ * error. `kind` names the missing flag; `guidance` is shown when the target
+ * can't be enumerated.
+ */
+export class MissingTargetError extends Error {
+  constructor(public kind: TargetKind, message: string, public guidance?: string) {
+    super(message);
+    this.name = 'MissingTargetError';
+  }
+}
+
+/**
  * Contract that every cloud backend must implement.
  *
  * Each provider translates between the unified dispatch interface and its
@@ -201,6 +232,22 @@ export interface CloudProvider {
 
   /** Send a follow-up message to a finished/idle/needs_review task. */
   message(taskId: string, content: string): Promise<void>;
+
+  /**
+   * The pre-provisioned target this provider runs inside, if any. Set for
+   * Codex (`env`) and Factory (`computer`); undefined for Rush (per-repo) and
+   * Antigravity (on-demand sandbox).
+   */
+  targetKind?: TargetKind;
+
+  /**
+   * Enumerate selectable targets for `agents cloud envs` and the picker.
+   * Present only when the backend can list non-interactively (Factory via
+   * `droid computer list`). Codex has no such CLI — it omits this, and callers
+   * fall back to `MissingTargetError.guidance`. May throw (e.g. not signed in);
+   * callers surface that verbatim.
+   */
+  listTargets?(): Promise<CloudTarget[]>;
 }
 
 /** Autonomy level passed to `droid exec --auto` for Factory cloud dispatches. */

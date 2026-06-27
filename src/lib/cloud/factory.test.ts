@@ -5,6 +5,8 @@ import {
   buildSshArgs,
   mapResultStatus,
   mapDroidEvent,
+  parseComputerList,
+  FactoryCloudProvider,
 } from './factory.js';
 
 describe('resolveAutonomy', () => {
@@ -113,5 +115,40 @@ describe('mapDroidEvent', () => {
     const ev = mapDroidEvent({ type: 'mystery', foo: 1 });
     expect(ev.type).toBe('unknown');
     if (ev.type === 'unknown') expect(ev.name).toBe('mystery');
+  });
+});
+
+describe('parseComputerList', () => {
+  it('parses computer names from a tabular listing, skipping the header', () => {
+    const out = parseComputerList(
+      [
+        'NAME            STATUS    TYPE',
+        'cloud-vm-1      active    managed',
+        'my-laptop       paused    byom',
+      ].join('\n'),
+    );
+    expect(out).toEqual([
+      { id: 'cloud-vm-1', label: 'active    managed', kind: 'computer' },
+      { id: 'my-laptop', label: 'paused    byom', kind: 'computer' },
+    ]);
+  });
+
+  it('handles a bare name-per-line listing', () => {
+    expect(parseComputerList('alpha\nbeta\n')).toEqual([
+      { id: 'alpha', label: undefined, kind: 'computer' },
+      { id: 'beta', label: undefined, kind: 'computer' },
+    ]);
+  });
+
+  it('skips separators and status messages, yielding [] on empty/error output', () => {
+    expect(parseComputerList('')).toEqual([]);
+    expect(parseComputerList('No authenticated user with organization available')).toEqual([]);
+    expect(parseComputerList('-------\n=======')).toEqual([]);
+  });
+});
+
+describe('FactoryCloudProvider target discovery', () => {
+  it('declares computer as its target kind', () => {
+    expect(new FactoryCloudProvider().targetKind).toBe('computer');
   });
 });

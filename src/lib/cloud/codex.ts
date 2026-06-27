@@ -18,7 +18,7 @@ import type {
   DispatchOptions,
   ProviderCapabilities,
 } from './types.js';
-import { resolveDispatchRepos } from './types.js';
+import { resolveDispatchRepos, MissingTargetError } from './types.js';
 import { getShimsDir } from '../state.js';
 
 const SHIMS_DIR = getShimsDir();
@@ -95,6 +95,10 @@ function parseTaskFromText(text: string): Partial<CloudTask> {
 export class CodexCloudProvider implements CloudProvider {
   id = 'codex' as const;
   name = 'Codex Cloud';
+  targetKind = 'env' as const;
+  // No listTargets: OpenAI ships no non-interactive "list environments"
+  // command. `codex cloud exec` requires --env and the help points at the
+  // interactive `codex cloud` TUI to browse. So discovery is guidance-only.
 
   private defaultEnv?: string;
 
@@ -121,7 +125,13 @@ export class CodexCloudProvider implements CloudProvider {
   async dispatch(options: DispatchOptions): Promise<CloudTask> {
     const env = (options.providerOptions?.env as string | undefined) ?? this.defaultEnv;
     if (!env) {
-      throw new Error('Codex Cloud requires --env <id>. Set a default in ~/.agents/agents.yaml under cloud.providers.codex.env.');
+      throw new MissingTargetError(
+        'env',
+        'Codex Cloud requires --env <id>.',
+        'Codex environments are created in the Codex web UI and bundle a repo + setup. ' +
+          'Browse yours with `codex cloud` (interactive), then re-run with --env <id> ' +
+          'or set a default in ~/.agents/agents.yaml under cloud.providers.codex.env.',
+      );
     }
 
     // Codex envs bundle their own repo list — the repos a task can touch are
