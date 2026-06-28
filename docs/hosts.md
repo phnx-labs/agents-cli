@@ -117,6 +117,73 @@ dirty working tree directly — no "clean git required," no VM snapshots. That i
 differentiated capability (Phase 2), and it's something Claude Teleport / Cursor
 have open issues asking for.
 
+## The HostProvider seam (the pluggable directory + reachability layer)
+
+The one design decision that keeps this open and general-purpose: **where host
+metadata lives and how a host is reached is a pluggable provider**, not a hardcoded
+mechanism. This mirrors the existing `CloudProvider` registry
+(`src/lib/cloud/registry.ts`) — capability-gated, so partial providers are
+first-class. Two orthogonal concerns:
+
+1. **`HostProvider`** — *"what are my hosts, and how do I reach them?"* Owns the
+   registry/metadata + presence + (optionally) its own dispatch channel.
+2. **Transport** — *how a command actually runs*: SSH to an address, or a provider's
+   own relay. Shared, so every provider benefits.
+
+```ts
+interface HostProvider {
+  id: string                  // 'local' | 'rush' | 'tailscale' | 'crabbox' | <yours>
+  capabilities(): {
+    directory   // list/track hosts            (all)
+    mutate      // add / remove                 (local, rush — not tailscale)
+    presence    // online/offline               (rush relay, tailscale status)
+    relay       // dispatch w/o an SSH address    (rush; others fall back to SSH)
+    lease       // provision new hosts            (crabbox / infra)
+  }
+  list(): Host[]              // {name, address?, user?, os?, caps?, status?, provider}
+  resolve(name): Host | null
+  register?(spec) / remove?(name)
+  presence?(name)
+  dispatch?(name, cmd)       // relay path, if capabilities.relay
+}
+```
+
+**Dispatch is provider-agnostic:** `resolve(name)` → if the owning provider has
+`relay` and the host is online, use it (NAT-free, no address); else SSH to
+`host.address`. Adding a provider is a few `providers.set(...)` lines, no core
+reshape.
+
+| Provider | directory | mutate | presence | relay | lease | What it is |
+|---|---|---|---|---|---|---|
+| `local` | ✓ | ✓ | — | — | — | a `hosts:` map in `agents.yaml` — **the v1 provider**; offline, no account |
+| `rush` | ✓ | ✓ | ✓ | ✓ | — | account-keyed `computers` table + WS relay (fast-follow) |
+| `tailscale` | ✓ | — | ✓ | — | — | reads `tailscale status` as the fleet; SSH transport (fast-follow) |
+| `crabbox` | ✓ | ✓ | partial | — | ✓ | leases boxes from Hetzner/AWS/… then registers them (fast-follow) |
+| *(yours)* | … | … | … | … | … | a VPN/SDN/infra API — implement the contract, register it |
+
+**v1 ships only `local`.** It meets the core "offload from the thrashing laptop to a
+stable SSH box" need with zero account/daemon dependency. The other providers are
+purely additive behind this contract — see Phasing for why deferring `rush` costs
+nothing.
+
+### Why `local` first, not `rush` (cost/benefit)
+
+Rush's `computers` backend is real and fully built (`prix/api/src/computers/` —
+Supabase table keyed by `user_id`, `POST/GET /api/v1/computers`, WS-relay presence,
+`POST /api/v1/computers/:name/exec`). It would give cross-device registry sync,
+presence, and NAT-free relay dispatch. But every one of those benefits is
+**conditional**, and none blocks the primary use case:
+
+| Rush buys | v1 substitute | Blocks core offload? |
+|---|---|---|
+| cross-device registry sync (no git push) | registry on the driver machine | No — you drive from one machine, offload to others |
+| presence (online/offline) | one lazy SSH probe at dispatch | No — you target one host at a time |
+| NAT-free relay exec | SSH to the address | No — your boxes are SSH-reachable (LAN/tailnet/public) |
+
+Costs of taking it in v1: forces `rush login`, requires a daemon holding a WebSocket
+on every machine, and couples the OSS CLI to the proprietary Rush backend. So `rush`
+is a fast-follow `HostProvider`, opt-in when logged in — not a v1 dependency.
+
 ## Architecture
 
 ```
@@ -406,10 +473,20 @@ just relocates the storm):
 
 ## Resolved decisions
 
-- **Discovery** — an **explicit registry** (`hosts:` map in `agents.yaml`), not
-  network discovery. No fleet enumeration; only the targeted host is contacted, and
-  only at dispatch. Tailscale is **not** a dependency — it's one optional way an
-  `address` is reachable (opt-in `import --from-tailscale` prefills entries).
+- **Pluggable `HostProvider` seam** — the directory/metadata/reachability layer is a
+  capability-gated provider (mirrors `CloudProvider`). v1 ships **only `local`**;
+  `rush`/`tailscale`/`crabbox` are additive fast-follows behind the same contract.
+  This is the "open & general-purpose" decision — anyone can swap in their own
+  metadata/network backend.
+- **v1 = `local`, no Rush dependency.** No `rush login`, no daemon, no account.
+  Registry is a `hosts:` map in `agents.yaml`; reach is SSH. The Rush `computers`
+  backend (cross-device sync + presence + relay) is real but its benefits are
+  conditional — deferred to the `rush` provider, which the seam makes free to add
+  later (see "Why `local` first").
+- **Discovery** — an **explicit registry**, not network enumeration. No fleet scan;
+  only the targeted host is contacted, and only at dispatch. Tailscale is **not** a
+  v1 dependency — it's a future `HostProvider`, and an opt-in `import
+  --from-tailscale` can prefill `local` entries.
 - **Driver-agent first.** The primary caller is a conversational driver agent that
   reads the registry metadata (`agents hosts list --json`), picks a host by
   task/capability, and dispatches (`agents run --on <name> --json`). The VS Code
@@ -436,24 +513,29 @@ just relocates the storm):
    gpu`) that resolves to a registered host tagged `gpu`, not just an exact name?
    (This is the driver-agent's main convenience; leaning yes, thin — filter the
    registry by `caps`, error if 0 or >1 match unless `--any`.)
-5. **crabbox integration depth** — shell out to `crabbox warmup/ssh/stop` for
-   leased hosts (leaning yes), or a tighter library binding? And `--on new`
-   semantics: default provider/class, auto-release on idle vs explicit `stop`.
-6. **Concurrency cap** — default max simultaneous agents per host (the incident
-   says "bound it"); per-host override in the `hosts:` overlay?
+4. **Enrollment scan sources for v1** — `~/.ssh/config` Host blocks + `known_hosts`
+   (leaning both); LAN scan (mDNS/ping) deferred as noisier/more code.
+5. **Concurrency cap** — default max simultaneous agents per host (the incident
+   says "bound it"); per-host override in the `hosts:` map?
 
 ## Phasing & verification
 
-- **Phase 1**: `agents hosts add/list/check/remove` (registry) + `agents run --on
-  <host>` (synchronous, transcript-tailed progress). Verify end-to-end against a
-  real registered box (the live peer node `yosemite-s1`, registered from
-  `yosemite-s0`): dispatch a trivial task, confirm it executed *off-box*, see live
-  progress via the transcript tailer, correct exit code. Crabbox for the unit suite.
-- **Phase 1.5**: leased hosts via crabbox (`--on new[:provider]` → warmup → run →
-  idle-release) + a `host` provider in the cloud store → `agents cloud
-  list/status/logs`.
-- **Phase 2**: `--resume … --on` handoff (branch + working-tree rsync + transcript
-  sync + resume) and attach/relay mode on the existing daemon.
+- **Phase 1 (v1, no Rush)**: the `HostProvider` seam + the **`local`** provider only.
+  `agents hosts add/list/check/remove` (registry in `Meta.hosts`; `add` scans SSH
+  sources + `checkbox` multi-select enroll, ensures key auth, bootstraps/upgrades
+  agents-cli to match the local version) + `agents run --on <host>` →
+  `ensureHostReady` (lazy SSH probe + config/agent/branch) → remote `agents run
+  --json` → transcript-tailed progress + a `host` row in the cloud store. Verify
+  end-to-end against the live peer node `yosemite-s1`, registered from `yosemite-s0`:
+  dispatch a trivial task, confirm it executed *off-box*, see live progress via the
+  transcript tailer, correct exit code. No account, no daemon.
+- **Phase 1.5 (fast-follows, behind the seam)**: the `rush` provider (account-keyed
+  `computers` registry + presence + relay-exec, opt-in when `rush login` exists),
+  the `tailscale` provider (presence/reachability without an account), and recall-as-
+  RPC (`agents hosts sessions <name>`).
+- **Phase 2**: the `crabbox` provider (lease → register → run → idle-release) and
+  `--resume … --on` handoff (branch + working-tree rsync + transcript sync + resume)
+  + attach/relay mode on the existing daemon.
 
 ## Key files (reuse map)
 
