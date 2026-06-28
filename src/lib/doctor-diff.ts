@@ -150,13 +150,13 @@ function buildLayerBases(cwd: string, kind: DoctorKind, opts: { excludeProject?:
 
 // ─── commands ─────────────────────────────────────────────────────────────────
 
-function diffCommands(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
+function diffCommands(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
   const agentConfig = AGENTS[agent];
   const isToml = agentConfig.format === 'toml';
   const ext = isToml ? '.toml' : '.md';
   const homeDir = getVersionCommandsDir(agent, version);
   const installed = new Set(listCommandsInVersionHome(agent, version));
-  const layerBases = buildLayerBases(cwd, 'commands');
+  const layerBases = buildLayerBases(cwd, 'commands', { excludeProject });
 
   const sourceByName = new Map<string, SourceCandidate>();
   for (const base of layerBases) {
@@ -242,10 +242,10 @@ function dirsContentMatch(src: string, dst: string): boolean {
   return true;
 }
 
-function diffSkills(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
+function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
   const homeDir = getVersionSkillsDir(agent, version);
   const installed = new Set(listSkillsInVersionHome(agent, version));
-  const layerBases = buildLayerBases(cwd, 'skills');
+  const layerBases = buildLayerBases(cwd, 'skills', { excludeProject });
 
   const sourceByName = new Map<string, SourceCandidate>();
   for (const base of layerBases) {
@@ -347,8 +347,8 @@ function diffHooks(agent: AgentId, version: string, cwd: string): ResourceDiff[]
 
 // ─── rules / memory ───────────────────────────────────────────────────────────
 
-function listRulesNames(cwd: string): Map<string, SourceCandidate> {
-  const projectDir = getProjectAgentsDir(cwd);
+function listRulesNames(cwd: string, excludeProject = false): Map<string, SourceCandidate> {
+  const projectDir = excludeProject ? null : getProjectAgentsDir(cwd);
   const userRules = getUserRulesDir();
   const systemRules = getResolvedRulesDir();
   const extras = getEnabledExtraRepos();
@@ -389,11 +389,11 @@ function expectedRuleContent(agent: AgentId, name: string, sourcePath: string): 
   return readSafe(sourcePath);
 }
 
-function diffRules(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
+function diffRules(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
   const agentConfig = AGENTS[agent];
   const versionHome = getVersionHomePath(agent, version);
   const configDir = path.join(versionHome, agentConfigDirName(agent));
-  const sourcesByName = listRulesNames(cwd);
+  const sourcesByName = listRulesNames(cwd, excludeProject);
 
   // Files actually present in the version home.
   const homeFiles = new Set<string>();
@@ -485,6 +485,13 @@ export interface DiffOptions {
   cwd?: string;
   /** Restrict to specific kinds; undefined = all. */
   kinds?: DoctorKind[];
+  /**
+   * Drop the project (`<cwd>/.agents/`) layer from resolution. Used by the heal
+   * path: the GLOBAL version home is only ever reconciled against user/system/
+   * extra sources — project resources are layered at launch, never synced into
+   * the global home, so counting them as "missing" there is a false gap.
+   */
+  excludeProject?: boolean;
 }
 
 export function diffVersionResources(
@@ -492,9 +499,15 @@ export function diffVersionResources(
   version: string,
   options: DiffOptions = {},
 ): VersionResourceReport {
-  const cwd = options.cwd ?? process.cwd();
+  const rawCwd = options.cwd ?? process.cwd();
+  const excludeProject = options.excludeProject ?? false;
   const home = getVersionHomePath(agent, version);
   const requested = new Set<DoctorKind>(options.kinds ?? ALL_KINDS);
+
+  // When excluding the project layer, resolve every per-cwd lookup against a
+  // neutral cwd so no `<cwd>/.agents/` is ever discovered.
+  const cwd = rawCwd;
+  const projectDir = excludeProject ? null : getProjectAgentsDir(cwd);
 
   const available = getAvailableResources(cwd);
   const synced = getActuallySyncedResources(agent, version, { cwd });
@@ -511,10 +524,10 @@ export function diffVersionResources(
     promptcuts: [],
   };
 
-  if (requested.has('commands')) empty.commands = diffCommands(agent, version, cwd);
-  if (requested.has('skills')) empty.skills = diffSkills(agent, version, cwd);
+  if (requested.has('commands')) empty.commands = diffCommands(agent, version, cwd, excludeProject);
+  if (requested.has('skills')) empty.skills = diffSkills(agent, version, cwd, excludeProject);
   if (requested.has('hooks')) empty.hooks = diffHooks(agent, version, cwd);
-  if (requested.has('rules')) empty.rules = diffRules(agent, version, cwd);
+  if (requested.has('rules')) empty.rules = diffRules(agent, version, cwd, excludeProject);
   if (requested.has('mcp')) empty.mcp = diffPresenceOnly('mcp', available.mcp, synced.mcp);
   if (requested.has('permissions')) empty.permissions = diffPresenceOnly('permissions', available.permissions, synced.permissions);
   if (requested.has('subagents')) empty.subagents = diffPresenceOnly('subagents', available.subagents, synced.subagents);
@@ -537,7 +550,7 @@ export function diffVersionResources(
     home,
     cwd,
     layers: {
-      project: getProjectAgentsDir(cwd),
+      project: projectDir,
       user: getUserAgentsDir(),
       system: getSystemAgentsDir(),
       extras: getEnabledExtraRepos().map((e) => ({ alias: e.alias, dir: e.dir })),

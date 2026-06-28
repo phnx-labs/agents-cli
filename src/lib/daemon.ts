@@ -260,6 +260,34 @@ export async function runDaemon(): Promise<void> {
   const syncInterval = setInterval(() => { void runSessionSync(); }, 90_000);
   void runSessionSync(); // kick once at startup
 
+  // Resource safety check: heal gaps between what DotAgents repos define and
+  // what's actually installed in each agent home — the slow rot that nothing
+  // else catches (a non-default version left stale, a Claude-invalid plugin
+  // manifest silently rejecting a whole plugin). Conservative 'safe' mode: it
+  // fills missing resources, repairs invalid manifests, and fast-forwards
+  // provably-unmodified stale plugins, but never overwrites hand-edited content
+  // or a plugin it can't prove is pristine — those it reports for `doctor --fix`.
+  // Runs ~every 6h plus once ~30s after startup (staggered so launch isn't busy).
+  let healing = false;
+  const runHealCheck = async () => {
+    if (healing) return;
+    healing = true;
+    try {
+      const { heal, summarizeHeal, notifyHeal, healChangedAnything } = await import('./heal.js');
+      const result = await heal({ mode: 'safe' });
+      if (healChangedAnything(result) || result.skippedPlugins.length > 0) {
+        log('INFO', `heal: ${summarizeHeal(result)}`);
+        notifyHeal(result);
+      }
+    } catch (err) {
+      log('ERROR', `heal check failed: ${(err as Error).message}`);
+    } finally {
+      healing = false;
+    }
+  };
+  const healInterval = setInterval(() => { void runHealCheck(); }, 6 * 60 * 60_000);
+  const healKickoff = setTimeout(() => { void runHealCheck(); }, 30_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     scheduler.reloadAll();
@@ -276,6 +304,8 @@ export async function runDaemon(): Promise<void> {
     await browserIPC.stop();
     clearInterval(monitorInterval);
     clearInterval(syncInterval);
+    clearInterval(healInterval);
+    clearTimeout(healKickoff);
     removeDaemonPid();
     process.exit(0);
   };

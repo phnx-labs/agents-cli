@@ -299,6 +299,60 @@ export function validateClaudePluginManifest(manifest: unknown): string[] {
   return warnings;
 }
 
+/**
+ * Fields safe to auto-repair by deletion. Scoped to `skills`/`commands` only —
+ * NOT `agents`: agents-cli overloads `agents` in plugin.json as its own
+ * `AgentId[]` targeting list (bare names like "claude"), so stripping it would
+ * destroy real metadata. (`validateClaudePluginManifest` still WARNS on a bare
+ * `agents` field; repairing it is a separate, deliberate non-goal here.)
+ */
+const REPAIRABLE_PATH_FIELDS = ['skills', 'commands'] as const;
+
+/** True when a manifest field holds bare-name entries Claude Code rejects. */
+function fieldHasBareEntries(value: unknown): boolean {
+  if (value === undefined || value === null) return false;
+  const entries = Array.isArray(value) ? value : [value];
+  return entries.some((e) => typeof e !== 'string' || !e.startsWith('./'));
+}
+
+/**
+ * The repairable fields present-and-invalid in a parsed manifest. Drives both
+ * the dry-run preview (heal/doctor --fix) and the actual write below.
+ */
+export function repairableManifestFields(manifest: unknown): string[] {
+  if (!manifest || typeof manifest !== 'object') return [];
+  const m = manifest as Record<string, unknown>;
+  return REPAIRABLE_PATH_FIELDS.filter((f) => fieldHasBareEntries(m[f]));
+}
+
+/**
+ * Auto-repair a plugin's SOURCE plugin.json in place: delete any `skills`/
+ * `commands` field that holds bare names (Claude Code silently rejects the
+ * ENTIRE plugin otherwise). Claude auto-discovers both from their directories,
+ * so deletion is the canonical, lossless fix — exactly what the validator's
+ * warning already recommends. Returns the fields it dropped (empty = no change).
+ *
+ * Writes to the source manifest (not the regenerated marketplace copy) so the
+ * fix survives the next sync. Pass `{ dryRun }` to preview without writing.
+ */
+export function repairPluginManifestFile(
+  manifestPath: string,
+  opts: { dryRun?: boolean } = {},
+): string[] {
+  if (!fs.existsSync(manifestPath)) return [];
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  } catch {
+    return []; // unparseable manifest is a different failure; don't touch it.
+  }
+  const dropped = repairableManifestFields(manifest);
+  if (dropped.length === 0 || opts.dryRun) return dropped;
+  for (const f of dropped) delete manifest[f];
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+  return dropped;
+}
+
 // ─── Catalog synthesis ──────────────────────────────────────────────────────
 
 /**

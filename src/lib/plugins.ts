@@ -1225,10 +1225,50 @@ export async function installPlugin(spec: string): Promise<{ name: string; root:
   }
   const capabilities = inspectPluginCapabilities(targetRoot);
 
-  // Persist source for future updates
-  fs.writeFileSync(path.join(targetRoot, SOURCE_FILE), JSON.stringify({ source, isGit: !isLocalPath }), 'utf-8');
+  // Persist source for future updates. `version` records the manifest version
+  // at pull time — a baseline that lets the heal path tell "central is an
+  // untouched copy of upstream" (safe to fast-forward) from "the user edited
+  // it" (leave alone) without hashing the whole tree.
+  fs.writeFileSync(
+    path.join(targetRoot, SOURCE_FILE),
+    JSON.stringify({ source, isGit: !isLocalPath, version: manifest.version }),
+    'utf-8',
+  );
 
   return { name: manifest.name, root: targetRoot, isNew, capabilities };
+}
+
+/** Parsed `.source` provenance written by install/update. `version` is the
+ *  upstream manifest version captured at the last pull (absent on pre-existing
+ *  installs from before baseline tracking). */
+export interface PluginSourceInfo {
+  source: string;
+  isGit: boolean;
+  version?: string;
+}
+
+/** Read a plugin's `.source` provenance, or null when absent/unreadable. */
+export function readPluginSourceInfo(root: string): PluginSourceInfo | null {
+  const f = path.join(root, SOURCE_FILE);
+  if (!fs.existsSync(f)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(f, 'utf-8')) as PluginSourceInfo;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the CURRENT upstream manifest version for a local-sourced plugin
+ * (the `.system`/local-path case). Returns null for git sources — reading their
+ * upstream version would need a network fetch, so git plugins are refreshed only
+ * via the explicit `agents plugins update`.
+ */
+export function getUpstreamManifestVersion(info: PluginSourceInfo): string | null {
+  if (info.isGit) return null;
+  const resolved = info.source.replace(/^~/, homeDir());
+  const m = loadPluginManifest(resolved);
+  return m?.version ?? null;
 }
 
 /**
@@ -1268,11 +1308,18 @@ export async function updatePlugin(name: string): Promise<{ success: boolean; er
         : null;
       fs.rmSync(plugin.root, { recursive: true, force: true });
       fs.cpSync(resolvedSource, plugin.root, { recursive: true });
-      fs.writeFileSync(path.join(plugin.root, SOURCE_FILE), JSON.stringify(sourceInfo), 'utf-8');
       if (userConfigBackup !== null) {
         fs.writeFileSync(userConfigPath, userConfigBackup, 'utf-8');
       }
     }
+    // Re-stamp .source with the freshly pulled manifest version so the baseline
+    // tracks what's now on disk (keeps the heal "unmodified?" check honest).
+    const freshVersion = loadPluginManifest(plugin.root)?.version;
+    fs.writeFileSync(
+      path.join(plugin.root, SOURCE_FILE),
+      JSON.stringify({ ...sourceInfo, version: freshVersion }),
+      'utf-8',
+    );
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }

@@ -15,8 +15,11 @@
  *      unified diff body for each divergent file. Mirrors the resolution that
  *      the shim drives at runtime: project > user > system > extras.
  *
- * Read-only: doctor never mutates state. Run `agents prune cleanup` to act on orphan
- * readouts, or just launch the agent to apply pending sync.
+ * Read-only by default: doctor diagnoses, it doesn't mutate. Pass `--fix` to
+ * heal the gaps it finds (install missing resources, repair Claude-invalid
+ * plugin manifests, refresh stale plugins, reconcile drift). Run
+ * `agents prune cleanup` to act on orphan readouts, or just launch the agent to
+ * apply pending sync.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -44,6 +47,7 @@ import {
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
+import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import * as fs from 'fs';
 
 const AGENT_NAMES: Record<string, string> = Object.fromEntries(
@@ -55,6 +59,7 @@ interface DoctorOptions {
   diff?: boolean;
   kind?: string;
   cwd?: string;
+  fix?: boolean;
 }
 
 interface SyncStatusRow {
@@ -397,8 +402,74 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
     console.log(chalk.green(`  Verdict: ${ok} resource${ok === 1 ? '' : 's'} reconciled. Version home matches resolved sources.`));
   } else {
     console.log(`  Verdict: ${verdictParts.join(', ')}.`);
-    console.log(chalk.gray(`  Run \`agents sync ${report.agent}@${report.version}\` to reconcile, or \`agents prune cleanup\` to drop extras.`));
+    console.log(chalk.gray(`  Run \`agents doctor ${report.agent}@${report.version} --fix\` to heal, or \`agents prune cleanup\` to drop extras.`));
   }
+}
+
+// ─── fix / heal mode ───────────────────────────────────────────────────────────
+
+function renderHealText(result: HealResult): void {
+  for (const r of result.repairedManifests) {
+    console.log(`  ${chalk.green('repair')}  plugin ${chalk.bold(r.plugin)} ${chalk.gray(`— dropped invalid ${r.droppedFields.join(', ')} field`)}`);
+  }
+  for (const r of result.refreshedPlugins) {
+    console.log(`  ${chalk.green('refresh')} plugin ${chalk.bold(r.plugin)}  ${chalk.gray(`${r.from} → ${r.to}`)}`);
+  }
+  for (const s of result.skippedPlugins) {
+    const why = s.reason === 'modified'
+      ? `locally modified — left as-is (run \`agents plugins update ${s.plugin}\` to force)`
+      : `no baseline recorded — left as-is (run \`agents plugins update ${s.plugin}\` to adopt)`;
+    console.log(`  ${chalk.yellow('hold  ')} plugin ${chalk.bold(s.plugin)}  ${chalk.gray(`${s.from} → ${s.upstream} available; ${why}`)}`);
+  }
+
+  for (const v of result.versions) {
+    const label = `${AGENT_NAMES[v.agent] || v.agent}@${v.version}`;
+    if (v.healed.length === 0 && v.skipped.length === 0) continue;
+    const byKind = new Map<string, number>();
+    for (const h of v.healed) byKind.set(h.kind, (byKind.get(h.kind) ?? 0) + 1);
+    const parts = Array.from(byKind, ([k, n]) => `${n} ${k}`);
+    if (v.healed.length > 0) {
+      console.log(`  ${chalk.green('fixed ')}  ${label}  ${chalk.gray(parts.join(', '))}`);
+    }
+    const drift = v.skipped.filter((s) => s.reason === 'drift');
+    const unres = v.skipped.filter((s) => s.reason === 'unreconcilable');
+    if (drift.length > 0) {
+      console.log(`  ${chalk.yellow('drift ')}  ${label}  ${chalk.gray(`${drift.length} hand-edited — left as-is (use \`--diff\` to inspect)`)}`);
+    }
+    if (unres.length > 0) {
+      const names = unres.map((s) => `${s.kind}/${s.name}`).join(', ');
+      console.log(`  ${chalk.yellow('hold  ')}  ${label}  ${chalk.gray(`${unres.length} couldn't reconcile (${names}) — source/home mismatch the writer can't satisfy`)}`);
+    }
+  }
+
+  console.log();
+  const healed = result.versions.reduce((n, v) => n + v.healed.length, 0);
+  const touchedVersions = result.versions.filter((v) => v.healed.length > 0).length;
+  if (!healChangedAnything(result)) {
+    console.log(chalk.green('✓ Everything in sync — nothing to heal.'));
+  } else {
+    const bits: string[] = [];
+    if (healed > 0) bits.push(`${healed} resource${healed === 1 ? '' : 's'} across ${touchedVersions} version${touchedVersions === 1 ? '' : 's'}`);
+    if (result.repairedManifests.length > 0) bits.push(`${result.repairedManifests.length} manifest${result.repairedManifests.length === 1 ? '' : 's'} repaired`);
+    if (result.refreshedPlugins.length > 0) bits.push(`${result.refreshedPlugins.length} plugin${result.refreshedPlugins.length === 1 ? '' : 's'} refreshed`);
+    console.log(chalk.green(`✓ Healed ${bits.join(', ')}.`));
+  }
+}
+
+async function runFix(parsed: { agent: AgentId; versions: string[] } | null, opts: DoctorOptions): Promise<void> {
+  // Heal targets the global install — project layer is irrelevant, so cwd is
+  // left to heal's neutral default rather than process.cwd().
+  if (!opts.json) console.log(chalk.bold('Healing…'));
+  const result = await heal({
+    mode: 'full',
+    agent: parsed?.agent,
+    versions: parsed?.versions,
+  });
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  renderHealText(result);
 }
 
 // ─── command registration ────────────────────────────────────────────────────
@@ -409,6 +480,7 @@ export function registerDoctorCommand(program: Command): void {
     .description('Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).')
     .option('--json', 'Output machine-readable JSON')
     .option('--diff', 'In target mode, include unified diffs for divergent files')
+    .option('--fix', 'Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, and reconcile drift (all installed versions, or just the target)')
     .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,promptcuts)')
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())');
 
@@ -428,11 +500,33 @@ export function registerDoctorCommand(program: Command): void {
 
       # Inspect only rules and hooks, with full diffs
       agents doctor claude@default --kind rules,hooks --diff
+
+      # Heal every gap across all installed versions
+      agents doctor --fix
+
+      # Heal just one agent (all its installed versions)
+      agents doctor claude --fix
     `,
   });
 
-  doctorCmd.action((target: string | undefined, opts: DoctorOptions) => {
+  doctorCmd.action(async (target: string | undefined, opts: DoctorOptions) => {
       const cwd = opts.cwd ? opts.cwd : process.cwd();
+
+      // --fix turns the read-only diagnosis into a heal. With no target it heals
+      // every installed version; with a target it scopes to that agent.
+      if (opts.fix) {
+        let scope: { agent: AgentId; versions: string[] } | null = null;
+        if (target) {
+          const parsed = parseTargetArg(target);
+          if ('error' in parsed) {
+            console.error(chalk.red(parsed.error));
+            process.exit(1);
+          }
+          scope = parsed;
+        }
+        await runFix(scope, opts);
+        return;
+      }
 
       if (!target) {
         const clis = checkAllClis();
