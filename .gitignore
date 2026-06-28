@@ -39,6 +39,7 @@ coverage/
 .agents/plans/
 .agents/worktrees/
 .agents/scratch/
+.agents/artifacts/
 .plans/
 
 # Scrub script lists personal data strings — must not be committed to public repo

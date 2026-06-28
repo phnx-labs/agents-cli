@@ -63,7 +63,17 @@ function activeSources(agent: AgentId, version: string, cwd: string): Record<str
     if (fs.existsSync(yamlPath)) result['rules.yaml'] = yamlPath;
   }
   for (const sub of compose.subrules) {
-    result[`subrules/${sub.name}.md`] = sub.sourcePath;
+    // Key off the actual source path so dir-form subrules (subrules/<name>/rule.md)
+    // and flat ones (subrules/<name>.md) both fingerprint the file that really
+    // contributes to the output, not a hard-coded `.md` that may not exist.
+    if (sub.subruleDir) {
+      result[`subrules/${sub.name}/rule.md`] = sub.sourcePath;
+      // Fingerprint hooks.yaml too so editing a hook re-syncs the rules section.
+      const hooksFile = path.join(sub.subruleDir, 'hooks.yaml');
+      if (fs.existsSync(hooksFile)) result[`subrules/${sub.name}/hooks.yaml`] = hooksFile;
+    } else {
+      result[`subrules/${sub.name}.md`] = sub.sourcePath;
+    }
   }
   return result;
 }

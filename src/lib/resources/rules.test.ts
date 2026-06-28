@@ -203,6 +203,52 @@ describe('listSubrulesInDir', () => {
 
     expect(names).toEqual(['rule']);
   });
+
+  it('lists dir-form subrules (foo/rule.md) alongside flat ones', () => {
+    const dir = path.join(tmpDir, 'subrules');
+    writeFile('subrules/flat.md', 'FLAT');
+    writeFile('subrules/dir/rule.md', 'DIR');
+    // A directory without rule.md is not a subrule.
+    writeFile('subrules/notarule/hooks.yaml', 'x: {}');
+
+    const names = listSubrulesInDir(dir);
+
+    expect(names).toEqual(['dir', 'flat']);
+  });
+});
+
+describe('rules — dir-form subrules', () => {
+  it('resolveRule reads dir-form rule.md', () => {
+    const system = makeLayer('system', 'system');
+    writeFile('system/subrules/foo/rule.md', 'DIR FOO');
+
+    const result = resolveRule('foo', [system]);
+    expect(result).not.toBeNull();
+    expect(result!.item.content).toBe('DIR FOO');
+    expect(result!.path).toBe(path.join(system.dir, 'subrules', 'foo', 'rule.md'));
+  });
+
+  it('dir-form in a higher layer shadows a flat one in a lower layer', () => {
+    const system = makeLayer('system', 'system');
+    const user = makeLayer('user', 'user');
+    writeFile('system/subrules/foo.md', 'SYS FLAT');
+    writeFile('user/subrules/foo/rule.md', 'USER DIR');
+
+    const result = resolveRule('foo', [user, system]);
+    expect(result!.layer).toBe('user');
+    expect(result!.item.content).toBe('USER DIR');
+  });
+
+  it('listAllRules includes dir-form subrules', () => {
+    const system = makeLayer('system', 'system');
+    writeFile('system/subrules/flat.md', 'FLAT');
+    writeFile('system/subrules/dir/rule.md', 'DIR');
+
+    const results = listAllRules([system]);
+    const byName = Object.fromEntries(results.map((r) => [r.name, r.item.content]));
+    expect(Object.keys(byName).sort()).toEqual(['dir', 'flat']);
+    expect(byName.dir).toBe('DIR');
+  });
 });
 
 describe('RulesHandler.format', () => {

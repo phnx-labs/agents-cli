@@ -16,7 +16,8 @@ import * as TOML from 'smol-toml';
 import { AGENTS, ALL_AGENT_IDS, agentConfigDirName } from './agents.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
-import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos } from './state.js';
+import { getAgentsDir, getHooksDir as getSystemHooksDir, getUserHooksDir, getUserAgentsDir, getSystemAgentsDir, getProjectAgentsDir, getTrashHooksDir, getEnabledExtraRepos, getResolvedRulesDir, getUserRulesDir } from './state.js';
+import { collectSubruleHooksFromState } from './rules/compose.js';
 
 function getCentralHooksDir(): string { return getUserHooksDir(); }
 
@@ -54,6 +55,12 @@ function getManagedHookPrefixes(): string[] {
     path.join(getUserAgentsDir(), 'hooks') + path.sep,
     ...extraDirs.map(d => path.join(d, 'hooks') + path.sep),
     path.join(getSystemAgentsDir(), 'hooks') + path.sep,
+    // Subrule-dir hook scripts register by their absolute source path under a
+    // rules `subrules/` tree. Cover those trees so a removed subrule/hook's
+    // stale settings entry gets garbage-collected like any other managed hook.
+    path.join(getUserRulesDir(), 'subrules') + path.sep,
+    ...extraDirs.map(d => path.join(d, 'rules', 'subrules') + path.sep),
+    path.join(getResolvedRulesDir(), 'subrules') + path.sep,
   ];
 }
 
@@ -165,6 +172,18 @@ const SCRIPT_EXTENSIONS = new Set([
 
 function isExecutable(mode: number): boolean {
   return (mode & 0o111) !== 0;
+}
+
+/**
+ * Ensure a script file carries an exec bit. Subrule-dir hook scripts are
+ * registered by their source path (not copied), so they must be executable in
+ * place. Best-effort: a chmod failure (read-only fs, foreign owner) is ignored.
+ */
+function ensureExecutable(scriptPath: string): void {
+  try {
+    const mode = fs.statSync(scriptPath).mode;
+    if (!isExecutable(mode)) fs.chmodSync(scriptPath, mode | 0o755);
+  } catch { /* best effort */ }
 }
 
 function getHooksDir(agentId: AgentId): string {
@@ -773,6 +792,14 @@ export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string,
   const merged: Record<string, ManifestHook> = {};
   const systemHooks: Record<string, ManifestHook> = {};
 
+  // Lowest-precedence layer: hooks declared inside active subrule directories.
+  // Seeded first so any same-key entry from system/user agents.yaml wins.
+  // Gated so a malformed hooks.yaml never breaks rule sync.
+  try {
+    const subruleHooks = collectSubruleHooksFromState();
+    for (const [name, def] of Object.entries(subruleHooks)) merged[name] = def;
+  } catch { /* subrule hook collection is best-effort */ }
+
   // System layer: hooks: section of agents.yaml (npm-shipped, separate repo).
   const systemPath = path.join(getSystemAgentsDir(), 'agents.yaml');
   if (fs.existsSync(systemPath)) {
@@ -899,6 +926,12 @@ export function registerHooksToSettings(
     ? path.join(versionHome, agentConfigDirName(agentId), AGENTS[agentId].hooksDir)
     : null;
   const resolveScript = (script: string): string | null => {
+    // Subrule-dir hooks declare an already-absolute script path. Use it
+    // directly (made executable) — these are not copied into the version home.
+    if (path.isAbsolute(script) && fs.existsSync(script)) {
+      ensureExecutable(script);
+      return script;
+    }
     if (overrideRoots) {
       return resolveContainedHookPath(path.join(overrideRoots[0], 'hooks'), script);
     }

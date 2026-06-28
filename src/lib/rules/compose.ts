@@ -29,6 +29,7 @@ import {
   getProjectAgentsDir,
   getEnabledExtraRepos,
 } from '../state.js';
+import type { ManifestHook } from '../types.js';
 
 export type LayerScope = 'project' | 'user' | 'extra' | 'system';
 
@@ -60,6 +61,8 @@ export interface ComposedSubrule {
   sourcePath: string;
   layerScope: LayerScope;
   layerAlias?: string;
+  /** Set when the subrule is dir-form (`subrules/<name>/`); the dir itself. */
+  subruleDir?: string;
 }
 
 export interface ComposeResult {
@@ -77,6 +80,31 @@ const SUBRULES_DIR_NAME = 'subrules';
 const RULES_YAML_NAME = 'rules.yaml';
 const DEFAULT_PRESET = 'default';
 const SUBRULES_README = 'README.md';
+/** Inside a dir-form subrule, the prose file. */
+const SUBRULE_RULE_FILE = 'rule.md';
+/** Inside a dir-form subrule, the optional hook manifest. */
+const SUBRULE_HOOKS_FILE = 'hooks.yaml';
+
+/**
+ * Resolve the prose file for a subrule named `name` under `<rulesDir>/subrules/`.
+ *
+ * A subrule resolves to the DIRECTORY form `subrules/<name>/rule.md` when that
+ * file exists, otherwise the flat form `subrules/<name>.md`. Returns the
+ * markdown path plus the dir-form subrule directory when applicable (callers
+ * that fold hooks need the dir to resolve `hooks.yaml` and relative scripts).
+ */
+function resolveSubrulePath(
+  rulesDir: string,
+  name: string
+): { sourcePath: string; subruleDir?: string } | null {
+  const dirForm = path.join(rulesDir, SUBRULES_DIR_NAME, name, SUBRULE_RULE_FILE);
+  if (fs.existsSync(dirForm)) {
+    return { sourcePath: dirForm, subruleDir: path.join(rulesDir, SUBRULES_DIR_NAME, name) };
+  }
+  const flatForm = path.join(rulesDir, SUBRULES_DIR_NAME, `${name}.md`);
+  if (fs.existsSync(flatForm)) return { sourcePath: flatForm };
+  return null;
+}
 
 function readRulesYaml(rulesDir: string): RulesYaml | null {
   const p = path.join(rulesDir, RULES_YAML_NAME);
@@ -105,23 +133,32 @@ function resolvePreset(
 function findSubrule(
   layers: RulesLayer[],
   name: string
-): { sourcePath: string; layer: RulesLayer } | null {
+): { sourcePath: string; subruleDir?: string; layer: RulesLayer } | null {
   for (const layer of layers) {
-    const p = path.join(layer.rulesDir, SUBRULES_DIR_NAME, `${name}.md`);
-    if (fs.existsSync(p)) return { sourcePath: p, layer };
+    const found = resolveSubrulePath(layer.rulesDir, name);
+    if (found) return { ...found, layer };
   }
   return null;
 }
 
+/**
+ * List subrule names in a layer. A name is contributed by either the flat
+ * form `subrules/<name>.md` OR the dir form `subrules/<name>/rule.md`; a
+ * directory without `rule.md` is not a subrule and is skipped.
+ */
 function listLayerSubruleNames(layer: RulesLayer): string[] {
   const dir = path.join(layer.rulesDir, SUBRULES_DIR_NAME);
   if (!fs.existsSync(dir)) return [];
   try {
-    return fs
-      .readdirSync(dir)
-      .filter((f) => f.endsWith('.md') && f !== SUBRULES_README)
-      .map((f) => f.slice(0, -3))
-      .sort();
+    const names = new Set<string>();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (fs.existsSync(path.join(dir, entry.name, SUBRULE_RULE_FILE))) names.add(entry.name);
+      } else if (entry.name.endsWith('.md') && entry.name !== SUBRULES_README) {
+        names.add(entry.name.slice(0, -3));
+      }
+    }
+    return [...names].sort();
   } catch {
     return [];
   }
@@ -156,6 +193,7 @@ export function composeRules(opts: ComposeOptions): ComposeResult {
       sourcePath: found.sourcePath,
       layerScope: found.layer.scope,
       layerAlias: found.layer.alias,
+      subruleDir: found.subruleDir,
     });
     seen.add(name);
   }
@@ -166,11 +204,14 @@ export function composeRules(opts: ComposeOptions): ComposeResult {
     if (layer.scope === 'system') continue;
     for (const name of listLayerSubruleNames(layer)) {
       if (seen.has(name)) continue;
+      const resolved = resolveSubrulePath(layer.rulesDir, name);
+      if (!resolved) continue;
       composed.push({
         name,
-        sourcePath: path.join(layer.rulesDir, SUBRULES_DIR_NAME, `${name}.md`),
+        sourcePath: resolved.sourcePath,
         layerScope: layer.scope,
         layerAlias: layer.alias,
+        subruleDir: resolved.subruleDir,
       });
       seen.add(name);
     }
@@ -233,4 +274,78 @@ export function discoverRulesLayers(opts: { cwd?: string } = {}): RulesLayer[] {
 export function composeRulesFromState(opts: { preset?: string; cwd?: string } = {}): ComposeResult {
   const layers = discoverRulesLayers({ cwd: opts.cwd });
   return composeRules({ preset: opts.preset, layers });
+}
+
+/**
+ * hooks.yaml shape (the bare-map form, chosen for brevity):
+ *
+ *   <hookName>:
+ *     script: enforce.sh        # relative to the subrule dir
+ *     events: [PreToolUse]
+ *     matcher: "Edit|Write"     # optional
+ *     timeout: 30               # optional
+ *
+ * A wrapped `{ hooks: { <hookName>: {...} } }` form is also accepted so a
+ * hooks.yaml can carry sibling keys without confusing the parser.
+ */
+function parseSubruleHooksFile(file: string): Record<string, ManifestHook> {
+  const parsed = yaml.parse(fs.readFileSync(file, 'utf-8')) as
+    | Record<string, ManifestHook>
+    | { hooks?: Record<string, ManifestHook> }
+    | null;
+  if (!parsed || typeof parsed !== 'object') return {};
+  const map = (parsed as { hooks?: Record<string, ManifestHook> }).hooks ?? parsed;
+  return (map as Record<string, ManifestHook>) || {};
+}
+
+/**
+ * Collect hooks declared inside the active subrule directories.
+ *
+ * Resolves the same composed subrule set as {@link composeRules} (preset-named
+ * plus auto-append, highest-layer-wins per name). For each dir-form subrule
+ * that ships a `hooks.yaml`, parses it, rewrites each hook's `script` to an
+ * ABSOLUTE path under the subrule dir, and namespaces the key as
+ * `<subruleName>__<hookName>` to avoid collisions across subrules.
+ *
+ * Returns an empty map for flat subrules and dir-form subrules without a
+ * `hooks.yaml`. A malformed hooks.yaml is skipped (try/catch) so a bad file
+ * never breaks rule composition or hook registration.
+ */
+export function collectSubruleHooks(
+  layers: RulesLayer[],
+  presetName?: string
+): Record<string, ManifestHook> {
+  const result: Record<string, ManifestHook> = {};
+  let composed: ComposeResult;
+  try {
+    composed = composeRules({ preset: presetName, layers });
+  } catch {
+    return result;
+  }
+
+  for (const sub of composed.subrules) {
+    if (!sub.subruleDir) continue; // flat subrule — no hooks
+    const hooksFile = path.join(sub.subruleDir, SUBRULE_HOOKS_FILE);
+    if (!fs.existsSync(hooksFile)) continue;
+    try {
+      const hooks = parseSubruleHooksFile(hooksFile);
+      for (const [hookName, def] of Object.entries(hooks)) {
+        if (!def || typeof def !== 'object' || typeof def.script !== 'string') continue;
+        const absScript = path.resolve(sub.subruleDir, def.script);
+        result[`${sub.name}__${hookName}`] = { ...def, script: absScript };
+      }
+    } catch {
+      // Malformed hooks.yaml — skip this subrule's hooks, keep the rest.
+    }
+  }
+
+  return result;
+}
+
+/** Convenience wrapper — discovers layers from state, then collects hooks. */
+export function collectSubruleHooksFromState(
+  opts: { preset?: string; cwd?: string } = {}
+): Record<string, ManifestHook> {
+  const layers = discoverRulesLayers({ cwd: opts.cwd });
+  return collectSubruleHooks(layers, opts.preset);
 }

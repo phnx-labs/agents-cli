@@ -9,6 +9,10 @@
 - **Configurable, still flexible.** Set the global default in `agents.yaml` (`secrets.policy: always` to restore prompt-every-time), or override per bundle with `agents secrets policy <bundle> always` for high-value keys (signing, SSH) you want to confirm on every read.
 - **Explicit `always` now persists** under the legacy `tier: biometry` token (older CLIs read it as their own always default). Bundles with no stored policy inherit the configured default — so an existing always-by-default bundle quietly becomes `daily` on first read by the new CLI, which is the intended migration.
 
+**`agents repos view [name]`: inspect one repo's contents without opening it**
+
+- New `agents repo view <name>` (also reachable as `agents repos view`, now a first-class alias of the `repo` command) prints a single repo's git state and per-kind resource counts — `system`, `user`, `project`, or an extra-repo alias. Omit the name for an interactive picker over the registered repos. It reuses the `inspect` repo renderer, so output matches `agents inspect <repo>`; supports `--brief` and `--json`. Source: `src/commands/repo.ts`, `src/commands/inspect.ts`.
+
 **Secrets prompt policy: human-readable `always` / `daily`, and `secrets list` now shows it**
 
 - Renamed the secrets-agent `tier` to a **prompt policy** with plain-language names: `biometry` → **`always`** (ask every time), `session` → **`daily`** (ask once, then held ~24h until screen-lock / sleep / logout). The old name `session` was misleading — it never meant "once per login session" — and collided with the half-dozen other "session" concepts in the CLI (`agents sessions`, sessions-sync, pty/browser sessions). Set it with `agents secrets policy <bundle> [always|daily]`.

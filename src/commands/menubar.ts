@@ -70,9 +70,13 @@ export function registerMenubarCommands(program: Command): void {
       console.log(`  running            ${yn(s.running)}`);
       console.log(`  service installed  ${yn(s.serviceInstalled)}`);
       console.log(`  app installed      ${s.installedApp ? chalk.gray(s.installedApp) : chalk.gray('no')}`);
+      console.log(`  installed version  ${s.installedVersion ? chalk.gray(s.installedVersion) : chalk.gray('unknown')}`);
+      console.log(`  current version    ${chalk.gray(s.currentVersion)}`);
       console.log(`  bundle source      ${s.source ? chalk.gray(s.source) : chalk.red('missing (cannot enable)')}`);
       console.log(`  disabled by user   ${yn(s.disabledByUser)}`);
-      if (!s.serviceInstalled && !s.disabledByUser) {
+      if (s.stale) {
+        console.log(chalk.yellow('\n  Installed helper is stale — runs on next `agents` startup, or `agents menubar enable` now.'));
+      } else if (!s.serviceInstalled && !s.disabledByUser) {
         console.log(chalk.gray('\n  Enable it with `agents menubar enable`.'));
       }
     });

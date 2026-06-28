@@ -102,7 +102,7 @@ interface ResourceItem {
   groups?: PluginResourceGroup[];
 }
 
-interface InspectOptions {
+export interface InspectOptions {
   brief?: boolean;
   json?: boolean;
   // Drill-down flags. commander treats `--skills [query]` so the value is
@@ -305,7 +305,7 @@ function isDotAgentsRoot(dir: string): boolean {
   return false;
 }
 
-async function inspectRepo(repo: RepoTarget, options: InspectOptions): Promise<void> {
+export async function inspectRepo(repo: RepoTarget, options: InspectOptions): Promise<void> {
   const drill = pickDrillKind(options);
   const jsonHead = { repo: repo.label, root: repo.root };
 
