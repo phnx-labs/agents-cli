@@ -12,6 +12,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // Cached cheap snapshot for the badge (no teams scan).
     private var badgeSessions: [Session] = []
 
+    // Routines are the ONLY menu input that isn't a cheap disk read: `agents
+    // routines list --json` shells the CLI (~300ms Node cold-start). Calling it
+    // synchronously in menuWillOpen blocked the dropdown ~300ms on every click —
+    // 200x the cost of the whole disk-read layer. Instead we cache it: warm it on
+    // the background poll and refresh after each open, so the menu always renders
+    // from the cheap layer (~1.4ms) and the routines line shows the last state.
+    private var cachedRoutines: [Routine] = []
+    private var routinesLoaded = false
+    private var routinesInFlight = false
+    private var routinesFetchedAt: Date?
+
     func install() {
         if let button = statusItem.button {
             button.image = Icon.make()
@@ -47,6 +58,26 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self?.refreshBadge()
             }
         }
+        refreshRoutines() // keep the routines cache warm off the click path
+    }
+
+    // Fetch routines on a background queue and cache them. Throttled to ~20s
+    // (routines change rarely) and coalesced so an open + a poll don't pile up.
+    // Must be called on the main thread (Timer + menuWillOpen both are).
+    private func refreshRoutines() {
+        if routinesInFlight { return }
+        if let t = routinesFetchedAt, Date().timeIntervalSince(t) < 20 { return }
+        routinesInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let r = AgentsCLI.routines()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.cachedRoutines = r
+                self.routinesLoaded = true
+                self.routinesFetchedAt = Date()
+                self.routinesInFlight = false
+            }
+        }
     }
 
     private func refreshBadge() {
@@ -71,13 +102,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Menu (rebuilt on open against fresh, full state)
     func menuWillOpen(_ menu: NSMenu) {
+        // Critical path is all cheap disk reads — no CLI shell. Routines come
+        // from the warm cache; we kick a (throttled) refresh for next time.
         let sessions = LocalState.sessions(includeTeams: true)
         let installed = LocalState.installedAgents()
-        let routines = AgentsCLI.routines()
         let daemonPid = AgentsCLI.daemonPid()
         badgeSessions = sessions
-        rebuild(menu, sessions: sessions, installed: installed, routines: routines, daemonPid: daemonPid)
+        rebuild(menu, sessions: sessions, installed: installed, routines: cachedRoutines, daemonPid: daemonPid)
         refreshBadge()
+        refreshRoutines()
     }
 
     private func rebuild(_ menu: NSMenu, sessions: [Session], installed: [String], routines: [Routine], daemonPid: Int?) {
@@ -126,9 +159,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        // Routines — one compact line (secondary).
+        // Routines — one compact line (secondary). Cached off the click path;
+        // shows "checking…" only until the first background fetch lands.
         let routineLine: String
-        if routines.isEmpty {
+        if routines.isEmpty && !routinesLoaded {
+            routineLine = "routines   checking…"
+        } else if routines.isEmpty {
             routineLine = "routines   none"
         } else {
             let next = routines.compactMap { $0.enabled ? $0.nextRunHuman : nil }.first(where: { $0 != "-" }) ?? "—"

@@ -9,6 +9,13 @@ import AppKit
 //   MENUBAR_STANDALONE=1 ...      # dev: stay up even with no daemon running
 //   AGENTS_BIN=/path/to/agents    # override the `agents` binary location
 
+// Benchmark mode: time the data-layer methods that build the menu, then exit.
+// No GUI session needed — LocalState reads files, AgentsCLI shells the CLI.
+if ProcessInfo.processInfo.environment["MENUBAR_BENCH"] == "1" {
+    Bench.run()
+    exit(0)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
