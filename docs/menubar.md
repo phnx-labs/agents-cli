@@ -40,7 +40,8 @@ out with `agents menubar disable`.
 ```
 
 - **NEEDS YOU** — pinned on top. Sessions blocked waiting for you, plus routines
-  whose last run failed or that are overdue. Empty when nothing needs attention.
+  whose last run failed, timed out, or that are overdue. Empty when nothing needs
+  attention.
 - **New session** — launches `agents run <agent>` in a new Terminal window.
 - **AGENTS** — every installed agent with running / idle counts. A session is
   *running* if its transcript was written in the last 2 minutes, else *idle*.
@@ -70,7 +71,8 @@ The helper assembles the menu by reading these directly — no CLI, no re-index:
 |---|---|---|
 | Terminals | `~/.agents/.cache/terminals/live-terminals.json` | terminal / IDE sessions (agent, cwd, pid) |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
-| Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `needs_review` → "awaiting input" |
+| Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
+| Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input (written by the Notification hook) |
 | Installed agents | `~/.agents/.history/versions/<agent>/` | the agent roster |
 
 Liveness is a `kill(pid, 0)` check; running-vs-idle is the transcript file's
