@@ -13,6 +13,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { detectDevBuild } from './lib/startup/dev-build.js';
 // `ora`, `@inquirer/prompts`, `./commands/utils.js`, and the agents/versions/shims
 // modules are imported dynamically at their use sites: they are needed only on
 // interactive / update / shim-repair paths, never for fast commands like
@@ -56,14 +57,7 @@ interface NpmPackageMetadata {
 // must not scribble on the user's real ~/.agents/), and skip the update prompt
 // (the "0.0.0-dev -> 1.x.y" message is misleading). Each individual env var
 // can still be set explicitly to override (set to '0' to re-enable).
-const IS_DEV_BUILD: boolean = (() => {
-  if (VERSION.startsWith('0.0.0-dev')) return true;
-  try {
-    const cliPath = process.argv[1] || '';
-    const repoRoot = path.dirname(path.dirname(cliPath));
-    return fs.existsSync(path.join(repoRoot, '.git'));
-  } catch { return false; }
-})();
+const IS_DEV_BUILD: boolean = detectDevBuild(process.argv[1] || '', VERSION);
 if (IS_DEV_BUILD) {
   if (process.env.AGENTS_NO_AUTOPULL === undefined) process.env.AGENTS_NO_AUTOPULL = '1';
   if (process.env.AGENTS_SKIP_MIGRATION === undefined) process.env.AGENTS_SKIP_MIGRATION = '1';
