@@ -15,7 +15,42 @@ agents run droid  "triage the inbox"   --on win-mini
 
 It sits next to the vendor clouds (`agents cloud run --provider rush|codex|…`),
 not replacing them: those dispatch to *someone else's* cloud; `hosts` dispatches
-to *your* boxes.
+to *your* boxes (owned, or leased on demand via crabbox — see Host sources).
+
+## Motivation — the bottleneck is OS coordination, not RAM
+
+This is grounded in a real incident (Agent Workload Resource Report, 2026-06-27).
+A 30-core workstation became unusable while running agents — but **not** from
+memory pressure (102G used, **25G free**). The failure was **OS-coordination
+starvation**:
+
+```
+Load Avg: 232.61, 306.45, 245.25
+CPU: 18.99% user, 79.35% sys, 1.65% idle
+Processes: 1807 total, 13322 threads
+```
+
+~79% of CPU was spent *inside the kernel* (scheduling, vnode/path resolution,
+symlink handling, filesystem metadata) — a recursive `ripgrep` search-storm from
+an editor extension, plus the general process/file/UI fan-out of agent tooling. A
+Linux 16-vCPU comparison showed the same shape (`system_pct` ~50, `runnable` ~38,
+high fork rate). The report's conclusions map directly onto this design:
+
+- **"Separate headless agent execution from interactive rendering."** Running an
+  agent headless and publishing *summarized state transitions* — instead of
+  rendering its full transcript character-by-character in a desktop UI — is what
+  lets a machine carry more concurrent work. This is exactly the transcript-tail
+  progress model (§4): the agent runs headless on the host; we read summarized
+  events from its transcript, we don't live-render a remote TTY.
+- **"A cloud or Linux box helps only if synchronization overhead is
+  controlled."** Offloading is necessary (your laptop has finite coordination
+  capacity), but the remote run must be bounded — headless, concurrency-capped,
+  no unbounded recursive scans. The design must carry those constraints to the
+  host, not just relocate the storm.
+
+So `hosts` isn't only "I want more cores" — it's "keep my interactive machine
+responsive by moving headless agent execution off it," which the report shows is
+a coordination problem money-can't-buy-RAM doesn't fix.
 
 ## Why this is brokerless (the core thesis)
 
@@ -91,6 +126,43 @@ agents run <agent> "<task>" --on <host>
   └─ track in the cloud store (a `host` provider) so                       [Phase 1.5]
         agents cloud list / status / logs see host runs
 ```
+
+### Host sources — owned (tailnet) + leased on demand (crabbox)
+
+A "host" comes from one of two sources, but both reduce to **a tailnet SSH
+target**, so the dispatch path (§2–§4) is identical:
+
+- **Owned, always-on** — your mac-mini, win-mini, DGX Sparks. Discovered live via
+  `tailscale status` (§1). Zero provisioning; they're just there.
+- **Leased, on demand** — ephemeral cloud machines provisioned by **crabbox**,
+  which is already installed and already a multi-cloud leasing layer:
+  `--provider hetzner|aws|azure|gcp|proxmox|e2b|modal|sprites|daytona|…`
+  (verified from `crabbox warmup --help`; AWS/EC2 is `--provider aws` with
+  `CRABBOX_AWS_REGION` + spot/on-demand). Crucially, crabbox machines **join your
+  tailnet** (`CRABBOX_TAILSCALE_AUTH_KEY`) and expose SSH (`crabbox ssh --id`),
+  with idle-timeout/TTL auto-expiry (`CRABBOX_IDLE_TIMEOUT`, `CRABBOX_TTL`). So a
+  leased box is the same kind of target as an owned one.
+
+This is the answer to "I need machines but don't own enough": when the laptop is
+starving, lease one.
+
+```
+agents run claude "big refactor" --on new           # crabbox warmup (default provider) → run → idle-release
+agents run codex  "gpu eval"     --on new:aws        # provider/class selector → EC2 → run
+agents run droid  "triage"       --on mac-mini       # owned, always-on
+```
+
+`--on new[:<provider/class>]` leases via crabbox, runs headless, and releases on
+idle/TTL. agents-cli **does not** reimplement provisioning — crabbox owns lease
+lifecycle, cost, multi-cloud, and the tailnet join; `hosts` owns *dispatch*. The
+overlap is deliberate: `crabbox run --provider ssh --static-host mac.local` shows
+crabbox already unifies leased + static SSH targets; we layer harness-agnostic
+agent dispatch + transcript-tail progress on top.
+
+Open question (carried below): how thin is the crabbox integration — shell out to
+the `crabbox` CLI (`warmup`/`ssh`/`stop`), or treat crabbox-leased boxes purely as
+tailnet peers once they've joined? (Leaning: shell out for lease/release, then the
+common tailnet-SSH path for everything else.)
 
 ### 1. Discovery — Tailscale-native (no registry required)
 
@@ -215,11 +287,30 @@ implementation.
 - **No broker / relay / connection-registry / heartbeat service.** Tailscale is
   that, for free. If we ever need off-tailnet hosts, that's an explicit registry
   entry + plain SSH, still no central service.
+- **No provisioning engine.** crabbox already leases across Hetzner/AWS/Azure/GCP/
+  e2b/modal/… and joins them to the tailnet. `hosts` shells out to crabbox for
+  lease/release and otherwise treats the box as a tailnet-SSH peer. We do not
+  reimplement multi-cloud provisioning, cost, or lifecycle.
 - **No new daemon.** Phase 2 relay/attach expands the existing routines daemon;
   it does not add a second long-running process.
 - **No custom wire protocol.** SSH + on-disk transcript are the protocol.
 - **No VM snapshots.** `rsync` over the tailnet replaces Devin-style block-diff for
   our single-tenant case.
+
+## Design constraints carried from the incident
+
+The Resource Report is also a list of things the remote run must NOT do (or it
+just relocates the storm):
+
+- **Headless only** — `agents run --print/--json`, never a remote interactive TTY.
+  Progress is summarized state from the transcript, not a live char stream.
+- **Bound concurrency** — cap simultaneous agents per host; a host's value is
+  finite coordination capacity, not infinite parallelism.
+- **No unbounded recursive scans** — the incident's trigger was `rg --no-ignore
+  --follow` over `.agents/worktrees` + `.gocache`. Remote workspace setup must
+  respect ignore boundaries and avoid scanning generated/worktree trees.
+- **Don't sync junk** — a working-tree `rsync` (Phase 2) must exclude
+  `node_modules`, `.gocache`, build caches, nested worktrees.
 
 ## Open questions (decide before Phase 1 build)
 
@@ -235,6 +326,11 @@ implementation.
    gpu`) that picks an online Spark, not just a named host?
 5. **Surface for tracked runs** — keep one-offs on `agents run --on` and only
    *tracked* runs in `agents cloud` (a `host` provider), or unify?
+6. **crabbox integration depth** — shell out to `crabbox warmup/ssh/stop` for
+   leased hosts (leaning yes), or a tighter library binding? And `--on new`
+   semantics: default provider/class, auto-release on idle vs explicit `stop`.
+7. **Concurrency cap** — default max simultaneous agents per host (the incident
+   says "bound it"); per-host override in the `hosts:` overlay?
 
 ## Phasing & verification
 
@@ -242,7 +338,9 @@ implementation.
   <host>` (synchronous, transcript-tailed progress). Verify end-to-end against a
   real tailnet box (mac-mini): dispatch a trivial task, see live progress via the
   transcript tailer, correct exit code. Crabbox for the unit suite.
-- **Phase 1.5**: `host` provider in the cloud store → `agents cloud list/status/logs`.
+- **Phase 1.5**: leased hosts via crabbox (`--on new[:provider]` → warmup → run →
+  idle-release) + a `host` provider in the cloud store → `agents cloud
+  list/status/logs`.
 - **Phase 2**: `--resume … --on` handoff (branch + working-tree rsync + transcript
   sync + resume) and attach/relay mode on the existing daemon.
 
