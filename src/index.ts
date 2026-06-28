@@ -9,12 +9,15 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import ora from 'ora';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { confirm, select } from '@inquirer/prompts';
+// `ora`, `@inquirer/prompts`, `./commands/utils.js`, and the agents/versions/shims
+// modules are imported dynamically at their use sites: they are needed only on
+// interactive / update / shim-repair paths, never for fast commands like
+// `--version`, `--help`, or `view`. Keeping them off the module-eval path is
+// what gets cold starts under the target.
 
 // Force exit on Ctrl+C when no interactive prompt is handling it.
 process.on('SIGINT', () => process.exit(130));
@@ -67,70 +70,64 @@ if (IS_DEV_BUILD) {
   if (process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE === undefined) process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE = '1';
 }
 
-// Import command registrations
-import { registerPullCommand } from './commands/pull.js';
-import { registerPushCommand } from './commands/push.js';
-import { registerRepoCommands } from './commands/repo.js';
-import { registerSetupCommand, runSetup } from './commands/setup.js';
-import { registerFeedbackCommand } from './commands/feedback.js';
-import { registerViewCommand } from './commands/view.js';
-import { registerInspectCommand } from './commands/inspect.js';
-import { registerCommandsCommands } from './commands/commands.js';
-import { registerHooksCommands } from './commands/hooks.js';
-import { registerSkillsCommands } from './commands/skills.js';
-import { registerRulesCommands } from './commands/rules.js';
-import { registerPermissionsCommands } from './commands/permissions.js';
-import { registerMcpCommands } from './commands/mcp.js';
-import { registerCliCommands } from './commands/cli.js';
-import { registerVersionsCommands } from './commands/versions.js';
-import { registerImportCommand } from './commands/import.js';
-import { registerPackagesCommands } from './commands/packages.js';
-import { registerDaemonCommands } from './commands/daemon.js';
-import { registerRoutinesCommands } from './commands/routines.js';
-import { registerRunCommand } from './commands/exec.js';
-import { registerModelsCommand } from './commands/models.js';
-import { registerDefaultsCommands } from './commands/defaults.js';
-import { registerPruneCommand } from './commands/prune.js';
-import { registerTrashCommands, registerRestoreCommand } from './commands/trash.js';
-import { registerDoctorCommand } from './commands/doctor.js';
-import { registerSubagentsCommands } from './commands/subagents.js';
-import { registerPluginsCommands } from './commands/plugins.js';
-import { registerWorkflowsCommands } from './commands/workflows.js';
-import { registerWorktreeCommands } from './commands/worktree.js';
-import { registerSyncCommand } from './commands/sync.js';
-import { registerRefreshRulesCommand } from './commands/refresh-rules.js';
-import { registerDriveCommands } from './commands/drive.js';
-import { registerPtyCommands } from './commands/pty.js';
-import { registerTmuxCommands } from './commands/tmux.js';
-import { registerBrowserCommand } from './commands/browser.js';
-import { registerComputerCommand } from './commands/computer.js';
-import { registerProfilesCommands } from './commands/profiles.js';
-import { registerSecretsCommands } from './commands/secrets.js';
-import { registerWalletCommands } from './commands/wallet.js';
-import { registerHelperCommand } from './commands/helper.js';
-import { registerMenubarCommands } from './commands/menubar.js';
-import { registerFactoryCommands } from './commands/factory.js';
-import { registerUsageCommand } from './commands/usage.js';
-import { registerCostCommand } from './commands/cost.js';
-import { registerBudgetCommand } from './commands/budget.js';
-import { registerAliasCommand } from './commands/alias.js';
-import { registerBetaCommands } from './commands/beta.js';
-import { applyGlobalHelpConventions } from './lib/help.js';
-import { isInteractiveTerminal, isPromptCancelled } from './commands/utils.js';
-import { getAgentsDir } from './lib/state.js';
-import { AGENTS } from './lib/agents.js';
-import { getGlobalDefault, listInstalledVersions } from './lib/versions.js';
+// Command registration is lazy: instead of statically importing every command
+// module on each invocation (which loaded the whole ~50-module tree before the
+// first byte of output), the registry maps a command name to a thunk that
+// imports only what that command needs. See src/lib/startup/command-registry.ts.
 import {
-  addShimsToPath,
-  ensureShimCurrent,
-  ensureVersionedAliasCurrent,
-  getPathShadowingExecutable,
-  getPathSetupInstructions,
-  getShimsDir,
-  isShimsInPath,
-  listAgentsWithInstalledVersions,
-  removeLegacyUserShim,
-} from './lib/shims.js';
+  COMMAND_LOADERS,
+  LAZY_COMMAND_NAMES,
+  loadView,
+  loadInspect,
+  loadFeedback,
+  loadCommands,
+  loadHooks,
+  loadSkills,
+  loadRules,
+  loadPermissions,
+  loadMcp,
+  loadCli,
+  loadSubagents,
+  loadPlugins,
+  loadWorkflows,
+  loadWorktree,
+  loadVersions,
+  loadImport,
+  loadPackages,
+  loadDaemon,
+  loadRoutines,
+  loadRun,
+  loadDefaults,
+  loadModels,
+  loadPrune,
+  loadTrash,
+  loadRestore,
+  loadDoctor,
+  loadProfiles,
+  loadSecrets,
+  loadWallet,
+  loadHelper,
+  loadMenubar,
+  loadBeta,
+  loadSync,
+  loadRefreshRules,
+  loadDrive,
+  loadFactory,
+  loadUsage,
+  loadCost,
+  loadBudget,
+  loadAlias,
+  loadPty,
+  loadTmux,
+  loadBrowser,
+  loadComputer,
+  loadPull,
+  loadPush,
+  loadRepo,
+  loadSetup,
+  type ModuleLoader,
+} from './lib/startup/command-registry.js';
+import { applyGlobalHelpConventions } from './lib/help.js';
 import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 
@@ -427,6 +424,9 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
 
 /** Present an interactive upgrade prompt (TTY) or a one-line hint (non-TTY). */
 async function promptUpgrade(latestVersion: string): Promise<void> {
+  const { default: ora } = await import('ora');
+  const { confirm, select } = await import('@inquirer/prompts');
+  const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
   if (!isInteractiveTerminal()) {
     console.error(chalk.yellow(`Update available: ${VERSION} -> ${latestVersion}. Run: agents upgrade --yes`));
     return;
@@ -532,6 +532,7 @@ async function checkForUpdates(): Promise<void> {
     try {
       await promptUpgrade(cache!.latestVersion);
     } catch (err) {
+      const { isPromptCancelled } = await import('./commands/utils.js');
       if (isPromptCancelled(err)) return;
       /* prompt error, ignore */
     }
@@ -555,6 +556,24 @@ async function maybeBootstrapShimIntegration(
   if (requestedCommand === 'sync' || requestedCommand === 'refresh-rules') {
     return;
   }
+
+  // Past the documentation/non-TTY guards: only now load the shim + agent
+  // tables this interactive repair flow needs, so fast commands never pay for
+  // them at module-eval time.
+  const { confirm } = await import('@inquirer/prompts');
+  const { AGENTS } = await import('./lib/agents.js');
+  const { getGlobalDefault, listInstalledVersions } = await import('./lib/versions.js');
+  const {
+    addShimsToPath,
+    ensureShimCurrent,
+    ensureVersionedAliasCurrent,
+    getPathShadowingExecutable,
+    getPathSetupInstructions,
+    getShimsDir,
+    isShimsInPath,
+    listAgentsWithInstalledVersions,
+    removeLegacyUserShim,
+  } = await import('./lib/shims.js');
 
   const installedAgents = listAgentsWithInstalledVersions();
   if (installedAgents.length === 0) {
@@ -679,94 +698,54 @@ async function maybeBootstrapShimIntegration(
 }
 
 
-// Register all commands
-registerViewCommand(program);
-registerInspectCommand(program);
-registerFeedbackCommand(program);
-registerCommandsCommands(program);
-registerHooksCommands(program);
-registerSkillsCommands(program);
-registerRulesCommands(program);
+// --- Inline command registrars ----------------------------------------------
+// These commands are defined here rather than in a command module because they
+// close over entry-point-local state (program re-parsing, VERSION, the npm
+// upgrade helpers). The lazy registrar and the all-commands fallback below both
+// call them, so the behavior is identical to the old eager registration.
 
-// Deprecated 'memory' command - hard error, force users to use 'rules'
-program
-  .command('memory', { hidden: true })
-  .allowUnknownOption()
-  .allowExcessArguments()
-  .action(() => {
-    console.error(chalk.red('"agents memory" has been renamed to "agents rules".'));
-    console.error(chalk.gray('Run "agents rules --help" for usage.\n'));
-    process.exit(1);
-  });
-registerPermissionsCommands(program);
+/** Deprecated `memory` command — hard error pointing users at `rules`. */
+function registerMemoryCommand(p: Command): void {
+  p.command('memory', { hidden: true })
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(() => {
+      console.error(chalk.red('"agents memory" has been renamed to "agents rules".'));
+      console.error(chalk.gray('Run "agents rules --help" for usage.\n'));
+      process.exit(1);
+    });
+}
 
-// Deprecated 'perms' alias for 'permissions'
-program
-  .command('perms', { hidden: true })
-  .allowUnknownOption()
-  .allowExcessArguments()
-  .action(async (opts, cmd) => {
-    console.log(chalk.yellow('Deprecated: Use "agents permissions" instead of "agents perms"\n'));
-    // Re-parse with 'permissions' command
-    const args = process.argv.slice(2);
-    args[0] = 'permissions';
-    await program.parseAsync(['node', 'agents', ...args]);
-  });
+/** Deprecated `perms` alias — re-parses as `permissions`. */
+function registerPermsAliasCommand(p: Command): void {
+  p.command('perms', { hidden: true })
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      console.log(chalk.yellow('Deprecated: Use "agents permissions" instead of "agents perms"\n'));
+      // Re-parse with 'permissions' command
+      const args = process.argv.slice(2);
+      args[0] = 'permissions';
+      await program.parseAsync(['node', 'agents', ...args]);
+    });
+}
 
-registerMcpCommands(program);
-registerCliCommands(program);
-registerSubagentsCommands(program);
-registerPluginsCommands(program);
-registerWorkflowsCommands(program);
-registerWorktreeCommands(program);
-registerVersionsCommands(program);
-registerImportCommand(program);
-registerPackagesCommands(program);
-registerDaemonCommands(program);
-registerRoutinesCommands(program);
-registerRunCommand(program);
-registerDefaultsCommands(program);
-registerModelsCommand(program);
-registerPruneCommand(program);
-registerTrashCommands(program);
-registerRestoreCommand(program);
-registerDoctorCommand(program);
+/** Deprecated `exec` alias — re-parses as `run`. */
+function registerExecAliasCommand(p: Command): void {
+  p.command('exec', { hidden: true })
+    .allowUnknownOption()
+    .allowExcessArguments()
+    .action(async () => {
+      console.log(chalk.yellow('Deprecated: Use "agents run" instead of "agents exec"\n'));
+      const args = process.argv.slice(2);
+      args[0] = 'run';
+      await program.parseAsync(['node', 'agents', ...args]);
+    });
+}
 
-// Deprecated 'exec' alias for 'run'
-program
-  .command('exec', { hidden: true })
-  .allowUnknownOption()
-  .allowExcessArguments()
-  .action(async () => {
-    console.log(chalk.yellow('Deprecated: Use "agents run" instead of "agents exec"\n'));
-    const args = process.argv.slice(2);
-    args[0] = 'run';
-    await program.parseAsync(['node', 'agents', ...args]);
-  });
-
-registerProfilesCommands(program);
-registerSecretsCommands(program);
-registerWalletCommands(program);
-registerHelperCommand(program);
-registerMenubarCommands(program);
-registerBetaCommands(program);
-registerSyncCommand(program);
-registerRefreshRulesCommand(program);
-registerDriveCommands(program);
-registerFactoryCommands(program);
-registerUsageCommand(program);
-registerCostCommand(program);
-registerBudgetCommand(program);
-registerAliasCommand(program);
-registerPtyCommands(program);
-registerTmuxCommands(program);
-registerBrowserCommand(program);
-registerComputerCommand(program);
-
-// Deprecated 'jobs' and 'cron' aliases for 'routines'
-for (const alias of ['jobs', 'cron']) {
-  program
-    .command(alias, { hidden: true })
+/** Deprecated `jobs` / `cron` aliases — re-parse as `routines`. */
+function registerJobsCronAliasCommand(p: Command, alias: string): void {
+  p.command(alias, { hidden: true })
     .allowUnknownOption()
     .allowExcessArguments()
     .action(async () => {
@@ -777,12 +756,16 @@ for (const alias of ['jobs', 'cron']) {
     });
 }
 
-program
-    .command('upgrade')
+/** Self-upgrade command (`agents upgrade [version]`). */
+function registerUpgradeCommand(p: Command): void {
+  p.command('upgrade')
     .description('Upgrade agents-cli to the latest version (or a specific [version])')
     .argument('[version]', 'Target version or dist-tag to install (default: latest)')
     .option('-y, --yes', 'Install without an interactive confirmation prompt')
     .action(async (version: string | undefined, options: { yes?: boolean }) => {
+      const { default: ora } = await import('ora');
+      const { confirm } = await import('@inquirer/prompts');
+      const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
       const target = version ?? 'latest';
       let spinner = ora(version ? `Resolving ${NPM_PACKAGE_NAME}@${target}...` : 'Checking for updates...').start();
       try {
@@ -828,13 +811,116 @@ program
         console.log(chalk.gray(`Run manually: agents upgrade ${version ? version + ' ' : ''}--yes`));
       }
     });
+}
 
-registerPullCommand(program);
-registerPushCommand(program);
-registerRepoCommands(program);
-registerSetupCommand(program);
+// --- Lazy registration orchestration -----------------------------------------
 
-applyGlobalHelpConventions(program);
+/** Import a command module via its loader and register it on the program. */
+async function reg(loader: ModuleLoader): Promise<void> {
+  (await loader())(program);
+}
+
+/**
+ * Register exactly the command(s) the requested top-level name needs.
+ * Returns false when the name maps to no known command (typo / unknown) so the
+ * caller can fall back to registering everything for spellcheck.
+ *
+ * Lazy commands (sessions/teams/cloud) are intentionally NOT handled here — they
+ * must register after applyGlobalHelpConventions to match main's ordering.
+ */
+async function registerEagerForRequest(name: string): Promise<boolean> {
+  switch (name) {
+    case 'memory':
+      registerMemoryCommand(program);
+      return true;
+    case 'perms':
+      // The action re-parses as `permissions`, so that target must exist too.
+      registerPermsAliasCommand(program);
+      await reg(loadPermissions);
+      return true;
+    case 'exec':
+      registerExecAliasCommand(program);
+      await reg(loadRun);
+      return true;
+    case 'jobs':
+    case 'cron':
+      registerJobsCronAliasCommand(program, name);
+      await reg(loadRoutines);
+      return true;
+    case 'upgrade':
+      registerUpgradeCommand(program);
+      return true;
+  }
+
+  const loaders = COMMAND_LOADERS[name];
+  if (!loaders) return false;
+  for (const loader of loaders) await reg(loader);
+  return true;
+}
+
+/**
+ * Register every command in the EXACT order main does (old src/index.ts lines
+ * 691-844), including the inline deprecated aliases. Used only on the slow paths
+ * (unknown command spellcheck, "did you mean" auto-correct) where the full set
+ * of names — and their registration order, which breaks ties in the suggestion
+ * picker — must match main byte-for-byte.
+ */
+async function registerAllEagerCommands(): Promise<void> {
+  await reg(loadView);
+  await reg(loadInspect);
+  await reg(loadFeedback);
+  await reg(loadCommands);
+  await reg(loadHooks);
+  await reg(loadSkills);
+  await reg(loadRules);
+  registerMemoryCommand(program);
+  await reg(loadPermissions);
+  registerPermsAliasCommand(program);
+  await reg(loadMcp);
+  await reg(loadCli);
+  await reg(loadSubagents);
+  await reg(loadPlugins);
+  await reg(loadWorkflows);
+  await reg(loadWorktree);
+  await reg(loadVersions);
+  await reg(loadImport);
+  await reg(loadPackages);
+  await reg(loadDaemon);
+  await reg(loadRoutines);
+  await reg(loadRun);
+  await reg(loadDefaults);
+  await reg(loadModels);
+  await reg(loadPrune);
+  await reg(loadTrash);
+  await reg(loadRestore);
+  await reg(loadDoctor);
+  registerExecAliasCommand(program);
+  await reg(loadProfiles);
+  await reg(loadSecrets);
+  await reg(loadWallet);
+  await reg(loadHelper);
+  await reg(loadMenubar);
+  await reg(loadBeta);
+  await reg(loadSync);
+  await reg(loadRefreshRules);
+  await reg(loadDrive);
+  await reg(loadFactory);
+  await reg(loadUsage);
+  await reg(loadCost);
+  await reg(loadBudget);
+  await reg(loadAlias);
+  await reg(loadPty);
+  await reg(loadTmux);
+  await reg(loadBrowser);
+  await reg(loadComputer);
+  registerJobsCronAliasCommand(program, 'jobs');
+  registerJobsCronAliasCommand(program, 'cron');
+  registerUpgradeCommand(program);
+  await reg(loadPull);
+  await reg(loadPush);
+  await reg(loadRepo);
+  await reg(loadSetup);
+}
 
 /** Calculate the Levenshtein edit distance between two strings. */
 function levenshtein(a: string, b: string): number {
@@ -885,49 +971,61 @@ program.on('command:*', (operands) => {
   process.exit(1);
 });
 
-// Run update check on EVERY invocation before parsing
-await checkForUpdates();
+// Parse the invocation shape up front: the first non-flag token is the command,
+// and the doc flags (--version/--help/-h) drive both the registration strategy
+// and whether the update check + background sync run at all.
+const passedArgs = process.argv.slice(2);
+const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
+// Help and version output are pure documentation — they must never gate on
+// setup, otherwise `agents <cmd> --help` becomes useless on a fresh box.
+const helpOrVersionRequested = passedArgs.some(
+  (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
+);
 
-// Surface any "behind upstream" notices from the previous detached sync, then
-// fire-and-forget the next background sync. System repo gets a real fast-forward
-// pull (read-only locally, safe). User repo and extras get fetch-only + a
-// status marker that we'll print on the *next* invocation.
-const { spawnDetachedSync } = await import('./lib/auto-pull.js');
-spawnDetachedSync();
+// Register only the command(s) this invocation actually uses. Lazy commands
+// (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
+const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
+if (requestedCommand !== undefined && !isLazyRequest) {
+  const known = await registerEagerForRequest(requestedCommand);
+  if (!known) {
+    // Unknown top-level command: register the full tree so the "did you mean"
+    // spellcheck and edit-distance-1 auto-correct (the command:* handler above)
+    // see the same candidate set — and ordering — as main.
+    await registerAllEagerCommands();
+  }
+}
+// When requestedCommand is undefined (bare invocation, --version, --help, -h) no
+// command modules are needed: --version is built in and the root help text is a
+// static string.
+
+// Mirror main: help conventions are applied after the eager command tree and
+// before the lazy commands, so the latter inherit the root's custom help
+// formatter instead of getting the per-command recursive pass.
+applyGlobalHelpConventions(program);
+
+// Lazy commands pull in the SQLite-backed session/cloud stack; register them
+// only when explicitly requested, keeping lightweight commands off that path.
+if (isLazyRequest) {
+  for (const loader of COMMAND_LOADERS[requestedCommand!]) await reg(loader);
+}
+
+// Pure documentation paths (--version / --help / -h) return immediately: skip
+// the update check (PATH scan + cache read) and the detached background sync
+// (spawns a child process) that every other invocation runs.
+if (!helpOrVersionRequested) {
+  // Run update check before parsing so the upgrade notice/prompt precedes output.
+  await checkForUpdates();
+
+  // Surface any "behind upstream" notices from the previous detached sync, then
+  // fire-and-forget the next background sync. System repo gets a real fast-forward
+  // pull (read-only locally, safe). User repo and extras get fetch-only + a
+  // status marker that we'll print on the *next* invocation.
+  const { spawnDetachedSync } = await import('./lib/auto-pull.js');
+  spawnDetachedSync();
+}
 
 // First-run experience: no args + no config yet + TTY -> launch interactive setup.
 // Skipped when stdin/stdout isn't a terminal (CI, pipes) or when user passes any args.
-const passedArgs = process.argv.slice(2);
-const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
-
-/**
- * Lazily register command trees that pull in the SQLite-backed session/cloud
- * stack. This keeps lightweight commands like `agents view` from loading the
- * DB layer during CLI startup.
- */
-async function registerLazyCommands(): Promise<void> {
-  switch (requestedCommand) {
-    case 'sessions': {
-      const { registerSessionsCommands } = await import('./commands/sessions.js');
-      registerSessionsCommands(program);
-      break;
-    }
-    case 'teams': {
-      const { registerTeamsCommands } = await import('./commands/teams.js');
-      registerTeamsCommands(program);
-      break;
-    }
-    case 'cloud': {
-      const { registerCloudCommands } = await import('./commands/cloud.js');
-      registerCloudCommands(program);
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-await registerLazyCommands();
 const metaFilePath = path.join(getUserAgentsDir(), 'agents.yaml');
 const firstRun =
   passedArgs.length === 0 &&
@@ -937,6 +1035,7 @@ const firstRun =
 
 if (firstRun) {
   try {
+    const { runSetup } = await import('./commands/setup.js');
     await runSetup(program);
   } catch (err) {
     if (!(err instanceof Error && err.name === 'ExitPromptError')) {
@@ -949,12 +1048,6 @@ if (firstRun) {
 // Every command requires the system repo to be cloned first. `setup` is the
 // only exemption — it's the command that does the cloning.
 const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help']);
-
-// Help and version output are pure documentation — they must never gate on
-// setup, otherwise `agents <cmd> --help` becomes useless on a fresh box.
-const helpOrVersionRequested = passedArgs.some(
-  (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
-);
 
 // Fold legacy ~/.agents-system/ into ~/.agents/.system/ BEFORE ensureInitialized
 // runs. ensureInitialized checks for .git inside the new path; if the user is
