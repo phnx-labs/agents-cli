@@ -53,6 +53,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Browser](browser.md) | Drive Chrome / Brave / Edge / Electron via CDP. Profiles, screenshots, click/type/evaluate, remote endpoints. |
 | [PTY](pty.md) | Persistent pseudo-terminals for REPLs and TUIs — start, exec, screen-snapshot, signal. |
 | [Computer](computer.md) | macOS Accessibility automation — screenshot the active app, click by label. |
+| [Menu bar](menubar.md) | macOS status item — live sessions, agents awaiting input, routines, + new session. Auto-enabled; `agents menubar enable/disable/status`. |
 
 ---
 
