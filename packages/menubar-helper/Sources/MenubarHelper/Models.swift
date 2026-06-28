@@ -17,3 +17,55 @@ struct Routine: Decodable {
     let lastRunStartedAt: String?
     let lastRunCompletedAt: String?
 }
+
+struct MenuAgent {
+    let id: String
+    let label: String
+}
+
+struct RecentSession: Decodable {
+    let id: String?
+    let shortId: String?
+    let agent: String
+    let timestamp: String?
+    let project: String?
+    let cwd: String?
+    let filePath: String?
+    let gitBranch: String?
+    let topic: String?
+    let version: String?
+}
+
+struct BrowserTask {
+    let name: String
+    let profile: String
+    let tabCount: Int
+    let createdAt: Double
+    let pid: Int
+}
+
+struct DoctorOverview: Decodable {
+    let clis: [String: DoctorCli]?
+    let sync: [DoctorSync]?
+    let orphans: [DoctorOrphan]?
+}
+
+struct DoctorCli: Decodable {
+    let installed: Bool
+    let path: String?
+    let error: String?
+}
+
+struct DoctorSync: Decodable {
+    let agent: String
+    let version: String?
+    let status: String
+}
+
+struct DoctorOrphan: Decodable {
+    let agent: String
+    let version: String?
+    let commands: Int?
+    let skills: Int?
+    let hooks: Int?
+}

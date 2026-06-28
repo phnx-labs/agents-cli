@@ -10,8 +10,9 @@ import SQLite3
 //   terminals : ~/.agents/.cache/terminals/live-terminals.json
 //   teams     : ~/.agents/.history/teams/agents/<id>/meta.json
 //   cloud     : ~/.agents/.cache/cloud/tasks.db  (SQLite)
+//   browser   : ~/.agents/.cache/browser/<profile>/tasks.json
 //   attention : ~/.agents/.cache/state/attention/<sessionId>  (written by the Notification hook)
-//   installed : ~/.agents/.history/versions/<agent>/
+//   roster    : fixed product-supported order
 enum SessionStatus: String {
     case running
     case idle
@@ -32,14 +33,59 @@ enum LocalState {
     private static let home = NSHomeDirectory()
     private static let fm = FileManager.default
     private static let activeWindowMs: Double = 2 * 60_000  // matches ACTIVE_MTIME_WINDOW_MS
+    static let desiredAgents: [MenuAgent] = [
+        MenuAgent(id: "claude", label: "Claude"),
+        MenuAgent(id: "codex", label: "Codex"),
+        MenuAgent(id: "grok", label: "Grok-Cli"),
+        MenuAgent(id: "kimi", label: "Kimi-Cli"),
+        MenuAgent(id: "antigravity", label: "Antigravity"),
+        MenuAgent(id: "droid", label: "Droid"),
+        MenuAgent(id: "opencode", label: "OpenCode"),
+    ]
 
     static func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
 
-    // MARK: Installed agents (cheap: list version dirs)
+    // MARK: Product-supported roster
     static func installedAgents() -> [String] {
-        let dir = "\(home)/.agents/.history/versions"
-        let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
-        return names.filter { !$0.hasPrefix(".") }.sorted()
+        desiredAgents.map(\.id)
+    }
+
+    static func agentLabel(_ id: String) -> String {
+        desiredAgents.first { $0.id == normalizeAgent(id) }?.label ?? id
+    }
+
+    static func normalizeAgent(_ raw: String) -> String {
+        let v = raw.lowercased().replacingOccurrences(of: "_", with: "-")
+        switch v {
+        case "grok-cli": return "grok"
+        case "kimi-cli": return "kimi"
+        case "open-code": return "opencode"
+        default: return v
+        }
+    }
+
+    // MARK: Browser sessions
+    static func browserTasks(limit: Int = 3) -> [BrowserTask] {
+        let base = "\(home)/.agents/.cache/browser"
+        let profiles = (try? fm.contentsOfDirectory(atPath: base)) ?? []
+        var out: [BrowserTask] = []
+
+        for profile in profiles where !profile.hasPrefix(".") {
+            let path = "\(base)/\(profile)/tasks.json"
+            guard let data = fm.contents(atPath: path),
+                  let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            for (key, raw) in root {
+                guard let task = raw as? [String: Any] else { continue }
+                guard let pid = int(task["pid"]), pid > 0, pidAlive(pid) else { continue }
+                let tabs = task["tabs"] as? [String: Any]
+                let name = string(task["name"]) ?? key
+                let createdAt = double(task["createdAt"]) ?? 0
+                out.append(BrowserTask(name: name, profile: profile, tabCount: tabs?.count ?? 0,
+                                       createdAt: createdAt, pid: pid))
+            }
+        }
+
+        return Array(out.sorted { $0.createdAt > $1.createdAt }.prefix(limit))
     }
 
     // MARK: Attention sentinels (written by the Notification hook)
@@ -174,5 +220,23 @@ enum LocalState {
     private static func col(_ stmt: OpaquePointer?, _ i: Int32) -> String? {
         guard let c = sqlite3_column_text(stmt, i) else { return nil }
         return String(cString: c)
+    }
+
+    private static func int(_ value: Any?) -> Int? {
+        if let i = value as? Int { return i }
+        if let n = value as? NSNumber { return n.intValue }
+        if let s = value as? String { return Int(s) }
+        return nil
+    }
+
+    private static func double(_ value: Any?) -> Double? {
+        if let d = value as? Double { return d }
+        if let n = value as? NSNumber { return n.doubleValue }
+        if let s = value as? String { return Double(s) }
+        return nil
+    }
+
+    private static func string(_ value: Any?) -> String? {
+        value as? String
     }
 }

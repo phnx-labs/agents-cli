@@ -58,6 +58,16 @@ enum AgentsCLI {
         return (try? JSONDecoder().decode([Routine].self, from: data)) ?? []
     }
 
+    static func recentSessions(limit: Int = 3) -> [RecentSession] {
+        guard let data = capture(argv(["sessions", "--all", "--limit", "\(limit)", "--json"])) else { return [] }
+        return (try? JSONDecoder().decode([RecentSession].self, from: data)) ?? []
+    }
+
+    static func doctorOverview() -> DoctorOverview? {
+        guard let data = capture(argv(["doctor", "--json"])) else { return nil }
+        return try? JSONDecoder().decode(DoctorOverview.self, from: data)
+    }
+
     // MARK: Actions
     // New interactive session: open a Terminal window running `agents run <agent>`.
     // A status-bar click can't host a TUI, so hand off to the user's terminal.
