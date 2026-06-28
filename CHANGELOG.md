@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+**Fix: migrations + menu-bar self-heal were silently disabled on Homebrew-node installs**
+
+- The "is this a dev build?" check walked `dirname(dirname(argv[1]))` looking for a `.git`, without resolving the bin symlink. On a Homebrew-node setup `agents` is `/opt/homebrew/bin/agents`, so it walked up to `/opt/homebrew` — **which is itself a git repo** — and false-positived as a dev build. Dev builds auto-set `AGENTS_SKIP_MIGRATION=1`, which gates **both** one-shot migrations **and** the menu-bar upgrade self-heal. Net effect: every Homebrew-node user ran with migrations and the menu-bar refresh permanently off.
+- Detection now `realpath`s the entrypoint (so a symlinked bin resolves into the real package dir) and requires the `.git`'s repo root to actually be the `@phnx-labs/agents-cli` package — an unrelated ancestor repo no longer counts. Extracted to `src/lib/startup/dev-build.ts` with tests covering the Homebrew symlink layout, a real checkout, and unrelated-ancestor cases.
+
 **Secrets default policy is now `daily` (one Touch ID per ~24h), not `always`**
 
 - The default prompt policy for bundles without an explicit one flipped from `always` (Touch ID on *every* read) to **`daily`** (one prompt, then held ~24h until screen-lock / sleep / logout). This is the fix for the prompt storm: a background reader like sessions-sync hammering a bundle now costs one Touch ID per ~24h instead of one per read.
