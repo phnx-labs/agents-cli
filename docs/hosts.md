@@ -114,8 +114,11 @@ agents run <agent> "<task>" --on <host>
   │
   ├─ resolveHost(name)         tailscale status --json → online? OS? addr   [Phase 1]
   │
-  ├─ ssh <node> 'agents run <agent> --print "<task>"'                       [Phase 1]
-  │     reuse src/lib/browser/drivers/ssh.ts (runSSHCommand, shellQuote)
+  ├─ ensureHostReady(name)     config (git/agents pull) + agent installed + branch [Phase 1]
+  │
+  ├─ ssh <node> 'agents run <agent> --json "<task>"'                        [Phase 1]
+  │     reuse src/lib/browser/drivers/ssh.ts (shellQuote exported; the
+  │     runSSHCommand/tunnel helpers are module-private today — small extract)
   │     remote agents-cli builds the harness argv (buildExecCommand, exec.ts)
   │
   ├─ progress  ◀── incrementally tail the REMOTE transcript file           [Phase 1]
@@ -196,9 +199,12 @@ status` peer whose HostName == name > error with the candidate list.
 
 `src/lib/browser/drivers/ssh.ts` already has the whole pattern: `runSSHCommand`,
 `shellQuote`, `startSSHTunnel`, `ensureRemoteBrowser`, with
-`StrictHostKeyChecking=accept-new`, `BatchMode=yes`, `ConnectTimeout`. A
-`src/lib/hosts/dispatch.ts` calls the same helpers to run the remote command and
-inherit stdout/stderr/exit. SSH is the protocol — it gives auth + transport +
+`StrictHostKeyChecking=accept-new`, `BatchMode=yes`, `ConnectTimeout` (verified at
+`ssh.ts:132-137`). Note: only `shellQuote` is currently `export`ed; `runSSHCommand`
+/ `startSSHTunnel` / `ensureRemoteBrowser` are module-private, so step one is a
+small lift — extract the ssh-exec primitive into a shared helper both the browser
+driver and `src/lib/hosts/dispatch.ts` import (no behavior change). `dispatch.ts`
+then calls it to run the remote command and inherit stdout/stderr/exit. SSH is the protocol — it gives auth + transport +
 stream + exit code; no custom `command_output`/`command_done` framing (which is
 what the rush daemon had to invent over its WebSocket).
 
@@ -207,11 +213,15 @@ Auth: the existing tailnet `ssh-keys` bundle, or Tailscale SSH (`tailscale ssh
 
 ### 3. Execution — remote `agents run` (harness-agnostic)
 
-The remote command is literally `agents run <agent> --print "<task>"` (+ `--mode`,
-`--model`, `--json`, `--quiet`). `agents run` already produces the right headless
-argv per harness via `buildExecCommand` (`src/lib/exec.ts`), so **every harness,
-mode, and secret-injection path works remotely for free** — provided agents-cli +
-that agent are installed and authed on the box (`agents hosts check` verifies).
+The remote command is literally `agents run <agent> "<task>" --json` (+ `--mode`,
+`--model`, `--quiet`). (`--json`/`--quiet`/`--mode`/`--model` are the real flags on
+`agents run`, registered in `src/commands/exec.ts:155-182`; there is no user-facing
+`--print` — the per-harness headless/`--print` mapping is internal to
+`buildExecCommand`.) `agents run` already produces the right headless argv per
+harness via `buildExecCommand` (`src/lib/exec.ts:522`, covering all 12 harnesses),
+so **every harness, mode, and secret-injection path works remotely for free** —
+provided agents-cli + that agent are installed and authed on the box, which
+`ensureHostReady` / `agents hosts check` guarantee (see Context, below).
 
 Workspace (where the run executes) is a deliberate scoping choice — see Open
 Questions. Phase 1 default: a caller-specified `--remote-cwd` (or the repo's
@@ -262,6 +272,55 @@ transcriptPath, offset, status}` in the existing SQLite store
 (`src/lib/cloud/store.ts`) and streams via the transcript tailer above. This makes
 "fleet observability" free and unifies the dispatch surface.
 
+## Context — what travels to the host (and what doesn't)
+
+An agent host is useless until the user's context is on it — but "sync everything"
+is the wrong instinct. The `.history` tree (versions, runs, sessions, backups) is
+large and almost all of it is irrelevant to any one task; bulk-copying it would
+*recreate the exact filesystem/IO storm the incident was about*, just on a second
+machine. The right model decomposes context into four layers, each carried by a
+mechanism that **already exists** — there is no new "sync engine":
+
+| Layer | How it gets there | Mechanism (today) |
+|---|---|---|
+| **`~/.agents` config** (commands, skills, hooks, memory) | The DotAgents user repo is git-backed — the box runs `agents pull` (or `git pull`). One-time/idempotent bootstrap, **not** a per-dispatch push. | `agents pull` / `agents repo pull`; bootstrapped + verified by `ensureHostReady` / `hosts check` |
+| **Working codebase** | Phase 1: committed branch → `git fetch` + checkout on the box (per-repo, caller's `--remote-cwd`/`--branch`). Phase 2: uncommitted working tree → `rsync` over the tailnet (the differentiator). | per-repo git; rsync (Phase 2) |
+| **Secrets** | Persistent boxes self-auth once via `agents secrets` (keychain). Blank/leased boxes get an on-demand, never-on-disk injection. | `agents secrets export <bundle> --to-ssh --host <t>` (`secrets.ts:1089-1097`, env over ssh stdin) |
+| **Sessions / `.history`** | **Not bulk-copied.** Recall is exposed as a *remote command*, not a file sync (below). | the routines daemon + `agents sessions`; selective `session/sync/` for the rare "make this transcript present" case |
+
+### `ensureHostReady(name)` — the Phase 1 readiness precondition
+
+Before dispatch, ensure the box can actually run the agent. This replaces the
+heavier "syncContext" idea — most of it is already solved by git + the existing
+sync substrate, so the precondition is thin and mostly one-time/cached:
+
+1. **agents-cli present** — `hosts check` already probes `agents --version`; if
+   absent, bootstrap (mirror `scripts/sandbox.sh:218-239`).
+2. **Config current** — `agents pull` on the box so `~/.agents` matches (git-backed;
+   cheap, idempotent).
+3. **Agent installed** — remote `agents list` confirms the requested harness exists.
+4. **Codebase present** — the target repo/branch is checked out at the run cwd
+   (`git fetch` + checkout; no working-tree copy in Phase 1).
+
+It does **not** copy `.history`, and it does **not** push secrets unless asked —
+persistent hosts are authed once, out of band.
+
+### Session recall is recall-as-RPC, not recall-as-copy
+
+The killer detail: you almost never want another machine's `.history` *on disk* —
+you want to *query* it. The routines daemon can already run commands on a host, so
+recall becomes a remote call:
+
+```
+agents hosts sessions <box> --search "<topic>"   # runs `agents sessions` ON the box, returns hits
+```
+
+The agent on box A searches box B's history without ever copying it — the same
+"expose a capability over the daemon" shape this design uses for dispatch. For the
+narrow case where a transcript must actually be *present* on the target (resume /
+handoff, Phase 2), the existing CRDT G-Set / R2 substrate (`src/lib/session/sync/`)
+replicates **that one session** selectively — never the whole tree.
+
 ## Phase 2 — session handoff (the differentiator)
 
 `agents run --resume <session-id> --on <host>` — move a live session, *including
@@ -277,9 +336,11 @@ uncommitted work*, to another box and continue:
    transcript (Phase 1 §4) and sending follow-ups over SSH — the "remote-control"
    UX, built on the *existing* daemon, not a new one.
 
-Honest hard parts (consistent across the whole field): secrets/env don't travel
-(the target needs its own bundles), model/provider continuity, and concurrent-
-session collisions on one branch. The doc will spell these out before Phase 2
+Honest hard parts (consistent across the whole field): model/provider continuity
+and concurrent-session collisions on one branch. Secrets are handled by the Context
+model above (persistent hosts self-auth; blank/leased hosts take an on-demand
+`secrets export --to-ssh` injection) — not an unsolved wall, but the bundle must
+exist on or be pushed to the target. The doc will spell these out before Phase 2
 implementation.
 
 ## Non-goals / what we explicitly will NOT build
@@ -302,7 +363,7 @@ implementation.
 The Resource Report is also a list of things the remote run must NOT do (or it
 just relocates the storm):
 
-- **Headless only** — `agents run --print/--json`, never a remote interactive TTY.
+- **Headless only** — `agents run --json`, never a remote interactive TTY.
   Progress is summarized state from the transcript, not a live char stream.
 - **Bound concurrency** — cap simultaneous agents per host; a host's value is
   finite coordination capacity, not infinite parallelism.
@@ -311,6 +372,18 @@ just relocates the storm):
   respect ignore boundaries and avoid scanning generated/worktree trees.
 - **Don't sync junk** — a working-tree `rsync` (Phase 2) must exclude
   `node_modules`, `.gocache`, build caches, nested worktrees.
+
+## Resolved decisions
+
+- **Naming** — `agents hosts` (list/check/add) + `agents run --on <host>`. (The
+  singular `agents computer` macOS-accessibility command is unrelated and stays.)
+- **Provider model** — keep tailnet-SSH dispatch as its own clean path; fold
+  *tracked* host runs into the existing cloud store as a `host` provider so
+  `agents cloud list/status/logs` see them (§6). No big `CloudProvider →
+  AgentHostProvider` rename — observability is unified without it.
+- **Context** — no bulk `.history` sync; `ensureHostReady` + recall-as-RPC over the
+  daemon (see Context). Config via git, codebase via branch (P1) / rsync (P2),
+  secrets via self-auth or `--to-ssh`.
 
 ## Open questions (decide before Phase 1 build)
 
@@ -324,12 +397,10 @@ just relocates the storm):
    on Windows (shims, paths)? Needs a verification pass.
 4. **GPU routing** — should `--on` accept a capability selector (e.g. `--on
    gpu`) that picks an online Spark, not just a named host?
-5. **Surface for tracked runs** — keep one-offs on `agents run --on` and only
-   *tracked* runs in `agents cloud` (a `host` provider), or unify?
-6. **crabbox integration depth** — shell out to `crabbox warmup/ssh/stop` for
+5. **crabbox integration depth** — shell out to `crabbox warmup/ssh/stop` for
    leased hosts (leaning yes), or a tighter library binding? And `--on new`
    semantics: default provider/class, auto-release on idle vs explicit `stop`.
-7. **Concurrency cap** — default max simultaneous agents per host (the incident
+6. **Concurrency cap** — default max simultaneous agents per host (the incident
    says "bound it"); per-host override in the `hosts:` overlay?
 
 ## Phasing & verification
@@ -355,8 +426,11 @@ just relocates the storm):
 | Per-agent transcript dirs | `src/lib/session/discover.ts:getAgentSessionDirs` |
 | Cross-machine transcript sync | `src/lib/session/sync/` (CRDT G-Set / R2) |
 | Scheduling | `src/lib/daemon.ts` (routines scheduler) |
-| Task tracking store | `src/lib/cloud/store.ts` |
+| Task tracking store | `src/lib/cloud/store.ts` (free-text `provider`, reserved `provider_data`) |
 | Config schema | `src/lib/types.ts` (`Meta`) + `src/lib/state.ts` (`readMeta`) |
+| Config bootstrap on host | `agents pull` (git-backed) + `scripts/sandbox.sh:218-239` |
+| Secret injection (on demand) | `src/commands/secrets.ts:1089-1097` (`--to-ssh`, env over ssh stdin) + `SSH_TARGET_RE`/`assertValidSshTarget` (`secrets.ts:189-195`) |
+| Selective transcript replication | `src/lib/session/sync/` (per-session, not whole tree) |
 
 ## Prior art studied
 
