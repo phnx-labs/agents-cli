@@ -4,8 +4,9 @@
 > before any code lands.
 
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
-*your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — over your
-own tailnet, with no central service to run or pay for:
+*your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed
+by name from a small local registry, over plain SSH, with no central service to
+run or pay for:
 
 ```
 agents run claude "fix the auth bug"   --on mac-mini
@@ -66,27 +67,35 @@ so directly — the relay exists "so no inbound ports / VPN required" (i.e.
 - Factory BYOM: outbound WebSocket → Factory relay. <https://docs.factory.ai/cli/features/droid-computers>
 - Anthropic self-hosted: outbound HTTPS poll of a work queue. <https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes>
 
-We have a VPN: a Tailscale tailnet already connects these machines (the `ssh-keys`
-bundle already unlocks `mac-mini` et al.). On a tailnet the entire broker layer
-collapses — verified against Tailscale's own APIs:
+We don't have their constraint. These are **your** machines, few in number, that
+you already know about — so discovery isn't a problem to solve, it's a **list you
+write down**. The entire broker layer collapses to a small local registry plus
+SSH:
 
-| What a relay-broker provides | Tailscale gives it for free |
+| What a relay-broker provides | What we use instead |
 |---|---|
-| connection registry (name → address) | `tailscale status --json` → `PeerStatus{HostName, DNSName, OS, TailscaleIPs}` |
-| heartbeat / "is it online?" | `PeerStatus.Online` (pushed live by the coordination server — no daemon of ours) |
-| NAT traversal | WireGuard + DERP, zero config |
-| SSH key distribution / rotation | Tailscale SSH via ACL tags, or the existing `ssh-keys` bundle |
-| identity / always-on nodes | tagged nodes, key-expiry disabled |
+| connection registry (name → address) | a `hosts:` map in `agents.yaml` you maintain (`name → {address, user, caps}`) |
+| heartbeat / "is it online?" | checked **lazily, on dispatch** — one SSH probe to the *one* host you're targeting, never a fleet-wide poll |
+| NAT traversal | whatever already makes the address reachable — LAN, or a tailnet/VPN you happen to run. Out of scope for agents-cli. |
+| SSH key distribution / rotation | the existing `ssh-keys` bundle / your own `~/.ssh` |
+| identity / always-on nodes | a registry entry; the box is as always-on as you keep it |
 
 So this prior art's relay (rush's `prix/api/src/computers/relay.ts` + the Go daemon's
 outbound WebSocket in `rush/cli/internal/daemon`) is exactly the part we **don't**
-need. What a free CLI needs is: read `tailscale status --json`, filter `Online`,
-`ssh <node> 'agents run …'`. No metadata service, no DB, no heartbeat.
+need — and neither do we need a *discovery* layer that enumerates a whole network.
+What a free CLI needs is: resolve a **name** in the registry → `ssh <address>
+'agents run …'`. No metadata service, no DB, no heartbeat, no fleet enumeration.
 
-Refs: `tailscale status --json` → `ipnstate.PeerStatus`
-(<https://pkg.go.dev/tailscale.com/ipn/ipnstate>); `Online`/`LastSeen` semantics
-(<https://github.com/tailscale/tailscale/issues/16584>); Tailscale SSH
-(<https://tailscale.com/docs/features/tailscale-ssh>).
+**On Tailscale specifically (deliberately not a dependency).** A tailnet is a great
+*transport* — if a box is only reachable over yours, you register its `.ts.net`
+name as the `address` and SSH rides the tailnet with zero extra code. But agents-cli
+will **not** call `tailscale status`, enumerate peers, or connect to nodes you
+didn't name. Treating "the tailnet" as the fleet is the wrong default: it pulls in
+machines you don't want to dispatch to and assumes a VPN that not every host needs.
+The registry is the source of truth; Tailscale is one optional way an `address`
+becomes reachable. (A convenience importer — `agents hosts import --from-tailscale`
+— can *prefill* registry entries from `tailscale status` on request; it reads names
+and connects to nothing.)
 
 ## What the field actually does (and where we can be better)
 
@@ -102,19 +111,20 @@ Remote-agent UX has converged on two modes:
   block-diff snapshots, only inside its own cloud (<https://cognition.com/blog/blockdiff>).
 
 The uncommitted-changes wall exists because those tools **can't reach into your
-machine** — no VPN, multi-tenant. We don't have that constraint. Over the tailnet
-we control both ends, so a handoff can `rsync` the dirty working tree directly —
-no "clean git required," no VM snapshots. That is the differentiated capability
-(Phase 2), and it's something Claude Teleport / Cursor have open issues asking for.
+machine** — no direct network path, multi-tenant. We don't have that constraint: we
+control both ends and have an SSH path to each host, so a handoff can `rsync` the
+dirty working tree directly — no "clean git required," no VM snapshots. That is the
+differentiated capability (Phase 2), and it's something Claude Teleport / Cursor
+have open issues asking for.
 
 ## Architecture
 
 ```
 agents run <agent> "<task>" --on <host>
   │
-  ├─ resolveHost(name)         tailscale status --json → online? OS? addr   [Phase 1]
+  ├─ resolveHost(name)         registry lookup in agents.yaml → {address,user,caps} [Phase 1]
   │
-  ├─ ensureHostReady(name)     config (git/agents pull) + agent installed + branch [Phase 1]
+  ├─ ensureHostReady(name)     lazy SSH probe (online?) + config + agent + branch  [Phase 1]
   │
   ├─ ssh <node> 'agents run <agent> --json "<task>"'                        [Phase 1]
   │     reuse src/lib/browser/drivers/ssh.ts (shellQuote exported; the
@@ -130,13 +140,14 @@ agents run <agent> "<task>" --on <host>
         agents cloud list / status / logs see host runs
 ```
 
-### Host sources — owned (tailnet) + leased on demand (crabbox)
+### Host sources — owned (registered) + leased on demand (crabbox)
 
-A "host" comes from one of two sources, but both reduce to **a tailnet SSH
-target**, so the dispatch path (§2–§4) is identical:
+A "host" comes from one of two sources, but both reduce to **a named SSH target in
+the registry**, so the dispatch path (§2–§4) is identical:
 
-- **Owned, always-on** — your mac-mini, win-mini, DGX Sparks. Discovered live via
-  `tailscale status` (§1). Zero provisioning; they're just there.
+- **Owned, always-on** — your mac-mini, win-mini, DGX Sparks. You register them
+  once in `agents.yaml` (§1); the `address` is a LAN host, a tailnet name, or a
+  public host — whatever is SSH-reachable. Zero provisioning; they're just there.
 - **Leased, on demand** — ephemeral cloud machines provisioned by **crabbox**,
   which is already installed and already a multi-cloud leasing layer:
   `--provider hetzner|aws|azure|gcp|proxmox|e2b|modal|sprites|daytona|…`
@@ -155,47 +166,57 @@ agents run codex  "gpu eval"     --on new:aws        # provider/class selector �
 agents run droid  "triage"       --on mac-mini       # owned, always-on
 ```
 
-`--on new[:<provider/class>]` leases via crabbox, runs headless, and releases on
-idle/TTL. agents-cli **does not** reimplement provisioning — crabbox owns lease
-lifecycle, cost, multi-cloud, and the tailnet join; `hosts` owns *dispatch*. The
-overlap is deliberate: `crabbox run --provider ssh --static-host mac.local` shows
-crabbox already unifies leased + static SSH targets; we layer harness-agnostic
-agent dispatch + transcript-tail progress on top.
+`--on new[:<provider/class>]` leases via crabbox, registers the leased box as a
+**transient registry entry** (its `crabbox ssh` address), runs headless, and
+releases on idle/TTL — tearing the entry down on release. agents-cli **does not**
+reimplement provisioning — crabbox owns lease lifecycle, cost, and multi-cloud;
+`hosts` owns *dispatch*. The overlap is deliberate: `crabbox run --provider ssh
+--static-host mac.local` shows crabbox already unifies leased + static SSH targets;
+we layer harness-agnostic agent dispatch + transcript-tail progress on top.
 
 Open question (carried below): how thin is the crabbox integration — shell out to
-the `crabbox` CLI (`warmup`/`ssh`/`stop`), or treat crabbox-leased boxes purely as
-tailnet peers once they've joined? (Leaning: shell out for lease/release, then the
-common tailnet-SSH path for everything else.)
+the `crabbox` CLI (`warmup`/`ssh`/`stop`) and register the resulting SSH address,
+or a tighter binding? (Leaning: shell out for lease/release, then the common
+named-SSH dispatch path for everything else.)
 
-### 1. Discovery — Tailscale-native (no registry required)
+### 1. Discovery — an explicit registry (metadata you write down)
 
-The fleet **is** `tailscale status --json`. A host resolves to the peer whose
-`HostName`/`DNSName` matches; we read `Online` (gate dispatch on it), `OS`, and
-`TailscaleIPs[0]`. `agents hosts` is then a thin layer:
-
-- `agents hosts list` — table of tailnet peers: name, OS, online, IP, tags.
-- `agents hosts add <name> …` — *optional* overlay in `agents.yaml` for a friendly
-  alias, a non-default ssh user, or a capability tag (e.g. `gpu: dgx-spark`) the
-  tailnet doesn't carry. Pure sugar — discovery works with zero config.
-- `agents hosts check <name>` — ssh probe + remote `agents --version` + remote
-  `agents list` (which agents are installed there).
-
-Implementation note: the `tailscale status --json` schema is documented
-"subject to change," so the reader must be defensive (parse the fields we use,
-tolerate the rest). A small `src/lib/hosts/tailscale.ts` wraps it.
-
-`agents.yaml` overlay (optional):
+The fleet is a curated `hosts:` map in `agents.yaml` — the few machines *you* own,
+with the metadata a driver agent needs to choose one. There is **no auto-discovery
+and no fleet enumeration**: nothing is contacted until you dispatch to a named
+host, and only that host. This matches how the work actually flows — you (or your
+driver agent) name a machine; we resolve its metadata and SSH to it.
 
 ```yaml
 hosts:
-  spark-0: { tailnet: spark-0.tailXXXX.ts.net, user: muqsit, gpu: dgx-spark }
-  win-mini: { tailnet: win-mini, user: muqsit, os: windows }
+  mac-mini: { address: mac-mini.local,            user: muqsit, os: macos }
+  spark-0:  { address: spark-0.tailXXXX.ts.net,   user: muqsit, os: linux, caps: [gpu] }
+  win-mini: { address: 100.84.x.x,                user: muqsit, os: windows }
 ```
 
-Resolution order for an address: explicit `hosts.<name>.tailnet` > a `tailscale
-status` peer whose HostName == name > error with the candidate list.
+`address` is **any SSH-reachable target** — LAN hostname, tailnet `.ts.net` name,
+or public host. agents-cli does not care how it's reachable; it just runs SSH.
+`caps`/`os` are free-form metadata for capability-based selection (e.g. a driver
+agent routing a GPU eval to a host tagged `gpu`).
 
-### 2. Transport — tailnet SSH (reuse, don't reinvent)
+`agents hosts` is a thin layer over this map, stored via the existing atomic+locked
+`readMeta`/`updateMeta` (`Meta` gains a `hosts?: Record<string, HostSpec>` field):
+
+- `agents hosts add <name> <user@address> [--cap gpu] [--os linux]` — write an entry.
+- `agents hosts list [--json]` — print the registry (name · address · os · caps).
+  **No probing** — pure metadata, instant, machine-readable for the driver agent.
+- `agents hosts check <name>` — the *only* command that touches the network: one
+  SSH probe to that host → reachable? remote `agents --version` + `agents list`
+  (which agents are installed). This is also what `ensureHostReady` calls before
+  dispatch (lazy, single-host — never a fleet poll).
+- `agents hosts remove <name>` / `agents hosts import --from-tailscale` (opt-in:
+  prefill entries from `tailscale status` names; reads only, connects to nothing).
+
+Resolution for an address: `hosts.<name>.address`, else error with the list of
+known names. (No tailnet lookup, no DNS guessing — a name is either registered or
+it isn't.)
+
+### 2. Transport — plain SSH (reuse, don't reinvent)
 
 `src/lib/browser/drivers/ssh.ts` already has the whole pattern: `runSSHCommand`,
 `shellQuote`, `startSSHTunnel`, `ensureRemoteBrowser`, with
@@ -208,8 +229,11 @@ then calls it to run the remote command and inherit stdout/stderr/exit. SSH is t
 stream + exit code; no custom `command_output`/`command_done` framing (which is
 what the rush daemon had to invent over its WebSocket).
 
-Auth: the existing tailnet `ssh-keys` bundle, or Tailscale SSH (`tailscale ssh
-<node> <cmd>`) where ACL tags remove key management entirely.
+Auth: your existing SSH keys / the `ssh-keys` bundle. If a host is reachable only
+over a tailnet, the registered `address` is its tailnet name and SSH rides it
+transparently — no Tailscale-specific code path. (Tailscale SSH / ACL-tag auth
+works too, since it's still `ssh <address> <cmd>` under the hood, but it's not
+required and not assumed.)
 
 ### 3. Execution — remote `agents run` (harness-agnostic)
 
@@ -260,9 +284,10 @@ efficiently — like the ssh/remote-browser pattern."
 
 Scheduled fleet dispatch needs **no new machinery**: the routines scheduler
 (`src/lib/daemon.ts`) fires jobs on cron; a job whose command is `agents run …
---on <host>` is a scheduled remote dispatch. Online-gating is a `tailscale status`
-check before firing. (We do **not** turn the scheduler into an RPC server — see
-Non-goals.)
+--on <host>` is a scheduled remote dispatch. Online-gating is the same lazy SSH
+probe `ensureHostReady` already does (skip/retry if the one targeted host is
+unreachable) — no fleet poll. (We do **not** turn the scheduler into an RPC
+server — see Non-goals.)
 
 ### 6. Tracking — reuse the cloud store (Phase 1.5)
 
@@ -284,7 +309,7 @@ mechanism that **already exists** — there is no new "sync engine":
 | Layer | How it gets there | Mechanism (today) |
 |---|---|---|
 | **`~/.agents` config** (commands, skills, hooks, memory) | The DotAgents user repo is git-backed — the box runs `agents pull` (or `git pull`). One-time/idempotent bootstrap, **not** a per-dispatch push. | `agents pull` / `agents repo pull`; bootstrapped + verified by `ensureHostReady` / `hosts check` |
-| **Working codebase** | Phase 1: committed branch → `git fetch` + checkout on the box (per-repo, caller's `--remote-cwd`/`--branch`). Phase 2: uncommitted working tree → `rsync` over the tailnet (the differentiator). | per-repo git; rsync (Phase 2) |
+| **Working codebase** | Phase 1: committed branch → `git fetch` + checkout on the box (per-repo, caller's `--remote-cwd`/`--branch`). Phase 2: uncommitted working tree → `rsync` over SSH (the differentiator). | per-repo git; rsync (Phase 2) |
 | **Secrets** | Persistent boxes self-auth once via `agents secrets` (keychain). Blank/leased boxes get an on-demand, never-on-disk injection. | `agents secrets export <bundle> --to-ssh --host <t>` (`secrets.ts:1089-1097`, env over ssh stdin) |
 | **Sessions / `.history`** | **Not bulk-copied.** Recall is exposed as a *remote command*, not a file sync (below). | the routines daemon + `agents sessions`; selective `session/sync/` for the rare "make this transcript present" case |
 
@@ -327,10 +352,10 @@ replicates **that one session** selectively — never the whole tree.
 uncommitted work*, to another box and continue:
 
 1. **Code**: push/sync the git branch; **`rsync` the working tree** (uncommitted
-   included) over the tailnet — the thing the cloud tools can't do.
+   included) over SSH — the thing the cloud tools can't do.
 2. **Conversation**: sync the transcript. The CRDT session-sync substrate already
    exists (`src/lib/session/sync/`, the `sessions-sync` work — G-Set union over
-   R2); for same-tailnet hops we can also rsync the JSONL directly.
+   R2); for a direct SSH hop we can also rsync the JSONL directly.
 3. **Resume**: `agents run <agent> --resume <session-id>` on the target.
 4. **Relay/attach mode**: attach to a still-running remote session by tailing its
    transcript (Phase 1 §4) and sending follow-ups over SSH — the "remote-control"
@@ -345,18 +370,24 @@ implementation.
 
 ## Non-goals / what we explicitly will NOT build
 
-- **No broker / relay / connection-registry / heartbeat service.** Tailscale is
-  that, for free. If we ever need off-tailnet hosts, that's an explicit registry
-  entry + plain SSH, still no central service.
+- **No broker / relay / connection-registry / heartbeat service.** The registry is
+  a local list; reachability is the host's own network (LAN/VPN). No central
+  service, ever.
+- **No discovery / fleet enumeration.** We never scan a network or call `tailscale
+  status` to find machines. The registry is hand-maintained (with an opt-in
+  `import --from-tailscale` prefill); only the targeted host is ever contacted.
+- **No Tailscale dependency.** A tailnet is a fine transport if you use one (just
+  register the `.ts.net` address), but agents-cli neither requires it nor knows
+  about it — SSH to an address is the whole contract.
 - **No provisioning engine.** crabbox already leases across Hetzner/AWS/Azure/GCP/
-  e2b/modal/… and joins them to the tailnet. `hosts` shells out to crabbox for
-  lease/release and otherwise treats the box as a tailnet-SSH peer. We do not
-  reimplement multi-cloud provisioning, cost, or lifecycle.
+  e2b/modal/… `hosts` shells out to crabbox for lease/release and registers the
+  resulting SSH address as a transient host. We do not reimplement multi-cloud
+  provisioning, cost, or lifecycle.
 - **No new daemon.** Phase 2 relay/attach expands the existing routines daemon;
   it does not add a second long-running process.
 - **No custom wire protocol.** SSH + on-disk transcript are the protocol.
-- **No VM snapshots.** `rsync` over the tailnet replaces Devin-style block-diff for
-  our single-tenant case.
+- **No VM snapshots.** `rsync` over SSH replaces Devin-style block-diff for our
+  single-tenant case.
 
 ## Design constraints carried from the incident
 
@@ -375,12 +406,21 @@ just relocates the storm):
 
 ## Resolved decisions
 
-- **Naming** — `agents hosts` (list/check/add) + `agents run --on <host>`. (The
-  singular `agents computer` macOS-accessibility command is unrelated and stays.)
-- **Provider model** — keep tailnet-SSH dispatch as its own clean path; fold
-  *tracked* host runs into the existing cloud store as a `host` provider so
-  `agents cloud list/status/logs` see them (§6). No big `CloudProvider →
-  AgentHostProvider` rename — observability is unified without it.
+- **Discovery** — an **explicit registry** (`hosts:` map in `agents.yaml`), not
+  network discovery. No fleet enumeration; only the targeted host is contacted, and
+  only at dispatch. Tailscale is **not** a dependency — it's one optional way an
+  `address` is reachable (opt-in `import --from-tailscale` prefills entries).
+- **Driver-agent first.** The primary caller is a conversational driver agent that
+  reads the registry metadata (`agents hosts list --json`), picks a host by
+  task/capability, and dispatches (`agents run --on <name> --json`). The VS Code
+  extension is a second front-end onto the same commands. So Phase 1 prioritizes
+  clean, deterministic, machine-readable `--json` on `hosts list` and `run --on`.
+- **Naming** — `agents hosts` (list/check/add/remove) + `agents run --on <host>`.
+  (The singular `agents computer` macOS-accessibility command is unrelated, stays.)
+- **Provider model** — keep named-SSH dispatch as its own clean path; fold *tracked*
+  host runs into the existing cloud store as a `host` provider so `agents cloud
+  list/status/logs` see them (§6). No big `CloudProvider → AgentHostProvider`
+  rename — observability is unified without it.
 - **Context** — no bulk `.history` sync; `ensureHostReady` + recall-as-RPC over the
   daemon (see Context). Config via git, codebase via branch (P1) / rsync (P2),
   secrets via self-auth or `--to-ssh`.
@@ -390,13 +430,12 @@ just relocates the storm):
 1. **Workspace model for Phase 1** — caller-specified `--remote-cwd` only, or port
    the rush git-worktree workspace now? (Leaning: `--remote-cwd` first, worktree as
    a fast follow.)
-2. **Tailscale dependency** — hard-require a tailnet for `hosts`, or support plain
-   SSH hosts from the `agents.yaml` registry as a fallback for non-tailnet boxes?
-   (Leaning: Tailscale-native primary, explicit-registry fallback.)
-3. **Windows targets** — `win-mini` over SSH: do remote `agents run` semantics hold
+2. **Windows targets** — `win-mini` over SSH: do remote `agents run` semantics hold
    on Windows (shims, paths)? Needs a verification pass.
-4. **GPU routing** — should `--on` accept a capability selector (e.g. `--on
-   gpu`) that picks an online Spark, not just a named host?
+3. **Capability routing** — should `--on` accept a capability selector (e.g. `--on
+   gpu`) that resolves to a registered host tagged `gpu`, not just an exact name?
+   (This is the driver-agent's main convenience; leaning yes, thin — filter the
+   registry by `caps`, error if 0 or >1 match unless `--any`.)
 5. **crabbox integration depth** — shell out to `crabbox warmup/ssh/stop` for
    leased hosts (leaning yes), or a tighter library binding? And `--on new`
    semantics: default provider/class, auto-release on idle vs explicit `stop`.
@@ -405,10 +444,11 @@ just relocates the storm):
 
 ## Phasing & verification
 
-- **Phase 1**: `agents hosts list/check` (tailscale-native) + `agents run --on
+- **Phase 1**: `agents hosts add/list/check/remove` (registry) + `agents run --on
   <host>` (synchronous, transcript-tailed progress). Verify end-to-end against a
-  real tailnet box (mac-mini): dispatch a trivial task, see live progress via the
-  transcript tailer, correct exit code. Crabbox for the unit suite.
+  real registered box (the live peer node `yosemite-s1`, registered from
+  `yosemite-s0`): dispatch a trivial task, confirm it executed *off-box*, see live
+  progress via the transcript tailer, correct exit code. Crabbox for the unit suite.
 - **Phase 1.5**: leased hosts via crabbox (`--on new[:provider]` → warmup → run →
   idle-release) + a `host` provider in the cloud store → `agents cloud
   list/status/logs`.
@@ -419,7 +459,8 @@ just relocates the storm):
 
 | Need | Existing code to reuse |
 |---|---|
-| SSH transport | `src/lib/browser/drivers/ssh.ts` (`runSSHCommand`, `shellQuote`, tunnels) |
+| SSH transport | `src/lib/browser/drivers/ssh.ts` (`shellQuote` exported; `runSSHCommand`/tunnels private — extract a shared ssh-exec helper) |
+| Host registry storage | `src/lib/state.ts` (`readMeta`/`updateMeta`, atomic+locked) + `Meta.hosts` (new field) |
 | Headless argv per harness | `src/lib/exec.ts` (`buildExecCommand`) + `agents run` (`src/commands/exec.ts`) |
 | Transcript parse → events | `src/lib/session/parse.ts` (`parseClaude`/`parseCodex`/…) |
 | Incremental offset read | `src/lib/session/active.ts:200-248` |
