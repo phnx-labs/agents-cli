@@ -185,11 +185,16 @@ describe('readMeta merges agents.yaml from both repos', () => {
   });
 
   it('does not lose concurrent updateMeta callback writes', async () => {
+    // Hold the meta lock through the callback longer than the old count-bounded
+    // retry budget (~750ms). The loser of the race must wait this out and still
+    // land its write; on the pre-fix lock it would exhaust its retries, throw,
+    // and silently drop a write — so this deterministically guards #306.
+    const HOLD_MS = 1_000;
     const makeUpdate = (agent: string, version: string) => `
       const { updateMeta } = await import(${JSON.stringify(modulePath)});
       updateMeta((meta) => {
         const block = new Int32Array(new SharedArrayBuffer(4));
-        Atomics.wait(block, 0, 0, 250);
+        Atomics.wait(block, 0, 0, ${HOLD_MS});
         return {
           ...meta,
           agents: {

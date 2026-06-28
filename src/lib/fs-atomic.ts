@@ -4,7 +4,18 @@ import { randomBytes } from 'crypto';
 import lockfile from 'proper-lockfile';
 
 const LOCK_STALE_MS = 5_000;
-const LOCK_RETRIES = 5;
+// Wall-clock budget to acquire the lock before giving up. A count-bounded retry
+// (the old 5 attempts / ~750ms ceiling) could expire while a peer legitimately
+// held the lock — under CI/parallel load two `agents` invocations mutating
+// agents.yaml would have one throw and silently drop its write. The budget must
+// comfortably exceed both a normal critical-section hold and the stale-break
+// window (LOCK_STALE_MS): a dead holder's lock turns stale at 5s and is then
+// broken on the next attempt, so this only ever waits out a live, in-progress
+// holder. Bounded (not unbounded) so a truly wedged holder still surfaces an
+// error instead of hanging the CLI forever.
+const LOCK_ACQUIRE_TIMEOUT_MS = 30_000;
+const LOCK_RETRY_MIN_MS = 50;
+const LOCK_RETRY_MAX_MS = 250;
 
 // Reused across all sleepSync calls — avoids allocating a new SAB each time.
 const _sleepBuf = new Int32Array(new SharedArrayBuffer(4));
@@ -45,24 +56,30 @@ export function atomicWriteFileSync(filePath: string, content: string): void {
 
 /**
  * Acquires an exclusive proper-lockfile lock on filePath, runs fn, then
- * releases the lock. Retries up to LOCK_RETRIES times with linear back-off.
- * Breaks stale locks older than LOCK_STALE_MS.
+ * releases the lock. Retries with capped linear back-off until either the lock
+ * is acquired or LOCK_ACQUIRE_TIMEOUT_MS elapses. Breaks stale locks older than
+ * LOCK_STALE_MS, so a crashed holder never blocks past the stale window.
  */
 export function withFileLock<T>(filePath: string, fn: () => T): T {
   let release: (() => void) | null = null;
   let lastError: unknown;
-  for (let attempt = 0; attempt <= LOCK_RETRIES; attempt++) {
+  const deadline = Date.now() + LOCK_ACQUIRE_TIMEOUT_MS;
+  for (let attempt = 0; ; attempt++) {
     try {
       release = lockfile.lockSync(filePath, { stale: LOCK_STALE_MS });
       break;
     } catch (err) {
       lastError = err;
-      if (attempt < LOCK_RETRIES) sleepSync(50 * (attempt + 1));
+      if (Date.now() >= deadline) break;
+      const backoff = Math.min(LOCK_RETRY_MIN_MS * (attempt + 1), LOCK_RETRY_MAX_MS);
+      sleepSync(Math.min(backoff, Math.max(0, deadline - Date.now())));
     }
   }
   if (!release) {
     const message = lastError instanceof Error ? lastError.message : String(lastError);
-    throw new Error(`Could not acquire lock for ${filePath}: ${message}`);
+    throw new Error(
+      `Could not acquire lock for ${filePath} after ${LOCK_ACQUIRE_TIMEOUT_MS}ms: ${message}`,
+    );
   }
   try {
     return fn();
