@@ -625,9 +625,13 @@ export interface ExtraRepoConfig {
 export interface Meta {
   agents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
-  /** macOS secrets-agent config. `auto` makes the first real keychain read of a
-   * `session`-tier bundle populate the broker so concurrent runs read silently. */
+  /** macOS secrets-agent config. `policy` is the default prompt policy for
+   * bundles without an explicit per-bundle policy: `daily` (the default) asks
+   * once per ~24h, `always` asks every time. `auto` (default on) lets the first
+   * real keychain read of a `daily` bundle populate the broker so concurrent
+   * runs read silently — set it `false` to force a prompt on every read. */
   secrets?: {
+    policy?: 'always' | 'daily';
     agent?: {
       auto?: boolean;
     };

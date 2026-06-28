@@ -475,14 +475,15 @@ export function registerSecretsCommands(program: Command): void {
       never touch disk in plaintext. Every item is device-local and gated by Touch ID
       or device passcode; cross-machine sync is handled by 'agents secrets push/pull'.
 
-      Touch ID noise: macOS pops a prompt per bundle per process, so concurrent
-      agents each re-prompt. Each bundle has a prompt policy, shown in the POLICY
-      column of 'agents secrets list':
-        always (default)  ask for Touch ID every time — never auto-held.
-        daily             ask once, then hold it silently in the local agent up
+      Touch ID noise: macOS pops a prompt per bundle per process. Each bundle has
+      a prompt policy, shown in the POLICY column of 'agents secrets list':
+        daily (default)   ask once, then hold it silently in the local agent up
                           to ~24h, until screen-lock / sleep / logout or 'lock'.
-      Set it with 'agents secrets policy <bundle> daily'. 'agents secrets unlock
-      <bundle>' holds any bundle after one prompt regardless of policy. Nothing on disk.
+        always            ask for Touch ID every time — never auto-held.
+      The default is 'daily' (one Touch ID per ~24h); change it globally with
+      'secrets.policy' in agents.yaml, or per bundle with 'agents secrets policy
+      <bundle> always'. 'agents secrets unlock <bundle>' holds any bundle after one
+      prompt regardless of policy. Nothing on disk.
 
       See also:
         agents secrets policy <bundle> daily           ask once a day, not every run
@@ -664,7 +665,7 @@ export function registerSecretsCommands(program: Command): void {
     .description('Create an empty bundle')
     .option('--description <text>', 'Free-form description')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
-    .option('--policy <policy>', 'prompt policy: always (default, ask every time) or daily (ask once a day)')
+    .option('--policy <policy>', 'prompt policy: daily (default, ask once a day) or always (ask every time)')
     .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
     .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
     .option('--force', 'Overwrite an existing bundle')
@@ -672,7 +673,10 @@ export function registerSecretsCommands(program: Command): void {
       try {
         const resolvedName = name ?? (await promptBundleName());
         validateBundleName(resolvedName);
-        const policy = parsePolicyOpt(opts.policy ?? opts.tier);
+        // Leave policy unset unless the user explicitly chose one, so the bundle
+        // inherits the configured default (`daily`) instead of being pinned.
+        const policyOpt = opts.policy ?? opts.tier;
+        const policy = policyOpt ? parsePolicyOpt(policyOpt) : undefined;
         const backend = parseBackendOpt(opts.backend);
         if (bundleExists(resolvedName) && !opts.force) {
           console.error(chalk.red(`Bundle '${resolvedName}' already exists. Use --force to overwrite.`));
@@ -688,7 +692,7 @@ export function registerSecretsCommands(program: Command): void {
         };
         writeBundle(bundle);
         const tags = [
-          policy === 'daily' ? 'policy: daily' : 'policy: always ask',
+          bundlePolicy(bundle) === 'daily' ? 'policy: daily' : 'policy: always ask',
           backend === 'file' ? 'backend: file' : null,
         ].filter(Boolean);
         console.log(chalk.green(`Bundle '${resolvedName}' created (${tags.join(', ')}).`));
@@ -1495,7 +1499,7 @@ Examples:
   cmd
     .command('policy <bundle> [policy]')
     .alias('tier')
-    .description("Show or set a bundle's prompt policy: always (default, ask every time) or daily (ask once a day).")
+    .description("Show or set a bundle's prompt policy: daily (default, ask once a day) or always (ask every time).")
     .action((bundleName: string, policyArg: string | undefined) => {
       try {
         const bundle = readBundle(bundleName);
@@ -1508,7 +1512,7 @@ Examples:
         writeBundle(bundle);
         console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
         if (next === 'daily') {
-          console.log(chalk.gray('Held by the secrets-agent after one unlock: run `agents secrets unlock`, or enable auto-cache with `secrets.agent.auto: true` in agents.yaml.'));
+          console.log(chalk.gray('Held by the secrets-agent for ~24h after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));
         } else {
           console.log(chalk.gray('Asks for Touch ID every time — never auto-held.'));
         }

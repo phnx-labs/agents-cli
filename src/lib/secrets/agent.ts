@@ -529,13 +529,15 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
   }
 }
 
-/** True when `secrets.agent.auto` is enabled in agents.yaml. Best-effort; a
- * missing/unreadable meta reads as off. */
+/** True unless `secrets.agent.auto` is explicitly disabled in agents.yaml. The
+ * broker is the mechanism that delivers the `daily` default policy (one Touch ID
+ * per ~24h), so auto-caching is ON by default; opt out with
+ * `secrets.agent.auto: false`. Best-effort; an unreadable meta reads as on. */
 export function secretsAgentAutoEnabled(): boolean {
   try {
-    return readMeta().secrets?.agent?.auto === true;
+    return readMeta().secrets?.agent?.auto !== false;
   } catch {
-    return false;
+    return true;
   }
 }
 

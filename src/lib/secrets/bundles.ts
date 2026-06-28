@@ -37,6 +37,7 @@ import {
 } from './index.js';
 import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
+import { readMeta } from '../state.js';
 import { agentGetSync, agentAutoLoadSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
 
 /** Which store carries a bundle's items. */
@@ -148,18 +149,19 @@ export interface VarMeta {
 
 /**
  * A bundle's prompt policy — how often macOS asks for Touch ID to read it:
- * - `always` (default): asks every time. Only an explicit `agents secrets
- *   unlock` ever holds it in the secrets-agent; every other read pops Touch ID.
- *   Use for high-value bundles you want to confirm every time.
- * - `daily`: ask once, then hold it silently. Eligible for the secrets-agent —
- *   `unlock` it, or (when `secrets.agent.auto` is enabled) the first real
- *   keychain read auto-loads it so concurrent runs read it silently. Held up to
- *   ~24h from that unlock (not refreshed on use); re-asks sooner after
- *   screen-lock, sleep, logout, or `agents secrets lock`.
+ * - `daily` (default): ask once, then hold it silently for up to ~24h. Eligible
+ *   for the secrets-agent — the first real keychain read auto-loads it (auto-cache
+ *   is on by default) so concurrent runs read it silently, or `unlock` it
+ *   explicitly. Held from that unlock (not refreshed on use); re-asks sooner
+ *   after screen-lock, sleep, logout, or `agents secrets lock`.
+ * - `always`: asks every time. Never auto-held — only an explicit `agents
+ *   secrets unlock` ever holds it; every other read pops Touch ID. Opt a
+ *   high-value bundle into this when you want to confirm every single read.
  *
- * Stored on disk under the legacy `tier` key (`session` == `daily`; absent ==
- * `always`) so bundles stay readable across mixed CLI versions on synced
- * machines. The in-memory and user-facing vocabulary is `policy`/`always`/`daily`.
+ * The default is configurable via `secrets.policy` in agents.yaml. Stored on disk
+ * under the legacy `tier` key (`session` == `daily`, `biometry` == explicit
+ * `always`, absent == inherit the default) so bundles stay readable across mixed
+ * CLI versions on synced machines. The user-facing vocabulary is `policy`/`always`/`daily`.
  */
 export type SecretsPolicy = 'always' | 'daily';
 
@@ -170,8 +172,8 @@ export interface SecretsBundle {
   allow_exec?: boolean;
   /** Which store carries this bundle's items. Absent ⇒ `keychain` (the default). */
   backend?: SecretsBackend;
-  /** Prompt policy. Absent ⇒ `always` (the safe default). Serialized under the
-   * legacy `tier` key — see SecretsPolicy. */
+  /** Prompt policy. Absent ⇒ the configured default (`daily`). Serialized under
+   * the legacy `tier` key — see SecretsPolicy. */
   policy?: SecretsPolicy;
   /** ISO 8601 UTC timestamp. Set once on the first writeBundle() for a bundle. */
   created_at?: string;
@@ -340,17 +342,33 @@ export function readBundle(name: string): SecretsBundle {
   return bundle;
 }
 
-/** Normalize the persisted prompt policy. The on-disk `tier` key uses the
- * legacy `session` token for `daily` (and `biometry`/absent for the default),
- * so accept both the legacy and current tokens. Anything but `daily`/`session`
- * ⇒ undefined (resolves to the `always` default). */
+/** Normalize the persisted prompt policy. The on-disk `tier` key uses legacy
+ * tokens for cross-version compatibility: `session` ⇒ `daily`, `biometry` ⇒ an
+ * explicit `always`. An absent token ⇒ undefined, which resolves to the
+ * configured default policy (`daily`). Persisting an explicit `always` as the
+ * legacy `biometry` token keeps older CLIs correct — they don't know `daily`,
+ * read `biometry` as undefined, and fall back to their own always default. */
 function parsePolicy(raw: unknown): SecretsPolicy | undefined {
-  return raw === 'daily' || raw === 'session' ? 'daily' : undefined;
+  if (raw === 'daily' || raw === 'session') return 'daily';
+  if (raw === 'always' || raw === 'biometry') return 'always';
+  return undefined;
 }
 
-/** The effective prompt policy of a bundle (absent ⇒ `always`). */
+/** The default prompt policy applied to bundles without an explicit per-bundle
+ * policy. Configurable via `secrets.policy` in agents.yaml; `daily` (one Touch
+ * ID per ~24h) unless the user explicitly opts back into prompt-every-time with
+ * `always`. Best-effort: an unreadable config falls back to the `daily` default. */
+export function secretsDefaultPolicy(): SecretsPolicy {
+  try {
+    return readMeta().secrets?.policy === 'always' ? 'always' : 'daily';
+  } catch {
+    return 'daily';
+  }
+}
+
+/** The effective prompt policy of a bundle (absent ⇒ the configured default). */
 export function bundlePolicy(bundle: SecretsBundle): SecretsPolicy {
-  return bundle.policy ?? 'always';
+  return bundle.policy ?? secretsDefaultPolicy();
 }
 
 export function writeBundle(bundle: SecretsBundle): void {
@@ -384,9 +402,11 @@ export function writeBundle(bundle: SecretsBundle): void {
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
     backend: backend === 'file' ? 'file' : undefined,
-    // Wire format: persist `daily` under the legacy `tier`/`session` token so
-    // older CLI versions on other synced machines keep reading the policy.
-    tier: bundle.policy === 'daily' ? 'session' : undefined,
+    // Wire format: persist the policy under the legacy `tier` token so older CLI
+    // versions on other synced machines keep reading it — `daily`⇒`session`,
+    // explicit `always`⇒`biometry`. An absent policy omits the token entirely
+    // and resolves to the configured default (`daily`) on read.
+    tier: bundle.policy === 'daily' ? 'session' : bundle.policy === 'always' ? 'biometry' : undefined,
     created_at: bundle.created_at,
     updated_at: bundle.updated_at,
     last_used: bundle.last_used,

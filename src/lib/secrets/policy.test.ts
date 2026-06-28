@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setKeychainBackendForTest, type KeychainBackend } from './index.js';
-import { writeBundle, readBundle, listBundles, bundlePolicy, type SecretsBundle } from './bundles.js';
+import { writeBundle, readBundle, listBundles, bundlePolicy, secretsDefaultPolicy, type SecretsBundle } from './bundles.js';
 
 /**
  * Covers the bundle prompt-policy field across the three parse sites (readBundle,
@@ -58,27 +58,42 @@ describe('secrets prompt-policy persistence', () => {
     expect(bundlePolicy(readBundle('legacy'))).toBe('daily');
   });
 
-  it('defaults to always when no policy is stored', () => {
+  it('stores no policy when unset and resolves it to the configured default', () => {
     writeBundle(bundle('b'));
     const read = readBundle('b');
-    expect(read.policy).toBeUndefined();
-    expect(bundlePolicy(read)).toBe('always');
+    expect(read.policy).toBeUndefined(); // absent on disk → inherits the default
+    // On a clean machine/CI (no `secrets.policy` in agents.yaml) the default is daily.
+    expect(secretsDefaultPolicy()).toBe('daily');
+    expect(bundlePolicy(read)).toBe(secretsDefaultPolicy());
   });
 
-  it('persists an explicit always policy as the absent default (not a literal)', () => {
+  it('persists an explicit always override (survives the daily default flip)', () => {
     writeBundle(bundle('b2', 'always'));
-    // always is the default, so it is not written into the JSON — it reads back
-    // as undefined, which bundlePolicy() resolves to always.
-    expect(readBundle('b2').policy).toBeUndefined();
+    // always is no longer the default, so it MUST be persisted — under the legacy
+    // `biometry` token, which older CLIs read as their own always default.
+    const raw = JSON.parse(mem.get('agents-cli.bundles.b2'));
+    expect(raw.tier).toBe('biometry');
+    expect(readBundle('b2').policy).toBe('always');
     expect(bundlePolicy(readBundle('b2'))).toBe('always');
   });
 
-  it('reflects the policy in listBundles', () => {
+  it('reads a legacy `tier: biometry` bundle back as an explicit always', () => {
+    writeBundle(bundle('old')); // create the metadata item
+    const item = 'agents-cli.bundles.old';
+    const raw = JSON.parse(mem.get(item));
+    raw.tier = 'biometry'; // simulate metadata written by an older CLI version
+    mem.set(item, JSON.stringify(raw));
+    expect(bundlePolicy(readBundle('old'))).toBe('always');
+  });
+
+  it('reflects the policy in listBundles (unset inherits the default)', () => {
     writeBundle(bundle('alpha', 'daily'));
-    writeBundle(bundle('beta'));
+    writeBundle(bundle('beta')); // unset → default
+    writeBundle(bundle('gamma', 'always')); // explicit override
     const byName = Object.fromEntries(listBundles().map((b) => [b.name, bundlePolicy(b)]));
     expect(byName.alpha).toBe('daily');
-    expect(byName.beta).toBe('always');
+    expect(byName.beta).toBe(secretsDefaultPolicy());
+    expect(byName.gamma).toBe('always');
   });
 
   it('treats an unknown/forward-incompatible persisted policy as the default', () => {
@@ -89,6 +104,6 @@ describe('secrets prompt-policy persistence', () => {
     raw.tier = 'galaxy-brain';
     mem.set(item, JSON.stringify(raw));
     expect(readBundle('weird').policy).toBeUndefined();
-    expect(bundlePolicy(readBundle('weird'))).toBe('always');
+    expect(bundlePolicy(readBundle('weird'))).toBe(secretsDefaultPolicy());
   });
 });

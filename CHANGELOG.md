@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**Secrets default policy is now `daily` (one Touch ID per ~24h), not `always`**
+
+- The default prompt policy for bundles without an explicit one flipped from `always` (Touch ID on *every* read) to **`daily`** (one prompt, then held ~24h until screen-lock / sleep / logout). This is the fix for the prompt storm: a background reader like sessions-sync hammering a bundle now costs one Touch ID per ~24h instead of one per read.
+- **Auto-cache is on by default.** The secrets-agent is the mechanism that delivers the daily policy, so it self-caches a `daily` bundle on first read with no `secrets.agent.auto: true` needed. Opt out with `secrets.agent.auto: false`.
+- **Configurable, still flexible.** Set the global default in `agents.yaml` (`secrets.policy: always` to restore prompt-every-time), or override per bundle with `agents secrets policy <bundle> always` for high-value keys (signing, SSH) you want to confirm on every read.
+- **Explicit `always` now persists** under the legacy `tier: biometry` token (older CLIs read it as their own always default). Bundles with no stored policy inherit the configured default — so an existing always-by-default bundle quietly becomes `daily` on first read by the new CLI, which is the intended migration.
+
 **Secrets prompt policy: human-readable `always` / `daily`, and `secrets list` now shows it**
 
 - Renamed the secrets-agent `tier` to a **prompt policy** with plain-language names: `biometry` → **`always`** (ask every time), `session` → **`daily`** (ask once, then held ~24h until screen-lock / sleep / logout). The old name `session` was misleading — it never meant "once per login session" — and collided with the half-dozen other "session" concepts in the CLI (`agents sessions`, sessions-sync, pty/browser sessions). Set it with `agents secrets policy <bundle> [always|daily]`.
