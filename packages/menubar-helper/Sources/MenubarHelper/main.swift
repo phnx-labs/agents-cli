@@ -31,4 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 let delegate = AppDelegate(controller)
 app.delegate = delegate
+if ProcessInfo.processInfo.environment["MENUBAR_DUMP"] == "1" {
+    controller.install()
+    exit(0)
+}
 app.run()
