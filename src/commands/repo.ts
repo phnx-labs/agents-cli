@@ -20,6 +20,13 @@ import simpleGit from 'simple-git';
 import { confirm, input } from '@inquirer/prompts';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
+import { itemPicker } from '../lib/picker.js';
+import {
+  inspectRepo,
+  resolveRepoTarget,
+  type RepoTarget as InspectRepoTarget,
+  type InspectOptions,
+} from './inspect.js';
 
 const HOME = os.homedir();
 
@@ -201,6 +208,7 @@ async function listRepos(alias: string | undefined): Promise<void> {
 export function registerRepoCommands(program: Command): void {
   const repoCmd = program
     .command('repo')
+    .alias('repos')
     .description('Manage extra DotAgent repos alongside ~/.agents/ (for private or team skills).');
 
   setHelpSections(repoCmd, {
@@ -219,6 +227,9 @@ export function registerRepoCommands(program: Command): void {
 
       # See what's registered
       agents repo list
+
+      # View one repo's contents (git state + resource counts); omit the name for a picker
+      agents repos view system
 
       # Temporarily disable without deleting
       agents repo disable acme
@@ -400,6 +411,43 @@ export function registerRepoCommands(program: Command): void {
     .description('Show all repos: branch, ahead/behind, dirty counts, URL, commit.')
     .action(async (alias: string | undefined) => {
       await listRepos(alias);
+    });
+
+  repoCmd
+    .command('view [name]')
+    .description("Show one repo's contents: git state and per-kind resource counts. Omit the name for an interactive picker.")
+    .option('--brief', 'header + git only; skip resource counts')
+    .option('--json', 'machine-readable JSON output')
+    .action(async (name: string | undefined, options: InspectOptions) => {
+      if (name) {
+        const repo = resolveRepoTarget(name);
+        if (!repo) {
+          console.log(chalk.red(`Unknown repo "${name}". Use "system", "user", "project", or a registered extra alias.`));
+          process.exitCode = 1;
+          return;
+        }
+        await inspectRepo(repo, options);
+        return;
+      }
+
+      const targets = collectRepoTargets(undefined) || [];
+      if (!isInteractiveTerminal()) {
+        console.log(chalk.red('No repo name given and not an interactive terminal.'));
+        console.log(chalk.gray('Pass a name (e.g. `agents repos view system`) or run in a TTY for the picker.'));
+        process.exitCode = 1;
+        return;
+      }
+
+      const picked = await itemPicker<RepoTarget>({
+        message: 'Select a repo to view',
+        items: targets,
+        filter: (q) => targets.filter((t) => t.alias.toLowerCase().includes(q.toLowerCase())),
+        labelFor: (t) => `${chalk.cyan(t.alias.padEnd(10))} ${chalk.gray(t.dir)}`,
+      });
+      if (!picked) return;
+
+      const repo: InspectRepoTarget = { label: picked.item.alias, root: picked.item.dir };
+      await inspectRepo(repo, options);
     });
 
   repoCmd

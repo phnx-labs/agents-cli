@@ -53,6 +53,8 @@ Resources are installed once in `~/.agents/` and synced to every supported agent
 
 To inspect what's installed, use the per-kind listers — `agents commands list`, `agents skills list`, `agents hooks list`, `agents mcp list`, `agents permissions list`, `agents subagents list`, `agents profiles list`. There is no single `agents resources` viewer that prints a merged cross-kind table today; if you want one, file an issue.
 
+To inspect a single repo on its own — its git state plus per-kind resource counts — use `agents repos view <repo>` (`system`, `user`, `project`, or an extra-repo alias). Omit the name for an interactive picker. It renders without opening anything; add `--brief` for the header only or `--json` for machine-readable output.
+
 ---
 
 ## Layered resolution
