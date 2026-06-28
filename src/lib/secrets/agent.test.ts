@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -103,5 +103,31 @@ describe('handleAgentRequest', () => {
       // fresh on-disk read and restarts the broker on mismatch.
       expect(typeof r.cliVersion).toBe('string');
     }
+  });
+});
+
+describe('shouldSelfHealForUpgrade (#435: never wipe a hot cache on upgrade)', () => {
+  it('defers the restart while bundles are unlocked, even on a version change', () => {
+    // The bug: an in-place `npm i -g` bumped the version, the broker self-healed
+    // immediately, wiped the in-memory unlocks, and the next read re-prompted.
+    expect(shouldSelfHealForUpgrade(true, 1, '1.20.21', '1.20.22')).toBe(false);
+    expect(shouldSelfHealForUpgrade(true, 5, '1.20.21', '1.20.22')).toBe(false);
+  });
+
+  it('self-heals once the store is empty and the version changed', () => {
+    expect(shouldSelfHealForUpgrade(true, 0, '1.20.21', '1.20.22')).toBe(true);
+  });
+
+  it('does not restart when the version is unchanged', () => {
+    expect(shouldSelfHealForUpgrade(true, 0, '1.20.22', '1.20.22')).toBe(false);
+  });
+
+  it('never self-heals a non-persistent (one-off) broker', () => {
+    expect(shouldSelfHealForUpgrade(false, 0, '1.20.21', '1.20.22')).toBe(false);
+  });
+
+  it('does not restart on an unknown version on either side (no spurious flap)', () => {
+    expect(shouldSelfHealForUpgrade(true, 0, 'unknown', '1.20.22')).toBe(false);
+    expect(shouldSelfHealForUpgrade(true, 0, '1.20.22', 'unknown')).toBe(false);
   });
 });

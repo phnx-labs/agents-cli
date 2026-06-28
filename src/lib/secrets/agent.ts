@@ -48,6 +48,28 @@ const IDLE_EXIT_MS = 5 * 60 * 1000; // 5m
 /** How often the broker sweeps expired entries. */
 const SWEEP_INTERVAL_MS = 30 * 1000;
 
+/**
+ * Decide whether a persistent broker should self-heal onto freshly-installed
+ * code (exit so launchd relaunches it). Only when the store is EMPTY: exiting
+ * with bundles still unlocked wipes them from memory, so the next reader falls
+ * back to a direct keychain read and re-prompts for Touch ID. Deferring the
+ * restart until the cache is idle (TTL-expired / screen-locked) means an
+ * in-place `npm i -g` never wipes a hot cache — the new code is adopted at the
+ * next quiet moment instead. See #435: rapid repeated upgrades wiped a hot
+ * cache on every bump and produced a recurring Touch ID storm.
+ */
+export function shouldSelfHealForUpgrade(
+  persistent: boolean,
+  storeSize: number,
+  runningVersion: string,
+  onDiskVersion: string,
+): boolean {
+  if (!persistent) return false;
+  if (storeSize > 0) return false; // hot cache — defer rather than wipe unlocks
+  if (runningVersion === 'unknown' || onDiskVersion === 'unknown') return false;
+  return onDiskVersion !== runningVersion;
+}
+
 export interface StoredBundle {
   bundle: SecretsBundle;
   env: Record<string, string>;
@@ -328,15 +350,15 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   const sweep = () => {
     const now = Date.now();
     for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
-    // Self-heal: a newer version was installed in place — exit so launchd
-    // relaunches us on the new code. Only meaningful when launchd will restart
-    // us (persistent); a one-off broker just keeps serving until idle.
-    if (persistent) {
-      const onDisk = getCliVersionFresh();
-      if (onDisk !== 'unknown' && runningVersion !== 'unknown' && onDisk !== runningVersion) {
-        shutdown(0); // KeepAlive relaunches on the new code
-        return;
-      }
+    // Self-heal onto a newer in-place install — but ONLY while the store is
+    // empty, so we never wipe live unlocks and force a re-prompt (#435). The
+    // `store.size === 0` short-circuit also keeps getCliVersionFresh (a disk
+    // read) off the hot path. A pending upgrade is adopted at the next idle
+    // sweep instead of immediately.
+    if (store.size === 0 &&
+        shouldSelfHealForUpgrade(persistent, store.size, runningVersion, getCliVersionFresh())) {
+      shutdown(0); // KeepAlive relaunches on the new code
+      return;
     }
     if (store.size === 0) {
       if (!persistent && now - emptySince >= IDLE_EXIT_MS) shutdown(0);
