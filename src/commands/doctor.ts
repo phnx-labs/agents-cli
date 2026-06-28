@@ -66,6 +66,7 @@ interface SyncStatusRow {
   agent: AgentId;
   version: string;
   status: 'fresh' | 'stale' | 'never-synced';
+  isDefault: boolean;
 }
 
 interface OrphanRow {
@@ -80,16 +81,19 @@ interface OrphanRow {
 
 function checkSyncStatus(cwd: string): SyncStatusRow[] {
   const rows: SyncStatusRow[] = [];
+  // Every installed version, not just the default — a stale NON-default version
+  // (e.g. one you launched from yesterday) is exactly the rot that silently
+  // serves outdated/invalid resources and that `--fix` now heals. Hiding it here
+  // is why that class of bug went unnoticed.
   for (const agent of ALL_AGENT_IDS) {
-    const version = getGlobalDefault(agent);
-    if (!version) continue;
-    const manifest = loadManifest(agent, version);
-    if (!manifest) {
-      rows.push({ agent, version, status: 'never-synced' });
-      continue;
+    const def = getGlobalDefault(agent);
+    for (const version of listInstalledVersions(agent)) {
+      const manifest = loadManifest(agent, version);
+      const status: SyncStatusRow['status'] = !manifest
+        ? 'never-synced'
+        : isStale(manifest, agent, version, cwd) ? 'stale' : 'fresh';
+      rows.push({ agent, version, status, isDefault: version === def });
     }
-    const stale = isStale(manifest, agent, version, cwd);
-    rows.push({ agent, version, status: stale ? 'stale' : 'fresh' });
   }
   return rows;
 }
@@ -108,12 +112,10 @@ function countOrphans(): OrphanRow[] {
   };
 
   for (const { agent, version } of iterCommandsCapableVersions()) {
-    if (version !== getGlobalDefault(agent)) continue;
     const diff = diffVersionCommands(agent, version);
     if (diff.orphans.length > 0) ensure(agent, version).commands = diff.orphans.length;
   }
   for (const { agent, version } of iterSkillsCapableVersions()) {
-    if (version !== getGlobalDefault(agent)) continue;
     const diff = diffVersionSkills(agent, version);
     if (diff.orphans.length > 0) ensure(agent, version).skills = diff.orphans.length;
   }
@@ -122,7 +124,6 @@ function countOrphans(): OrphanRow[] {
   // never fire. (Distinct from the source-diff `diffVersionHooks().orphans`,
   // which false-flags valid system-sourced registered hooks.)
   for (const { agent, version } of iterHooksCapableVersions()) {
-    if (version !== getGlobalDefault(agent)) continue;
     const dead = listUnmanagedHooksInVersionHome(agent, version);
     if (dead.length > 0) ensure(agent, version).hooks = dead.length;
   }
@@ -137,26 +138,38 @@ function renderOverviewText(
   hostClis: ReturnType<typeof listCliStatus>,
 ): void {
   console.log(chalk.bold('Agent CLIs'));
-  if (Object.keys(clis).length === 0) {
-    console.log(chalk.gray('  (no agents reported)'));
+  // Show the fleet you actually run — agents that are ready in PATH, plus any
+  // you MANAGE (have installed versions) whose binary isn't resolving (a real
+  // problem). The other supported-but-unadopted agents collapse to one hint line
+  // instead of a column of red "not installed" nags for tools you never wanted.
+  const managed = new Set<string>(ALL_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0));
+  const entries = Object.entries(clis);
+  const shown = entries.filter(([name, e]) => e.installed || managed.has(name));
+  const hidden = entries.filter(([name, e]) => !e.installed && !managed.has(name)).map(([name]) => name);
+  if (shown.length === 0) {
+    console.log(chalk.gray('  (none installed — `agents add <name>` to start)'));
   } else {
-    for (const [name, entry] of Object.entries(clis)) {
-      const pretty = AGENT_NAMES[name] || name;
+    for (const [name, entry] of shown) {
+      const pretty = (AGENT_NAMES[name] || name).padEnd(11);
       if (entry.installed) {
-        console.log(`  ${chalk.green('ready')}  ${pretty.padEnd(10)} ${chalk.gray(entry.path || '')}`);
+        console.log(`  ${chalk.green('ready')}  ${pretty} ${chalk.gray(entry.path || '')}`);
       } else {
-        console.log(`  ${chalk.red('no   ')}  ${pretty.padEnd(10)} ${chalk.gray(entry.error || 'not installed')}`);
+        console.log(`  ${chalk.red('no   ')}  ${pretty} ${chalk.gray(entry.error || 'not installed')}`);
       }
     }
   }
+  if (hidden.length > 0) {
+    console.log(chalk.gray(`  +${hidden.length} more supported (${hidden.join(', ')}) — \`agents add <name>\` to manage`));
+  }
   console.log();
 
-  console.log(chalk.bold('Sync status (default versions)'));
+  console.log(chalk.bold('Sync status (installed versions)'));
   if (syncRows.length === 0) {
-    console.log(chalk.gray('  (no default versions set; pin one with `agents use <agent>@<version>`)'));
+    console.log(chalk.gray('  (no versions installed; add one with `agents add <agent>@<version>`)'));
   } else {
     for (const row of syncRows) {
-      const label = `${AGENT_NAMES[row.agent] || row.agent}@${row.version}`;
+      const tag = row.isDefault ? chalk.gray(' (default)') : '';
+      const label = `${AGENT_NAMES[row.agent] || row.agent}@${row.version}${tag}`;
       if (row.status === 'fresh') {
         console.log(`  ${chalk.green('fresh')}  ${label}`);
       } else if (row.status === 'stale') {
@@ -168,7 +181,7 @@ function renderOverviewText(
   }
   console.log();
 
-  console.log(chalk.bold('Orphans (default versions)'));
+  console.log(chalk.bold('Orphans (installed versions)'));
   if (orphanRows.length === 0) {
     console.log(chalk.gray('  (none — version homes match central sources)'));
   } else {
