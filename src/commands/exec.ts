@@ -250,6 +250,10 @@ export function registerRunCommand(program: Command): void {
 
       # Inject a keychain-backed secrets bundle
       agents run claude "deploy the worker" --secrets prod --mode edit
+
+      # Pass arbitrary native flags to the underlying CLI via -- separator
+      agents run kimi -- --plan --some-kimi-option value
+      agents run claude "fix the bug" -- --custom-flag
     `,
     notes: `
       Modes (not every agent supports every mode — check agents.yaml capabilities):
@@ -268,10 +272,18 @@ export function registerRunCommand(program: Command): void {
       Fallback: --fallback codex,gemini retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
       Resume: --session-id <id> continues a prior Claude conversation.
+
+      Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
+        agents run kimi -- --plan --some-native-flag value
     `,
   });
 
-  runCmd.action(async (agentSpec: string, prompt: string | undefined, options: ExecCommandActionOptions) => {
+  runCmd.action(async (agentSpec: string, prompt: string | undefined, options: ExecCommandActionOptions, command: Command) => {
+      // Capture everything after -- as passthrough args forwarded verbatim to the underlying CLI.
+      // Use command.args (all positional strings) and strip the declared positional args from the front.
+      const declaredArgCount = prompt !== undefined ? 2 : 1;
+      const passthroughArgs = command.args.slice(declaredArgCount);
+
       // --resume-checkpoint short-circuits normal dispatch entirely: the
       // checkpoint already carries the agent, version, prompt, session id,
       // iteration, and loop config of the killed run. Reconstruct ExecOptions
@@ -774,6 +786,7 @@ export function registerRunCommand(program: Command): void {
         env,
         toolsRestrict: workflowToolsRestrict,
         mcpConfigPath: workflowMcpConfigPath,
+        passthroughArgs,
       };
 
       if (options.interactive && options.headless) {

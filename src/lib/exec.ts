@@ -155,6 +155,8 @@ export interface ExecOptions {
    * flag alone merely ADDS to the existing server set).
    */
   mcpConfigPath?: string;
+  /** Raw args captured after `--` on the command line, forwarded verbatim to the underlying agent CLI. */
+  passthroughArgs?: string[];
 }
 
 /**
@@ -684,6 +686,12 @@ export function buildExecCommand(options: ExecOptions): string[] {
       cmd.push('--mcp-config', options.mcpConfigPath);
       cmd.push('--strict-mcp-config');
     }
+  }
+
+  // Forward arbitrary native flags supplied after `--` verbatim. Appended last
+  // so they cannot be misinterpreted as values for earlier flags or as the prompt.
+  if (options.passthroughArgs && options.passthroughArgs.length > 0) {
+    cmd.push(...options.passthroughArgs);
   }
 
   return cmd;

@@ -338,6 +338,45 @@ describe('buildExecCommand', () => {
     });
   });
 
+  // --- Passthrough args (everything after --) ---
+
+  describe('passthrough args', () => {
+    it('forwards arbitrary flags after -- for kimi', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi', prompt: undefined, passthroughArgs: ['--plan', '--some-flag', 'value'] }));
+      expect(cmd.slice(-3)).toEqual(['--plan', '--some-flag', 'value']);
+    });
+
+    it('forwards flags after -- without breaking the prompt', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi', prompt: 'fix auth', passthroughArgs: ['--custom-flag'] }));
+      const promptIdx = cmd.indexOf('fix auth');
+      const flagIdx = cmd.indexOf('--custom-flag');
+      expect(promptIdx).toBeGreaterThan(-1);
+      expect(flagIdx).toBeGreaterThan(promptIdx);
+    });
+
+    it('forwards flags in interactive mode', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: undefined, interactive: true, passthroughArgs: ['--custom-flag'] }));
+      expect(cmd).toContain('--custom-flag');
+      expect(cmd[cmd.length - 1]).toBe('--custom-flag');
+    });
+
+    it('does not include passthrough args when empty', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi' }));
+      expect(cmd).not.toContain('--custom-flag');
+    });
+
+    it('forwards passthrough args for codex after all generated flags', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit', prompt: undefined, passthroughArgs: ['--verbose', '--timeout', '10m'] }));
+      expect(cmd.slice(-3)).toEqual(['--verbose', '--timeout', '10m']);
+    });
+
+    it('combines --mode mapping and passthrough args for kimi', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip', passthroughArgs: ['--extra'] }));
+      expect(cmd).toContain('--yolo');
+      expect(cmd[cmd.length - 1]).toBe('--extra');
+    });
+  });
+
   // --- resolveInteractive precedence ---
 
   describe('resolveInteractive precedence', () => {
