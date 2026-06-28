@@ -21,6 +21,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { getRuntimeStateDir, getHelpersDir } from '../state.js';
+import { getCliVersion } from '../version.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -30,9 +31,33 @@ function onDarwin(): boolean {
   return process.platform === 'darwin';
 }
 
+/** ~/Library/Application Support/agents-cli */
+function installDir(): string {
+  return path.join(os.homedir(), 'Library', 'Application Support', INSTALL_DIR_NAME);
+}
+
 /** ~/Library/Application Support/agents-cli/MenubarHelper.app */
 function installedAppPath(): string {
-  return path.join(os.homedir(), 'Library', 'Application Support', INSTALL_DIR_NAME, APP_BUNDLE_NAME);
+  return path.join(installDir(), APP_BUNDLE_NAME);
+}
+
+/**
+ * Version stamp written next to the installed bundle. The upgrade self-heal
+ * compares this against the running CLI's version to decide whether the App
+ * Support copy + plist need to be rebuilt — without it, a `npm update` refreshes
+ * dist/index.js but leaves the menu bar running the OLD helper binary and a
+ * plist whose baked paths may have drifted.
+ */
+function installedVersionMarkerPath(): string {
+  return path.join(installDir(), '.menubar-version');
+}
+
+function readInstalledMenubarVersion(): string | null {
+  try {
+    return fs.readFileSync(installedVersionMarkerPath(), 'utf-8').trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /** Executable inside the installed bundle. */
@@ -225,7 +250,36 @@ export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOp
     try { execFileSync('launchctl', ['load', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* may already be loaded */ }
   }
   try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* best effort */ }
+
+  // Stamp the version we just installed so the upgrade self-heal can tell when
+  // a later release ships a newer helper that needs reinstalling.
+  try { fs.writeFileSync(installedVersionMarkerPath(), getCliVersion()); } catch { /* best effort */ }
   return true;
+}
+
+/**
+ * Pure staleness decision (no I/O) so the truth table is unit-testable. The
+ * installed service is stale when the helper binary is gone, or when it was
+ * installed by a different CLI version than the one now running — a version
+ * change is the signal that the plist's baked interpreter/entry/bundle paths
+ * and the helper binary itself may have drifted. A null installedVersion
+ * (pre-stamp install) counts as stale so old installs get re-stamped once.
+ */
+export function isMenubarStale(opts: {
+  installedVersion: string | null;
+  currentVersion: string;
+  execExists: boolean;
+}): boolean {
+  if (!opts.execExists) return true;
+  return opts.installedVersion !== opts.currentVersion;
+}
+
+function menubarSetupStale(): boolean {
+  return isMenubarStale({
+    installedVersion: readInstalledMenubarVersion(),
+    currentVersion: getCliVersion(),
+    execExists: fs.existsSync(installedExecutablePath()),
+  });
 }
 
 /**
@@ -246,19 +300,32 @@ export function disableMenubarService(): void {
 }
 
 /**
- * Upgrade-time auto-enable. Runs from runMigration() once per sentinel bump.
- * No-ops if: not darwin, the user opted out, no helper bundle ships, or the
- * service is already installed. Best-effort — never throws into migration.
+ * Startup self-heal, run on every darwin CLI invocation (see src/index.ts).
+ * No-ops cheaply (a couple of existsSync + a tiny file read) unless work is
+ * needed:
+ *   - fresh install (no service yet)      -> enable
+ *   - upgrade (version stamp changed) or  -> re-enable: recopy the new helper
+ *     the App Support helper went missing     binary + rewrite the plist + kick
+ *
+ * Without the staleness re-enable, `npm update` refreshed the CLI but left the
+ * menu bar running the previous release's helper binary on a possibly-stale
+ * plist. No-ops if: not darwin, the user opted out, or no helper bundle ships.
+ * Best-effort — never throws into startup.
  */
 export function installMenubarLaunchAgentOnUpgrade(): void {
   try {
     if (!onDarwin()) return;
     if (menubarDisabledByUser()) return;
-    if (menubarServiceInstalled()) return;
     if (!sourceAppPath()) return;
-    enableMenubarService({ clearOptOut: false });
+    if (!menubarServiceInstalled()) {
+      enableMenubarService({ clearOptOut: false });
+      return;
+    }
+    if (menubarSetupStale()) {
+      enableMenubarService({ clearOptOut: false });
+    }
   } catch {
-    /* never block migration on the menu bar */
+    /* never block startup on the menu bar */
   }
 }
 
@@ -266,6 +333,9 @@ export interface MenubarStatus {
   platform: string;
   source: string | null;
   installedApp: string | null;
+  installedVersion: string | null;
+  currentVersion: string;
+  stale: boolean;
   serviceInstalled: boolean;
   running: boolean;
   disabledByUser: boolean;
@@ -278,11 +348,15 @@ export function getMenubarStatus(): MenubarStatus {
     const r = spawnSync('pgrep', ['-f', 'MenubarHelper'], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf-8' });
     running = r.status === 0 && (r.stdout || '').trim().length > 0;
   }
+  const serviceInstalled = menubarServiceInstalled();
   return {
     platform: process.platform,
     source: sourceAppPath(),
     installedApp: fs.existsSync(dest) ? dest : null,
-    serviceInstalled: menubarServiceInstalled(),
+    installedVersion: readInstalledMenubarVersion(),
+    currentVersion: getCliVersion(),
+    stale: onDarwin() && serviceInstalled && menubarSetupStale(),
+    serviceInstalled,
     running,
     disabledByUser: menubarDisabledByUser(),
   };
