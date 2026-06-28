@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**`agents sessions --host <machine>`: query a remote machine's sessions live over SSH**
+
+- `agents sessions "<query>" --host <alias|user@host>` runs the same session query on a remote machine's own index over SSH and streams the result back — repeat `--host` (or pass several) to fan out across machines. SSH access is the only auth; there's no daemon or shared store. Targets are validated against a strict allowlist (`SSH_TARGET_RE`) to block flag-smuggling, and the forwarded invocation is double-quoted (`shellQuote`) so a query like `$(whoami)` survives as a literal string on both shell layers. Source: `src/lib/session/remote.ts`, `src/commands/sessions.ts`, `docs/05-sessions.md`.
+
 **Fix: migrations + menu-bar self-heal were silently disabled on Homebrew-node installs**
 
 - The "is this a dev build?" check walked `dirname(dirname(argv[1]))` looking for a `.git`, without resolving the bin symlink. On a Homebrew-node setup `agents` is `/opt/homebrew/bin/agents`, so it walked up to `/opt/homebrew` — **which is itself a git repo** — and false-positived as a dev build. Dev builds auto-set `AGENTS_SKIP_MIGRATION=1`, which gates **both** one-shot migrations **and** the menu-bar upgrade self-heal. Net effect: every Homebrew-node user ran with migrations and the menu-bar refresh permanently off.
