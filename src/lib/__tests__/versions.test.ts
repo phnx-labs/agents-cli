@@ -3,11 +3,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
+import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'url';
 
 import { getProjectVersion, removeVersion } from '../versions.js';
 import { getVersionsDir, getTrashVersionsDir } from '../state.js';
 import { getDB, updateSessionFilePaths } from '../session/db.js';
 import type { AgentId } from '../types.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 let tmpDir: string;
 
@@ -140,6 +144,69 @@ describe('removeVersion soft-deletes the entire version dir to trash', () => {
       }
     });
   }
+});
+
+// Regression: for a commands-as-skills agent (kimi: commands:false, skills:true,
+// no native command runtime), the commands writer materializes each command as a
+// skill dir under skills/. The skills orphan-sweep that runs afterward in a full
+// (no-selection) sync must NOT delete those converted command-skills — that bug
+// silently dropped every command (e.g. /recap) from kimi/grok.
+describe('syncResourcesToVersion preserves command-skills through the skills orphan-sweep', () => {
+  it('[kimi] keeps converted command-skills AND real skills after a full sync', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdskill-sweep-'));
+    try {
+      const script = String.raw`
+        import * as fs from 'fs';
+        import * as path from 'path';
+        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/versions.ts';
+
+        const home = process.env.HOME;
+        if (!home) throw new Error('HOME missing');
+        const userDir = path.join(home, '.agents');
+        const projectRoot = path.join(home, 'project');
+        fs.mkdirSync(projectRoot, { recursive: true });
+        const write = (rel, content) => {
+          const p = path.join(userDir, rel);
+          fs.mkdirSync(path.dirname(p), { recursive: true });
+          fs.writeFileSync(p, content);
+        };
+        // A top-level command (converts to a command-skill) and a real skill.
+        write('commands/recap.md', ['---','description: Recap','---','','recap body'].join('\n'));
+        write('skills/realskill/SKILL.md', ['---','name: realskill','description: a real skill','---','','body'].join('\n'));
+
+        const agent = 'kimi';
+        const version = '0.0.0-test';
+        const fakeBin = path.join(userDir, '.history', 'versions', agent, version, 'node_modules', '.bin', 'kimi');
+        fs.mkdirSync(path.dirname(fakeBin), { recursive: true });
+        fs.writeFileSync(fakeBin, '#!/usr/bin/env sh\nexit 0\n');
+        fs.chmodSync(fakeBin, 0o755);
+
+        // Full sync: no selection -> orphan sweep runs.
+        syncResourcesToVersion(agent, version, undefined, { cwd: projectRoot, force: true });
+
+        const skillsDir = path.join(getVersionHomePath(agent, version), '.kimi-code', 'skills');
+        const recapMd = path.join(skillsDir, 'recap', 'SKILL.md');
+        console.log(JSON.stringify({
+          recapExists: fs.existsSync(recapMd),
+          recapIsCommandSkill: fs.existsSync(recapMd) && fs.readFileSync(recapMd, 'utf-8').includes('agents_command: "recap"'),
+          realSkillExists: fs.existsSync(path.join(skillsDir, 'realskill', 'SKILL.md')),
+        }));
+      `;
+      const out = execFileSync('bun', ['--eval', script], {
+        cwd: repoRoot,
+        env: { ...process.env, HOME: home },
+        encoding: 'utf-8',
+      });
+      const result = JSON.parse(out.trim()) as {
+        recapExists: boolean; recapIsCommandSkill: boolean; realSkillExists: boolean;
+      };
+      expect(result.recapExists).toBe(true);
+      expect(result.recapIsCommandSkill).toBe(true);
+      expect(result.realSkillExists).toBe(true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 // When a version is removed, the command handler calls removeVersion then

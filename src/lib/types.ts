@@ -88,6 +88,13 @@ export interface AgentConfig {
   commandsDir: string;
   commandsSubdir: string;
   skillsDir: string;
+  /**
+   * Agent resolves slash-commands through its own runtime (e.g. openclaw's
+   * Gateway), so agents-cli commands must NOT be converted into skills for it.
+   * Skills-capable agents WITHOUT a native command-file dir convert commands to
+   * skills by default; set this to opt such an agent out of that conversion.
+   */
+  nativeCommandRuntime?: boolean;
   hooksDir: string;
   pluginManifestDir?: string;
   instructionsFile: string;

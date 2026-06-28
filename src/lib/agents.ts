@@ -318,6 +318,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsDir: '', // OpenClaw uses Gateway-based slash commands, not file-based
     commandsSubdir: '',
     skillsDir: path.join(HOME, '.openclaw', 'skills'),
+    nativeCommandRuntime: true, // Gateway resolves slash commands — don't convert commands to skills
+
     hooksDir: 'hooks',
     instructionsFile: 'workspace/AGENTS.md', // Primary memory file (also has SOUL.md, IDENTITY.md, etc.)
     format: 'markdown',

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 
-function runCommandsWriterFixture(scriptBody: string): unknown {
+function runCommandsWriterFixture(scriptBody: string, agent = 'grok', configDirName = '.grok'): unknown {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'commands-writer-'));
   try {
     const script = `
@@ -17,11 +17,13 @@ function runCommandsWriterFixture(scriptBody: string): unknown {
 
       const home = process.env.HOME;
       if (!home) throw new Error('HOME missing');
+      const agent = ${JSON.stringify(agent)};
+      const configDirName = ${JSON.stringify(configDirName)};
       const userDir = path.join(home, '.agents');
       const projectRoot = path.join(home, 'project');
       const version = '0.2.33';
-      const versionHome = path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home');
-      const agentDir = path.join(versionHome, '.grok');
+      const versionHome = path.join(home, '.agents', '.history', 'versions', agent, version, 'home');
+      const agentDir = path.join(versionHome, configDirName);
       fs.mkdirSync(projectRoot, { recursive: true });
       fs.mkdirSync(agentDir, { recursive: true });
       const writeUser = (rel, content) => {
@@ -30,8 +32,8 @@ function runCommandsWriterFixture(scriptBody: string): unknown {
         fs.writeFileSync(p, content, 'utf-8');
         return p;
       };
-      const writer = getWriter('commands', 'grok');
-      if (!writer) throw new Error('grok commands writer missing');
+      const writer = getWriter('commands', agent);
+      if (!writer) throw new Error(agent + ' commands writer missing');
       ${scriptBody}
     `;
     const out = execFileSync('bun', ['--eval', script], {
@@ -82,5 +84,24 @@ describe('commands writer', () => {
 
     expect(result.synced).toEqual(['plan']);
     expect(result.exists).toBe(false);
+  });
+
+  it('converts a command to a skill for kimi (commands:false, no native runtime)', () => {
+    const result = runCommandsWriterFixture(`
+      writeUser('commands/recap.md', ['---', 'description: Summarize the situation', '---', '', 'recap body'].join('\\n'));
+
+      const writeResult = writer.write({ version, versionHome, selection: ['recap'], cwd: projectRoot });
+      const skillPath = path.join(agentDir, 'skills', 'recap', 'SKILL.md');
+      console.log(JSON.stringify({
+        synced: writeResult.synced,
+        exists: fs.existsSync(skillPath),
+        content: fs.existsSync(skillPath) ? fs.readFileSync(skillPath, 'utf-8') : '',
+      }));
+    `, 'kimi', '.kimi-code') as { synced: string[]; exists: boolean; content: string };
+
+    expect(result.synced).toEqual(['recap']);
+    expect(result.exists).toBe(true);
+    expect(result.content).toContain('agents_command: "recap"');
+    expect(result.content).toContain('recap body');
   });
 });

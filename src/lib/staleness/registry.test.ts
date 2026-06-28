@@ -67,6 +67,25 @@ describe('staleness/registry', () => {
     expect(DETECTORS.commands.grok).toBeDefined();
   });
 
+  it('kimi has a commands writer + detector for commands-as-skills', () => {
+    // kimi.capabilities.commands === false with an empty commandsSubdir, like
+    // grok — but it has no native command runtime, so commands must convert to
+    // skills. Registration is driven by nativeCommandRuntime, not an agent-id
+    // allowlist; this is the assertion that would have caught the kimi
+    // silent-skip (the "every supported (agent, kind)" check skips kimi because
+    // supports('kimi','commands') is false).
+    expect(WRITERS.commands.kimi).toBeDefined();
+    expect(DETECTORS.commands.kimi).toBeDefined();
+  });
+
+  it('openclaw opts OUT of commands-as-skills (native command runtime)', () => {
+    // openclaw resolves slash commands through its Gateway runtime, so it
+    // declares nativeCommandRuntime and must NOT be registered for commands.
+    expect(AGENTS.openclaw.nativeCommandRuntime).toBe(true);
+    expect(WRITERS.commands.openclaw).toBeUndefined();
+    expect(DETECTORS.commands.openclaw).toBeUndefined();
+  });
+
   it('grok has a permissions writer + detector', () => {
     expect(WRITERS.permissions.grok).toBeDefined();
     expect(DETECTORS.permissions.grok).toBeDefined();

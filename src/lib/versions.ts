@@ -2000,7 +2000,13 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     // dot-dirs to keep plugin-managed subtrees (.plugins/, .promptcuts) intact.
     const skillsTargetSweep = path.join(agentDir, 'skills');
     if (!userPassedSelection && fs.existsSync(skillsTargetSweep) && !fs.lstatSync(skillsTargetSweep).isSymbolicLink()) {
+      // Trust real skills AND command-skills: when commandsAsSkills, the
+      // commands writer (above) materialized each command as a skill dir under
+      // skills/. Those names are not in skillsToSync, so without this they'd be
+      // swept as orphans — silently deleting every converted command (e.g.
+      // /recap on kimi/grok).
       const trustedSkills = new Set(skillsToSync);
+      if (commandsAsSkills) for (const cmd of commandsToSync) trustedSkills.add(cmd);
       for (const entry of fs.readdirSync(skillsTargetSweep, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
         if (!trustedSkills.has(entry.name)) {

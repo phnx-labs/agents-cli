@@ -84,24 +84,19 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
 //   - commands-as-skills (grok, codex >= 0.117.0)
 //
 // Agents that have skills but use a NATIVE non-file slash-command system
-// (openclaw → Gateway-based commands) are NOT registered. The signal is an
-// empty `commandsSubdir`: there's no directory to write to AND the agent
-// doesn't want commands-as-skills either (it has its own runtime command
-// resolver).
+// (openclaw → Gateway-based commands) are NOT registered. They declare
+// `nativeCommandRuntime: true` to opt out — their own runtime resolves slash
+// commands, so there's nothing to write and nothing to convert.
 export const commandsWriters = lazyAgentMap<ResourceWriter<string[]>>(() => {
   const m: Partial<Record<AgentId, ResourceWriter<string[]>>> = {};
   for (const id of Object.keys(AGENTS) as AgentId[]) {
     const cfg = AGENTS[id];
     if (cfg.capabilities.commands === false && (!cfg.skillsDir || cfg.skillsDir === '')) continue;
-    // Native non-file slash-command runtime — no version-home write.
+    // Skills-capable agent with no native command-file dir: convert commands to
+    // skills by default (grok, kimi, …). Opt out only agents with their own
+    // slash-command runtime (openclaw).
     if (cfg.capabilities.commands === false && (!cfg.commandsSubdir || cfg.commandsSubdir === '')) {
-      // Grok has empty commandsSubdir AND wants commands-as-skills.
-      // Distinguish: grok has skillsDir set; openclaw also has skillsDir, so we
-      // can't use that. The cleanest signal is the agent's `cliCommand` set —
-      // openclaw flags `commands: false` AND has its Gateway runtime, while
-      // grok flags `commands: false` because grok's slash commands are skills.
-      // We opt in explicitly: only grok takes commands-as-skills today.
-      if (id !== 'grok') continue;
+      if (cfg.nativeCommandRuntime) continue;
     }
     const hasCommands = cfg.capabilities.commands !== false;
     const hasSkills = cfg.capabilities.skills !== false;
