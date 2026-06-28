@@ -18,6 +18,14 @@
 - **Configurable, still flexible.** Set the global default in `agents.yaml` (`secrets.policy: always` to restore prompt-every-time), or override per bundle with `agents secrets policy <bundle> always` for high-value keys (signing, SSH) you want to confirm on every read.
 - **Explicit `always` now persists** under the legacy `tier: biometry` token (older CLIs read it as their own always default). Bundles with no stored policy inherit the configured default — so an existing always-by-default bundle quietly becomes `daily` on first read by the new CLI, which is the intended migration.
 
+**Menu bar: a macOS status item for agent activity (`agents menubar`)**
+
+- New no-Dock menu bar app showing live agent activity on the machine: a **NEEDS YOU** section (sessions awaiting input + failed/overdue routines), a per-agent **roster** (running / idle counts across installed agents), a **+ New session** launcher, and a one-line routines summary. The icon badges red `!` when something needs you, green with a count when sessions are running.
+- Reads state **directly from disk** — `live-terminals.json`, teams `meta.json`, and the cloud `tasks.db` — so opening the menu never triggers the costly sessions transcript re-index. The CLI is shelled only for actions (start a session, run a routine).
+- **Auto-enabled on macOS** for every user as a launchd login service (`com.phnx-labs.agents-menubar`); a fresh install brings the icon up with no manual step. Manage with `agents menubar enable | disable | status`. Opt out with `agents menubar disable` — sticky across upgrades.
+- **Upgrade self-heal:** the installed bundle is version-stamped, and the startup self-heal now re-installs the helper when a newer release ships a newer build (or the installed copy goes missing), instead of skipping whenever a service already existed. So `npm update` actually moves users onto the new helper binary + plist rather than leaving the old one running (#442). `agents menubar status` shows installed vs current version and staleness.
+- Docs: [Menu bar](docs/menubar.md). macOS only.
+
 **`agents repos view [name]`: inspect one repo's contents without opening it**
 
 - New `agents repo view <name>` (also reachable as `agents repos view`, now a first-class alias of the `repo` command) prints a single repo's git state and per-kind resource counts — `system`, `user`, `project`, or an extra-repo alias. Omit the name for an interactive picker over the registered repos. It reuses the `inspect` repo renderer, so output matches `agents inspect <repo>`; supports `--brief` and `--json`. Source: `src/commands/repo.ts`, `src/commands/inspect.ts`.
