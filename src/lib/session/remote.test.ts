@@ -55,6 +55,38 @@ describe('buildForwardedArgs', () => {
     expect(buildForwardedArgs(argv('sessions', 'tail', '--latest', '--host', 'box')))
       .toEqual(['sessions', 'tail', '--latest']);
   });
+
+  it('strips every host in the variadic --host a b form (not just the first)', () => {
+    // Commander's `<target...>` lets `--host box1 box2` set host=['box1','box2'].
+    // Without the known-host set the scan would only drop box1 and leak box2
+    // into the remote query. Passing the set strips both.
+    expect(
+      buildForwardedArgs(
+        argv('sessions', 'auth bug', '--host', 'box1', 'box2', '--json'),
+        new Set(['box1', 'box2']),
+      ),
+    ).toEqual(['sessions', 'auth bug', '--json']);
+  });
+
+  it('strips repeated --host flags when given the host set', () => {
+    expect(
+      buildForwardedArgs(
+        argv('sessions', 'auth bug', '--host', 'box1', '--host', 'box2'),
+        new Set(['box1', 'box2']),
+      ),
+    ).toEqual(['sessions', 'auth bug']);
+  });
+
+  it('stops consuming at the first token that is not a known host', () => {
+    // The scan only swallows consecutive tokens present in the host set; a
+    // trailing non-host token ('auth') is preserved rather than over-consumed.
+    expect(
+      buildForwardedArgs(
+        argv('sessions', '--host', 'box1', 'box2', 'auth'),
+        new Set(['box1', 'box2']),
+      ),
+    ).toEqual(['sessions', 'auth']);
+  });
 });
 
 describe('shellQuote', () => {

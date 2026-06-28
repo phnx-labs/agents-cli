@@ -47,13 +47,22 @@ export function shellQuote(s: string): string {
  * @param argv full process argv; the sessions args begin at index 2
  *             (`[runtime, script, 'sessions', ...]`).
  */
-export function buildForwardedArgs(argv: string[]): string[] {
+export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set()): string[] {
   const args = argv.slice(2);
   const out: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--host' || a === '-H') {
-      i++; // also consume the separate value token
+      // Commander's `<target...>` variadic accepts both `--host a --host b` and
+      // `--host a b` — consume every consecutive token that is a known host so
+      // the variadic form doesn't leak the extra hosts into the remote argv.
+      // Fall back to consuming the single next token when we have no host set
+      // (e.g. malformed input) so the flag value never leaks either way.
+      if (hosts.size > 0) {
+        while (i + 1 < args.length && hosts.has(args[i + 1])) i++;
+      } else {
+        i++; // also consume the separate value token
+      }
       continue;
     }
     if (a.startsWith('--host=') || a.startsWith('-H=')) continue;
@@ -88,7 +97,7 @@ const SSH_OPTS = [
 export function runRemoteSessions(hosts: string[], argv: string[] = process.argv): void {
   for (const host of hosts) assertValidSshTarget(host); // fail fast on any bad target
 
-  const remoteCmd = buildRemoteCommand(buildForwardedArgs(argv));
+  const remoteCmd = buildRemoteCommand(buildForwardedArgs(argv, new Set(hosts)));
   const multi = hosts.length > 1;
   let failures = 0;
 
