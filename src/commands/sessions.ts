@@ -23,6 +23,7 @@ import { getActiveSessions, type ActiveSession } from '../lib/session/active.js'
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
+import { runRemoteSessions } from '../lib/session/remote.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { colorAgent, resolveAgentName } from '../lib/agents.js';
@@ -59,6 +60,7 @@ interface SessionsOptions extends SessionFilterOptions {
   artifact?: string;
   active?: boolean;
   cloud?: boolean;
+  host?: string[];
 }
 
 interface ClaudeHistoryEntry {
@@ -402,6 +404,16 @@ async function renderActiveSessions(asJson: boolean): Promise<void> {
 
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
 async function sessionsAction(query: string | undefined, options: SessionsOptions): Promise<void> {
+  if (options.host && options.host.length > 0) {
+    try {
+      runRemoteSessions(options.host);
+    } catch (err: any) {
+      console.error(chalk.red(err.message));
+      process.exit(1);
+    }
+    return;
+  }
+
   if (options.active) {
     await renderActiveSessions(options.json === true);
     return;
@@ -1288,7 +1300,8 @@ export function registerSessionsCommands(program: Command): void {
     .option('--artifacts', 'List all files written or edited during a session')
     .option('--artifact <name>', 'Read a specific artifact by filename or path (outputs to stdout)')
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
-    .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk');
+    .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
+    .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)');
 
   setHelpSections(sessionsCmd, {
     examples: `
@@ -1309,8 +1322,15 @@ export function registerSessionsCommands(program: Command): void {
 
       # Export for analysis
       agents sessions --since 30d --limit 200 --json > sessions.json
+
+      # Search another machine's sessions live over SSH (no sync needed)
+      agents sessions "auth bug" --last 3 --host yosemite-s1
+
+      # Fan the same query out across several machines
+      agents sessions --all "deploy script" --host box-a --host box-b
     `,
     notes: `
+      - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --include and --exclude are mutually exclusive.
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.

@@ -169,6 +169,33 @@ content 1.0   # everything else
 - ISO date: `2026-04-22T00:00:00Z`
 - Natural: `yesterday`, `today`
 
+## Remote Sessions over SSH
+
+Discovery is local-only — every path is rooted at `os.homedir()`, so a machine
+sees only its own transcripts. `--host` runs the query on another machine instead:
+
+```
+# Search another machine's sessions live (no sync, always current)
+agents sessions "auth bug" --last 3 --host yosemite-s1
+
+# Fan the same query across several machines
+agents sessions --all "deploy script" --host box-a --host box-b
+```
+
+It works by invoking the **remote's own** `agents sessions` against its already-built
+index over SSH and streaming stdout back — `ssh -o BatchMode=yes <host> bash -lc
+'agents sessions …'` (`src/lib/session/remote.ts`). Every other flag (`--since`,
+`--json`, `--markdown`, query, even `tail` and `--active`) forwards verbatim, since
+the far end runs the same binary. `--host` is stripped before forwarding so there is
+no recursion; the target must be a host alias or `user@host` (validated against
+`SSH_TARGET_RE` to block argv-flag smuggling). SSH access is the only auth — if you
+can `ssh <host>`, you own the box; there is no identity layer.
+
+This is the **live** counterpart to `agents sessions sync` (R2 + CRDT union, eventual
+~90s): no upfront copy and always current, but the peer must be reachable. Use sync
+to make every machine's sessions show up in plain `agents sessions`; use `--host` to
+peek at a specific machine on demand.
+
 ## Schema Version
 
 Schema version is currently `6`. Migrations run on connection open; old DBs
