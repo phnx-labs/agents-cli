@@ -1489,11 +1489,14 @@ export function resolveVersion(agent: AgentId, projectPath?: string): string | n
 /**
  * Normalize a user-supplied @version token across CLI subcommands.
  *
- *   undefined / "" / "default"  -> undefined  (caller falls back to project pin or global default)
+ *   undefined / "" / "default" / "pinned" -> undefined  (caller falls back to project pin or global default)
  *   "latest"                    -> highest installed version (process.exit if none installed)
  *   "oldest"                    -> lowest installed version (process.exit if none installed)
  *   "x.y.z" (installed)         -> "x.y.z"
  *   "x.y.z" (not installed)     -> process.exit with installed-list hint
+ *
+ * `pinned` is a synonym for `default`: both name the project pin / global
+ * default, which the caller resolves.
  *
  * Use this anywhere the user can type `agents <cmd> claude@<token>` to keep the
  * vocabulary consistent. Subcommands with different semantics for `latest`
@@ -1501,7 +1504,7 @@ export function resolveVersion(agent: AgentId, projectPath?: string): string | n
  * parsing.
  */
 export function resolveVersionAlias(agent: AgentId, raw: string | undefined | null): string | undefined {
-  if (!raw || raw === 'default') return undefined;
+  if (!raw || raw === 'default' || raw === 'pinned') return undefined;
 
   if (raw === 'latest' || raw === 'oldest') {
     const installed = listInstalledVersions(agent);
@@ -1527,12 +1530,12 @@ export function resolveVersionAlias(agent: AgentId, raw: string | undefined | nu
 
 /**
  * Loose variant of resolveVersionAlias for record-filter contexts (sessions,
- * team history). Same `default`/`latest`/`oldest` semantics, but explicit
+ * team history). Same `default`/`pinned`/`latest`/`oldest` semantics, but explicit
  * versions pass through unchanged so historical records of uninstalled versions
  * remain queryable.
  */
 export function resolveVersionAliasLoose(agent: AgentId, raw: string | undefined | null): string | undefined {
-  if (!raw || raw === 'default') return undefined;
+  if (!raw || raw === 'default' || raw === 'pinned') return undefined;
   if (raw === 'latest' || raw === 'oldest') {
     const installed = listInstalledVersions(agent);
     if (installed.length === 0) return undefined;

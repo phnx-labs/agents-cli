@@ -9,6 +9,8 @@
  *   agents sync claude                                  # one agent: uses default/sole installed version
  *   agents sync claude@2.1.142                          # one agent: explicit version
  *   agents sync claude@latest                           # one agent: newest installed
+ *   agents sync claude@oldest                           # one agent: oldest installed
+ *   agents sync claude@pinned   (= claude@default)      # one agent: the pinned default version
  *   agents sync --agent claude --agent-version 2.1.142  # legacy form, still supported
  *
  * The umbrella stages live in lib/sync-umbrella.ts; this file dispatches to them
@@ -36,6 +38,7 @@ import {
   syncResourcesToVersion,
   parseAgentSpec,
   resolveVersion,
+  resolveVersionAlias,
   listInstalledVersions,
   getAvailableResources,
   getActuallySyncedResources,
@@ -75,7 +78,7 @@ export function registerSyncCommand(program: Command): void {
   program
     .command('sync [agentSpec]')
     .summary('Make this machine current, or sync resources into one agent')
-    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude" or "claude@2.1.142".\n\nWith NO agent, runs the umbrella verb: fetch remote state (config repos + secrets + sessions) then reconcile it into every installed agent. Scope it with --repos / --secrets / --sessions, --cloud (fetch only), or --local (reconcile only).')
+    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", or a selector: @latest / @oldest / @pinned (= @default).\n\nWith NO agent, runs the umbrella verb: fetch remote state (config repos + secrets + sessions) then reconcile it into every installed agent. Scope it with --repos / --secrets / --sessions, --cloud (fetch only), or --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
     .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version")')
     .option('--project-dir <path>', 'Path to project-level .agents/ directory containing project-scoped resources')
@@ -158,16 +161,23 @@ async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<v
   let agentId: AgentId | undefined;
   let version: string | undefined;
 
+  // A positional @selector typed by the user (latest/oldest/pinned/default/
+  // explicit). parseAgentSpec defaults a missing version to 'latest', so a bare
+  // `agents sync claude` and `agents sync claude@latest` are indistinguishable
+  // after parsing — we only treat the version as a selector when an '@' was
+  // actually typed, keeping bare `claude` on the default-version path.
+  let selector: string | undefined;
+
   if (agentSpec) {
     const parsed = parseAgentSpec(agentSpec);
     if (!parsed) {
       errLog(chalk.red(`Invalid agent spec '${agentSpec}'.`));
-      errLog(chalk.gray('Examples: claude, claude@2.1.142, codex@latest'));
+      errLog(chalk.gray('Examples: claude, claude@2.1.142, claude@latest, claude@oldest, claude@pinned'));
       process.exitCode = 1;
       return;
     }
     agentId = parsed.agent;
-    if (parsed.version !== 'latest' && parsed.version !== 'oldest') version = parsed.version;
+    if (agentSpec.includes('@')) selector = parsed.version;
   }
 
   if (opts.agent) {
@@ -180,6 +190,8 @@ async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<v
     agentId = resolved;
   }
   if (opts.agentVersion) {
+    // Legacy flag and the launch-shim hot path (`--agent-version <concrete>`):
+    // pass through verbatim. Selector aliases are a positional-spec feature.
     version = opts.agentVersion;
   }
 
@@ -191,6 +203,14 @@ async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<v
   }
 
   // ---------- 2. Resolve version (project pin → global default → sole installed) ----------
+  // A positional @selector wins over the default-resolution below.
+  //   @latest / @oldest        → newest / oldest installed (process.exit if none)
+  //   @pinned / @default       → undefined → fall through to the default path
+  //   @x.y.z                   → that version (process.exit if not installed)
+  if (selector !== undefined && !version) {
+    version = resolveVersionAlias(agentId, selector);
+  }
+
   if (!version) {
     version = resolveVersion(agentId, process.cwd()) || undefined;
     if (!version) {
