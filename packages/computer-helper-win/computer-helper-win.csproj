@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Windows computer-use daemon. Speaks the SAME newline-delimited JSON-RPC
+    protocol as the macOS Swift helper (packages/computer-helper) so the TS
+    client in src/lib/computer-rpc.ts drives both unchanged. Built as a
+    self-contained single-file win-x64 exe (the box needs no .NET runtime),
+    cross-published from macOS/Linux via `scripts/build-win.sh`.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <!-- Allow cross-publishing a Windows target from macOS/Linux build hosts. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- WindowsForms pulls in System.Drawing (screen capture) + SystemInformation. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- WPF pulls in System.Windows.Automation (UIAutomation client). -->
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>computer-helper-win</AssemblyName>
+    <RootNamespace>ComputerHelperWin</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+</Project>
