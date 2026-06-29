@@ -662,6 +662,50 @@ export function syncLabels(labelMap: Map<string, string | null>): number {
   return updates.length;
 }
 
+/**
+ * Sync topics (session titles) for a set of sessions, keyed by id. For agents
+ * whose human-readable title lives in a side index that updates independently
+ * of the transcript (Codex `session_index.jsonl`), the per-file scan can't see
+ * a title that lands later. This applies those titles by id, updating both
+ * `sessions.topic` and the FTS5 topic column. Only ever sets a non-empty title
+ * and only when it differs from the stored value — cheap to call every run.
+ * Returns the number of rows updated.
+ */
+export function syncTopics(topicMap: Map<string, string>): number {
+  if (topicMap.size === 0) return 0;
+  const db = getDB();
+  const ids = [...topicMap.keys()];
+  const CHUNK = 500;
+  const updates: Array<{ id: string; topic: string }> = [];
+
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(`SELECT id, topic FROM sessions WHERE id IN (${placeholders})`)
+      .all(...chunk) as Array<{ id: string; topic: string | null }>;
+    for (const row of rows) {
+      const live = topicMap.get(row.id) ?? '';
+      if (live && live !== (row.topic ?? '')) {
+        updates.push({ id: row.id, topic: live });
+      }
+    }
+  }
+  if (updates.length === 0) return 0;
+
+  const updSessions = db.prepare(`UPDATE sessions SET topic = ? WHERE id = ?`);
+  const updFts = db.prepare(`UPDATE session_text SET topic = ? WHERE session_id = ?`);
+
+  const txn = db.transaction((items: typeof updates) => {
+    for (const { id, topic } of items) {
+      updSessions.run(topic, id);
+      updFts.run(topic, id);
+    }
+  });
+  txn(updates);
+  return updates.length;
+}
+
 /** Convert a raw database row into a SessionMeta object. */
 function rowToMeta(row: SessionRow): SessionMeta {
   return {
