@@ -1494,9 +1494,10 @@ export async function viewAction(
     console.log(chalk.red(formatAgentError(agentName)));
     process.exit(1);
   }
-  // Keep 'default' as-is since showAgentResources handles it; resolveVersionAlias
-  // returns undefined for 'default' which would skip the detailed view.
-  const requestedVersion = parts[1] === 'default'
+  // Keep 'default'/'pinned' as-is since showAgentResources handles 'default';
+  // resolveVersionAlias returns undefined for both (they're synonyms), which
+  // would otherwise skip the detailed view.
+  const requestedVersion = (parts[1] === 'default' || parts[1] === 'pinned')
     ? 'default'
     : (resolveVersionAlias(agentId, parts[1]) ?? null);
 
