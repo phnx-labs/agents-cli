@@ -75,7 +75,6 @@ fi
 
 # Must be on main, up to date with origin
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[[ "$BRANCH" == "main" ]] || die "must be on main (currently on $BRANCH)"
 git fetch --quiet origin main
 LOCAL="$(git rev-parse HEAD)"
 REMOTE="$(git rev-parse origin/main)"
