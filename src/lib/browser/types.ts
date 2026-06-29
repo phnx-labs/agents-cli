@@ -8,7 +8,15 @@ export type BrowserType = 'chrome' | 'comet' | 'chromium' | 'brave' | 'edge' | '
  * Per-endpoint overrides take precedence over profile-level fields.
  */
 export interface EndpointPreset {
-  /** CDP URL — `cdp://host:port` or `ssh://host?port=N` */
+  /**
+   * CDP URL — `cdp://host:port` or `ssh://host?port=N`.
+   *
+   * For an SSH target whose remote is Windows, append `&os=windows` (e.g.
+   * `ssh://user@host?port=9222&os=windows`). The driver then speaks the
+   * cmd.exe dialect (launch via `start /B msedge`, teardown via PowerShell)
+   * instead of the POSIX default. The query param is the single source of
+   * truth for remote-OS selection.
+   */
   target: string;
   /** Override the profile-level binary (e.g. a remote host has no local binary). */
   binary?: string;
