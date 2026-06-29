@@ -53,6 +53,7 @@ interface ExecCommandActionOptions {
   computer?: string;
   remoteCwd?: string;
   follow?: boolean; // --no-follow sets this false
+  any?: boolean;
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -242,7 +243,8 @@ export function registerRunCommand(program: Command): void {
       'Offload this run onto a registered agent host over SSH instead of running locally. See `agents hosts`.',
     )
     .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
-    .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).');
+    .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
+    .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.');
 
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
@@ -318,7 +320,18 @@ export function registerRunCommand(program: Command): void {
         const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
         let host = await resolveHost(hostName);
         if (!host) {
-          try { host = await resolveHostByCap(hostName); } catch { /* not a cap either */ }
+          // Not a host name — try capability routing (e.g. --host gpu). A
+          // "Multiple hosts tagged…" error is actionable and must surface;
+          // only "no host tagged" falls through to the generic unknown-host msg.
+          try {
+            host = await resolveHostByCap(hostName, options.any);
+          } catch (e) {
+            const msg = (e as Error).message ?? '';
+            if (msg.startsWith('Multiple hosts')) {
+              console.error(chalk.red(msg));
+              process.exit(1);
+            }
+          }
         }
         if (!host) {
           console.error(chalk.red(`Unknown host "${hostName}". List hosts: agents hosts list`));

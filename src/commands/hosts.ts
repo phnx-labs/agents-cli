@@ -81,11 +81,13 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
       choices: candidates.map((c) => ({ value: c, name: c })),
     });
     for (const c of picked) {
+      // The ssh target is the candidate name itself either way: ssh resolves it
+      // for ssh-config hosts, and it's a reachable hostname for known_hosts ones.
       const source = isSshConfigHost(c) ? 'ssh-config' : 'inline';
-      const probe = probeHost(source === 'ssh-config' ? c : c);
+      const probe = probeHost(c);
       await registerHost({ name: c, provider: 'local', source, ...(source === 'inline' ? { address: c } : {}), os: probe.os, caps: opts.cap });
       console.log(chalk.green(`Enrolled ${c}`) + chalk.gray(` (${source}${probe.os ? `, ${probe.os}` : ''})`));
-      if (opts.enroll !== false) await maybeBootstrap(source === 'ssh-config' ? c : c, c);
+      if (opts.enroll !== false) await maybeBootstrap(c, c);
     }
     return;
   }
