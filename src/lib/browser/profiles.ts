@@ -203,6 +203,29 @@ function hasSshEndpoint(endpoints: BrowserProfileConfig['endpoints']): boolean {
   });
 }
 
+/**
+ * True when any endpoint is an `ssh://…?os=windows` target — i.e. the browser
+ * lives on a remote Windows host. Such a profile's binary (`msedge.exe`) will
+ * never exist on this Mac, so create-time local-binary validation must be
+ * skipped; the binary is resolved on the remote at connect time instead.
+ */
+function hasRemoteWindowsEndpoint(endpoints: BrowserProfileConfig['endpoints']): boolean {
+  const targets = Array.isArray(endpoints)
+    ? endpoints
+    : Object.values(endpoints).map((preset) => preset.target);
+  return targets.some((target) => {
+    try {
+      const url = new URL(target);
+      return (
+        url.protocol === 'ssh:' &&
+        (url.searchParams.get('os') || '').toLowerCase() === 'windows'
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
 export async function createProfile(profile: BrowserProfile): Promise<void> {
   const meta = readMeta();
   if (meta.browser?.[profile.name]) {
@@ -233,7 +256,13 @@ export async function createProfile(profile: BrowserProfile): Promise<void> {
   // error ("Comet not installed at /Applications/Comet.app") rather than
   // deferring the failure to the first task. `findBrowserPath` short-circuits
   // for browser=custom without a binary by throwing — same outcome.
-  findBrowserPath(profile.browser, profile.binary);
+  //
+  // Skip for remote-Windows profiles: the browser is `msedge.exe` on the
+  // remote box, never on this Mac, so a local lookup would always (wrongly)
+  // fail. The remote launcher resolves it at connect time via App Paths.
+  if (!hasRemoteWindowsEndpoint(profile.endpoints)) {
+    findBrowserPath(profile.browser, profile.binary);
+  }
 
   meta.browser = meta.browser ?? {};
   meta.browser[profile.name] = profileToConfig(profile);
