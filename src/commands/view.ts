@@ -74,6 +74,10 @@ import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
+// Shown in the email column for agents that are signed in but expose no email
+// address locally (Antigravity, Kimi store an opaque OAuth/JWT credential).
+const SIGNED_IN_LABEL = 'signed in';
+
 /**
  * Group profile summaries by their host harness, optionally filtered to a
  * single agent. Profile YAMLs that fail validation are silently skipped by
@@ -435,6 +439,7 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         const rawInfo = infoMap.get(`${agentId}:${v}`);
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
         if (info?.email) maxEmail = Math.max(maxEmail, info.email.length);
+        else if (info?.signedIn) maxEmail = Math.max(maxEmail, SIGNED_IN_LABEL.length);
         if (info?.plan) maxPlanWidth = Math.max(maxPlanWidth, info.plan.length);
       }
       // Profile rows share these columns with version rows so they line up.
@@ -493,6 +498,7 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         // Build columns, trimming trailing whitespace when columns are empty
         const parts = [`    ${label}`];
         const hasEmail = !!vInfo?.email;
+        const signedIn = !!vInfo?.signedIn;
         const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth);
         const hasUsage = usageStr.length > 0;
         // Only show lastActive for versions with an actual logged-in account.
@@ -504,13 +510,16 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         if (runDefaults.mode) runDefaultBits.push(`mode:${runDefaults.mode}`);
         if (runDefaults.model) runDefaultBits.push(`model:${runDefaults.model}`);
 
-        if (!hasEmail && !hasUsage) {
+        if (!hasEmail && !hasUsage && !signedIn) {
           // Installed but never signed in
           parts.push(chalk.gray('(not signed in — run ' + agent.cliCommand + ' to log in)'));
         } else {
-          if (hasEmail || hasUsage || hasActive) {
-            const emailCol = (vInfo?.email || '').padEnd(maxEmail);
-            parts.push(hasEmail ? chalk.cyan(emailCol) : ' '.repeat(maxEmail));
+          if (hasEmail || hasUsage || hasActive || signedIn) {
+            // Signed-in agents without a local email (Antigravity, Kimi) show a
+            // "signed in" placeholder so they read as logged in, not blank.
+            const display = vInfo?.email || (signedIn ? SIGNED_IN_LABEL : '');
+            const emailCol = display.padEnd(maxEmail);
+            parts.push(display ? chalk.cyan(emailCol) : ' '.repeat(maxEmail));
           }
           if (hasUsage || hasActive) {
             const usagePad = ' '.repeat(Math.max(0, maxUsageWidth - visibleWidth(usageStr)));
@@ -596,7 +605,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
       const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null);
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
-      if (gInfo?.email || gUsageStr || gActiveStr) parts.push(gInfo?.email ? chalk.cyan(gInfo.email) : '');
+      if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
+        const gDisplay = gInfo?.email || (gInfo?.signedIn ? SIGNED_IN_LABEL : '');
+        parts.push(gDisplay ? chalk.cyan(gDisplay) : '');
+      }
       if (gUsageStr || gActiveStr) parts.push(gUsageStr);
       const gStatusStr = formatUsageStatusBadge(gInfo?.usageStatus);
       if (gMaxStatusWidth > 0) {
@@ -949,7 +961,11 @@ async function showAgentResources(
       cliVersion: version,
       info: accountInfo,
     });
-    const emailStr = accountInfo.email ? chalk.cyan(`  ${accountInfo.email}`) : '';
+    const emailStr = accountInfo.email
+      ? chalk.cyan(`  ${accountInfo.email}`)
+      : accountInfo.signedIn
+        ? chalk.cyan(`  ${SIGNED_IN_LABEL}`)
+        : '';
     const status = chalk.green(version);
     const usageStr = formatUsageSummary(accountInfo.plan, null);
     const usagePart = usageStr ? `  ${usageStr}` : '';
@@ -1175,7 +1191,7 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
     const entry: ViewJsonVersion = {
       version,
       isDefault: version === globalDefault,
-      signedIn: !!info.email,
+      signedIn: info.signedIn,
       email: info.email,
       plan: info.plan,
       usageStatus: info.usageStatus,
