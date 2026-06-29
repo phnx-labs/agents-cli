@@ -6,7 +6,7 @@
  * injection, and multi-agent fallback chains for rate-limit resilience.
  */
 
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
 import type { AgentId } from '../lib/types.js';
@@ -46,6 +46,13 @@ interface ExecCommandActionOptions {
   budget?: string;
   until?: string;
   interval?: string;
+  // Host dispatch: run on a registered agent host instead of locally.
+  // `--host` is canonical; `--on`/`--computer` are hidden aliases.
+  host?: string;
+  on?: string;
+  computer?: string;
+  remoteCwd?: string;
+  follow?: boolean; // --no-follow sets this false
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -229,7 +236,17 @@ export function registerRunCommand(program: Command): void {
     .option(
       '--interval <dur>',
       'Loop delay between iterations ("0" back-to-back, "30m" paces). Loop only.',
-    );
+    )
+    .option(
+      '--host <name>',
+      'Offload this run onto a registered agent host over SSH instead of running locally. See `agents hosts`.',
+    )
+    .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
+    .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).');
+
+  // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
+  runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
+  runCmd.addOption(new Option('--computer <name>', 'Alias of --host.').hideHelp());
 
   setHelpSections(runCmd, {
     examples: `
@@ -283,6 +300,49 @@ export function registerRunCommand(program: Command): void {
       // Use command.args (all positional strings) and strip the declared positional args from the front.
       const declaredArgCount = prompt !== undefined ? 2 : 1;
       const passthroughArgs = command.args.slice(declaredArgCount);
+
+      // --host/--on/--computer: offload this run onto a registered agent host
+      // over SSH instead of running locally. The three flags are aliases.
+      const hostGiven = [options.host, options.on, options.computer].filter((v): v is string => !!v);
+      if (hostGiven.length > 0) {
+        if (new Set(hostGiven).size > 1) {
+          console.error(chalk.red('Conflicting --host/--on/--computer values — pass just one.'));
+          process.exit(1);
+        }
+        const hostName = hostGiven[0];
+        if (prompt === undefined) {
+          console.error(chalk.red('A prompt is required for host runs: agents run <agent> "<task>" --host <name>'));
+          process.exit(1);
+        }
+        const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
+        const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
+        let host = await resolveHost(hostName);
+        if (!host) {
+          try { host = await resolveHostByCap(hostName); } catch { /* not a cap either */ }
+        }
+        if (!host) {
+          console.error(chalk.red(`Unknown host "${hostName}". List hosts: agents hosts list`));
+          process.exit(1);
+        }
+        try {
+          const { exitCode } = await dispatchToHost(host, {
+            agent: agentSpec.split('@')[0],
+            prompt,
+            mode: options.mode,
+            model: options.model,
+            remoteCwd: options.remoteCwd,
+            follow: options.follow !== false,
+          });
+          if (options.follow === false) {
+            console.log(chalk.green(`Dispatched to ${host.name}.`) + chalk.gray(' Track: agents hosts ps · Follow: agents hosts logs <id> -f'));
+            process.exit(0);
+          }
+          process.exit(exitCode === undefined || exitCode === -1 ? 1 : exitCode);
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+      }
 
       // --resume-checkpoint short-circuits normal dispatch entirely: the
       // checkpoint already carries the agent, version, prompt, session id,

@@ -5,17 +5,16 @@ import { getPortOccupant } from '../chrome.js';
 import { parseEndpointUrl } from '../profiles.js';
 import { writeProfileRuntime, clearProfileRuntime } from '../runtime-state.js';
 import type { BrowserProfile } from '../types.js';
+// shellQuote lives in the shared ssh-exec helper (single choke point); re-export
+// so existing importers of `shellQuote` from this module keep working.
+import { shellQuote } from '../../ssh-exec.js';
+export { shellQuote };
 
 export interface SSHConnection {
   cdp: CDPClient;
   port: number;
   pid: number;
   cleanup: () => void;
-}
-
-export function shellQuote(s: string): string {
-  if (/^[A-Za-z0-9_./:=@%+-]+$/.test(s)) return s;
-  return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
 export async function connectSSH(
