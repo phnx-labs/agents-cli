@@ -70,6 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
 CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent);
 CREATE INDEX IF NOT EXISTS idx_sessions_file_path ON sessions(file_path);
+CREATE INDEX IF NOT EXISTS idx_sessions_short_id ON sessions(short_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS session_text USING fts5(
   session_id UNINDEXED,
@@ -136,6 +137,10 @@ export interface QueryOptions {
   /** Match any session whose cwd equals this or is a descendant of it. */
   cwdPrefix?: string;
   project?: string;
+  /** Match the full session id or short id, case-insensitively (exact). */
+  idExact?: string;
+  /** Match sessions whose id or short id begins with this (case-insensitive prefix). */
+  idPrefix?: string;
   sinceMs?: number;
   untilMs?: number;
   limit?: number;
@@ -762,6 +767,19 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
     params.push(`%${options.project.toLowerCase()}%`);
   }
 
+  // id lookup. SQLite's LIKE is case-insensitive for ASCII, so a lowercased
+  // pattern matches mixed-case ids; the `=` exact compare adds COLLATE NOCASE
+  // for the same reason. short_id carries its own index (idx_sessions_short_id);
+  // id is the PRIMARY KEY.
+  if (options.idExact) {
+    where.push('(id = ? COLLATE NOCASE OR short_id = ? COLLATE NOCASE)');
+    params.push(options.idExact, options.idExact);
+  }
+  if (options.idPrefix) {
+    where.push('(id LIKE ? OR short_id LIKE ?)');
+    params.push(`${options.idPrefix}%`, `${options.idPrefix}%`);
+  }
+
   if (typeof options.sinceMs === 'number') {
     // Compare as strings; ISO 8601 timestamps sort lexicographically.
     where.push('timestamp >= ?');
@@ -928,6 +946,25 @@ export function getSessionById(id: string): SessionMeta | null {
   const db = getDB();
   const row = db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(id) as SessionRow | undefined;
   return row ? rowToMeta(row) : null;
+}
+
+/**
+ * Resolve a full-or-partial session id against the index, exact-first then
+ * prefix — the DB-backed equivalent of resolveSessionById() that runs over the
+ * SQLite table instead of a pre-loaded array. Matches both the full id and the
+ * short id. An exact hit short-circuits so a complete id never also drags in its
+ * prefix siblings. `scope` narrows by agent / version / project (cwd) so an
+ * ambiguous prefix disambiguates against the caller's context.
+ */
+export function findSessionsById(
+  idQuery: string,
+  scope: Pick<QueryOptions, 'agent' | 'version' | 'cwd' | 'project'> = {},
+): SessionMeta[] {
+  const q = idQuery.trim();
+  if (!q) return [];
+  const exact = querySessions({ ...scope, idExact: q });
+  if (exact.length > 0) return exact;
+  return querySessions({ ...scope, idPrefix: q });
 }
 
 /** A single full-text search result with ranking score. */

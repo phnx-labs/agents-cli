@@ -786,7 +786,7 @@ function formatPickerLabel(s: SessionMeta, query: string): string {
   );
 }
 
-async function pickSessionInteractive(
+export async function pickSessionInteractive(
   sessions: SessionMeta[],
   message = 'Search sessions:',
   initialSearch?: string,

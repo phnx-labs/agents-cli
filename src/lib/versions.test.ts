@@ -441,4 +441,28 @@ describe('resolveVersionAlias @selectors', () => {
     installDroidVersions(home, VERSIONS);
     expect(runResolveAlias(home, 'droid', undefined)).toBeNull();
   });
+
+  it("treats 'any' like default/pinned — no version constraint (undefined)", () => {
+    const home = makeTempHome();
+    installDroidVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'droid', 'any')).toBeNull();
+  });
+});
+
+describe('resolveVersionAliasLoose — @any', () => {
+  it('treats "any" like "default": no version constraint (undefined)', () => {
+    const home = makeTempHome();
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const tsxBin = path.resolve('node_modules/.bin/tsx');
+    const child = spawnSync(tsxBin, ['-e', `
+      import { resolveVersionAlias, resolveVersionAliasLoose } from ${JSON.stringify(moduleUrl)};
+      console.log(JSON.stringify({
+        strictAny: resolveVersionAlias('claude', 'any') ?? null,
+        looseAny: resolveVersionAliasLoose('claude', 'any') ?? null,
+        strictDefault: resolveVersionAlias('claude', 'default') ?? null,
+      }));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    expect(child.status, child.stderr).toBe(0);
+    expect(JSON.parse(child.stdout.trim())).toEqual({ strictAny: null, looseAny: null, strictDefault: null });
+  });
 });

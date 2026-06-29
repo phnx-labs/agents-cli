@@ -14,6 +14,7 @@ const {
   getDB,
   getDBPath,
   querySessions,
+  findSessionsById,
   closeDB,
   upsertSession,
   queryUsageRollup,
@@ -278,5 +279,94 @@ describe('syncTopics', () => {
 
   it('returns 0 for an empty map', () => {
     expect(syncTopics(new Map())).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findSessionsById — exact-then-prefix id resolution over the index (the
+// DB-backed equivalent of resolveSessionById, used by `agents run --resume`).
+// ---------------------------------------------------------------------------
+
+const ID_FILES_DIR = path.join(TEST_HOME, 'id-files');
+fs.mkdirSync(ID_FILES_DIR, { recursive: true });
+
+/** Seed a session with explicit id / short_id / agent / version / cwd. */
+function seedId(
+  id: string,
+  shortId: string,
+  agent: string,
+  version: string | null,
+  cwd: string,
+  timestamp: string,
+): void {
+  const filePath = path.join(ID_FILES_DIR, `${id}.jsonl`);
+  fs.writeFileSync(filePath, '');
+  getDB().prepare(`
+    INSERT INTO sessions (
+      id, short_id, agent, version, timestamp, project, cwd,
+      file_path, file_mtime_ms, file_size, scanned_at, is_team_origin
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(id, shortId, agent, version, timestamp, 'proj-id', cwd, filePath, 0, 0, 0);
+}
+
+describe('findSessionsById', () => {
+  const HERE = path.join(ID_FILES_DIR, 'here');
+  const ELSEWHERE = path.join(ID_FILES_DIR, 'elsewhere');
+
+  beforeAll(() => {
+    // Two sessions sharing the prefix "80af" in THIS project's cwd.
+    seedId('80af76ca-b734-4f45-8833-ef1142219568', '80af76ca', 'claude', '2.1.180', HERE, '2026-06-01T10:00:00.000Z');
+    seedId('80af0000-0000-4000-8000-000000000001', '80af0000', 'claude', '2.1.181', HERE, '2026-06-02T10:00:00.000Z');
+    // A non-overlapping id in a DIFFERENT project's cwd (for widen test).
+    seedId('cccccccc-0000-4000-8000-000000000002', 'cccccccc', 'claude', '2.1.181', ELSEWHERE, '2026-06-03T10:00:00.000Z');
+    // A codex session whose id collides on prefix with the claude ones.
+    seedId('80af9999-0000-4000-8000-000000000003', '80af9999', 'codex', '0.50.0', HERE, '2026-06-04T10:00:00.000Z');
+  });
+
+  it('resolves a full id exactly (no prefix siblings dragged in)', () => {
+    const r = findSessionsById('80af76ca-b734-4f45-8833-ef1142219568', { agent: 'claude' });
+    expect(r.map(s => s.id)).toEqual(['80af76ca-b734-4f45-8833-ef1142219568']);
+  });
+
+  it('resolves a short id exactly', () => {
+    const r = findSessionsById('80af0000', { agent: 'claude' });
+    expect(r.map(s => s.id)).toEqual(['80af0000-0000-4000-8000-000000000001']);
+  });
+
+  it('is case-insensitive', () => {
+    const r = findSessionsById('80AF76CA', { agent: 'claude' });
+    expect(r.map(s => s.id)).toEqual(['80af76ca-b734-4f45-8833-ef1142219568']);
+  });
+
+  it('returns all prefix matches when ambiguous, newest first', () => {
+    const r = findSessionsById('80af', { agent: 'claude' });
+    expect(r.map(s => s.id)).toEqual([
+      '80af0000-0000-4000-8000-000000000001',
+      '80af76ca-b734-4f45-8833-ef1142219568',
+    ]);
+  });
+
+  it('scopes by agent — codex prefix sibling does not leak into a claude lookup', () => {
+    const claude = findSessionsById('80af', { agent: 'claude' });
+    expect(claude.some(s => s.agent === 'codex')).toBe(false);
+    const codex = findSessionsById('80af', { agent: 'codex' });
+    expect(codex.map(s => s.id)).toEqual(['80af9999-0000-4000-8000-000000000003']);
+  });
+
+  it('scopes by version', () => {
+    const r = findSessionsById('80af', { agent: 'claude', version: '2.1.180' });
+    expect(r.map(s => s.id)).toEqual(['80af76ca-b734-4f45-8833-ef1142219568']);
+  });
+
+  it('cwd scope finds in-project, and dropping cwd widens to other projects', () => {
+    const scoped = findSessionsById('cccccccc', { agent: 'claude', cwd: HERE });
+    expect(scoped).toEqual([]); // lives in ELSEWHERE, not HERE
+    const widened = findSessionsById('cccccccc', { agent: 'claude' });
+    expect(widened.map(s => s.id)).toEqual(['cccccccc-0000-4000-8000-000000000002']);
+  });
+
+  it('returns empty for an unknown id and a blank query', () => {
+    expect(findSessionsById('deadbeef', { agent: 'claude' })).toEqual([]);
+    expect(findSessionsById('   ', { agent: 'claude' })).toEqual([]);
   });
 });
