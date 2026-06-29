@@ -104,13 +104,13 @@ function deriveAlias(source: string): string {
  * unit a user reasons about: one skill, one command, one plugin — even if it
  * spans several files on disk.
  */
-type ResourceKind =
+type RepoResourceKind =
   | 'skill' | 'command' | 'plugin' | 'hook' | 'mcp' | 'subagent'
   | 'rule' | 'workflow' | 'routine' | 'profile' | 'permission'
   | 'cli' | 'config' | 'other';
 
 /** Top-level dir -> resource kind. Directory-based resources collapse to one unit. */
-const RESOURCE_DIRS: Record<string, ResourceKind> = {
+const RESOURCE_DIRS: Record<string, RepoResourceKind> = {
   skills: 'skill', commands: 'command', prompts: 'command', plugins: 'plugin',
   hooks: 'hook', mcp: 'mcp', subagents: 'subagent', rules: 'rule',
   workflows: 'workflow', routines: 'routine', profiles: 'profile',
@@ -118,7 +118,7 @@ const RESOURCE_DIRS: Record<string, ResourceKind> = {
 };
 
 /** [singular, plural] display labels per kind. */
-const RESOURCE_LABELS: Record<ResourceKind, [string, string]> = {
+const RESOURCE_LABELS: Record<RepoResourceKind, [string, string]> = {
   skill: ['skill', 'skills'], command: ['command', 'commands'],
   plugin: ['plugin', 'plugins'], hook: ['hook', 'hooks'], mcp: ['MCP', 'MCPs'],
   subagent: ['subagent', 'subagents'], rule: ['rule', 'rules'],
@@ -129,7 +129,7 @@ const RESOURCE_LABELS: Record<ResourceKind, [string, string]> = {
 };
 
 /** Display order — the resources a user cares about most come first. */
-const RESOURCE_ORDER: ResourceKind[] = [
+const RESOURCE_ORDER: RepoResourceKind[] = [
   'skill', 'command', 'plugin', 'hook', 'mcp', 'subagent', 'rule',
   'workflow', 'routine', 'profile', 'permission', 'cli', 'config', 'other',
 ];
@@ -141,7 +141,7 @@ export type ChangeAction = 'new' | 'changed' | 'removed';
  * resources (skills/foo/SKILL.md) collapse to `skills/foo` so all their files
  * count as one unit; flat config files (agents.yaml, hooks.yaml) count alone.
  */
-export function resourceUnit(file: string): { kind: ResourceKind; unit: string } {
+export function resourceUnit(file: string): { kind: RepoResourceKind; unit: string } {
   const parts = file.split('/');
   const top = parts[0];
   if (top === 'agents.yaml' || top === 'hooks.yaml') return { kind: 'config', unit: top };
@@ -162,7 +162,7 @@ export function formatResourceDelta(
   maxParts = 5,
 ): string {
   // Gather every action seen across a unit's files, then collapse to one action.
-  const units = new Map<string, { kind: ResourceKind; actions: Set<ChangeAction> }>();
+  const units = new Map<string, { kind: RepoResourceKind; actions: Set<ChangeAction> }>();
   for (const { action, file } of entries) {
     const { kind, unit } = resourceUnit(file);
     const key = `${kind} ${unit}`;
@@ -278,11 +278,13 @@ async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
     } else {
       const pieces: string[] = [];
       if (behind > 0) {
-        const incoming = formatResourceDelta(await diffResourceEntries(git, 'HEAD..@{upstream}'));
+        // Three-dot isolates upstream's side via the merge-base, so a diverged
+        // branch reports exactly what a pull adds (not the inverse of local commits).
+        const incoming = formatResourceDelta(await diffResourceEntries(git, 'HEAD...@{upstream}'));
         pieces.push(`${incoming || chalk.yellow(`${behind} commit${behind > 1 ? 's' : ''}`)} ${chalk.gray('to pull')}`);
       }
       if (ahead > 0) {
-        const outgoing = formatResourceDelta(await diffResourceEntries(git, '@{upstream}..HEAD'));
+        const outgoing = formatResourceDelta(await diffResourceEntries(git, '@{upstream}...HEAD'));
         pieces.push(`${outgoing || chalk.yellow(`${ahead} commit${ahead > 1 ? 's' : ''}`)} ${chalk.gray('to push')}`);
       }
       sync = pieces.join(chalk.gray('  ·  '));
