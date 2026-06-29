@@ -375,3 +375,70 @@ describe('installVersion version validation', () => {
     expect(result?.error ?? '').toContain('does not support version-pinned installs');
   });
 });
+
+// `resolveVersionAlias` is the shared @selector vocabulary (latest / oldest /
+// default / pinned / explicit) every `agents <cmd> agent@<token>` reads. droid
+// installs a single global binary (~/.local/bin/droid) shared across version
+// dirs, so a fixture is just N dirs + one binary — every dir reads as installed.
+function runResolveAlias(home: string, agent: string, raw: string | undefined): string | null {
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const tsxBin = path.resolve('node_modules/.bin/tsx');
+  const child = spawnSync(tsxBin, ['-e', `
+    import { resolveVersionAlias } from ${JSON.stringify(moduleUrl)};
+    const r = resolveVersionAlias(${JSON.stringify(agent)}, ${JSON.stringify(raw ?? null)});
+    console.log(JSON.stringify({ v: r === undefined ? null : r }));
+  `], {
+    env: { ...process.env, HOME: home },
+    encoding: 'utf-8',
+  });
+  expect(child.status, child.stderr).toBe(0);
+  return (JSON.parse(child.stdout.trim()) as { v: string | null }).v;
+}
+
+function installDroidVersions(home: string, versions: string[]): void {
+  for (const v of versions) {
+    fs.mkdirSync(path.join(droidVersionDir(home, v), 'home'), { recursive: true });
+  }
+  // droid's binary is global and per-host, not per-version (getBinaryPath).
+  const bin = path.join(home, '.local', 'bin', 'droid');
+  fs.mkdirSync(path.dirname(bin), { recursive: true });
+  fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n', 'utf-8');
+  fs.chmodSync(bin, 0o755);
+}
+
+describe('resolveVersionAlias @selectors', () => {
+  // Versions chosen so numeric ordering disagrees with lexical ordering:
+  // numeric oldest=0.9.0, newest=0.158.0; lexical would put "0.10.0" first.
+  const VERSIONS = ['0.9.0', '0.10.0', '0.158.0'];
+
+  it("resolves 'latest' to the highest installed version (numeric, not lexical)", () => {
+    const home = makeTempHome();
+    installDroidVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'droid', 'latest')).toBe('0.158.0');
+  });
+
+  it("resolves 'oldest' to the lowest installed version (numeric, not lexical)", () => {
+    const home = makeTempHome();
+    installDroidVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'droid', 'oldest')).toBe('0.9.0');
+  });
+
+  it("treats 'pinned' as a synonym for 'default' — both defer to the caller (undefined)", () => {
+    const home = makeTempHome();
+    installDroidVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'droid', 'pinned')).toBeNull();
+    expect(runResolveAlias(home, 'droid', 'default')).toBeNull();
+  });
+
+  it('passes an explicit installed version through unchanged', () => {
+    const home = makeTempHome();
+    installDroidVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'droid', '0.10.0')).toBe('0.10.0');
+  });
+
+  it("defers an absent/empty token to the caller (undefined)", () => {
+    const home = makeTempHome();
+    installDroidVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'droid', undefined)).toBeNull();
+  });
+});

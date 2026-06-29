@@ -18,6 +18,7 @@ function account(overrides: Partial<AccountInfo>): AccountInfo {
     usageStatus: null,
     overageCredits: null,
     lastActive: null,
+    signedIn: false,
     ...overrides,
   };
 }

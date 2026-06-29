@@ -18,6 +18,8 @@ const {
   upsertSession,
   queryUsageRollup,
   topSessionsByCost,
+  syncTopics,
+  ftsSearch,
 } = await import('../db.js');
 const { costOfUsage } = await import('../../pricing/index.js');
 type SessionMeta = import('../types.js').SessionMeta;
@@ -215,5 +217,66 @@ describe('multi-model session cost equals sum of per-model usage', () => {
     const projMm = rows.find(r => r.key === 'proj-mm')!;
     expect(projMm.costUsd).toBeCloseTo(opus + haiku, 10);
     expect(projMm.costUsd).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncTopics — apply externally-sourced titles (Codex thread_name) by id.
+// ---------------------------------------------------------------------------
+
+const TOPIC_FILES_DIR = path.join(TEST_HOME, 'topic-files');
+fs.mkdirSync(TOPIC_FILES_DIR, { recursive: true });
+
+function seedTopic(id: string, topic: string): void {
+  const filePath = path.join(TOPIC_FILES_DIR, `${id}.jsonl`);
+  fs.writeFileSync(filePath, '');
+  const meta: SessionMeta = {
+    id,
+    shortId: id.slice(0, 8),
+    agent: 'codex',
+    timestamp: '2026-06-28T00:00:00.000Z',
+    project: 'agents-cli',
+    cwd: TOPIC_FILES_DIR,
+    filePath,
+    topic,
+  };
+  // Upsert through the public API so session_text (FTS) is populated too.
+  upsertSession(meta, 'searchable body text');
+}
+
+describe('syncTopics', () => {
+  beforeAll(() => {
+    seedTopic('codex-rename', 'first prompt fallback');
+    seedTopic('codex-keep', 'Already correct');
+  });
+
+  it('updates topic in sessions + FTS only for ids whose title differs', () => {
+    const updated = syncTopics(
+      new Map([
+        ['codex-rename', 'Review skill placement'],
+        ['codex-keep', 'Already correct'], // identical -> no update
+        ['codex-missing', 'No such session'], // not in DB -> no update
+      ]),
+    );
+    expect(updated).toBe(1);
+
+    const rows = querySessions({ agent: 'codex' });
+    expect(rows.find(r => r.id === 'codex-rename')?.topic).toBe('Review skill placement');
+    expect(rows.find(r => r.id === 'codex-keep')?.topic).toBe('Already correct');
+
+    // The new title is searchable via FTS (topic column was updated, not just sessions).
+    const hits = ftsSearch('Review skill placement');
+    expect(hits.some(h => h.sessionId === 'codex-rename')).toBe(true);
+  });
+
+  it('never clears an existing topic with an empty value', () => {
+    const updated = syncTopics(new Map([['codex-keep', '']]));
+    expect(updated).toBe(0);
+    const rows = querySessions({ agent: 'codex' });
+    expect(rows.find(r => r.id === 'codex-keep')?.topic).toBe('Already correct');
+  });
+
+  it('returns 0 for an empty map', () => {
+    expect(syncTopics(new Map())).toBe(0);
   });
 });

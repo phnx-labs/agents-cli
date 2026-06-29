@@ -2,10 +2,27 @@
  * Executable resolution, platform-aware.
  */
 import { execFileSync } from 'child_process';
+import * as path from 'path';
 
 /** PATH-search command for the platform: `where` on Windows, else `which`. */
 export function whichCommand(platform: NodeJS.Platform = process.platform): string {
   return platform === 'win32' ? 'where' : 'which';
+}
+
+/**
+ * Does spawning `binary` require `shell: true` on this platform?
+ *
+ * On Windows a `.cmd`/`.bat` wrapper (npm.cmd, bun.cmd, the agent shims) cannot
+ * be exec'd directly — `spawn`/`execFile` look for a literal executable and miss
+ * the PATHEXT/cmd-interpreter step, surfacing as `ENOENT`/`EINVAL`. A bare
+ * command name (not an absolute path) needs the same PATHEXT resolution. Both
+ * cases require the shell. Always false off Windows, where direct exec is right.
+ */
+export function needsWindowsShell(binary: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform !== 'win32') return false;
+  // path.win32.isAbsolute, not path.isAbsolute: the latter uses the HOST's rules,
+  // so a Windows path would read as relative when this runs on a Linux CI host.
+  return !path.win32.isAbsolute(binary) || /\.(cmd|bat)$/i.test(binary);
 }
 
 /**

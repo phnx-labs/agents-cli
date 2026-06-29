@@ -31,6 +31,7 @@ import {
   getScanStampsForPaths,
   recordScans,
   syncLabels,
+  syncTopics,
   upsertSessionsBatch,
   querySessions,
   countSessions,
@@ -626,7 +627,16 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
   }
 
   const changed = filterChangedFiles(filePaths);
-  if (changed.length === 0) return;
+
+  // Codex keeps human-readable titles (`thread_name`) in `session_index.jsonl`,
+  // which updates independently of the rollout files — apply them by id on every
+  // scan so a title that lands after a session was first indexed still surfaces.
+  const titles = readCodexThreadNames();
+
+  if (changed.length === 0) {
+    syncTopics(titles);
+    return;
+  }
 
   onProgress?.({ agent: 'codex', parsed: 0, total: changed.length });
 
@@ -639,6 +649,9 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
       const result = await readCodexMeta(filePath, account, currentVersion);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
+        // Prefer the Codex-generated title over the first-prompt fallback.
+        const title = titles.get(result.meta.id);
+        if (title) result.meta.topic = title;
         entries.push({ meta: result.meta, content: result.content, scan });
       } else {
         touched.push({ filePath, scan });
@@ -652,6 +665,45 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
 
   upsertSessionsBatch(entries);
   recordScans(touched);
+  // Catch sessions whose rollout file was unchanged but gained a title since the
+  // last scan (the index changed, the transcript did not).
+  syncTopics(titles);
+}
+
+/** Parse the lines of a Codex `session_index.jsonl` into a session id -> title map. */
+export function parseCodexThreadNameIndex(raw: string): Map<string, string> {
+  const titles = new Map<string, string>();
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      const id = typeof entry.id === 'string' ? entry.id : '';
+      const name = typeof entry.thread_name === 'string' ? entry.thread_name.trim() : '';
+      if (id && name) titles.set(id, name);
+    } catch {
+      // skip malformed line
+    }
+  }
+  return titles;
+}
+
+/**
+ * Read Codex session titles across every Codex home (live + versioned). The
+ * `session_index.jsonl` file sits beside each `sessions/` rollout tree.
+ */
+function readCodexThreadNames(): Map<string, string> {
+  const titles = new Map<string, string>();
+  for (const sessionsDir of getAgentSessionDirs('codex', 'sessions')) {
+    const indexPath = path.join(path.dirname(sessionsDir), 'session_index.jsonl');
+    let raw: string;
+    try {
+      raw = fs.readFileSync(indexPath, 'utf-8');
+    } catch {
+      continue; // no index in this home
+    }
+    for (const [id, name] of parseCodexThreadNameIndex(raw)) titles.set(id, name);
+  }
+  return titles;
 }
 
 /** Stream-parse a single Codex JSONL file to extract session metadata. */
@@ -1447,7 +1499,7 @@ function extractHermesMessageText(content: any): string {
 }
 
 /** Stream a Claude JSONL file and extract scan-level metadata (timestamp, cwd, topic, tokens). */
-async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
+export async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
   const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
@@ -1456,6 +1508,10 @@ async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
   let gitBranch: string | undefined;
   let version: string | undefined;
   let topic: string | undefined;
+  // Explicit session titles: `/rename` writes a `custom-title` event; Claude
+  // auto-generates an `ai-title`. Both can repeat across the file — last wins.
+  let customTitle: string | undefined;
+  let aiTitle: string | undefined;
   let entrypoint: string | undefined;
   let messageCount = 0;
   let tokenCount = 0;
@@ -1499,6 +1555,17 @@ async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
         cwd = parsed.cwd || '';
         gitBranch = parsed.gitBranch || undefined;
         version = parsed.version || undefined;
+      }
+
+      if (parsed.type === 'custom-title') {
+        const t = typeof parsed.customTitle === 'string' ? parsed.customTitle.trim() : '';
+        if (t) customTitle = t;
+        continue;
+      }
+      if (parsed.type === 'ai-title') {
+        const t = typeof parsed.aiTitle === 'string' ? parsed.aiTitle.trim() : '';
+        if (t) aiTitle = t;
+        continue;
       }
 
       if (parsed.type === 'user') {
@@ -1557,12 +1624,16 @@ async function scanClaudeSession(filePath: string): Promise<ClaudeSessionScan> {
       ? lastTsMs - firstTsMs
       : undefined;
 
+  // Prefer an explicit session title (user `/rename` > Claude auto-title) over
+  // the first-prompt topic.
+  const resolvedTopic = customTitle || aiTitle || topic;
+
   return {
     timestamp,
     cwd,
     gitBranch,
     version,
-    topic,
+    topic: resolvedTopic,
     entrypoint,
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,

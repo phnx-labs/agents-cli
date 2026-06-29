@@ -22,7 +22,7 @@ Extra repos register via `agents repo add <source>` → clone into `~/.agents-<a
 
 ### 2. `AGENTS.md` is the canonical memory file
 
-`CLAUDE.md`, `GEMINI.md` are symlinks (`ls -la *.md` confirms). **Edit `AGENTS.md` only** — editing the symlink targets directly will be stomped on the next sync. The sync writes the right file name per agent (`OPENCODE.md`, `.cursorrules`, etc.) — see [§Agent config matrix](#agent-config-matrix).
+`CLAUDE.md`, `GEMINI.md` are symlinks (`ls -la *.md` confirms). **Edit `AGENTS.md` only** — editing the symlink targets directly will be stomped on the next sync. The sync writes the right file name per agent (`OPENCODE.md`, `.cursorrules`, etc.) — see [§Supported harnesses](#supported-harnesses).
 
 ### 3. Capability table gates per-agent writes
 
@@ -63,7 +63,45 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 
 See [`docs/00-concepts.md`](docs/00-concepts.md) for the full mental model and resolution semantics.
 
-## Agent config matrix
+## Supported harnesses
+
+15 harnesses ship support today. The full id list is `AgentId` ([`src/lib/types.ts:10`](src/lib/types.ts)); per-harness config + capabilities live in the `AGENTS` registry ([`src/lib/agents.ts:215-550`](src/lib/agents.ts)) and are gated through `supports()` ([`src/lib/capabilities.ts`](src/lib/capabilities.ts)).
+
+### Prioritized (first-class) harnesses
+
+These six are the support-priority set — new features and parity work target them first. When a feature can't reach all 15 at once, it must reach these:
+
+**Claude Code** (`claude`) · **Codex CLI** (`codex`) · **Kimi CLI** (`kimi`) · **Antigravity CLI** (`antigravity`) · **Grok CLI** (`grok`) · **OpenCode** (`opencode`)
+
+### Feature support matrix
+
+Not every harness supports every capability — the registry decides per harness. Snapshot below (★ = prioritized); [`src/lib/agents.ts`](src/lib/agents.ts) is canonical, keep both in sync.
+
+| Harness | `id` | hooks | mcp | allowlist | skills | commands | plugins | subagents | workflows | modes |
+|---|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
+| ★ Claude Code | `claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | plan·edit·auto·skip |
+| ★ Codex CLI | `codex` | ≥0.116 | ✓ | — | ✓ | <0.117 | ≥0.128 | — | — | plan·edit·skip |
+| ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | plan·edit·auto·skip |
+| ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | edit·skip |
+| ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | plan·edit·skip |
+| ★ OpenCode | `opencode` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
+| Gemini | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·skip |
+| Cursor | `cursor` | — | ✓ | — | ✓ | ✓ | — | — | — | edit·skip |
+| OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — | plan·edit·skip |
+| Copilot | `copilot` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·auto·skip |
+| Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
+| Kiro | `kiro` | — | ✓ | — | ✓ | ✓ | — | — | — | edit |
+| Goose | `goose` | — | ✓ | — | — | — | — | — | — | edit |
+| Roo Code | `roo` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
+| Droid | `droid` | — | ✓ | — | — | ✓ | — | ✓ | — | plan·edit·auto·skip |
+
+✓ = supported · — = not supported · version cell = supported only within that range (e.g. `≥0.116` needs version `>= 0.116.0`; `<0.117` only below `0.117.0`). Out-of-range cells are **skipped silently** — `supports()` returns false and the resource is never written.
+
+- `rules` (the memory file) is supported by **all 15** — each writes its own file (see config matrix below). `workflows` is **Claude-only**. `mcp` is universal.
+- `allowlist` (granular per-tool permission rules) is limited to `claude`, `antigravity`, `grok`, `kimi`.
+- `subagents` is limited to `claude`, `openclaw`, `droid`.
+
+### Config matrix
 
 | Agent | Commands dir | Memory file |
 |-------|--------------|-------------|

@@ -5,6 +5,10 @@ import {
   buildRemoteCommand,
   shellQuote,
   assertValidSshTarget,
+  classifySshFailure,
+  remoteCachePath,
+  formatStaleBanner,
+  formatUnreachable,
 } from './remote.js';
 
 /**
@@ -132,5 +136,71 @@ describe('assertValidSshTarget', () => {
     expect(() => assertValidSshTarget('-oProxyCommand=evil')).toThrow(/Invalid SSH target/);
     expect(() => assertValidSshTarget('box; rm -rf /')).toThrow(/Invalid SSH target/);
     expect(() => assertValidSshTarget('box$(whoami)')).toThrow(/Invalid SSH target/);
+  });
+});
+
+describe('classifySshFailure', () => {
+  it('maps a clean exit to ok', () => {
+    expect(classifySshFailure({ status: 0 })).toBe('ok');
+  });
+
+  it('maps ssh exit 255 to unreachable (connection layer, not the remote query)', () => {
+    // 255 is ssh's own code for "could not establish the session" — the cache
+    // fallback hinges on telling this apart from a forwarded non-zero.
+    expect(classifySshFailure({ status: 255 })).toBe('unreachable');
+  });
+
+  it('maps any other non-zero to query-failed (remote agents ran and failed)', () => {
+    expect(classifySshFailure({ status: 1 })).toBe('query-failed');
+    expect(classifySshFailure({ status: 2 })).toBe('query-failed');
+    expect(classifySshFailure({ status: null })).toBe('query-failed'); // killed by signal
+  });
+
+  it('maps a spawn error (ssh binary missing, etc.) to spawn-error', () => {
+    expect(classifySshFailure({ error: new Error('ENOENT'), status: null })).toBe('spawn-error');
+  });
+});
+
+describe('remoteCachePath', () => {
+  it('is deterministic for the same host and args', () => {
+    const a = remoteCachePath('mac-mini', ['sessions', '--last', '3']);
+    const b = remoteCachePath('mac-mini', ['sessions', '--last', '3']);
+    expect(a).toBe(b);
+  });
+
+  it('separates distinct queries into distinct files', () => {
+    const a = remoteCachePath('mac-mini', ['sessions', '--last', '3']);
+    const b = remoteCachePath('mac-mini', ['sessions', '--last', '5']);
+    expect(a).not.toBe(b);
+  });
+
+  it('separates distinct hosts even for the same query', () => {
+    const a = remoteCachePath('box-a', ['sessions', 'auth']);
+    const b = remoteCachePath('box-b', ['sessions', 'auth']);
+    expect(a).not.toBe(b);
+  });
+
+  it('keeps the host readable but filesystem-safe in the filename', () => {
+    // user@host is a valid ssh target; the path segment must not contain a
+    // separator or other unsafe char that would escape the cache dir.
+    const p = remoteCachePath('deploy@staging.example.com', ['sessions']);
+    const file = p.split('/').pop()!;
+    expect(file.startsWith('deploy@staging.example.com__')).toBe(true);
+    expect(file.endsWith('.txt')).toBe(true);
+  });
+});
+
+describe('offline banners', () => {
+  it('stale banner names the host and how old the cache is', () => {
+    const twoHoursAgo = new Date('2026-06-29T00:00:00Z').getTime() - 2 * 3_600_000;
+    const msg = formatStaleBanner('mac-mini', twoHoursAgo);
+    expect(msg).toContain('mac-mini');
+    expect(msg.toLowerCase()).toContain('cached');
+  });
+
+  it('unreachable message names the host and the cause', () => {
+    const msg = formatUnreachable('mac-mini');
+    expect(msg).toContain('mac-mini');
+    expect(msg.toLowerCase()).toContain('unreachable');
   });
 });

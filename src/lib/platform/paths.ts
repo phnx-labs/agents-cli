@@ -64,3 +64,27 @@ export function homeDir(): string {
 export function isWindowsAbsolutePath(p: string): boolean {
   return WIN_DRIVE_RE.test(p) || p.startsWith('\\\\');
 }
+
+/**
+ * Fold backslashes to forward slashes. Use when a path is going into a string
+ * that must read the same on every OS — a doc-comparable display path, a regex
+ * subject, a forward-slash-keyed lookup. Pure string transform; on POSIX input
+ * (no backslashes) it returns the value unchanged.
+ */
+export function toPosix(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+/**
+ * Derive a filesystem-safe key/slug from an absolute path. Drops the Windows
+ * drive colon (`:` is illegal in NTFS filenames / is the ADS separator) and
+ * folds path separators and spaces to `_`. For a POSIX path this produces the
+ * exact historical slug (`/a/b c` -> `_a_b_c`), so existing on-disk keys are
+ * unchanged; on Windows `C:\a\b` -> `C_a_b` instead of an unusable name.
+ *
+ * Shell mirror (keep byte-identical in any bash shim that recomputes this key):
+ *   printf '%s' "$P" | tr -d ':' | tr '\\/ ' '_'
+ */
+export function toPortableKey(p: string): string {
+  return p.replace(/^([a-zA-Z]):/, '$1').replace(/[\\/ ]/g, '_');
+}

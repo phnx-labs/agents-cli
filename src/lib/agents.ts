@@ -822,6 +822,12 @@ export interface AccountInfo {
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
   overageCredits: { amount: number; currency: string } | null;
   lastActive: Date | null;
+  // Whether the agent has a usable local credential. For most agents this
+  // tracks `email != null`, but some CLIs (Antigravity, Kimi) store an opaque
+  // OAuth/JWT credential with no email claim — they are signed in even though
+  // we can't surface an address. Callers that only want to know "logged in or
+  // not" should read this, not `email`.
+  signedIn: boolean;
 }
 
 /** Return the email address associated with the agent's auth config, or null. */
@@ -853,6 +859,7 @@ export async function getAccountInfo(
     usageStatus: null,
     overageCredits: null,
     lastActive: null,
+    signedIn: false,
   };
 
   const configFiles: Partial<Record<AgentId, string>> = {
@@ -929,6 +936,7 @@ export async function getAccountInfo(
           usageStatus,
           overageCredits,
           lastActive,
+          signedIn: !!email,
         };
       }
       case 'codex': {
@@ -971,11 +979,13 @@ export async function getAccountInfo(
           usageStatus,
           overageCredits: null,
           lastActive,
+          signedIn: !!email,
         };
       }
       case 'gemini': {
         const data = JSON.parse(await fs.promises.readFile(path.join(base, '.gemini', 'google_accounts.json'), 'utf-8'));
-        return { ...empty, email: data.active || null, lastActive };
+        const email = data.active || null;
+        return { ...empty, email, signedIn: !!email, lastActive };
       }
       case 'grok': {
         // Grok stores auth in ~/.grok/auth.json
@@ -984,10 +994,39 @@ export async function getAccountInfo(
           if (fs.existsSync(authPath)) {
             const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
             const email = data.email || data.user?.email || data.account?.email || null;
-            return { ...empty, email, lastActive };
+            return { ...empty, email, signedIn: !!email, lastActive };
           }
         } catch {}
         return { ...empty, lastActive };
+      }
+      case 'antigravity': {
+        // Antigravity (`agy`) stores a Google OAuth token at
+        // ~/.gemini/antigravity-cli/antigravity-oauth-token. It's a consumer
+        // OAuth grant (access + refresh token, no id_token), so there's no email
+        // claim to read locally — presence of a refresh token is the only
+        // signed-in signal we can derive without a network call.
+        const tokenPath = path.join(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+        if (!fs.existsSync(tokenPath)) return { ...empty, lastActive };
+        const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
+        const hasToken =
+          typeof data?.token?.refresh_token === 'string' && !!data.token.refresh_token;
+        if (!hasToken) return { ...empty, lastActive };
+        return { ...empty, signedIn: true, lastActive };
+      }
+      case 'kimi': {
+        // Kimi Code stores OAuth credentials at
+        // ~/.kimi-code/credentials/kimi-code.json. The access token is a JWT
+        // whose payload carries an opaque user_id (no email), so we report
+        // signed-in state plus a stable account key for usage dedup.
+        const credPath = path.join(base, '.kimi-code', 'credentials', 'kimi-code.json');
+        if (!fs.existsSync(credPath)) return { ...empty, lastActive };
+        const data = JSON.parse(await fs.promises.readFile(credPath, 'utf-8'));
+        const accessToken = data?.access_token;
+        if (typeof accessToken !== 'string' || !accessToken) return { ...empty, lastActive };
+        const decoded = decodeJwtPayload(accessToken);
+        const userId = normalizeIdentityPart(decoded?.user_id ?? decoded?.sub);
+        const accountKey = buildIdentityKey(agentId, [['user', userId]]);
+        return { ...empty, signedIn: true, accountId: userId, accountKey, lastActive };
       }
       default:
         return { ...empty, lastActive };

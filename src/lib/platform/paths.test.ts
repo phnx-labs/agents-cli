@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as os from 'os';
-import { looksLikePath, toComparablePath, homeDir, isWindowsAbsolutePath } from './paths.js';
+import { looksLikePath, toComparablePath, homeDir, isWindowsAbsolutePath, toPosix, toPortableKey } from './paths.js';
 
 describe('looksLikePath', () => {
   // POSIX markers must classify identically on every platform — this is the
@@ -56,5 +56,29 @@ describe('isWindowsAbsolutePath', () => {
     for (const p of ['/abs/path', './rel', '~/x', 'owner/repo', 'plugin-name', '']) {
       expect(isWindowsAbsolutePath(p)).toBe(false);
     }
+  });
+});
+
+describe('toPosix', () => {
+  it('folds backslashes to forward slashes', () => {
+    expect(toPosix('C:\\Users\\Me\\repo')).toBe('C:/Users/Me/repo');
+    expect(toPosix('a\\b\\c')).toBe('a/b/c');
+  });
+  it('leaves POSIX paths unchanged', () => {
+    expect(toPosix('/Users/Me/repo')).toBe('/Users/Me/repo');
+    expect(toPosix('a/b/c')).toBe('a/b/c');
+  });
+});
+
+describe('toPortableKey', () => {
+  it('produces the historical POSIX slug unchanged (no regression of on-disk keys)', () => {
+    // Old logic: cwd.replace(/\//g,'_').replace(/ /g,'_')
+    expect(toPortableKey('/home/user/repo')).toBe('_home_user_repo');
+    expect(toPortableKey('/home/user/my repo')).toBe('_home_user_my_repo');
+  });
+  it('drops the Windows drive colon and folds separators (NTFS-safe)', () => {
+    // Without the drop, ':' is illegal in a filename (ADS separator) -> ENOENT.
+    expect(toPortableKey('C:\\Users\\me\\repo')).toBe('C_Users_me_repo');
+    expect(toPortableKey('D:\\a\\b c')).toBe('D_a_b_c');
   });
 });

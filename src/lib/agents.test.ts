@@ -4,7 +4,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGENTS, ALL_AGENT_IDS, resolveAgentName, resolveLastActive } from './agents.js';
+import { AGENTS, ALL_AGENT_IDS, getAccountInfo, resolveAgentName, resolveLastActive } from './agents.js';
 import type { CapabilityName } from './types.js';
 
 const tempDirs: string[] = [];
@@ -327,5 +327,77 @@ describe('resolveAgentName', () => {
     expect(resolveAgentName('gpt')).toBeNull();
     expect(resolveAgentName('')).toBeNull();
     expect(resolveAgentName('definitely-not-an-agent')).toBeNull();
+  });
+});
+
+/** Encode a minimal JWT (only the payload segment is ever decoded). */
+function makeJwt(payload: Record<string, unknown>): string {
+  const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  return `${b64({ alg: 'ES256', typ: 'JWT' })}.${b64(payload)}.sig`;
+}
+
+describe('getAccountInfo — token-only agents (no local email)', () => {
+  it('marks Antigravity signed in when a refresh token is present', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.gemini', 'antigravity-cli');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'antigravity-oauth-token'),
+      JSON.stringify({
+        token: { access_token: 'ya29.expired', refresh_token: '1//refresh', token_type: 'Bearer' },
+        auth_method: 'consumer',
+      }),
+      'utf-8'
+    );
+
+    const info = await getAccountInfo('antigravity', home);
+    expect(info.signedIn).toBe(true);
+    // Consumer Google OAuth exposes no email/identity claim locally.
+    expect(info.email).toBeNull();
+  });
+
+  it('treats Antigravity as signed out when the token file is missing', async () => {
+    const info = await getAccountInfo('antigravity', makeTempDir());
+    expect(info.signedIn).toBe(false);
+    expect(info.email).toBeNull();
+  });
+
+  it('treats Antigravity as signed out when the token carries no refresh token', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.gemini', 'antigravity-cli');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'antigravity-oauth-token'),
+      JSON.stringify({ token: { access_token: 'ya29.x' } }),
+      'utf-8'
+    );
+    const info = await getAccountInfo('antigravity', home);
+    expect(info.signedIn).toBe(false);
+  });
+
+  it('marks Kimi signed in and derives a stable account key from the JWT user_id', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.kimi-code', 'credentials');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'kimi-code.json'),
+      JSON.stringify({
+        access_token: makeJwt({ user_id: 'd483kfq783mkn8of1gtg', sub: 'd483kfq783mkn8of1gtg', scope: 'kimi-code' }),
+        refresh_token: makeJwt({ type: 'refresh' }),
+        token_type: 'Bearer',
+      }),
+      'utf-8'
+    );
+
+    const info = await getAccountInfo('kimi', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBeNull();
+    expect(info.accountId).toBe('d483kfq783mkn8of1gtg');
+    expect(info.accountKey).toBe('kimi:user=d483kfq783mkn8of1gtg');
+  });
+
+  it('treats Kimi as signed out when the credentials file is missing', async () => {
+    const info = await getAccountInfo('kimi', makeTempDir());
+    expect(info.signedIn).toBe(false);
   });
 });
