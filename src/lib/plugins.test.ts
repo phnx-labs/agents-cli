@@ -137,7 +137,7 @@ describe('discoverPlugins', () => {
     vi.resetModules();
     vi.doMock('./state.js', async (importOriginal) => {
       const actual = await importOriginal<typeof import('./state.js')>();
-      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null };
+      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
     });
 
     try {
@@ -159,7 +159,7 @@ describe('discoverPlugins', () => {
     vi.resetModules();
     vi.doMock('./state.js', async (importOriginal) => {
       const actual = await importOriginal<typeof import('./state.js')>();
-      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null };
+      return { ...actual, getPluginsDir: () => pluginsDir, getEnabledExtraRepos: () => [], getProjectPluginsDir: () => null, getSystemPluginsDir: () => path.join(tmpDir, 'no-system') };
     });
 
     try {
@@ -213,7 +213,9 @@ describe('discoverPlugins across marketplaces', () => {
     vi.resetModules();
     vi.doMock('./state.js', async (importOriginal) => {
       const actual = await importOriginal<typeof import('./state.js')>();
-      return { ...actual, ...overrides };
+      // Isolate from a real ~/.agents/.system/plugins on the dev machine; a test
+      // can still opt into a system repo by passing getSystemPluginsDir in overrides.
+      return { ...actual, getSystemPluginsDir: () => path.join(tmpDir, 'no-system'), ...overrides };
     });
     try {
       const mod = await import('./plugins.js');

@@ -104,6 +104,7 @@ describe('discoverMarketplaces', () => {
       pluginsDir?: string;
       extras?: Array<{ alias: string; dir: string; url: string }>;
       projectPlugins?: string | null;
+      systemPlugins?: string | null;
     },
     fn: (mod: typeof import('./plugin-marketplace.js')) => void | Promise<void>
   ): Promise<void> {
@@ -116,6 +117,10 @@ describe('discoverMarketplaces', () => {
         getPluginsDir: () => overrides.pluginsDir ?? userPlugins,
         getEnabledExtraRepos: () => overrides.extras ?? [],
         getProjectPluginsDir: () => overrides.projectPlugins ?? null,
+        // Default to a non-existent path so tests that don't opt into a system
+        // repo see no agents-system marketplace (deterministic across machines
+        // that may have a real ~/.agents/.system/plugins on disk).
+        getSystemPluginsDir: () => overrides.systemPlugins ?? path.join(tmpDir, 'no-system', 'plugins'),
       };
     });
     try {
@@ -171,6 +176,46 @@ describe('discoverMarketplaces', () => {
       expect(found.map(m => m.name)).toEqual(['agents-cli', 'agents-project']);
       expect(found[1].spec).toMatchObject({ kind: 'project', root: projectPlugins });
     });
+  });
+
+  it('includes the system marketplace FIRST when ~/.agents/.system/plugins/ exists', async () => {
+    const systemPlugins = path.join(tmpDir, 'system', 'plugins');
+    fs.mkdirSync(systemPlugins, { recursive: true });
+    await withState({ systemPlugins }, ({ discoverMarketplaces }) => {
+      const found = discoverMarketplaces();
+      // System listed first (lowest precedence), then the user repo.
+      expect(found.map(m => m.name)).toEqual(['agents-system', 'agents-cli']);
+      expect(found[0].spec).toMatchObject({ kind: 'system', root: systemPlugins });
+      expect(found[0].pluginsRoot).toBe(systemPlugins);
+    });
+  });
+
+  it('skips the system marketplace when its plugins/ dir does not exist', async () => {
+    await withState({ systemPlugins: path.join(tmpDir, 'absent', 'plugins') }, ({ discoverMarketplaces }) => {
+      expect(discoverMarketplaces().map(m => m.name)).toEqual(['agents-cli']);
+    });
+  });
+
+  it('orders marketplaces low→high precedence so name-dedupe keeps the highest scope', async () => {
+    const systemPlugins = path.join(tmpDir, 'system', 'plugins');
+    const extraDir = path.join(tmpDir, 'extra-extras');
+    const projectPlugins = path.join(tmpDir, 'proj', '.agents', 'plugins');
+    fs.mkdirSync(systemPlugins, { recursive: true });
+    fs.mkdirSync(path.join(extraDir, 'plugins'), { recursive: true });
+    fs.mkdirSync(projectPlugins, { recursive: true });
+    await withState(
+      { systemPlugins, extras: [{ alias: 'extras', dir: extraDir, url: 'gh:x/y' }], projectPlugins },
+      ({ discoverMarketplaces }) => {
+        // Order is the dedupe order consumers rely on (Map/last-wins): a plugin
+        // present in multiple repos resolves to project > extra > user > system.
+        expect(discoverMarketplaces({ cwd: '/whatever' }).map(m => m.name)).toEqual([
+          'agents-system',
+          'agents-cli',
+          'agents-extras',
+          'agents-project',
+        ]);
+      }
+    );
   });
 });
 

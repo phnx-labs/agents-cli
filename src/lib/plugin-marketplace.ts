@@ -30,7 +30,7 @@ import * as fs from 'fs';
 import { agentConfigDirName } from './agents.js';
 import * as path from 'path';
 import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec, DiscoveredMarketplace } from './types.js';
-import { getPluginsDir, getEnabledExtraRepos, getProjectPluginsDir } from './state.js';
+import { getPluginsDir, getEnabledExtraRepos, getProjectPluginsDir, getSystemPluginsDir } from './state.js';
 
 /**
  * Canonical name for the user-repo marketplace (~/.agents/plugins/). Kept as an
@@ -115,6 +115,20 @@ function descriptionFor(spec: MarketplaceSpec): string {
  */
 export function discoverMarketplaces(opts: { cwd?: string } = {}): DiscoveredMarketplace[] {
   const out: DiscoveredMarketplace[] = [];
+
+  // System repo — npm-shipped defaults (~/.agents/.system/plugins/) → the
+  // "agents-system" marketplace. Listed FIRST so it has the lowest precedence:
+  // consumers that dedupe by plugin name keep the LAST occurrence, letting
+  // user / extra / project plugins of the same name override a system one (same
+  // direction collectPluginScopes() in project-launch.ts uses). Without this,
+  // `agents sync` never discovers system plugins, so cleanOrphanedPluginSkills
+  // trashes whatever a project launch installed under agents-system and the
+  // marketplace gets unregistered on the next sync.
+  const systemRoot = getSystemPluginsDir();
+  if (dirExists(systemRoot)) {
+    const spec: MarketplaceSpec = { kind: 'system', root: systemRoot };
+    out.push({ spec, name: marketplaceNameFor(spec), pluginsRoot: systemRoot, description: descriptionFor(spec) });
+  }
 
   // User repo — always the canonical "agents-cli" marketplace.
   const userRoot = getPluginsDir();
