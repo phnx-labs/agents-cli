@@ -13,7 +13,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec } from './types.js';
-import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir } from './state.js';
+import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir, getSystemPluginsDir } from './state.js';
 import { IS_WINDOWS, isWindowsAbsolutePath, homeDir } from './platform/index.js';
 import { assertSafeGitTransport } from './git.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
@@ -36,6 +36,7 @@ import {
   marketplaceNameFor,
   MARKETPLACE_NAME,
   PROJECT_MARKETPLACE_NAME,
+  SYSTEM_MARKETPLACE_NAME,
 } from './plugin-marketplace.js';
 
 const PLUGIN_MANIFEST_DIR = '.claude-plugin';
@@ -239,11 +240,19 @@ export function assertPluginTargetContained(targetRoot: string, pluginsDir: stri
 }
 
 /**
- * Get a specific plugin by name.
+ * Get a specific plugin by name. On a cross-marketplace name collision the
+ * highest-precedence scope wins (project > extra > user > system) — the same
+ * resolution the sync writer's Map(last-wins) dedupe and collectPluginScopes()
+ * use. discoverPlugins() yields low→high precedence order, so the LAST match is
+ * the winner; returning the first match would resolve to the lowest scope (e.g.
+ * a system plugin over the user's same-named one), which is exactly backwards.
  */
 export function getPlugin(name: string): DiscoveredPlugin | null {
   const plugins = discoverPlugins();
-  return plugins.find(p => p.name === name) || null;
+  for (let i = plugins.length - 1; i >= 0; i--) {
+    if (plugins[i].name === name) return plugins[i];
+  }
+  return null;
 }
 
 /**
@@ -451,12 +460,17 @@ export function checkPluginDependencies(manifest: PluginManifest): string[] {
 /**
  * Reconstruct a MarketplaceSpec from a marketplace name. The inverse of
  * marketplaceNameFor(): "agents-cli" → user, "agents-project" → project,
- * "agents-<alias>" → extra. The per-version marketplace operations only key off
- * the name (never spec.root), but we resolve the real source root anyway so the
- * spec is honest for any caller that inspects it.
+ * "agents-system" → system, "agents-<alias>" → extra. The per-version
+ * marketplace operations only key off the name (never spec.root), but we
+ * resolve the real source root anyway so the spec is honest for any caller that
+ * inspects it (e.g. descriptionFor, which would otherwise label the system
+ * marketplace as an extra repo named "system").
  */
 function marketplaceSpecForName(name: string | undefined, cwd: string = process.cwd()): MarketplaceSpec {
   if (!name || name === MARKETPLACE_NAME) return { kind: 'user' };
+  if (name === SYSTEM_MARKETPLACE_NAME) {
+    return { kind: 'system', root: getSystemPluginsDir() };
+  }
   if (name === PROJECT_MARKETPLACE_NAME) {
     return { kind: 'project', root: getProjectPluginsDir(cwd) ?? '' };
   }

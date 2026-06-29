@@ -265,6 +265,65 @@ describe('discoverPlugins across marketplaces', () => {
     );
   });
 
+  it('getPlugin resolves a name collision to the highest-precedence scope (project > extra > user > system)', async () => {
+    const systemDir = path.join(tmpDir, 'system', 'plugins');
+    fs.mkdirSync(systemDir, { recursive: true });
+    // Same name in all four scopes — the user must NOT get the system copy.
+    writePlugin(systemDir, 'code');
+    writePlugin(userDir, 'code');
+    writePlugin(path.join(extraRepo, 'plugins'), 'code');
+    writePlugin(projectDir, 'code');
+
+    await withState(
+      {
+        getSystemPluginsDir: () => systemDir,
+        getPluginsDir: () => userDir,
+        getEnabledExtraRepos: () => [{ alias: 'extras', dir: extraRepo, url: '' }],
+        getProjectPluginsDir: () => projectDir,
+      },
+      ({ getPlugin }) => {
+        expect(getPlugin('code')?.marketplace).toBe('agents-project');
+      }
+    );
+  });
+
+  it('getPlugin prefers the user copy over a same-named system plugin', async () => {
+    const systemDir = path.join(tmpDir, 'system', 'plugins');
+    fs.mkdirSync(systemDir, { recursive: true });
+    writePlugin(systemDir, 'code');
+    writePlugin(userDir, 'code');
+
+    await withState(
+      {
+        getSystemPluginsDir: () => systemDir,
+        getPluginsDir: () => userDir,
+        getEnabledExtraRepos: () => [],
+        getProjectPluginsDir: () => null,
+      },
+      ({ getPlugin }) => {
+        expect(getPlugin('code')?.marketplace).toBe('agents-cli');
+      }
+    );
+  });
+
+  it('getPlugin still resolves a system-only plugin', async () => {
+    const systemDir = path.join(tmpDir, 'system', 'plugins');
+    fs.mkdirSync(systemDir, { recursive: true });
+    writePlugin(systemDir, 'sysonly');
+
+    await withState(
+      {
+        getSystemPluginsDir: () => systemDir,
+        getPluginsDir: () => userDir,
+        getEnabledExtraRepos: () => [],
+        getProjectPluginsDir: () => null,
+      },
+      ({ getPlugin }) => {
+        expect(getPlugin('sysonly')?.marketplace).toBe('agents-system');
+      }
+    );
+  });
+
   it('does NOT discover plugins from a disabled (filtered-out) extra repo', async () => {
     writePlugin(userDir, 'alpha');
     // The disabled repo's plugin exists on disk, but getEnabledExtraRepos (which
