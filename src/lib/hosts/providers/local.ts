@@ -79,6 +79,11 @@ export class LocalHostProvider implements HostProvider {
     updateMeta((meta) => {
       const hosts = { ...(meta.hosts ?? {}) };
       delete hosts[name];
+      // Drop the key entirely when empty so we don't leave `hosts: {}` behind.
+      if (Object.keys(hosts).length === 0) {
+        const { hosts: _omit, ...rest } = meta;
+        return rest;
+      }
       return { ...meta, hosts };
     });
   }
