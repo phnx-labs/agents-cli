@@ -9,11 +9,20 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     permissions: {}
     strategy:
+      # Run every OS x node combo to completion so a single platform failure
+      # doesn't mask the others — we want the full cross-platform picture.
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [22, 24]
+    # Cross-platform gating is being brought up incrementally (Linux + macOS +
+    # Windows is the target). Native Windows still has known gaps (#TODO: link),
+    # so Windows legs may fail without blocking the branch until those land.
+    # Promote Windows to a required check once it's green.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -28,8 +37,15 @@ jobs:
       - name: Install dependencies
         run: bun install --ignore-scripts
 
-      - name: Install Playwright browsers
+      # --with-deps installs OS-level libs for headless Chromium and only works
+      # on Linux (apt). macOS and Windows ship the needed libs already.
+      - name: Install Playwright browsers (Linux)
+        if: runner.os == 'Linux'
         run: bunx playwright install --with-deps chromium
+
+      - name: Install Playwright browsers (macOS/Windows)
+        if: runner.os != 'Linux'
+        run: bunx playwright install chromium
 
       - name: Build
         run: bun run build
