@@ -8,6 +8,7 @@
  * and syncing them across version switches.
  */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -886,6 +887,79 @@ type CodexHooksFile = {
   hooks: Record<string, CodexMatcherGroup[]>;
 };
 
+// Maps PascalCase hook event names (as written in hooks.json) to the
+// snake_case labels Codex uses in its persisted [hooks.state] keys.
+// Mirrors hook_event_key_label() in codex-rs/hooks/src/lib.rs.
+const CODEX_EVENT_KEY_LABELS: Record<string, string> = {
+  PreToolUse: 'pre_tool_use',
+  PermissionRequest: 'permission_request',
+  PostToolUse: 'post_tool_use',
+  PreCompact: 'pre_compact',
+  PostCompact: 'post_compact',
+  SessionStart: 'session_start',
+  UserPromptSubmit: 'user_prompt_submit',
+  SubagentStart: 'subagent_start',
+  SubagentStop: 'subagent_stop',
+  Stop: 'stop',
+};
+
+// Recursively sort object keys alphabetically at every level, mirroring
+// canonical_json() in codex-rs/config/src/fingerprint.rs. Codex hashes the
+// canonical JSON form so trust survives key-order differences.
+function canonicalizeForHash(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeForHash);
+  }
+  if (value && typeof value === 'object') {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      sorted[key] = canonicalizeForHash((value as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
+/**
+ * Compute the trust hash Codex expects for a single command hook handler, so
+ * agents-cli can pre-trust the hooks it registers. Without a matching
+ * trusted_hash in [hooks.state], Codex classifies the hook Untrusted and
+ * silently drops it in non-interactive (`codex exec`) mode where there is no
+ * TUI prompt to approve it.
+ *
+ * Mirrors command_hook_hash() in codex-rs/hooks/src/engine/discovery.rs +
+ * version_for_toml() in codex-rs/config/src/fingerprint.rs:
+ *   sha256( canonicalJson( NormalizedHookIdentity ) ) prefixed with "sha256:".
+ *
+ * The identity passes through TOML on the Codex side, which drops None fields
+ * (commandWindows, statusMessage, and matcher when absent). `async` is always
+ * false (async hooks are not yet supported) and is always present. `timeout`
+ * is normalized to >= 1 (Codex: unwrap_or(600).max(1)).
+ */
+export function computeCodexHookTrustHash(
+  eventKeyLabel: string,
+  command: string,
+  timeout: number,
+  matcher: string | undefined
+): string {
+  const handler: Record<string, unknown> = {
+    type: 'command',
+    command,
+    timeout: Math.max(timeout, 1),
+    async: false,
+  };
+  const identity: Record<string, unknown> = {
+    event_name: eventKeyLabel,
+    hooks: [handler],
+  };
+  if (matcher !== undefined && matcher !== '') {
+    identity.matcher = matcher;
+  }
+  const canonical = canonicalizeForHash(identity);
+  const hex = crypto.createHash('sha256').update(JSON.stringify(canonical), 'utf-8').digest('hex');
+  return `sha256:${hex}`;
+}
+
 /**
  * Register hooks as lifecycle events in an agent's config.
  * Reads hooks.yaml manifest, merges into the agent's config file(s).
@@ -1246,7 +1320,11 @@ function registerHooksForCodex(
     return { registered, errors };
   }
 
-  // Ensure [features] codex_hooks = true in config.toml
+  // Ensure [features] hooks = true and pre-trust every registered hook in
+  // config.toml. Codex only runs hooks that are enabled AND trusted; in
+  // non-interactive (`codex exec`) mode there is no TUI prompt to approve
+  // them, so an untrusted hook is silently dropped. We compute the same
+  // trust hash Codex would and persist it under [hooks.state].
   try {
     let tomlConfig: Record<string, unknown> = {};
     if (fs.existsSync(configPath)) {
@@ -1258,7 +1336,62 @@ function registerHooksForCodex(
     if (!tomlConfig.features || typeof tomlConfig.features !== 'object') {
       tomlConfig.features = {};
     }
-    (tomlConfig.features as Record<string, unknown>).codex_hooks = true;
+    // Codex 0.116+ feature flag is `hooks` (the legacy `codex_hooks` name is
+    // an unrecognized key that triggers a deprecation error and is ignored).
+    const features = tomlConfig.features as Record<string, unknown>;
+    delete features.codex_hooks;
+    features.hooks = true;
+
+    // Pre-trust hooks. The [hooks.state] key is keyed by the hooks.json path
+    // exactly as Codex resolves it (the absolute CODEX_HOME path), the
+    // snake_case event label, and the per-event group/handler indices — which
+    // must match Codex's parse order, so we iterate the just-written
+    // hooksFile structure in array order.
+    if (!tomlConfig.hooks || typeof tomlConfig.hooks !== 'object') {
+      tomlConfig.hooks = {};
+    }
+    const hooksTable = tomlConfig.hooks as Record<string, unknown>;
+    const existingState =
+      hooksTable.state && typeof hooksTable.state === 'object'
+        ? (hooksTable.state as Record<string, { enabled?: boolean; trusted_hash?: string }>)
+        : {};
+    const hookState: Record<string, { enabled?: boolean; trusted_hash?: string }> = {};
+
+    for (const [event, eventGroups] of Object.entries(hooksFile.hooks)) {
+      const eventKeyLabel = CODEX_EVENT_KEY_LABELS[event];
+      if (!eventKeyLabel) continue;
+      eventGroups.forEach((group, groupIdx) => {
+        if (!group.hooks) return;
+        group.hooks.forEach((handler, handlerIdx) => {
+          if (handler.type !== 'command') return;
+          const key = `${hooksPath}:${eventKeyLabel}:${groupIdx}:${handlerIdx}`;
+          const trustedHash = computeCodexHookTrustHash(
+            eventKeyLabel,
+            handler.command,
+            handler.timeout,
+            group.matcher
+          );
+          // Preserve a user's explicit `enabled = false` for this exact hook;
+          // only (re)write the trust hash.
+          const prior = existingState[key];
+          const entry: { enabled?: boolean; trusted_hash?: string } = { trusted_hash: trustedHash };
+          if (prior && prior.enabled === false) {
+            entry.enabled = false;
+          }
+          hookState[key] = entry;
+        });
+      });
+    }
+
+    // Carry forward trust state for any hooks we did not (re)register this
+    // pass — e.g. user-added hooks under a different command path.
+    for (const [key, entry] of Object.entries(existingState)) {
+      if (!(key in hookState)) {
+        hookState[key] = entry;
+      }
+    }
+
+    hooksTable.state = hookState;
 
     fs.writeFileSync(configPath, TOML.stringify(tomlConfig as Parameters<typeof TOML.stringify>[0]), 'utf-8');
   } catch (err) {
