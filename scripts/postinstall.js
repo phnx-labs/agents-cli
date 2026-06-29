@@ -239,6 +239,10 @@ To enable version-aware shims, add this to your shell config:
     console.log(`  Installed shorthands: ${written.join(', ')}`);
   }
 
+  if (process.platform !== 'win32') {
+    await ensureAgentsResolvablePosix();
+  }
+
   await healLongRunningProcesses();
 
   const version = getVersion();
@@ -249,6 +253,64 @@ To enable version-aware shims, add this to your shell config:
       console.log(section);
       console.log('');
     }
+  }
+}
+
+/**
+ * Make the `agents` command resolvable in a *login* shell on POSIX.
+ *
+ * `agents`/`ag` reach PATH only through npm's bin symlink in the npm global-bin
+ * dir. Under nvm (and other per-user node prefixes) that dir is missing from a
+ * non-interactive login shell's PATH, so `bash -lc 'agents …'` fails with
+ * command-not-found — which breaks `agents secrets export --host` (it runs
+ * `bash -lc 'agents secrets import …'` on the remote) and the routines daemon
+ * (src/lib/daemon.ts falls back to bare `agents`). This is the POSIX symmetric
+ * counterpart of the Windows branch in main() that registers npm's global-bin
+ * dir on the user PATH.
+ *
+ * Self-heal, not a prompt: it fires ONLY when `agents` is otherwise
+ * unresolvable — the genuinely-broken state — so it acts decisively, exactly
+ * like the Windows PATH registration. The symlink never clobbers a dev build
+ * (scripts/install.sh) or any real file. Skipped in CI (ephemeral homes) and
+ * when AGENTS_NO_HEAL=1.
+ */
+async function ensureAgentsResolvablePosix() {
+  if (process.env.CI || process.env.AGENTS_NO_HEAL === '1') return;
+  try {
+    const { localBinDir, ensureLocalBinSymlink, loginShellResolves, dirOnLoginPath } =
+      await import('../dist/lib/platform/posixpath.js');
+
+    // macOS/homebrew, system-node Linux, and dev-build users already resolve it.
+    if (loginShellResolves('agents')) return;
+
+    const binDir = localBinDir();
+    const results = ['agents', 'ag'].map((name) => ensureLocalBinSymlink(name, AGENTS_BIN, binDir));
+    if (!results.some((r) => r.created)) return; // nothing we could safely link
+
+    if (dirOnLoginPath(binDir)) {
+      console.log(`\n  Linked 'agents' into ${binDir} (already on the login PATH) so 'bash -lc agents' resolves.`);
+      return;
+    }
+
+    // ~/.local/bin isn't on the *bash* login PATH yet. The consumers run
+    // `bash -lc`, so add it to the file a bash login shell reads (~/.bash_profile
+    // when present, else ~/.profile) — not the interactive $SHELL rc, which for a
+    // zsh user (.zshrc) bash would never source.
+    const bashRc = fs.existsSync(path.join(HOME, '.bash_profile'))
+      ? path.join(HOME, '.bash_profile')
+      : path.join(HOME, '.profile');
+    const marker = '# agents-cli: ensure ~/.local/bin on PATH (so the agents command resolves)';
+    let already = false;
+    try {
+      already = fs.existsSync(bashRc) && fs.readFileSync(bashRc, 'utf-8').includes(marker);
+    } catch { /* unreadable rc — fall through and append */ }
+    if (!already) {
+      fs.appendFileSync(bashRc, `\n${marker}\nexport PATH="${binDir}:$PATH"\n`);
+    }
+    console.log(`\n  Linked 'agents' into ${binDir} and added it to PATH in ${path.basename(bashRc)}.`);
+    console.log(`  Restart your shell (or run: source ~/${path.basename(bashRc)}) to pick it up.`);
+  } catch {
+    /* best-effort: a failure here must never break the install */
   }
 }
 
