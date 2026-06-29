@@ -38,7 +38,11 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getVersionHomePath,
+  compareVersions,
 } from './versions.js';
+import { discoverPlugins, marketplaceSpecForName } from './plugins.js';
+import type { DiscoveredPlugin } from './types.js';
+import { pluginInstallDir, repairableManifestFields } from './plugin-marketplace.js';
 import { markdownToToml } from './convert.js';
 import { resolveImports, supportsRulesImports } from './rules/compile.js';
 import { listCommandsInVersionHome, getVersionCommandsDir } from './commands.js';
@@ -74,6 +78,9 @@ export interface ResourceDiff {
   sourcePath?: string;
   /** Absolute path to the file/dir inside the version home (when present). */
   homePath?: string;
+  /** Human-readable specifics for a divergent row — e.g. for a stale plugin:
+   *  "0.6.1→0.7.0, missing skills: ship, learn". Currently set for plugins. */
+  detail?: string;
 }
 
 export interface VersionResourceReport {
@@ -473,6 +480,86 @@ function diffPresenceOnly(
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// ─── plugins (content-aware) ───────────────────────────────────────────────
+
+function listPluginSkillDirs(pluginDir: string): string[] {
+  const d = path.join(pluginDir, 'skills');
+  try {
+    return fs.readdirSync(d, { withFileTypes: true })
+      .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && fs.existsSync(path.join(d, e.name, 'SKILL.md')))
+      .map((e) => e.name);
+  } catch { return []; }
+}
+
+function listPluginCommandFiles(pluginDir: string): string[] {
+  const d = path.join(pluginDir, 'commands');
+  try {
+    return fs.readdirSync(d).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, ''));
+  } catch { return []; }
+}
+
+/**
+ * Describe how a version's marketplace MIRROR of a plugin diverges from its
+ * central source — the detail presence-only checks miss. Surfaces a stale mirror
+ * version, a Claude-invalid manifest, and (the part users care about) the
+ * plugin's own skills/commands that never made it into the mirror. Returns null
+ * when the mirror faithfully matches source.
+ */
+export function describePluginDrift(central: DiscoveredPlugin, mirrorDir: string): string | null {
+  if (!fs.existsSync(mirrorDir)) return 'mirror missing';
+  const parts: string[] = [];
+
+  let mManifest: Record<string, unknown> | null = null;
+  try {
+    mManifest = JSON.parse(fs.readFileSync(path.join(mirrorDir, '.claude-plugin', 'plugin.json'), 'utf-8'));
+  } catch { mManifest = null; }
+
+  const mVer = mManifest && typeof mManifest.version === 'string' ? mManifest.version : undefined;
+  const cVer = central.manifest.version;
+  if (mVer && cVer && compareVersions(cVer, mVer) > 0) parts.push(`${mVer}→${cVer}`);
+  if (mManifest && repairableManifestFields(mManifest).length > 0) parts.push('invalid manifest');
+
+  const mirrorSkills = new Set(listPluginSkillDirs(mirrorDir));
+  const missSkills = listPluginSkillDirs(central.root).filter((s) => !mirrorSkills.has(s)).sort();
+  const mirrorCmds = new Set(listPluginCommandFiles(mirrorDir));
+  const missCmds = listPluginCommandFiles(central.root).filter((c) => !mirrorCmds.has(c)).sort();
+  if (missSkills.length) parts.push(`missing skill${missSkills.length > 1 ? 's' : ''}: ${missSkills.join(', ')}`);
+  if (missCmds.length) parts.push(`missing command${missCmds.length > 1 ? 's' : ''}: ${missCmds.join(', ')}`);
+
+  return parts.length ? parts.join(', ') : null;
+}
+
+function diffPlugins(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
+  const versionHome = getVersionHomePath(agent, version);
+  const synced = new Set(getActuallySyncedResources(agent, version, { cwd }).plugins);
+  const rows: ResourceDiff[] = [];
+  const seen = new Set<string>();
+
+  for (const p of discoverPlugins({ cwd })) {
+    if (seen.has(p.name)) continue; // dedupe across marketplaces for the readout
+    seen.add(p.name);
+    if (!synced.has(p.name)) {
+      rows.push({ kind: 'plugins', name: p.name, status: 'missing', sourcePath: p.root });
+      continue;
+    }
+    const mirror = pluginInstallDir(p, marketplaceSpecForName(p.marketplace), agent, versionHome);
+    const detail = describePluginDrift(p, mirror);
+    rows.push({
+      kind: 'plugins',
+      name: p.name,
+      status: detail ? 'diff' : 'ok',
+      sourcePath: p.root,
+      homePath: mirror,
+      ...(detail ? { detail } : {}),
+    });
+  }
+  for (const name of synced) {
+    if (!seen.has(name)) rows.push({ kind: 'plugins', name, status: 'extra' });
+  }
+
+  return rows.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function diffPromptcuts(): ResourceDiff[] {
   const sourcePath = getEffectivePromptcutsPath();
   if (!fs.existsSync(sourcePath)) return [];
@@ -531,7 +618,7 @@ export function diffVersionResources(
   if (requested.has('mcp')) empty.mcp = diffPresenceOnly('mcp', available.mcp, synced.mcp);
   if (requested.has('permissions')) empty.permissions = diffPresenceOnly('permissions', available.permissions, synced.permissions);
   if (requested.has('subagents')) empty.subagents = diffPresenceOnly('subagents', available.subagents, synced.subagents);
-  if (requested.has('plugins')) empty.plugins = diffPresenceOnly('plugins', available.plugins, synced.plugins);
+  if (requested.has('plugins')) empty.plugins = diffPlugins(agent, version, cwd);
   if (requested.has('promptcuts')) empty.promptcuts = diffPromptcuts();
 
   let ok = 0, diff = 0, missing = 0, extra = 0;

@@ -154,6 +154,13 @@ const NON_SCRIPT_EXTENSIONS = new Set([
   '.yaml', '.yml', '.json', '.toml', '.ini', '.conf',
 ]);
 
+// Documentation siblings of a hook (e.g. `git-guard.md` next to `git-guard.sh`)
+// are human-readable docs the hook never reads at runtime — NOT a data sidecar.
+// Treating them as the hook's `dataFile` made the installer's correct omission
+// of docs look like perpetual drift in `agents doctor` that no sync could fix.
+// Structured siblings (.yaml/.json/.toml/...) remain valid data files.
+const DOC_EXTENSIONS = new Set(['.md', '.markdown', '.rst']);
+
 const SCRIPT_EXTENSIONS = new Set([
   '.sh',
   '.bash',
@@ -281,7 +288,7 @@ export function listHookEntriesFromDir(dir: string): HookEntry[] {
       group.find((f) => SCRIPT_EXTENSIONS.has(f.ext.toLowerCase())) ||
       group.find((f) => f.isExec && !NON_SCRIPT_EXTENSIONS.has(f.ext.toLowerCase()));
     if (!script) continue;
-    const data = group.find((f) => f !== script);
+    const data = group.find((f) => f !== script && !DOC_EXTENSIONS.has(f.ext.toLowerCase()));
     entries.push({
       name: base,
       scriptPath: script.fullPath,

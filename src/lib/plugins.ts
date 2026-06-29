@@ -455,7 +455,7 @@ export function checkPluginDependencies(manifest: PluginManifest): string[] {
  * the name (never spec.root), but we resolve the real source root anyway so the
  * spec is honest for any caller that inspects it.
  */
-function marketplaceSpecForName(name: string | undefined, cwd: string = process.cwd()): MarketplaceSpec {
+export function marketplaceSpecForName(name: string | undefined, cwd: string = process.cwd()): MarketplaceSpec {
   if (!name || name === MARKETPLACE_NAME) return { kind: 'user' };
   if (name === PROJECT_MARKETPLACE_NAME) {
     return { kind: 'project', root: getProjectPluginsDir(cwd) ?? '' };

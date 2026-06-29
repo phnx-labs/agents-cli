@@ -67,6 +67,8 @@ interface SyncStatusRow {
   version: string;
   status: 'fresh' | 'stale' | 'never-synced';
   isDefault: boolean;
+  /** For stale rows: prioritized lines naming exactly what diverged (plugins first). */
+  divergence?: string[];
 }
 
 interface OrphanRow {
@@ -78,6 +80,31 @@ interface OrphanRow {
 }
 
 // ─── overview mode (no target) ────────────────────────────────────────────────
+
+// Lines naming exactly what's out of sync for a version, plugins prioritized:
+// each divergent plugin gets its own line with specifics (stale mirror version,
+// invalid manifest, or the bundled skills/commands missing from the mirror —
+// the system-repo plugin content that matters most). Other kinds collapse to
+// compact counts so the readout stays scannable.
+function divergenceLines(report: VersionResourceReport): string[] {
+  const lines: string[] = [];
+  for (const p of report.kinds.plugins) {
+    if (p.status === 'missing') lines.push(`plugin ${p.name} — not installed`);
+    else if (p.status === 'diff') lines.push(`plugin ${p.name} — ${p.detail ?? 'mirror drifted'}`);
+  }
+  const counts: string[] = [];
+  for (const kind of ['commands', 'skills', 'hooks', 'rules', 'mcp', 'permissions', 'subagents'] as const) {
+    const rows = report.kinds[kind];
+    const miss = rows.filter((r) => r.status === 'missing').length;
+    const dif = rows.filter((r) => r.status === 'diff').length;
+    const bits: string[] = [];
+    if (miss) bits.push(`${miss} missing`);
+    if (dif) bits.push(`${dif} drifted`);
+    if (bits.length) counts.push(`${kind} ${bits.join('/')}`);
+  }
+  if (counts.length) lines.push(counts.join(' · '));
+  return lines;
+}
 
 function checkSyncStatus(cwd: string): SyncStatusRow[] {
   const rows: SyncStatusRow[] = [];
@@ -92,7 +119,15 @@ function checkSyncStatus(cwd: string): SyncStatusRow[] {
       const status: SyncStatusRow['status'] = !manifest
         ? 'never-synced'
         : isStale(manifest, agent, version, cwd) ? 'stale' : 'fresh';
-      rows.push({ agent, version, status, isDefault: version === def });
+      const row: SyncStatusRow = { agent, version, status, isDefault: version === def };
+      if (status === 'stale') {
+        // Resolve the specifics against non-project layers (the global home is
+        // never reconciled against per-cwd project resources).
+        const report = diffVersionResources(agent, version, { cwd, excludeProject: true });
+        const lines = divergenceLines(report);
+        if (lines.length) row.divergence = lines;
+      }
+      rows.push(row);
     }
   }
   return rows;
@@ -174,6 +209,9 @@ function renderOverviewText(
         console.log(`  ${chalk.green('fresh')}  ${label}`);
       } else if (row.status === 'stale') {
         console.log(`  ${chalk.yellow('stale')}  ${label}  ${chalk.gray('— will sync on next launch')}`);
+        for (const line of row.divergence ?? []) {
+          console.log(chalk.gray(`           ${line}`));
+        }
       } else {
         console.log(`  ${chalk.gray('cold ')}  ${label}  ${chalk.gray('— never synced; first launch will populate')}`);
       }
@@ -335,7 +373,8 @@ function renderKindSection(
 
   for (const r of visible) {
     const src = sourceLabel(r, layers);
-    console.log(`    ${statusLabel(r.status)}  ${r.name.padEnd(28)} ${src}`);
+    const detail = r.detail ? chalk.gray(`  ${r.detail}`) : '';
+    console.log(`    ${statusLabel(r.status)}  ${r.name.padEnd(28)} ${src}${detail}`);
 
     if (options.showDiff && r.status === 'diff' && r.sourcePath && r.homePath) {
       const expected = readExpectedForDiff(kind, r);
