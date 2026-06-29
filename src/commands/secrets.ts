@@ -188,7 +188,7 @@ function readStdinSync(): string {
 }
 
 /**
- * SSH target for `export --to-ssh`: a bare ssh-config host alias (e.g. `yosemite-s0`)
+ * SSH target for `export --host`: a bare ssh-config host alias (e.g. `yosemite-s0`)
  * or `user@host`. The strict allowlist blocks shell metacharacters and a leading `-`
  * so a target can't be smuggled in as an ssh argv flag.
  */
@@ -465,7 +465,7 @@ export function registerSecretsCommands(program: Command): void {
       eval "$(agents secrets export prod --plaintext)"
 
       # Push the bundle to remote machine(s) over SSH (lands as a native bundle there)
-      agents secrets export prod --to-ssh --host yosemite-s0 --host yosemite-s1 --force
+      agents secrets export prod --host yosemite-s0 --host yosemite-s1 --force
 
       # Run a one-off command with secrets injected
       agents secrets exec prod -- ./deploy.sh
@@ -1072,7 +1072,7 @@ Examples:
         const requestedBackend = parseBackendOpt(opts.backend);
         // Read the bundle if it exists (inheriting its backend); otherwise
         // create it with the requested backend so a single `import --backend
-        // file` works (this is what `export --to-ssh --remote-backend file`
+        // file` works (this is what `export --host ... --remote-backend file`
         // drives on the remote).
         let bundle: SecretsBundle;
         if (bundleExists(resolvedBundleName)) {
@@ -1147,19 +1147,17 @@ Examples:
 
   cmd
     .command('export [bundle]')
-    .description('Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --to-ssh.')
+    .description('Resolve a bundle and print KEY=VALUE lines, push it to a 1Password vault with --to-1password, or push it to remote machine(s) over SSH with --host.')
     .option('--plaintext', 'Acknowledge that the resolved values will be printed in the clear (shell export mode)')
     .option('--to-1password', 'Push every key in the bundle as a PASSWORD item in a 1Password vault')
     .option('--vault <name>', '1Password vault name (used with --to-1password)')
-    .option('--to-ssh', 'Push the bundle to remote machine(s) over SSH via their native agents-cli import')
-    .option('--host <target...>', 'SSH target(s) for --to-ssh: host alias or user@host (repeatable)')
-    .option('--remote-backend <backend>', 'Backend for the bundle on the remote: keychain (default) or file (passphrase-encrypted, headless-readable). file forwards AGENTS_SECRETS_PASSPHRASE over stdin.', 'keychain')
-    .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --to-ssh)')
+    .option('--host <target...>', 'Push the bundle over SSH to this target (host alias or user@host); repeatable for multiple machines')
+    .option('--remote-backend <backend>', 'Backend for the bundle on the remote (with --host): keychain (default) or file (passphrase-encrypted, headless-readable). file forwards AGENTS_SECRETS_PASSPHRASE over stdin.', 'keychain')
+    .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --host)')
     .action(async (bundleName: string | undefined, opts: {
       plaintext?: boolean;
       to1password?: boolean;
       vault?: string;
-      toSsh?: boolean;
       host?: string[];
       remoteBackend?: string;
       force?: boolean;
@@ -1168,11 +1166,11 @@ Examples:
         const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
 
-        if (opts.toSsh) {
-          const hosts = opts.host ?? [];
-          if (hosts.length === 0) {
-            throw new Error('--to-ssh requires at least one --host <target>.');
-          }
+        // The presence of --host selects SSH push: --host is the destination
+        // and carries the mode (no separate --to-ssh needed — it would be
+        // strictly redundant since SSH always requires at least one host).
+        const hosts = opts.host ?? [];
+        if (hosts.length > 0) {
           for (const h of hosts) assertValidSshTarget(h);
           const remoteBackend = parseBackendOpt(opts.remoteBackend);
           // For a file-backed remote bundle the remote must encrypt at rest with
