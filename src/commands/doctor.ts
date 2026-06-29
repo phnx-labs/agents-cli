@@ -202,19 +202,29 @@ function renderOverviewText(
   if (syncRows.length === 0) {
     console.log(chalk.gray('  (no versions installed; add one with `agents add <agent>@<version>`)'));
   } else {
+    let anyOutOfSync = false;
     for (const row of syncRows) {
       const tag = row.isDefault ? chalk.gray(' (default)') : '';
       const label = `${AGENT_NAMES[row.agent] || row.agent}@${row.version}${tag}`;
       if (row.status === 'fresh') {
         console.log(`  ${chalk.green('fresh')}  ${label}`);
       } else if (row.status === 'stale') {
-        console.log(`  ${chalk.yellow('stale')}  ${label}  ${chalk.gray('— will sync on next launch')}`);
+        anyOutOfSync = true;
+        console.log(`  ${chalk.yellow('stale')}  ${label}  ${chalk.gray('— sources changed since last sync')}`);
         for (const line of row.divergence ?? []) {
           console.log(chalk.gray(`           ${line}`));
         }
       } else {
-        console.log(`  ${chalk.gray('cold ')}  ${label}  ${chalk.gray('— never synced; first launch will populate')}`);
+        anyOutOfSync = true;
+        console.log(`  ${chalk.gray('cold ')}  ${label}  ${chalk.gray('— never synced')}`);
       }
+    }
+    // Launching does NOT reconcile a version home — the shim hot path only
+    // resolves a version and compiles project-scoped resources (shims.ts v15/v16).
+    // Version homes are reconciled only by management commands, so point at one
+    // rather than promising an auto-sync that never happens.
+    if (anyOutOfSync) {
+      console.log(chalk.gray('  Reconcile with `agents doctor <agent>@<version> --fix` or `agents sync <agent>@<version>` (not applied on launch).'));
     }
   }
   console.log();
