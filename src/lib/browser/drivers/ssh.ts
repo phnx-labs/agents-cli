@@ -13,6 +13,15 @@ export interface SSHConnection {
   cleanup: () => void;
 }
 
+/**
+ * Which shell dialect the *remote* host speaks. Selected per-endpoint via the
+ * `&os=windows` query param on an `ssh://` target. POSIX is the default — the
+ * historical behavior for macOS/Linux remotes. Windows remotes run OpenSSH
+ * Server with cmd.exe as the default shell, so the launch/teardown command
+ * strings differ (no `&` backgrounding, no `lsof`, `.exe` instead of `.app`).
+ */
+export type RemoteOs = 'windows' | 'posix';
+
 export function shellQuote(s: string): string {
   if (/^[A-Za-z0-9_./:=@%+-]+$/.test(s)) return s;
   return "'" + s.replace(/'/g, "'\\''") + "'";
@@ -39,6 +48,13 @@ export async function connectSSH(
   const host = parsed.host;
   const remotePort = parsed.port;
 
+  // `&os=windows` switches the remote-command dialect (cmd.exe launch via
+  // `start`, taskkill teardown). Anything else — including absent — is posix.
+  // The query param is the single source of truth so the driver never has to
+  // be threaded a separate per-profile field.
+  const remoteOs: RemoteOs =
+    (url.searchParams.get('os') || '').toLowerCase() === 'windows' ? 'windows' : 'posix';
+
   // Bind the tunnel to the SAME local port the user configured. Using an
   // allocated port instead made `status` print confusing rows like
   // `port 9200 (configured 10005)` and made it impossible to predict which
@@ -59,7 +75,7 @@ export async function connectSSH(
   }
 
   try {
-    await ensureRemoteBrowser(user, host, profile.browser, remotePort, profile.binary);
+    await ensureRemoteBrowser(user, host, profile.browser, remotePort, remoteOs, profile.binary);
   } catch {
     // Browser may already be running, continue
   }
@@ -186,34 +202,114 @@ function tryConnect(port: number): Promise<void> {
   });
 }
 
-async function ensureRemoteBrowser(
-  user: string,
-  host: string,
+// macOS .app launchers — the historical POSIX table.
+const POSIX_BROWSER_PATHS: Record<string, string> = {
+  chrome: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  comet: '/Applications/Comet.app/Contents/MacOS/Comet',
+  chromium: '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  brave: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  edge: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+};
+
+// Windows App Paths registry keys per browser. CreateProcess (used by WMI
+// Win32_Process.Create) does not honor App Paths the way ShellExecute/`start`
+// does, so the launch script resolves the real `.exe` path from this registry
+// key at runtime — covering both Program Files and Program Files (x86)
+// installs without hardcoding (or guessing) the location.
+const WIN_BROWSER_APPPATH: Record<string, string> = {
+  chrome: 'chrome.exe',
+  chromium: 'chrome.exe',
+  brave: 'brave.exe',
+  edge: 'msedge.exe',
+};
+
+/** Single-quote a string for embedding inside a PowerShell literal. */
+function psSingleQuote(s: string): string {
+  return "'" + s.replace(/'/g, "''") + "'";
+}
+
+/**
+ * Wrap a PowerShell script as a `-EncodedCommand` invocation. Base64 of the
+ * UTF-16LE bytes is a single quote-free token, so it rides through Node spawn
+ * → Windows sshd → cmd.exe with zero escaping hazards (hand-quoted
+ * `powershell -Command "…"` is fragile the moment a path or URL is involved).
+ */
+export function encodePowerShell(script: string): string {
+  const b64 = Buffer.from(script, 'utf16le').toString('base64');
+  return `powershell -NoProfile -EncodedCommand ${b64}`;
+}
+
+/**
+ * The PowerShell that launches the browser on a Windows remote. Two hard
+ * requirements shaped this:
+ *   1. The browser must OUTLIVE the ssh session. Windows OpenSSH terminates
+ *      the session's job tree on disconnect, which reaps both `start /B` and
+ *      `Start-Process` children (verified against a real box). WMI
+ *      `Win32_Process.Create` spawns under the WMI provider service instead,
+ *      so the process survives after we drop the ssh connection and reconnect
+ *      over the CDP tunnel.
+ *   2. A distinct `--user-data-dir` so a fresh instance bound to the debugging
+ *      port comes up even when the user already has Edge open.
+ * CreateProcess ignores App Paths, so we resolve the real `.exe` from the
+ * registry at runtime rather than relying on a bare `msedge` name.
+ */
+export function buildWindowsLaunchScript(
   browserType: string,
   port: number,
   customBinary?: string
-): Promise<void> {
-  const browserPaths: Record<string, string> = {
-    chrome: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    comet: '/Applications/Comet.app/Contents/MacOS/Comet',
-    chromium: '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    brave: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
-    edge: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-  };
-
-  let browserPath: string;
+): string {
+  let exeExpr: string;
   if (customBinary) {
-    browserPath = customBinary;
+    exeExpr = psSingleQuote(customBinary);
   } else if (browserType === 'custom') {
     throw new Error('browser: custom requires a binary path in the profile');
   } else {
-    browserPath = browserPaths[browserType];
-    if (!browserPath) {
-      throw new Error(`Unknown browser type: ${browserType}`);
-    }
+    const exeKey = WIN_BROWSER_APPPATH[browserType];
+    if (!exeKey) throw new Error(`Unknown browser type for windows remote: ${browserType}`);
+    exeExpr =
+      `(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exeKey}').'(default)'`;
   }
+  // Keep the `--remote-allow-origins=http://127.0.0.1:${port}` literal in
+  // source — a test asserts CDP is never opened to `*`.
+  return [
+    `$exe = ${exeExpr}`,
+    `$cl = '"' + $exe + '" --remote-debugging-port=${port}` +
+      ` --remote-allow-origins=http://127.0.0.1:${port}` +
+      ` --disable-background-timer-throttling --user-data-dir="' + $env:TEMP + '\\agents-browser-${port}"'`,
+    `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cl } | Out-Null`,
+  ].join('; ');
+}
 
-  const remoteCmd = [
+/** The PowerShell that kills whatever holds the CDP port on a Windows remote. */
+export function buildWindowsKillScript(port: number): string {
+  return (
+    `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue ` +
+    `| ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`
+  );
+}
+
+/**
+ * Build the remote command that launches the browser detached with a CDP port.
+ * POSIX backgrounds the `.app` binary with `… &`; Windows resolves the exe and
+ * spawns it via WMI (encoded PowerShell) so it survives the ssh session.
+ */
+export function buildLaunchCmd(
+  remoteOs: RemoteOs,
+  browserType: string,
+  port: number,
+  customBinary?: string
+): string {
+  if (remoteOs === 'windows') {
+    return encodePowerShell(buildWindowsLaunchScript(browserType, port, customBinary));
+  }
+  const browserPath = customBinary ?? POSIX_BROWSER_PATHS[browserType];
+  if (!browserPath) {
+    if (browserType === 'custom') {
+      throw new Error('browser: custom requires a binary path in the profile');
+    }
+    throw new Error(`Unknown browser type for posix remote: ${browserType}`);
+  }
+  return [
     shellQuote(browserPath),
     `--remote-debugging-port=${port}`,
     shellQuote(`--remote-allow-origins=http://127.0.0.1:${port}`),
@@ -221,6 +317,29 @@ async function ensureRemoteBrowser(
     `--user-data-dir=/tmp/agents-browser-${port}`,
     '</dev/null >/dev/null 2>&1 &',
   ].join(' ');
+}
+
+/**
+ * Build the remote command that kills whatever holds the CDP port.
+ * POSIX uses `lsof`+`kill`; Windows uses encoded PowerShell
+ * (Get-NetTCPConnection → Stop-Process).
+ */
+export function buildKillCmd(remoteOs: RemoteOs, port: number): string {
+  if (remoteOs === 'windows') {
+    return encodePowerShell(buildWindowsKillScript(port));
+  }
+  return `pids=$(lsof -ti ${shellQuote(`:${port}`)} 2>/dev/null); [ -z "$pids" ] || kill -9 $pids 2>/dev/null || true`;
+}
+
+async function ensureRemoteBrowser(
+  user: string,
+  host: string,
+  browserType: string,
+  port: number,
+  remoteOs: RemoteOs,
+  customBinary?: string
+): Promise<void> {
+  const remoteCmd = buildLaunchCmd(remoteOs, browserType, port, customBinary);
 
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -249,13 +368,13 @@ export async function restartRemoteBrowser(
   host: string,
   browserType: string,
   port: number,
+  remoteOs: RemoteOs,
   customBinary?: string
 ): Promise<void> {
   // Kill any process using the remote debugging port
-  const killCmd = `pids=$(lsof -ti ${shellQuote(`:${port}`)} 2>/dev/null); [ -z "$pids" ] || kill -9 $pids 2>/dev/null || true`;
-  await runSSHCommand(user, host, killCmd);
+  await runSSHCommand(user, host, buildKillCmd(remoteOs, port));
   await sleep(500);
-  await ensureRemoteBrowser(user, host, browserType, port, customBinary);
+  await ensureRemoteBrowser(user, host, browserType, port, remoteOs, customBinary);
   await sleep(1500);
 }
 
