@@ -547,7 +547,7 @@ export function installMcpServers(
   // the CLI is actually executable (the bare wrapper is a shell script).
   const cliCommand = AGENTS[agentId].cliCommand;
   let binaryPath = path.join(getVersionsDir(), agentId, version, 'node_modules', '.bin', cliCommand);
-  if (IS_WINDOWS && !fs.existsSync(binaryPath) && fs.existsSync(binaryPath + '.cmd')) {
+  if (IS_WINDOWS && fs.existsSync(binaryPath + '.cmd')) {
     binaryPath += '.cmd';
   }
 
