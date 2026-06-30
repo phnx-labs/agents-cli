@@ -91,6 +91,7 @@ export function parseSession(filePath: string, agent?: SessionAgentId): SessionE
     case 'openclaw': events = []; break; // OpenClaw sessions don't have parseable files yet
     case 'hermes': events = parseHermes(filePath); break;
     case 'kimi': events = parseKimi(filePath); break;
+    case 'droid': events = parseDroid(filePath); break;
   }
 
   // Chokepoint: every string field that originated in an untrusted session
@@ -109,6 +110,7 @@ export function detectAgent(filePath: string): SessionAgentId | null {
   if (filePath.includes('/.rush/') || filePath.includes('\\.rush\\')) return 'rush';
   if (filePath.includes('/.hermes/') || filePath.includes('\\.hermes\\')) return 'hermes';
   if (filePath.includes('/.kimi-code/') || filePath.includes('\\.kimi-code\\')) return 'kimi';
+  if (filePath.includes('/.factory/') || filePath.includes('\\.factory\\')) return 'droid';
   // Cloud convention: cloud-sessions/<id>/session.<format>.jsonl
   const cloudMatch = filePath.match(/session\.(claude|codex|rush)\.jsonl(?:$|[?#])/);
   if (cloudMatch) return cloudMatch[1] as SessionAgentId;
@@ -1128,6 +1130,109 @@ export function parseKimi(filePath: string): SessionEvent[] {
           inputTokens: typeof inputTokens === 'number' ? inputTokens : undefined,
           outputTokens: typeof outputTokens === 'number' ? outputTokens : undefined,
         });
+      }
+    }
+  }
+
+  return events;
+}
+
+// ---------------------------------------------------------------------------
+// Droid (Factory) parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a Droid (Factory) JSONL session file into normalized events. Droid
+ * wraps each turn in a `{type:'message', message:{role, content, modelId}}`
+ * envelope; the content blocks are Anthropic-shaped (text/thinking/tool_use/
+ * tool_result), so block handling mirrors the Claude parser.
+ */
+export function parseDroid(filePath: string): SessionEvent[] {
+  const content = safeReadSessionFile(filePath);
+  const lines = content.split('\n').filter(l => l.trim());
+  const events: SessionEvent[] = [];
+
+  // Map tool_use id -> {tool, args} for correlating with tool_result.
+  const toolUseMap = new Map<string, { tool: string; args: Record<string, any> }>();
+
+  for (const line of lines) {
+    let raw: any;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (raw.type !== 'message') continue;
+
+    const message = raw.message || {};
+    const role = message.role === 'user' ? 'user' : 'assistant';
+    const timestamp = raw.timestamp || new Date().toISOString();
+    const blocks = message.content;
+
+    // Plain-string content (rare) renders as a single message.
+    if (typeof blocks === 'string') {
+      const text = blocks.trim();
+      if (text) events.push({ type: 'message', agent: 'droid', timestamp, role, content: text });
+      continue;
+    }
+    if (!Array.isArray(blocks)) continue;
+
+    for (const block of blocks) {
+      if (block.type === 'text') {
+        const text = (block.text || '').trim();
+        // Skip injected context blocks (date, skills list) on the first user turn.
+        if (text && !(role === 'user' && text.startsWith('<system-reminder>'))) {
+          events.push({ type: 'message', agent: 'droid', timestamp, role, content: text });
+        }
+      } else if (block.type === 'thinking') {
+        const thinkingText = (block.thinking || '').trim();
+        if (thinkingText) events.push({ type: 'thinking', agent: 'droid', timestamp, content: thinkingText });
+      } else if (block.type === 'tool_use') {
+        const toolName = block.name || 'unknown';
+        const toolInput = block.input || {};
+        if (block.id) toolUseMap.set(block.id, { tool: toolName, args: toolInput });
+        events.push({
+          type: 'tool_use',
+          agent: 'droid',
+          timestamp,
+          tool: toolName,
+          args: toolInput,
+          path: toolInput.file_path || toolInput.path || undefined,
+          command: toolName === 'Bash' ? toolInput.command : undefined,
+        });
+      } else if (block.type === 'tool_result') {
+        const toolId = block.tool_use_id;
+        const toolInfo = toolId ? toolUseMap.get(toolId) : undefined;
+        const isError = block.is_error === true;
+
+        let output = '';
+        if (typeof block.content === 'string') {
+          output = block.content;
+        } else if (Array.isArray(block.content)) {
+          output = block.content
+            .filter((c: any) => c.type === 'text')
+            .map((c: any) => c.text || '')
+            .join('\n');
+        }
+
+        if (isError) {
+          events.push({ type: 'error', agent: 'droid', timestamp, tool: toolInfo?.tool, content: output || 'Tool execution failed' });
+        } else {
+          events.push({
+            type: 'tool_result',
+            agent: 'droid',
+            timestamp,
+            tool: toolInfo?.tool,
+            success: true,
+            output: output.length > 500 ? output.slice(0, 497) + '...' : output,
+          });
+        }
+        if (toolId) toolUseMap.delete(toolId);
+      } else if (block.type === 'image') {
+        const source = block.source || {};
+        const sizeBytes = source.type === 'base64' ? Math.ceil(((source.data as string)?.length || 0) * 0.75) : 0;
+        events.push({ type: 'attachment', agent: 'droid', timestamp, mediaType: source.media_type || 'image/png', sizeBytes });
       }
     }
   }

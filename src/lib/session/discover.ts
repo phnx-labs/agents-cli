@@ -166,6 +166,7 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
             case 'rush': return scanRushIncremental(onProgress);
             case 'hermes': return scanHermesIncremental(onProgress);
             case 'kimi': return scanKimiIncremental(onProgress);
+            case 'droid': return scanDroidIncremental(onProgress);
           }
         }),
       );
@@ -1516,6 +1517,242 @@ function extractHermesMessageText(content: any): string {
       if (typeof part?.text === 'string') return part.text;
       return '';
     })
+    .join('\n')
+    .trim();
+}
+
+// ---------------------------------------------------------------------------
+// Droid (Factory)
+// ---------------------------------------------------------------------------
+
+/** Lightweight metadata extracted from a Droid JSONL file during incremental scan. */
+interface DroidSessionScan {
+  sessionId?: string;
+  timestamp?: string;
+  cwd?: string;
+  topic?: string;
+  model?: string;
+  messageCount: number;
+  durationMs?: number;
+  contentText?: string;
+}
+
+/**
+ * Incrementally re-scan changed Droid (Factory) session files and upsert into
+ * the DB. Droid writes one `<uuid>.jsonl` transcript plus a sibling
+ * `<uuid>.settings.json` (model + token usage) under
+ * `~/.factory/sessions/<encoded-cwd>/`.
+ */
+async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
+  const currentVersion = await getCurrentAgentVersion('droid');
+
+  const filePaths: string[] = [];
+  for (const sessionsDir of getAgentSessionDirs('droid', 'sessions')) {
+    // High limit: we only stat files here, parsing is gated by ledger match.
+    for (const fp of walkForFiles(sessionsDir, '.jsonl', 100_000)) {
+      filePaths.push(fp);
+    }
+  }
+
+  const changed = filterChangedFiles(filePaths);
+  if (changed.length === 0) return;
+
+  onProgress?.({ agent: 'droid', parsed: 0, total: changed.length });
+
+  const entries: ScanEntry[] = [];
+  const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
+  const seen = new Set<string>();
+  let parsed = 0;
+  for (const { filePath, scan } of changed) {
+    try {
+      const result = await readDroidMeta(filePath, currentVersion);
+      if (result && !seen.has(result.meta.id)) {
+        seen.add(result.meta.id);
+        entries.push({ meta: result.meta, content: result.content, scan });
+      } else {
+        touched.push({ filePath, scan });
+      }
+    } catch {
+      touched.push({ filePath, scan });
+    }
+    parsed++;
+    onProgress?.({ agent: 'droid', parsed, total: changed.length });
+  }
+
+  upsertSessionsBatch(entries);
+  recordScans(touched);
+}
+
+/** Stream-parse a single Droid JSONL file (+ sibling settings) into session metadata. */
+async function readDroidMeta(
+  filePath: string,
+  currentVersion?: string,
+): Promise<{ meta: SessionMeta; content: string } | null> {
+  const scan = await scanDroidSession(filePath);
+  // The filename is the canonical session id; fall back to the session_start id.
+  const sessionId = path.basename(filePath).replace(/\.jsonl$/, '') || scan.sessionId || '';
+  if (!sessionId) return null;
+
+  // Token usage and cost live only in the sibling `<uuid>.settings.json`.
+  const settings = readDroidSettings(filePath.replace(/\.jsonl$/, '.settings.json'));
+  const model = settings.model || scan.model;
+  const tokenCount = settings.tokenCount;
+  const costUsd = model && settings.usage
+    ? costOfUsage({
+        model,
+        inputTokens: settings.usage.inputTokens,
+        outputTokens: settings.usage.outputTokens,
+        cacheReadTokens: settings.usage.cacheReadTokens,
+        cacheCreationTokens: settings.usage.cacheCreationTokens,
+      })
+    : 0;
+
+  const stat = safeStatSync(filePath);
+  const cwd = normalizeCwd(scan.cwd || '');
+  const meta: SessionMeta = {
+    id: sessionId,
+    shortId: sessionId.slice(0, 8),
+    agent: 'droid',
+    timestamp: scan.timestamp || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
+    project: cwd ? path.basename(cwd) : undefined,
+    cwd,
+    filePath,
+    version: resolveSessionVersion('droid', filePath, undefined, currentVersion),
+    topic: scan.topic,
+    messageCount: scan.messageCount,
+    tokenCount,
+    costUsd: costUsd > 0 ? costUsd : undefined,
+    durationMs: scan.durationMs,
+  };
+  return { meta, content: scan.contentText || '' };
+}
+
+/** Read model + token usage from a Droid `<uuid>.settings.json` sidecar. */
+function readDroidSettings(settingsPath: string): {
+  model?: string;
+  tokenCount?: number;
+  usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheCreationTokens?: number };
+} {
+  try {
+    const data = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    const model = typeof data.model === 'string' ? data.model : undefined;
+    const u = data.tokenUsage;
+    if (!u || typeof u !== 'object') return { model };
+    const usage = {
+      inputTokens: u.inputTokens,
+      outputTokens: u.outputTokens,
+      cacheReadTokens: u.cacheReadTokens,
+      cacheCreationTokens: u.cacheCreationTokens,
+    };
+    const tokenCount = sumKnownNumbers([
+      u.inputTokens,
+      u.outputTokens,
+      u.cacheCreationTokens,
+      u.cacheReadTokens,
+    ]) ?? undefined;
+    return { model, tokenCount, usage };
+  } catch {
+    return {};
+  }
+}
+
+/** Stream a Droid JSONL file and extract scan-level metadata (id, cwd, topic, model, duration). */
+async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
+  const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+  let sessionId: string | undefined;
+  let timestamp: string | undefined;
+  let cwd: string | undefined;
+  let title: string | undefined;
+  let sessionTitle: string | undefined;
+  let firstUserTopic: string | undefined;
+  let model: string | undefined;
+  let messageCount = 0;
+  let firstTsMs: number | undefined;
+  let lastTsMs: number | undefined;
+  const userTexts: string[] = [];
+
+  try {
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      if (parsed.type === 'session_start') {
+        sessionId = typeof parsed.id === 'string' ? parsed.id : sessionId;
+        cwd = typeof parsed.cwd === 'string' ? parsed.cwd : cwd;
+        // Droid auto-generates `sessionTitle`; `title` is the raw first prompt.
+        if (typeof parsed.sessionTitle === 'string' && parsed.sessionTitle.trim()) {
+          sessionTitle = parsed.sessionTitle.trim();
+        }
+        if (typeof parsed.title === 'string' && parsed.title.trim()) {
+          title = parsed.title.trim();
+        }
+        continue;
+      }
+
+      if (parsed.type !== 'message') continue;
+
+      // Track duration across every timestamped message.
+      if (typeof parsed.timestamp === 'string') {
+        const ms = new Date(parsed.timestamp).getTime();
+        if (!Number.isNaN(ms)) {
+          if (firstTsMs === undefined || ms < firstTsMs) firstTsMs = ms;
+          if (lastTsMs === undefined || ms > lastTsMs) lastTsMs = ms;
+        }
+      }
+      if (!timestamp && typeof parsed.timestamp === 'string') timestamp = parsed.timestamp;
+
+      const msg = parsed.message || {};
+      if (typeof msg.modelId === 'string') model = msg.modelId;
+
+      const text = extractDroidMessageText(msg.content);
+      if (!text) continue;
+      messageCount++;
+      if (msg.role === 'user') {
+        userTexts.push(text);
+        if (!firstUserTopic) firstUserTopic = extractSessionTopic(text);
+      }
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+
+  const durationMs =
+    firstTsMs !== undefined && lastTsMs !== undefined && lastTsMs > firstTsMs
+      ? lastTsMs - firstTsMs
+      : undefined;
+
+  return {
+    sessionId,
+    timestamp,
+    cwd,
+    // Prefer Droid's auto-title, then the raw first-prompt title, then the
+    // derived first-user-message topic.
+    topic: sessionTitle || title || firstUserTopic,
+    model,
+    messageCount,
+    durationMs,
+    contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
+  };
+}
+
+/** Extract plain text from a Droid message content field (Anthropic-shaped blocks). */
+function extractDroidMessageText(content: any): string {
+  if (typeof content === 'string') return content.trim();
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part: any) => (typeof part?.text === 'string' && part.type === 'text' ? part.text : ''))
+    // Droid front-loads injected context (date, skills list) as <system-reminder>
+    // text blocks on the first user turn — drop them so topic/content stay clean.
+    .filter((text: string) => text.trim() && !text.trim().startsWith('<system-reminder>'))
     .join('\n')
     .trim();
 }
