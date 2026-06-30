@@ -1,29 +1,263 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Automation.Text;
 
 namespace ComputerHelperWin;
 
 /// <summary>
-/// Input + UIAutomation backend. This first slice implements the
-/// coordinate/input verbs (click x/y, type_text, key) via SendInput, which are
-/// directly visually verifiable. The UIAutomation tree verbs (describe →
-/// id-addressable click/get_text/set_focus/set value) are the next increment
-/// and currently report action_unsupported so the contract stays explicit.
+/// Input + UIAutomation backend.
+///
+/// Two layers:
+///   - Coordinate/input verbs (click x/y, type_text, key) via Win32 SendInput —
+///     the universal fallback for canvas apps and anything off the UIA tree.
+///   - UIAutomation tree verbs (describe -> id-addressable click / get_text /
+///     set_focus / type) via System.Windows.Automation, the Windows analogue of
+///     the macOS Accessibility (AXUIElement) backend in packages/computer-helper.
+///
+/// The result shapes mirror the macOS helper (AX.swift) so the single TS client
+/// in src/lib/computer-rpc.ts drives both platforms unchanged:
+///   describe -> { pid, tree, element_count, truncated }
+///   node     -> { id, role, enabled, label?, value?, bounds:[x,y,w,h]?, children? }
+/// Element ids are "@eN", reset on every describe (a stale id throws
+/// element_stale, prompting a re-describe — same contract as macOS).
 /// </summary>
 public sealed class Automation
 {
+    private readonly ElementCache _cache = new();
+
+    // ---- describe: UIAutomation tree walk -------------------------------
+    public Dictionary<string, object?> Describe(JsonElement p)
+    {
+        int pid = P.Int(p, "pid");
+        int maxDepth = P.IntOr(p, "max_depth", MaxDepthDefault);
+
+        var windows = TopLevelWindows(pid);
+        if (windows.Count == 0) throw RpcError.AppMissing(pid);
+
+        _cache.BeginDescribe(pid);
+        int counter = 0;
+        bool truncated = false;
+
+        // Synthetic application root (depth 0, always emitted) carrying the
+        // process's top-level windows — mirrors the macOS AXApplication root.
+        var rootId = _cache.NextRefId(pid);
+        var children = new List<Dictionary<string, object?>>();
+        foreach (var w in windows)
+        {
+            var node = Walk(w, pid, depth: 1, maxDepth, ref counter, ref truncated);
+            if (node != null) children.Add(node);
+        }
+        counter++;
+
+        var tree = new Dictionary<string, object?>
+        {
+            ["id"] = rootId,
+            ["role"] = "Application",
+            ["enabled"] = true,
+        };
+        var procName = SafeProcessName(pid);
+        if (procName != null) tree["label"] = procName;
+        if (children.Count > 0) tree["children"] = children;
+
+        return new()
+        {
+            ["pid"] = pid,
+            ["tree"] = tree,
+            ["element_count"] = counter,
+            ["truncated"] = truncated,
+        };
+    }
+
+    private Dictionary<string, object?>? Walk(
+        AutomationElement el, int pid, int depth, int maxDepth, ref int counter, ref bool truncated)
+    {
+        if (counter >= MaxElements) { truncated = true; return null; }
+        if (depth > maxDepth) return null;
+
+        string role;
+        string? label;
+        bool enabled;
+        int[]? bounds;
+        try
+        {
+            var info = el.Current;
+            role = ControlTypeName(info.ControlType);
+            label = NullIfEmpty(info.Name);
+            enabled = info.IsEnabled;
+            bounds = RectToBounds(info.BoundingRectangle);
+        }
+        catch (ElementNotAvailableException)
+        {
+            return null; // element vanished mid-walk — skip it
+        }
+        string? value = TryReadValue(el);
+
+        // Recurse via the ControlView walker (filters out raw/noise elements,
+        // the closest UIA analogue to the macOS interesting-roles filter).
+        var childNodes = new List<Dictionary<string, object?>>();
+        try
+        {
+            var walker = TreeWalker.ControlViewWalker;
+            for (var child = walker.GetFirstChild(el); child != null; child = walker.GetNextSibling(child))
+            {
+                var node = Walk(child, pid, depth + 1, maxDepth, ref counter, ref truncated);
+                if (node != null) childNodes.Add(node);
+                if (counter >= MaxElements) { truncated = true; break; }
+            }
+        }
+        catch (ElementNotAvailableException) { /* subtree gone — emit what we have */ }
+
+        bool isInteractable = InteractableRoles.Contains(role);
+        bool isContent = ContentRoles.Contains(role) && (label != null || !string.IsNullOrEmpty(value));
+        bool hasChildren = childNodes.Count > 0;
+        bool isTextEntry = role is "Edit" or "Document";
+
+        bool shouldEmit = isContent
+            || (isInteractable && (label != null || isTextEntry || hasChildren));
+
+        if (!shouldEmit)
+        {
+            // Flatten empty/unlabeled containers: pass children up.
+            if (childNodes.Count == 1) return childNodes[0];
+            if (childNodes.Count == 0) return null;
+            return new Dictionary<string, object?> { ["role"] = "Group", ["children"] = childNodes };
+        }
+
+        counter++;
+        var id = _cache.NextRefId(pid);
+        _cache.Put(pid, id, el);
+
+        var nodeOut = new Dictionary<string, object?>
+        {
+            ["id"] = id,
+            ["role"] = role,
+            ["enabled"] = enabled,
+        };
+        if (label != null) nodeOut["label"] = label;
+        if (!string.IsNullOrEmpty(value) && value != label) nodeOut["value"] = TruncateForDisplay(value!);
+        if (bounds != null) nodeOut["bounds"] = bounds;
+        if (childNodes.Count > 0) nodeOut["children"] = childNodes;
+        return nodeOut;
+    }
+
     // ---- click ----------------------------------------------------------
     public Dictionary<string, object?> Click(JsonElement p)
     {
+        // id-addressable click: resolve the element, prefer a UIA pattern,
+        // fall back to a synthetic click at its on-screen center.
+        string? elementId = P.StringOpt(p, "element_id");
+        if (elementId != null)
+        {
+            int pid = P.Int(p, "pid");
+            var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
+            try
+            {
+                if (el.TryGetCurrentPattern(InvokePattern.Pattern, out var inv))
+                {
+                    ((InvokePattern)inv).Invoke();
+                    return new() { ["ok"] = true, ["action"] = "invoke" };
+                }
+                if (el.TryGetCurrentPattern(TogglePattern.Pattern, out var tog))
+                {
+                    ((TogglePattern)tog).Toggle();
+                    return new() { ["ok"] = true, ["action"] = "toggle" };
+                }
+                if (el.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var sel))
+                {
+                    ((SelectionItemPattern)sel).Select();
+                    return new() { ["ok"] = true, ["action"] = "select" };
+                }
+                // No actionable pattern — click the element's center physically.
+                var b = RectToBounds(el.Current.BoundingRectangle)
+                    ?? throw RpcError.Unsupported("element has no invoke/toggle/select pattern and no bounds");
+                int cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
+                MoveCursor(cx, cy);
+                SendMouse(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP);
+                return new() { ["ok"] = true, ["action"] = "click", ["at"] = new[] { cx, cy } };
+            }
+            catch (ElementNotAvailableException) { throw RpcError.Stale(); }
+        }
+
+        // Coordinate click (no element_id): the universal fallback.
         if (p.TryGetProperty("x", out var xe) && p.TryGetProperty("y", out var ye))
         {
             int x = xe.GetInt32(), y = ye.GetInt32();
             MoveCursor(x, y);
             SendMouse(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP);
-            return new() { ["ok"] = true, ["x"] = x, ["y"] = y };
+            return new() { ["ok"] = true, ["action"] = "click", ["at"] = new[] { x, y } };
         }
-        // id-based click needs the describe() element cache — not built yet.
-        throw RpcError.Unsupported("click by element id (use --x/--y for now; describe-cache is the next increment)");
+        throw RpcError.Invalid("pass either element_id or x,y");
+    }
+
+    // ---- type / set value (ValuePattern, focus+type fallback) -----------
+    public Dictionary<string, object?> SetValue(JsonElement p)
+    {
+        string text = P.StringOpt(p, "value") ?? P.StringOpt(p, "text")
+            ?? throw RpcError.Invalid("type needs `value` (or `text`)");
+        string elementId = P.StringOpt(p, "element_id")
+            ?? throw RpcError.Invalid("type needs `element_id` (use type_text for the focused field)");
+        int pid = P.Int(p, "pid");
+        var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
+
+        try
+        {
+            if (IsSecureField(el) && !P.BoolOr(p, "allow_secure_field", false))
+                throw RpcError.Denied("secure text field — set allow_secure_field=true to override");
+
+            if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
+            {
+                var value = (ValuePattern)vp;
+                if (value.Current.IsReadOnly)
+                    throw RpcError.Unsupported($"value is read-only on element {elementId}");
+                value.SetValue(text);
+                bool committedVp = false;
+                if (P.BoolOr(p, "commit", false)) { el.SetFocus(); SendVirtualKey(VK_RETURN); committedVp = true; }
+                return new() { ["ok"] = true, ["committed"] = committedVp };
+            }
+
+            // No ValuePattern — focus and type the characters.
+            el.SetFocus();
+            foreach (char ch in text) SendUnicode(ch);
+            bool committed = false;
+            if (P.BoolOr(p, "commit", false)) { SendVirtualKey(VK_RETURN); committed = true; }
+            return new() { ["ok"] = true, ["committed"] = committed };
+        }
+        catch (ElementNotAvailableException) { throw RpcError.Stale(); }
+    }
+
+    // ---- set_focus ------------------------------------------------------
+    public Dictionary<string, object?> SetFocus(JsonElement p)
+    {
+        string elementId = P.StringOpt(p, "element_id") ?? throw RpcError.Invalid("set_focus needs `element_id`");
+        int pid = P.Int(p, "pid");
+        var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
+        try { el.SetFocus(); return new() { ["ok"] = true }; }
+        catch (ElementNotAvailableException) { throw RpcError.Stale(); }
+        catch (Exception e) { throw new RpcError("action_failed", $"SetFocus failed: {e.Message}"); }
+    }
+
+    // ---- get_text -------------------------------------------------------
+    public Dictionary<string, object?> GetText(JsonElement p)
+    {
+        string? elementId = P.StringOpt(p, "element_id");
+        if (elementId == null) throw RpcError.Invalid("get_text needs `element_id`");
+        int pid = P.Int(p, "pid");
+        var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
+        try
+        {
+            // Prefer rich document text, then ValuePattern, then the Name.
+            if (el.TryGetCurrentPattern(TextPattern.Pattern, out var tp))
+            {
+                var text = ((TextPattern)tp).DocumentRange.GetText(MaxTextChars);
+                return new() { ["text"] = text };
+            }
+            if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
+                return new() { ["text"] = ((ValuePattern)vp).Current.Value ?? "" };
+            return new() { ["text"] = el.Current.Name ?? "" };
+        }
+        catch (ElementNotAvailableException) { throw RpcError.Stale(); }
     }
 
     // ---- type_text: unicode characters into the focused control ----------
@@ -68,17 +302,87 @@ public sealed class Automation
         return new() { ["ok"] = true };
     }
 
-    // ---- not-yet-implemented (UIAutomation tree) ------------------------
-    public Dictionary<string, object?> Describe(JsonElement p)
-        => throw RpcError.Unsupported("describe (UIAutomation tree walk) is the next increment");
-    public Dictionary<string, object?> SetValue(JsonElement p)
-        => throw RpcError.Unsupported("type (set value via ValuePattern) is the next increment");
-    public Dictionary<string, object?> SetFocus(JsonElement p)
-        => throw RpcError.Unsupported("set_focus is the next increment");
-    public Dictionary<string, object?> GetText(JsonElement p)
-        => throw RpcError.Unsupported("get_text is the next increment");
+    // ---- describe/value tuning ------------------------------------------
+    private const int MaxElements = 500;
+    private const int MaxDepthDefault = 25;
+    private const int MaxTextChars = 20_000;
+    private const int MaxValueDisplayChars = 400;
 
-    // ---- key name → virtual-key code ------------------------------------
+    // Roles surfaced to the agent as interactable (UIA ControlType short names).
+    private static readonly HashSet<string> InteractableRoles = new()
+    {
+        "Button", "CheckBox", "RadioButton", "ComboBox", "Edit", "Document",
+        "Hyperlink", "MenuItem", "Tab", "TabItem", "ListItem", "TreeItem",
+        "Slider", "SplitButton", "Spinner", "List", "Tree", "Table", "DataItem",
+        "Menu", "ToolBar", "ScrollBar", "Thumb",
+    };
+
+    // Roles that carry content we surface when labeled/valued.
+    private static readonly HashSet<string> ContentRoles = new() { "Text", "Image", "Header" };
+
+    // ControlType.ProgrammaticName is "ControlType.Button"; strip the prefix for
+    // a clean, locale-independent role string.
+    private static string ControlTypeName(ControlType ct)
+    {
+        var name = ct?.ProgrammaticName ?? "Custom";
+        int dot = name.LastIndexOf('.');
+        return dot >= 0 ? name[(dot + 1)..] : name;
+    }
+
+    private static string? TryReadValue(AutomationElement el)
+    {
+        try
+        {
+            if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
+                return NullIfEmpty(((ValuePattern)vp).Current.Value);
+            if (el.TryGetCurrentPattern(RangeValuePattern.Pattern, out var rp))
+                return ((RangeValuePattern)rp).Current.Value.ToString("0.###");
+        }
+        catch (ElementNotAvailableException) { }
+        catch (InvalidOperationException) { }
+        return null;
+    }
+
+    private static bool IsSecureField(AutomationElement el)
+    {
+        try { return el.Current.IsPassword; }
+        catch { return false; }
+    }
+
+    private static int[]? RectToBounds(Rect r)
+    {
+        if (r.IsEmpty) return null;
+        if (double.IsInfinity(r.X) || double.IsInfinity(r.Y) ||
+            double.IsInfinity(r.Width) || double.IsInfinity(r.Height)) return null;
+        if (r.Width <= 0 || r.Height <= 0) return null;
+        return new[] { (int)r.X, (int)r.Y, (int)r.Width, (int)r.Height };
+    }
+
+    private static string TruncateForDisplay(string s)
+        => s.Length <= MaxValueDisplayChars ? s : s[..MaxValueDisplayChars] + "...";
+
+    private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
+
+    private static List<AutomationElement> TopLevelWindows(int pid)
+    {
+        var result = new List<AutomationElement>();
+        try
+        {
+            var cond = new PropertyCondition(AutomationElement.ProcessIdProperty, pid);
+            var found = AutomationElement.RootElement.FindAll(TreeScope.Children, cond);
+            foreach (AutomationElement w in found) result.Add(w);
+        }
+        catch (ElementNotAvailableException) { }
+        return result;
+    }
+
+    private static string? SafeProcessName(int pid)
+    {
+        try { using var proc = System.Diagnostics.Process.GetProcessById(pid); return proc.ProcessName; }
+        catch { return null; }
+    }
+
+    // ---- key name -> virtual-key code -----------------------------------
     private static ushort ResolveKey(string k) => k switch
     {
         "enter" or "return" => VK_RETURN,
