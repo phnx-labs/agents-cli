@@ -1,8 +1,9 @@
 import AppKit
 
-// Owns the NSStatusItem. The dropdown is intentionally data-dense: a fixed
-// product roster, activity from local sessions/browser work, routines,
-// resource sync state, and compact warnings near the footer.
+// Owns the NSStatusItem. The dropdown is actionable-first: what needs the user
+// now (attention sessions, a stopped scheduler, failing routines) leads; live
+// work follows; setup/health noise collapses into one row. Every health fact
+// has exactly one home — no section restates another.
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let accent = NSColor(red: 0x39 / 255.0, green: 0xd3 / 255.0, blue: 0x53 / 255.0, alpha: 1) // #39d353
@@ -173,53 +174,108 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                          doctor: DoctorOverview?, daemonPid: Int?) {
         menu.removeAllItems()
 
-        addHeader(menu, daemonPid: daemonPid)
+        addHeader(menu, sessions: sessions)
+        menu.addItem(.separator())
+
+        // What needs me now — rendered only when there's something actionable.
+        if addNeedsAttention(menu, sessions: sessions, routines: routines, daemonPid: daemonPid) {
+            menu.addItem(.separator())
+        }
+
         addNewSession(menu)
         menu.addItem(.separator())
 
-        addAgents(menu, sessions: sessions, doctor: doctor)
-        menu.addItem(.separator())
-
-        addActivity(menu, browserTasks: browserTasks, recentSessions: recentSessions)
-        menu.addItem(.separator())
-
-        addRoutines(menu, routines: routines)
-        menu.addItem(.separator())
-
-        addResources(menu, doctor: doctor)
-
-        let warnings = warningRows(routines: routines, doctor: doctor)
-        if !warnings.isEmpty {
+        // Live work — skipped entirely on a calm, idle machine.
+        let live = sessions.filter { $0.status == .running || $0.status == .idle || $0.status == .attention }
+        if !live.isEmpty || !browserTasks.isEmpty {
+            addActive(menu, live: live, browserTasks: browserTasks)
             menu.addItem(.separator())
-            addSectionTitle(menu, "WARNINGS", color: warning)
-            for row in warnings.prefix(4) {
-                let it = NSMenuItem(title: "  ! \(row)", action: nil, keyEquivalent: "")
-                menu.addItem(it)
-            }
-            if warnings.count > 4 {
-                menu.addItem(disabled("  \(warnings.count - 4) more warnings"))
-            }
         }
+
+        addRecent(menu, recentSessions: recentSessions)
+        menu.addItem(.separator())
+
+        addRoutinesRow(menu, routines: routines)
+        addSetup(menu, doctor: doctor)
 
         menu.addItem(.separator())
         addFooter(menu, daemonPid: daemonPid)
     }
 
-    private func addHeader(_ menu: NSMenu, daemonPid: Int?) {
-        let status = daemonPid == nil ? "STOPPED" : "RUNNING"
-        let title = "agents-cli                                      \(status)"
+    // MARK: Sections
+    private func addHeader(_ menu: NSMenu, sessions: [Session]) {
+        let attn = sessions.filter { $0.status == .attention }.count
+        let running = sessions.filter { $0.status == .running }.count
+        let status: String
+        let color: NSColor
+        if attn > 0 {
+            status = "! \(attn) awaiting input"
+            color = alert
+        } else if running > 0 {
+            status = "\u{25CF} \(running) running"
+            color = accent
+        } else {
+            status = "idle"
+            color = .secondaryLabelColor
+        }
+
+        let left = "agents-cli"
+        let width = max(left.count + 3, 44 - status.count)
+        let title = left.padding(toLength: width, withPad: " ", startingAt: 0) + status
         let item = disabled(title)
         let attr = NSMutableAttributedString(string: title, attributes: [
             .foregroundColor: NSColor.labelColor,
             .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .semibold),
         ])
-        let range = (title as NSString).range(of: status)
-        attr.addAttributes([
-            .foregroundColor: daemonPid == nil ? alert : accent,
-            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
-        ], range: range)
+        let range = (title as NSString).range(of: status, options: .backwards)
+        if range.location != NSNotFound {
+            attr.addAttributes([
+                .foregroundColor: color,
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+            ], range: range)
+        }
         item.attributedTitle = attr
         menu.addItem(item)
+    }
+
+    // Returns true if anything was rendered (caller adds the trailing separator).
+    private func addNeedsAttention(_ menu: NSMenu, sessions: [Session],
+                                   routines: [Routine], daemonPid: Int?) -> Bool {
+        var rows: [(String, NSMenu?)] = []
+
+        for s in sessions where s.status == .attention {
+            let detail = s.detail.isEmpty ? "awaiting input" : trim(s.detail, 34)
+            rows.append(("  ! \(LocalState.agentLabel(s.agent)) · \(s.repo) — \(detail)",
+                         s.cwd.map { revealSubmenu($0) }))
+        }
+
+        if daemonPid == nil && !routines.isEmpty {
+            let sub = NSMenu()
+            let start = NSMenuItem(title: "Start scheduler", action: #selector(onStartScheduler), keyEquivalent: "")
+            start.target = self
+            sub.addItem(start)
+            sub.addItem(.separator())
+            let next = routines.compactMap { $0.enabled ? $0.nextRunHuman : nil }.first(where: { $0 != "-" }) ?? "—"
+            sub.addItem(disabled("\(routines.count) routines waiting · next \(next)"))
+            rows.append(("  ! Scheduler stopped — routines won’t run", sub))
+        }
+
+        let bad = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        if bad.count == 1, let r = bad.first {
+            let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+            rows.append(("  ! Routine \(r.name) \(why)", allRoutinesSubmenu(bad)))
+        } else if bad.count > 1 {
+            rows.append(("  ! \(bad.count) routines failing", allRoutinesSubmenu(bad)))
+        }
+
+        if rows.isEmpty { return false }
+        addSectionTitle(menu, "NEEDS ATTENTION", color: warning)
+        for (title, sub) in rows {
+            let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            it.submenu = sub
+            menu.addItem(it)
+        }
+        return true
     }
 
     private func addNewSession(_ menu: NSMenu) {
@@ -235,58 +291,66 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(newItem)
     }
 
-    private func addAgents(_ menu: NSMenu, sessions: [Session], doctor: DoctorOverview?) {
-        let running = sessions.filter { $0.status == .running }.count
-        let idle = sessions.filter { $0.status == .idle }.count
-        addSectionTitle(menu, "AGENTS  ·  \(running) running · \(idle) idle", color: .secondaryLabelColor)
-        for agent in LocalState.desiredAgents {
-            let mine = sessions.filter { LocalState.normalizeAgent($0.agent) == agent.id }
-            let item = NSMenuItem(title: rosterRow(agent: agent, sessions: mine, doctor: doctor),
-                                  action: nil, keyEquivalent: "")
-            item.submenu = rosterSubmenu(agent: agent, sessions: mine, doctor: doctor)
-            menu.addItem(item)
+    private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask]) {
+        let running = live.filter { $0.status == .running }.count
+        let idle = live.filter { $0.status == .idle }.count
+        var title = "ACTIVE"
+        if running > 0 || idle > 0 { title += "  ·  \(running) running · \(idle) idle" }
+        addSectionTitle(menu, title, color: .secondaryLabelColor)
+
+        for s in live {
+            let mark = s.status == .attention ? "! " : (s.status == .running ? "● " : "○ ")
+            let detail = s.detail.isEmpty ? "" : " — \(trim(s.detail, 32))"
+            let row = NSMenuItem(title: "  \(mark)\(LocalState.agentLabel(s.agent))   \(s.repo)\(detail)",
+                                 action: nil, keyEquivalent: "")
+            if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
+            menu.addItem(row)
+        }
+        for task in browserTasks {
+            let tabs = task.tabCount == 1 ? "1 tab" : "\(task.tabCount) tabs"
+            let row = NSMenuItem(title: "  ◦ Browser   \(trim(task.name, 24)) · \(shortProfile(task.profile)) · \(tabs)",
+                                 action: nil, keyEquivalent: "")
+            row.submenu = browserTaskSubmenu(task)
+            menu.addItem(row)
         }
     }
 
-    private func addActivity(_ menu: NSMenu, browserTasks: [BrowserTask], recentSessions: [RecentSession]) {
-        addSectionTitle(menu, "ACTIVITY", color: .secondaryLabelColor)
-        let visibleRecentSessions = Array(recentSessions.filter {
+    private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession]) {
+        addSectionTitle(menu, "RECENT", color: .secondaryLabelColor)
+        let visible = Array(recentSessions.filter {
             let id = LocalState.normalizeAgent($0.agent)
             return LocalState.desiredAgents.contains { $0.id == id }
         }.prefix(3))
-
-        for task in browserTasks {
-            let tabs = task.tabCount == 1 ? "1 tab" : "\(task.tabCount) tabs"
-            let title = "  Browser      \(trim(task.name, 28)) · \(shortProfile(task.profile)) · \(tabs)"
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-            item.submenu = browserTaskSubmenu(task)
-            menu.addItem(item)
-        }
-
-        if visibleRecentSessions.isEmpty {
+        if visible.isEmpty {
             menu.addItem(disabled(recentSessionsLoaded ? "  No recent sessions" : "  Recent sessions checking…"))
             return
         }
-
-        for session in visibleRecentSessions {
-            let title = recentSessionTitle(session)
-            let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        for session in visible {
+            let item = NSMenuItem(title: recentSessionTitle(session), action: nil, keyEquivalent: "")
             item.submenu = recentSessionSubmenu(session)
             menu.addItem(item)
         }
     }
 
-    private func addRoutines(_ menu: NSMenu, routines: [Routine]) {
-        addSectionTitle(menu, "ROUTINES", color: .secondaryLabelColor)
-        let item = NSMenuItem(title: routinesSummary(routines), action: nil, keyEquivalent: "")
+    private func addRoutinesRow(_ menu: NSMenu, routines: [Routine]) {
+        let detail: String
+        if routines.isEmpty {
+            detail = routinesLoaded ? "none" : "checking…"
+        } else {
+            let next = routines.compactMap { $0.enabled ? $0.nextRunHuman : nil }.first(where: { $0 != "-" }) ?? "—"
+            let paused = routines.filter { !$0.enabled }.count
+            var parts = ["\(routines.count)", "next \(next)"]
+            if paused > 0 { parts.append("\(paused) paused") }
+            detail = parts.joined(separator: " · ")
+        }
+        let item = NSMenuItem(title: "\(pad("Routines"))\(detail)", action: nil, keyEquivalent: "")
         if !routines.isEmpty { item.submenu = allRoutinesSubmenu(routines) }
         menu.addItem(item)
     }
 
-    private func addResources(_ menu: NSMenu, doctor: DoctorOverview?) {
-        addSectionTitle(menu, "RESOURCES", color: .secondaryLabelColor)
-        let item = NSMenuItem(title: resourcesSummary(doctor), action: nil, keyEquivalent: "")
-        item.submenu = resourcesSubmenu(doctor)
+    private func addSetup(_ menu: NSMenu, doctor: DoctorOverview?) {
+        let item = NSMenuItem(title: "\(pad("Setup"))\(setupSummary(doctor))", action: nil, keyEquivalent: "")
+        item.submenu = setupSubmenu(doctor)
         menu.addItem(item)
     }
 
@@ -305,52 +369,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(quit)
     }
 
-    // MARK: Row builders
-    private func rosterRow(agent: MenuAgent, sessions: [Session], doctor: DoctorOverview?) -> String {
-        let attn = sessions.filter { $0.status == .attention }.count
-        let run = sessions.filter { $0.status == .running }.count
-        let idle = sessions.filter { $0.status == .idle }.count
-        let name = agent.label.padding(toLength: 13, withPad: " ", startingAt: 0)
-        let resource = resourceHint(agent.id, doctor: doctor)
-        if cliInstalled(agent.id, doctor: doctor) == false { return "\(name) ! missing CLI" }
-        if attn > 0 { return "\(name) ! \(attn) awaiting input\(resource)" }
-        if run > 0 { return "\(name) ● \(run) running" + (idle > 0 ? " · \(idle) idle" : "") + resource }
-        if idle > 0 { return "\(name) ○ \(idle) idle\(resource)" }
-        return "\(name) ○ ready\(resource)"
-    }
-
-    private func rosterSubmenu(agent: MenuAgent, sessions: [Session], doctor: DoctorOverview?) -> NSMenu {
-        let sub = NSMenu()
-        if sessions.isEmpty {
-            sub.addItem(disabled("No live sessions"))
-        } else {
-            for s in sessions {
-                let mark = s.status == .attention ? "! " : (s.status == .running ? "● " : "○ ")
-                let detail = s.detail.isEmpty ? "" : "  ·  \(trim(s.detail, 40))"
-                let row = NSMenuItem(title: "\(mark)\(s.repo)\(detail)", action: nil, keyEquivalent: "")
-                if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
-                sub.addItem(row)
-            }
-        }
-
-        sub.addItem(.separator())
-        if let sync = syncState(agent.id, doctor: doctor) {
-            sub.addItem(disabled("Resources: \(sync.status)\(sync.version.map { " · \($0)" } ?? "")"))
-        } else {
-            sub.addItem(disabled(doctorLoaded ? "Resources: unknown" : "Resources: checking…"))
-        }
-        if let cli = doctor?.clis?[agent.id] {
-            sub.addItem(disabled(cli.installed ? "CLI installed" : "CLI missing"))
-        }
-
-        sub.addItem(.separator())
-        let new = NSMenuItem(title: "New \(agent.label) session", action: #selector(onNewSession(_:)), keyEquivalent: "")
-        new.target = self
-        new.representedObject = agent.id
-        sub.addItem(new)
-        return sub
-    }
-
+    // MARK: Submenus
     private func browserTaskSubmenu(_ task: BrowserTask) -> NSMenu {
         let sub = NSMenu()
         sub.addItem(disabled("Profile: \(task.profile)"))
@@ -435,111 +454,64 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return sub
     }
 
-    private func resourcesSubmenu(_ doctor: DoctorOverview?) -> NSMenu {
+    private func setupSummary(_ doctor: DoctorOverview?) -> String {
+        guard let doctor else { return doctorLoaded ? "unavailable" : "checking…" }
+        let sync = desiredSyncStates(doctor)
+        let stale = sync.filter { $0.status == "stale" }.count
+        let never = sync.filter { $0.status == "never-synced" }.count
+        let missing = LocalState.desiredAgents.filter { doctor.clis?[$0.id]?.installed == false }.count
+        var parts: [String] = []
+        if missing > 0 { parts.append("\(missing) not installed") }
+        if stale > 0 { parts.append("\(stale) stale") }
+        if never > 0 { parts.append("\(never) unsynced") }
+        return parts.isEmpty ? "all set" : parts.joined(separator: " · ")
+    }
+
+    private func setupSubmenu(_ doctor: DoctorOverview?) -> NSMenu {
         let sub = NSMenu()
         guard let doctor else {
             sub.addItem(disabled(doctorLoaded ? "Doctor unavailable" : "Checking resources…"))
             return sub
         }
-
-        for agent in LocalState.desiredAgents {
-            let sync = syncState(agent.id, doctor: doctor)
-            let cli = doctor.clis?[agent.id]
-            var title = "\(agent.label)  "
-            if cli?.installed == false {
-                title += "missing CLI"
-            } else if let sync {
-                title += "\(sync.status)" + (sync.version.map { " · \($0)" } ?? "")
-            } else {
-                title += "unknown"
-            }
-            sub.addItem(disabled(title))
+        let notInstalled = LocalState.desiredAgents.filter { doctor.clis?[$0.id]?.installed == false }
+        if !notInstalled.isEmpty {
+            sub.addItem(disabled("Not installed"))
+            for a in notInstalled { sub.addItem(disabled("  \(a.label)")) }
         }
-
+        let needsSync = LocalState.desiredAgents.compactMap { a -> (MenuAgent, DoctorSync)? in
+            guard let s = syncState(a.id, doctor: doctor),
+                  s.status == "stale" || s.status == "never-synced" else { return nil }
+            return (a, s)
+        }
+        if !needsSync.isEmpty {
+            sub.addItem(disabled("Resources"))
+            for (a, s) in needsSync {
+                sub.addItem(disabled("  \(a.label)  \(s.status)\(s.version.map { " · \($0)" } ?? "")"))
+            }
+        }
+        if notInstalled.isEmpty && needsSync.isEmpty {
+            sub.addItem(disabled("All agents installed & synced"))
+        }
         sub.addItem(.separator())
+        let doctorItem = NSMenuItem(title: "Run agents doctor", action: #selector(onRunDoctor), keyEquivalent: "")
+        doctorItem.target = self
+        sub.addItem(doctorItem)
         let open = NSMenuItem(title: "Open ~/.agents", action: #selector(onOpenAgentsHome), keyEquivalent: "")
         open.target = self
         sub.addItem(open)
         return sub
     }
 
-    // MARK: Summaries
-    private func routinesSummary(_ routines: [Routine]) -> String {
-        if routines.isEmpty && !routinesLoaded { return "  checking…" }
-        if routines.isEmpty { return "  none" }
-
-        let next = routines.compactMap { $0.enabled ? $0.nextRunHuman : nil }.first(where: { $0 != "-" }) ?? "—"
-        let bad = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }.count
-        let paused = routines.filter { !$0.enabled }.count
-        var parts = ["  \(routines.count) routines", "next \(next)"]
-        if paused > 0 { parts.append("\(paused) paused") }
-        if bad > 0 { parts.append("\(bad) warning\(bad == 1 ? "" : "s")") }
-        return parts.joined(separator: " · ")
-    }
-
-    private func resourcesSummary(_ doctor: DoctorOverview?) -> String {
-        guard let doctor else { return doctorLoaded ? "  unavailable" : "  checking…" }
-        let sync = desiredSyncStates(doctor)
-        let stale = sync.filter { $0.status == "stale" }.count
-        let never = sync.filter { $0.status == "never-synced" }.count
-        let missing = LocalState.desiredAgents.filter { doctor.clis?[$0.id]?.installed == false }.count
-        var parts: [String] = []
-        if stale > 0 { parts.append("\(stale) stale") }
-        if never > 0 { parts.append("\(never) never synced") }
-        if missing > 0 { parts.append("\(missing) missing CLI") }
-        if parts.isEmpty { parts.append("all synced") }
-        return "  sync \(parts.joined(separator: " · "))"
-    }
-
-    private func warningRows(routines: [Routine], doctor: DoctorOverview?) -> [String] {
-        var rows: [String] = []
-
-        let badRoutines = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
-        if badRoutines.count == 1, let r = badRoutines.first {
-            let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
-            rows.append("Routine \(r.name) \(why)")
-        } else if badRoutines.count > 1 {
-            rows.append("\(badRoutines.count) routines need attention")
-        }
-
-        if let doctor {
-            let missing = LocalState.desiredAgents.filter { doctor.clis?[$0.id]?.installed == false }.map(\.label)
-            if !missing.isEmpty { rows.append("Missing CLI: \(list(missing))") }
-
-            let never = desiredSyncStates(doctor).filter { $0.status == "never-synced" }.map { LocalState.agentLabel($0.agent) }
-            if !never.isEmpty { rows.append("Never synced: \(list(never))") }
-
-            let stale = desiredSyncStates(doctor).filter { $0.status == "stale" }.map { LocalState.agentLabel($0.agent) }
-            if !stale.isEmpty { rows.append("Stale resources: \(list(stale))") }
-
-            let drift = doctor.orphans?.filter { LocalState.desiredAgents.map(\.id).contains($0.agent) } ?? []
-            if !drift.isEmpty { rows.append("Local-only resources in \(drift.count) agents") }
-        }
-
-        return rows
-    }
-
     private func recentSessionTitle(_ session: RecentSession) -> String {
-        let agent = LocalState.agentLabel(session.agent).padding(toLength: 11, withPad: " ", startingAt: 0)
+        let agent = LocalState.agentLabel(session.agent).padding(toLength: 9, withPad: " ", startingAt: 0)
         let project = session.project ?? session.cwd.map { ($0 as NSString).lastPathComponent } ?? "session"
-        let sid = session.shortId ?? session.id.map { String($0.prefix(8)) } ?? "recent"
-        return "  \(agent) \(trim(project, 18)) · \(sid) · \(shortWhen(session.timestamp))"
-    }
-
-    private func resourceHint(_ agent: String, doctor: DoctorOverview?) -> String {
-        guard let doctor else { return "" }
-        if doctor.clis?[agent]?.installed == false { return " · missing CLI" }
-        guard let sync = syncState(agent, doctor: doctor) else { return "" }
-        switch sync.status {
-        case "stale": return " · stale"
-        case "never-synced": return " · never synced"
-        case "missing": return " · missing resources"
-        default: return ""
+        let label: String
+        if let topic = session.topic, !topic.isEmpty {
+            label = "“\(trim(topic, 22))”"
+        } else {
+            label = session.shortId ?? session.id.map { String($0.prefix(8)) } ?? "recent"
         }
-    }
-
-    private func cliInstalled(_ agent: String, doctor: DoctorOverview?) -> Bool? {
-        doctor?.clis?[agent]?.installed
+        return "  \(agent) \(trim(project, 14)) · \(label) · \(shortWhen(session.timestamp))"
     }
 
     private func syncState(_ agent: String, doctor: DoctorOverview?) -> DoctorSync? {
@@ -564,6 +536,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let p = s.representedObject as? String { AgentsCLI.openPath(p) }
     }
     @objc private func onOpenAgentsHome() { AgentsCLI.openPath("\(AgentsCLI.home)/.agents") }
+    @objc private func onStartScheduler() { AgentsCLI.startScheduler() }
+    @objc private func onRunDoctor() { AgentsCLI.runDoctor() }
     @objc private func onStopScheduler() { AgentsCLI.stopDaemon() }
     @objc private func onQuit() { AgentsCLI.menubarDisable(); NSApp.terminate(nil) }
 
@@ -587,6 +561,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return it
     }
 
+    // Left-pad a single-row label so its value column lines up (Routines / Setup).
+    private func pad(_ label: String) -> String {
+        label.padding(toLength: max(label.count + 1, 10), withPad: " ", startingAt: 0)
+    }
+
     private func trim(_ value: String, _ max: Int) -> String {
         if value.count <= max { return value }
         return String(value.prefix(max - 1)) + "…"
@@ -603,7 +582,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let f = DateFormatter()
             f.dateStyle = .none
             f.timeStyle = .short
-            return "today \(f.string(from: date))"
+            return f.string(from: date)
         }
         if cal.isDateInYesterday(date) { return "yesterday" }
         let f = DateFormatter()
@@ -617,11 +596,6 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let d = f.date(from: raw) { return d }
         f.formatOptions = [.withInternetDateTime]
         return f.date(from: raw)
-    }
-
-    private func list(_ values: [String], limit: Int = 3) -> String {
-        if values.count <= limit { return values.joined(separator: ", ") }
-        return values.prefix(limit).joined(separator: ", ") + " +\(values.count - limit)"
     }
 
     private func dumpMenu(_ menu: NSMenu) {

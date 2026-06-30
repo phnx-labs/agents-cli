@@ -88,7 +88,15 @@ enum AgentsCLI {
 
     static func openPath(_ path: String) { runDetached(["/usr/bin/open", path]) }
 
+    static func startScheduler() { runDetached(argv(["routines", "start"])) }
     static func stopDaemon() { runDetached(argv(["routines", "stop"])) }
+
+    // Surface CLI health in a terminal — `agents doctor` is interactive output.
+    static func runDoctor() {
+        let cmd = "\(shellQuote(binary)) doctor"
+        let script = "tell application \"Terminal\"\nactivate\ndo script \"\(cmd)\"\nend tell"
+        runDetached(["/usr/bin/osascript", "-e", script])
+    }
 
     // "Quit menu bar" disables the launchd agent so it doesn't relaunch on the
     // KeepAlive policy, then the app terminates.
