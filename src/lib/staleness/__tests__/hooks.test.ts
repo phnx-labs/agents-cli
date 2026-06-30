@@ -96,7 +96,9 @@ describe('staleness e2e: hooks', () => {
     expect(list(fx, 'hooks')).toEqual(['foo.sh']);
   });
 
-  it('file with no extension counts as a hook only when exec bit is set', () => {
+  // Exec-bit gating is POSIX-only: NTFS has no executable bit, so chmod 0o755 is
+  // a no-op and an extensionless file can never be classified as a hook on Windows.
+  it.skipIf(process.platform === 'win32')('file with no extension counts as a hook only when exec bit is set', () => {
     writeFile(fx, 'user', 'hooks/no-ext', '#!/bin/bash\necho hi');
     expect(list(fx, 'hooks')).toEqual([]);
     fs.chmodSync(path.join(fx.userDir, 'hooks/no-ext'), 0o755);

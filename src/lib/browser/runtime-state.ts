@@ -292,18 +292,39 @@ export function reapOrphanedProcesses(): { reaped: number; details: string[] } {
 }
 
 function matchesCommand(pid: number, expectedCommand: string): boolean {
+  const out = liveProcessCommand(pid);
+  if (!out) return false;
+  // Match on the basename only — `/Applications/Comet.app/Contents/MacOS/Comet`
+  // vs the recorded `Comet`, vs `Google\ Chrome`, vs Windows `chrome.exe`.
+  // Case-insensitive.
+  const live = path.basename(out).toLowerCase();
+  const want = path.basename(expectedCommand).toLowerCase();
+  return live === want || live.startsWith(want) || want.startsWith(live);
+}
+
+/**
+ * The executable/image name the live `pid` is running, or null if it can't be
+ * determined. The process-listing API differs per OS: Windows has no `ps`, so
+ * we query `tasklist` (CSV image name in column 1); POSIX uses `ps -o comm=`.
+ */
+function liveProcessCommand(pid: number): string | null {
   try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      // Rows look like: "node.exe","1234","Console","1","12,345 K"
+      // A no-match prints an "INFO: No tasks..." line that won't match the regex.
+      const m = out.match(/^"([^"]+)"/);
+      return m ? m[1] : null;
+    }
     const out = execFileSync('ps', ['-p', String(pid), '-o', 'comm='], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    if (!out) return false;
-    // Match on the basename only — `/Applications/Comet.app/Contents/MacOS/Comet`
-    // vs the recorded `Comet`, vs `Google\ Chrome`. Case-insensitive.
-    const live = path.basename(out).toLowerCase();
-    const want = path.basename(expectedCommand).toLowerCase();
-    return live === want || live.startsWith(want) || want.startsWith(live);
+    return out || null;
   } catch {
-    return false;
+    return null;
   }
 }

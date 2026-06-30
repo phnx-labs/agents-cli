@@ -218,7 +218,11 @@ afterEach(() => {
   }
 });
 
-describe('non-interactive CLI usage', () => {
+// Every case here drives the CLI through fake managed-version binaries written
+// as `#!/bin/sh` scripts + `chmod 0o755` (writeFakeManagedVersion / fake npm
+// installer). Shebang scripts don't execute on Windows and chmod is a no-op
+// there, so the spawn path can't be exercised — this is a POSIX-tooling suite.
+describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () => {
   it('shows a plain hint instead of opening a picker', () => {
     const home = makeTempHome();
     tempHomes.push(home);

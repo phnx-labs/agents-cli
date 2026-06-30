@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { selectSessionsToFetch, resolveMirrorWrite, reconcileCopies, type RemoteCopy } from './sync.js';
 import { sourceSignature } from './manifest.js';
 import { SYNC_AGENTS } from './agents.js';
+import { toPosix } from '../../platform/index.js';
 
 const claude = SYNC_AGENTS.find(s => s.id === 'claude')!;
 
@@ -55,7 +56,7 @@ describe('resolveMirrorWrite', () => {
     const out = resolveMirrorWrite(claude, list, ['line1\nline2\n']);
     expect(out.content).toBe('line1\nline2\n');
     expect(out.merged).toBe(false);
-    expect(out.dest).toContain('backups/claude/mac/projects/proj/s1.jsonl');
+    expect(toPosix(out.dest)).toContain('backups/claude/mac/projects/proj/s1.jsonl');
   });
 
   it('fork: unions content and picks a deterministic destination', () => {
@@ -72,7 +73,7 @@ describe('resolveMirrorWrite', () => {
     expect(r1.merged).toBe(true);
     // smallest machine id ('s0') determines the canonical path, regardless of order
     expect(r1.dest).toBe(r2.dest);
-    expect(r1.dest).toContain('backups/claude/s0/projects/p/s0.jsonl');
+    expect(toPosix(r1.dest)).toContain('backups/claude/s0/projects/p/s0.jsonl');
     // union is the superset b (a ⊆ b), byte-identical regardless of arg order
     expect(r1.content).toBe(b);
     expect(r2.content).toBe(b);
@@ -85,7 +86,7 @@ describe('reconcileCopies', () => {
     const out = reconcileCopies(claude, list, ['a\n', 'a\nb\n']);
     expect(out).not.toBeNull();
     expect(out!.merged).toBe(true);
-    expect(out!.dest).toContain('backups/claude/s0/projects/p/s0.jsonl');
+    expect(toPosix(out!.dest)).toContain('backups/claude/s0/projects/p/s0.jsonl');
   });
 
   it('single complete copy: resolves a verbatim, non-merged write', () => {

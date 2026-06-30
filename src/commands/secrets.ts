@@ -10,6 +10,7 @@ import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
+import { SSH_TARGET_RE, assertValidSshTarget } from '../lib/ssh-exec.js';
 import {
   bundleBackend,
   bundleExists,
@@ -187,18 +188,9 @@ function readStdinSync(): string {
   return Buffer.concat(chunks).toString('utf-8').trim();
 }
 
-/**
- * SSH target for `export --host`: a bare ssh-config host alias (e.g. `yosemite-s0`)
- * or `user@host`. The strict allowlist blocks shell metacharacters and a leading `-`
- * so a target can't be smuggled in as an ssh argv flag.
- */
-export const SSH_TARGET_RE = /^[a-zA-Z0-9._-]+(@[a-zA-Z0-9._-]+)?$/;
-
-export function assertValidSshTarget(host: string): void {
-  if (!SSH_TARGET_RE.test(host)) {
-    throw new Error(`Invalid SSH target ${JSON.stringify(host)}. Expected a host alias or user@host (letters, digits, '.', '_', '-').`);
-  }
-}
+// SSH target validation is defined canonically in src/lib/ssh-exec.ts and
+// re-exported here for back-compat with existing importers of these symbols.
+export { SSH_TARGET_RE, assertValidSshTarget };
 
 /** POSIX single-quote a string for safe interpolation into a remote shell command. */
 function shellQuote(s: string): string {

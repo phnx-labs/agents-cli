@@ -7,10 +7,21 @@ import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash 
 import * as TOML from 'smol-toml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
 import { compareVersions } from '../versions.js';
+import { toPosix } from '../platform/index.js';
 import type { ManifestHook } from '../types.js';
 
 let agentsDir: string;
 let tmpDir: string;
+
+// The registrar stores the portable command form (~/ + forward slashes) so the
+// path expands in bash on every OS. Expand the tilde and posix-fold both sides
+// so the assertion is separator-agnostic and survives Windows' backslashes.
+function resolvedCommand(command: string): string {
+  const expanded = command.startsWith('~/')
+    ? path.join(os.homedir(), command.slice(2))
+    : command;
+  return toPosix(expanded);
+}
 
 function makeScript(name: string): string {
   const scriptPath = path.join(agentsDir, 'hooks', name);
@@ -100,7 +111,7 @@ describe('registerHooksToSettings - Codex', () => {
 
     // Nested hooks array holds the actual command entry
     expect(groups[0].hooks).toHaveLength(1);
-    expect(groups[0].hooks[0].command).toBe(scriptPath);
+    expect(resolvedCommand(groups[0].hooks[0].command)).toBe(toPosix(scriptPath));
     expect(groups[0].hooks[0].timeout).toBe(30);
     expect(groups[0].hooks[0].type).toBe('command');
   });
@@ -128,7 +139,7 @@ describe('registerHooksToSettings - Codex', () => {
     const groups = hooksJson.hooks.PreToolUse;
     expect(groups).toHaveLength(1);
     expect(groups[0].matcher).toBe('Bash');
-    expect(groups[0].hooks[0].command).toBe(scriptPath);
+    expect(resolvedCommand(groups[0].hooks[0].command)).toBe(toPosix(scriptPath));
   });
 
   it('writes [features] hooks = true to config.toml', () => {
@@ -318,7 +329,7 @@ describe('registerHooksToSettings - Codex', () => {
     const hooksJson = JSON.parse(
       fs.readFileSync(path.join(versionHome, '.codex', 'hooks.json'), 'utf-8')
     );
-    expect(hooksJson.hooks.UserPromptSubmit[0].hooks[0].command).toBe(scriptPath);
+    expect(resolvedCommand(hooksJson.hooks.UserPromptSubmit[0].hooks[0].command)).toBe(toPosix(scriptPath));
   });
 
   // Codex only runs a non-managed hook when it is enabled AND its trusted_hash
@@ -542,7 +553,8 @@ describe('registerHooksToSettings - Antigravity', () => {
     expect(settings.hooks).toBeDefined();
     expect(Array.isArray(settings.hooks.before_tool_call)).toBe(true);
     expect(settings.hooks.before_tool_call).toHaveLength(1);
-    expect(settings.hooks.before_tool_call[0]).toEqual({ command: scriptPath });
+    expect(Object.keys(settings.hooks.before_tool_call[0])).toEqual(['command']);
+    expect(resolvedCommand(settings.hooks.before_tool_call[0].command)).toBe(toPosix(scriptPath));
   });
 
   it('maps all four supported events: PreToolUse, PostToolUse, Stop, OnError', () => {
@@ -582,9 +594,9 @@ describe('registerHooksToSettings - Antigravity', () => {
     expect(result.registered).toHaveLength(3);
 
     const settings = readAgySettings(versionHome);
-    expect(settings.hooks.before_tool_call[0].command).toBe(scriptPath);
-    expect(settings.hooks.after_model_call[0].command).toBe(scriptPath);
-    expect(settings.hooks.on_loop_stop[0].command).toBe(scriptPath);
+    expect(resolvedCommand(settings.hooks.before_tool_call[0].command)).toBe(toPosix(scriptPath));
+    expect(resolvedCommand(settings.hooks.after_model_call[0].command)).toBe(toPosix(scriptPath));
+    expect(resolvedCommand(settings.hooks.on_loop_stop[0].command)).toBe(toPosix(scriptPath));
   });
 
   it('silently skips unmapped events (e.g. UserPromptSubmit)', () => {
@@ -806,7 +818,7 @@ describe('registerHooksToSettings - Claude', () => {
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash');
     expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
-    expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(scriptPath);
+    expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(toPosix(scriptPath));
     expect(settings.hooks.PreToolUse[0].hooks[0].type).toBe('command');
   });
 
@@ -823,6 +835,6 @@ describe('registerHooksToSettings - Claude', () => {
 
     const settings = readClaudeSettings(versionHome);
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
-    expect(settings.hooks.UserPromptSubmit[0].hooks[0].command).toBe(scriptPath);
+    expect(resolvedCommand(settings.hooks.UserPromptSubmit[0].hooks[0].command)).toBe(toPosix(scriptPath));
   });
 });

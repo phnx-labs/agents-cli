@@ -6,7 +6,7 @@
  * injection, and multi-agent fallback chains for rate-limit resilience.
  */
 
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
 import type { AgentId } from '../lib/types.js';
@@ -32,6 +32,8 @@ interface ExecCommandActionOptions {
   quiet?: boolean;
   headless?: boolean;
   interactive?: boolean;
+  /** --resume [id]: string id/prefix, or `true` for the bare flag (interactive picker). */
+  resume?: string | boolean;
   sessionId?: string;
   verbose?: boolean;
   timeout?: string;
@@ -46,6 +48,14 @@ interface ExecCommandActionOptions {
   budget?: string;
   until?: string;
   interval?: string;
+  // Host dispatch: run on a registered agent host instead of locally.
+  // `--host` is canonical; `--on`/`--computer` are hidden aliases.
+  host?: string;
+  on?: string;
+  computer?: string;
+  remoteCwd?: string;
+  follow?: boolean; // --no-follow sets this false
+  any?: boolean;
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -182,7 +192,8 @@ export function registerRunCommand(program: Command): void {
     .option('--quiet', 'Suppress preamble (rotation banner, "Running:" line). Useful when piping JSON events to a parser.', false)
     .option('--headless', 'Force headless mode. Auto-enabled when a prompt is provided; pass explicitly to stay headless with no prompt (reads the prompt from stdin).', false)
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
-    .option('--session-id <id>', 'Resume a previous conversation (Claude only)')
+    .option('--resume [id]', 'Resume a previous conversation. Accepts a full or partial session id (prefix-matched against the index); omit the id to pick from recent sessions interactively. Resumes under the version that started the session. claude/codex resume natively; other agents replay via a /continue first message. Pair with a prompt to continue headlessly.')
+    .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--verbose', 'Show detailed execution logs')
     .option('--timeout <duration>', 'Kill the agent after this duration (e.g., 30m, 1h, 2h30m)')
     .option(
@@ -229,7 +240,18 @@ export function registerRunCommand(program: Command): void {
     .option(
       '--interval <dur>',
       'Loop delay between iterations ("0" back-to-back, "30m" paces). Loop only.',
-    );
+    )
+    .option(
+      '--host <name>',
+      'Offload this run onto a registered agent host over SSH instead of running locally. See `agents hosts`.',
+    )
+    .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
+    .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
+    .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.');
+
+  // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
+  runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
+  runCmd.addOption(new Option('--computer <name>', 'Alias of --host.').hideHelp());
 
   setHelpSections(runCmd, {
     examples: `
@@ -271,7 +293,7 @@ export function registerRunCommand(program: Command): void {
 
       Fallback: --fallback codex,gemini retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
-      Resume: --session-id <id> continues a prior Claude conversation.
+      Resume: --resume <id> continues a prior conversation (full or partial id; omit to pick interactively). claude/codex resume natively; others replay via a /continue first message. Add a prompt to continue headlessly.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value
@@ -283,6 +305,60 @@ export function registerRunCommand(program: Command): void {
       // Use command.args (all positional strings) and strip the declared positional args from the front.
       const declaredArgCount = prompt !== undefined ? 2 : 1;
       const passthroughArgs = command.args.slice(declaredArgCount);
+
+      // --host/--on/--computer: offload this run onto a registered agent host
+      // over SSH instead of running locally. The three flags are aliases.
+      const hostGiven = [options.host, options.on, options.computer].filter((v): v is string => !!v);
+      if (hostGiven.length > 0) {
+        if (new Set(hostGiven).size > 1) {
+          console.error(chalk.red('Conflicting --host/--on/--computer values — pass just one.'));
+          process.exit(1);
+        }
+        const hostName = hostGiven[0];
+        if (prompt === undefined) {
+          console.error(chalk.red('A prompt is required for host runs: agents run <agent> "<task>" --host <name>'));
+          process.exit(1);
+        }
+        const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
+        const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
+        let host = await resolveHost(hostName);
+        if (!host) {
+          // Not a host name — try capability routing (e.g. --host gpu). A
+          // "Multiple hosts tagged…" error is actionable and must surface;
+          // only "no host tagged" falls through to the generic unknown-host msg.
+          try {
+            host = await resolveHostByCap(hostName, options.any);
+          } catch (e) {
+            const msg = (e as Error).message ?? '';
+            if (msg.startsWith('Multiple hosts')) {
+              console.error(chalk.red(msg));
+              process.exit(1);
+            }
+          }
+        }
+        if (!host) {
+          console.error(chalk.red(`Unknown host "${hostName}". List hosts: agents hosts list`));
+          process.exit(1);
+        }
+        try {
+          const { exitCode } = await dispatchToHost(host, {
+            agent: agentSpec.split('@')[0],
+            prompt,
+            mode: options.mode,
+            model: options.model,
+            remoteCwd: options.remoteCwd,
+            follow: options.follow !== false,
+          });
+          if (options.follow === false) {
+            console.log(chalk.green(`Dispatched to ${host.name}.`) + chalk.gray(' Track: agents hosts ps · Follow: agents hosts logs <id> -f'));
+            process.exit(0);
+          }
+          process.exit(exitCode === undefined || exitCode === -1 ? 1 : exitCode);
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+      }
 
       // --resume-checkpoint short-circuits normal dispatch entirely: the
       // checkpoint already carries the agent, version, prompt, session id,
@@ -363,7 +439,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       const [
-        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, defaultModeFor, headlessPlanStallCommand },
+        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, defaultModeFor, headlessPlanStallCommand, nativeResume, resolveInteractive },
         { ALL_AGENT_IDS },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle },
@@ -614,6 +690,102 @@ export function registerRunCommand(program: Command): void {
 
       version = resolveVersionAlias(agent, version);
 
+      // --resume: resolve a prior conversation and rewrite the run target to
+      // continue it. `version` here is already the alias-resolved candidate-version
+      // FILTER (undefined for default/any, concrete for @latest/@oldest/@x.y.z);
+      // it is replaced below by the chosen session's OWN version (isolation).
+      let resumeNative = false;
+      let resumeSessionId: string | undefined;
+      let forceInteractive = false;
+      if (options.resume !== undefined) {
+        if (options.sessionId) {
+          console.error(chalk.red('--resume and --session-id are mutually exclusive. --session-id CREATES a session with a fixed id; --resume continues an existing one.'));
+          process.exit(1);
+        }
+        if (options.loop || options.fallback || options.resumeCheckpoint) {
+          console.error(chalk.red('--resume cannot be combined with --loop, --fallback, or --resume-checkpoint (those are separate continuation mechanisms).'));
+          process.exit(1);
+        }
+
+        const { findSessionsById } = await import('../lib/session/db.js');
+        const { discoverSessions } = await import('../lib/session/discover.js');
+        const { pickSessionInteractive } = await import('./sessions.js');
+        const { buildContinuePrompt } = await import('../lib/loop.js');
+
+        // Freshen the index for this agent before any lookup (incremental, cached).
+        // AgentId is wider than SessionAgentId (cursor/amp/… keep no transcripts);
+        // those simply yield no matches and fall through to the not-found error.
+        const sessionAgent = agent as import('../lib/session/types.js').SessionAgentId;
+        await discoverSessions({ agent: sessionAgent, version });
+
+        // Resume is interactive unless a follow-on prompt makes it headless.
+        const wantsInteractive = resolveInteractive({ interactive: options.interactive, headless: options.headless, prompt });
+        const idArg = typeof options.resume === 'string' ? options.resume.trim() : '';
+        let scopeCwd: string | undefined;
+        try { scopeCwd = fs.realpathSync(cwd); } catch { scopeCwd = cwd; }
+
+        let session: import('../lib/session/types.js').SessionMeta | undefined;
+        if (idArg) {
+          let matches = findSessionsById(idArg, { agent: sessionAgent, version, cwd: scopeCwd });
+          if (matches.length === 0) {
+            const wide = findSessionsById(idArg, { agent: sessionAgent, version });
+            if (wide.length > 0) {
+              if (!options.quiet) process.stderr.write(chalk.gray(`No match for "${idArg}" in this project; widened to all projects.\n`));
+              matches = wide;
+            }
+          }
+          if (matches.length === 0) {
+            console.error(chalk.red(`No ${agent} session matching "${idArg}".`));
+            console.error(chalk.gray(`Browse sessions: agents sessions ${idArg}`));
+            process.exit(1);
+          } else if (matches.length === 1) {
+            session = matches[0];
+          } else if (wantsInteractive) {
+            const picked = await pickSessionInteractive(matches, `Multiple sessions match "${idArg}":`);
+            if (!picked) process.exit(0);
+            session = picked.session;
+          } else {
+            console.error(chalk.red(`"${idArg}" is ambiguous — ${matches.length} sessions match:`));
+            for (const m of matches.slice(0, 10)) {
+              console.error(chalk.gray(`  ${m.shortId}  ${m.timestamp.slice(0, 16).replace('T', ' ')}  ${m.topic ?? m.label ?? ''}`));
+            }
+            console.error(chalk.gray('Pass more of the id, or resume interactively (drop the prompt).'));
+            process.exit(1);
+          }
+        } else {
+          // Bare --resume: pick from recent sessions in scope. Needs a TTY.
+          if (!wantsInteractive) {
+            console.error(chalk.red('--resume with no id needs an interactive terminal. Pass a session id (full or prefix), or run without --headless.'));
+            process.exit(1);
+          }
+          const recent = await discoverSessions({ agent: sessionAgent, version, limit: 200 });
+          if (recent.length === 0) {
+            console.error(chalk.red(`No ${agent} sessions found to resume in this project.`));
+            console.error(chalk.gray('Browse all: agents sessions'));
+            process.exit(1);
+          }
+          const picked = await pickSessionInteractive(recent, `Resume which ${agent} session?`);
+          if (!picked) process.exit(0);
+          session = picked.session;
+          forceInteractive = true; // bare resume always lands in the agent's TUI
+        }
+
+        // Pin to the chosen session's own version (the isolated HOME the transcript
+        // lives in) and route by tier.
+        version = session.version;
+        if (nativeResume(agent)) {
+          resumeNative = true;
+          resumeSessionId = session.id;
+          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''}\n`));
+        } else {
+          // Tier-2: launch fresh with a /continue <id> first message; the agent
+          // loads the transcript via `agents sessions <id>` and picks up.
+          prompt = buildContinuePrompt(session.id, prompt);
+          if (prompt.trim() === `/continue ${session.id}`) forceInteractive = true;
+          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (/continue replay)${version ? ` @${version}` : ''}\n`));
+        }
+      }
+
       const configuredStrategy = getConfiguredRunStrategy(agent, cwd);
       const explicitStrategy = options.strategy ? normalizeRunStrategy(options.strategy) : null;
       if (options.strategy && !explicitStrategy) {
@@ -772,7 +944,7 @@ export function registerRunCommand(program: Command): void {
         agent,
         version,
         prompt,
-        interactive: options.interactive,
+        interactive: options.interactive || forceInteractive,
         mode,
         effort,
         cwd: options.cwd,
@@ -780,7 +952,8 @@ export function registerRunCommand(program: Command): void {
         addDirs: options.addDir,
         json: options.json,
         headless: options.headless,
-        sessionId: options.sessionId,
+        sessionId: resumeSessionId ?? options.sessionId,
+        resume: resumeNative,
         verbose: options.verbose,
         timeout: options.timeout,
         env,

@@ -56,6 +56,7 @@ import {
   getSystemPluginsDir,
 } from './state.js';
 import { getVersionHomePath } from './versions.js';
+import { toPortableKey } from './platform/index.js';
 import { transformSubagentForClaude } from './subagents.js';
 import { compileRulesForProject } from './rules/compile.js';
 import { discoverPluginsInDir, hasPluginExecSurfaces, inspectPluginCapabilities } from './plugins.js';
@@ -133,15 +134,17 @@ export function runLaunchSync(opts: LaunchSyncOptions): LaunchSyncResult {
 
 /**
  * Path of the shim's skip-fast sentinel for this (agent, version, cwd) tuple.
- * Must match the SHIM-SIDE format in src/lib/shims.ts (PROJECT_SLUG derivation):
- *   slug = PWD with `/` → `_` and ` ` → `_`
+ * Must match the SHIM-SIDE format in src/lib/shims.ts (PROJECT_SLUG derivation),
+ * which is the canonical `toPortableKey` mapping: drop the Windows drive colon
+ * and fold `\`, `/`, and ` ` → `_`. On POSIX this is byte-identical to the old
+ * `/` and ` ` → `_` slug; on Windows it yields a legal filename (no `C:\`).
  *
  * Cache leak note: this dir accumulates one zero-byte file per
  * (agent, version, project) tuple ever launched. Disk impact is negligible
  * (inodes only). A periodic GC belongs in `agents prune` — follow-up.
  */
 function launchSentinelPath(agent: AgentId, version: string, cwd: string): string {
-  const slug = cwd.replace(/\//g, '_').replace(/ /g, '_');
+  const slug = toPortableKey(cwd);
   // Prefer $HOME (respects test overrides + matches bash's $HOME expansion in
   // the shim), fall back to os.homedir() so the lookup never resolves to '/'
   // if HOME is somehow unset.

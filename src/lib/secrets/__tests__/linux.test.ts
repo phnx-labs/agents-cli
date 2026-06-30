@@ -91,7 +91,8 @@ describe('fileBackend (encrypted-file store)', () => {
     const fp = path.join(tmpDir, 'agents-cli.bundles.work.enc');
     expect(fs.existsSync(fp)).toBe(true);
     const stat = fs.statSync(fp);
-    expect(stat.mode & 0o777).toBe(0o600);
+    // NTFS has no POSIX mode bits — the 0o600 lockdown is a no-op on Windows.
+    if (process.platform !== 'win32') expect(stat.mode & 0o777).toBe(0o600);
     const raw = fs.readFileSync(fp, 'utf8');
     expect(raw).not.toContain('FOO');
   });
@@ -247,7 +248,8 @@ describe('headless auto-provisioned passphrase (no env, locked keyring)', () => 
 
     const passFp = path.join(tmpDir, '.passphrase');
     expect(fs.existsSync(passFp)).toBe(true);
-    expect(fs.statSync(passFp).mode & 0o777).toBe(0o600);
+    // NTFS has no POSIX mode bits — the 0o600 lockdown is a no-op on Windows.
+    if (process.platform !== 'win32') expect(fs.statSync(passFp).mode & 0o777).toBe(0o600);
     // The on-disk item is ciphertext, not the plaintext value.
     const enc = fs.readFileSync(path.join(tmpDir, 'agents-cli.secrets.work.API_KEY.enc'), 'utf8');
     expect(enc).not.toContain('sk-headless-123');

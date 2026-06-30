@@ -9,6 +9,7 @@ import {
   clearLoopSignal,
   parseLoopInterval,
   buildLoopContinuePrompt,
+  buildContinuePrompt,
   type LoopContext,
   type IterationResult,
 } from './loop.js';
@@ -272,6 +273,20 @@ describe('buildLoopContinuePrompt (FIX 1)', () => {
   it('prepends the /continue skill directive then re-appends the entrypoint', () => {
     expect(buildLoopContinuePrompt('abc-123', 'do the work')).toBe(
       '/continue abc-123\n\ndo the work',
+    );
+  });
+});
+
+describe('buildContinuePrompt (Tier-2 universal resume directive)', () => {
+  it('directive only when no follow-on prompt', () => {
+    expect(buildContinuePrompt('abc-123')).toBe('/continue abc-123');
+  });
+  it('treats a whitespace-only prompt as none', () => {
+    expect(buildContinuePrompt('abc-123', '   ')).toBe('/continue abc-123');
+  });
+  it('appends a real follow-on prompt after a blank line', () => {
+    expect(buildContinuePrompt('abc-123', 'what did we decide?')).toBe(
+      '/continue abc-123\n\nwhat did we decide?',
     );
   });
 });

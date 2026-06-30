@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { IS_WINDOWS, toPosix } from '../src/lib/platform/index.js';
 
 // Mock state.ts to redirect all paths to temp directory. Stash mutable
 // override state on globalThis instead of a top-level const — vitest 4
@@ -648,12 +649,12 @@ describe('version path helpers', () => {
 
   it('getBinaryPath returns correct binary location', () => {
     const bin = getBinaryPath('claude', '2.0.65');
-    expect(bin).toContain('node_modules/.bin/claude');
+    expect(toPosix(bin)).toContain('node_modules/.bin/claude');
   });
 
   it('getVersionHomePath returns home subdir', () => {
     const home = getVersionHomePath('claude', '2.0.65');
-    expect(home.endsWith('/home')).toBe(true);
+    expect(toPosix(home).endsWith('/home')).toBe(true);
   });
 });
 
@@ -1021,9 +1022,13 @@ describe('syncResourcesToVersion', () => {
       const hookFile = path.join(versionHome, '.claude', 'hooks', 'pre-commit.sh');
       expect(result.hooks).toBe(true);
       expect(fs.existsSync(hookFile)).toBe(true);
-      // Check executable permission
-      const stat = fs.statSync(hookFile);
-      expect(stat.mode & 0o111).toBeGreaterThan(0); // has execute bits
+      // Check executable permission — Windows has no POSIX exec bit (statSync
+      // mode does not carry 0o111), so the copy preserving it is only
+      // observable on POSIX.
+      if (!IS_WINDOWS) {
+        const stat = fs.statSync(hookFile);
+        expect(stat.mode & 0o111).toBeGreaterThan(0); // has execute bits
+      }
     });
 
     it('skips hooks for codex versions below minimum floor', () => {

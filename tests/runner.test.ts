@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 import { buildJobCommand, extractReport } from '../src/lib/runner.js';
+import { toPosix } from '../src/lib/platform/index.js';
 import type { JobConfig } from '../src/lib/jobs.js';
 
 const TEST_DIR = join(tmpdir(), 'agents-cli-runner-test');
@@ -48,8 +49,10 @@ describe('buildJobCommand', () => {
         return acc;
       }, []);
       expect(addDirIndices.length).toBe(2);
-      expect(cmd[addDirIndices[0] + 1]).toBe(join(homedir(), 'projects/foo'));
-      expect(cmd[addDirIndices[1] + 1]).toBe(join(homedir(), 'reports'));
+      // The `~` expansion (os.homedir() + the rest of the entry) yields mixed
+      // separators on Windows; compare separator-agnostically.
+      expect(toPosix(cmd[addDirIndices[0] + 1])).toBe(toPosix(join(homedir(), 'projects/foo')));
+      expect(toPosix(cmd[addDirIndices[1] + 1])).toBe(toPosix(join(homedir(), 'reports')));
     });
 
     it('adds --model flag when config.model is set', () => {

@@ -6,6 +6,7 @@ import * as path from 'path';
 const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cloud-cache-test-'));
 const cacheRoot = path.join(tmpRoot, 'cache');
 const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 
 vi.mock('../state.js', () => ({
   getCacheDir: () => cacheRoot,
@@ -17,6 +18,10 @@ describe('cloud session cache path safety', () => {
   beforeEach(() => {
     originalFetch = globalThis.fetch;
     process.env.HOME = tmpRoot;
+    // cloud.ts resolves ~/.rush/user.yaml via os.homedir(), which reads
+    // USERPROFILE (not HOME) on Windows — set both so the temp home takes
+    // effect and readToken() finds the fixture token cross-platform.
+    process.env.USERPROFILE = tmpRoot;
     fs.mkdirSync(path.join(tmpRoot, '.rush'), { recursive: true });
     fs.writeFileSync(path.join(tmpRoot, '.rush', 'user.yaml'), 'session:\n  access_token: test-token\n');
 
@@ -31,6 +36,8 @@ describe('cloud session cache path safety', () => {
     fs.rmSync(cacheRoot, { recursive: true, force: true });
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
   });
 
   it('writes a valid UUID execution id inside the cloud cache', async () => {

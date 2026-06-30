@@ -13,6 +13,7 @@ import * as os from 'os';
 import type { JobConfig } from './routines.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from './gemini-settings.js';
 import { getRoutinesDir, getUserAgentsDir } from './state.js';
+import { createLink } from './platform/index.js';
 
 function resolveRealHome(): string {
   const home = os.homedir();
@@ -146,8 +147,10 @@ export function symlinkAllowedDirs(overlayHome: string, dirs: string[]): void {
 
     if (!fs.existsSync(symlinkTarget)) {
       try {
-        fs.symlinkSync(realPath, symlinkTarget);
-      } catch { /* symlink already exists */ }
+        // createLink uses a junction for directories on Windows (no elevation),
+        // a plain symlink on POSIX — allowed dirs are directories.
+        createLink(realPath, symlinkTarget);
+      } catch { /* link already exists or refused */ }
     }
   }
 }

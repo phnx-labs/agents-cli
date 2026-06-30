@@ -33,6 +33,7 @@ import {
   shouldInstallCommandAsSkill,
   installCommandSkillToVersion,
 } from '../src/lib/command-skills.js';
+import { toPosix } from '../src/lib/platform/index.js';
 
 type FormatKind =
   | 'markdown-flat'
@@ -153,10 +154,12 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
           if (fmt.kind === 'skill-dir') {
             const skillsDir = reg.skillsDir ?? '';
             const docDirPrefix = expectedPath.replace(/\/[^/]+\/SKILL\.md$/, '');
+            // Registry paths use path.join (backslash on Windows); doc templates
+            // use forward slashes. Compare separator-agnostically.
             expect(
-              skillsDir,
+              toPosix(skillsDir),
               `Docs say ${id}${tag} skills live at ${docDirPrefix}/<name>/SKILL.md; registry has skillsDir=${skillsDir}.${banner}`,
-            ).toBe(docDirPrefix);
+            ).toBe(toPosix(docDirPrefix));
           } else if (fmt.kind === 'markdown-flat' || fmt.kind === 'toml-flat') {
             // Use the registry's real configDir as the write base — NOT a
             // hardcoded `.${id}`, which is wrong for agents whose config dir is
@@ -166,9 +169,9 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
             const regPath = path.join(agentDir, reg.commandsSubdir ?? '', `name.${fmt.kind === 'toml-flat' ? 'toml' : 'md'}`);
             const docPathPattern = expectedPath.replace('{name}', 'name');
             expect(
-              regPath,
+              toPosix(regPath),
               `Docs say ${id}${tag} writes to ${docPathPattern}; registry would write to ${regPath}.${banner}`,
-            ).toBe(docPathPattern);
+            ).toBe(toPosix(docPathPattern));
           }
         });
       }

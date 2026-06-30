@@ -17,6 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { compareVersions } from './versions.js';
+import { needsWindowsShell } from './platform/index.js';
 
 export const NPM_PACKAGE_NAME = '@phnx-labs/agents-cli';
 
@@ -166,7 +167,10 @@ export async function installPackageIntoPrefix(spec: string, prefix: string): Pr
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
-  await execFileAsync('npm', ['install', '-g', '--prefix', prefix, spec, '--ignore-scripts']);
+  // On Windows `npm` is `npm.cmd`; execFile cannot run it without a shell (ENOENT).
+  await execFileAsync('npm', ['install', '-g', '--prefix', prefix, spec, '--ignore-scripts'], {
+    shell: needsWindowsShell('npm'),
+  });
 }
 
 /**
@@ -181,7 +185,8 @@ export async function installPackageWithBun(spec: string): Promise<void> {
   const { execFile } = await import('child_process');
   const { promisify } = await import('util');
   const execFileAsync = promisify(execFile);
-  await execFileAsync('bun', ['add', '-g', spec]);
+  // On Windows `bun` resolves to `bun.exe`/`bun.cmd`; force shell for the .cmd case.
+  await execFileAsync('bun', ['add', '-g', spec], { shell: needsWindowsShell('bun') });
 }
 
 /** Read the version field of the package.json at `packageRoot`, fresh from disk. */

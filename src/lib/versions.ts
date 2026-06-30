@@ -1490,6 +1490,7 @@ export function resolveVersion(agent: AgentId, projectPath?: string): string | n
  * Normalize a user-supplied @version token across CLI subcommands.
  *
  *   undefined / "" / "default" / "pinned" -> undefined  (caller falls back to project pin or global default)
+ *   "any"                       -> undefined  (caller imposes no version constraint — e.g. resume across any version)
  *   "latest"                    -> highest installed version (process.exit if none installed)
  *   "oldest"                    -> lowest installed version (process.exit if none installed)
  *   "x.y.z" (installed)         -> "x.y.z"
@@ -1504,7 +1505,7 @@ export function resolveVersion(agent: AgentId, projectPath?: string): string | n
  * parsing.
  */
 export function resolveVersionAlias(agent: AgentId, raw: string | undefined | null): string | undefined {
-  if (!raw || raw === 'default' || raw === 'pinned') return undefined;
+  if (!raw || raw === 'default' || raw === 'pinned' || raw === 'any') return undefined;
 
   if (raw === 'latest' || raw === 'oldest') {
     const installed = listInstalledVersions(agent);
@@ -1535,7 +1536,7 @@ export function resolveVersionAlias(agent: AgentId, raw: string | undefined | nu
  * remain queryable.
  */
 export function resolveVersionAliasLoose(agent: AgentId, raw: string | undefined | null): string | undefined {
-  if (!raw || raw === 'default' || raw === 'pinned') return undefined;
+  if (!raw || raw === 'default' || raw === 'pinned' || raw === 'any') return undefined;
   if (raw === 'latest' || raw === 'oldest') {
     const installed = listInstalledVersions(agent);
     if (installed.length === 0) return undefined;

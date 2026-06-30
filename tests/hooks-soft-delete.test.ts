@@ -168,7 +168,10 @@ describe('removeHookFromVersion – soft-delete', () => {
     expect(existsSync(join(hooksDir, 'other-hook.sh'))).toBe(true);
   });
 
-  it('creates the trash dir with mode 0o700', () => {
+  // NTFS does not honor POSIX permission bits, so mkdirSync's mode 0o700 is a
+  // no-op on Windows (stat reports 0o666-derived bits). The intent — a
+  // private-by-default trash dir — only holds on POSIX.
+  it.skipIf(process.platform === 'win32')('creates the trash dir with mode 0o700', () => {
     const hooksDir = makeVersionHooksDir('claude', '2.1.0');
     writeScript(hooksDir, 'secure-hook.sh');
 

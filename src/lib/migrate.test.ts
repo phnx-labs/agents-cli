@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { migrateExtrasExtrasToAgentsExtras, repairSelfReferentialBinShims } from './migrate.js';
+import { toPosix } from './platform/index.js';
 
 const tempDirs: string[] = [];
 
@@ -112,9 +113,9 @@ describe('migrateExtrasExtrasToAgentsExtras', () => {
     const known = JSON.parse(fs.readFileSync(path.join(pluginsDir, 'known_marketplaces.json'), 'utf-8'));
     expect(Object.keys(known)).not.toContain('extras-extras');
     expect(known['agents-extras']).toBeDefined();
-    expect(known['agents-extras'].source.path).toContain('/marketplaces/agents-extras');
+    expect(toPosix(known['agents-extras'].source.path)).toContain('/marketplaces/agents-extras');
     expect(known['agents-extras'].source.path).not.toContain('extras-extras');
-    expect(known['agents-extras'].installLocation).toContain('/marketplaces/agents-extras');
+    expect(toPosix(known['agents-extras'].installLocation)).toContain('/marketplaces/agents-extras');
     expect(known['agents-extras'].lastUpdated).toBe('2026-06-08T05:27:15.261Z');
 
     // settings.json enabledPlugins keys renamed with values preserved.

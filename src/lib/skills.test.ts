@@ -154,7 +154,7 @@ describe('removeSkillFromVersion — soft-delete', () => {
     expect(fs.existsSync(trashRoot)).toBe(false);
   });
 
-  it('creates trash directory with mode 0o700', () => {
+  it.skipIf(process.platform === 'win32')('creates trash directory with mode 0o700', () => {
     const home = makeTempHome();
     const agent = 'claude';
     const version = '2.0.0';
@@ -165,7 +165,7 @@ describe('removeSkillFromVersion — soft-delete', () => {
 
     const trashRoot = path.join(home, '.agents', '.history', 'trash', 'skills', agent, version, skillName);
     const stat = fs.statSync(trashRoot);
-    // 0o700 = owner rwx only
+    // 0o700 = owner rwx only. NTFS has no POSIX mode bits — POSIX-only assertion.
     expect(stat.mode & 0o777).toBe(0o700);
   });
 

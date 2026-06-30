@@ -91,7 +91,9 @@ afterEach(() => {
   }
 });
 
-describe('drive sync remote validation', () => {
+// POSIX-only: these tests stand up `#!/bin/sh` fake `rsync`/`ssh` binaries on
+// PATH, which Windows can't execute (and rsync/ssh are absent → ENOENT).
+describe.skipIf(process.platform === 'win32')('drive sync remote validation', () => {
   const malicious = [
     'evil; touch pwned@host',
     'a@host`touch pwned`',

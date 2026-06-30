@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { generateHookShim, getHookShimPath, parseCacheConfig, parseDuration, removeHookShim } from './cache.js';
+import { toPosix } from '../platform/index.js';
 
 describe('parseDuration', () => {
   it('accepts plain numeric seconds', () => {
@@ -90,8 +91,11 @@ describe('generateHookShim', () => {
     });
     expect(shim).toBe(path.join(testPaths.shimsDir, 'my-hook.sh'));
     expect(fs.existsSync(shim)).toBe(true);
-    const stat = fs.statSync(shim);
-    expect(stat.mode & 0o111).not.toBe(0);
+    // NTFS has no POSIX exec bit; Node reports mode without 0o111 on Windows.
+    if (process.platform !== 'win32') {
+      const stat = fs.statSync(shim);
+      expect(stat.mode & 0o111).not.toBe(0);
+    }
   });
 
   it('embeds the canonical config in the shim body', () => {
@@ -139,7 +143,7 @@ describe('generateHookShim', () => {
     // The path is whatever getHookShimsDir() resolves to. Doesn't matter what
     // value — what matters is that production callers (who don't pass `paths`)
     // get a consistent location.
-    expect(getHookShimPath('foo')).toMatch(/\.cache\/shims\/hooks\/foo\.sh$/);
+    expect(toPosix(getHookShimPath('foo'))).toMatch(/\.cache\/shims\/hooks\/foo\.sh$/);
   });
 
   it('removeHookShim deletes the file if it exists', () => {

@@ -17,7 +17,7 @@
  * deletable — so the fetch-don't-replicate model holds; this is just graceful
  * degradation when the peer is asleep.
  *
- * Mirrors the transport already used by `agents secrets export --to-ssh`
+ * Mirrors the transport already used by `agents secrets export --host`
  * (`src/commands/secrets.ts`): `ssh -o BatchMode=yes <host> bash -lc '<cmd>'`,
  * with `bash -lc` so the remote login PATH resolves `agents`.
  */

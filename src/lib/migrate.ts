@@ -11,6 +11,7 @@ import * as os from 'os';
 import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
+import { createLink } from './platform/index.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -55,7 +56,7 @@ export function foldLegacySystemRepo(): void {
   if (!fs.existsSync(SYSTEM_DIR)) {
     try {
       fs.renameSync(LEGACY_SYSTEM_DIR, SYSTEM_DIR);
-      try { fs.symlinkSync(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
+      try { createLink(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
       console.error('Folded ~/.agents-system/ into ~/.agents/.system/ (left back-compat symlink)');
       return;
     } catch {
@@ -66,7 +67,7 @@ export function foldLegacySystemRepo(): void {
   try {
     copyDirSkipExisting(LEGACY_SYSTEM_DIR, SYSTEM_DIR);
     fs.rmSync(LEGACY_SYSTEM_DIR, { recursive: true, force: true });
-    try { fs.symlinkSync(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
+    try { createLink(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
     console.error('Merged ~/.agents-system/ into ~/.agents/.system/ (left back-compat symlink)');
   } catch { /* best-effort */ }
 }
@@ -633,12 +634,12 @@ function repairAgentConfigSymlinks(): void {
       if (resolved === path.resolve(userTarget)) continue; // already correct
       try {
         fs.unlinkSync(symlinkPath);
-        fs.symlinkSync(userTarget, symlinkPath);
+        createLink(userTarget, symlinkPath);
         repaired++;
       } catch { /* best-effort */ }
     } else if (!stat) {
       try {
-        fs.symlinkSync(userTarget, symlinkPath);
+        createLink(userTarget, symlinkPath);
         repaired++;
       } catch { /* best-effort */ }
     }
@@ -731,7 +732,10 @@ export function repairSelfReferentialBinShims(
       const realBinary = findInPath(cli);
       try {
         fs.unlinkSync(binLink);
-        if (realBinary) fs.symlinkSync(realBinary, binLink);
+        // createLink: a real symlink where the OS allows it (POSIX, and Windows
+        // with the symlink privilege), copy-fallback otherwise — so the repair
+        // lands a working binary on Windows runners without the symlink right.
+        if (realBinary) createLink(realBinary, binLink);
         repaired++;
       } catch { /* best-effort */ }
     }

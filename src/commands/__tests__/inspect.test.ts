@@ -7,7 +7,9 @@ import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
 const cliEntry = path.join(repoRoot, 'src', 'index.ts');
-const tsxBin = path.join(repoRoot, 'node_modules', '.bin', 'tsx');
+// Run tsx via `node node_modules/tsx/dist/cli.mjs`, not the .bin/tsx shim: on
+// Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell.
+const tsxBin = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 
 function mkdir(p: string): void {
   fs.mkdirSync(p, { recursive: true });
@@ -73,7 +75,7 @@ function makeFixture(): string {
 }
 
 function run(home: string, args: string[], cwd: string = home) {
-  return spawnSync(tsxBin, [cliEntry, ...args], {
+  return spawnSync(process.execPath, [tsxBin, cliEntry, ...args], {
     cwd,
     env: {
       ...process.env,
@@ -148,7 +150,7 @@ describe('agents inspect', () => {
     expect(data.version).toBe('9.9.9');
     expect(data.default).toBe(true);
     expect(data.home).toContain(path.join('versions', 'claude', '9.9.9', 'home'));
-    expect(data.shim).toContain('shims/claude');
+    expect(data.shim).toContain(path.join('shims', 'claude'));
     expect(data.alias).toContain('claude@9.9.9');
     expect(data.strategy).toBe('balanced');
     expect(data.capabilities.skills.ok).toBe(true);
@@ -176,7 +178,7 @@ describe('agents inspect', () => {
     expect(names).toContain('release');
     const demo = (data.items as Array<{ name: string; path: string }>).find(i => i.name === 'demo-skill');
     // For bundled skills, path is the skill directory.
-    expect(demo?.path).toMatch(/skills\/demo-skill$/);
+    expect(demo?.path).toMatch(/skills[\\/]demo-skill$/);
   });
 
   it('--skills <typo> resolves via fuzzy match; bogus query exits 1 with suggestions', () => {

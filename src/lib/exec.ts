@@ -136,6 +136,14 @@ export interface ExecOptions {
   addDirs?: string[];
   timeout?: string;
   sessionId?: string;
+  /**
+   * Resume the conversation named by `sessionId` using the agent's NATIVE resume
+   * form (claude `--resume`, codex `resume`) instead of the default `--session-id`
+   * create. Only set for agents where `nativeResume` returns true; other agents
+   * resume via a `/continue <id>` first message (Tier 2), which needs no flag and
+   * leaves this unset.
+   */
+  resume?: boolean;
   verbose?: boolean;
   env?: Record<string, string>;
   /**
@@ -322,6 +330,15 @@ export interface AgentCommandTemplate {
   modelFlag?: string;
   printFlags?: string[];
   verboseFlag?: string;
+  /**
+   * How this agent natively resumes a prior conversation. Presence here is the
+   * single source of truth for `nativeResume(agent)` — agents without it fall
+   * back to the universal `/continue <id>` replay (Tier 2). Two shapes:
+   *   { flag }       — append `<flag> <id>` (e.g. claude `--resume <id>`)
+   *   { subcommand } — replace the headless base subcommand with `<subcommand> <id>`
+   *                    (codex: `codex exec` -> `codex exec resume <id>`)
+   */
+  resume?: { flag: string } | { subcommand: string };
 }
 
 /**
@@ -344,10 +361,12 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modelFlag: '--model',
     printFlags: ['--print'],
     verboseFlag: '--verbose',
+    resume: { flag: '--resume' },
   },
   codex: {
     base: ['codex', 'exec'],
     promptFlag: 'positional',
+    resume: { subcommand: 'resume' },
     modeFlags: {
       // NOTE: codex has no read-only mode in --sandbox; 'plan' here means
       // "workspace-write but no auto-approval" — closer to plan-as-restraint.
@@ -385,6 +404,9 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
   opencode: {
     base: ['opencode', 'run'],
     promptFlag: 'positional',
+    // opencode's native resume is `opencode --session <id>` (NOT under `run`), so
+    // it does not compose with this headless `run` base. Until that's verified on
+    // a box with opencode installed, opencode resumes via Tier-2 `/continue`.
     modeFlags: {
       plan: ['--agent', 'plan'],
       edit: ['--agent', 'build'],
@@ -520,6 +542,15 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
   },
 };
 
+/**
+ * Whether `agent` has a native resume form (Tier 1). Derived solely from the
+ * command template's `resume` field — the single source of truth. Agents that
+ * return false resume via the universal Tier-2 `/continue` replay instead.
+ */
+export function nativeResume(agent: AgentId): boolean {
+  return AGENT_COMMANDS[agent]?.resume !== undefined;
+}
+
 /** Assemble the full CLI argument array for an agent invocation. */
 export function buildExecCommand(options: ExecOptions): string[] {
   const template = AGENT_COMMANDS[options.agent];
@@ -536,6 +567,16 @@ export function buildExecCommand(options: ExecOptions): string[] {
     } else if (options.agent === 'opencode' && cmd[1] === 'run') {
       cmd.splice(1, 1);
     }
+  }
+
+  // Native resume with a `{ subcommand }` shape (codex) appends the resume verb
+  // to the base: `codex exec` -> `codex exec resume` (headless) and, after the
+  // interactive drop above, `codex` -> `codex resume` (TUI). The session id is
+  // pushed later as the first positional (before any prompt). `{ flag }` agents
+  // (claude) need no base change — the flag is appended with the id below.
+  const resumeSpec = options.resume ? template.resume : undefined;
+  if (resumeSpec && 'subcommand' in resumeSpec) {
+    cmd.push(resumeSpec.subcommand);
   }
 
   // Use versioned alias if a specific version was requested (e.g., claude@2.1.98).
@@ -591,7 +632,18 @@ export function buildExecCommand(options: ExecOptions): string[] {
       `Internal error: ${options.agent} declares '${resolvedMode}' in capabilities.modes but has no entry in AGENT_COMMANDS.modeFlags.${resolvedMode}.`,
     );
   }
-  cmd.push(...modeFlags);
+  if (resumeSpec && 'subcommand' in resumeSpec) {
+    // codex `exec resume` / `resume` does NOT accept `--sandbox <mode>` (only the
+    // bypass flag, verified against `codex exec resume --help`). So the standard
+    // codex modeFlags can't be reused on resume. A non-plan HEADLESS resume needs
+    // the bypass or it stalls on approval prompts; plan and interactive resume
+    // inherit codex's default sandbox and pass no flag.
+    if (!interactive && resolvedMode !== 'plan') {
+      cmd.push('--dangerously-bypass-approvals-and-sandbox');
+    }
+  } else {
+    cmd.push(...modeFlags);
+  }
 
   // Add print/headless flags only when a prompt is provided. Without a prompt
   // the caller wants an interactive REPL -- passing --print would immediately
@@ -600,8 +652,18 @@ export function buildExecCommand(options: ExecOptions): string[] {
     cmd.push(...template.printFlags);
   }
 
-  // Add session ID (Claude only)
-  if (options.sessionId && options.agent === 'claude') {
+  // Resume vs. create. With `resume`, emit the agent's NATIVE resume reference:
+  // `{ flag }` agents append `<flag> <id>` (claude `--resume <id>`); `{ subcommand }`
+  // agents (codex) already pushed the verb above, so the id is the first
+  // positional here — placed before the prompt positional appended later. Without
+  // `resume`, the legacy claude-only `--session-id` CREATES a session with that id.
+  if (options.resume && options.sessionId && resumeSpec) {
+    if ('flag' in resumeSpec) {
+      cmd.push(resumeSpec.flag, options.sessionId);
+    } else {
+      cmd.push(options.sessionId);
+    }
+  } else if (options.sessionId && options.agent === 'claude') {
     cmd.push('--session-id', options.sessionId);
   }
 

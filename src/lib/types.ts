@@ -676,6 +676,28 @@ export interface Meta {
    * lives separately in ~/.agents/.cache/browser/<profile>/.
    */
   browser?: Record<string, BrowserProfileConfig>;
+  /**
+   * Agent-host registry keyed by host name (`agents hosts`). Portable user
+   * config synced with `agents repo push/pull`. For `ssh-config` hosts this is
+   * just an overlay (caps/os) — the connection details stay in ~/.ssh/config and
+   * are never copied. `inline` hosts carry their own address/user.
+   */
+  hosts?: Record<string, HostEntry>;
+}
+
+/** Persisted agent-host entry in agents.yaml (overlay or inline). */
+export interface HostEntry {
+  /** `ssh-config`: reach via the bare name (ssh resolves). `inline`: use address/user below. */
+  source: 'ssh-config' | 'inline';
+  /** SSH-reachable target — inline hosts only (ssh-config hosts omit it). */
+  address?: string;
+  /** SSH user — inline hosts only. */
+  user?: string;
+  /** Captured at enroll probe. */
+  os?: string;
+  /** Free-form capability tags for routing (e.g. ['gpu']). */
+  caps?: string[];
+  addedAt?: string;
 }
 
 /** Browser profile definition stored in agents.yaml. */

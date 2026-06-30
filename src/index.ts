@@ -115,6 +115,7 @@ import {
   loadTmux,
   loadBrowser,
   loadComputer,
+  loadHosts,
   loadPull,
   loadPush,
   loadRepo,
@@ -907,6 +908,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadTmux);
   await reg(loadBrowser);
   await reg(loadComputer);
+  await reg(loadHosts);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
   registerUpgradeCommand(program);

@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { toPosix } from './platform/index.js';
 
 import {
   loadPluginManifest,
@@ -713,7 +714,7 @@ describe('installPlugin validation', () => {
     // as a git flag; the metacharacters above are inert in argv form.
     expect(args.slice(0, 4)).toEqual(['clone', '--depth', '1', '--']);
     expect(args[4]).toBe(source);
-    expect(args[5]).toMatch(/\/safe$/);
+    expect(toPosix(args[5])).toMatch(/\/safe$/);
     expect(opts).toEqual({ stdio: 'pipe' });
   });
 

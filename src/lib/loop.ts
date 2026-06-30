@@ -133,7 +133,20 @@ export function loopSignalPath(runDir: string): string {
  * agent both recalls the prior turn AND knows what to do this iteration.
  */
 export function buildLoopContinuePrompt(prevSessionId: string, entrypoint: string): string {
-  return `/continue ${prevSessionId}\n\n${entrypoint}`;
+  return buildContinuePrompt(prevSessionId, entrypoint);
+}
+
+/**
+ * The universal (Tier-2) resume directive: a `/continue <id>` first message that
+ * tells the agent to load the prior transcript via `agents sessions <id>` and
+ * pick up. Works for ANY agent that ships the `/continue` command — the resume
+ * path for agents without a native `--resume` (gemini, grok, opencode, …). An
+ * optional follow-on prompt is appended after a blank line; omitted when empty so
+ * a bare resume sends just the directive.
+ */
+export function buildContinuePrompt(sessionId: string, prompt?: string): string {
+  const directive = `/continue ${sessionId}`;
+  return prompt && prompt.trim() ? `${directive}\n\n${prompt}` : directive;
 }
 
 /**

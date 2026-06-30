@@ -49,7 +49,10 @@ afterEach(async () => {
   await fsp.rm(sock, { force: true });
 });
 
-describe.skipIf(!nodePtyLoadable)('PTY socket permission', () => {
+// Windows uses a named pipe, not a filesystem socket inode — getSocketPath()
+// returns a \\.\pipe\ path that can't be stat()ed or chmod()ed. These boot
+// tests assert unix-socket file semantics, so they are POSIX-only.
+describe.skipIf(!nodePtyLoadable || process.platform === 'win32')('PTY socket permission', () => {
   it('chmods the socket to 0o600 immediately after listen', async () => {
     // runPtyServer awaits forever; kick it off without awaiting and poll
     // for the socket inode to appear.
@@ -94,7 +97,9 @@ describe.skipIf(!nodePtyLoadable)('PTY socket permission', () => {
   }, 15_000);
 });
 
-describe.skipIf(!nodePtyLoadable)('PTY duplicate-spawn race resolution', () => {
+// POSIX-only for the same reason: it pre-stages a regular file at the socket
+// path and asserts it survives — a \\.\pipe\ path on Windows can't be written.
+describe.skipIf(!nodePtyLoadable || process.platform === 'win32')('PTY duplicate-spawn race resolution', () => {
   it('exits cleanly without touching the socket when a live PID file already exists', async () => {
     // Pre-stage a PID file pointing to a live process (this test runner). The
     // server boot must detect this via isPtyServerRunning() and exit cleanly

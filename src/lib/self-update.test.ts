@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { needsWindowsShell, toPosix } from './platform/index.js';
 import {
   bunGlobalDir,
   deriveGlobalPrefix,
@@ -34,17 +35,19 @@ afterEach(() => {
 describe('deriveGlobalPrefix', () => {
   it('resolves the POSIX npm global layout (<prefix>/lib/node_modules/<scoped pkg>)', () => {
     const root = path.join('/Users/x/.nvm/versions/node/v24.15.0', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
-    expect(deriveGlobalPrefix(root)).toBe('/Users/x/.nvm/versions/node/v24.15.0');
+    // path.resolve so the expected carries a drive on Windows, matching the
+    // function's own path.resolve of the input.
+    expect(deriveGlobalPrefix(root)).toBe(path.resolve('/Users/x/.nvm/versions/node/v24.15.0'));
   });
 
   it('resolves the Windows npm global layout (<prefix>/node_modules/<scoped pkg>)', () => {
     const root = path.join('/x/npm-prefix', 'node_modules', '@phnx-labs', 'agents-cli');
-    expect(deriveGlobalPrefix(root)).toBe('/x/npm-prefix');
+    expect(deriveGlobalPrefix(root)).toBe(path.resolve('/x/npm-prefix'));
   });
 
   it('resolves the dev-install prefix used by scripts/install.sh', () => {
     const root = path.join('/Users/x/.local/agents-cli-dev', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
-    expect(deriveGlobalPrefix(root)).toBe('/Users/x/.local/agents-cli-dev');
+    expect(deriveGlobalPrefix(root)).toBe(path.resolve('/Users/x/.local/agents-cli-dev'));
   });
 
   it('throws for a source checkout that is not under node_modules', () => {
@@ -64,7 +67,7 @@ describe('detectPackageManager', () => {
   it('detects bun from the BUN_INSTALL global layout (no lib segment)', () => {
     process.env.BUN_INSTALL = '/Users/x/.bun';
     const root = path.join(bunGlobalDir(), 'node_modules', '@phnx-labs', 'agents-cli');
-    expect(root).toBe('/Users/x/.bun/install/global/node_modules/@phnx-labs/agents-cli');
+    expect(toPosix(root)).toBe('/Users/x/.bun/install/global/node_modules/@phnx-labs/agents-cli');
     expect(detectPackageManager(root)).toBe('bun');
   });
 
@@ -138,7 +141,11 @@ describe('installPackageIntoPrefix', () => {
       path.join(src, 'package.json'),
       JSON.stringify({ name: '@agents-cli-test/dummy', version, license: 'MIT' }),
     );
-    const tarball = execFileSync('npm', ['pack', '--silent'], { cwd: src, encoding: 'utf-8' }).trim();
+    const tarball = execFileSync('npm', ['pack', '--silent'], {
+      cwd: src,
+      encoding: 'utf-8',
+      shell: needsWindowsShell('npm'),
+    }).trim();
     return path.join(src, tarball);
   }
 
@@ -230,7 +237,10 @@ describe('update-check cache', () => {
   });
 });
 
-describe('findAgentsCliInstalls', () => {
+// findAgentsCliInstalls is POSIX-only (Windows npm bins are .cmd wrappers, not
+// symlinks — the function returns [] on win32), and the fixtures here create
+// symlinks that need Developer Mode on Windows. Skip the whole block there.
+describe.skipIf(process.platform === 'win32')('findAgentsCliInstalls', () => {
   /** Lay out an npm-global-shaped install and a bin dir whose `agents` symlinks into it. */
   function makeInstall(base: string, name: string, version: string, pkgName = '@phnx-labs/agents-cli') {
     const packageRoot = path.join(base, name, 'lib', 'node_modules', ...pkgName.split('/'));

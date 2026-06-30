@@ -787,7 +787,7 @@ function formatPickerLabel(s: SessionMeta, query: string): string {
   );
 }
 
-async function pickSessionInteractive(
+export async function pickSessionInteractive(
   sessions: SessionMeta[],
   message = 'Search sessions:',
   initialSearch?: string,
@@ -1551,7 +1551,11 @@ function findClaudeResumeTimestamp(filePath: string, targetTimestampMs?: number)
 }
 
 function isWithinProject(sessionCwd: string, projectRoot: string): boolean {
-  return sessionCwd === projectRoot || sessionCwd.startsWith(projectRoot + path.sep);
+  // Compare separator- and case-normalized (Windows folds `\`→`/` and lowercases)
+  // so a backslash session cwd matches a forward-slash project root and vice versa.
+  const cwd = toComparablePath(sessionCwd);
+  const root = toComparablePath(projectRoot);
+  return cwd === root || cwd.startsWith(root + '/');
 }
 
 function sessionDistance(session: SessionMeta, historyEntry: ClaudeHistoryEntry): number {

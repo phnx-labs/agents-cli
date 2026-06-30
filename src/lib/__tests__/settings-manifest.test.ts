@@ -148,8 +148,11 @@ describe('carryForwardSettings (codex)', () => {
     expect(merged.projects['/root/work'].trust_level).toBe('trusted');
     expect(merged.notice).toBeUndefined();
 
-    const mode = fs.statSync(path.join(toHome, '.codex/auth.json')).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // NTFS has no POSIX mode bits — the 0o600 restrictMode is a no-op on Windows.
+    if (process.platform !== 'win32') {
+      const mode = fs.statSync(path.join(toHome, '.codex/auth.json')).mode & 0o777;
+      expect(mode).toBe(0o600);
+    }
   });
 
   it('copies prompt dir entries without clobbering existing ones', () => {
