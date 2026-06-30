@@ -331,10 +331,10 @@ describe('symlinkAllowedDirs', () => {
 
     const expectedLink = join(overlayHome, relative(homedir(), realDir));
     expect(existsSync(expectedLink)).toBe(true);
-    // Windows links directories as junctions (no elevation needed); junctions
-    // report as directories, not symlinks. POSIX uses a real symlink.
-    const st = lstatSync(expectedLink);
-    expect(process.platform === 'win32' ? st.isDirectory() : st.isSymbolicLink()).toBe(true);
+    // Node reports a Windows junction as a symbolic link (a reparse point maps to
+    // S_IFLNK), so isSymbolicLink() holds on both POSIX (symlink) and Windows
+    // (junction).
+    expect(lstatSync(expectedLink).isSymbolicLink()).toBe(true);
   });
 
   it('skips dirs outside HOME', () => {
