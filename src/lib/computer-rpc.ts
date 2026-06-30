@@ -206,9 +206,30 @@ export function resolveHelperApp(): string | null {
   return path.resolve(exec, '..', '..', '..');
 }
 
-// Pick the best transport. If the socket exists, use it. Otherwise fall
-// back to spawning the helper as a subprocess (legacy path).
+// Resolve the TCP endpoint for the Windows daemon (computer-helper-win), if
+// configured. The Windows helper binds loopback TCP (Program.cs) and the CLI
+// reaches it over an `ssh -L` tunnel, so the endpoint is a local forwarded
+// port. COMPUTER_HELPER_TCP is "host:port" (host defaults to 127.0.0.1);
+// COMPUTER_HELPER_TOKEN is the shared secret sent in the first `auth` frame.
+export function resolveTcpEndpoint(): { host: string; port: number; token: string | null } | null {
+  const raw = process.env.COMPUTER_HELPER_TCP;
+  if (!raw || raw.length === 0) return null;
+  const [hostPart, portPart] = raw.includes(':') ? raw.split(':') : ['127.0.0.1', raw];
+  const port = Number(portPart);
+  if (!Number.isInteger(port) || port <= 0) return null;
+  const token = process.env.COMPUTER_HELPER_TOKEN;
+  return { host: hostPart || '127.0.0.1', port, token: token && token.length > 0 ? token : null };
+}
+
+// Pick the best transport. Precedence:
+//   1. COMPUTER_HELPER_TCP -> the Windows daemon over a (tunneled) TCP port.
+//   2. the macOS launchd socket if it exists.
+//   3. spawning the helper as a subprocess (legacy/dev fallback).
 export function openComputerClient(): ComputerClient {
+  const tcp = resolveTcpEndpoint();
+  if (tcp) {
+    return new TcpClient(tcp.host, tcp.port, tcp.token);
+  }
   const sockPath = resolveSocketPath();
   if (fs.existsSync(sockPath)) {
     return new SocketClient(sockPath);
@@ -310,6 +331,63 @@ class SocketClient extends BaseClient {
       this.closed = true;
       this.failPending('helper_exited', 'socket closed before reply');
     });
+  }
+
+  protected send(payload: string): void {
+    this.sock.write(payload);
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) return;
+    this.sock.end();
+    await new Promise<void>((resolve) => {
+      if (this.closed) return resolve();
+      this.sock.on('close', () => resolve());
+    });
+  }
+}
+
+// TCP transport for the Windows daemon (computer-helper-win). The daemon
+// binds loopback only (Program.cs); the CLI reaches it over an `ssh -L`
+// tunnel, so `host` is typically 127.0.0.1 + a forwarded port. When a token
+// is configured the daemon accepts only an `auth` frame until authenticated,
+// so we send that first and gate every other call on it.
+class TcpClient extends BaseClient {
+  private sock: Socket;
+  private authReady: Promise<void>;
+
+  constructor(host: string, port: number, token: string | null) {
+    super();
+    this.sock = createConnection({ host, port });
+    this.sock.setEncoding('utf8');
+    this.sock.on('data', (chunk: string) => this.handleChunk(chunk));
+    this.sock.on('error', (err) => {
+      this.closed = true;
+      this.failPending('socket_error', err.message);
+    });
+    this.sock.on('close', () => {
+      this.closed = true;
+      this.failPending('helper_exited', 'tcp connection closed before reply');
+    });
+    // Kick off the auth handshake synchronously so its frame (id 1) is the
+    // first thing written. No token → daemon is open (tunnel-gated).
+    this.authReady = token ? this.authenticate(token) : Promise.resolve();
+  }
+
+  private async authenticate(token: string): Promise<void> {
+    const res = await super.call('auth', { token });
+    if (res.error) throw new Error(`computer-helper auth failed: ${res.error.code}`);
+  }
+
+  async call(method: string, params?: Record<string, unknown>): Promise<RPCResponse> {
+    if (method !== 'auth') {
+      try {
+        await this.authReady;
+      } catch (e) {
+        return { id: null, error: { code: 'auth_failed', message: (e as Error).message } };
+      }
+    }
+    return super.call(method, params);
   }
 
   protected send(payload: string): void {
