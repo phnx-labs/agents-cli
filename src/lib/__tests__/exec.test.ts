@@ -32,6 +32,12 @@ function opts(overrides: Partial<ExecOptions>): ExecOptions {
 
 const ALL_AGENTS = Object.keys(AGENT_COMMANDS) as AgentId[];
 
+// Mirror the source's home resolution (src/lib/state.ts: `process.env.HOME ?? os.homedir()`).
+// On Windows process.env.HOME is unset, so a bare `process.env.HOME!` is undefined and
+// `path.join(undefined, …)` throws — these assertions must resolve home the same way the
+// version-home builder does so the expected path matches on every OS.
+const HOME = process.env.HOME ?? os.homedir();
+
 describe('buildExecCommand', () => {
   // --- Mode flags per agent ---
 
@@ -729,7 +735,7 @@ describe('buildExecCommand', () => {
       // path.join (not a forward-slash template) so the separator matches the
       // source on every OS — buildExecEnv builds this with path.join too.
       expect(env.CLAUDE_CONFIG_DIR).toBe(
-        path.join(process.env.HOME!, '.agents', '.history', 'versions', 'claude', '2.1.98', 'home', '.claude')
+        path.join(HOME, '.agents', '.history', 'versions', 'claude', '2.1.98', 'home', '.claude')
       );
     });
 
@@ -750,7 +756,7 @@ describe('buildExecCommand', () => {
     it('injects COPILOT_HOME for pinned Copilot versions', () => {
       const env = buildExecEnv(opts({ agent: 'copilot', version: '1.0.56', mode: 'edit' }));
       expect(env.COPILOT_HOME).toBe(
-        path.join(process.env.HOME!, '.agents', '.history', 'versions', 'copilot', '1.0.56', 'home', '.copilot')
+        path.join(HOME, '.agents', '.history', 'versions', 'copilot', '1.0.56', 'home', '.copilot')
       );
     });
 
@@ -767,7 +773,7 @@ describe('buildExecCommand', () => {
     it('injects KIMI_CODE_HOME for pinned Kimi versions', () => {
       const env = buildExecEnv(opts({ agent: 'kimi', version: '0.11.0' }));
       expect(env.KIMI_CODE_HOME).toBe(
-        path.join(process.env.HOME!, '.agents', '.history', 'versions', 'kimi', '0.11.0', 'home', '.kimi-code')
+        path.join(HOME, '.agents', '.history', 'versions', 'kimi', '0.11.0', 'home', '.kimi-code')
       );
     });
 
