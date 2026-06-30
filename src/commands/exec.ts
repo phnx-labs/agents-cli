@@ -443,6 +443,7 @@ export function registerRunCommand(program: Command): void {
         { ALL_AGENT_IDS },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle },
+        { splitBundleRef, resolveSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
@@ -455,6 +456,7 @@ export function registerRunCommand(program: Command): void {
         import('../lib/agents.js'),
         import('../lib/profiles.js'),
         import('../lib/secrets/bundles.js'),
+        import('../lib/secrets/remote.js'),
         import('../lib/rotate.js'),
         import('../lib/versions.js'),
         import('../lib/plugins.js'),
@@ -909,17 +911,27 @@ export function registerRunCommand(program: Command): void {
       // ones. Any resolution failure (missing keychain item, blocked exec ref)
       // aborts before spawn so the agent never sees a partial env.
       let secretsEnv: Record<string, string> = {};
-      for (const bundleName of options.secrets) {
+      for (const bundleRef of options.secrets) {
         try {
-          const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, { caller: `agent ${agent}` });
-          const entries = describeBundle(bundle);
-          const counts: Record<string, number> = {};
-          for (const e of entries) {
-            counts[e.kind] = (counts[e.kind] || 0) + 1;
+          const { bundle: bundleName, host } = splitBundleRef(bundleRef);
+          if (host) {
+            // Remote bundle (`bundle@host`): resolve over SSH and inject
+            // ephemerally — values never touch this machine's keychain or disk.
+            const target = await resolveSshTarget(host);
+            const bundleEnv = await remoteResolveEnv(target, bundleName);
+            console.log(chalk.gray(`[secrets] Resolved ${bundleName}@${host}: ${Object.keys(bundleEnv).length} keys (remote, ephemeral)`));
+            secretsEnv = { ...secretsEnv, ...bundleEnv };
+          } else {
+            const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, { caller: `agent ${agent}` });
+            const entries = describeBundle(bundle);
+            const counts: Record<string, number> = {};
+            for (const e of entries) {
+              counts[e.kind] = (counts[e.kind] || 0) + 1;
+            }
+            const breakdown = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ');
+            console.log(chalk.gray(`[secrets] Resolved ${bundleName}: ${entries.length} keys (${breakdown})`));
+            secretsEnv = { ...secretsEnv, ...bundleEnv };
           }
-          const breakdown = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ');
-          console.log(chalk.gray(`[secrets] Resolved ${bundleName}: ${entries.length} keys (${breakdown})`));
-          secretsEnv = { ...secretsEnv, ...bundleEnv };
         } catch (err) {
           console.error(chalk.red((err as Error).message));
           process.exit(1);

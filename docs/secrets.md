@@ -72,6 +72,40 @@ store (`~/.agents/.cache/secrets/<item>.enc`, scrypt-derived key) keyed by
 Recommended custody for a remote release (laptop keeps the key, the remote Mac
 holds only ciphertext): see [Recipe 8](#8-headless-release-on-a-remote-mac).
 
+## Remote secrets (read & use from other hosts)
+
+Browse and *use* the bundles that live on another machine, over the same hardened
+SSH path that `secrets export --host` (the write direction) already uses. Hosts
+resolve through the `agents hosts` registry, an ssh-config alias, or `user@host`.
+
+```bash
+# Browse one host, or several at once (grouped by host)
+agents secrets list --host yosemite-s1
+agents secrets list --hosts yosemite-s0,yosemite-s1
+agents secrets view --host yosemite-s1 r2.backups --reveal --plaintext
+
+# Use a remote bundle ephemerally — values are injected, never stored locally
+agents secrets exec --host yosemite-s1 r2.backups -- ./deploy.sh
+agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suffix
+```
+
+- **`--host <target>`** (single) and **`--hosts <a,b,c>`** (comma list) compose on
+  `list` / `view`; **`bundle@host`** is the reference form for `run --secrets` and
+  the target for `exec --host`.
+- **Ephemeral.** Remote values cross over ssh stdout (encrypted in transit), are
+  parsed in memory, and injected into the run/command env — never written to this
+  machine's keychain or disk.
+- **The remote unlocks with its own credentials.** A file-backed remote bundle
+  reads headlessly via the remote's own `AGENTS_SECRETS_PASSPHRASE`; a keychain
+  bundle on a macOS remote will block on Touch ID under non-interactive SSH — use
+  a remote `file` bundle, an already-unlocked remote secrets-agent, or run
+  `view --reveal` from an interactive terminal (it forces an SSH TTY so the prompt
+  can surface). This machine's passphrase is never forwarded.
+
+Source: `src/lib/secrets/remote.ts` (transport + resolve), wired into `list` /
+`view` / `exec` in `src/commands/secrets.ts` and the `--secrets` loop in
+`src/commands/exec.ts`. The lossless wire format is `secrets export --format json`.
+
 ## Command Reference
 
 ### Bundle commands

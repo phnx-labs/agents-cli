@@ -10,7 +10,13 @@ import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import { spawnSync } from 'child_process';
-import { SSH_TARGET_RE, assertValidSshTarget } from '../lib/ssh-exec.js';
+import { SSH_TARGET_RE, assertValidSshTarget, type SshExecResult } from '../lib/ssh-exec.js';
+import {
+  parseHostsOption,
+  remoteResolveEnv,
+  remoteSecretsRaw,
+  resolveSshTarget,
+} from '../lib/secrets/remote.js';
 import {
   bundleBackend,
   bundleExists,
@@ -216,6 +222,42 @@ export function bundleEnvToDotenv(env: Record<string, string>): string {
     lines.push(`${k}="${v}"`);
   }
   return lines.join('\n') + '\n';
+}
+
+/**
+ * Browse `agents secrets <args>` on one or more remote hosts over SSH and print
+ * each host's stdout verbatim (lossless — no parsing). With >1 host the output
+ * is grouped under a `── <host> ──` header. `tty` forces an interactive ssh
+ * session (run sequentially) so a remote Touch-ID / passphrase prompt can
+ * surface (e.g. `view --reveal`); otherwise hosts are queried in parallel.
+ * Exits non-zero if any host fails.
+ */
+async function browseRemote(targets: string[], args: string[], tty: boolean): Promise<void> {
+  const multi = targets.length > 1;
+  let failures = 0;
+  const render = (name: string, res: SshExecResult) => {
+    if (multi) console.log(chalk.bold.cyan(`\n── ${name} ──`));
+    if (res.code === 0) {
+      if (res.stdout) process.stdout.write(res.stdout.endsWith('\n') ? res.stdout : `${res.stdout}\n`);
+      if (res.stderr.trim()) process.stderr.write(chalk.gray(res.stderr));
+    } else {
+      failures++;
+      const msg = (res.stderr || res.stdout || '').trim();
+      const why = res.timedOut ? 'timed out' : res.code === null ? 'ssh failed' : `exit ${res.code}`;
+      console.error(chalk.red(`${name}: ${why}${msg ? `: ${msg}` : ''}`));
+    }
+  };
+  if (tty) {
+    for (const t of targets) {
+      const target = await resolveSshTarget(t);
+      render(t, remoteSecretsRaw(target, args, { tty: true }));
+    }
+  } else {
+    const resolved = await Promise.all(targets.map((t) => resolveSshTarget(t)));
+    const results = resolved.map((target) => remoteSecretsRaw(target, args));
+    targets.forEach((t, i) => render(t, results[i]));
+  }
+  if (failures > 0) process.exit(1);
 }
 
 /** Strip ANSI escape sequences so padding can be computed on visible width. */
@@ -502,8 +544,15 @@ export function registerSecretsCommands(program: Command): void {
   cmd
     .command('list')
     .alias('ls')
-    .description('List configured secrets bundles')
-    .action(async () => {
+    .description('List configured secrets bundles (use --host/--hosts to list bundles on other machines over SSH)')
+    .option('--host <target>', 'List bundles on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
+    .option('--hosts <list>', 'Comma-separated hosts to list in one shot, e.g. yosemite-s0,yosemite-s1')
+    .action(async (opts: { host?: string; hosts?: string }) => {
+      const targets = parseHostsOption(opts);
+      if (targets.length > 0) {
+        await browseRemote(targets, ['list'], false);
+        return;
+      }
       const bundles = listBundles();
       if (bundles.length === 0) {
         console.log(chalk.gray('No secrets bundles configured.'));
@@ -534,8 +583,26 @@ export function registerSecretsCommands(program: Command): void {
     .description('Show a bundle. Keychain values are masked by default — pass --reveal to see them.')
     .option('--reveal', 'Print keychain-backed values in the clear (TTY only unless --plaintext)')
     .option('--plaintext', 'Allow --reveal in non-interactive shells (use with care)')
-    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean }) => {
+    .option('--host <target>', 'Show a bundle on a remote host over SSH (enrolled `agents hosts` name, ssh-config alias, or user@host)')
+    .option('--hosts <list>', 'Comma-separated hosts to show in one shot, e.g. yosemite-s0,yosemite-s1')
+    .action(async (name: string | undefined, opts: { reveal?: boolean; plaintext?: boolean; host?: string; hosts?: string }) => {
       try {
+        const targets = parseHostsOption(opts);
+        if (targets.length > 0) {
+          if (!name) {
+            console.error(chalk.red('A bundle name is required when viewing a remote host (interactive pick needs a local terminal).'));
+            process.exit(1);
+          }
+          const args = ['view', name];
+          if (opts.reveal) args.push('--reveal');
+          if (opts.plaintext) args.push('--plaintext');
+          // With --reveal, force a TTY so the remote keychain prompt can surface
+          // (and the remote's "--reveal in a non-TTY needs --plaintext" gate is
+          // satisfied) — only when this side is itself interactive.
+          const tty = Boolean(opts.reveal) && Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+          await browseRemote(targets, args, tty);
+          return;
+        }
         const resolvedName = name ?? (await pickBundleName('view'));
         const bundle = readBundle(resolvedName);
         const entries = describeBundle(bundle);
@@ -1146,6 +1213,7 @@ Examples:
     .option('--host <target...>', 'Push the bundle over SSH to this target (host alias or user@host); repeatable for multiple machines')
     .option('--remote-backend <backend>', 'Backend for the bundle on the remote (with --host): keychain (default) or file (passphrase-encrypted, headless-readable). file forwards AGENTS_SECRETS_PASSPHRASE over stdin.', 'keychain')
     .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --host)')
+    .option('--format <shell|json>', 'Output for --plaintext export: shell (default) or json (lossless, machine-readable; used by remote resolve)', 'shell')
     .action(async (bundleName: string | undefined, opts: {
       plaintext?: boolean;
       to1password?: boolean;
@@ -1153,6 +1221,7 @@ Examples:
       host?: string[];
       remoteBackend?: string;
       force?: boolean;
+      format?: string;
     }) => {
       try {
         const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
@@ -1261,11 +1330,21 @@ Examples:
           return;
         }
 
+        if (opts.format && opts.format !== 'shell' && opts.format !== 'json') {
+          console.error(chalk.red(`Invalid --format ${JSON.stringify(opts.format)}. Expected 'shell' or 'json'.`));
+          process.exit(1);
+        }
         if (!opts.plaintext) {
           console.error(chalk.red('export prints secrets in the clear and requires --plaintext (works for TTY and pipes alike).'));
           process.exit(1);
         }
         const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `export to shell` });
+        if (opts.format === 'json') {
+          // Lossless, machine-readable form consumed by `remoteResolveEnv` over
+          // SSH. Single object of KEY -> value; values verbatim (newlines, quotes).
+          process.stdout.write(JSON.stringify(env));
+          return;
+        }
         const prefix = bundleToEnvPrefix(resolvedBundleName);
         for (const [k, v] of Object.entries(env)) {
           const exportKey = isReservedEnvName(k) ? `${prefix}_${k}` : k;
@@ -1282,17 +1361,23 @@ Examples:
 
   cmd
     .command('exec <bundle> [command...]')
-    .description('Run a command with the bundle\'s secrets injected into the environment')
+    .description('Run a command with the bundle\'s secrets injected into the environment (use --host to resolve the bundle from a remote machine, ephemerally)')
+    .option('--host <target>', 'Resolve <bundle> on a remote host over SSH and inject it (ephemeral — never stored on this machine)')
     .allowUnknownOption()
-    .action(async (bundleName: string, commandParts: string[]) => {
+    .action(async (bundleName: string, commandParts: string[], execOpts: { host?: string }) => {
       try {
         if (commandParts.length === 0) {
           console.error(chalk.red('Usage: agents secrets exec <bundle> -- <command...>'));
           process.exit(1);
         }
-        const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
         const [cmd, ...args] = commandParts;
-        const { env: secretEnv } = readAndResolveBundleEnv(bundleName, { caller: `command ${cmd}` });
+        let secretEnv: Record<string, string>;
+        if (execOpts.host) {
+          secretEnv = await remoteResolveEnv(await resolveSshTarget(execOpts.host), bundleName);
+        } else {
+          const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
+          secretEnv = readAndResolveBundleEnv(bundleName, { caller: `command ${cmd}` }).env;
+        }
         const { spawn } = await import('child_process');
         const proc = spawn(cmd, args, {
           stdio: 'inherit',
