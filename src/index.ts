@@ -116,6 +116,7 @@ import {
   loadBrowser,
   loadComputer,
   loadHosts,
+  loadSsh,
   loadPull,
   loadPush,
   loadRepo,
@@ -909,6 +910,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadBrowser);
   await reg(loadComputer);
   await reg(loadHosts);
+  await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
   registerUpgradeCommand(program);

@@ -398,6 +398,9 @@ export function getTeamsAgentsDir(): string { return TEAMS_AGENTS_DIR; }
 /** Path to the team registry — list of named teams with timestamps. Durable runtime, per-machine. */
 export function getTeamsRegistryPath(): string { return path.join(HISTORY_DIR, 'teams', 'registry.json'); }
 
+/** Path to the device registry — SSH device profiles with platform/auth metadata. Durable runtime, per-machine (host list + addresses are NOT pulled by `agents repo push`). */
+export function getDevicesRegistryPath(): string { return path.join(HISTORY_DIR, 'devices', 'registry.json'); }
+
 /** Path to cloud dispatch cache (~/.agents/.cache/cloud/). */
 export function getCloudDir(): string { return CLOUD_DIR; }
 

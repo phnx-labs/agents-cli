@@ -74,6 +74,7 @@ export const loadTmux: ModuleLoader = async () => (await import('../../commands/
 export const loadBrowser: ModuleLoader = async () => (await import('../../commands/browser.js')).registerBrowserCommand;
 export const loadComputer: ModuleLoader = async () => (await import('../../commands/computer.js')).registerComputerCommand;
 export const loadHosts: ModuleLoader = async () => (await import('../../commands/hosts.js')).registerHostsCommand;
+export const loadSsh: ModuleLoader = async () => (await import('../../commands/ssh.js')).registerSshCommands;
 export const loadPull: ModuleLoader = async () => (await import('../../commands/pull.js')).registerPullCommand;
 export const loadPush: ModuleLoader = async () => (await import('../../commands/push.js')).registerPushCommand;
 export const loadRepo: ModuleLoader = async () => (await import('../../commands/repo.js')).registerRepoCommands;
@@ -158,6 +159,8 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   browser: [loadBrowser],
   computer: [loadComputer],
   hosts: [loadHosts],
+  ssh: [loadSsh],
+  devices: [loadSsh],
   pull: [loadPull],
   push: [loadPush],
   repo: [loadRepo],
