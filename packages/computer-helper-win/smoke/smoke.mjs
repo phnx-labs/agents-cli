@@ -144,8 +144,17 @@ async function main() {
     ok(`set_focus ${elId}`);
     await c.call('type_text', { text: TYPED });
     ok(`type_text "${TYPED}"`);
-    const got = await c.call('get_text', { pid, element_id: elId });
-    if (!String(got.text ?? '').includes(TYPED)) fail(`get_text roundtrip mismatch: got ${JSON.stringify(got.text)}`);
+    // SendInput delivers keystrokes to the target's message loop
+    // asynchronously, so poll get_text until the document settles.
+    let lastText = '';
+    let matched = false;
+    for (let i = 0; i < 30; i++) {
+      const got = await c.call('get_text', { pid, element_id: elId });
+      lastText = String(got.text ?? '');
+      if (lastText.includes(TYPED)) { matched = true; break; }
+      await sleep(150);
+    }
+    if (!matched) fail(`get_text roundtrip mismatch after retries: got ${JSON.stringify(lastText)}`);
     ok(`get_text roundtrip matched`);
 
     // 6. screenshot
