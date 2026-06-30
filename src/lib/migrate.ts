@@ -56,7 +56,7 @@ export function foldLegacySystemRepo(): void {
   if (!fs.existsSync(SYSTEM_DIR)) {
     try {
       fs.renameSync(LEGACY_SYSTEM_DIR, SYSTEM_DIR);
-      try { fs.symlinkSync(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
+      try { createLink(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
       console.error('Folded ~/.agents-system/ into ~/.agents/.system/ (left back-compat symlink)');
       return;
     } catch {
@@ -67,7 +67,7 @@ export function foldLegacySystemRepo(): void {
   try {
     copyDirSkipExisting(LEGACY_SYSTEM_DIR, SYSTEM_DIR);
     fs.rmSync(LEGACY_SYSTEM_DIR, { recursive: true, force: true });
-    try { fs.symlinkSync(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
+    try { createLink(SYSTEM_DIR, LEGACY_SYSTEM_DIR); } catch { /* best-effort */ }
     console.error('Merged ~/.agents-system/ into ~/.agents/.system/ (left back-compat symlink)');
   } catch { /* best-effort */ }
 }
@@ -634,12 +634,12 @@ function repairAgentConfigSymlinks(): void {
       if (resolved === path.resolve(userTarget)) continue; // already correct
       try {
         fs.unlinkSync(symlinkPath);
-        fs.symlinkSync(userTarget, symlinkPath);
+        createLink(userTarget, symlinkPath);
         repaired++;
       } catch { /* best-effort */ }
     } else if (!stat) {
       try {
-        fs.symlinkSync(userTarget, symlinkPath);
+        createLink(userTarget, symlinkPath);
         repaired++;
       } catch { /* best-effort */ }
     }
