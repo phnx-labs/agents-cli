@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, mkdirSync, rmSync, readFileSync, lstatSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, relative } from 'path';
 import { tmpdir, homedir } from 'os';
 
 const { TEST_REAL_HOME } = vi.hoisted(() => {
   const { tmpdir } = require('node:os');
   const { join } = require('node:path');
-  return { TEST_REAL_HOME: join(tmpdir(), 'agents-cli-sandbox-real-home') };
+  const { realpathSync } = require('node:fs');
+  // Canonicalize the tmp base so the mocked homedir() matches what
+  // realpathSync() returns inside symlinkAllowedDirs. On Windows tmpdir() is an
+  // 8.3 short name (RUNNER~1 vs runneradmin); on macOS /var symlinks to
+  // /private/var. Without this the source's HOME-containment guard sees the two
+  // forms as different and skips the link.
+  return { TEST_REAL_HOME: join(realpathSync(tmpdir()), 'agents-cli-sandbox-real-home') };
 });
 
 // vi.importActual / importOriginal are vitest-only; pull the real `os` via
@@ -323,10 +329,12 @@ describe('symlinkAllowedDirs', () => {
   it('creates symlink for HOME-relative dirs', () => {
     symlinkAllowedDirs(overlayHome, [realDir]);
 
-    const relative = realDir.replace(homedir() + '/', '');
-    const expectedLink = join(overlayHome, relative);
+    const expectedLink = join(overlayHome, relative(homedir(), realDir));
     expect(existsSync(expectedLink)).toBe(true);
-    expect(lstatSync(expectedLink).isSymbolicLink()).toBe(true);
+    // Windows links directories as junctions (no elevation needed); junctions
+    // report as directories, not symlinks. POSIX uses a real symlink.
+    const st = lstatSync(expectedLink);
+    expect(process.platform === 'win32' ? st.isDirectory() : st.isSymbolicLink()).toBe(true);
   });
 
   it('skips dirs outside HOME', () => {
@@ -342,8 +350,7 @@ describe('symlinkAllowedDirs', () => {
 
     symlinkAllowedDirs(overlayHome, [nestedDir]);
 
-    const relative = nestedDir.replace(homedir() + '/', '');
-    const expectedLink = join(overlayHome, relative);
+    const expectedLink = join(overlayHome, relative(homedir(), nestedDir));
     expect(existsSync(expectedLink)).toBe(true);
   });
 });

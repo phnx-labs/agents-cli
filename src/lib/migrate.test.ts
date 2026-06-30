@@ -238,8 +238,13 @@ describe('repairSelfReferentialBinShims', () => {
 
     withPath([realBinDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
 
-    // After repair it resolves to the real binary, not the shim.
-    expect(fs.realpathSync(binLink)).toBe(fs.realpathSync(realBin));
+    // After repair the loop is broken and the .bin entry yields the real binary.
+    // On Windows without the symlink privilege createLink copies (a copy's
+    // realpath is itself, not the target), so assert the functional contract —
+    // same bytes as the real binary, and no longer resolving back into the
+    // shims dir — rather than symlink-target identity.
+    expect(fs.readFileSync(binLink)).toEqual(fs.readFileSync(realBin));
+    expect(fs.realpathSync(binLink).startsWith(fs.realpathSync(shimsDir) + path.sep)).toBe(false);
   });
 
   it('removes the self-referential symlink when no real binary is on PATH', () => {
