@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseSshConfigHosts, parseKnownHosts } from './ssh-config.js';
+import { parseSshConfigHosts, parseKnownHosts, sshResolve } from './ssh-config.js';
 
 describe('parseSshConfigHosts', () => {
   it('extracts concrete Host names and skips wildcard/negated patterns', () => {
@@ -38,5 +38,13 @@ describe('parseKnownHosts', () => {
       '# comment',
     ].join('\n');
     expect(parseKnownHosts(kh)).toEqual(['yosemite-s1', 'mac-mini.local', 'gh.example.com', '140.82.1.2']);
+  });
+});
+
+describe('sshResolve target-injection guard', () => {
+  it('refuses a dash-led name instead of passing it to `ssh -G` as a flag', () => {
+    // Must never spawn `ssh -G -oProxyCommand=…` — the guard short-circuits to undefined.
+    expect(sshResolve('-oProxyCommand=evil')).toBeUndefined();
+    expect(sshResolve('a;rm -rf /')).toBeUndefined();
   });
 });

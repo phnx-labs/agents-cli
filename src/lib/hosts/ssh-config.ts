@@ -10,6 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { assertValidSshTarget } from '../ssh-exec.js';
 
 const SSH_DIR = path.join(os.homedir(), '.ssh');
 const SSH_CONFIG = path.join(SSH_DIR, 'config');
@@ -130,6 +131,14 @@ export interface SshGResult {
  * to decide whether a name is actually configured.
  */
 export function sshResolve(name: string): SshGResult | undefined {
+  // Same target-injection guard as sshExec: a name starting with `-` (or
+  // carrying shell metacharacters) must never reach `ssh` as a bare argv where
+  // it could be parsed as a flag (e.g. `-oProxyCommand=…`).
+  try {
+    assertValidSshTarget(name);
+  } catch {
+    return undefined;
+  }
   const res = spawnSync('ssh', ['-G', name], { encoding: 'utf-8', timeout: 5000 });
   if (res.status !== 0 || !res.stdout) return undefined;
   const out: SshGResult = {};

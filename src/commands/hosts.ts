@@ -17,7 +17,6 @@ import { listSshConfigHosts, listKnownHosts, isSshConfigHost } from '../lib/host
 import {
   probeHost,
   remoteAgentsVersion,
-  remoteAgentInstalled,
   bootstrapAgentsCli,
   localCliVersion,
 } from '../lib/hosts/ready.js';
