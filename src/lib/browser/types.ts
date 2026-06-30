@@ -13,7 +13,8 @@ export interface EndpointPreset {
    *
    * For an SSH target whose remote is Windows, append `&os=windows` (e.g.
    * `ssh://user@host?port=9222&os=windows`). The driver then speaks the
-   * cmd.exe dialect (launch via `start /B msedge`, teardown via PowerShell)
+   * Windows dialect (launch via WMI Win32_Process.Create so the browser
+   * survives the ssh session, teardown via Get-NetTCPConnection/Stop-Process)
    * instead of the POSIX default. The query param is the single source of
    * truth for remote-OS selection.
    */
