@@ -69,7 +69,6 @@ export interface DeviceProfile {
   address: DeviceAddress;
   auth: DeviceAuth;
   tailscale?: DeviceTailscale;
-  tags?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -197,7 +196,6 @@ export interface DeviceInput {
   address?: DeviceAddress;
   auth?: DeviceAuth;
   tailscale?: DeviceTailscale;
-  tags?: string[];
 }
 
 /**
@@ -221,7 +219,6 @@ export async function upsertDevice(name: string, input: DeviceInput): Promise<De
       address: input.address ?? prev?.address ?? { via: 'manual' },
       auth: input.auth ?? prev?.auth ?? { method: 'key' },
       tailscale: input.tailscale ?? prev?.tailscale,
-      tags: input.tags ?? prev?.tags,
       createdAt: prev?.createdAt ?? now,
       updatedAt: now,
     };
