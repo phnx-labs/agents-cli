@@ -1,0 +1,47 @@
+name: computer-helper-win
+
+# Builds and smoke-tests the Windows computer-use daemon on a real Windows
+# runner. Self-contained (does not touch the main CI matrix) so it can land on
+# the win-computer-use branch without rebasing onto main's CI changes.
+#
+# Non-blocking for now (continue-on-error) until the verb set reaches parity
+# with the macOS helper — promote to a required check once green and stable.
+
+on:
+  push:
+    branches: ['win-computer-use', 'main']
+    paths:
+      - 'packages/computer-helper-win/**'
+      - '.github/workflows/computer-helper-win.yml'
+  pull_request:
+    paths:
+      - 'packages/computer-helper-win/**'
+      - '.github/workflows/computer-helper-win.yml'
+
+jobs:
+  build-and-smoke:
+    runs-on: windows-latest
+    continue-on-error: true
+    permissions: {}
+    defaults:
+      run:
+        working-directory: packages/computer-helper-win
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build (native win-x64)
+        run: dotnet build -c Release
+
+      - name: Smoke test (UIAutomation roundtrip + screenshot)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Path bin/Release -Filter computer-helper-win.exe | Select-Object -First 1
+          if (-not $exe) { throw "built exe not found under bin/Release" }
+          Write-Host "exe: $($exe.FullName)"
+          node smoke/smoke.mjs --exe "$($exe.FullName)" --port 8771
