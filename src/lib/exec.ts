@@ -138,10 +138,10 @@ export interface ExecOptions {
   sessionId?: string;
   /**
    * Resume the conversation named by `sessionId` using the agent's NATIVE resume
-   * form (claude `--resume`, codex `resume`, opencode `--session`) instead of the
-   * default `--session-id` create. Only set for agents where `nativeResume` is
-   * true; other agents resume via a `/continue <id>` first message (Tier 2),
-   * which needs no flag and leaves this unset.
+   * form (claude `--resume`, codex `resume`) instead of the default `--session-id`
+   * create. Only set for agents where `nativeResume` returns true; other agents
+   * resume via a `/continue <id>` first message (Tier 2), which needs no flag and
+   * leaves this unset.
    */
   resume?: boolean;
   verbose?: boolean;
@@ -334,9 +334,9 @@ export interface AgentCommandTemplate {
    * How this agent natively resumes a prior conversation. Presence here is the
    * single source of truth for `nativeResume(agent)` — agents without it fall
    * back to the universal `/continue <id>` replay (Tier 2). Two shapes:
-   *   { flag }       — append `<flag> <id>` (claude `--resume`, opencode `--session`)
+   *   { flag }       — append `<flag> <id>` (e.g. claude `--resume <id>`)
    *   { subcommand } — replace the headless base subcommand with `<subcommand> <id>`
-   *                    (codex: `codex exec` -> `codex resume <id>`)
+   *                    (codex: `codex exec` -> `codex exec resume <id>`)
    */
   resume?: { flag: string } | { subcommand: string };
 }
