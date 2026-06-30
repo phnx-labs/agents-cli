@@ -61,6 +61,28 @@ post_install: |
     expect(parsed.name).toBe('glab');
   });
 
+  it('tolerates a double-quoted Windows-style path in a display-only field', () => {
+    // A double-quoted YAML string containing "C:\Users\..." trips the strict parser
+    // because \U is not a valid YAML escape sequence. parseCliManifest uses
+    // strict:false so the manifest loads and falls through to the field validators.
+    // description is display-only and not passed to any child process, so the
+    // recovered (possibly mangled) value is acceptable — the manifest must not throw.
+    const raw = 'name: gh\ndescription: "Binary at C:\\Users\\foo"\ninstall:\n  - brew: gh\n';
+    const parsed = parseCliManifest(raw, { name: 'gh', source: 'user', path: '/tmp/g.yaml' });
+    expect(parsed.name).toBe('gh');
+    expect(parsed.description).toBeDefined();
+  });
+
+  it('rejects a Windows-style path in check.cmd even after tolerant parse', () => {
+    // Even with strict:false the security validator runs on check.cmd.
+    // Backslash and colon are not in SAFE_CHECK_TOKEN, so the path is rejected.
+    const raw =
+      'name: gh\ncheck:\n  kind: version\n  cmd: "C:\\\\bin\\\\gh"\ninstall:\n  - brew: gh\n';
+    expect(() =>
+      parseCliManifest(raw, { name: 'gh', source: 'user', path: '/tmp/g.yaml' }),
+    ).toThrow(/unsafe token/);
+  });
+
   it('rejects an empty install list', () => {
     expect(() =>
       parseCliManifest('name: x\ninstall: []\n', { name: 'x', source: 'user', path: '/x' }),
