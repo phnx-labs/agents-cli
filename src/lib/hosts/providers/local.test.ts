@@ -8,6 +8,8 @@ import type { LocalHostProvider as LHP } from './local.js';
 // dir and re-importing the module graph fresh for each test (vi.resetModules).
 let home: string;
 let provider: LHP;
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 
 async function freshProvider(): Promise<LHP> {
   vi.resetModules();
@@ -18,12 +20,19 @@ async function freshProvider(): Promise<LHP> {
 beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosts-test-'));
   process.env.HOME = home;
+  // ssh-config reader resolves via os.homedir(), which reads USERPROFILE (not
+  // HOME) on Windows — set both so the temp home takes effect cross-platform.
+  process.env.USERPROFILE = home;
   fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
   provider = await freshProvider();
 });
 
 afterEach(() => {
   fs.rmSync(home, { recursive: true, force: true });
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = originalUserProfile;
 });
 
 describe('LocalHostProvider CRUD', () => {

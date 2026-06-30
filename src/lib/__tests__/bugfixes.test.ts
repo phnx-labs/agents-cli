@@ -11,13 +11,18 @@ describe('Bug Fix: Path traversal in sandbox.ts', () => {
   let allowedDir: string;
   let fakeHome: string;
   let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
 
   beforeEach(() => {
     // Point HOME at an isolated tmpdir so the test never touches the real home.
-    // sandbox.ts resolves the user's home via os.homedir(), which consults $HOME.
+    // sandbox.ts resolves the user's home via os.homedir(), which consults $HOME
+    // on POSIX but USERPROFILE on Windows — set both so the temp home takes
+    // effect cross-platform.
     originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
     fakeHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-fakehome-')));
     process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
 
     overlayHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-test-'));
     fs.mkdirSync(path.join(fakeHome, '.agents-system'), { recursive: true });
@@ -27,6 +32,8 @@ describe('Bug Fix: Path traversal in sandbox.ts', () => {
   afterEach(() => {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;
+    if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = originalUserProfile;
     fs.rmSync(overlayHome, { recursive: true, force: true });
     fs.rmSync(fakeHome, { recursive: true, force: true });
   });

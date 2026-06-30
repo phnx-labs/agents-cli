@@ -155,7 +155,11 @@ describe('installPackageIntoPrefix', () => {
 
     await installPackageIntoPrefix(tarball, prefix);
 
-    const installedRoot = path.join(prefix, 'lib', 'node_modules', '@agents-cli-test', 'dummy');
+    // npm prefix layout is platform-divergent: POSIX nests under lib/, Windows
+    // installs node_modules directly under the prefix. Source handles both.
+    const installedRoot = process.platform === 'win32'
+      ? path.join(prefix, 'node_modules', '@agents-cli-test', 'dummy')
+      : path.join(prefix, 'lib', 'node_modules', '@agents-cli-test', 'dummy');
     expect(readInstalledVersion(installedRoot)).toBe('2.0.0');
     expect(() => verifyInstalledVersion(installedRoot, '2.0.0')).not.toThrow();
     // The exact upgrade-flow composition: the prefix derived from the

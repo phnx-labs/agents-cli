@@ -166,13 +166,16 @@ describe('runLaunchSync — workspace resource mirror', () => {
   it('does not clobber a dangling user symlink at the dest path', () => {
     writeFile(path.join(PROJECT_DIR, '.agents', 'subagents', 'foo', 'AGENT.md'), '---\nname: foo\ndescription: from project\n---\n\nGenerated body.');
     fs.mkdirSync(path.join(PROJECT_DIR, '.claude', 'agents'), { recursive: true });
-    fs.symlinkSync('/tmp/does-not-exist-pls-keep-this-dangling', path.join(PROJECT_DIR, '.claude', 'agents', 'foo.md'));
+    const danglingTarget = path.join(os.tmpdir(), 'does-not-exist-pls-keep-this-dangling');
+    fs.symlinkSync(danglingTarget, path.join(PROJECT_DIR, '.claude', 'agents', 'foo.md'));
 
     const result = runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
     expect(result.workspaceSkipped).toContain(path.join('.claude', 'agents', 'foo.md'));
     // The dangling symlink must survive — it's in-progress user state.
-    expect(fs.readlinkSync(path.join(PROJECT_DIR, '.claude', 'agents', 'foo.md'))).toBe('/tmp/does-not-exist-pls-keep-this-dangling');
+    const dest = path.join(PROJECT_DIR, '.claude', 'agents', 'foo.md');
+    expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true);  // still a symlink, not clobbered
+    expect(fs.existsSync(dest)).toBe(false);                 // still dangling (target absent)
   });
 
   it('is a no-op for non-claude agents (v1 scope)', () => {

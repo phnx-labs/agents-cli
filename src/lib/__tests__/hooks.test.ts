@@ -362,8 +362,13 @@ describe('registerHooksToSettings - Codex', () => {
     const key = `${hooksJsonPath}:pre_tool_use:0:0`;
     expect(state[key]).toBeDefined();
     // The persisted hash must equal what Codex recomputes for this exact hook.
+    // The registrar hashes the portable command it wrote into hooks.json, so
+    // re-hash that exact string (not the raw native scriptPath, which diverges
+    // on Windows where tmpdir lives under home and folds to a ~/-relative path).
+    const hooksJson = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf-8'));
+    const registeredCommand = hooksJson.hooks.PreToolUse[0].hooks[0].command;
     expect(state[key].trusted_hash).toBe(
-      computeCodexHookTrustHash('pre_tool_use', scriptPath, 5, 'Bash')
+      computeCodexHookTrustHash('pre_tool_use', registeredCommand, 5, 'Bash')
     );
     // Default-enabled: we must NOT write enabled = true (absence == enabled).
     expect(state[key].enabled).toBeUndefined();
@@ -400,8 +405,12 @@ describe('registerHooksToSettings - Codex', () => {
       { trusted_hash?: string; enabled?: boolean }
     >;
     expect(afterState[key].enabled).toBe(false);
+    // Hash the portable command the registrar wrote, not the native scriptPath
+    // (separator/tilde divergence on Windows — see the PreToolUse test above).
+    const hooksJson = JSON.parse(fs.readFileSync(hooksJsonPath, 'utf-8'));
+    const registeredCommand = hooksJson.hooks.UserPromptSubmit[0].hooks[0].command;
     expect(afterState[key].trusted_hash).toBe(
-      computeCodexHookTrustHash('user_prompt_submit', scriptPath, 600, undefined)
+      computeCodexHookTrustHash('user_prompt_submit', registeredCommand, 600, undefined)
     );
   });
 

@@ -82,7 +82,7 @@ describe('runMigration', () => {
     const sysOverlap = path.join(systemDir, 'versions', 'claude', '2.0.50', 'home', '.claude');
     fs.mkdirSync(sysOverlap, { recursive: true });
     fs.writeFileSync(path.join(sysOverlap, 'history.jsonl'), 'legacy-history');
-    fs.writeFileSync(path.join(sysOverlap, 'skills', 'mq', 'SKILL.md').replace('skills/mq/SKILL.md', 'skills-stale.md'), 'stale');
+    fs.writeFileSync(path.join(sysOverlap, 'skills-stale.md'), 'stale');
 
     // Pre-create the symlink that the migrator should re-point. Use the legacy system target.
     fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: 2.0.50\n');

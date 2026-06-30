@@ -3,7 +3,11 @@ import { existsSync, mkdirSync, rmSync, readFileSync, lstatSync, writeFileSync }
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 
-const TEST_REAL_HOME = join(tmpdir(), 'agents-cli-sandbox-real-home');
+const { TEST_REAL_HOME } = vi.hoisted(() => {
+  const { tmpdir } = require('node:os');
+  const { join } = require('node:path');
+  return { TEST_REAL_HOME: join(tmpdir(), 'agents-cli-sandbox-real-home') };
+});
 
 // vi.importActual / importOriginal are vitest-only; pull the real `os` via
 // `node:os` so this mock works under Bun's native test runner too.

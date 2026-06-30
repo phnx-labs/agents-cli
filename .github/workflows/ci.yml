@@ -18,11 +18,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [22, 24]
-    # Cross-platform gating is being brought up incrementally (Linux + macOS +
-    # Windows is the target). Native Windows still has known gaps (#TODO: link),
-    # so Windows legs may fail without blocking the branch until those land.
-    # Promote Windows to a required check once it's green.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    # All three OSes gate merges. Windows is now green and required alongside
+    # Linux and macOS — no leg is allowed to fail (was: continue-on-error on
+    # windows-latest while the native-Windows gaps were brought up).
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

@@ -33,6 +33,21 @@ import { SEEDED_REGISTRIES } from './types.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 
+/**
+ * Compare two filesystem paths for identity, resolving symlinks and (on
+ * Windows) 8.3 short-name vs long-name divergence via the OS realpath.
+ * Falls back to a case-folded normalize when a path doesn't exist on disk.
+ */
+function isSamePath(a: string, b: string): boolean {
+  try {
+    return fs.realpathSync.native(a) === fs.realpathSync.native(b);
+  } catch {
+    const norm = (p: string) =>
+      process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p);
+    return norm(a) === norm(b);
+  }
+}
+
 // ─── Root directories ─────────────────────────────────────────────────────────
 
 /** User repo — user-authored resources and agents.yaml. Always-on. */
@@ -184,7 +199,7 @@ export function getProjectAgentsDir(startPath: string = process.cwd()): string |
   while (true) {
     const agentsPath = path.join(dir, '.agents');
     if (fs.existsSync(agentsPath) && fs.statSync(agentsPath).isDirectory()) {
-      if (agentsPath !== SYSTEM_AGENTS_DIR && agentsPath !== USER_AGENTS_DIR) {
+      if (!isSamePath(agentsPath, SYSTEM_AGENTS_DIR) && !isSamePath(agentsPath, USER_AGENTS_DIR)) {
         return agentsPath;
       }
     }
@@ -311,6 +326,9 @@ export function getUserPromptcutsPath(): string { return USER_PROMPTCUTS_FILE; }
 //
 // Top-level dirs hold definitions/configs only; runtime data lives under
 // .history/ (durable) or .cache/ (regenerable). See file header.
+
+/** Canonical home anchor (HOME env override or os.homedir()). */
+export function getHomeDir(): string { return HOME; }
 
 /** Bucket root for durable runtime data (~/.agents/.history/). */
 export function getHistoryDir(): string { return HISTORY_DIR; }

@@ -206,8 +206,12 @@ describe('index file safety', () => {
     // Confirm Keychain has the secret (would throw if missing)
     expect(showCard(card.id).pan).toBe(VISA_PAN);
 
-    // Now simulate index write failure: point at a directory we cannot write
-    _setIndexPathForTest('/this/path/does/not/exist/cards.json');
+    // Now simulate index write failure: put a regular file where the index
+    // dir needs to be, so mkdir(recursive) throws ENOTDIR/EEXIST on every OS.
+    // (A leading-`/` path is drive-relative on Windows and mkdir succeeds there.)
+    const blocker = path.join(tmpDir, 'blocker-file');
+    fs.writeFileSync(blocker, 'not a directory');
+    _setIndexPathForTest(path.join(blocker, 'cards.json'));
     expect(() => addCard({
       nickname: 'Will Fail', pan: MC_PAN, cvc: '321', cardholder: 'X', exp_month: '1', exp_year: '2027',
     })).toThrow();

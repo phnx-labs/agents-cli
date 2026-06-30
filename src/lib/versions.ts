@@ -24,7 +24,7 @@ import chalk from 'chalk';
 import * as TOML from 'smol-toml';
 import { checkbox, select, confirm } from '@inquirer/prompts';
 import type { AgentId, VersionResources } from './types.js';
-import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset } from './state.js';
+import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from './state.js';
 import { defaultPatterns, expandPatterns } from './resource-patterns.js';
 import { resolveResource, listResources } from './resources.js';
 import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath } from './agents.js';
@@ -900,7 +900,7 @@ export function getBinaryPath(agent: AgentId, version: string): string {
     // per-version — config isolation rides the ~/.factory symlink switch, not a
     // separate binary per version. Mirror the shim's `droid` branch so
     // isVersionInstalled/`agents view` agree with what actually executes.
-    return path.join(os.homedir(), '.local', 'bin', 'droid');
+    return path.join(getHomeDir(), '.local', 'bin', 'droid');
   }
   const versionDir = getVersionDir(agent, version);
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);
@@ -1423,7 +1423,7 @@ export function removeVersion(agent: AgentId, version: string): boolean {
   // Clean up dangling config symlink if it pointed to the removed version
   const symlinkVersion = getConfigSymlinkVersion(agent);
   if (symlinkVersion === version) {
-    const configPath = path.join(os.homedir(), agentConfigDirName(agent));
+    const configPath = path.join(getHomeDir(), agentConfigDirName(agent));
     try {
       fs.unlinkSync(configPath);
     } catch {
@@ -2250,7 +2250,7 @@ export function getEffectiveHome(agentId: AgentId): string {
   if (resolved && isVersionInstalled(agentId, resolved)) {
     return getVersionHomePath(agentId, resolved);
   }
-  return os.homedir();
+  return getHomeDir();
 }
 
 /** Result of resolving agent/version targets from CLI input or interactive selection. */

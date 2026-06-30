@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
+import * as path from 'path';
 import {
   buildForwardedArgs,
   buildRemoteCommand,
@@ -184,7 +185,7 @@ describe('remoteCachePath', () => {
     // user@host is a valid ssh target; the path segment must not contain a
     // separator or other unsafe char that would escape the cache dir.
     const p = remoteCachePath('deploy@staging.example.com', ['sessions']);
-    const file = p.split('/').pop()!;
+    const file = path.basename(p);
     expect(file.startsWith('deploy@staging.example.com__')).toBe(true);
     expect(file.endsWith('.txt')).toBe(true);
   });
