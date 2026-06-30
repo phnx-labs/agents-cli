@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { buildFtsQuery } from '../db.js';
-import { scanClaudeSession, parseCodexThreadNameIndex } from '../discover.js';
+import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend } from '../discover.js';
 
 describe('buildFtsQuery', () => {
   it('returns empty expression for whitespace-only input', () => {
@@ -167,5 +167,40 @@ describe('parseCodexThreadNameIndex', () => {
 
   it('returns an empty map for empty input', () => {
     expect(parseCodexThreadNameIndex('').size).toBe(0);
+  });
+});
+
+describe('shouldDeferRecentAppend', () => {
+  const now = 1_000_000;
+  const prev = {
+    fileMtimeMs: now - 2_000,
+    fileSize: 1_000,
+    scannedAt: now - 1_000,
+  };
+
+  it('defers append-only growth scanned inside the debounce window', () => {
+    expect(shouldDeferRecentAppend(prev, {
+      fileMtimeMs: now - 500,
+      fileSize: 1_500,
+    }, now, 5_000)).toBe(true);
+  });
+
+  it('rescans append-only growth after the debounce window expires', () => {
+    expect(shouldDeferRecentAppend({ ...prev, scannedAt: now - 6_000 }, {
+      fileMtimeMs: now - 500,
+      fileSize: 1_500,
+    }, now, 5_000)).toBe(false);
+  });
+
+  it('does not defer truncates or same-size rewrites', () => {
+    expect(shouldDeferRecentAppend(prev, {
+      fileMtimeMs: now - 500,
+      fileSize: 900,
+    }, now, 5_000)).toBe(false);
+
+    expect(shouldDeferRecentAppend(prev, {
+      fileMtimeMs: now - 500,
+      fileSize: 1_000,
+    }, now, 5_000)).toBe(false);
   });
 });

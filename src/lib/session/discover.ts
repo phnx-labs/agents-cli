@@ -55,6 +55,7 @@ const HERMES_SESSIONS_DIR = path.join(HOME, '.hermes', 'sessions');
 
 /** How long OpenClaw channel/cron snapshots stay valid before we re-shell-out. */
 const OPENCLAW_TTL_MS = 60_000;
+const ACTIVE_APPEND_RESCAN_DEBOUNCE_MS = 5_000;
 
 let cachedOpenClawWorkspaces: Map<string, string> | null = null;
 
@@ -283,12 +284,18 @@ export function searchContentIndex(
 /**
  * For a list of files, stat each, compare to the DB ledger, and return only
  * the ones that need rescanning. One bulk DB query for the whole list.
+ *
+ * Actively running agents append to their JSONL every few seconds. Without a
+ * small debounce, repeated `agents sessions` invocations stream-parse the same
+ * growing transcript over and over. The cached row is good enough for a few
+ * seconds; once writes settle or the debounce expires, the file is parsed once.
  */
 function filterChangedFiles(
   filePaths: string[],
 ): Array<{ filePath: string; scan: ScanStamp }> {
   const ledger = getScanStampsForPaths(filePaths);
   const out: Array<{ filePath: string; scan: ScanStamp }> = [];
+  const now = Date.now();
   for (const filePath of filePaths) {
     const stat = safeStatSync(filePath);
     if (!stat) continue;
@@ -300,9 +307,24 @@ function filterChangedFiles(
     if (prev && prev.fileMtimeMs === scan.fileMtimeMs && prev.fileSize === scan.fileSize) {
       continue;
     }
+    if (prev && shouldDeferRecentAppend(prev, scan, now)) {
+      continue;
+    }
     out.push({ filePath, scan });
   }
   return out;
+}
+
+export function shouldDeferRecentAppend(
+  prev: ScanStamp,
+  current: ScanStamp,
+  nowMs: number,
+  debounceMs = ACTIVE_APPEND_RESCAN_DEBOUNCE_MS,
+): boolean {
+  if (prev.scannedAt === undefined) return false;
+  if (current.fileSize <= prev.fileSize) return false;
+  if (current.fileMtimeMs < prev.fileMtimeMs) return false;
+  return nowMs - prev.scannedAt < debounceMs;
 }
 
 // ---------------------------------------------------------------------------

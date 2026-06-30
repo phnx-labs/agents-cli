@@ -125,6 +125,7 @@ export interface SessionRow {
 export interface ScanStamp {
   fileMtimeMs: number;
   fileSize: number;
+  scannedAt?: number;
 }
 
 /** Filter and pagination options for querying the sessions table. */
@@ -358,9 +359,9 @@ export function getDBPath(): string {
 export function getScanStampByPath(filePath: string): ScanStamp | null {
   const db = getDB();
   const row = db
-    .prepare(`SELECT file_mtime_ms, file_size FROM scan_ledger WHERE file_path = ? LIMIT 1`)
-    .get(canonicalLedgerKey(filePath)) as { file_mtime_ms: number; file_size: number } | undefined;
-  return row ? { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size } : null;
+    .prepare(`SELECT file_mtime_ms, file_size, scanned_at FROM scan_ledger WHERE file_path = ? LIMIT 1`)
+    .get(canonicalLedgerKey(filePath)) as { file_mtime_ms: number; file_size: number; scanned_at: number } | undefined;
+  return row ? { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, scannedAt: row.scanned_at } : null;
 }
 
 /**
@@ -393,14 +394,14 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
     const placeholders = chunk.map(() => '?').join(',');
     const rows = db
       .prepare(`
-        SELECT file_path, file_mtime_ms, file_size
+        SELECT file_path, file_mtime_ms, file_size, scanned_at
         FROM scan_ledger
         WHERE file_path IN (${placeholders})
       `)
-      .all(...chunk) as Array<{ file_path: string; file_mtime_ms: number; file_size: number }>;
+      .all(...chunk) as Array<{ file_path: string; file_mtime_ms: number; file_size: number; scanned_at: number }>;
 
     for (const row of rows) {
-      const stamp = { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size };
+      const stamp = { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, scannedAt: row.scanned_at };
       for (const original of canonicalToOriginals.get(row.file_path) || []) {
         result.set(original, stamp);
       }
