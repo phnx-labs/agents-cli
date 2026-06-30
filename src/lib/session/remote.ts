@@ -9,12 +9,25 @@
  * upfront copy, always current, but the peer must be reachable. SSH access is the
  * only auth — if you can `ssh <host>`, you own the box (no identity layer by design).
  *
+ * Offline degradation (no sync, still fetch-first): every *successful* fetch is
+ * cached to `~/.agents/.cache/remote-sessions/`, keyed by host + the exact query.
+ * When a later run finds the host unreachable, the cache is replayed with a clearly
+ * labelled "showing cached results" banner instead of returning nothing. The cache
+ * is a byproduct of fetches you already made — never a background job, freely
+ * deletable — so the fetch-don't-replicate model holds; this is just graceful
+ * degradation when the peer is asleep.
+ *
  * Mirrors the transport already used by `agents secrets export --to-ssh`
  * (`src/commands/secrets.ts`): `ssh -o BatchMode=yes <host> bash -lc '<cmd>'`,
  * with `bash -lc` so the remote login PATH resolves `agents`.
  */
 import { spawnSync } from 'child_process';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'fs';
+import { join } from 'path';
+import { createHash } from 'crypto';
 import chalk from 'chalk';
+import { getCacheDir } from '../state.js';
+import { formatRelativeTime } from './relative-time.js';
 
 /**
  * SSH target: a bare ssh-config host alias (e.g. `yosemite-s1`) or `user@host`.
@@ -88,32 +101,131 @@ const SSH_OPTS = [
   '-o', 'ConnectTimeout=10',
 ];
 
+/** The four outcomes of one `ssh <host> agents sessions …` invocation. */
+export type SshOutcome = 'ok' | 'unreachable' | 'query-failed' | 'spawn-error';
+
+/**
+ * Classify an ssh `spawnSync` result. ssh(1) reserves exit 255 for its own
+ * connection-layer failures (host down, timeout, refused, auth, changed host
+ * key) — distinct from any other non-zero, which is the remote `agents sessions`
+ * exit code forwarded back (the query ran but failed). The two must be handled
+ * differently: 255 may fall back to cache, a forwarded failure must surface.
+ */
+export function classifySshFailure(res: { error?: Error | null; status: number | null }): SshOutcome {
+  if (res.error) return 'spawn-error';
+  if (res.status === 0) return 'ok';
+  if (res.status === 255) return 'unreachable';
+  return 'query-failed';
+}
+
+/** Root of the offline-replay cache (`~/.agents/.cache/remote-sessions/`). */
+const REMOTE_CACHE_DIR = join(getCacheDir(), 'remote-sessions');
+
+/**
+ * Deterministic cache path for a (host, forwarded-args) pair. The forwarded args
+ * are hashed so distinct queries cache independently; the host stays readable in
+ * the filename (sanitised so `user@host` and aliases are filesystem-safe).
+ */
+export function remoteCachePath(host: string, forwardedArgs: string[]): string {
+  const hash = createHash('sha256').update(forwardedArgs.join('\u0000')).digest('hex').slice(0, 16);
+  const safeHost = host.replace(/[^a-zA-Z0-9._@-]/g, '_');
+  return join(REMOTE_CACHE_DIR, `${safeHost}__${hash}.txt`);
+}
+
+/** Banner shown above replayed cache rows when the peer is offline. */
+export function formatStaleBanner(host: string, mtimeMs: number): string {
+  const ago = formatRelativeTime(new Date(mtimeMs).toISOString());
+  return chalk.yellow(`${host}: offline — showing cached results from ${ago}`);
+}
+
+/** Message shown when a host is unreachable and there is no cache to fall back to. */
+export function formatUnreachable(host: string): string {
+  return chalk.red(
+    `${host}: unreachable over SSH (asleep, offline, or host key changed?) — ConnectTimeout 10s`,
+  );
+}
+
+/** Persist a successful fetch for later offline replay. Best-effort: a cache
+ * write must never break the live query. */
+function writeRemoteCache(host: string, forwardedArgs: string[], output: string): void {
+  try {
+    mkdirSync(REMOTE_CACHE_DIR, { recursive: true });
+    writeFileSync(remoteCachePath(host, forwardedArgs), output);
+  } catch {
+    // ignore — caching is an optimisation, not a guarantee
+  }
+}
+
+/** Replay a cached fetch for an unreachable host. Banner goes to stderr (so a
+ * piped stdout stays exactly the cached rows); returns false when nothing is
+ * cached for this exact (host, query). */
+function replayRemoteCache(host: string, forwardedArgs: string[]): boolean {
+  try {
+    const p = remoteCachePath(host, forwardedArgs);
+    if (!existsSync(p)) return false;
+    process.stderr.write(formatStaleBanner(host, statSync(p).mtimeMs) + '\n');
+    process.stdout.write(readFileSync(p, 'utf8'));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Run the current `agents sessions` invocation on one or more remote machines over
- * SSH, streaming each remote's output to the terminal. Sets `process.exitCode = 1`
- * if any host fails. Reads the invocation from `process.argv` (override via
- * `argv` for testing).
+ * SSH, writing each remote's output to the terminal. A successful fetch is cached;
+ * an unreachable host falls back to that cache (with a stale banner) when present.
+ * Sets `process.exitCode = 1` if any host could not be answered (live or cached).
+ * Reads the invocation from `process.argv` (override via `argv` for testing).
+ *
+ * Output is captured rather than `stdio: 'inherit'`-streamed so it can be cached.
+ * Session output is small and the remote returns quickly, so buffering is
+ * imperceptible; `maxBuffer` is generous for the rare large `--markdown <id>` dump.
  */
 export function runRemoteSessions(hosts: string[], argv: string[] = process.argv): void {
   for (const host of hosts) assertValidSshTarget(host); // fail fast on any bad target
 
-  const remoteCmd = buildRemoteCommand(buildForwardedArgs(argv, new Set(hosts)));
+  const forwarded = buildForwardedArgs(argv, new Set(hosts));
+  const remoteCmd = buildRemoteCommand(forwarded);
   const multi = hosts.length > 1;
   let failures = 0;
 
   for (const host of hosts) {
     if (multi) process.stdout.write(chalk.cyan(`\n── ${host} ──\n`));
-    const res = spawnSync('ssh', [...SSH_OPTS, host, remoteCmd], { stdio: 'inherit' });
-    if (res.error) {
-      failures++;
-      console.error(chalk.red(`${host}: ${res.error.message}`));
-      continue;
-    }
-    if (res.status !== 0) {
-      failures++;
-      console.error(
-        chalk.red(`${host}: remote query failed (exit ${res.status ?? 'signal'}).`),
-      );
+    const res = spawnSync('ssh', [...SSH_OPTS, host, remoteCmd], {
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+
+    switch (classifySshFailure(res)) {
+      case 'ok':
+        process.stdout.write(res.stdout ?? '');
+        if (res.stderr) process.stderr.write(res.stderr);
+        writeRemoteCache(host, forwarded, res.stdout ?? '');
+        break;
+
+      case 'unreachable':
+        // Served-from-cache counts as answered (degraded, but with data + a clear
+        // banner), so it does not increment failures. No cache → a real failure.
+        if (!replayRemoteCache(host, forwarded)) {
+          failures++;
+          console.error(formatUnreachable(host));
+        }
+        break;
+
+      case 'spawn-error':
+        failures++;
+        console.error(chalk.red(`${host}: ${res.error?.message ?? 'failed to launch ssh'}`));
+        break;
+
+      case 'query-failed':
+        // The remote ran but its query exited non-zero — surface its own output
+        // and exit code; never mask a genuine error with stale cache.
+        failures++;
+        if (res.stdout) process.stdout.write(res.stdout);
+        if (res.stderr) process.stderr.write(res.stderr);
+        console.error(chalk.red(`${host}: remote query failed (exit ${res.status ?? 'signal'}).`));
+        break;
     }
   }
 

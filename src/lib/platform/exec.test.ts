@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { whichCommand, findExecutable } from './exec.js';
+import { whichCommand, findExecutable, needsWindowsShell } from './exec.js';
 
 describe('whichCommand', () => {
   it('is `where` on win32, `which` elsewhere', () => {
@@ -20,5 +20,28 @@ describe('findExecutable', () => {
 
   it('returns null for a name that does not exist', () => {
     expect(findExecutable('definitely-not-a-real-binary-xyz123')).toBeNull();
+  });
+});
+
+describe('needsWindowsShell', () => {
+  it('is always false off Windows, even for .cmd or bare names', () => {
+    expect(needsWindowsShell('npm', 'linux')).toBe(false);
+    expect(needsWindowsShell('npm.cmd', 'linux')).toBe(false);
+    expect(needsWindowsShell('/usr/bin/node', 'darwin')).toBe(false);
+  });
+
+  it('on win32, needs the shell for .cmd/.bat wrappers (case-insensitive)', () => {
+    expect(needsWindowsShell('C:\\Program Files\\nodejs\\npm.cmd', 'win32')).toBe(true);
+    expect(needsWindowsShell('C:\\tools\\bun.CMD', 'win32')).toBe(true);
+    expect(needsWindowsShell('C:\\x\\run.bat', 'win32')).toBe(true);
+  });
+
+  it('on win32, needs the shell for a bare (PATHEXT-resolved) command name', () => {
+    expect(needsWindowsShell('npm', 'win32')).toBe(true);
+    expect(needsWindowsShell('bun', 'win32')).toBe(true);
+  });
+
+  it('on win32, a direct absolute .exe does NOT need the shell', () => {
+    expect(needsWindowsShell('C:\\Program Files\\nodejs\\node.exe', 'win32')).toBe(false);
   });
 });

@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { registerHooksToSettings, unmanagedHookNames } from '../hooks.js';
+import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash } from '../hooks.js';
+import * as TOML from 'smol-toml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
 import { compareVersions } from '../versions.js';
 import type { ManifestHook } from '../types.js';
@@ -130,7 +131,7 @@ describe('registerHooksToSettings - Codex', () => {
     expect(groups[0].hooks[0].command).toBe(scriptPath);
   });
 
-  it('writes [features] codex_hooks = true to config.toml', () => {
+  it('writes [features] hooks = true to config.toml', () => {
     const versionHome = makeVersionHome();
     makeScript('on-prompt.sh');
 
@@ -144,7 +145,10 @@ describe('registerHooksToSettings - Codex', () => {
     expect(fs.existsSync(configPath)).toBe(true);
 
     const content = fs.readFileSync(configPath, 'utf-8');
-    expect(content).toContain('codex_hooks = true');
+    // Codex 0.116+ feature flag is `hooks`; the legacy `codex_hooks` name is
+    // an unrecognized key that Codex ignores with a deprecation error.
+    expect(content).toContain('hooks = true');
+    expect(content).not.toContain('codex_hooks');
   });
 
   it('preserves existing config.toml entries when enabling feature flag', () => {
@@ -161,8 +165,27 @@ describe('registerHooksToSettings - Codex', () => {
     registerHooksToSettings('codex', versionHome, manifest, agentsDir);
 
     const content = fs.readFileSync(configPath, 'utf-8');
-    expect(content).toContain('codex_hooks = true');
+    expect(content).toContain('hooks = true');
     expect(content).toContain('approval_policy');
+  });
+
+  it('migrates a stale [features] codex_hooks flag to hooks', () => {
+    const versionHome = makeVersionHome();
+    makeScript('on-prompt.sh');
+
+    // Simulate a config written by an older agents-cli build.
+    const configPath = path.join(versionHome, '.codex', 'config.toml');
+    fs.writeFileSync(configPath, '[features]\ncodex_hooks = true\n', 'utf-8');
+
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['UserPromptSubmit'] },
+    };
+
+    registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+
+    const content = fs.readFileSync(configPath, 'utf-8');
+    expect(content).toContain('hooks = true');
+    expect(content).not.toContain('codex_hooks');
   });
 
   it('does not duplicate managed hook entries on repeated calls', () => {
@@ -296,6 +319,129 @@ describe('registerHooksToSettings - Codex', () => {
       fs.readFileSync(path.join(versionHome, '.codex', 'hooks.json'), 'utf-8')
     );
     expect(hooksJson.hooks.UserPromptSubmit[0].hooks[0].command).toBe(scriptPath);
+  });
+
+  // Codex only runs a non-managed hook when it is enabled AND its trusted_hash
+  // in [hooks.state] matches the hash Codex recomputes. In `codex exec` mode
+  // there is no TUI prompt, so an untrusted hook is silently dropped — which is
+  // why agents-cli must pre-compute and persist the hash.
+  it('writes a [hooks.state] trusted_hash for each registered hook', () => {
+    const versionHome = makeVersionHome();
+    const scriptPath = makeScript('bash-tool-hook.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      'bash-hook': {
+        script: 'bash-tool-hook.sh',
+        events: ['PreToolUse'],
+        matcher: 'Bash',
+        timeout: 5,
+      },
+    };
+
+    registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+
+    const hooksJsonPath = path.join(versionHome, '.codex', 'hooks.json');
+    const configPath = path.join(versionHome, '.codex', 'config.toml');
+    const config = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    const state = (config.hooks as Record<string, unknown>).state as Record<
+      string,
+      { trusted_hash?: string; enabled?: boolean }
+    >;
+
+    const key = `${hooksJsonPath}:pre_tool_use:0:0`;
+    expect(state[key]).toBeDefined();
+    // The persisted hash must equal what Codex recomputes for this exact hook.
+    expect(state[key].trusted_hash).toBe(
+      computeCodexHookTrustHash('pre_tool_use', scriptPath, 5, 'Bash')
+    );
+    // Default-enabled: we must NOT write enabled = true (absence == enabled).
+    expect(state[key].enabled).toBeUndefined();
+  });
+
+  it('preserves a user-set enabled = false when rewriting the trust hash', () => {
+    const versionHome = makeVersionHome();
+    const scriptPath = makeScript('on-prompt.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['UserPromptSubmit'] },
+    };
+
+    // First pass writes the trust hash.
+    registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+    const configPath = path.join(versionHome, '.codex', 'config.toml');
+    const hooksJsonPath = path.join(versionHome, '.codex', 'hooks.json');
+    const key = `${hooksJsonPath}:user_prompt_submit:0:0`;
+
+    // User disables the hook from their side.
+    const config = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    const state = (config.hooks as Record<string, unknown>).state as Record<
+      string,
+      { trusted_hash?: string; enabled?: boolean }
+    >;
+    state[key].enabled = false;
+    fs.writeFileSync(configPath, TOML.stringify(config as Parameters<typeof TOML.stringify>[0]), 'utf-8');
+
+    // Re-register; enabled = false must survive.
+    registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+    const after = TOML.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    const afterState = (after.hooks as Record<string, unknown>).state as Record<
+      string,
+      { trusted_hash?: string; enabled?: boolean }
+    >;
+    expect(afterState[key].enabled).toBe(false);
+    expect(afterState[key].trusted_hash).toBe(
+      computeCodexHookTrustHash('user_prompt_submit', scriptPath, 600, undefined)
+    );
+  });
+
+  // Ground-truth fixtures: these hashes were written into a real config.toml by
+  // the Codex 0.134.0 binary's own trust flow for these exact hook definitions.
+  // If canonicalization (key ordering, field omission, always-present
+  // `async:false`, TOML null-drop of an absent matcher) regresses, they break.
+  describe('computeCodexHookTrustHash — Codex 0.134.0 ground truth', () => {
+    const HOOK_DIR = '~/.agents/.history/versions/codex/0.134.0/home/.codex/hooks';
+
+    it('SessionStart metadata hook, no matcher', () => {
+      expect(
+        computeCodexHookTrustHash('session_start', `${HOOK_DIR}/04-capture-session-start-metadata.sh`, 5, undefined)
+      ).toBe('sha256:03b77fe0c51d19ec5438fd556ea783c70843f7ae24c1c640a190d3bfce70ea56');
+    });
+
+    it('PreToolUse git-guard, matcher "Bash"', () => {
+      expect(computeCodexHookTrustHash('pre_tool_use', `${HOOK_DIR}/git-guard.sh`, 5, 'Bash')).toBe(
+        'sha256:a5996ca377f7bd87d23d062ab6b7a8aef4745b9400c8da6a475009ec8096c6f1'
+      );
+    });
+
+    it('PreToolUse rm-guard, matcher "Bash"', () => {
+      expect(computeCodexHookTrustHash('pre_tool_use', `${HOOK_DIR}/rm-guard.sh`, 5, 'Bash')).toBe(
+        'sha256:f840a97db8c64eb46d0eef3d37ebc98a409c12e6bdbf73f19442d02543223d34'
+      );
+    });
+
+    it('PreToolUse large-file-add-guard, matcher "Bash"', () => {
+      expect(
+        computeCodexHookTrustHash('pre_tool_use', `${HOOK_DIR}/large-file-add-guard.sh`, 5, 'Bash')
+      ).toBe('sha256:a5c51bb0d1ad496a102de8ea2b88a9a4f5fed80ddab8f388691e9f45529d38d0');
+    });
+
+    it('treats an empty-string matcher the same as no matcher (TOML null-drop)', () => {
+      expect(computeCodexHookTrustHash('session_start', `${HOOK_DIR}/x.sh`, 5, '')).toBe(
+        computeCodexHookTrustHash('session_start', `${HOOK_DIR}/x.sh`, 5, undefined)
+      );
+    });
+
+    it('is matcher-sensitive', () => {
+      expect(computeCodexHookTrustHash('pre_tool_use', `${HOOK_DIR}/git-guard.sh`, 5, 'Bash')).not.toBe(
+        computeCodexHookTrustHash('pre_tool_use', `${HOOK_DIR}/git-guard.sh`, 5, 'Read')
+      );
+    });
+
+    it('normalizes a sub-1 timeout to 1 (Codex: unwrap_or(600).max(1))', () => {
+      expect(computeCodexHookTrustHash('session_start', `${HOOK_DIR}/x.sh`, 0, undefined)).toBe(
+        computeCodexHookTrustHash('session_start', `${HOOK_DIR}/x.sh`, 1, undefined)
+      );
+    });
   });
 });
 

@@ -322,8 +322,8 @@ agents secrets generate 32 | agents secrets add release.key PASSPHRASE --value-s
 #    resolves them (one Touch ID) and forwards AGENTS_SECRETS_PASSPHRASE over
 #    stdin (never argv) so the remote can encrypt them at rest.
 export AGENTS_SECRETS_PASSPHRASE="$(agents secrets exec release.key -- printenv PASSPHRASE)"
-agents secrets export apple.com    --to-ssh --host mac-mini --remote-backend file
-agents secrets export rush.releases --to-ssh --host mac-mini --remote-backend file
+agents secrets export apple.com    --host mac-mini --remote-backend file
+agents secrets export rush.releases --host mac-mini --remote-backend file
 unset AGENTS_SECRETS_PASSPHRASE
 
 # --- Each release, from the laptop ---
