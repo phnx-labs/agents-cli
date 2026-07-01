@@ -42,7 +42,6 @@ import {
   getVersionHomePath,
   resolveInstalledAgentTargets,
   resolveConfiguredAgentTargets,
-  resolveVersionAlias,
   syncResourcesToVersion,
 } from '../lib/versions.js';
 import { getUserAgentsDir } from '../lib/state.js';
@@ -57,6 +56,7 @@ import {
   resolveInstalledAgentTargetsAutoInstalling,
   VersionNotInstalledError,
   type RemovalTarget,
+  resolveListFilterOrExit,
 } from './utils.js';
 import {
   showResourceList,
@@ -233,7 +233,7 @@ When to use:
           process.exit(1);
         }
         filterAgent = resolved;
-        filterVersion = resolveVersionAlias(resolved, parts[1]);
+        filterVersion = resolveListFilterOrExit(resolved, parts[1]);
       }
 
       const rows = buildMcpRows({ filterAgent, filterVersion });

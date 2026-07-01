@@ -180,3 +180,23 @@ export function resolveVersionFilter(
   const { version, source } = resolveSingleAgentTarget(`${agent}@${q}`, provider, { ...opts, availableAgents: [agent] });
   return { version, source };
 }
+
+/**
+ * Concrete version filter for list/display commands whose downstream code
+ * filters by an exact version string (not the `'default'` sentinel `view` uses).
+ *   undefined / '' / @any → undefined  (no filter → show all installed)
+ *   @default / @pinned    → the configured default version, or undefined if none
+ *                           is set (falls back to show-all rather than erroring)
+ *   @latest/@oldest/x.y.z → a concrete version (throws AgentSpecError if bad)
+ */
+export function resolveListFilter(
+  agent: AgentId,
+  qualifier: string | undefined | null,
+  provider: VersionProvider,
+  opts: ResolveOptions = {},
+): string | undefined {
+  const q = qualifier?.trim();
+  if (!q || q === 'any') return undefined;
+  if (q === 'default' || q === 'pinned') return provider.getGlobalDefault(agent) ?? undefined;
+  return resolveSingleAgentTarget(`${agent}@${q}`, provider, { ...opts, availableAgents: [agent] }).version;
+}

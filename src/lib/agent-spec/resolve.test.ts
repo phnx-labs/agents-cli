@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { AgentId } from '../types.js';
 import { compareVersions } from './primitives.js';
 import { AgentSpecError, type VersionProvider } from './types.js';
-import { resolveAgentTargets, resolveSingleAgentTarget, resolveVersionFilter } from './resolve.js';
+import { resolveAgentTargets, resolveSingleAgentTarget, resolveVersionFilter, resolveListFilter } from './resolve.js';
 
 // In-memory provider — the whole point of the DI seam: no fs, no $HOME.
 function providerOf(state: {
@@ -158,5 +158,31 @@ describe('resolveVersionFilter (read/list commands)', () => {
 
   it('a bad exact filter throws', () => {
     expect(() => resolveVersionFilter(CLAUDE, '9.9.9', p)).toThrow(AgentSpecError);
+  });
+});
+
+describe('resolveListFilter (list commands — concrete version, not the sentinel)', () => {
+  it('bare / @any → undefined (show all installed)', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, global: { claude: '2.1.0' } });
+    expect(resolveListFilter(CLAUDE, undefined, p)).toBeUndefined();
+    expect(resolveListFilter(CLAUDE, 'any', p)).toBeUndefined();
+  });
+
+  it('@default / @pinned → the configured default VERSION (the behavior change)', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, global: { claude: '2.1.0' } });
+    expect(resolveListFilter(CLAUDE, 'default', p)).toBe('2.1.0');
+    expect(resolveListFilter(CLAUDE, 'pinned', p)).toBe('2.1.0');
+  });
+
+  it('@default with no default set → undefined (falls back to show-all, never errors)', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] } });
+    expect(resolveListFilter(CLAUDE, 'default', p)).toBeUndefined();
+  });
+
+  it('@latest / exact → a concrete version; bad exact throws', () => {
+    const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] } });
+    expect(resolveListFilter(CLAUDE, 'latest', p)).toBe('2.1.1');
+    expect(resolveListFilter(CLAUDE, '2.1.0', p)).toBe('2.1.0');
+    expect(() => resolveListFilter(CLAUDE, '9.9.9', p)).toThrow(AgentSpecError);
   });
 });

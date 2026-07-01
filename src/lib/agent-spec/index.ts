@@ -45,3 +45,12 @@ export function resolveVersionFilter(
 ): VersionFilter {
   return core.resolveVersionFilter(agent, qualifier, defaultVersionProvider, opts);
 }
+
+/** Concrete version filter for list/display commands (undefined → show all, @default → the default version). */
+export function resolveListFilter(
+  agent: AgentId,
+  qualifier: string | undefined | null,
+  opts: ResolveOptions = {},
+): string | undefined {
+  return core.resolveListFilter(agent, qualifier, defaultVersionProvider, opts);
+}
