@@ -1,6 +1,6 @@
 ---
 name: secrets
-description: "Manage named bundles of environment variables backed by macOS Keychain. Create bundles, add secrets, generate passwords, and inject them into agent runs. Triggers on: 'API key', 'credentials', 'secrets bundle', 'inject env vars', '--secrets', 'keychain'."
+description: "Manage named bundles of environment variables backed by the OS keychain (macOS Keychain, Linux libsecret, Windows Credential Manager). Create bundles, add secrets, generate passwords, and inject them into agent runs. Triggers on: 'API key', 'credentials', 'secrets bundle', 'inject env vars', '--secrets', 'keychain', 'credential manager'."
 argument-hint: "[create|add|list|view|import|export|rotate|generate]"
 allowed-tools: Bash(agents secrets*)
 user-invocable: true
@@ -17,9 +17,11 @@ Store credentials in your OS keychain and inject them into agent runs. Nothing t
 | macOS | Keychain | Built-in |
 | Linux (desktop) | GNOME Keyring (libsecret) | `sudo apt install libsecret-tools` |
 | Linux (headless/server) | Use `env:` refs | See below |
-| Windows | Credential Manager (encrypted-file fallback) | Built-in |
+| Windows | Credential Manager (primary) + encrypted-file fallback | Built-in |
 
 **Desktop Linux:** GNOME Keyring (or another Secret Service provider) must be running. Most desktop environments start it automatically.
+
+**Headless Windows (service accounts, SSH with no interactive logon):** Credential Manager needs a logon session; without one it fails with `ERROR_NO_SUCH_LOGON_SESSION` (1312) and secrets transparently route to the AES-256-GCM encrypted-file store. Set `AGENTS_SECRETS_PASSPHRASE` so that store has an off-disk key — otherwise a machine-local key is provisioned next to the ciphertext.
 
 **Headless Linux (SSH, CI, containers):** No keyring daemon available. Use `env:` refs to pass secrets via environment:
 
