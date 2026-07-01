@@ -27,13 +27,15 @@ const claudeBinaryVer = listInstalledVersions('claude').find((v) =>
 // Prefer a version whose model source actually resolves on this host — partial
 // installs (e.g. ones missing the vendored binary) would otherwise short-circuit
 // the catalog tests with null catalogs.
-const firstLocatable = (agent: 'codex' | 'gemini' | 'opencode' | 'openclaw'): string | null =>
+const firstLocatable = (agent: 'codex' | 'gemini' | 'opencode' | 'openclaw' | 'antigravity' | 'kimi'): string | null =>
   listInstalledVersions(agent).find((v) => locateModelSource(agent, v) !== null) ?? null;
 
 const codexVer = firstLocatable('codex');
 const geminiVer = firstLocatable('gemini');
 const opencodeVer = firstLocatable('opencode');
 const openclawVer = firstLocatable('openclaw');
+const antigravityVer = firstLocatable('antigravity');
+const kimiVer = firstLocatable('kimi');
 
 describe('locateModelSource', () => {
   it('finds the JS bundle for Claude versions that ship one', () => {
@@ -245,6 +247,48 @@ describe('getModelCatalog (openclaw)', () => {
     for (const m of catalog.models) {
       expect(m.id).toContain('/');
     }
+  });
+});
+
+describe('getModelCatalog (antigravity)', () => {
+  it('parses `agy models` display-name-only rows and flags the first as default', () => {
+    if (!antigravityVer) return;
+    const src = locateModelSource('antigravity', antigravityVer);
+    expect(src).not.toBeNull();
+    expect(src!.kind).toBe('cli');
+
+    const catalog = getModelCatalog('antigravity', antigravityVer);
+    // `agy` may be unavailable/timing out in restricted environments; skip
+    // rather than fail when the CLI produces nothing.
+    if (!catalog || catalog.models.length === 0) return;
+    // Antigravity prints display names only; those strings ARE the accepted
+    // --model values, so id === displayName and each has a parenthesized level.
+    for (const m of catalog.models) {
+      expect(m.id).toBe(m.displayName);
+      expect(m.id).toMatch(/\([^)]+\)\s*$/);
+    }
+    // Exactly one default, and it is the first row.
+    const defaults = catalog.models.filter((m) => m.isDefault);
+    expect(defaults.length).toBe(1);
+    expect(catalog.models[0].isDefault).toBe(true);
+  });
+});
+
+describe('getModelCatalog (kimi)', () => {
+  it('parses `kimi provider list --json` model keys and marks the default', () => {
+    if (!kimiVer) return;
+    const src = locateModelSource('kimi', kimiVer);
+    expect(src).not.toBeNull();
+    expect(src!.kind).toBe('cli');
+
+    const catalog = getModelCatalog('kimi', kimiVer);
+    if (!catalog || catalog.models.length === 0) return;
+    // Kimi ids are `provider/model` keys from the config JSON.
+    for (const m of catalog.models) {
+      expect(m.id).toContain('/');
+    }
+    // At most one default may be flagged (the "Default model:" line).
+    expect(catalog.models.filter((m) => m.isDefault).length).toBeLessThanOrEqual(1);
   });
 });
 
