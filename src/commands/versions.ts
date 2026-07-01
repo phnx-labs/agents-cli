@@ -7,6 +7,7 @@
  * switching, resource sync prompts, and project-level version pinning.
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -869,8 +870,7 @@ export function registerVersionsCommands(program: Command): void {
     });
 
   // Deprecated: use `agents view` instead
-  program
-    .command('list [agent]')
+  addHostOption(program.command('list [agent]'))
     .description('List installed agent CLI versions')
     .action(async (agentArg?: string) => {
       console.log(chalk.red('Deprecated: "agents list" is now "agents view"\n'));

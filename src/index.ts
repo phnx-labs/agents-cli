@@ -980,6 +980,19 @@ const helpOrVersionRequested = passedArgs.some(
   (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
 );
 
+// `--host` passthrough: run this invocation on a remote machine over SSH instead
+// of locally. Handled before any local command registration / update check /
+// background sync — a remote run needs none of that. Only the allowlisted
+// read-only + config + teams commands route here; `run`/`sessions` are absent
+// from the table and fall through to their own richer `--host` handling below.
+// `--help`/`--version` stay local (docs must work without a reachable host).
+if (requestedCommand !== undefined && !helpOrVersionRequested) {
+  const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
+  if (await maybeRunOnHost(requestedCommand, passedArgs)) {
+    process.exit(process.exitCode ?? 0);
+  }
+}
+
 // Register only the command(s) this invocation actually uses. Lazy commands
 // (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);

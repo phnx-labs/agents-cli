@@ -9,6 +9,7 @@
  * quota status per agent and is left untouched.
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 
 import { discoverSessions, parseTimeFilter } from '../lib/session/discover.js';
@@ -28,8 +29,7 @@ interface CostOptions {
 }
 
 export function registerCostCommand(program: Command): void {
-  program
-    .command('cost')
+  addHostOption(program.command('cost'))
     .description('Roll up $ cost and duration across local agent sessions')
     .option('--json', 'Output the rollup as JSON')
     .option('--since <time>', 'Only sessions newer than this (e.g., 7d, 4w, or ISO date)')

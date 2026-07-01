@@ -7,6 +7,7 @@
  * rules, hooks, and promptcuts synced to that version.
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -1550,8 +1551,7 @@ export async function viewAction(
 
 /** Register the `agents view` command. */
 export function registerViewCommand(program: Command): void {
-  program
-    .command('view [agent]')
+  addHostOption(program.command('view [agent]'))
     .description('Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.')
     .option('--json', 'Emit machine-readable JSON (version list, usage, signed-in status).')
     .option('--prune', 'Remove older installed versions that share an account with a newer installed version. Skips the global default.')

@@ -13,6 +13,7 @@
  */
 
 import { execSync } from 'child_process';
+import { addHostOption } from '../lib/hosts/option.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -128,8 +129,7 @@ export interface InspectOptions {
 // ─── Command registration ────────────────────────────────────────────────────
 
 export function registerInspectCommand(program: Command): void {
-  const cmd = program
-    .command('inspect <target>')
+  const cmd = addHostOption(program.command('inspect <target>'))
     .description('Inspect one installed agent at one version, or a DotAgents repo (user|system|project|alias|path) — paths, capabilities, resources, drill into any kind.')
     .option('--brief', 'header + capabilities only; skip resources/sessions')
     .option('--json', 'machine-readable JSON output');

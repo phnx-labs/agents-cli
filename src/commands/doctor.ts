@@ -22,6 +22,7 @@
  * apply pending sync.
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import { checkAllClis } from '../lib/teams/agents.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError } from '../lib/agents.js';
@@ -537,8 +538,7 @@ async function runFix(parsed: { agent: AgentId; versions: string[] } | null, opt
 // ─── command registration ────────────────────────────────────────────────────
 
 export function registerDoctorCommand(program: Command): void {
-  const doctorCmd = program
-    .command('doctor [target]')
+  const doctorCmd = addHostOption(program.command('doctor [target]'))
     .description('Diagnose CLI availability, sync status, and resource divergence (optionally for a specific agent[@version]).')
     .option('--json', 'Output machine-readable JSON')
     .option('--diff', 'In target mode, include unified diffs for divergent files')
