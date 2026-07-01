@@ -298,6 +298,10 @@ export function execPolicyWarningLines(platform: NodeJS.Platform, policy: string
 }
 
 function renderExecPolicyAdvisory(): void {
+  // Only probe the policy on Windows — getEffectiveExecutionPolicy() spawns
+  // powershell, which is a wasted (doomed) process on POSIX where the advisory
+  // never applies.
+  if (process.platform !== 'win32') return;
   const lines = execPolicyWarningLines(process.platform, getEffectiveExecutionPolicy());
   if (lines.length === 0) return;
   console.log();
