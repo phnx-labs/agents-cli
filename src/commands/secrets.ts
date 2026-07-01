@@ -1380,10 +1380,11 @@ Examples:
         }
         const { spawn } = await import('child_process');
         // On Windows, spawn without a shell ENOENTs for `.cmd`/`.bat` launchers
-        // (npm, yarn, most JS CLIs) and shell built-ins — mirrors the win32
-        // branch in copyToClipboard below. With shell:true Node hands cmd.exe a
-        // single command line with NO quoting of its own, so args containing
-        // spaces or cmd metacharacters must be quoted here or they'd be split.
+        // (npm, yarn, most JS CLIs) and shell built-ins, so we set shell:true.
+        // With shell:true Node hands cmd.exe a single command line with NO quoting
+        // of its own, so args containing spaces or cmd metacharacters must be
+        // quoted here (quoteWin32ExecArg) or they'd be split. See that helper for
+        // the cmd.exe %VAR%/!VAR! expansion caveat.
         const useShell = process.platform === 'win32';
         const spawnCmd = useShell ? quoteWin32ExecArg(cmd) : cmd;
         const spawnArgs = useShell ? args.map(quoteWin32ExecArg) : args;
@@ -1694,9 +1695,16 @@ function humanRemaining(expiresAt: number): string {
  * NO quoting of its own, so an unquoted arg with a space is split into several
  * args, and a cmd metacharacter (`&|<>()^`) would be interpreted by the shell.
  * We wrap any arg with whitespace, a quote, or a metacharacter in double quotes
- * — which also makes cmd treat the metacharacters literally — and escape
- * embedded quotes / trailing backslashes per the CommandLineToArgvW rules so
- * the child process reconstructs the exact original argv. An empty arg becomes
+ * and escape embedded quotes / trailing backslashes per the CommandLineToArgvW
+ * rules, so the *child's* argv parse reconstructs the original argument.
+ *
+ * CAVEAT: cmd.exe expands `%VAR%` (always) and `!VAR!` (under delayed expansion)
+ * BEFORE argv parsing, and double-quoting does NOT suppress `%`/`!` (the
+ * "BatBadBut" / CVE-2024-1874 class). We deliberately do not escape `%`/`!`:
+ * `agents secrets exec` runs a caller-supplied command against a bundle the
+ * caller owns, so caller-controlled `%`/`!` is not a privilege boundary. If that
+ * ever changes (exec'ing an untrusted command line), route through a shell that
+ * disables expansion rather than relying on this quoter. An empty arg becomes
  * `""`. Exported for tests. No-ops on non-Windows (the caller only invokes it
  * under `process.platform === 'win32'`).
  */
