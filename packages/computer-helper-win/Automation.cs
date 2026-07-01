@@ -255,7 +255,25 @@ public sealed class Automation
                 // "Start or end specified is past the end of the text range" when the
                 // document is shorter than maxLength. GetText(-1) returns the whole
                 // range with no endpoint arithmetic; clamp the length in managed code.
-                var text = ((TextPattern)tp).DocumentRange.GetText(-1) ?? "";
+                string text;
+                try
+                {
+                    text = ((TextPattern)tp).DocumentRange.GetText(-1) ?? "";
+                }
+                catch (Exception ex) when (
+                    ex is not ElementNotAvailableException &&
+                    (ex.Message.Contains("past the end of the text range") ||
+                     ex is System.Runtime.InteropServices.COMException ||
+                     ex is ArgumentException ||
+                     ex is InvalidOperationException))
+                {
+                    // An EMPTY editable document (e.g. right after ctrl+a/delete)
+                    // makes the Win11 Notepad UIA provider raise "Start or end
+                    // specified is past the end of the text range" even for
+                    // GetText(-1). A field with no text is not an error — report it
+                    // as empty so get_text is total over all editable states. (#587)
+                    text = "";
+                }
                 if (text.Length > MaxTextChars) text = text.Substring(0, MaxTextChars);
                 return new() { ["text"] = text };
             }
