@@ -113,7 +113,7 @@ describe('resolveInteractive (sanity for the gating inputs above)', () => {
   });
 });
 
-describe('resolveShimSpawn (Windows .cmd / .ps1 exec fallback, #shims)', () => {
+describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
   it('POSIX execs the binary directly, no shell', () => {
     const r = resolveShimSpawn('linux', '/home/u/.agents/.../claude', ['--help']);
     expect(r).toEqual({ command: '/home/u/.agents/.../claude', args: ['--help'], shell: false });
@@ -124,15 +124,6 @@ describe('resolveShimSpawn (Windows .cmd / .ps1 exec fallback, #shims)', () => {
     expect(r.command).toBe('C:\\bin\\claude.cmd');
     expect(r.args).toEqual(['run']);
     expect(r.shell).toBe(true);
-  });
-
-  it('win32 routes an absolute .ps1 (no .cmd companion) through powershell -File so it launches', () => {
-    const r = resolveShimSpawn('win32', 'C:\\npm\\claude.ps1', ['-p', 'hi']);
-    expect(r.command).toBe('powershell');
-    expect(r.shell).toBe(false);
-    // -File is what makes powershell run the script (not exec the raw .ps1); Bypass
-    // lets it run even under a Restricted/AllSigned policy.
-    expect(r.args).toEqual(['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\npm\\claude.ps1', '-p', 'hi']);
   });
 
   it('win32 sends a bare (non-absolute) name to the shell for PATHEXT resolution', () => {

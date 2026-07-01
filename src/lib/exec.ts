@@ -771,14 +771,12 @@ export async function execAgent(options: ExecOptions): Promise<number> {
 /**
  * Resolve how to spawn a shim target for a platform. Pure — testable on any host.
  *
- * POSIX always execs the binary directly (no shell). On Windows:
- *  - a bare (non-absolute) name or a `.cmd` companion goes through the shell so
- *    cmd.exe resolves it via PATHEXT — the common, `.cmd`-present path, unchanged.
- *  - an absolute `.ps1` (the form npm leaves when no `.cmd` companion exists)
- *    cannot be exec'd directly, and under the shell cmd.exe would hand it to the
- *    `.ps1` file-association handler (Notepad by default), not run it — so it is
- *    launched through `powershell -File`. `-ExecutionPolicy Bypass` lets it run
- *    even under a Restricted/AllSigned policy (see `agents doctor`).
+ * POSIX always execs the binary directly (no shell). On Windows a bare
+ * (non-absolute) name or a `.cmd` companion goes through the shell so cmd.exe
+ * resolves it via PATHEXT — the common, `.cmd`-present path; an absolute `.cmd`
+ * or extensionless path is exec'd through the shell / directly. npm always ships
+ * a `<cmd>.cmd` companion on Windows, so the runnable target `execShimPassthrough`
+ * hands us is the `.cmd` (never a bare `.ps1`).
  */
 export function resolveShimSpawn(
   platform: NodeJS.Platform,
@@ -788,13 +786,6 @@ export function resolveShimSpawn(
   if (platform === 'win32') {
     // Use win32 path semantics regardless of the host running this (the platform
     // is the parameter, not process.platform) so `C:\...` reads as absolute.
-    if (path.win32.isAbsolute(binary) && binary.toLowerCase().endsWith('.ps1')) {
-      return {
-        command: 'powershell',
-        args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', binary, ...extraArgs],
-        shell: false,
-      };
-    }
     const useShell = !path.win32.isAbsolute(binary) || binary.endsWith('.cmd');
     return { command: binary, args: extraArgs, shell: useShell };
   }
