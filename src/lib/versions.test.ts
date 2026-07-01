@@ -29,7 +29,7 @@ function runVersionSync(home: string, expression: string): unknown {
   // .exe everywhere, so this is shell-free and cross-platform.
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
   const child = spawnSync(process.execPath, [tsxBin, '-e', `
-    import { listInstalledVersions, syncResourcesToVersion } from ${JSON.stringify(moduleUrl)};
+    import { listInstalledVersions, syncResourcesToVersion, buildRepoScopedSelection } from ${JSON.stringify(moduleUrl)};
     const home = ${JSON.stringify(home)};
     const result = ${expression};
     console.log(JSON.stringify(result));
@@ -488,7 +488,7 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
   // scoping to one repo returns only that layer's resources. Guards against
   // layer-misattribution — the bug where `--repo system` would sweep in (or
   // drop) the wrong repo's skills.
-  function runBuildScoped(home: string, repo: string): { skills?: string[] } {
+  function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] } {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(process.execPath, [tsxBin, '-e', `
@@ -523,10 +523,31 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
     expect(sel.skills).toEqual(['user-only']);
   });
 
-  it('omits the memory file — a repo-scoped sync leaves merged rules untouched', () => {
+  it('skips the memory file through a real sync — leaves merged rules untouched', () => {
     const home = makeTempHome();
-    scaffoldSkills(home);
-    const sel = runBuildScoped(home, 'system') as Record<string, unknown>;
-    expect(sel.memory).toBeUndefined();
+    // Same fixture the "writes missing grok AGENTS.md" test uses to PROVE the
+    // memory file IS written for a partial selection. Under a repo scope the
+    // memory:[] sentinel must make syncResourcesToVersion skip it entirely —
+    // so this is a real negative control, not a check of the returned object.
+    const rulesDir = path.join(home, '.agents', '.system', 'rules');
+    fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
+    fs.writeFileSync(
+      path.join(rulesDir, 'rules.yaml'),
+      'presets:\n  default:\n    subrules:\n      - core\n',
+      'utf-8'
+    );
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'scoped memory body\n', 'utf-8');
+
+    // The empty-array sentinel is what the skipMemory gate keys on.
+    expect(runBuildScoped(home, 'system').memory).toEqual([]);
+
+    const result = runVersionSync(
+      home,
+      "syncResourcesToVersion('grok', '0.2.33', buildRepoScopedSelection('system', home), { cwd: home })"
+    ) as { memory: string[] };
+
+    const agentsPath = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.grok', 'AGENTS.md');
+    expect(result.memory).toEqual([]);
+    expect(fs.existsSync(agentsPath)).toBe(false);
   });
 });

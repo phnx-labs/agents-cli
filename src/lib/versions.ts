@@ -1805,6 +1805,39 @@ export function listRepoNames(): string[] {
   return ['project', 'user', 'system', ...getEnabledExtraRepos().map(e => e.alias)];
 }
 
+/** Pattern-selectable resource kinds — every kind whose selection is
+ * driven by `source:name` patterns (memory is preset-driven, handled apart). */
+type SelectableKind = 'commands' | 'skills' | 'hooks' | 'subagents' | 'permissions' | 'mcp' | 'plugins' | 'workflows';
+
+/**
+ * Build the name→source-layer map for one resource kind, the input
+ * `expandPatterns` matches `source:*` patterns against. This is the single
+ * source of truth for how each kind attributes its source layer:
+ *   - commands/skills/hooks/subagents → real layer from `listResources`
+ *   - permissions                     → always the system repo
+ *   - mcp                             → project vs user scope preserved
+ *   - plugins/workflows               → user repo
+ * Both the persisted-pattern sync path and `buildRepoScopedSelection` use it
+ * so the attribution can't drift between the two.
+ */
+function resourceSourceMap(kind: SelectableKind, cwd: string, available: AvailableResources): Map<string, string> {
+  switch (kind) {
+    case 'commands':
+    case 'skills':
+    case 'hooks':
+    case 'subagents':
+      return new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
+    case 'permissions':
+      return new Map(available.permissions.map(n => [n, 'system']));
+    case 'mcp':
+      return new Map(getScopedMcpResources(cwd).map(r => [r.name, r.scope]));
+    case 'plugins':
+      return new Map(available.plugins.map(n => [n, 'user']));
+    case 'workflows':
+      return new Map(available.workflows.map(n => [n, 'user']));
+  }
+}
+
 /**
  * Build a ResourceSelection scoped to a single DotAgent repo (`system`,
  * `user`, `project`, or an extra-repo alias). Every resource kind is filtered
@@ -1813,40 +1846,23 @@ export function listRepoNames(): string[] {
  * sync path uses. Passing the result as an explicit `selection` means the sync
  * touches only that repo's resources — no orphan-sweep of the other layers.
  *
- * `memory` is intentionally omitted: the memory file is a merge of all layers,
- * not a per-repo artifact, so a repo-scoped sync leaves it untouched.
+ * `memory` is set to `[]` (not omitted): that empty-array sentinel is what
+ * `syncResourcesToVersion`'s `skipMemory` gate keys on to leave the memory
+ * file untouched — it's a merge of all layers, not a per-repo artifact.
  */
 export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd()): ResourceSelection {
   const patterns = [`${repo}:*`];
-  const selection: ResourceSelection = {};
   const available = getAvailableResources(cwd);
+  const selection: ResourceSelection = {};
 
-  const listableKinds = ['commands', 'skills', 'hooks', 'subagents'] as const;
-  for (const kind of listableKinds) {
-    const sourceMap = new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
-    const names = expandPatterns(patterns, sourceMap);
+  const kinds: SelectableKind[] = ['commands', 'skills', 'hooks', 'subagents', 'permissions', 'mcp', 'plugins', 'workflows'];
+  for (const kind of kinds) {
+    const names = expandPatterns(patterns, resourceSourceMap(kind, cwd, available));
     if (names.length > 0) selection[kind] = names;
   }
 
-  // permissions: all groups originate from the system repo.
-  const permMap = new Map(available.permissions.map(n => [n, 'system' as const]));
-  const perms = expandPatterns(patterns, permMap);
-  if (perms.length > 0) selection.permissions = perms;
-
-  // mcp: preserve project vs user scope (system/alias MCPs won't match those).
-  const mcpMap = new Map(getScopedMcpResources(cwd).map(r => [r.name, r.scope]));
-  const mcp = expandPatterns(patterns, mcpMap);
-  if (mcp.length > 0) selection.mcp = mcp;
-
-  // plugins / workflows: treated as user-source (mirrors the default patterns).
-  const pluginMap = new Map(available.plugins.map(n => [n, 'user' as const]));
-  const plugins = expandPatterns(patterns, pluginMap);
-  if (plugins.length > 0) selection.plugins = plugins;
-
-  const workflowMap = new Map(available.workflows.map(n => [n, 'user' as const]));
-  const workflows = expandPatterns(patterns, workflowMap);
-  if (workflows.length > 0) selection.workflows = workflows;
-
+  // Empty-array sentinel → skip the memory writer (see skipMemory below).
+  selection.memory = [];
   return selection;
 }
 
@@ -1918,32 +1934,22 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
       for (const [type, kind] of listableTypes) {
         const patterns = vr[type];
         if (!Array.isArray(patterns) || patterns.length === 0) continue;
-        const sourceMap = new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
-        patternSelection[type] = expandPatterns(patterns, sourceMap);
+        patternSelection[type] = expandPatterns(patterns, resourceSourceMap(kind, cwd, available));
       }
 
-      // permissions: all groups are 'system' source.
+      // permissions / mcp / plugins / workflows: source attribution lives in
+      // resourceSourceMap so it can't drift from buildRepoScopedSelection.
       if (Array.isArray(vr.permissions) && vr.permissions.length > 0) {
-        const permMap = new Map(available.permissions.map(n => [n, 'system' as const]));
-        patternSelection.permissions = expandPatterns(vr.permissions, permMap);
+        patternSelection.permissions = expandPatterns(vr.permissions, resourceSourceMap('permissions', cwd, available));
       }
-
-      // mcp: pattern matching must preserve project vs user scope.
       if (Array.isArray(vr.mcp) && vr.mcp.length > 0) {
-        const mcpMap = new Map(getScopedMcpResources(cwd).map(resource => [resource.name, resource.scope]));
-        patternSelection.mcp = expandPatterns(vr.mcp, mcpMap);
+        patternSelection.mcp = expandPatterns(vr.mcp, resourceSourceMap('mcp', cwd, available));
       }
-
-      // plugins: treat all as 'user' source for now.
       if (Array.isArray(vr.plugins) && vr.plugins.length > 0) {
-        const pluginMap = new Map(available.plugins.map(n => [n, 'user' as const]));
-        patternSelection.plugins = expandPatterns(vr.plugins, pluginMap);
+        patternSelection.plugins = expandPatterns(vr.plugins, resourceSourceMap('plugins', cwd, available));
       }
-
-      // workflows: treat all as 'user' source.
       if (Array.isArray(vr.workflows) && vr.workflows.length > 0) {
-        const workflowMap = new Map(available.workflows.map(n => [n, 'user' as const]));
-        patternSelection.workflows = expandPatterns(vr.workflows, workflowMap);
+        patternSelection.workflows = expandPatterns(vr.workflows, resourceSourceMap('workflows', cwd, available));
       }
 
       // memory is not pattern-controlled (rulesPreset handles it) — always sync.
