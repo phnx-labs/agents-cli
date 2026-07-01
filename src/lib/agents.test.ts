@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AGENTS, ALL_AGENT_IDS, getAccountInfo, resolveAgentName, resolveLastActive } from './agents.js';
 import { IS_WINDOWS } from './platform/index.js';
 import type { CapabilityName } from './types.js';
@@ -345,6 +345,20 @@ function makeJwt(payload: Record<string, unknown>): string {
 }
 
 describe('getAccountInfo — token-only agents (no local email)', () => {
+  // Sign-in is account-global: getAccountInfo falls back from the passed
+  // per-version home to the active config under AGENTS_REAL_HOME. Pin that to a
+  // fresh empty dir so "signed out" assertions don't leak into the developer's
+  // real ~/.factory / ~/.kimi-code / ~/.gemini login (RUSH-1318 fallback).
+  let prevRealHome: string | undefined;
+  beforeEach(() => {
+    prevRealHome = process.env.AGENTS_REAL_HOME;
+    process.env.AGENTS_REAL_HOME = makeTempDir();
+  });
+  afterEach(() => {
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+  });
+
   it('marks Antigravity signed in when a refresh token is present', async () => {
     const home = makeTempDir();
     const dir = path.join(home, '.gemini', 'antigravity-cli');

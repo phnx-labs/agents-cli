@@ -17,7 +17,7 @@ import type { AgentId } from './types.js';
 import { IS_WINDOWS, prependToWindowsUserPath } from './platform/index.js';
 import { getShimsDir, getVersionsDir, getBackupsDir, ensureAgentsDir } from './state.js';
 export { getShimsDir };
-import { AGENTS } from './agents.js';
+import { AGENTS, agentConfigDirName } from './agents.js';
 
 /**
  * Files and directories to always skip during conflict detection and migration.
@@ -940,6 +940,62 @@ function detectMigrationConflicts(agent: AgentId, version: string): ConflictInfo
  *
  * Returns: { success: boolean, backupPath?: string, error?: string }
  */
+/**
+ * Seed a version's config home with the account credential so switching versions
+ * doesn't log the CLI out. Droid/antigravity/kimi (registry `authFiles`) store
+ * login as files inside the per-version config dir; sign-in is account-global,
+ * so we copy the FRESHEST existing copy (by mtime, across all installed version
+ * homes) into `toConfigDir` when its copy is missing or older. mtime is
+ * preserved so the "freshest" comparison stays stable and switches don't
+ * ping-pong. Best-effort: a failed copy just means the user re-logs in.
+ */
+export function carryForwardAuthFiles(agent: AgentId, toConfigDir: string): void {
+  const authFiles = AGENTS[agent].authFiles;
+  if (!authFiles || authFiles.length === 0) return;
+
+  const configDirName = agentConfigDirName(agent);
+  const versionsBase = path.join(getVersionsDir(), agent);
+  let sourceDirs: string[] = [];
+  try {
+    sourceDirs = fs
+      .readdirSync(versionsBase)
+      .map(v => path.join(versionsBase, v, 'home', configDirName));
+  } catch {
+    return; // no installed versions to source from
+  }
+
+  for (const rel of authFiles) {
+    const dest = path.join(toConfigDir, rel);
+    const destResolved = path.resolve(dest);
+
+    // Newest existing source copy across all version homes (excluding dest).
+    let newest: { path: string; mtimeMs: number } | null = null;
+    for (const dir of sourceDirs) {
+      const src = path.join(dir, rel);
+      if (path.resolve(src) === destResolved) continue;
+      let st: fs.Stats;
+      try { st = fs.statSync(src); } catch { continue; }
+      if (!st.isFile()) continue;
+      if (!newest || st.mtimeMs > newest.mtimeMs) newest = { path: src, mtimeMs: st.mtimeMs };
+    }
+    if (!newest) continue;
+
+    // Skip when the target already has an at-least-as-fresh copy.
+    try {
+      const dstat = fs.statSync(dest);
+      if (dstat.mtimeMs >= newest.mtimeMs) continue;
+    } catch { /* dest missing — copy below */ }
+
+    try {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      const srcStat = fs.statSync(newest.path);
+      fs.copyFileSync(newest.path, dest);
+      fs.chmodSync(dest, (srcStat.mode & 0o777) || 0o600);
+      fs.utimesSync(dest, srcStat.atime, srcStat.mtime);
+    } catch { /* best-effort; a failed carry just means a re-login */ }
+  }
+}
+
 export async function switchConfigSymlink(
   agent: AgentId,
   version: string
@@ -951,6 +1007,13 @@ export async function switchConfigSymlink(
   if (!fs.existsSync(versionConfigPath)) {
     fs.mkdirSync(versionConfigPath, { recursive: true });
   }
+
+  // Carry the account credential into the version we're switching to. Droid /
+  // antigravity / kimi store login as files INSIDE the per-version config home;
+  // switching versions repoints the symlink to a home that was never logged in,
+  // silently logging the CLI out. Sign-in is account-global, so seed the target
+  // home with the freshest existing credential before we flip the symlink.
+  carryForwardAuthFiles(agent, versionConfigPath);
 
   try {
     const stat = fs.lstatSync(configPath);

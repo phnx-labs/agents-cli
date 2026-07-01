@@ -85,6 +85,7 @@ export interface AgentConfig {
   installScript?: string;
   configDir: string;
   homeFiles?: string[]; // Files at $HOME level that need per-version symlink switching (e.g., '.claude.json')
+  authFiles?: string[]; // Credential files inside configDir (relative to it) that must be carried across version-homes on switch so sign-in survives version changes (e.g., droid 'auth.v2.file'). Account-global, not version-specific.
   commandsDir: string;
   commandsSubdir: string;
   skillsDir: string;

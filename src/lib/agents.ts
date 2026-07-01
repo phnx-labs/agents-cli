@@ -433,6 +433,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     npmPackage: '',
     installScript: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
     configDir: path.join(HOME, '.gemini', 'antigravity-cli'),
+    authFiles: ['antigravity-oauth-token'],
     commandsDir: path.join(HOME, '.gemini', 'antigravity-cli', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.gemini', 'antigravity-cli', 'skills'),
@@ -493,6 +494,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     npmPackage: '@moonshot-ai/kimi-code',
     installScript: 'curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash',
     configDir: path.join(HOME, '.kimi-code'),
+    authFiles: ['credentials/kimi-code.json'],
     commandsDir: '',
     commandsSubdir: '',
     skillsDir: path.join(HOME, '.kimi-code', 'skills'),
@@ -532,6 +534,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     npmPackage: '',
     installScript: 'curl -fsSL https://app.factory.ai/cli | sh',
     configDir: path.join(HOME, '.factory'),
+    authFiles: ['auth.v2.file', 'auth.v2.key'],
     commandsDir: path.join(HOME, '.factory', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: '', // no skills concept
@@ -846,6 +849,26 @@ export async function getAccountEmail(
  * Extract full account information (identity, plan, usage status, credits) from
  * the agent's local auth/config files. Supports Claude, Codex, and Gemini.
  */
+/**
+ * Resolve a file-auth agent's credential file. Sign-in is account-global, but
+ * each installed version gets an isolated home; the credential physically lives
+ * only in the home the user logged in under (the one the `~/.<config>` symlink
+ * targets). Check the per-version `base` first, then fall back to the active
+ * config location under the real HOME so every installed version reflects the
+ * true account state (droid/antigravity/kimi all stored login per-version-home
+ * and showed non-active versions as "not signed in"). Returns the first
+ * existing path, or null.
+ */
+function resolveAccountCredentialPath(base: string, ...segments: string[]): string | null {
+  const perVersion = path.join(base, ...segments);
+  try { if (fs.existsSync(perVersion)) return perVersion; } catch { /* unreadable */ }
+  const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...segments);
+  if (active !== perVersion) {
+    try { if (fs.existsSync(active)) return active; } catch { /* unreadable */ }
+  }
+  return null;
+}
+
 export async function getAccountInfo(
   agentId: AgentId,
   home?: string
@@ -1008,8 +1031,8 @@ export async function getAccountInfo(
         // OAuth grant (access + refresh token, no id_token), so there's no email
         // claim to read locally — presence of a refresh token is the only
         // signed-in signal we can derive without a network call.
-        const tokenPath = path.join(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
-        if (!fs.existsSync(tokenPath)) return { ...empty, lastActive };
+        const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+        if (!tokenPath) return { ...empty, lastActive };
         const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
         const hasToken =
           typeof data?.token?.refresh_token === 'string' && !!data.token.refresh_token;
@@ -1021,8 +1044,8 @@ export async function getAccountInfo(
         // ~/.kimi-code/credentials/kimi-code.json. The access token is a JWT
         // whose payload carries an opaque user_id (no email), so we report
         // signed-in state plus a stable account key for usage dedup.
-        const credPath = path.join(base, '.kimi-code', 'credentials', 'kimi-code.json');
-        if (!fs.existsSync(credPath)) return { ...empty, lastActive };
+        const credPath = resolveAccountCredentialPath(base, '.kimi-code', 'credentials', 'kimi-code.json');
+        if (!credPath) return { ...empty, lastActive };
         const data = JSON.parse(await fs.promises.readFile(credPath, 'utf-8'));
         const accessToken = data?.access_token;
         if (typeof accessToken !== 'string' || !accessToken) return { ...empty, lastActive };
@@ -1038,8 +1061,8 @@ export async function getAccountInfo(
         // network call — same pattern as antigravity/kimi. `.factory` is the
         // config dir on every platform (macOS/Linux ~/.factory, Windows
         // %USERPROFILE%\.factory), so path.join keeps this cross-platform.
-        const authPath = path.join(base, '.factory', 'auth.v2.file');
-        if (!fs.existsSync(authPath)) return { ...empty, lastActive };
+        const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
+        if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
       }
       default:
