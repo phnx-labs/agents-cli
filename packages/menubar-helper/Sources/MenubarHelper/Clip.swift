@@ -16,7 +16,8 @@ import UniformTypeIdentifiers
 //   • a copied file (PDF, image, …) → copied into the attachments dir for a
 //     stable snapshot that survives Desktop/Screenshots sweeps, scp-safe name.
 //   • a copied directory → referenced IN PLACE (copying a whole tree is
-//     unreasonable); the agent fetches it with `scp -r` / `rsync -a`.
+//     unreasonable); the agent fetches it with `scp -r` / `rsync -a`. Its path
+//     can't be renamed, so the token POSIX-quotes it when it isn't shell-safe.
 enum Clip {
     // ~/.agents/.history/attachments — .history is gitignored (never pushed) and
     // DURABLE (unlike .cache, a cache-clear won't sweep an in-flight reference).
@@ -29,8 +30,7 @@ enum Clip {
     // inject the reference. Nothing referenceable on the clipboard → no-op.
     static func run() {
         guard let path = persistFromPasteboard() else { return }
-        let token = "\(localHostName()):\(path.path)"
-        inject(token)
+        inject(referenceToken(for: path))
     }
 
     // Test/debug entry: resolve + print the token, no keystroke injection (so it
@@ -40,9 +40,23 @@ enum Clip {
             FileHandle.standardError.write(Data("no file, directory, or image on clipboard\n".utf8))
             exit(1)
         }
-        let token = "\(localHostName()):\(path.path)"
-        print(token)
+        print(referenceToken(for: path))
         exit(0)
+    }
+
+    // The `<host>:<path>` reference typed into the terminal. Copied files land on
+    // a sanitized, space-free name, but a directory referenced in place keeps its
+    // original path — which may contain spaces or shell metacharacters. Since the
+    // token is typed into a live shell, POSIX-single-quote the path when it isn't
+    // already shell-safe so `scp -r <token>` parses as one argument. Clean paths
+    // stay unquoted.
+    static func referenceToken(for url: URL) -> String {
+        let path = url.path
+        let safe = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-@/"
+        let rendered = path.allSatisfy { safe.contains($0) }
+            ? path
+            : "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return "\(localHostName()):\(rendered)"
     }
 
     // MARK: - pasteboard → reference path

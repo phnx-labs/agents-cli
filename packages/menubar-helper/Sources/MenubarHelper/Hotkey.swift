@@ -23,7 +23,7 @@ final class HotkeyManager {
 
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                  eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
+        let installed = InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
             HotkeyManager.shared?.onFire()
             return noErr
         }, 1, &spec, nil, &handlerRef)
@@ -31,7 +31,14 @@ final class HotkeyManager {
         // 'AGCT' signature keeps our hotkey id namespaced from other apps'.
         let id = EventHotKeyID(signature: OSType(0x41474354), id: 1)
         let modifiers = UInt32(cmdKey | shiftKey)
-        RegisterEventHotKey(UInt32(kVK_ANSI_V), modifiers, id,
-                            GetApplicationEventTarget(), 0, &hotKeyRef)
+        let registered = RegisterEventHotKey(UInt32(kVK_ANSI_V), modifiers, id,
+                                             GetApplicationEventTarget(), 0, &hotKeyRef)
+
+        // Registration fails if another app already owns the chord — surface it
+        // rather than silently never firing.
+        if installed != noErr || registered != noErr {
+            FileHandle.standardError.write(Data(
+                "clip: hotkey registration failed (install=\(installed) register=\(registered))\n".utf8))
+        }
     }
 }
