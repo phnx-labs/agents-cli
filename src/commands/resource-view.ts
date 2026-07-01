@@ -12,6 +12,7 @@ import type { AgentId } from '../lib/types.js';
 import { agentLabel } from '../lib/agents.js';
 import { itemPicker } from '../lib/picker.js';
 import { isInteractiveTerminal, isPromptCancelled, printWithPager } from './utils.js';
+import { terminalWidth, truncateToWidth, padToWidth, stringWidth, stripAnsi } from '../lib/session/width.js';
 
 export type SyncStatus = 'synced' | 'stale' | 'missing';
 
@@ -116,24 +117,67 @@ function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
   return `${name} ${extra}${extra2}${desc} ${sync}`;
 }
 
-/** Render resources as a plain-text table (used when output is piped). */
-function printResourceTable(opts: ResourceViewOptions): void {
-  const header = buildTableHeader(opts);
-  console.log(header);
-  console.log(chalk.gray('─'.repeat(Math.min(process.stdout.columns || 100, 120))));
+/** Max width for the Name column in the wide table. */
+const NAME_CAP = 22;
+/** Below this many columns of description budget, the list stacks into cards. */
+const MIN_DESC_W = 24;
 
-  for (const row of opts.rows) {
-    const name = chalk.cyan(padRight(row.name, 22));
-    const extra = opts.extraLabel
-      ? padRight(row.extra ?? '-', 10)
-      : '';
-    const extra2 = opts.extra2Label
-      ? padRight(row.extra2 ?? '-', 16)
-      : '';
-    const descRaw = row.description ? truncate(row.description, 40) : '-';
-    const desc = padRight(chalk.gray(descRaw), 42);
-    const sync = formatSyncSummary(row.targets, opts);
-    console.log(`${name} ${extra}${extra2}${desc} ${sync}`);
+export interface ResourceLayout {
+  mode: 'table' | 'cards';
+  nameW: number;
+  extraW: number;
+  extra2W: number;
+  descW: number;
+  syncW: number;
+}
+
+/**
+ * Pure column arithmetic. Decides table vs. cards for the effective terminal
+ * width and sizes the flexible Description column from whatever is left after the
+ * fixed columns and a capped Sync column — so the table fits `cols` instead of
+ * the old fixed 22+10+16+42+∞ layout that overflowed every narrow terminal.
+ */
+export function resourceLayout(
+  cols: number,
+  o: { hasExtra: boolean; hasExtra2: boolean; nameW: number; syncW: number },
+): ResourceLayout {
+  const extraW = o.hasExtra ? 10 : 0;
+  const extra2W = o.hasExtra2 ? 16 : 0;
+  // Cap Sync so a long "missing on …" tail can't starve the description.
+  const syncW = Math.min(o.syncW, Math.max(14, Math.floor(cols * 0.32)));
+  const fixed =
+    o.nameW + 1 + (extraW ? extraW + 1 : 0) + (extra2W ? extra2W + 1 : 0) + 1 + syncW;
+  const descW = cols - fixed;
+  return {
+    mode: descW >= MIN_DESC_W ? 'table' : 'cards',
+    nameW: o.nameW,
+    extraW,
+    extra2W,
+    descW,
+    syncW,
+  };
+}
+
+/** Render resources (used when output is piped). Responsive: wide table or cards. */
+function printResourceTable(opts: ResourceViewOptions): void {
+  const cols = terminalWidth();
+  const syncStrings = opts.rows.map((r) => formatSyncSummary(r.targets, opts));
+  const nameW = Math.min(
+    NAME_CAP,
+    Math.max('Name'.length, ...opts.rows.map((r) => stringWidth(r.name))),
+  );
+  const syncMax = Math.max('Synced'.length, ...syncStrings.map((s) => stringWidth(s)));
+  const layout = resourceLayout(cols, {
+    hasExtra: Boolean(opts.extraLabel),
+    hasExtra2: Boolean(opts.extra2Label),
+    nameW,
+    syncW: syncMax,
+  });
+
+  if (layout.mode === 'cards') {
+    renderResourceCards(opts, cols, syncStrings);
+  } else {
+    renderResourceWideTable(opts, layout, syncStrings);
   }
 
   console.log();
@@ -146,18 +190,59 @@ function printResourceTable(opts: ResourceViewOptions): void {
   console.log(chalk.gray(summary.join(' · ')));
 }
 
-/** Build the column header line for the plain-text table. */
-function buildTableHeader(opts: ResourceViewOptions): string {
-  const name = chalk.bold(padRight('Name', 22));
-  const extra = opts.extraLabel
-    ? chalk.bold(padRight(opts.extraLabel, 10))
-    : '';
-  const extra2 = opts.extra2Label
-    ? chalk.bold(padRight(opts.extra2Label, 16))
-    : '';
-  const desc = padRight(chalk.bold('Description'), 42);
-  const sync = chalk.bold('Synced');
-  return `${name} ${extra}${extra2}${desc} ${sync}`;
+/** Wide aligned table: Name · [Extra] · [Extra2] · Description (flex) · Synced. */
+function renderResourceWideTable(
+  opts: ResourceViewOptions,
+  L: ResourceLayout,
+  syncStrings: string[],
+): void {
+  const cell = (text: string, width: number, color?: (s: string) => string): string => {
+    const clipped = truncateToWidth(text, width);
+    return padToWidth(color ? color(clipped) : clipped, width);
+  };
+
+  const headerParts = [cell(chalk.bold('Name'), L.nameW)];
+  if (L.extraW) headerParts.push(cell(chalk.bold(opts.extraLabel ?? ''), L.extraW));
+  if (L.extra2W) headerParts.push(cell(chalk.bold(opts.extra2Label ?? ''), L.extra2W));
+  headerParts.push(cell(chalk.bold('Description'), L.descW));
+  headerParts.push(chalk.bold('Synced'));
+  console.log(headerParts.join(' '));
+
+  const contentW =
+    L.nameW + 1 + (L.extraW ? L.extraW + 1 : 0) + (L.extra2W ? L.extra2W + 1 : 0) + L.descW + 1 + L.syncW;
+  console.log(chalk.gray('─'.repeat(Math.min(contentW, terminalWidth()))));
+
+  opts.rows.forEach((row, i) => {
+    const parts = [cell(row.name, L.nameW, chalk.cyan)];
+    if (L.extraW) parts.push(cell(row.extra ?? '-', L.extraW));
+    if (L.extra2W) parts.push(cell(row.extra2 ?? '-', L.extra2W));
+    parts.push(cell(row.description ?? '-', L.descW, chalk.gray));
+    let sync = syncStrings[i] ?? '';
+    if (stringWidth(sync) > L.syncW) sync = chalk.gray(truncateToWidth(sync, L.syncW));
+    parts.push(sync);
+    console.log(parts.join(' '));
+  });
+}
+
+/** Stacked cards for narrow terminals: name + meta on one line, description below. */
+function renderResourceCards(
+  opts: ResourceViewOptions,
+  cols: number,
+  syncStrings: string[],
+): void {
+  opts.rows.forEach((row, i) => {
+    const meta = [row.extra, row.extra2, stripAnsi(syncStrings[i] ?? '')]
+      .filter((s): s is string => Boolean(s && s.trim()))
+      .join(' · ');
+    const metaBudget = Math.max(8, cols - stringWidth(row.name) - 2);
+    const line1 = meta
+      ? `${chalk.cyan(row.name)}  ${chalk.gray(truncateToWidth(meta, metaBudget))}`
+      : chalk.cyan(row.name);
+    console.log(line1);
+    if (row.description) {
+      console.log(`    ${chalk.gray(truncateToWidth(row.description, cols - 4))}`);
+    }
+  });
 }
 
 /** Compact sync summary: "everywhere", "14 of 16 installs", or "not installed". */
