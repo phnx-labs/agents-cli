@@ -1,47 +1,45 @@
 ---
 version: alpha
 name: "agents-cli"
-description: "The meta harness engineering system for agents. agents-cli is a terminal-first tool with a matching web surface (the agents-cli.sh landing page and the VS Code / Cursor extension webview). One brand across two mediums: a dark terminal console with a single neon-lime accent. Sans/mono type is Geist; the CLI itself speaks in chalk-semantic ANSI color."
+description: "The meta harness engineering system for agents. A Phoenix Labs OSS product (MIT), terminal-coded — NOT the Rush/Swarmify brand. Two surfaces, one identity: a chalk-colored terminal CLI and the agents-cli.sh web landing, both a dark #0a0a0a canvas with a single neon-lime accent. Type is JetBrains Mono (wordmark, code, terminal) + Inter (prose); the CLI speaks in chalk-semantic ANSI color."
 
 colors:
-  # Brand — lime-400. The one accent that means "live / active / success",
-  # shared verbatim by the landing page and the extension webview.
+  # Brand — lime on black. #a3e635 is the named brand lime (per the repo's
+  # brand-identity block); the demo/promo uses a brighter #b3ff0c for glow.
   brand: "#a3e635"
-  brand-600: "#84cc16"
-  brand-700: "#65a30d"
-  brand-ring: "rgba(163,230,53,0.25)"
+  lime-bright: "#b3ff0c"
 
-  # Web canvas (landing + webview) — near-black, high contrast.
+  # Web / demo canvas (from demo/src) — near-black, high contrast.
   bg: "#0a0a0a"
-  bg-panel: "#141414"
-  bg-recessed: "#0f0f0f"
-  text: "#E7E5E4"
-  text-muted: "#A8A29E"
-  text-dim: "#6E6A63"
-  border: "rgba(255,255,255,0.08)"
+  bg-panel: "#161616"
+  bg-recessed: "#0c0c0c"
+  border: "#3a3a3a"
+  text: "#e8e8e8"
+  text-bright: "#f5f5f5"
+  text-dim: "#777777"
 
-  # Terminal (ANSI, via chalk) — semantic, not literal hex. The renderer maps
-  # these to the user's terminal theme; the meaning is what's fixed, not the pixel.
-  term-success: "green"
-  term-error: "red"
-  term-warning: "yellow"
-  term-identifier: "cyan"
-  term-secondary: "gray"
+  # Terminal (ANSI, via chalk) — semantic names, not literal hex; the renderer
+  # maps them to the user's terminal theme. The demo/src hexes below are how the
+  # brand renders those roles when it controls the pixels (Terminal.tsx).
+  term-success: "green"       # renders lime — #b3ff0c
+  term-error: "red"           # #f87171
+  term-warning: "yellow"      # #facc15
+  term-identifier: "cyan"     # #22d3ee
+  term-secondary: "gray"      # #777777
   term-emphasis: "bold"
 
 typography:
-  # Web surface — Geist (sans) + Geist Mono. Terminal inherits the user's font.
-  heading:
-    fontFamily: "Geist, -apple-system, system-ui, sans-serif"
+  # JetBrains Mono for the wordmark, code, and terminal; Inter for prose.
+  # (agents-cli/demo/src/index.css @font-face; brand-identity block in AGENTS.md.)
+  wordmark:
+    fontFamily: "'JetBrains Mono', ui-monospace, monospace"
     fontWeight: 700
-    letterSpacing: "-0.005em"
-  body:
-    fontFamily: "Geist, -apple-system, system-ui, sans-serif"
-    fontSize: "13px"
-    fontWeight: 400
-    lineHeight: 1.45
   mono:
-    fontFamily: "Geist Mono, ui-monospace, SF Mono, monospace"
+    fontFamily: "'JetBrains Mono', ui-monospace, SF Mono, monospace"
+    fontWeight: 400
+  prose:
+    fontFamily: "Inter, -apple-system, system-ui, sans-serif"
+    fontWeight: 400
 
 rounded:
   xs: "3px"
@@ -81,18 +79,22 @@ components:
 
 agents-cli is a **terminal-first tool that also wears a web face**. The same brand shows up in two mediums, and the design job is to make them feel like one product:
 
-- **The terminal** — the primary surface. Thousands of lines of `chalk`-colored output, spinners, and stamped ASCII tables. This is where the tool lives.
-- **The web** — the [agents-cli.sh](https://agents-cli.sh) landing page and the VS Code / Cursor extension webview. A dark terminal console rendered in HTML: black canvas, one neon-lime accent, Geist type. (The extension's design system is documented in full at `swarmify/extension/DESIGN.md`, and its CSS header states outright that it "matches the agents-cli landing palette.")
+- **The terminal** — the primary surface. Thousands of lines of `chalk`-colored output, spinners, and aligned monospace tables. This is where the tool lives.
+- **The web** — the [agents-cli.sh](https://agents-cli.sh) landing page (and the promo demo in `demo/src/`). The same identity rendered in HTML: `#0a0a0a` canvas, one neon-lime accent, JetBrains Mono wordmark over Inter prose.
 
-The through-line across both is **quiet, dense, high-signal**. The tool is mostly gray — secondary text, paths, hints — so that the rare colored element (a green success, a red failure, a lime call-to-action) carries real weight. The brand personality is a *developer-first performance instrument*: the landing headline is "The meta harness engineering system for agents," and the hero stat is "4.3× FASTER." Nothing is decorative; every glyph and color is a status signal.
+> **Not the Rush/Swarmify brand.** agents-cli is Phoenix Labs OSS and terminal-coded; it does not use Swarmify's Geist/coral system. The Swarmify VS Code extension mirrors this *palette* (lime on black) but is a separate product with its own design doc — don't import its tokens here.
+
+The through-line across both surfaces is **quiet, dense, high-signal**. The tool is mostly gray — secondary text, paths, hints — so that the rare colored element (a lime success, a red failure, a lime call-to-action) carries real weight. The brand personality is a *developer-first performance instrument*: the landing headline is "The meta harness engineering system for agents," and the hero stat is "4.3× FASTER." Nothing is decorative; every glyph and color is a status signal.
+
+![agents-cli brand — accent, surfaces, terminal semantic palette, and type](assets/design/brand.png)
 
 ## Colors
 
 There are two color systems, because there are two renderers.
 
-### Web (landing + webview)
+### Web (landing + demo)
 
-The brand is **lime-400** (`#a3e635`) on a near-black canvas — the exact palette the extension mirrors. One accent, used sparingly, for "live / active / primary." Hover and press deepen to `brand-600` (`#84cc16`) and `brand-700` (`#65a30d`); focus rings use `brand-ring` (`rgba(163,230,53,0.25)`). Surfaces run a short black-up ladder (`#0a0a0a` canvas → `#0f0f0f` wells → `#141414` panels); text is a warm-gray hierarchy (`#E7E5E4` → `#A8A29E` → `#6E6A63`). See `swarmify/extension/DESIGN.md` for the complete, per-token web system.
+The brand is **lime on a near-black canvas.** `#a3e635` is the named brand lime; the promo demo pushes a brighter `#b3ff0c` for glow. One accent, used sparingly, for "live / active / primary." Surfaces are a short ladder — `#0a0a0a` canvas → `#0c0c0c` wells → `#161616` panels, hairlined in `#3a3a3a`; text is `#e8e8e8` (bright `#f5f5f5`) dropping to `#777777` for secondary. (Tokens from `demo/src`.)
 
 ### Terminal (ANSI via chalk)
 
@@ -110,9 +112,13 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 
 `magenta` and `blue` appear rarely (~24× / ~22×) as one-off accents; reach for them almost never. The dominance of gray is the point: **the terminal is calm by default, and color is the exception that means something.**
 
+![agents-cli terminal — a representative session showing each semantic color role in context](assets/design/terminal.png)
+
+*Representative render (JetBrains Mono; role hexes from `demo/src` — lime success, cyan names, gray hints, red/yellow status). Actual colors resolve to the user's terminal theme.*
+
 ## Typography
 
-**Web:** Geist for interface text, Geist Mono for anything machine-shaped (code, CLI examples, tokens). The mono/sans split is the hierarchy — prose is human, monospace is the machine.
+**Web:** **JetBrains Mono** for the wordmark, code samples, and any machine-shaped text; **Inter** for prose and paragraph copy. The mono/sans split is the hierarchy — prose is human, monospace is the machine. (Both are loaded via `@font-face` in `demo/src/index.css`.)
 
 **Terminal:** typography is the user's terminal font; the CLI controls only weight (`bold`), dimming (`dim`), and layout. Hierarchy is created with **column alignment** (`.padEnd()` fixed-width columns) and `bold` headers, not type size — a monospace grid is the only typographic tool a terminal has, so lean on it.
 
@@ -125,7 +131,7 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 - **Aligned key/value pairs** — label left, value right, padded to a common width.
 - No heavy ASCII boxes; alignment and color do the structuring.
 
-**Web layout** follows the shared agents web system (dense 13px base, small radii, embossed panels) — see the extension DESIGN.md.
+**Web layout** is a dark, terminal-coded landing: a centered column on the `#0a0a0a` canvas, panels in `#161616` hairlined with `#3a3a3a`, generous whitespace around a single lime call-to-action.
 
 ## Shapes
 
@@ -141,7 +147,7 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 ## Components
 
 ### Web
-Primary button: solid lime, near-black text, `4px` radius. Panels, badges, keycaps, LED status dots — all defined in the extension design system (`swarmify/extension/DESIGN.md`); reuse it rather than reinventing web chrome here.
+Primary button: solid lime (`#a3e635`), near-black text (`#0a0a0a`), `4px` radius — the one call-to-action per view. Panels are `#161616` on `#0c0c0c` wells, hairlined in `#3a3a3a`; wordmark in JetBrains Mono, body in Inter. Keep web chrome minimal — the landing sells the terminal, so it should read like one.
 
 ### Terminal
 - **Status line** — glyph + colored label + gray detail: `✓ Menu bar helper enabled.` then dim follow-up.
@@ -166,4 +172,4 @@ Primary button: solid lime, near-black text, `4px` radius. Panels, badges, keyca
 - Invent new status glyphs beyond the fixed set, or new chalk roles (avoid `magenta`/`blue` unless truly one-off).
 - Emit emojis or decorative flair (repo hard rule: no emojis anywhere).
 - Use toasts or spinner-that-never-ends UX — success is a quiet ✓, errors are inline red with a fix hint.
-- Drift the web surface off lime + Geist; the landing and webview must stay a single palette.
+- Drift the web surface off lime + JetBrains Mono / Inter, or pull in the Rush/Swarmify (Geist/coral) styling — the landing must stay terminal-coded and on one palette.
