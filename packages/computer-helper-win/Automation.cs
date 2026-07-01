@@ -250,7 +250,13 @@ public sealed class Automation
             // Prefer rich document text, then ValuePattern, then the Name.
             if (el.TryGetCurrentPattern(TextPattern.Pattern, out var tp))
             {
-                var text = ((TextPattern)tp).DocumentRange.GetText(MaxTextChars);
+                // GetText(maxLength > 0) makes the provider compute an endpoint at
+                // start+maxLength; the Windows 11 Notepad UIA provider rejects that as
+                // "Start or end specified is past the end of the text range" when the
+                // document is shorter than maxLength. GetText(-1) returns the whole
+                // range with no endpoint arithmetic; clamp the length in managed code.
+                var text = ((TextPattern)tp).DocumentRange.GetText(-1) ?? "";
+                if (text.Length > MaxTextChars) text = text.Substring(0, MaxTextChars);
                 return new() { ["text"] = text };
             }
             if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
