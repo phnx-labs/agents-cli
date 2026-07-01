@@ -419,6 +419,9 @@ export function getTeamsRegistryPath(): string { return path.join(HISTORY_DIR, '
 /** Path to the device registry — SSH device profiles with platform/auth metadata. Durable runtime, per-machine (host list + addresses are NOT pulled by `agents repo push`). */
 export function getDevicesRegistryPath(): string { return path.join(HISTORY_DIR, 'devices', 'registry.json'); }
 
+/** Path to the device ignore-list — tailscale node names the user dismissed, so auto-discovery never re-suggests them. Per-machine, same dir as the registry. */
+export function getDevicesIgnoredPath(): string { return path.join(HISTORY_DIR, 'devices', 'ignored.json'); }
+
 /** Path to cloud dispatch cache (~/.agents/.cache/cloud/). */
 export function getCloudDir(): string { return CLOUD_DIR; }
 

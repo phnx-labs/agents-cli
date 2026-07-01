@@ -129,6 +129,18 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
     }
   }
 
+  // Populate the device registry from the tailnet on first setup. Soft: no
+  // tailscale is a clean no-op, never a setup failure.
+  try {
+    const { runDeviceSync } = await import('../lib/devices/sync.js');
+    const dev = await runDeviceSync({ soft: true });
+    if (dev.ok && dev.synced > 0) {
+      console.log(chalk.gray(`Discovered ${dev.synced} device${dev.synced === 1 ? '' : 's'} on your tailnet (agents devices list).`));
+    }
+  } catch {
+    // Never let device discovery block setup.
+  }
+
   // Offer to import existing unmanaged installations
   if (unmanaged.length > 0 && isInteractiveTerminal()) {
     console.log(chalk.bold('\nFound existing installations:\n'));
