@@ -9,7 +9,7 @@
  */
 
 /** An interactive terminal backend the engine can drive. */
-export type Backend = 'iterm' | 'ghostty' | 'tmux';
+export type Backend = 'iterm' | 'ghostty' | 'tmux' | 'vscodium-agent';
 
 /** Which way a split pane grows. `right` = side-by-side; `down` = stacked. */
 export type SplitDirection = 'right' | 'down';

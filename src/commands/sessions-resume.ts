@@ -49,6 +49,7 @@ interface ResumeOptions {
   iterm?: boolean;
   ghostty?: boolean;
   tmux?: boolean;
+  vscodium?: boolean;
   tabs?: boolean;
 }
 
@@ -56,7 +57,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('resume')
     .argument('[query]', 'Filter sessions before selecting (topic, path, or id fragment)')
-    .description('Multi-select sessions and resume each in a terminal tab/split (this terminal, iTerm, Ghostty, tmux; local or --host).')
+    .description('Multi-select sessions and resume each in a terminal tab/split (this terminal, iTerm, Ghostty, tmux, VSCodium; local or --host).')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--all', 'Include sessions from every directory (not just current project)')
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
@@ -66,6 +67,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
     .option('--iterm', 'Force the iTerm backend')
     .option('--ghostty', 'Force the Ghostty backend')
     .option('--tmux', 'Force the tmux backend')
+    .option('--vscodium', 'Force the VSCodium agent-terminal backend (swarm-ext)')
     .option('--tabs', 'One tab per session (default: pack two panes per tab)');
 
   setHelpSections(cmd, {
@@ -78,13 +80,15 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
 
       # Force a backend / one tab each / a remote host
       agents sessions resume --ghostty
+      agents sessions resume --vscodium
       agents sessions resume --tabs
       agents sessions resume --host zion --tmux
     `,
     notes: `
       - space toggles a session, enter confirms; tab toggles the preview pane.
       - Layout: two-per-tab by default (session 1 → new tab, session 2 → split beside it, …). --tabs disables splitting.
-      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux.
+      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.
+      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --host too).
       - --host <alias> resumes on a remote machine over the same SSH transport as 'sessions --host' (defaults to tmux).
       - Each session opens version-pinned, in its own cwd. Non-resumable agents are skipped with a note.
     `,
@@ -219,7 +223,11 @@ async function resolveBackend(
   count: number,
 ): Promise<Backend | 'inplace' | 'cancel'> {
   const forced: Backend | undefined =
-    options.iterm ? 'iterm' : options.ghostty ? 'ghostty' : options.tmux ? 'tmux' : undefined;
+    options.iterm ? 'iterm'
+      : options.ghostty ? 'ghostty'
+      : options.tmux ? 'tmux'
+      : options.vscodium ? 'vscodium-agent'
+      : undefined;
   if (forced) return forced;
   // Remote defaults to tmux (headless, no GUI session assumptions); override with a backend flag.
   if (options.host) return 'tmux';

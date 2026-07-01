@@ -3,6 +3,12 @@ import type { EngineContext } from '../types.js';
 import { itermTabScript, itermSplitScript, itermBackend } from './iterm.js';
 import { ghosttyTabScript, ghosttySplitScript, ghosttyBackend } from './ghostty.js';
 import { tmuxTabArgv, tmuxSplitArgv, tmuxBackend } from './tmux.js';
+import {
+  vscodiumAgentBackend,
+  makeVscodiumAgentBackend,
+  spawnUri,
+  EDITOR_VARIANTS,
+} from './vscodium-agent.js';
 import { detectCurrentBackend, availableBackends, BACKENDS } from './index.js';
 
 const CMD = ['claude@2.1.187', '--resume', 'cad0e546'];
@@ -63,6 +69,46 @@ describe('tmux backend', () => {
   });
 });
 
+describe('vscodium-agent backend', () => {
+  it('tab: codium --open-url with a vscodium:// spawn URI carrying cwd + raw command (no zsh wrap)', () => {
+    const argv = vscodiumAgentBackend.buildTab('/Users/me/dev', CMD);
+    expect(argv.argv[0]).toBe('codium');
+    expect(argv.argv[1]).toBe('--open-url');
+    const url = argv.argv[2];
+    expect(url.startsWith('vscodium://swarmify.swarm-ext/spawn?')).toBe(true);
+    // the editor terminal is already an interactive login shell — no zsh -ilc wrap
+    expect(url).not.toContain('zsh');
+    const q = new URLSearchParams(url.split('?')[1]);
+    expect(q.get('cwd')).toBe('/Users/me/dev');
+    expect(q.get('command')).toBe('claude@2.1.187 --resume cad0e546');
+    expect(q.get('split')).toBeNull();
+  });
+  it('split: carries the direction so the extension splits beside the prior pane', () => {
+    const right = new URLSearchParams(vscodiumAgentBackend.buildSplit('/d', CMD, 'right').argv[2].split('?')[1]);
+    expect(right.get('split')).toBe('right');
+    const down = new URLSearchParams(vscodiumAgentBackend.buildSplit('/d', CMD, 'down').argv[2].split('?')[1]);
+    expect(down.get('split')).toBe('down');
+  });
+  it('spawnUri percent-encodes spaces and special chars in cwd + command', () => {
+    const url = spawnUri('vscodium', '/Users/me/my project', ['claude', '--resume', 'a b&c']);
+    expect(url).not.toContain(' ');
+    const q = new URLSearchParams(url.split('?')[1]);
+    expect(q.get('cwd')).toBe('/Users/me/my project');
+    expect(q.get('command')).toBe('claude --resume a b&c');
+  });
+  it('makeVscodiumAgentBackend binds a variant CLI + scheme (Cursor, VS Code)', () => {
+    const cursor = makeVscodiumAgentBackend(EDITOR_VARIANTS[1]);
+    expect(cursor.buildTab('/d', CMD).argv[0]).toBe('cursor');
+    expect(cursor.buildTab('/d', CMD).argv[2].startsWith('cursor://')).toBe(true);
+    const code = makeVscodiumAgentBackend(EDITOR_VARIANTS[2]);
+    expect(code.buildTab('/d', CMD).argv[0]).toBe('code');
+    expect(code.buildTab('/d', CMD).argv[2].startsWith('vscode://')).toBe(true);
+  });
+  it('is darwin-only (VSCodium.app presence checked at runtime)', () => {
+    expect(vscodiumAgentBackend.isAvailable(ctx({}, 'linux'))).toBe(false);
+  });
+});
+
 describe('availability + detection', () => {
   it('tmux is available iff $TMUX is set (any platform)', () => {
     expect(tmuxBackend.isAvailable(ctx({ TMUX: '/tmp/x,1,0' }, 'linux'))).toBe(true);
@@ -82,7 +128,7 @@ describe('availability + detection', () => {
     const a = availableBackends(ctx({ TMUX: 'x' }, 'linux'));
     expect(a.map((b) => b.id)).toEqual(['tmux']);
   });
-  it('registry has all three backends', () => {
-    expect(Object.keys(BACKENDS).sort()).toEqual(['ghostty', 'iterm', 'tmux']);
+  it('registry has all four backends', () => {
+    expect(Object.keys(BACKENDS).sort()).toEqual(['ghostty', 'iterm', 'tmux', 'vscodium-agent']);
   });
 });
