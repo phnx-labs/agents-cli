@@ -81,7 +81,11 @@ describe('carryForwardAuthFiles / switchConfigSymlink — auth survives version 
     expect(fs.existsSync(dst)).toBe(true);
     expect(fs.readFileSync(dst, 'utf8')).toBe('LOGGED_IN_BLOB');
     expect(fs.existsSync(path.join(v2, '.factory', 'auth.v2.key'))).toBe(true);
-    expect(fs.statSync(dst).mode & 0o777).toBe(0o600);
+    // POSIX perms don't survive on Windows — Node reports 0o666 regardless of the
+    // mode copyFileSync was given, so asserting 0o600 there tests the OS, not us.
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(dst).mode & 0o777).toBe(0o600);
+    }
     // ...and the source is untouched (copy, not move).
     expect(fs.existsSync(path.join(v1, '.factory', 'auth.v2.file'))).toBe(true);
   });
