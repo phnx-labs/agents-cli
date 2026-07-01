@@ -249,6 +249,13 @@ describe('startDetached (integration: daemon stays alive)', () => {
         up = await probeEndpoint(endpoint);
         if (!up) await new Promise((r) => setTimeout(r, 100));
       }
+      if (!up) {
+        // TEMP DIAGNOSTIC (remove before merge): the detached daemon's stdio and
+        // structured log are the only window into why the socket never bound.
+        const stdio = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf-8') : '(no stdio log)';
+        const structured = fs.existsSync(daemonLog) ? fs.readFileSync(daemonLog, 'utf-8') : '(no structured log)';
+        console.error(`\n===== DAEMON STDIO (${logPath}) =====\n${stdio}\n===== DAEMON LOG (${daemonLog}) =====\n${structured}\n===== daemon alive=${alive()} pid=${pid} =====\n`);
+      }
       expect(up).toBe(true);
 
       // The crux of #556: it must NOT tear itself down. Wait well past the 36ms
