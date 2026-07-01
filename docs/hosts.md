@@ -193,7 +193,7 @@ is a fast-follow `HostProvider`, opt-in when logged in — not a v1 dependency.
 ## Architecture
 
 ```
-agents run <agent> "<task>" --on <host>
+agents run <agent> "<task>" --host <host>
   │
   ├─ resolveHost(name)         registry lookup in agents.yaml → {address,user,caps} [Phase 1]
   │
