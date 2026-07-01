@@ -74,6 +74,13 @@ export interface ActiveSession {
    * Absent for cloud sessions (no local pid) and any pid whose env is unreadable.
    */
   provenance?: SessionProvenance;
+  /**
+   * The machine this session runs on, as a normalized device id (machineId()
+   * form). Set when merging cross-machine results so the grouped `--active`
+   * view can bucket by computer. Absent for a purely local query (the renderer
+   * falls back to provenance.host, then the local machine).
+   */
+  machine?: string;
   teamName?: string;
   agentId?: string;
   cloudProvider?: string;

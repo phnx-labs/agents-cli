@@ -20,6 +20,8 @@ import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { machineId, normalizeHost } from '../lib/session/sync/config.js';
+import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
@@ -441,14 +443,143 @@ export function groupActiveSessions(sessions: ActiveSession[]): ActiveSessionsLa
   return { workspaces };
 }
 
-/** Render the unified active-session view. */
-async function renderActiveSessions(asJson: boolean, waitingOnly = false): Promise<void> {
-  const all = await getActiveSessions();
+/** One machine's active sessions, keeping the within-machine workspace layout. */
+export interface MachineGroup {
+  /** Normalized device id (machineId() form). */
+  machine: string;
+  /** The machine this command is running on — pinned first and marked. */
+  isLocal: boolean;
+  total: number;
+  layout: ActiveSessionsLayout;
+}
+
+/** Active sessions grouped by the machine they run on. */
+export interface MachineGroupedLayout {
+  machines: MachineGroup[];
+}
+
+/**
+ * The machine a session belongs to: an explicit tag (set when merging
+ * cross-machine results) wins; else the process's provenance host (normalized
+ * to the same id form); else the local machine. Never keys off `ActiveSession.host`
+ * — that is the terminal *app* (code/tmux), not the computer.
+ */
+function machineKeyFor(s: ActiveSession, localMachine: string): string {
+  if (s.machine) return s.machine;
+  if (s.provenance?.host) return normalizeHost(s.provenance.host);
+  return localMachine;
+}
+
+/**
+ * Group active sessions by machine, then delegate each machine's sessions to the
+ * existing workspace/window grouping. Local machine is pinned first and flagged;
+ * the rest sort by session count descending, then name. Pure — `localMachine` is
+ * injected so the function stays testable without reading os.hostname().
+ */
+export function groupSessionsByMachine(sessions: ActiveSession[], localMachine: string): MachineGroupedLayout {
+  const byMachine = new Map<string, ActiveSession[]>();
+  for (const s of sessions) {
+    const key = machineKeyFor(s, localMachine);
+    (byMachine.get(key) ?? byMachine.set(key, []).get(key)!).push(s);
+  }
+  const keys = Array.from(byMachine.keys()).sort((a, b) => {
+    if (a === localMachine) return -1;
+    if (b === localMachine) return 1;
+    const ac = byMachine.get(a)!.length, bc = byMachine.get(b)!.length;
+    if (ac !== bc) return bc - ac;
+    return a.localeCompare(b);
+  });
+  const machines = keys.map((machine) => ({
+    machine,
+    isLocal: machine === localMachine,
+    total: byMachine.get(machine)!.length,
+    layout: groupActiveSessions(byMachine.get(machine)!),
+  }));
+  return { machines };
+}
+
+/**
+ * Collapse duplicate sessions after a cross-machine merge. Two rows collapse
+ * only when they share both machine and session UUID (the same host listed
+ * twice, or a local/remote overlap); rows without a sessionId can't be
+ * correlated, so they're all kept.
+ */
+export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession[] {
+  const seen = new Set<string>();
+  const out: ActiveSession[] = [];
+  for (const s of sessions) {
+    if (!s.sessionId) { out.push(s); continue; }
+    const key = `${s.machine ?? ''}:${s.sessionId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+/** Print one machine's workspace tree, indented under its machine header. */
+function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string): void {
+  let first = true;
+  for (const ws of layout.workspaces) {
+    if (!first) console.log();
+    first = false;
+
+    const header = ws.key === '__cloud__'
+      ? chalk.magenta.bold('cloud')
+      : ws.key === '__unknown__'
+        ? chalk.gray.bold('unknown')
+        : chalk.cyan.bold(shortCwd(ws.key));
+    console.log(`${base}${header} ${chalk.gray(`(${ws.total})`)}`);
+
+    for (const win of ws.windows) {
+      // Host is per-process, but every terminal in the same IDE window shares
+      // an ancestor — take the first non-empty host as the window's label.
+      const host = win.sessions.find((s) => s.host)?.host ?? 'terminal';
+      const winHeader = `${chalk.gray(host)} ${chalk.gray('·')} ${chalk.gray(shortWindowLabel(win.windowId))} ${chalk.gray(`(${win.sessions.length})`)}`;
+      console.log(base + '  ' + winHeader);
+      for (const s of win.sessions) printActiveRow(s, base + '    ');
+    }
+
+    for (const s of ws.flat) printActiveRow(s, base + '  ');
+  }
+}
+
+/** Machine header: `▸ <name> ← this machine` for the local box (cyan), matching
+ * the `ag devices list` treatment; a plain `▸ <name>` for remotes. */
+function printMachineHeader(mg: MachineGroup): void {
+  const marker = mg.isLocal ? chalk.cyan('▸ ') : chalk.gray('▸ ');
+  const name = mg.isLocal ? chalk.bold.cyan(mg.machine) : chalk.bold(mg.machine);
+  const here = mg.isLocal ? chalk.cyan('  ← this machine') : '';
+  console.log(`${marker}${name} ${chalk.gray(`(${mg.total})`)}${here}`);
+}
+
+/**
+ * Render the unified active-session view, grouped by machine. Local sessions
+ * come from `getActiveSessions()`; unless `--local`, sessions from other
+ * machines are folded in over SSH (explicit `--host` targets, else the
+ * registered online devices from `ag devices`). A tip is shown when there are
+ * no other machines to include.
+ */
+async function renderActiveSessions(
+  asJson: boolean,
+  waitingOnly = false,
+  opts: { local?: boolean; hosts?: string[] } = {},
+): Promise<void> {
+  const self = machineId();
+  const local = await getActiveSessions();
+  for (const s of local) if (!s.machine) s.machine = self;
+
+  let remoteDeviceCount = 0;
+  let merged = local;
+  if (!opts.local) {
+    const remote = await gatherRemoteActive(opts.hosts);
+    remoteDeviceCount = remote.deviceCount;
+    merged = dedupeByMachineSession([...local, ...remote.sessions]);
+  }
+
   // --waiting: only sessions blocked on the user. Exits non-zero when any are
   // present so a supervising agent or hook can poll it as a gate.
-  const sessions = waitingOnly
-    ? all.filter(s => s.status === 'input_required')
-    : all;
+  const sessions = waitingOnly ? merged.filter(s => s.status === 'input_required') : merged;
 
   if (asJson) {
     process.stdout.write(JSON.stringify(sessions, null, 2) + '\n');
@@ -458,34 +589,17 @@ async function renderActiveSessions(asJson: boolean, waitingOnly = false): Promi
 
   if (sessions.length === 0) {
     console.log(chalk.gray(waitingOnly ? 'No sessions waiting on input.' : 'No active agent sessions.'));
+    if (!opts.local && !opts.hosts?.length && remoteDeviceCount === 0) printCrossMachineTip();
     return;
   }
 
-  const layout = groupActiveSessions(sessions);
-
-  let first = true;
-  for (const ws of layout.workspaces) {
-    if (!first) console.log();
-    first = false;
-
-    // Print workspace header
-    const header = ws.key === '__cloud__'
-      ? chalk.magenta.bold('cloud')
-      : ws.key === '__unknown__'
-        ? chalk.gray.bold('unknown')
-        : chalk.cyan.bold(shortCwd(ws.key));
-    console.log(`${header} ${chalk.gray(`(${ws.total})`)}`);
-
-    for (const win of ws.windows) {
-      // Host is per-process, but every terminal in the same IDE window shares
-      // an ancestor — take the first non-empty host as the window's label.
-      const host = win.sessions.find((s) => s.host)?.host ?? 'terminal';
-      const winHeader = `${chalk.gray(host)} ${chalk.gray('·')} ${chalk.gray(shortWindowLabel(win.windowId))} ${chalk.gray(`(${win.sessions.length})`)}`;
-      console.log('  ' + winHeader);
-      for (const s of win.sessions) printActiveRow(s, '    ');
-    }
-
-    for (const s of ws.flat) printActiveRow(s, '  ');
+  const grouped = groupSessionsByMachine(sessions, self);
+  let firstMachine = true;
+  for (const mg of grouped.machines) {
+    if (!firstMachine) console.log();
+    firstMachine = false;
+    printMachineHeader(mg);
+    renderWorkspaceLayout(mg.layout, '  ');
   }
 
   const runningCount = sessions.filter(s => s.status === 'running').length;
@@ -496,15 +610,29 @@ async function renderActiveSessions(asJson: boolean, waitingOnly = false): Promi
   if (runningCount > 0) parts.push(`${runningCount} running`);
   if (idleCount > 0) parts.push(`${idleCount} idle`);
   if (queuedCount > 0) parts.push(`${queuedCount} queued`);
-  console.log(chalk.gray(`\n${sessions.length} active (${parts.join(', ')}).`));
+  const machineWord = grouped.machines.length === 1 ? 'machine' : 'machines';
+  console.log(chalk.gray(`\n${sessions.length} active (${parts.join(', ')}) across ${grouped.machines.length} ${machineWord}.`));
+
+  // Tip only when nothing else could be included and the user didn't opt out.
+  if (!opts.local && !opts.hosts?.length && remoteDeviceCount === 0) printCrossMachineTip();
 
   // Scriptable gate: a non-zero exit when anything is waiting on the user.
   if (waitingOnly && sessions.length > 0) process.exitCode = 1;
 }
 
+/** Nudge shown when `--active` has no other machines to fold in. */
+function printCrossMachineTip(): void {
+  console.log(chalk.gray(
+    "\nTip: include sessions from your other machines — register them with 'ag devices sync', then rerun. Use --local to skip.",
+  ));
+}
+
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
 async function sessionsAction(query: string | undefined, options: SessionsOptions): Promise<void> {
-  if (options.host && options.host.length > 0) {
+  // --host WITHOUT --active keeps the legacy per-host stream (each remote's raw
+  // stdout under a `── host ──` banner). With --active, the hosts are folded
+  // into the merged machine-grouped view instead (handled below).
+  if (options.host && options.host.length > 0 && !options.active) {
     try {
       runRemoteSessions(options.host);
     } catch (err: any) {
@@ -515,7 +643,13 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   }
 
   if (options.active) {
-    await renderActiveSessions(options.json === true, options.waiting === true);
+    // AGENTS_SESSIONS_LOCAL is set by a parent fan-out invocation (see
+    // remote-active.ts) so a peer answers for itself without recursing.
+    const forceLocal = options.local === true || process.env.AGENTS_SESSIONS_LOCAL === '1';
+    await renderActiveSessions(options.json === true, options.waiting === true, {
+      local: forceLocal,
+      hosts: options.host,
+    });
     return;
   }
 
@@ -1517,6 +1651,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--artifacts', 'List all files written or edited during a session')
     .option('--artifact <name>', 'Read a specific artifact by filename or path (outputs to stdout)')
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
+    .option('--local', 'With --active: only this machine — skip the cross-machine SSH fan-out')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
