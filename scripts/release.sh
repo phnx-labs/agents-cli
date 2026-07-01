@@ -270,18 +270,26 @@ fi
 rm -f "$BUILD_LOG"
 green "Build clean."
 
-# ----- Tests -----
+# ----- Tests (remote, on crabbox) -----
+# The full suite runs on a leased crabbox VM, NOT locally: a release test run
+# freezes the mac for minutes and the box matches the Linux CI environment.
+# Publishing still happens here (the signed macOS keychain helper can only be
+# produced + notarized locally) -- only the test gate is offloaded. sandbox.sh
+# rsyncs this checkout to the box and runs the suite there. TASK_ID pins a
+# stable remote workspace so re-runs of the same release reuse it.
 if $SKIP_TESTS; then
   yellow "Skipping tests (--skip-tests)"
 else
-  # pipefail is on, so a failure in `npm test` would propagate even through a
-  # pipe. We don't pipe -- show the full output so a developer can scroll back
-  # through any individual failure. The summary line is captured for the
-  # tarball-preview section regardless.
-  bold "Running tests (npm test)..."
+  # pipefail is on, so a failure in the remote run propagates through the pipe.
+  # We tee the streamed output so a developer can scroll back through any
+  # individual failure; the log is also scanned for silent unhandled errors.
+  bold "Running tests on crabbox (scripts/sandbox.sh)..."
   TEST_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-test.XXXXXX")"
-  if ! npm test 2>&1 | tee "$TEST_LOG"; then
-    red "Tests failed."
+  # `bun run build` before test: crabbox's sync honors .gitignore, so the
+  # gitignored dist/ never reaches the box -- the integration tests that spawn
+  # a child importing dist/ need it built there. Matches ci.yml (Build->Test).
+  if ! TASK_ID="release-$TARGET" "$ROOT/scripts/sandbox.sh" "bun install && bun run build && bun run test" 2>&1 | tee "$TEST_LOG"; then
+    red "Tests failed (crabbox)."
     rm -f "$TEST_LOG"
     die "fix failing tests before releasing"
   fi
@@ -374,6 +382,31 @@ fi
 # Past this point we want to keep the bumped package.json, since we're
 # committing it. Disable the auto-revert.
 PKG_BUMPED=false
+
+# ----- Roll the changelog: promote "## Unreleased" -> "## $TARGET" -----
+# Without this, every release leaves its notes stranded under "Unreleased" and
+# the section grows across releases with no per-version headers. Only fires when
+# the Unreleased section actually has content, so a notes-less release can't
+# create an empty version header.
+if [[ -f CHANGELOG.md ]]; then
+  unrel_content="$(awk '/^## Unreleased[[:space:]]*$/{f=1;next} f&&/^## /{exit} f&&/[^[:space:]]/{print}' CHANGELOG.md)"
+  if [[ -n "$unrel_content" ]]; then
+    tmp_cl="$(mktemp)"
+    awk -v ver="$TARGET" '
+      ins { print; next }
+      seen && /^## / { print; ins=1; seen=0; next }
+      seen && /[^[:space:]]/ { print "## " ver; print ""; print; ins=1; seen=0; next }
+      seen { print; next }
+      /^## Unreleased[[:space:]]*$/ { print; seen=1; next }
+      { print }
+    ' CHANGELOG.md > "$tmp_cl"
+    mv "$tmp_cl" CHANGELOG.md
+    git add CHANGELOG.md
+    green "Rolled CHANGELOG: ## Unreleased -> ## $TARGET"
+  else
+    gray "CHANGELOG: no Unreleased content to roll"
+  fi
+fi
 
 # ----- Commit (idempotent on package.json diff alone) -----
 git add package.json

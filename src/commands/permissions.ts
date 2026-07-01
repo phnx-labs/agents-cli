@@ -43,7 +43,6 @@ import {
   getVersionHomePath,
   promptAgentVersionSelection,
   resolveAgentVersionTargets,
-  resolveVersionAlias,
 } from '../lib/versions.js';
 import { recordVersionResources } from '../lib/state.js';
 import {
@@ -53,6 +52,7 @@ import {
   printWithPager,
   requireInteractiveSelection,
   resolveAgentTargetsAutoInstalling,
+  resolveListFilterOrExit,
 } from './utils.js';
 
 export function shouldRefuseBroadPermissions(
@@ -179,7 +179,7 @@ When to use:
           console.log(chalk.red(formatAgentError(agentName, capableAgents('allowlist'))));
           process.exit(1);
         }
-        const requestedVersion = resolveVersionAlias(agentId, parts[1]) ?? null;
+        const requestedVersion = resolveListFilterOrExit(agentId, parts[1]) ?? null;
 
         if (!isCapable(agentId, 'allowlist')) {
           console.log(chalk.yellow(`${AGENTS[agentId].name} does not support fine-grained permissions`));

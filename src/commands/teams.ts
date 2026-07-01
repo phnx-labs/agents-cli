@@ -8,6 +8,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs/promises';
+import { addHostOption } from '../lib/hosts/option.js';
 import * as path from 'path';
 import {
   AgentManager,
@@ -783,8 +784,7 @@ export function registerTeamsCommands(program: Command): void {
   });
 
   // list
-  teams
-    .command('list [query]')
+  addHostOption(teams.command('list [query]'))
     .alias('ls')
     .description('List your teams, most recent activity first')
     .option('-a, --agent <agent>', 'Filter: only teams with this agent (e.g. claude or claude@2.1.112)')
@@ -909,8 +909,7 @@ export function registerTeamsCommands(program: Command): void {
     });
 
   // create
-  teams
-    .command('create <team>')
+  addHostOption(teams.command('create <team>'))
     .aliases(['c', 'new'])
     .description('Start a new team. No teammates yet; add them with `teams add`.')
     .option('-d, --description <text>', 'One-line summary of what this team is working on')
@@ -945,8 +944,7 @@ export function registerTeamsCommands(program: Command): void {
     });
 
   // add
-  teams
-    .command('add <team> <teammate> <task>')
+  addHostOption(teams.command('add <team> <teammate> <task>'))
     .alias('a')
     .description("Add a teammate to work on a task. Runs in background; returns immediately. Use 'status' to check in.")
     .option('-n, --name <name>', 'Friendly name for this teammate (e.g. alice). Required if using --after. Unique within team.')
@@ -1209,8 +1207,7 @@ export function registerTeamsCommands(program: Command): void {
     });
 
   // status
-  teams
-    .command('status [team]')
+  addHostOption(teams.command('status [team]'))
     .aliases(['s', 'st', 'check'])
     .description("Check in on a team: status, files touched, recent commands, last messages. Pass --verbose for the full per-teammate dump; --since for delta polling.")
     .option('-f, --filter <state>', 'Show only teammates in this state: running, completed, failed, stopped, or all (default: all)', 'all')
@@ -1314,8 +1311,7 @@ export function registerTeamsCommands(program: Command): void {
     });
 
   // start — fire any staged teammates whose --after deps have all completed
-  teams
-    .command('start [team]')
+  addHostOption(teams.command('start [team]'))
     .description('Launch any pending teammates whose --after dependencies are satisfied. Use --watch to keep draining the DAG as teammates finish and as new tasks are added mid-flight.')
     .option('--json', 'Output machine-readable JSON')
     .option('--watch', 'Keep running: poll every --interval seconds, fire new waves, exit when the DAG drains.')
@@ -1373,8 +1369,7 @@ export function registerTeamsCommands(program: Command): void {
     });
 
   // stop
-  teams
-    .command('stop [team] [teammate]')
+  addHostOption(teams.command('stop [team] [teammate]'))
     .description('Stop a running teammate. Can be restarted later. Cleans up worktree if no uncommitted changes.')
     .option('--json', 'Output machine-readable JSON')
     .action(async (team: string | undefined, ref: string | undefined, opts: { json?: boolean }) => {

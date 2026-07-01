@@ -52,15 +52,27 @@ function seedLiteral(value: string): void {
 }
 
 let restore: KeychainBackend | null = null;
+let prevNoAgent: string | undefined;
 
 beforeEach(() => {
   const m = makeMemoryBackend();
   restore = setKeychainBackendForTest(m.backend);
+  // Hermeticity: readAndResolveBundleEnv consults the running secrets-agent
+  // (bundles.ts agentGetSync fast-path) BEFORE the injected keychain backend.
+  // On a dev machine where the agent is live and the real `claude` bundle is
+  // unlocked, that returns the machine's real CLAUDE_CODE_OAUTH_TOKEN and this
+  // test reads a live credential instead of the seeded value (CI has no agent,
+  // so it only bites locally). Disable the agent so the read falls through to
+  // the in-memory backend above — hermetic regardless of host state.
+  prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+  process.env.AGENTS_SECRETS_NO_AGENT = '1';
 });
 
 afterEach(() => {
   try { deleteBundle('claude'); } catch { /* not created */ }
   setKeychainBackendForTest(restore);
+  if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+  else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
 });
 
 describe('readDaemonClaudeOAuthToken', () => {

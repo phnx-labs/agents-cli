@@ -29,6 +29,7 @@ import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTail } from './tail.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import { detectProvenance, type SessionProvenance } from './provenance.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -63,6 +64,15 @@ export interface ActiveSession {
   sessionFile?: string;
   startedAtMs?: number;
   status: ActiveStatus;
+  /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
+  pidCount?: number;
+  /**
+   * Where the process actually lives — machine host, local vs SSH, tmux pane,
+   * and whether a rail exists to type back into it. Read from the process env
+   * (`/proc/<pid>/environ` on Linux, `ps eww` on macOS) during enrichment.
+   * Absent for cloud sessions (no local pid) and any pid whose env is unreadable.
+   */
+  provenance?: SessionProvenance;
   teamName?: string;
   agentId?: string;
   cloudProvider?: string;
@@ -599,5 +609,48 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 
   const unattributed = opts.skipHeadless ? [] : await listUnattributedActive(knownPids);
 
-  return [...teams, ...terminals, ...cloud, ...unattributed];
+  const merged = dedupeBySession([...teams, ...terminals, ...cloud, ...unattributed]);
+  await enrichProvenance(merged);
+  return merged;
+}
+
+/**
+ * Attach provenance (host / local-vs-SSH / tmux pane / reply rail) to every
+ * session that has a live pid. Mutates in place. Runs after dedupe so we probe
+ * each session once, not once per fork pid. Probes run in parallel — each is a
+ * single /proc read (Linux) or `ps` call (macOS); failures leave `provenance`
+ * undefined rather than blocking the listing.
+ */
+async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
+  await Promise.all(
+    sessions.map(async (s) => {
+      if (s.provenance || !s.pid) return;
+      s.provenance = await detectProvenance(s.pid);
+    }),
+  );
+}
+
+/**
+ * Collapse rows that resolve to the *same* session — a session with many
+ * subagent/fork PIDs (all matched to one transcript file) would otherwise print
+ * dozens of identical rows. Keyed by session id (falling back to the file), the
+ * first row wins and carries a `pidCount`. Rows with no session identity (cloud,
+ * unresolved headless) pass through untouched.
+ */
+function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
+  const out: ActiveSession[] = [];
+  const byKey = new Map<string, ActiveSession>();
+  for (const s of sessions) {
+    const key = s.sessionId || s.sessionFile;
+    if (!key) { out.push(s); continue; }
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.pidCount = (existing.pidCount ?? 1) + 1;
+    } else {
+      s.pidCount = 1;
+      byKey.set(key, s);
+      out.push(s);
+    }
+  }
+  return out;
 }

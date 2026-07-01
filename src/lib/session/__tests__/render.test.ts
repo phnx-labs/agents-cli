@@ -577,6 +577,7 @@ describe('renderSummaryHeader', () => {
       userTurns: 10,
       assistantTurns: 10,
       toolCount: 50,
+      toolCounts: { Edit: 30, Bash: 20 },
       errorCount: 2,
       outputTokens: 361_000,
       cacheReadTokens: 67_500_000,
@@ -598,6 +599,7 @@ describe('renderSummaryHeader', () => {
       userTurns: 5,
       assistantTurns: 5,
       toolCount: 0,
+      toolCounts: {},
       errorCount: 0,
       outputTokens: 0,
       cacheReadTokens: 0,
@@ -628,8 +630,8 @@ describe('renderSummary', () => {
       makeEvent({ type: 'tool_use', tool: 'Edit', args: { file_path: '/project/src/a.ts' }, path: '/project/src/a.ts' }),
     ];
     const out = renderSummary(events, '/project');
-    // a.ts should appear in Modified, not in Read
-    expect(out).toContain('Modified');
+    // a.ts should appear in Changes (modified), not in Read
+    expect(out).toContain('Changes');
     // The Read section should not appear since the only read file was also modified
     // (and would be deduped out, leaving 0 read-only files)
     const readMatch = out.match(/Read\s+\((\d+)\)/);
@@ -721,13 +723,13 @@ describe('renderSummary', () => {
     expect(out).toContain('Bash');
   });
 
-  it('separates external edits (outside cwd) from in-project Modified', () => {
+  it('separates external edits (outside cwd) from in-project Changes', () => {
     const events: SessionEvent[] = [
       makeEvent({ type: 'tool_use', tool: 'Edit', args: { file_path: '/project/src/a.ts' }, path: '/project/src/a.ts' }),
       makeEvent({ type: 'tool_use', tool: 'Edit', args: { file_path: '/tmp/scratch.md' }, path: '/tmp/scratch.md' }),
     ];
     const out = renderSummary(events, '/project');
-    expect(out).toContain('Modified');
+    expect(out).toContain('Changes');
     expect(out).toContain('src/a.ts');
     expect(out).toContain('External edits');
     expect(out).toContain('/tmp/scratch.md');
@@ -744,7 +746,7 @@ describe('renderSummary', () => {
     expect(out).toContain('Migrate to FTS5 index');
   });
 
-  it('uses cwd-relative paths in Modified section', () => {
+  it('uses cwd-relative paths in Changes section', () => {
     const events: SessionEvent[] = [
       makeEvent({ type: 'tool_use', tool: 'Edit', args: { file_path: '/project/src/lib/render.ts' }, path: '/project/src/lib/render.ts' }),
     ];
@@ -767,7 +769,7 @@ describe('renderSummary', () => {
     const out = renderSummary(events, '/p');
     const promptIdx = out.indexOf('Prompt:');
     const recentIdx = out.indexOf('Recent Activity');
-    const modifiedIdx = out.indexOf('Modified');
+    const modifiedIdx = out.indexOf('Changes');
     expect(promptIdx).toBeGreaterThanOrEqual(0);
     expect(recentIdx).toBeGreaterThan(promptIdx);
     expect(modifiedIdx).toBeGreaterThan(recentIdx);
@@ -802,7 +804,7 @@ describe('renderSummary', () => {
       makeEvent({ role: 'assistant', content: 'all done now', timestamp: '2024-01-01T00:00:05Z' }),
     ];
     const out = renderSummary(events, '/p');
-    const recentBlock = out.slice(out.indexOf('Recent Activity'), out.indexOf('Modified'));
+    const recentBlock = out.slice(out.indexOf('Recent Activity'), out.indexOf('Changes'));
     expect(recentBlock).toContain('Edit');
     expect(recentBlock).toContain('a.ts');
     expect(recentBlock).toContain('Bash');
@@ -822,7 +824,7 @@ describe('renderSummary', () => {
     ];
     const out = renderSummary(events, '/p');
     const errorsIdx = out.indexOf('Errors');
-    const modifiedIdx = out.indexOf('Modified');
+    const modifiedIdx = out.indexOf('Changes');
     const commandsIdx = out.indexOf('Commands');
     expect(errorsIdx).toBeGreaterThan(-1);
     expect(errorsIdx).toBeLessThan(modifiedIdx);

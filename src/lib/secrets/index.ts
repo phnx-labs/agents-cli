@@ -24,7 +24,7 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { linuxBackend } from './linux.js';
+import { linuxBackend, usesFileFallback as linuxUsesFileFallback } from './linux.js';
 import { getKeychainHelperPath } from './install-helper.js';
 
 const SERVICE_PREFIX = 'agents-cli';
@@ -299,6 +299,22 @@ export function deleteKeychainToken(item: string): boolean {
   return spawnSync(bin, ['delete', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
   }).status === 0;
+}
+
+/**
+ * True when the active keychain backend transparently routes reads/writes to
+ * the encrypted-file store instead of the OS credential store. This only
+ * happens on Linux under the headless / locked-collection fallback
+ * (src/lib/secrets/linux.ts); macOS and the test backend always return false.
+ *
+ * Callers that ALSO enumerate the file store directly (e.g. `listBundles`)
+ * use this to avoid double-counting: under the fallback `listKeychainItems`
+ * and the direct file enumeration return the same items.
+ */
+export function keychainUsesFileFallback(): boolean {
+  if (backend) return false;
+  if (isLinux()) return linuxUsesFileFallback();
+  return false;
 }
 
 /** Enumerate keychain/keyring item names starting with the given prefix. */

@@ -55,6 +55,7 @@ import {
   setKeychainBackendForTest,
   type KeychainBackend,
 } from '../index.js';
+import { _resetFileStoreForTest } from '../filestore.js';
 
 interface StoredItem { value: string }
 
@@ -76,15 +77,24 @@ function makeMemoryBackend(): { backend: KeychainBackend; store: Map<string, Sto
 
 let restore: KeychainBackend | null = null;
 let store: Map<string, StoredItem>;
+let fileTmpDir: string;
 
 beforeEach(() => {
   const m = makeMemoryBackend();
   store = m.store;
   restore = setKeychainBackendForTest(m.backend);
+  // Isolate the encrypted-file store to an empty temp dir. Without this,
+  // listBundles() enumerates the developer's REAL ~/.agents/.cache/secrets on
+  // any machine that has file-backed bundles (e.g. a headless Linux box under
+  // the secret-service fallback), leaking those into the counts asserted here.
+  fileTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-bundles-storage-'));
+  _resetFileStoreForTest({ fileDir: fileTmpDir });
 });
 
 afterEach(() => {
   setKeychainBackendForTest(restore);
+  _resetFileStoreForTest();
+  fs.rmSync(fileTmpDir, { recursive: true, force: true });
 });
 
 describe('writeBundle + readBundle round-trip', () => {

@@ -23,7 +23,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
-import { sshExec } from './ssh-exec.js';
+import { Transform } from 'stream';
+import { sshExec, SSH_OPTS } from './ssh-exec.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
 import { getDevice, type DeviceProfile } from './devices/registry.js';
 import { sshTargetFor } from './devices/connect.js';
@@ -256,6 +257,69 @@ export function buildUnregisterTaskScript(taskName: string): string {
  * go through `sshExec` (BatchMode key auth — the same hardening the browser
  * driver and `agents ssh` use). Throws with the remote stderr on any failure.
  */
+/**
+ * Base64-encode a byte stream in 3-byte-aligned chunks so the concatenated
+ * output is valid (every chunk boundary lands on a base64 quantum).
+ */
+class Base64Encode extends Transform {
+  private leftover = Buffer.alloc(0);
+  override _transform(chunk: Buffer, _enc: BufferEncoding, cb: () => void): void {
+    const buf = this.leftover.length ? Buffer.concat([this.leftover, chunk]) : chunk;
+    const usable = buf.length - (buf.length % 3);
+    this.leftover = Buffer.from(buf.subarray(usable));
+    if (usable > 0) this.push(buf.subarray(0, usable).toString('base64'));
+    cb();
+  }
+  override _flush(cb: () => void): void {
+    if (this.leftover.length) this.push(this.leftover.toString('base64'));
+    cb();
+  }
+}
+
+/**
+ * Stream a local file to a remote command's stdin over ssh, base64-encoded on
+ * the fly. Async spawn + piping honors backpressure; the previous
+ * `spawnSync({ input })` blob deadlocked once the ssh socket buffer filled
+ * (~4MB) on large files (the 157MB Windows helper reproduced this reliably),
+ * and worse, reported a false success leaving a 0-byte remote file. Rejects on
+ * any pipe error so a broken transfer fails loudly instead.
+ */
+function streamFileOverSsh(
+  target: string,
+  remoteCmd: string,
+  filePath: string,
+  timeoutMs = 600_000,
+): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('ssh', [...SSH_OPTS, target, remoteCmd], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    let stdout = '';
+    child.stderr.on('data', (d) => (stderr += d.toString()));
+    child.stdout.on('data', (d) => (stdout += d.toString()));
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`ssh push to ${target} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    const fail = (e: Error) => {
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      reject(e);
+    };
+    child.on('error', fail);
+    child.stdin.on('error', fail); // EPIPE if the remote decoder dies mid-stream
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code, stderr: stderr || stdout });
+    });
+    const src = fs.createReadStream(filePath);
+    src.on('error', fail);
+    // disk -> aligned base64 -> ssh stdin; .pipe() applies backpressure
+    src.pipe(new Base64Encode()).pipe(child.stdin);
+  });
+}
+
 export async function setupRemoteHelper(name: string): Promise<{ target: string; taskName: string }> {
   const { target } = await resolveRemoteDevice(name);
 
@@ -264,14 +328,12 @@ export async function setupRemoteHelper(name: string): Promise<{ target: string;
     throw new Error(`Windows helper exe not built. Run: bash scripts/build-win.sh`);
   }
 
-  // Push: base64 the exe locally, stream it over ssh stdin to the decoder.
-  const b64 = fs.readFileSync(exe).toString('base64');
-  const push = sshExec(target, encodePowerShell(buildPushScript()), {
-    input: b64,
-    timeoutMs: 600_000, // ~156MB over the wire — allow up to 10 minutes
-  });
+  // Push: stream the exe from disk, base64-encoded on the fly, to the remote
+  // decoder. Streaming (vs a single spawnSync `input` blob) honors ssh socket
+  // backpressure — the blob path deadlocks once the socket buffer fills (~4MB).
+  const push = await streamFileOverSsh(target, encodePowerShell(buildPushScript()), exe);
   if (push.code !== 0) {
-    throw new Error(`pushing helper exe to '${name}' failed (exit ${push.code ?? 'null'}): ${push.stderr.trim() || push.stdout.trim()}`);
+    throw new Error(`pushing helper exe to '${name}' failed (exit ${push.code ?? 'null'}): ${push.stderr.trim()}`);
   }
 
   // Register + start the LOGON task.

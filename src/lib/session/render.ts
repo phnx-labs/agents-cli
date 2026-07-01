@@ -13,6 +13,7 @@ import { summarizeToolUse } from './parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
 import { redactSecrets } from '../redact.js';
+import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult, type FileChange, type FileOp } from './digest.js';
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -179,6 +180,8 @@ export interface SessionStats {
   userTurns: number;
   assistantTurns: number;
   toolCount: number;
+  /** Per-tool call counts (histogram), highest first when rendered. */
+  toolCounts: Record<string, number>;
   errorCount: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -189,6 +192,7 @@ export interface SessionStats {
 /** Compute aggregate statistics (turns, tools, tokens, duration) from session events. */
 export function computeSummaryStats(events: SessionEvent[]): SessionStats {
   const modelSet = new Set<string>();
+  const toolCounts: Record<string, number> = {};
   let userTurns = 0;
   let assistantTurns = 0;
   let toolCount = 0;
@@ -209,6 +213,7 @@ export function computeSummaryStats(events: SessionEvent[]): SessionStats {
       else if (e.role === 'assistant') assistantTurns++;
     } else if (e.type === 'tool_use' && !e._local) {
       toolCount++;
+      if (e.tool) toolCounts[e.tool] = (toolCounts[e.tool] ?? 0) + 1;
     } else if (e.type === 'error') {
       errorCount++;
     } else if (e.type === 'usage') {
@@ -223,6 +228,7 @@ export function computeSummaryStats(events: SessionEvent[]): SessionStats {
     userTurns,
     assistantTurns,
     toolCount,
+    toolCounts,
     errorCount,
     outputTokens,
     cacheReadTokens,
@@ -487,6 +493,76 @@ function renderActivityLine(item: {
   }
 }
 
+// ── Catch-up digest sections ──────────────────────────────────────────────────
+
+const OP_GLYPH: Record<FileOp, (s: string) => string> = {
+  created: (s) => chalk.green(s),
+  modified: (s) => chalk.yellow(s),
+  deleted: (s) => chalk.red(s),
+};
+const OP_MARK: Record<FileOp, string> = { created: '+', modified: '~', deleted: '−' };
+
+/**
+ * Render the Changes section: files grouped by directory, each tagged with its
+ * create/modify/delete lifecycle, plus a `+N ~N −N` summary. Replaces the old
+ * flat "Modified" list. Returns true if anything was rendered.
+ */
+function renderChangesSection(lines: string[], events: SessionEvent[], cwd?: string): boolean {
+  // In-project changes only; edits outside cwd (e.g. /tmp) keep their own
+  // "External edits" section so they don't clutter the project's changeset.
+  const inCwd = (p: string): boolean => !cwd || !p.startsWith('/') || p.startsWith(cwd + '/');
+  const changes = classifyFileChanges(events).filter(ch => inCwd(ch.path));
+  if (changes.length === 0) return false;
+  const c = changeCounts(changes);
+  const opByRel = new Map<string, FileOp>();
+  for (const ch of changes) opByRel.set(relativeToCwd(ch.path, cwd), ch.op);
+
+  const summary = [
+    c.created ? chalk.green(`+${c.created}`) : '',
+    c.modified ? chalk.yellow(`~${c.modified}`) : '',
+    c.deleted ? chalk.red(`−${c.deleted}`) : '',
+  ].filter(Boolean).join(' ');
+  lines.push(chalk.bold('Changes') + chalk.gray(` (${changes.length})  `) + summary);
+
+  const groups = groupByParentDir(changes.map(ch => ch.path), cwd);
+  const single = groups.size === 1;
+  for (const [dir, files] of groups) {
+    // Single dir: show the full relative path per file (dir/base). Multiple
+    // dirs: a dir header, then bare filenames under it.
+    if (!single) lines.push('  ' + chalk.dim(dir + '/'));
+    for (const f of files.sort()) {
+      const rel = dir === '.' ? f : `${dir}/${f}`;
+      const op = opByRel.get(rel) ?? 'modified';
+      const shown = single ? rel : f;
+      const name = op === 'deleted' ? chalk.strikethrough(chalk.gray(shown)) : shown;
+      lines.push((single ? '  ' : '    ') + OP_GLYPH[op](OP_MARK[op]) + ' ' + name);
+    }
+  }
+  lines.push('');
+  return true;
+}
+
+/** Render the tool histogram: `Edit 61 · Bash 48 · Read 35 …`. */
+function renderToolsSection(lines: string[], stats: SessionStats): void {
+  const hist = toolHistogram(stats.toolCounts, 8);
+  if (hist.length === 0) return;
+  const parts = hist.map(h => `${chalk.white(h.tool)} ${chalk.gray(String(h.count))}`);
+  lines.push(chalk.bold('Tools') + '  ' + parts.join(chalk.gray(' · ')));
+  lines.push('');
+}
+
+/** Render the last test/build verdict, e.g. `Tests  tests: 294 pass · 4 fail`. */
+function renderTestsLine(lines: string[], events: SessionEvent[]): void {
+  const r = detectTestResult(events);
+  if (!r || !r.ok) return;
+  const bits: string[] = [];
+  if (r.passed !== undefined) bits.push(chalk.green(`${r.passed} pass`));
+  if (r.failed !== undefined) bits.push(r.failed > 0 ? chalk.red(`${r.failed} fail`) : chalk.gray('0 fail'));
+  const verdict = r.failed && r.failed > 0 ? chalk.red('✗') : chalk.green('✓');
+  lines.push(chalk.bold('Tests') + `  ${verdict} ${chalk.cyan(r.runner)} ${bits.join(chalk.gray(' · '))}`);
+  lines.push('');
+}
+
 // ── Main summary renderer ─────────────────────────────────────────────────────
 
 /**
@@ -634,7 +710,6 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
     return m;
   };
 
-  const modifiedAbsMap = buildAbsMap(filesModifiedAbs);
   const readAbsMap = buildAbsMap(filesReadAbs);
 
   // ── Render sections ───────────────────────────────────────────────────────
@@ -723,16 +798,16 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
     lines.push('');
   }
 
-  // 6. Modified files
-  if (filesModifiedAbs.size > 0) {
-    lines.push(chalk.bold('Modified') + chalk.gray(` (${filesModifiedAbs.size})`));
-    const groups = groupByParentDir(filesModifiedAbs, cwd);
-    renderFileGroup(lines, groups, modifiedAbsMap);
-    lines.push('');
-  }
+  // 6. Changes — files grouped by directory with create/modify/delete lifecycle
+  // (replaces the old flat "Modified" + "External edits" lists).
+  renderChangesSection(lines, events, cwd);
 
-  // 6b. External edits (files edited outside the project root — typically /tmp)
-  // Filter out plan files (already shown in Plan section)
+  // 6b. Catch-up signals: last test/build verdict, then the tool histogram.
+  renderTestsLine(lines, events);
+  renderToolsSection(lines, computeSummaryStats(events));
+
+  // 6c. External edits (files edited outside the project root — typically /tmp).
+  // Filter out plan files (already shown in Plan section).
   const externalNonPlan = [...filesModifiedExternal].filter(p => !(p.includes('.claude/plans/') && p.endsWith('.md')));
   if (externalNonPlan.length > 0) {
     const externalList = externalNonPlan.sort();

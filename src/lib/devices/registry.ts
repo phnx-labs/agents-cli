@@ -18,7 +18,7 @@ import * as fsSync from 'fs';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
 import lockfile from 'proper-lockfile';
-import { getDevicesRegistryPath } from '../state.js';
+import { getDevicesRegistryPath, getDevicesIgnoredPath } from '../state.js';
 
 /** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
@@ -236,6 +236,74 @@ export async function removeDevice(name: string): Promise<boolean> {
     if (!reg[name]) return false;
     delete reg[name];
     await saveDevices(reg);
+    return true;
+  });
+}
+
+/**
+ * The ignore-list: tailscale node names the user explicitly dismissed from
+ * auto-discovery. A dismissed node is NOT a device (it never enters the
+ * registry), so it lives in a sibling file. Auto-discovery (`runDeviceSync`'s
+ * pending diff) subtracts this set, so an ignored node never re-surfaces as a
+ * suggestion. Stored under the same devices/ dir, guarded by the same lock and
+ * atomic-write plumbing as the registry.
+ */
+interface IgnoredFile {
+  ignored: string[];
+  updatedAt: string;
+}
+
+function ignoredPath(): string {
+  return getDevicesIgnoredPath();
+}
+
+/** Load the set of ignored node names. Missing file => empty set. A malformed
+ * file is a hard error for the same reason the registry is: silently returning
+ * [] would let the next write wipe the user's dismissals. */
+export async function loadIgnored(): Promise<Set<string>> {
+  const p = ignoredPath();
+  let raw: string;
+  try {
+    raw = await fs.readFile(p, 'utf-8');
+  } catch (err: any) {
+    if (err && err.code === 'ENOENT') return new Set();
+    throw err;
+  }
+  try {
+    const parsed = JSON.parse(raw) as IgnoredFile;
+    return new Set(Array.isArray(parsed.ignored) ? parsed.ignored : []);
+  } catch (err: any) {
+    throw new Error(
+      `Device ignore-list corrupted at ${p}: ${err?.message ?? err}. Inspect and restore from backup.`,
+    );
+  }
+}
+
+/** True if `name` is on the ignore-list. */
+export async function isIgnored(name: string): Promise<boolean> {
+  return (await loadIgnored()).has(name);
+}
+
+/** Add a node name to the ignore-list. Idempotent. Returns the resulting set. */
+export async function addIgnored(name: string): Promise<Set<string>> {
+  assertValidDeviceName(name);
+  const p = ignoredPath();
+  return withRegistryLock(p, async () => {
+    const set = await loadIgnored();
+    set.add(name);
+    await atomicWriteJson(p, { ignored: [...set].sort(), updatedAt: new Date().toISOString() });
+    return set;
+  });
+}
+
+/** Remove a node name from the ignore-list (un-ignore). Returns false if it was
+ * not ignored. */
+export async function removeIgnored(name: string): Promise<boolean> {
+  const p = ignoredPath();
+  return withRegistryLock(p, async () => {
+    const set = await loadIgnored();
+    if (!set.delete(name)) return false;
+    await atomicWriteJson(p, { ignored: [...set].sort(), updatedAt: new Date().toISOString() });
     return true;
   });
 }

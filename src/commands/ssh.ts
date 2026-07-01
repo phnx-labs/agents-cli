@@ -18,10 +18,14 @@ import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { machineId } from '../lib/session/sync/config.js';
 import {
+  addIgnored,
   getDevice,
   loadDevices,
+  loadIgnored,
   removeDevice,
+  removeIgnored,
   upsertDevice,
   type DeviceAuthMethod,
   type DevicePlatform,
@@ -32,6 +36,9 @@ import {
   parseTailscaleStatus,
   tailscaleStatusJson,
 } from '../lib/devices/tailscale.js';
+import { planDeviceReconciliation, runDeviceSync } from '../lib/devices/sync.js';
+import { clearPendingSentinel } from '../lib/devices/pending.js';
+import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { hostNameFor, renderSshConfig } from '../lib/devices/ssh-config.js';
 import {
   ASKPASS_BUNDLE_ENV,
@@ -47,8 +54,9 @@ function parseTarget(target: string): { host: string; user?: string } {
   return { user: target.slice(0, at), host: target.slice(at + 1) };
 }
 
-/** One-line summary of a device for `list`. */
-function deviceSummary(d: DeviceProfile): string {
+/** One-line summary of a device for `list`. `isSelf` marks the machine this
+ * command is running on so it stands out from the rest of the tailnet. */
+function deviceSummary(d: DeviceProfile, isSelf = false): string {
   const addr = hostNameFor(d) ?? chalk.gray('no address');
   const online = d.tailscale
     ? d.tailscale.online
@@ -56,7 +64,10 @@ function deviceSummary(d: DeviceProfile): string {
       : chalk.gray('offline')
     : chalk.gray('unknown');
   const reach = d.tailscale?.online && !d.tailscale.direct ? chalk.yellow(' (relayed)') : '';
-  return `  ${chalk.bold(d.name.padEnd(16))} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}`;
+  const marker = isSelf ? chalk.cyan('▸ ') : '  ';
+  const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
+  const here = isSelf ? chalk.cyan('  ← this machine') : '';
+  return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}`;
 }
 
 /** Resolve a device or exit with a clear error. */
@@ -69,6 +80,71 @@ async function mustGetDevice(name: string): Promise<DeviceProfile> {
   return d;
 }
 
+/**
+ * Interactive `agents devices sync`: discover tailscale nodes, present a
+ * checkbox pre-checked with what's already registered, and reconcile the
+ * choice. Checked = registered (and un-ignored). Unchecked = removed from the
+ * registry AND added to the ignore-list, so auto-discovery never re-suggests
+ * it — this is the "click to register/unregister" surface, with dismissals that
+ * stick.
+ */
+async function runInteractiveDeviceSync(): Promise<void> {
+  const spinner = ora('Reading tailscale status...').start();
+  let nodes;
+  try {
+    nodes = parseTailscaleStatus(tailscaleStatusJson());
+  } catch (err: any) {
+    spinner.fail(err.message);
+    process.exit(1);
+  }
+  const [reg, ignored] = await Promise.all([loadDevices(), loadIgnored()]);
+  const registered = new Set(Object.keys(reg));
+  spinner.stop();
+
+  if (nodes.length === 0) {
+    console.log(chalk.gray('No tailscale nodes found.'));
+    return;
+  }
+
+  const { checkbox } = await import('@inquirer/prompts');
+  let selected: string[];
+  try {
+    selected = await checkbox({
+      // Everything not already dismissed starts checked, so pressing Enter keeps
+      // the fleet as-is (matching what auto-sync would register). Unchecking a
+      // device removes it AND dismisses it so auto-sync never re-adds it.
+      message: 'Your fleet — uncheck a device to remove and stop suggesting it:',
+      pageSize: Math.min(nodes.length, 20),
+      choices: nodes.map((n) => {
+        const flags = [n.platform, n.online ? undefined : 'offline', ignored.has(n.name) ? 'ignored' : undefined]
+          .filter(Boolean)
+          .join(', ');
+        return { value: n.name, name: `${n.name}  ${chalk.gray(`(${flags})`)}`, checked: !ignored.has(n.name) };
+      }),
+    });
+  } catch (err) {
+    if (isPromptCancelled(err)) {
+      console.log(chalk.gray('Cancelled — no changes.'));
+      return;
+    }
+    throw err;
+  }
+
+  const byName = new Map(nodes.map((n) => [n.name, n]));
+  const plan = planDeviceReconciliation(byName.keys(), selected, registered, ignored);
+  for (const name of plan.toRegister) await upsertDevice(name, nodeToDeviceInput(byName.get(name)!));
+  for (const name of plan.toUnignore) await removeIgnored(name);
+  for (const name of plan.toRemove) await removeDevice(name);
+  for (const name of plan.toIgnore) await addIgnored(name);
+
+  const parts = [
+    chalk.green(`${plan.toRegister.length} registered`),
+    plan.toRemove.length ? chalk.yellow(`${plan.toRemove.length} removed`) : null,
+    plan.toIgnore.length ? chalk.gray(`${plan.toIgnore.length} ignored`) : null,
+  ].filter(Boolean);
+  console.log(parts.join(chalk.gray(' · ')));
+}
+
 /** Register the `agents devices` command tree. */
 function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
@@ -76,24 +152,28 @@ function registerDevicesCommands(program: Command): void {
     .description('Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale.')
     .addHelpText('after', `
 Typical workflow:
-  agents devices sync            # ingest tailscale nodes (auto-detect platform)
+  agents devices sync            # curate: pick which tailscale nodes to keep (TTY)
+  agents devices sync --yes      # non-interactive: register all non-ignored nodes
   agents devices list            # see what's registered
+  agents devices ignore ipad165  # dismiss a node so it's never re-suggested
   agents devices set win-mini --auth password --bundle muqsit
   agents devices render --write  # write ~/.ssh/config.d/agents include
 `);
 
   devicesCmd
     .command('sync')
-    .description('Ingest `tailscale status --json` and create/update device profiles (auto-detects platform, address, reachability).')
-    .action(async () => {
+    .description('Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.')
+    .option('--yes', 'skip the picker; register all discovered non-ignored nodes')
+    .action(async (opts: { yes?: boolean }) => {
+      if (isInteractiveTerminal() && !opts.yes) {
+        await runInteractiveDeviceSync();
+        return;
+      }
       const spinner = ora('Reading tailscale status...').start();
       try {
-        const nodes = parseTailscaleStatus(tailscaleStatusJson());
-        spinner.text = `Updating ${nodes.length} device${nodes.length === 1 ? '' : 's'}...`;
-        for (const node of nodes) {
-          await upsertDevice(node.name, nodeToDeviceInput(node));
-        }
-        spinner.succeed(`Synced ${nodes.length} device${nodes.length === 1 ? '' : 's'} from Tailscale`);
+        const res = await runDeviceSync();
+        const extra = res.pending.length ? chalk.gray(` (${res.pending.length} new)`) : '';
+        spinner.succeed(`Synced ${res.synced} device${res.synced === 1 ? '' : 's'} from Tailscale${extra}`);
       } catch (err: any) {
         spinner.fail(err.message);
         process.exit(1);
@@ -101,18 +181,72 @@ Typical workflow:
     });
 
   devicesCmd
+    .command('register <name>')
+    .description('Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.')
+    .action(async (name: string) => {
+      try {
+        const nodes = parseTailscaleStatus(tailscaleStatusJson());
+        const node = nodes.find((n) => n.name === name);
+        if (!node) {
+          console.error(chalk.red(`'${name}' is not a current tailscale node. See 'agents devices sync'.`));
+          process.exit(1);
+        }
+        await removeIgnored(name); // a re-registered node is no longer dismissed
+        const d = await upsertDevice(name, nodeToDeviceInput(node));
+        clearPendingSentinel(name); // drop the notification immediately
+        console.log(chalk.green(`Registered '${name}'`) + chalk.gray(` (${d.platform})`));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
+    .command('ignore <name>')
+    .description('Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).')
+    .action(async (name: string) => {
+      try {
+        await removeDevice(name);
+        await addIgnored(name);
+        clearPendingSentinel(name); // drop the notification immediately
+        console.log(chalk.green(`Ignored '${name}'`) + chalk.gray(" — it won't be suggested again. Undo with `agents devices unignore`."));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
+    .command('unignore <name>')
+    .description('Undo `ignore`: allow a node to be discovered and registered again.')
+    .action(async (name: string) => {
+      const ok = await removeIgnored(name);
+      if (!ok) {
+        console.error(chalk.gray(`'${name}' was not ignored.`));
+        return;
+      }
+      console.log(chalk.green(`No longer ignoring '${name}'`) + chalk.gray(' — run `agents devices sync` to register it.'));
+    });
+
+  devicesCmd
     .command('list')
     .alias('ls')
     .description('List registered devices with platform, address, and reachability.')
-    .action(async () => {
+    .option('--json', 'output the registry as a JSON array (for scripts and hooks)')
+    .action(async (opts: { json?: boolean }) => {
       const reg = await loadDevices();
       const names = Object.keys(reg).sort();
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(names.map((n) => reg[n]), null, 2) + '\n');
+        return;
+      }
       if (names.length === 0) {
         console.log(chalk.gray("No devices. Run 'agents devices sync' or 'agents devices add <name> <user@host>'."));
         return;
       }
+      const self = machineId();
       console.log(chalk.bold(`Devices (${names.length})`));
-      for (const name of names) console.log(deviceSummary(reg[name]));
+      for (const name of names) console.log(deviceSummary(reg[name], name === self));
     });
 
   devicesCmd

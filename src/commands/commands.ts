@@ -47,7 +47,6 @@ import {
 import {
   listInstalledVersions,
   getGlobalDefault,
-  resolveVersionAlias,
   syncResourcesToVersion,
   promptAgentVersionSelection,
   getVersionHomePath,
@@ -65,6 +64,7 @@ import {
   promptRemovalTargets,
   resolveAgentTargetsAutoInstalling,
   type RemovalTarget,
+  resolveListFilterOrExit,
 } from './utils.js';
 
 /** Register the `agents commands` command tree (list, add, remove, sync, prune, view). */
@@ -117,7 +117,7 @@ When to use:
           process.exit(1);
         }
         filterAgent = resolved;
-        filterVersion = resolveVersionAlias(resolved, parts[1]);
+        filterVersion = resolveListFilterOrExit(resolved, parts[1]);
       }
 
       const rows = buildCommandRows({ filterAgent, filterVersion });

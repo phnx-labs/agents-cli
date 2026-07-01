@@ -7,6 +7,7 @@
  * rules, hooks, and promptcuts synced to that version.
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -42,7 +43,6 @@ import {
   getVersionHomePath,
   getVersionDir,
   resolveVersion,
-  resolveVersionAlias,
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
@@ -52,6 +52,7 @@ import {
   syncResourcesToVersion,
   removeVersion,
   printTrashFooter,
+  reconcileStaleLatestForAgent,
 } from '../lib/versions.js';
 import {
   getShimsDir,
@@ -60,6 +61,7 @@ import {
   removeShim,
 } from '../lib/shims.js';
 import { getAgentResources, listResources } from '../lib/resources.js';
+import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins.js';
@@ -1482,6 +1484,17 @@ export async function viewAction(
   };
   const filterIsSet = SECTION_KEYS.some((k) => filter[k]);
 
+  // RUSH-1320: fold any stale literal `latest` version-home into its concrete
+  // version before rendering, so it stops appearing as a bogus "version" next
+  // to the real ones. Best-effort — must never break `agents view`. Scoped to
+  // the queried agent when one is given (cheap no-op for agents with no
+  // `latest` dir, i.e. almost all of them).
+  {
+    const target = agentArg ? resolveAgentName(agentArg.split('@')[0]) : null;
+    const toReconcile = agentArg ? (target ? [target] : []) : ALL_AGENT_IDS;
+    await Promise.all(toReconcile.map((a) => reconcileStaleLatestForAgent(a).catch(() => {})));
+  }
+
   if (!agentArg) {
     if (prune) {
       await pruneDuplicates(undefined, yes, dryRun);
@@ -1510,12 +1523,23 @@ export async function viewAction(
     console.log(chalk.red(formatAgentError(agentName)));
     process.exit(1);
   }
-  // Keep 'default'/'pinned' as-is since showAgentResources handles 'default';
-  // resolveVersionAlias returns undefined for both (they're synonyms), which
-  // would otherwise skip the detailed view.
-  const requestedVersion = (parts[1] === 'default' || parts[1] === 'pinned')
-    ? 'default'
-    : (resolveVersionAlias(agentId, parts[1]) ?? null);
+  // Resolve the @version filter through the agent-spec engine:
+  //   bare/@any → null (show all versions), @default/@pinned → 'default'
+  //   (showAgentResources handles it), @latest/@oldest/@x.y.z → concrete.
+  let requestedVersion: string | null;
+  try {
+    requestedVersion = resolveVersionFilter(agentId, parts[1]).version;
+  } catch (e) {
+    if (e instanceof AgentSpecError) {
+      if (json) {
+        console.log(JSON.stringify({ error: e.message }));
+      } else {
+        console.log(chalk.red(e.message));
+      }
+      process.exit(1);
+    }
+    throw e;
+  }
 
   if (prune) {
     if (requestedVersion) {
@@ -1550,8 +1574,7 @@ export async function viewAction(
 
 /** Register the `agents view` command. */
 export function registerViewCommand(program: Command): void {
-  program
-    .command('view [agent]')
+  addHostOption(program.command('view [agent]'))
     .description('Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.')
     .option('--json', 'Emit machine-readable JSON (version list, usage, signed-in status).')
     .option('--prune', 'Remove older installed versions that share an account with a newer installed version. Skips the global default.')

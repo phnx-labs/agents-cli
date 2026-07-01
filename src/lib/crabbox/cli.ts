@@ -1,0 +1,269 @@
+/**
+ * Typed wrapper over the external `crabbox` binary (github.com/openclaw/crabbox).
+ *
+ * crabbox leases ephemeral cloud boxes (Hetzner/DO/EC2/…), syncs the dirty
+ * checkout, and runs commands on them. We use it as the transport for
+ * `agents run --lease`: warm a box → run the agent on it via `crabbox run` →
+ * stop it. crabbox owns the SSH connection, so agents-cli never needs a direct
+ * ssh target (unlike the `agents hosts` model).
+ *
+ * crabbox talks to its cloud provider's API for list/status/warmup/stop, which
+ * needs a provider token (e.g. HCLOUD_TOKEN) in the environment. We inject it
+ * from a secrets bundle when one is configured (see `crabboxEnv`).
+ */
+
+import { spawn, spawnSync } from 'child_process';
+import { readAndResolveBundleEnv } from '../secrets/bundles.js';
+
+/** A crabbox machine as reported by `crabbox list --json`. */
+export interface CrabboxBox {
+  /** Provider machine name, e.g. `crabbox-blue-hermit-1039689b`. */
+  name: string;
+  /** Provider run state, e.g. `running`. */
+  status: string;
+  /** Friendly slug used with `--id`, e.g. `blue-hermit`. */
+  slug: string;
+  /** Lease id, e.g. `cbx_9968746bb15c`. */
+  lease: string;
+  /** crabbox bootstrap state; `ready` once the box is usable. */
+  state: string;
+  /** Public IPv4, when the provider exposes one. */
+  ip?: string;
+  profile?: string;
+  class?: string;
+  /** True when running + bootstrap-complete. */
+  ready: boolean;
+}
+
+export interface CrabboxOptions {
+  /**
+   * Name of a secrets bundle whose env (e.g. `HCLOUD_TOKEN`) crabbox needs to
+   * reach its cloud provider. Resolved via agents-cli's own keychain-backed
+   * secrets. When unset, crabbox runs with the ambient environment / its own
+   * `crabbox login` credentials.
+   */
+  secretsBundle?: string;
+}
+
+/** Locate the crabbox binary, or throw an actionable error. */
+export function findCrabbox(): string {
+  const r = spawnSync('crabbox', ['--help'], { encoding: 'utf-8' });
+  if (r.error) {
+    throw new Error(
+      'crabbox is not installed or not on PATH. Install it and run `crabbox login`, then `crabbox doctor` to verify provider access.',
+    );
+  }
+  return 'crabbox';
+}
+
+/** Build the child env for crabbox, injecting a secrets bundle when configured. */
+export function crabboxEnv(opts: CrabboxOptions): NodeJS.ProcessEnv {
+  const bundle = opts.secretsBundle ?? process.env.AGENTS_LEASE_SECRETS_BUNDLE;
+  if (!bundle) return process.env;
+  try {
+    // Reuse the same resolver `agents secrets exec` uses so a keychain-backed
+    // bundle (e.g. hetzner.com → HCLOUD_TOKEN) reaches crabbox without ever
+    // touching disk.
+    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents run --lease (crabbox)' });
+    return { ...process.env, ...env };
+  } catch (e) {
+    throw new Error(
+      `Could not load secrets bundle "${bundle}" for crabbox: ${(e as Error).message}. ` +
+        `Fix the bundle (agents secrets view ${bundle}) or unset lease.secretsBundle to use crabbox's own login.`,
+    );
+  }
+}
+
+function normalizeBox(raw: Record<string, unknown>): CrabboxBox | null {
+  const labels = (raw.labels ?? {}) as Record<string, string>;
+  const slug = labels.slug ?? '';
+  if (!slug) return null;
+  const status = String(raw.status ?? '');
+  const state = String(labels.state ?? '');
+  const publicNet = (raw.public_net ?? {}) as { ipv4?: { ip?: string } };
+  return {
+    name: String(raw.name ?? ''),
+    status,
+    slug,
+    lease: labels.lease ?? '',
+    state,
+    ip: publicNet.ipv4?.ip || undefined,
+    profile: labels.profile,
+    class: labels.class,
+    ready: status === 'running' && state === 'ready',
+  };
+}
+
+/** All crabbox machines the broker knows about. */
+export function crabboxList(opts: CrabboxOptions = {}): CrabboxBox[] {
+  findCrabbox();
+  const r = spawnSync('crabbox', ['list', '--json'], { encoding: 'utf-8', env: crabboxEnv(opts) });
+  if (r.status !== 0) {
+    throw new Error(`crabbox list failed: ${(r.stderr || r.stdout || '').trim() || 'unknown error'}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(r.stdout || '[]');
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((b) => normalizeBox(b as Record<string, unknown>)).filter((b): b is CrabboxBox => b !== null);
+}
+
+/** Find one box by slug, or null. */
+export function crabboxFind(slug: string, opts: CrabboxOptions = {}): CrabboxBox | null {
+  return crabboxList(opts).find((b) => b.slug === slug) ?? null;
+}
+
+export interface WarmupOptions extends CrabboxOptions {
+  class?: string;
+  profile?: string;
+  /** Provision web code-server capability on the box. */
+  code?: boolean;
+  /** Cloud backend override (crabbox provider id, e.g. hetzner/aws/do). */
+  provider?: string;
+}
+
+/**
+ * Lease a box and block until it is ready. Returns the leased box.
+ *
+ * We diff `crabbox list` before/after so we reliably identify the box this call
+ * created even if warmup's stdout format changes — the new lease id is the one
+ * that wasn't present before.
+ */
+export function crabboxWarmup(opts: WarmupOptions = {}): CrabboxBox {
+  findCrabbox();
+  const env = crabboxEnv(opts);
+  const before = new Set(crabboxList(opts).map((b) => b.lease));
+
+  const args = ['warmup'];
+  if (opts.class) args.push('--class', opts.class);
+  if (opts.profile) args.push('--profile', opts.profile);
+  if (opts.provider) args.push('--provider', opts.provider);
+  if (opts.code) args.push('--code');
+
+  const r = spawnSync('crabbox', args, { encoding: 'utf-8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (r.status !== 0) {
+    const detail = (r.stderr || r.stdout || '').trim();
+    throw new Error(
+      `crabbox warmup failed: ${detail || 'unknown error'}. ` +
+        `Check provider access with \`crabbox doctor\`; a missing cloud token often means \`crabbox login\` or a lease.secretsBundle is needed.`,
+    );
+  }
+
+  // Prefer the freshly-created box (lease absent from the pre-warmup snapshot).
+  const after = crabboxList(opts);
+  const fresh = after.filter((b) => !before.has(b.lease));
+  if (fresh.length === 1) return fresh[0];
+
+  // Fallback: parse the cbx_ lease id crabbox prints and match it.
+  const m = (r.stdout || '').match(/cbx_[0-9a-f]+/i);
+  if (m) {
+    const byLease = after.find((b) => b.lease === m[0]);
+    if (byLease) return byLease;
+  }
+  if (fresh.length > 1) {
+    // Multiple new boxes (concurrent warmups) — pick the newest ready one.
+    const ready = fresh.filter((b) => b.ready);
+    if (ready.length) return ready[ready.length - 1];
+    return fresh[fresh.length - 1];
+  }
+  throw new Error('crabbox warmup succeeded but the new box could not be located in `crabbox list`.');
+}
+
+/**
+ * Poll until the box reports ready, or throw after timeoutMs.
+ * `sleep` is injectable so tests don't wall-clock wait.
+ */
+export async function crabboxWaitReady(
+  slug: string,
+  opts: CrabboxOptions & { timeoutMs?: number; intervalMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<CrabboxBox> {
+  const timeoutMs = opts.timeoutMs ?? 180_000;
+  const intervalMs = opts.intervalMs ?? 5_000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise((res) => setTimeout(res, ms)));
+  const deadline = Date.now() + timeoutMs;
+  let last: CrabboxBox | null = null;
+  // First check is immediate (warmup usually returns an already-ready box).
+  for (;;) {
+    last = crabboxFind(slug, opts);
+    if (last?.ready) return last;
+    if (Date.now() >= deadline) break;
+    await sleep(intervalMs);
+  }
+  throw new Error(
+    `crabbox box "${slug}" did not become ready within ${Math.round(timeoutMs / 1000)}s (state: ${last?.state ?? 'gone'}).`,
+  );
+}
+
+export interface CrabboxRunOptions extends CrabboxOptions {
+  /** Called with each chunk of combined stdout/stderr as it streams. */
+  onData?: (chunk: string) => void;
+  /** Force a full remote resync before running. */
+  fullResync?: boolean;
+}
+
+/**
+ * Run `remoteCmd` on the leased box via `crabbox run` (crabbox syncs the dirty
+ * checkout and owns the SSH). Streams combined output; resolves with the remote
+ * exit code (or null if crabbox itself failed to dispatch).
+ */
+export function crabboxRun(slug: string, remoteCmd: string, opts: CrabboxRunOptions = {}): Promise<number | null> {
+  findCrabbox();
+  const args = ['run', '--id', slug, '--reclaim'];
+  if (opts.fullResync) args.push('--full-resync');
+  args.push('--', 'bash', '-lc', remoteCmd);
+  return new Promise((resolve) => {
+    const proc = spawn('crabbox', args, { env: crabboxEnv(opts), stdio: ['ignore', 'pipe', 'pipe'] });
+    const pump = (chunk: Buffer) => {
+      const s = chunk.toString('utf-8');
+      if (opts.onData) opts.onData(s);
+      else process.stdout.write(s);
+    };
+    proc.stdout.on('data', pump);
+    proc.stderr.on('data', pump);
+    proc.on('error', () => resolve(null));
+    proc.on('close', (code) => resolve(code));
+  });
+}
+
+/**
+ * Upload `script` to the box via `crabbox run --script-stdin` and run it.
+ *
+ * The script body travels over stdin and is written to a file on the box before
+ * execution — it never appears in argv / `ps` / shell history, which is why this
+ * is the transport for credential provisioning (the token contents live only in
+ * the uploaded script, then the file is removed by the script itself).
+ * Streams combined output; resolves with the remote exit code (null on dispatch failure).
+ */
+export function crabboxRunScript(slug: string, script: string, opts: CrabboxRunOptions = {}): Promise<number | null> {
+  findCrabbox();
+  const args = ['run', '--id', slug, '--reclaim'];
+  if (opts.fullResync) args.push('--full-resync');
+  args.push('--script-stdin');
+  return new Promise((resolve) => {
+    const proc = spawn('crabbox', args, { env: crabboxEnv(opts), stdio: ['pipe', 'pipe', 'pipe'] });
+    const pump = (chunk: Buffer) => {
+      const s = chunk.toString('utf-8');
+      if (opts.onData) opts.onData(s);
+      else process.stdout.write(s);
+    };
+    proc.stdout.on('data', pump);
+    proc.stderr.on('data', pump);
+    proc.on('error', () => resolve(null));
+    proc.on('close', (code) => resolve(code));
+    proc.stdin.write(script);
+    proc.stdin.end();
+  });
+}
+
+/** Release the lease / delete the box. Best-effort; never throws. */
+export function crabboxStop(slug: string, opts: CrabboxOptions = {}): boolean {
+  try {
+    const r = spawnSync('crabbox', ['stop', '--id', slug], { encoding: 'utf-8', env: crabboxEnv(opts) });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}

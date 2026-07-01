@@ -44,3 +44,37 @@ jobs:
           if (-not $exe) { throw "built exe not found under bin/Release" }
           Write-Host "exe: $($exe.FullName)"
           node smoke/smoke.mjs --exe "$($exe.FullName)" --port 8771
+
+  # Reproduces GitHub #519: the framework-dependent `dotnet build` above leaves
+  # WPF/UIAutomation native DLLs loose next to the exe, so its smoke passes even
+  # when the SHIPPED artifact is broken. This leg publishes the SAME
+  # self-contained single-file exe `scripts/build-win.sh` ships and smokes THAT,
+  # so a single-file host that can't resolve the native UIA libraries fails here
+  # (describe/get_text walk the UIA tree). Required check: a failure blocks merge.
+  publish-and-smoke:
+    runs-on: windows-latest
+    permissions: {}
+    defaults:
+      run:
+        working-directory: packages/computer-helper-win
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@d4c94342e560b34958eacfc5d055d21461ed1c5d # v5.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      # Exact flags scripts/build-win.sh uses, so CI smokes the shipped artifact.
+      - name: Publish (self-contained single-file win-x64)
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
+
+      - name: Smoke test published single-file exe (UIA roundtrip + screenshot)
+        shell: pwsh
+        run: |
+          $exe = "dist/computer-helper-win.exe"
+          if (-not (Test-Path $exe)) { throw "published single-file exe not found at $exe" }
+          $full = (Resolve-Path $exe).Path
+          Write-Host "exe: $full"
+          node smoke/smoke.mjs --exe "$full" --port 8772

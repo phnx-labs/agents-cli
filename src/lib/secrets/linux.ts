@@ -112,6 +112,27 @@ function preflight(): 'file' | 'secret-tool' {
   return 'secret-tool';
 }
 
+/**
+ * True when secret operations currently route to the encrypted-file store
+ * instead of the Secret Service (the headless / locked-collection fallback).
+ *
+ * Runs the same `preflight()` decision every read and write uses, so it can't
+ * drift from where bytes actually land. `preflight()` throws only in the
+ * interactive / no-secret-tool / no-passphrase case — where nothing is stored
+ * — so treat that as "not on the file path".
+ *
+ * `listBundles()` needs this: under the fallback the keychain enumeration
+ * (`linuxBackend.list`) and the file enumeration read the SAME store, so
+ * without this signal every file-backed bundle would be listed twice.
+ */
+export function usesFileFallback(): boolean {
+  try {
+    return preflight() === 'file';
+  } catch {
+    return false;
+  }
+}
+
 // ---------- secret-tool ops with fallback ----------
 
 /** secret-tool lookup attributes:

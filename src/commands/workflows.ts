@@ -31,7 +31,6 @@ import {
 import {
   getVersionHomePath,
   getGlobalDefault,
-  resolveVersionAlias,
   syncResourcesToVersion,
   promptAgentVersionSelection,
   resolveAgentVersionTargets,
@@ -46,6 +45,7 @@ import {
   parseCommaSeparatedList,
   resolveAgentTargetsAutoInstalling,
   type RemovalTarget,
+  resolveListFilterOrExit,
 } from './utils.js';
 import {
   showResourceList,
@@ -118,7 +118,7 @@ Examples:
           process.exit(1);
         }
         filterAgent = resolved;
-        filterVersion = parts[1] ? resolveVersionAlias(resolved, parts[1]) : undefined;
+        filterVersion = resolveListFilterOrExit(resolved, parts[1]);
       }
 
       const rows = buildWorkflowRows({ filterAgent, filterVersion });

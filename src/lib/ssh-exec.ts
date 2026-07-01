@@ -9,6 +9,9 @@
  */
 
 import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
+import { getCacheDir } from './state.js';
 
 /**
  * SSH target: a bare ssh-config host alias (e.g. `yosemite-s0`) or `user@host`.
@@ -39,6 +42,41 @@ export const SSH_OPTS: readonly string[] = [
   '-o', 'ConnectTimeout=10',
 ];
 
+/**
+ * OpenSSH connection-multiplexing options. The first connection to a host opens
+ * a control socket; subsequent connections (even from a *separate* `agents`
+ * invocation) reuse it, skipping the TCP+auth handshake — so repeated
+ * `--host <name>` calls to the same box feel local instead of paying ~100-300ms
+ * each. `ControlPersist=60s` keeps the master alive briefly after the last
+ * client exits. `%C` (a short fixed-length hash of local-host/remote/port/user)
+ * keeps the socket path well under macOS's 104-char `sun_path` limit.
+ *
+ * The socket directory is created lazily; if ssh can't open the control socket
+ * it falls back to a normal connection (multiplexing is an optimisation, never a
+ * requirement), so this can never make a reachable host unreachable.
+ */
+let controlDirEnsured = false;
+export function controlOpts(): string[] {
+  // OpenSSH on Windows has no ControlMaster/ControlPath (unix-socket) support —
+  // passing those options makes ssh error out. Multiplexing is a pure latency
+  // optimisation, so on Windows we simply skip it and use a fresh connection.
+  if (process.platform === 'win32') return [];
+  const dir = path.join(getCacheDir(), 'ssh');
+  if (!controlDirEnsured) {
+    try {
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    } catch {
+      /* best-effort — ssh degrades to a fresh connection if the dir is missing */
+    }
+    controlDirEnsured = true;
+  }
+  return [
+    '-o', 'ControlMaster=auto',
+    '-o', `ControlPath=${path.join(dir, 'cm-%C')}`,
+    '-o', 'ControlPersist=60s',
+  ];
+}
+
 export interface SshExecOptions {
   /** Piped to the remote command's stdin (never interpolated into the shell). */
   input?: string;
@@ -46,6 +84,8 @@ export interface SshExecOptions {
   timeoutMs?: number;
   /** Extra ssh flags inserted before the target (e.g. `-tt`). */
   extraSshArgs?: string[];
+  /** Reuse a persistent control socket across calls (see `controlOpts`). */
+  multiplex?: boolean;
 }
 
 export interface SshExecResult {
@@ -64,7 +104,8 @@ export interface SshExecResult {
  */
 export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions = {}): SshExecResult {
   assertValidSshTarget(target);
-  const args = [...SSH_OPTS, ...(opts.extraSshArgs ?? []), target, remoteCmd];
+  const mux = opts.multiplex ? controlOpts() : [];
+  const args = [...SSH_OPTS, ...mux, ...(opts.extraSshArgs ?? []), target, remoteCmd];
   const res = spawnSync('ssh', args, {
     input: opts.input,
     encoding: 'utf-8',
@@ -82,5 +123,34 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
 
 /** True if `target` is reachable over ssh (a passwordless `true` succeeds quickly). */
 export function sshReachable(target: string, timeoutMs = 10000): boolean {
-  return sshExec(target, 'true', { timeoutMs }).code === 0;
+  return sshExec(target, 'true', { timeoutMs, multiplex: true }).code === 0;
+}
+
+export interface SshStreamOptions {
+  /**
+   * Allocate a remote pseudo-terminal (`ssh -tt`) so an interactive remote
+   * command (a picker, a prompt) renders live on the local terminal. Callers
+   * pass this when the *local* process is itself a TTY; piped/scripted callers
+   * leave it off and forward a non-interactive invocation instead.
+   */
+  tty?: boolean;
+  /** Reuse a persistent control socket across calls (see `controlOpts`). */
+  multiplex?: boolean;
+}
+
+/**
+ * Foreground counterpart to `sshExec`: run `remoteCmd` on `target` with the
+ * local stdio wired straight through (`stdio: 'inherit'`), so output streams as
+ * it is produced and — with `tty` — keystrokes reach a remote picker. Blocks
+ * until the remote command exits and returns its exit code (255 is ssh's own
+ * connection-layer failure; any other non-zero is the remote command's code).
+ */
+export function sshStream(target: string, remoteCmd: string, opts: SshStreamOptions = {}): number {
+  assertValidSshTarget(target);
+  const mux = opts.multiplex ? controlOpts() : [];
+  const tty = opts.tty ? ['-tt'] : [];
+  const args = [...SSH_OPTS, ...mux, ...tty, target, remoteCmd];
+  const res = spawnSync('ssh', args, { stdio: 'inherit' });
+  if (typeof res.status === 'number') return res.status;
+  return 255; // spawn error / signal — treat as a connection-layer failure
 }

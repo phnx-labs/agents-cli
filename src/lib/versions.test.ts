@@ -119,6 +119,62 @@ describe('reconcileStaleLatestDir', () => {
   });
 });
 
+// Full path (RUSH-1320): resolve the live CLI version via a real `--version`
+// shell-out, then fold the stale `latest` dir onto it. Uses a fake `droid` on
+// PATH — no mocking — so getCliVersionFromPath returns a concrete version.
+function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): void {
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    import { reconcileStaleLatestForAgent } from ${JSON.stringify(moduleUrl)};
+    (async () => { await reconcileStaleLatestForAgent(${JSON.stringify(agent)}); })();
+  `], {
+    // Prepend the fake-bin dir so `droid --version` resolves to our stub.
+    env: { ...process.env, HOME: home, PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}` },
+    encoding: 'utf-8',
+  });
+  expect(child.status, child.stderr).toBe(0);
+}
+
+describe('reconcileStaleLatestForAgent (proactive)', () => {
+  it.skipIf(process.platform === 'win32')('folds a stale `latest` onto the live CLI version, preserving home/', () => {
+    const home = makeTempHome();
+    // Stale latest home with a credential-like file that must survive the fold.
+    const latestFactory = path.join(droidVersionDir(home, 'latest'), 'home', '.factory');
+    fs.mkdirSync(latestFactory, { recursive: true });
+    fs.writeFileSync(path.join(latestFactory, 'auth.v2.file'), 'LOGIN');
+
+    // Fake `droid --version` -> 0.161.0.
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const droidStub = path.join(binDir, 'droid');
+    fs.writeFileSync(droidStub, '#!/bin/sh\necho "droid 0.161.0"\n');
+    fs.chmodSync(droidStub, 0o755);
+
+    runReconcileForAgent(home, 'droid', binDir);
+
+    // `latest` is gone; its home (incl. the login file) now lives under 0.161.0.
+    expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
+    expect(fs.readFileSync(path.join(droidVersionDir(home, '0.161.0'), 'home', '.factory', 'auth.v2.file'), 'utf8')).toBe('LOGIN');
+  });
+
+  it.skipIf(process.platform === 'win32')('is a no-op when there is no stale `latest` dir', () => {
+    const home = makeTempHome();
+    fs.mkdirSync(path.join(droidVersionDir(home, '0.161.0'), 'home'), { recursive: true });
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const droidStub = path.join(binDir, 'droid');
+    fs.writeFileSync(droidStub, '#!/bin/sh\necho "droid 0.161.0"\n');
+    fs.chmodSync(droidStub, 0o755);
+
+    runReconcileForAgent(home, 'droid', binDir);
+
+    // 0.161.0 untouched, no `latest` created.
+    expect(fs.existsSync(droidVersionDir(home, '0.161.0'))).toBe(true);
+    expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
+  });
+});
+
 describe('version resource sync path handling', () => {
   it('intersects explicit resource selections with discovered resources before syncing', async () => {
     const home = makeTempHome();
