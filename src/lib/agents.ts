@@ -517,7 +517,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   },
   // Factory AI Droid CLI (`droid`) — agentic coding CLI from factory.ai.
   // Install: `curl -fsSL https://app.factory.ai/cli | sh` (no npm package).
-  // Binary is NOT in node_modules/.bin — resolved via resolveDroidBinary().
+  // Binary is NOT in node_modules/.bin — the shim resolves the fixed install
+  // path ~/.local/bin/droid directly (see the droid branch in shims.ts).
   // Config: `~/.factory/` (settings.json, mcp.json, droids/, commands/).
   // Memory: native AGENTS.md. Subagents = custom droids (top-level .md files
   // in ~/.factory/droids/). Config isolation rides the ~/.factory symlink
@@ -751,6 +752,7 @@ export const UNMANAGED_DETECTION_CANDIDATES: AgentId[] = [
   'gemini',
   'grok',
   'copilot',
+  'droid',
 ];
 
 /**
@@ -1143,6 +1145,8 @@ function getSessionDir(agentId: AgentId, base: string): string | null {
       // Copilot persists sessions at ~/.copilot/session-state/<id>/events.jsonl.
       // The events.jsonl is the canonical NDJSON event stream per session.
       return path.join(base, '.copilot', 'session-state');
+    case 'droid':
+      return path.join(base, '.factory', 'sessions');
     default:
       return null;
   }
@@ -1154,6 +1158,7 @@ function getSessionExtension(agentId: AgentId): string | null {
     case 'claude':
     case 'codex':
     case 'copilot':
+    case 'droid':
       return '.jsonl';
     case 'gemini':
       return '.json';
@@ -1852,6 +1857,8 @@ export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   gk: 'grok',
   kimi: 'kimi',
   'kimi-code': 'kimi',
+  factory: 'droid',
+  'factory-ai': 'droid',
 };
 
 /**

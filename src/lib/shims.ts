@@ -698,7 +698,11 @@ export KIMI_CODE_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/
 # ${VERSIONED_ALIAS_VERSION_MARKER} ${VERSIONED_ALIAS_SCHEMA_VERSION}
 # Direct alias for ${agentConfig.name}@${version}
 
-BINARY="$HOME/.agents/.history/versions/${agent}/${version}/node_modules/.bin/${agentConfig.cliCommand}"
+BINARY="${
+    agent === 'droid'
+      ? '$HOME/.local/bin/droid'
+      : `$HOME/.agents/.history/versions/${agent}/${version}/node_modules/.bin/${agentConfig.cliCommand}`
+  }"
 
 if [ ! -x "$BINARY" ]; then
   echo "agents: ${agent}@${version} not installed" >&2
