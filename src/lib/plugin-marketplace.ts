@@ -73,6 +73,38 @@ interface DroidInstalledPlugins {
   plugins: Record<string, DroidInstalledEntry[]>;
 }
 
+/**
+ * GitHub Copilot CLI records plugin state across TWO files under COPILOT_HOME
+ * (`~/.copilot`), both distinct from the marketplace catalog. Verified against
+ * Copilot CLI 1.0.56 (`plugin marketplace add` + `plugin install`):
+ *
+ *   settings.json  { extraKnownMarketplaces, enabledPlugins }  (user-editable)
+ *   config.json    { installedPlugins }                        (auto-managed)
+ *
+ * A plugin is only visible to `copilot plugin list` (and loaded at runtime) when
+ * it has an installedPlugins entry in config.json; the marketplace + enabledPlugins
+ * alone are not enough. `cache_path` may point at the marketplace install dir —
+ * no separate copy is needed (confirmed: `plugin list` lists it and `plugin
+ * marketplace list` shows the marketplace as registered).
+ */
+interface CopilotExtraMarketplace {
+  source: { source: 'directory'; path: string };
+}
+
+interface CopilotInstalledPluginEntry {
+  name: string;
+  marketplace: string;
+  version: string;
+  installed_at: string;
+  enabled: boolean;
+  cache_path: string;
+}
+
+interface CopilotConfig {
+  installedPlugins: CopilotInstalledPluginEntry[];
+  [key: string]: unknown;
+}
+
 interface MarketplacePluginEntry {
   name: string;
   source: string;
@@ -198,7 +230,13 @@ export function marketplaceRoot(specOrName: MarketplaceSpec | string, agent: Age
 }
 
 export function marketplaceManifestPath(specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): string {
-  return path.join(marketplaceRoot(specOrName, agent, versionHome), '.claude-plugin', 'marketplace.json');
+  const root = marketplaceRoot(specOrName, agent, versionHome);
+  // Copilot resolves a marketplace's catalog from `marketplace.json` at the
+  // marketplace ROOT (also `.plugin/marketplace.json`, `.github/plugin/
+  // marketplace.json`) — NOT `.claude-plugin/marketplace.json`. Verified against
+  // GitHub Copilot CLI 1.0.56 (`plugin marketplace add`).
+  if (agent === 'copilot') return path.join(root, 'marketplace.json');
+  return path.join(root, '.claude-plugin', 'marketplace.json');
 }
 
 export function pluginInstallDir(plugin: DiscoveredPlugin, specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): string {
@@ -469,6 +507,16 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
 export function registerMarketplace(spec: MarketplaceSpec, agent: AgentId, versionHome: string): void {
   const name = marketplaceNameFor(spec);
   const root = marketplaceRoot(spec, agent, versionHome);
+
+  // Copilot diverges from Claude's known_marketplaces.json: it reads registered
+  // marketplaces from settings.json#extraKnownMarketplaces. Verified against
+  // GitHub Copilot CLI 1.0.56 (`plugin marketplace add <dir>` writes exactly
+  // this shape). A "directory"-source entry points at the on-disk catalog root.
+  if (agent === 'copilot') {
+    registerCopilotMarketplace(name, root, agent, versionHome);
+    return;
+  }
+
   const knownPath = knownMarketplacesPath(agent, versionHome);
 
   let known: Record<string, KnownMarketplaceEntry> = {};
@@ -597,6 +645,125 @@ export function unregisterDroidInstalledPlugin(
   fs.writeFileSync(p, JSON.stringify(registry, null, 2) + '\n', 'utf-8');
 }
 
+// ─── Copilot marketplace + installed-plugin registry ──────────────────────────
+
+function copilotConfigPath(agent: AgentId, versionHome: string): string {
+  return path.join(versionHome, agentConfigDirName(agent), 'config.json');
+}
+
+function readCopilotSettings(agent: AgentId, versionHome: string): Record<string, unknown> {
+  const p = settingsPath(agent, versionHome);
+  if (fs.existsSync(p)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, unknown>;
+      if (parsed && typeof parsed === 'object') return parsed;
+    } catch { /* fall through */ }
+  }
+  return {};
+}
+
+function writeCopilotSettings(agent: AgentId, versionHome: string, settings: Record<string, unknown>): void {
+  const p = settingsPath(agent, versionHome);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(settings, null, 2) + '\n', 'utf-8');
+}
+
+/** Register a marketplace in Copilot's settings.json#extraKnownMarketplaces. */
+function registerCopilotMarketplace(name: string, root: string, agent: AgentId, versionHome: string): void {
+  const settings = readCopilotSettings(agent, versionHome);
+  const known = (settings.extraKnownMarketplaces && typeof settings.extraKnownMarketplaces === 'object'
+    ? settings.extraKnownMarketplaces
+    : {}) as Record<string, CopilotExtraMarketplace>;
+  known[name] = { source: { source: 'directory', path: root } };
+  settings.extraKnownMarketplaces = known;
+  writeCopilotSettings(agent, versionHome, settings);
+}
+
+/** Inverse of registerCopilotMarketplace: drop the entry, prune the empty key. */
+function unregisterCopilotMarketplace(name: string, agent: AgentId, versionHome: string): void {
+  const p = settingsPath(agent, versionHome);
+  if (!fs.existsSync(p)) return;
+  const settings = readCopilotSettings(agent, versionHome);
+  const known = settings.extraKnownMarketplaces as Record<string, CopilotExtraMarketplace> | undefined;
+  if (!known || !(name in known)) return;
+  delete known[name];
+  if (Object.keys(known).length === 0) delete settings.extraKnownMarketplaces;
+  writeCopilotSettings(agent, versionHome, settings);
+}
+
+function readCopilotConfig(agent: AgentId, versionHome: string): CopilotConfig {
+  const p = copilotConfigPath(agent, versionHome);
+  if (fs.existsSync(p)) {
+    try {
+      // config.json may carry a leading `//` comment banner written by Copilot;
+      // strip line comments before parsing so we never clobber a real config.
+      const raw = fs.readFileSync(p, 'utf-8').replace(/^\s*\/\/.*$/gm, '');
+      const parsed = JSON.parse(raw) as Partial<CopilotConfig>;
+      if (parsed && typeof parsed === 'object') {
+        return { ...parsed, installedPlugins: Array.isArray(parsed.installedPlugins) ? parsed.installedPlugins : [] };
+      }
+    } catch { /* fall through to fresh config */ }
+  }
+  return { installedPlugins: [] };
+}
+
+/**
+ * Record a plugin in Copilot's config.json#installedPlugins (the registry that
+ * makes `copilot plugin list` see it). `cache_path` points at the marketplace
+ * install dir — no separate copy. Idempotent: re-running refreshes the entry and
+ * preserves the original installed_at plus every other config key.
+ */
+export function registerCopilotInstalledPlugin(
+  pluginName: string,
+  marketplaceName: string,
+  installDir: string,
+  version: string,
+  enabled: boolean,
+  agent: AgentId,
+  versionHome: string
+): void {
+  const config = readCopilotConfig(agent, versionHome);
+  const now = new Date().toISOString();
+  const prior = config.installedPlugins.find(e => e.name === pluginName && e.marketplace === marketplaceName);
+  const others = config.installedPlugins.filter(e => !(e.name === pluginName && e.marketplace === marketplaceName));
+  config.installedPlugins = [
+    ...others,
+    {
+      name: pluginName,
+      marketplace: marketplaceName,
+      version,
+      installed_at: prior?.installed_at ?? now,
+      enabled,
+      cache_path: installDir,
+    },
+  ];
+
+  const p = copilotConfigPath(agent, versionHome);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+}
+
+/**
+ * Remove a plugin's entry from Copilot's config.json#installedPlugins. Inverse
+ * of registerCopilotInstalledPlugin. Leaves the file (with an empty
+ * installedPlugins) rather than deleting it, since config.json may hold other
+ * Copilot-managed keys.
+ */
+export function unregisterCopilotInstalledPlugin(
+  pluginName: string,
+  marketplaceName: string,
+  agent: AgentId,
+  versionHome: string
+): void {
+  const p = copilotConfigPath(agent, versionHome);
+  if (!fs.existsSync(p)) return;
+  const config = readCopilotConfig(agent, versionHome);
+  const kept = config.installedPlugins.filter(e => !(e.name === pluginName && e.marketplace === marketplaceName));
+  if (kept.length === config.installedPlugins.length) return;
+  config.installedPlugins = kept;
+  fs.writeFileSync(p, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+}
+
 /**
  * Drop a marketplace entry from known_marketplaces.json. Called when the last
  * plugin under it is removed. Removes only its own entry; deletes the file only
@@ -604,6 +771,14 @@ export function unregisterDroidInstalledPlugin(
  */
 export function unregisterMarketplace(specOrName: MarketplaceSpec | string, agent: AgentId, versionHome: string): void {
   const name = nameOf(specOrName);
+
+  // Copilot stores registrations in settings.json#extraKnownMarketplaces, not
+  // known_marketplaces.json. Mirror the branch in registerMarketplace.
+  if (agent === 'copilot') {
+    unregisterCopilotMarketplace(name, agent, versionHome);
+    return;
+  }
+
   const knownPath = knownMarketplacesPath(agent, versionHome);
   if (!fs.existsSync(knownPath)) return;
 

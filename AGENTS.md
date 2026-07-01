@@ -88,7 +88,7 @@ Not every harness supports every capability — the registry decides per harness
 | Gemini † | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·skip |
 | Cursor | `cursor` | — | ✓ | — | ✓ | ✓ | — | — | — | edit·skip |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — | plan·edit·skip |
-| Copilot | `copilot` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·auto·skip |
+| Copilot | `copilot` | — | ✓ | — | ✓ | ✓ | ✓ | — | — | plan·edit·auto·skip |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
 | Kiro | `kiro` | — | ✓ | — | ✓ | ✓ | — | — | — | edit |
 | Goose | `goose` | — | ✓ | — | — | — | — | — | — | edit |

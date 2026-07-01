@@ -31,6 +31,8 @@ import {
   registerDroidInstalledPlugin,
   unregisterDroidInstalledPlugin,
   isDroidPluginInstalled,
+  registerCopilotInstalledPlugin,
+  unregisterCopilotInstalledPlugin,
   marketplaceIsEmpty,
   removeEmptyMarketplaceDir,
   isInstalledInMarketplace,
@@ -610,6 +612,23 @@ export function syncPluginToVersion(
     );
   }
 
+  // 5d. Copilot, like Droid, only "sees" a plugin that also has an entry in its
+  //     auto-managed config.json#installedPlugins (registerMarketplace already
+  //     wrote settings.json#extraKnownMarketplaces, and addPluginToSettings the
+  //     enabledPlugins flag). cache_path points at the marketplace copy; the
+  //     `enabled` flag mirrors the exec-surface trust gate above.
+  if (agent === 'copilot') {
+    registerCopilotInstalledPlugin(
+      plugin.name,
+      marketplaceName,
+      installDir,
+      plugin.manifest.version,
+      enablePlugin,
+      agent,
+      versionHome
+    );
+  }
+
   // 5b. Convert plugin commands/ to skills for agents that dropped command support
   //     (Codex >= 0.117.0). Skill name is prefixed with plugin name to avoid
   //     collision with standalone command skills.
@@ -887,6 +906,9 @@ export function removePluginFromVersion(
     if (agent === 'droid') {
       unregisterDroidInstalledPlugin(pluginName, name, agent, versionHome);
     }
+    if (agent === 'copilot') {
+      unregisterCopilotInstalledPlugin(pluginName, name, agent, versionHome);
+    }
 
     // Refresh marketplace.json so it reflects what's left under plugins/.
     syncMarketplaceManifest(spec, agent, versionHome);
@@ -1078,6 +1100,9 @@ export function cleanOrphanedPluginSkills(
         removePluginFromSettings(entry.name, name, agent, versionHome);
         if (agent === 'droid') {
           unregisterDroidInstalledPlugin(entry.name, name, agent, versionHome);
+        }
+        if (agent === 'copilot') {
+          unregisterCopilotInstalledPlugin(entry.name, name, agent, versionHome);
         }
         removed.push(entry.name);
         trashedHere = true;

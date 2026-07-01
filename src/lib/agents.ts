@@ -350,11 +350,16 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.copilot', 'skills'),
     hooksDir: 'hooks',
+    // Copilot reads a plugin's manifest from the plugin ROOT (plugin.json),
+    // not `.claude-plugin/plugin.json`. Mirror it there. Verified against the
+    // GitHub Copilot CLI (1.0.56): `copilot plugin install` produces an
+    // installed plugin dir whose manifest sits at the root.
+    pluginManifestDir: '.',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'auto', 'skip'] },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'auto', 'skip'] },
   },
   amp: {
     id: 'amp',

@@ -97,6 +97,13 @@ export interface AgentConfig {
    */
   nativeCommandRuntime?: boolean;
   hooksDir: string;
+  /**
+   * Directory (relative to a plugin's install dir) the agent reads its plugin
+   * manifest from, when it differs from the canonical `.claude-plugin/`. Codex
+   * uses `.codex-plugin`, Droid `.factory-plugin`. Set to `.` when the agent
+   * reads the manifest from the plugin ROOT (Copilot). syncPluginToVersion
+   * mirrors `.claude-plugin/plugin.json` into this dir.
+   */
   pluginManifestDir?: string;
   instructionsFile: string;
   format: 'markdown' | 'toml';
