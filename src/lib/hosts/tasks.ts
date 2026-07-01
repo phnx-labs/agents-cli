@@ -64,6 +64,21 @@ export function updateTask(id: string, patch: Partial<HostTask>): HostTask | nul
   return next;
 }
 
+/**
+ * The record patch for a run that has finished with `code`. The single authority
+ * for the exit-code → status mapping, so the dispatch, reconcile, and log-follow
+ * paths can never disagree. A genuine remote exit code is never -1 (that sentinel
+ * means "follow window closed while the run continues"), so callers must resolve
+ * -1 as still-running and never pass it here.
+ */
+export function terminalPatch(code: number): Partial<HostTask> {
+  return {
+    status: code === 0 ? 'completed' : 'failed',
+    exitCode: code,
+    finishedAt: new Date().toISOString(),
+  };
+}
+
 export function listTasks(): HostTask[] {
   let files: string[];
   try {
