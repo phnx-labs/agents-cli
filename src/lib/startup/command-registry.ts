@@ -85,6 +85,7 @@ export const loadSetup: ModuleLoader = async () => (await import('../../commands
 export const loadSessions: ModuleLoader = async () => (await import('../../commands/sessions.js')).registerSessionsCommands;
 export const loadTeams: ModuleLoader = async () => (await import('../../commands/teams.js')).registerTeamsCommands;
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
+export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -93,7 +94,7 @@ export const loadCloud: ModuleLoader = async () => (await import('../../commands
  * inherit the root's custom help formatter rather than getting the per-command
  * recursive pass. Keeping that ordering preserves their `--help` output exactly.
  */
-export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'teams', 'cloud']);
+export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set(['sessions', 'teams', 'cloud', 'message']);
 
 /**
  * User-typed top-level command name -> ordered list of module loaders to run.
@@ -174,4 +175,5 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   sessions: [loadSessions],
   teams: [loadTeams],
   cloud: [loadCloud],
+  message: [loadMessage],
 };

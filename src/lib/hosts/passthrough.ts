@@ -45,6 +45,7 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   list: {},
   sync: { nonInteractive: ['--yes'] },
   teams: {},
+  message: {},
 };
 
 /** `--no-tty` is stripped like the routing flags but carries no value. */
