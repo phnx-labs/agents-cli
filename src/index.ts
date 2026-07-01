@@ -125,6 +125,7 @@ import {
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
+import { renderWhatsNew } from './lib/whats-new.js';
 import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 
@@ -252,45 +253,14 @@ async function showWhatsNew(fromVersion: string, toVersion: string): Promise<voi
     const response = await fetch(`https://unpkg.com/@phnx-labs/agents-cli@${toVersion}/CHANGELOG.md`);
     if (!response.ok) return;
 
-    const changelog = await response.text();
-    const lines = changelog.split('\n');
-
-    const relevantChanges: string[] = [];
-    let inRelevantSection = false;
-    let currentVersion = '';
-
-    for (const line of lines) {
-      const versionMatch = line.match(/^## (\d+\.\d+\.\d+)/);
-      if (versionMatch) {
-        currentVersion = versionMatch[1];
-        // Only the range the user actually moved through: (fromVersion, toVersion].
-        // Bounding the top end matters when upgrading to a specific older
-        // version, and guards against a changelog that lists unreleased entries.
-        const inRange =
-          compareVersions(currentVersion, fromVersion) > 0 &&
-          compareVersions(currentVersion, toVersion) <= 0;
-        inRelevantSection = inRange;
-        if (inRelevantSection) {
-          relevantChanges.push('');
-          relevantChanges.push(chalk.bold(`v${currentVersion}`));
-        }
-        continue;
-      }
-
-      if (inRelevantSection && line.trim()) {
-        if (line.startsWith('**') && line.endsWith('**')) {
-          relevantChanges.push(chalk.cyan(line.replace(/\*\*/g, '')));
-        } else if (line.startsWith('- ')) {
-          relevantChanges.push(chalk.gray(`  ${line}`));
-        }
-      }
-    }
+    const relevantChanges = renderWhatsNew(await response.text(), fromVersion, toVersion);
 
     if (relevantChanges.length > 0) {
       console.log(chalk.bold("\nWhat's new:\n"));
       for (const line of relevantChanges) {
         console.log(line);
       }
+      console.log(chalk.gray('\nFull notes: https://github.com/phnx-labs/agents-cli/blob/main/CHANGELOG.md'));
       console.log();
     }
   } catch {
