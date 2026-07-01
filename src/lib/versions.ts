@@ -1858,9 +1858,13 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
  * sync path uses. Passing the result as an explicit `selection` means the sync
  * touches only that repo's resources — no orphan-sweep of the other layers.
  *
- * `memory` is set to `[]` (not omitted): that empty-array sentinel is what
- * `syncResourcesToVersion`'s `skipMemory` gate keys on to leave the memory
- * file untouched — it's a merge of all layers, not a per-repo artifact.
+ * `memory` is set to `'all'`, NOT `[]`: the composed rules-memory file is a
+ * merge of ALL layers, so scoping the sync to a single repo must still
+ * recompile it in the same pass (RUSH-1354). Leaving it out — or using the
+ * `[]` skip-sentinel — silently strands the memory file at its old content
+ * whenever a repo-scoped sync runs after a rules change. `'all'` makes
+ * `syncResourcesToVersion` recompose from every layer via the active preset,
+ * exactly as an unscoped full reconcile does.
  */
 export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd()): ResourceSelection {
   const patterns = [`${repo}:*`];
@@ -1873,8 +1877,9 @@ export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd
     if (names.length > 0) selection[kind] = names;
   }
 
-  // Empty-array sentinel → skip the memory writer (see skipMemory below).
-  selection.memory = [];
+  // Recompile the memory file from all layers even under a repo scope — it is
+  // composed, not a per-repo artifact (see skipMemory below and RUSH-1354).
+  selection.memory = 'all';
   return selection;
 }
 
