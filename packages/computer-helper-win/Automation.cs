@@ -920,36 +920,44 @@ public sealed class Automation
         SendInput((uint)inp.Length, inp, Marshal.SizeOf<INPUT>());
     }
 
+    // A minimal per-character settle so the foreground thread's message pump
+    // drains each injected VK_PACKET before the next one arrives (see
+    // SendUnicodeString). Small enough to be imperceptible for field-sized text,
+    // large enough to yield a scheduling slice to a busy receiver (e.g. Edge).
+    private const int TypeSettleMs = 5;
+
     // Type an arbitrary string as KEYEVENTF_UNICODE key events. Every character
-    // is delivered by its own down/up pair carrying the literal UTF-16 code unit
-    // in wScan (with wVk = 0), so SendKeys metacharacters (+ ^ % ~ ( ) { }) and
-    // spaces land byte-for-byte — there is no SendKeys operator layer to escape.
+    // is delivered by its own atomic down/up SendInput call carrying the literal
+    // UTF-16 code unit in wScan (with wVk = 0), so SendKeys metacharacters
+    // (+ ^ % ~ ( ) { } [ ] < > = & * ! @ #) and spaces land byte-for-byte —
+    // there is no SendKeys operator layer to escape.
     //
-    // Fidelity depends on a SINGLE SendInput call for the whole string: it
-    // enqueues all events atomically and in order. The previous one-SendInput-
-    // per-char loop injected with no inter-key settle, which races the target's
-    // input-processing thread and can collapse the tail of the string onto the
-    // last character — issue #554: "reliability probe 12345" landed as
-    // "reliability 55555555555" (same length, tail stuck on the final '5').
+    // Per KEYBDINPUT/KEYEVENTF_UNICODE, each event is posted to the foreground
+    // thread's queue as a WM_KEYDOWN/WM_KEYUP whose wParam is VK_PACKET and whose
+    // wScan is the code unit; TranslateMessage turns the KEYDOWN into the WM_CHAR
+    // the control renders. Because EVERY unicode event shares the same virtual key
+    // (VK_PACKET), a contiguous run of them dumped into the queue at once can be
+    // coalesced by a busy receiver onto the surviving (last) VK_PACKET message —
+    // the tail of the run collapses onto the final code unit. That is issue #581:
+    // "Fidelity probe 12345 +^%(){}=" landed as "Fidelity probe 12345 ========"
+    // and "(){}[]<>" as "(>>>>>>>" (letters/digits pumped first survive; the
+    // symbol run piled up behind them and coalesced). #554 had the mirror bug: a
+    // one-SendInput-per-char loop with NO settle still let the events pile up, so
+    // the tail stuck on the last char ("reliability probe 12345" -> "...55555").
     //
-    // When char_delay_ms > 0 the caller explicitly wants pacing (slow inputs for
-    // laggy fields), so fall back to per-char calls with a real sleep between
-    // them — the sleep provides the settle the batched path gets for free.
+    // The fix keeps the down/up of a single character atomic (one SendInput call)
+    // AND yields a real settle between characters, so the pump consumes each
+    // VK_PACKET before the next is queued — nothing piles up, nothing coalesces.
+    // Alphanumerics stay correct (the #554 race was purely the missing settle); a
+    // larger char_delay_ms lets a caller pace extra for laggy fields.
     private static void SendUnicodeString(string text, int delayMs = 0)
     {
         if (text.Length == 0) return;
-        if (delayMs > 0)
+        int settle = delayMs > 0 ? delayMs : TypeSettleMs;
+        for (int i = 0; i < text.Length; i++)
         {
-            foreach (char ch in text) { SendUnicode(ch); Thread.Sleep(delayMs); }
-            return;
+            SendUnicode(text[i]);
+            if (i != text.Length - 1) Thread.Sleep(settle);
         }
-        var inp = new INPUT[text.Length * 2];
-        int i = 0;
-        foreach (char ch in text)
-        {
-            inp[i++] = UnicodeDown(ch);
-            inp[i++] = UnicodeUp(ch);
-        }
-        SendInput((uint)inp.Length, inp, Marshal.SizeOf<INPUT>());
     }
 }
