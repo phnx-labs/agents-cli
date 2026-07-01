@@ -160,39 +160,33 @@ func migrateInline(service: String, account: String, value: String) {
         writeStderr("migrate-inline: could not encode value for \(service)")
         return
     }
-    // Order matters — write the data-protection copy FIRST, then best-effort
-    // delete the legacy copy. The legacy item may carry a trusted-app ACL whose
-    // SecItemDelete is itself gated; the old order (delete-legacy first, early-
-    // return on a non-clean delete) meant a gated delete aborted before the DP
-    // write ever ran, so the item stayed legacy on every read and re-prompted
-    // forever. It also risked data loss on the reverse failure: delete legacy,
-    // then a failing SecItemAdd left the value in neither keychain.
+    // We ONLY add the data-protection copy here; we never delete the legacy copy
+    // inline. Two hard-won reasons:
     //
-    // Writing DP first fixes both: readItem queries the DP keychain first, so
-    // once the DP copy exists every future read resolves there (no second auth
-    // sheet) even if the legacy copy lingers; and if the DP write fails we leave
-    // the legacy copy untouched, so the value is never lost.
+    //  1. Deleting the legacy item AFTER adding the DP copy destroys the DP copy.
+    //     SecItemDelete(fileBase) is not reliably scoped to the file-based
+    //     keychain on macOS 26 — with a DP item of the same service+account
+    //     present, the unscoped delete matches and removes it too, so the DP add
+    //     never survives (and the delete returns errSecSuccess, so it's silent).
+    //  2. Deleting the legacy item BEFORE the add risks data loss: a failing
+    //     SecItemAdd would leave the value in neither keychain.
+    //
+    // Adding only is safe and sufficient: readItem queries the DP keychain first,
+    // so once the DP copy exists every future read resolves there and the second
+    // auth sheet stops — the lingering legacy copy is never read. Purging that
+    // harmless legacy copy is the job of `agents secrets migrate-acl`, which
+    // clears both keychains BEFORE its add (the safe order) after an encrypted
+    // backup. Clear any stale DP copy first so the add can't hit
+    // errSecDuplicateItem; that delete IS scoped (dpBase carries the DP flag).
+    SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
     var addAttrs = dpBase(service: service, account: account)
     addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()
     addAttrs[kSecValueData] = valueData
-    var addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
-    if addStatus == errSecDuplicateItem {
-        // A DP copy already exists (e.g. a prior partial migration) — clear it
-        // and retry so the value is refreshed from the copy we just read.
-        SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
-        addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
-    }
-    guard addStatus == errSecSuccess else {
-        // Leave the legacy copy in place — a failed DP write must never cost us
-        // the only remaining copy. The read that called us already has the value.
-        writeStderr("migrate-inline: DP re-add failed for \(service) (OSStatus \(addStatus)); legacy copy left intact")
-        return
-    }
-    // DP copy is authoritative now. Best-effort drop the legacy copy so the
-    // second auth sheet stops; a gated/failed delete is harmless (DP wins on read).
-    let delStatus = SecItemDelete(fileBase(service: service, account: account) as CFDictionary)
-    if delStatus != errSecSuccess && delStatus != errSecItemNotFound {
-        writeStderr("migrate-inline: legacy delete failed for \(service) (OSStatus \(delStatus)); DP copy is authoritative")
+    let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
+    if addStatus != errSecSuccess {
+        // Legacy copy is untouched, so the value is never lost; the next read
+        // falls back to the legacy sheet again and retries the migration.
+        writeStderr("migrate-inline: DP add failed for \(service) (OSStatus \(addStatus)); legacy copy left intact")
     }
 }
 
