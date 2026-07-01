@@ -2,6 +2,46 @@
 
 Using agents-cli as a programmatic observability layer for agent fleets.
 
+## Audit Event Log (`agents events`)
+
+Separate from the fleet-state sources below (which answer "what's running *now*"),
+the **audit event log** answers "who did what, and from where". Every
+`agents <module> <command>` invocation is recorded — team create/disband, agent
+run, secrets access, version installs — as a structured JSONL line at
+`~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl` (dir `0700`, files `0600`, 7-day
+rotation).
+
+The recording is a single choke point — a commander `preAction`/`postAction`
+hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
+/ `command.end` for *every* subcommand, so coverage is automatic and no per-command
+wiring can drift out of date. Richer typed events (`secrets.get`, `version.install`,
+…) layer on top where the extra payload earns it.
+
+Every record carries **attribution** computed once per process
+([`src/lib/events.ts`](../src/lib/events.ts)):
+
+- `osUser` — the OS account that ran it.
+- `transport` — `local`, or `ssh` when `$SSH_CONNECTION` is present.
+- `sshClientIp` — the remote client IP when over SSH.
+
+So "was this agent started on the host by a remote user?" is answerable for any
+event, not just runs. The write is a synchronous single-line append (durable
+before the action proceeds); `AGENTS_DISABLE_EVENT_LOG=1` turns it off.
+
+```bash
+agents events                          # recent activity across everything
+agents events --module teams           # team lifecycle (create / add / disband)
+agents events --module secrets         # every secret accessed or revealed
+agents events --command "teams create" # a command path — prefix match
+agents events --event secrets.get --since 7d --json
+agents events -f                       # live tail of today's log
+```
+
+`--module` filters the top-level group; `--command` matches a command path by
+prefix (`teams` catches `teams create`); `--event` filters a typed event
+(repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
+raw records for external consumers.
+
 External tools (dashboards, voice assistants, CI runners, monitoring) can read
 fleet state via three canonical `--json` sources. No direct DB access, no re-parsing
 of agent-specific formats, no auth to manage.
