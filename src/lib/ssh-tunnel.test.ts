@@ -12,6 +12,7 @@ import {
   REMOTE_TASK_NAME,
   WIN_HELPER_EXE,
 } from './ssh-tunnel.js';
+import { SSH_OPTS } from './ssh-exec.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
 
 describe('buildTunnelArgs', () => {
@@ -27,20 +28,23 @@ describe('buildTunnelArgs', () => {
     expect(args.join(' ')).toContain('ConnectTimeout=10');
   });
 
-  it('matches the args the browser driver historically spawned (behavior unchanged)', () => {
-    // The browser CDP driver used exactly this argv shape before extraction.
+  it('is the -L mapping + target + -N followed by the shared hardened baseline', () => {
+    // The tunnel now composes the canonical SSH_OPTS instead of re-listing the
+    // options, so it automatically inherits the keepalive (which lets a dropped
+    // -N tunnel exit instead of zombying) and any future baseline hardening.
     expect(buildTunnelArgs('u', 'h', 9222, 9222)).toEqual([
       '-L',
       '9222:127.0.0.1:9222',
       'u@h',
       '-N',
-      '-o',
-      'StrictHostKeyChecking=accept-new',
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=10',
+      ...SSH_OPTS,
     ]);
+  });
+
+  it('inherits the keepalive from the shared baseline', () => {
+    const args = buildTunnelArgs('u', 'h', 9222, 9222);
+    expect(args.join(' ')).toContain('ServerAliveInterval=15');
+    expect(args.join(' ')).toContain('ServerAliveCountMax=3');
   });
 });
 

@@ -47,7 +47,11 @@ export interface StartTunnelOptions {
   detached?: boolean;
 }
 
-/** Build the ssh argv (after the `ssh` program name) for an `-L` tunnel. Pure. */
+/** Build the ssh argv (after the `ssh` program name) for an `-L` tunnel. Pure.
+ *
+ * Composes the shared hardened baseline (`SSH_OPTS`) rather than re-listing it,
+ * so the tunnel inherits the same options — crucially the keepalive, which lets
+ * a dropped `-N` tunnel exit instead of lingering as a zombie on the laptop. */
 export function buildTunnelArgs(
   user: string,
   host: string,
@@ -59,12 +63,7 @@ export function buildTunnelArgs(
     `${localPort}:127.0.0.1:${remotePort}`,
     `${user}@${host}`,
     '-N',
-    '-o',
-    'StrictHostKeyChecking=accept-new',
-    '-o',
-    'BatchMode=yes',
-    '-o',
-    'ConnectTimeout=10',
+    ...SSH_OPTS,
   ];
 }
 
