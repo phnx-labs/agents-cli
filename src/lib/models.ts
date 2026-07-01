@@ -863,11 +863,12 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     aliases,
   };
 
-  // Don't cache empty CLI extractions: the CLI may have been mid-install,
-  // network-dependent, or transiently failing. Caching 0 models would mask
-  // the real catalog forever (mtime won't change). Bundle/binary/js sources
-  // are deterministic, so cache those even when empty.
-  if (src.kind !== 'cli' || models.length > 0) {
+  // Never cache an empty extraction, regardless of source kind. A 0-model
+  // result is always suspect: the CLI may have been mid-install, network-
+  // dependent, or transiently failing, and a js/bundle/binary extractor that
+  // regex-misses would otherwise pin an empty catalog forever (mtime won't
+  // change until the source file does). Only persist a non-empty catalog.
+  if (models.length > 0) {
     cache.entries[key] = { sourcePath: src.path, mtime, catalog };
     saveCache();
   }
