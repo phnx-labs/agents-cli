@@ -55,6 +55,7 @@ export const loadPrune: ModuleLoader = async () => (await import('../../commands
 export const loadTrash: ModuleLoader = async () => (await import('../../commands/trash.js')).registerTrashCommands;
 export const loadRestore: ModuleLoader = async () => (await import('../../commands/trash.js')).registerRestoreCommand;
 export const loadDoctor: ModuleLoader = async () => (await import('../../commands/doctor.js')).registerDoctorCommand;
+export const loadStatus: ModuleLoader = async () => (await import('../../commands/status.js')).registerStatusCommand;
 export const loadProfiles: ModuleLoader = async () => (await import('../../commands/profiles.js')).registerProfilesCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../../commands/secrets.js')).registerSecretsCommands;
 export const loadWallet: ModuleLoader = async () => (await import('../../commands/wallet.js')).registerWalletCommands;
@@ -140,6 +141,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   trash: [loadTrash],
   restore: [loadRestore],
   doctor: [loadDoctor],
+  status: [loadStatus],
   profiles: [loadProfiles],
   secrets: [loadSecrets],
   wallet: [loadWallet],
