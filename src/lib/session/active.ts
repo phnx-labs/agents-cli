@@ -24,6 +24,7 @@ import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
+import { readPidSessionEntry, prunePidSessionRegistry } from './pid-registry.js';
 import { buildClaudeLabelMap } from './discover.js';
 import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
@@ -571,8 +572,13 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   const out: ActiveSession[] = [];
   for (let i = 0; i < candidates.length; i++) {
     const { pid, kind } = candidates[i];
-    const cwd = cwds[i];
-    const sessionFile = findSessionFileForKind(kind, cwd);
+    // The per-pid registry (written by `ag run`) gives the EXACT session id this
+    // pid was launched with — so N agents in one cwd resolve to N distinct
+    // sessions instead of all collapsing onto the newest .jsonl. Absent (agent
+    // not launched via `ag run`, or one that takes no session id) → heuristic.
+    const entry = readPidSessionEntry(pid);
+    const cwd = cwds[i] ?? entry?.cwd ?? undefined;
+    const sessionFile = findSessionFileForKind(kind, cwd, entry?.sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
@@ -583,11 +589,13 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       host,
       pid,
       cwd,
-      sessionId: sessionIdFromFile(sessionFile),
+      sessionId: entry?.sessionId ?? sessionIdFromFile(sessionFile),
       topic,
       sessionFile,
     }, state, sessionFile));
   }
+  // Housekeeping: drop registry files for pids that have since died.
+  prunePidSessionRegistry(isPidAlive);
   return out;
 }
 
