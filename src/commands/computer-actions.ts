@@ -201,11 +201,15 @@ function emit(result: Record<string, unknown>, json: boolean, human: () => strin
   }
 }
 
-// Add the shared --pid/--bundle target options to a verb.
+// Add the shared --pid/--bundle/--host target options to a verb. `--host` routes
+// the verb at a remote Windows device: the `computer` preAction hook hydrates
+// COMPUTER_HELPER_TCP from the tunnel `start --host` recorded, so withClient's
+// openComputerClient() transparently selects the TCP transport.
 function addTargetOpts(cmd: Command): Command {
   return cmd
     .option('--bundle <id>', 'Bundle id of the target app (default: frontmost allow-listed app)')
-    .option('--pid <n>', 'Target pid directly (overrides --bundle)', (v) => parseInt(v, 10));
+    .option('--pid <n>', 'Target pid directly (overrides --bundle)', (v) => parseInt(v, 10))
+    .option('--host <device>', 'Drive a remote Windows device (requires `agents computer start --host <device>` first)');
 }
 
 // Add the shared --id/--x/--y element-or-coords options to a verb.
@@ -216,7 +220,7 @@ function addElementOrCoordOpts(cmd: Command): Command {
     .option('--y <n>', 'Y coordinate (global, points)', (v) => parseInt(v, 10));
 }
 
-type TargetOpts = { pid?: number; bundle?: string; json?: boolean };
+type TargetOpts = { pid?: number; bundle?: string; host?: string; json?: boolean };
 type ElemOpts = TargetOpts & { id?: string; x?: number; y?: number };
 
 export function registerActionCommands(program: Command): void {

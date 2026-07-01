@@ -433,8 +433,13 @@ class StdioClient extends BaseClient {
 }
 
 // Describe which transport is currently in use. Useful for diagnostics
-// like `agents computer status`.
-export function describeTransport(): { kind: 'socket' | 'stdio' | 'none'; path: string | null } {
+// like `agents computer status`. TCP takes precedence to match
+// openComputerClient() — when COMPUTER_HELPER_TCP is set we drive a remote
+// (Windows) daemon over a tunnel, so callers off macOS (no socket, no local
+// .app) must not be told "no transport". `path` is null: the endpoint is an
+// env-configured host:port, not an on-disk path.
+export function describeTransport(): { kind: 'socket' | 'stdio' | 'tcp' | 'none'; path: string | null } {
+  if (resolveTcpEndpoint()) return { kind: 'tcp', path: null };
   const sockPath = resolveSocketPath();
   if (fs.existsSync(sockPath)) return { kind: 'socket', path: sockPath };
   const exec = resolveHelperExec();

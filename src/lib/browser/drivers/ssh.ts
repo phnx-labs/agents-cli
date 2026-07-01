@@ -9,6 +9,10 @@ import type { BrowserProfile } from '../types.js';
 // so existing importers of `shellQuote` from this module keep working.
 import { shellQuote } from '../../ssh-exec.js';
 export { shellQuote };
+// The `ssh -L` tunnel spawn is shared with `agents computer --host`; it lives in
+// the single ssh-tunnel helper. Calling it with no options preserves this
+// driver's original foreground, stderr-captured behavior exactly.
+import { startSSHTunnel } from '../../ssh-tunnel.js';
 
 export interface SSHConnection {
   cdp: CDPClient;
@@ -129,50 +133,6 @@ export async function connectSSH(
       clearProfileRuntime(profile.name);
     },
   };
-}
-
-function startSSHTunnel(
-  user: string,
-  host: string,
-  localPort: number,
-  remotePort: number
-): Promise<ChildProcess> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      '-L',
-      `${localPort}:127.0.0.1:${remotePort}`,
-      `${user}@${host}`,
-      '-N',
-      '-o',
-      'StrictHostKeyChecking=accept-new',
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=10',
-    ];
-
-    const tunnel = spawn('ssh', args, {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      detached: false,
-    });
-
-    let stderr = '';
-    tunnel.stderr?.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    tunnel.on('error', (err) => {
-      reject(new Error(`SSH tunnel failed: ${err.message}`));
-    });
-
-    setTimeout(() => {
-      if (tunnel.killed) {
-        reject(new Error(`SSH tunnel died: ${stderr}`));
-      } else {
-        resolve(tunnel);
-      }
-    }, 500);
-  });
 }
 
 async function waitForPort(port: number, timeoutMs: number): Promise<void> {

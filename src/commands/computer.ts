@@ -13,11 +13,18 @@ import {
   resolvePolicyPath,
   resolvePeersPath,
   describeTransport,
+  resolveTcpEndpoint,
   loadComputerAllowList,
   loadDefaultPeers,
   writeComputerPolicy,
   writeComputerPeers,
 } from '../lib/computer-rpc.js';
+import {
+  setupRemoteHelper,
+  startRemoteTunnel,
+  stopRemoteHelper,
+  hydrateRemoteEnvFromState,
+} from '../lib/ssh-tunnel.js';
 import { registerActionCommands, withClient, unwrap, pickTarget, type AppInfo } from './computer-actions.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
@@ -28,15 +35,47 @@ const COMPUTER_HELP_GROUPS = [
   { title: 'Interact', names: ['launch', 'raise', 'click', 'right-click', 'type', 'type-text', 'key', 'drag', 'scroll', 'ax-action', 'focus', 'wait'] },
 ] as const;
 
+// Subcommands that manage the `--host` remote path themselves (provisioning /
+// tunnel lifecycle). Every other `--host`-bearing subcommand is a plain verb
+// that just needs the TCP endpoint hydrated before it runs.
+const REMOTE_LIFECYCLE = new Set(['setup', 'start', 'stop']);
+
+/**
+ * Pure platform gate. The computer subsystem is macOS-only for LOCAL driving
+ * (Accessibility / launchctl). It is NOT blocked off macOS when a remote daemon
+ * is reachable — either a configured TCP endpoint (COMPUTER_HELPER_TCP, e.g. a
+ * Windows daemon over a tunnel) or a `--host <device>` remote invocation. Kept
+ * pure so the gating rule is unit-testable without a live command tree.
+ */
+export function shouldBlockOffPlatform(opts: {
+  platform: NodeJS.Platform;
+  tcpConfigured: boolean;
+  host?: string;
+}): boolean {
+  if (opts.platform === 'darwin') return false;
+  if (opts.tcpConfigured) return false; // remote (Windows) daemon over a tunnel
+  if (opts.host) return false; // remote path resolves its own endpoint
+  return true;
+}
+
 export function registerComputerCommand(program: Command): void {
   const computer = program
     .command('computer')
-    .description('Drive macOS apps via Accessibility — list, screenshot, click, type (macOS only)')
-    // The whole subsystem is macOS Accessibility / TCC. Fail fast with a clear
-    // message on other platforms instead of a downstream ENOENT / launchctl error.
-    .hook('preAction', () => {
-      if (process.platform !== 'darwin') {
-        console.error('agents computer: macOS only — it drives apps via the macOS Accessibility API.');
+    .description('Drive macOS apps via Accessibility, or a remote Windows host with --host — list, screenshot, click, type')
+    // The whole subsystem is macOS Accessibility / TCC for LOCAL driving. Off
+    // macOS it still works against a remote daemon (COMPUTER_HELPER_TCP set, or
+    // a `--host <device>` invocation). Fail fast with a clear message only when
+    // neither remote path is available, instead of a downstream launchctl error.
+    .hook('preAction', async (_thisCommand, actionCommand) => {
+      const host = actionCommand.opts().host as string | undefined;
+      // Verbs with --host reconnect to the tunnel `start --host` recorded; this
+      // sets COMPUTER_HELPER_TCP so the shared client picks the TCP transport.
+      if (host && !REMOTE_LIFECYCLE.has(actionCommand.name())) {
+        hydrateRemoteEnvFromState(host);
+      }
+      if (shouldBlockOffPlatform({ platform: process.platform, tcpConfigured: resolveTcpEndpoint() != null, host })) {
+        console.error('agents computer: macOS only for local driving — it uses the macOS Accessibility API.');
+        console.error('For a remote Windows host: register it with `agents devices`, then use --host (or set COMPUTER_HELPER_TCP).');
         process.exit(1);
       }
     });
@@ -117,6 +156,7 @@ function registerScreenshotCommand(program: Command): void {
     .description('Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)')
     .option('--bundle <id>', 'Bundle id to capture (default: frontmost allow-listed app)')
     .option('--pid <n>', 'Target pid directly (overrides --bundle)', (v) => parseInt(v, 10))
+    .option('--host <device>', 'Drive a remote Windows device (requires `agents computer start --host <device>` first)')
     .option('--list', 'List the app\'s windows (id/title/layer/bounds) instead of capturing — reveals modals/popups')
     .option('--window-id <n>', 'Capture a specific window by id (from --list)', (v) => parseInt(v, 10))
     .option('--display', 'Capture the whole display the app is on (composites stacked modals)')
@@ -126,6 +166,7 @@ function registerScreenshotCommand(program: Command): void {
     .action(async (opts: {
       bundle?: string;
       pid?: number;
+      host?: string;
       list?: boolean;
       windowId?: number;
       display?: boolean;
@@ -215,8 +256,23 @@ function registerSetupCommand(program: Command): void {
   program
     .command('setup')
     .alias('install-helper')
-    .description('Install ComputerHelper.app to /Applications/ (does NOT activate the daemon — run `start` to enable)')
-    .action(async () => {
+    .description('Install the helper — locally to /Applications/ (macOS), or to a remote Windows host with --host')
+    .option('--host <device>', 'Provision a remote Windows device (push the exe + register a LOGON task) instead of installing locally')
+    .action(async (opts: { host?: string }) => {
+      if (opts.host) {
+        try {
+          const { target, taskName } = await setupRemoteHelper(opts.host);
+          console.log(`pushed computer-helper-win.exe to ${target}`);
+          console.log(`registered LOGON scheduled task "${taskName}" (interactive session, started now)`);
+          console.log('');
+          console.log(`Next:  agents computer start --host ${opts.host}`);
+        } catch (err) {
+          console.error(`error: ${(err as Error).message}`);
+          process.exit(1);
+        }
+        return;
+      }
+
       const srcApp = resolveHelperApp();
       if (!srcApp || !fs.existsSync(srcApp)) {
         console.error('helper not built. Run: ./packages/computer-helper/scripts/build.sh debug');
@@ -305,8 +361,24 @@ function registerSetupCommand(program: Command): void {
 function registerStartCommand(program: Command): void {
   program
     .command('start')
-    .description('Activate the helper daemon (loads launchd, opens socket)')
-    .action(async () => {
+    .description('Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --host')
+    .option('--host <device>', 'Open a tunnel to the remote Windows daemon and record it for --host verbs')
+    .action(async (opts: { host?: string }) => {
+      if (opts.host) {
+        try {
+          const state = await startRemoteTunnel(opts.host);
+          console.log(`tunnel: 127.0.0.1:${state.localPort} -> ${state.target} (127.0.0.1:${state.remotePort})`);
+          console.log(`daemon: answering (ssh pid ${state.tunnelPid})`);
+          console.log('');
+          console.log(`Drive it:  agents computer apps --host ${opts.host}`);
+          console.log(`Stop:      agents computer stop --host ${opts.host}`);
+        } catch (err) {
+          console.error(`error: ${(err as Error).message}`);
+          process.exit(1);
+        }
+        return;
+      }
+
       const home = os.homedir();
       const plistPath = path.join(home, 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
       const socketPath = resolveSocketPath();
@@ -488,8 +560,21 @@ function registerReloadCommand(program: Command): void {
 function registerStopCommand(program: Command): void {
   program
     .command('stop')
-    .description('Deactivate the helper daemon (bootout, removes socket)')
-    .action(async () => {
+    .description('Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --host')
+    .option('--host <device>', 'Tear down the remote tunnel and unregister the scheduled task')
+    .action(async (opts: { host?: string }) => {
+      if (opts.host) {
+        try {
+          const { tunnelKilled, taskRemoved } = await stopRemoteHelper(opts.host);
+          console.log(`tunnel: ${tunnelKilled ? 'closed' : 'not running'}`);
+          console.log(`task:   ${taskRemoved ? 'unregistered' : 'not removed (device offline?)'}`);
+        } catch (err) {
+          console.error(`error: ${(err as Error).message}`);
+          process.exit(1);
+        }
+        return;
+      }
+
       const home = os.homedir();
       const plistPath = path.join(home, 'Library', 'LaunchAgents', `${HELPER_LABEL}.plist`);
       const socketPath = resolveSocketPath();
