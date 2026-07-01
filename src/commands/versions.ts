@@ -19,6 +19,7 @@ import {
   getAccountEmail,
   getAccountInfo,
   agentLabel,
+  warnAgentDeprecated,
 } from '../lib/agents.js';
 import type { AccountInfo } from '../lib/agents.js';
 import type { UsageSnapshot } from '../lib/usage.js';
@@ -356,6 +357,8 @@ export function registerVersionsCommands(program: Command): void {
 
         const { agent, version } = parsed;
         const agentConfig = AGENTS[agent];
+
+        warnAgentDeprecated(agent);
 
         if (!agentConfig.npmPackage && !agentConfig.installScript) {
           console.log(chalk.yellow(`${agentLabel(agentConfig.id)} has no npm package. Install manually.`));

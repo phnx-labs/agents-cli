@@ -46,6 +46,7 @@ import {
   removeWorktree,
 } from '../lib/teams/worktree.js';
 import { isVersionInstalled, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/versions.js';
+import { warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
 import type { SessionMeta } from '../lib/session/types.js';
@@ -998,6 +999,7 @@ export function registerTeamsCommands(program: Command): void {
       }
 
       const { agent, version, profileName } = parseTeammate(teammate);
+      warnAgentDeprecated(agent);
       if (version && !isVersionInstalled(agent, version)) {
         die(
           `${AGENT_NAMES[agent]} ${version} isn't installed.\n` +
