@@ -28,8 +28,10 @@ import * as path from 'path';
 import {
   deleteKeychainToken,
   getKeychainToken,
+  getKeychainTokens,
   hasKeychainToken,
   listKeychainItems,
+  listLegacyKeychainItems,
   setKeychainToken,
 } from '../lib/secrets/index.js';
 import { getBackupsDir } from '../lib/state.js';
@@ -122,8 +124,9 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
     .description('Refresh existing keychain ACLs to use the signed Agents CLI helper. Dry-run by default.')
     .option('--commit', 'Perform writes (default is dry-run reporting only)')
     .option('--prefix <p>', `Restrict to items beginning with PREFIX (default ${ITEM_PREFIX})`, ITEM_PREFIX)
+    .option('--all', 'Rewrite EVERY matching item, not just legacy stragglers (slower; a Touch ID prompt per item)')
     .option('--passphrase-env <var>', 'Read the backup passphrase from this env var instead of prompting')
-    .action(async (opts: { commit?: boolean; prefix?: string; passphraseEnv?: string }) => {
+    .action(async (opts: { commit?: boolean; prefix?: string; all?: boolean; passphraseEnv?: string }) => {
       try {
         if (process.platform !== 'darwin') {
           throw new Error('migrate-acl is macOS-only. Linux items already use the keyring-native ACL model.');
@@ -134,15 +137,26 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
             `--prefix must start with '${ITEM_PREFIX}' to avoid touching unrelated Keychain items (got '${prefix}').`,
           );
         }
-        const items = listKeychainItems(prefix).map((item) => {
+        // Default: migrate ONLY legacy stragglers (items still in the file-based
+        // keychain) — modern DP items need no rewrite and touching them is a
+        // Touch ID prompt per item for nothing. `--all` forces the old full
+        // rewrite. Either way this is one command over every matching item — no
+        // one-by-one invocation.
+        const names = opts.all ? listKeychainItems(prefix) : listLegacyKeychainItems(prefix);
+        const items = names.map((item) => {
           const localExists = hasKeychainToken(item);
           return { item, sync: !localExists };
         });
         if (items.length === 0) {
-          console.log(chalk.gray(`No keychain items with prefix '${prefix}'.`));
+          console.log(
+            opts.all
+              ? chalk.gray(`No keychain items with prefix '${prefix}'.`)
+              : chalk.green(`Nothing to migrate — all items under '${prefix}' already use the modern ACL.`),
+          );
           return;
         }
-        console.log(chalk.bold(`Found ${items.length} item(s) under '${prefix}'.`));
+        const label = opts.all ? 'item' : 'legacy item';
+        console.log(chalk.bold(`Found ${items.length} ${label}(s) under '${prefix}' to migrate.`));
         if (!opts.commit) {
           for (const { item, sync } of items) {
             console.log(`  ${chalk.cyan(item)} ${chalk.gray(sync ? '(synced)' : '(local)')}`);
@@ -151,15 +165,18 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
           console.log(chalk.gray('Dry-run — pass --commit to perform the migration.'));
           return;
         }
-        // Commit phase. Snapshot every value first, encrypt, then mutate.
+        // Commit phase. Snapshot every value first (one batched read behind a
+        // single helper process, so DP items share one auth context), encrypt,
+        // then mutate.
+        const fetched = getKeychainTokens(items.map((i) => i.item));
         const records: MigrationRecord[] = [];
         for (const { item, sync } of items) {
-          try {
-            const value = getKeychainToken(item);
-            records.push({ item, sync, value });
-          } catch (err) {
-            console.error(chalk.red(`Skipping '${item}': read failed (${(err as Error).message}).`));
+          const value = fetched.get(item);
+          if (value === undefined) {
+            console.error(chalk.red(`Skipping '${item}': read failed or item absent.`));
+            continue;
           }
+          records.push({ item, sync, value });
         }
         if (records.length === 0) {
           console.error(chalk.red('No items could be read. Aborting before any writes.'));

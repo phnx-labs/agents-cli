@@ -343,6 +343,32 @@ export function listKeychainItems(prefix: string): string[] {
 }
 
 /**
+ * Enumerate ONLY legacy file-based-keychain item names with the given prefix —
+ * the items that still carry a pre-migration (trusted-app) ACL and pop a
+ * separate auth sheet on read. Items already in the data-protection keychain are
+ * excluded (they need no migration). Silent (attributes only, never decrypts).
+ *
+ * macOS only: on Linux / the test backend there is no separate legacy keychain,
+ * so this returns []. Used by `agents secrets migrate-acl` to rewrite only the
+ * stragglers instead of every item (which would be a Touch ID storm).
+ */
+export function listLegacyKeychainItems(prefix: string): string[] {
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['list-legacy', prefix], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to enumerate legacy keychain items with prefix '${prefix}'.`);
+  }
+  const out = result.stdout?.toString() || '';
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
  * One-time upgrade for a keychain item that was written by a previous helper
  * generation with a trusted-app ACL. The helper reads the legacy item
  * (which may pop the password sheet once), then deletes and re-adds it with
