@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { resourceUnit, formatResourceDelta, type ChangeAction } from './repo.js';
+import {
+  resourceUnit, formatResourceDelta, resourceDelta, deltaBrief, wrapPhrases, repoSlug,
+  type ChangeAction,
+} from './repo.js';
 
 /** Strip ANSI color codes so assertions are stable regardless of TTY/color env. */
 function plain(s: string): string {
@@ -71,5 +74,80 @@ describe('formatResourceDelta', () => {
 
   it('returns empty string for no changes', () => {
     expect(formatResourceDelta([])).toBe('');
+  });
+});
+
+describe('resourceDelta', () => {
+  it('reports total distinct units and ordered counts (new before changed)', () => {
+    const d = resourceDelta([
+      e('new', 'skills/a/SKILL.md'),
+      e('new', 'skills/b/SKILL.md'),
+      e('changed', 'hooks/h.md'),
+    ]);
+    expect(d.total).toBe(3);
+    expect(d.counts).toEqual([
+      { action: 'new', kind: 'skill', count: 2 },
+      { action: 'changed', kind: 'hook', count: 1 },
+    ]);
+  });
+
+  it('counts a multi-file unit once', () => {
+    const d = resourceDelta([e('changed', 'skills/foo/SKILL.md'), e('changed', 'skills/foo/a.md')]);
+    expect(d.total).toBe(1);
+    expect(d.counts).toEqual([{ action: 'changed', kind: 'skill', count: 1 }]);
+  });
+});
+
+describe('deltaBrief', () => {
+  it('shows the top kinds and folds the rest into +N by unit count', () => {
+    // 24 skills, 9 commands, 4 plugins, 7 hooks, 1 workflow -> total 45
+    const entries: { action: ChangeAction; file: string }[] = [];
+    const add = (kind: string, n: number) => {
+      for (let i = 0; i < n; i++) entries.push(e('new', `${kind}/u${i}/f.md`));
+    };
+    add('skills', 24); add('commands', 9); add('plugins', 4); add('hooks', 7); add('workflows', 1);
+    const d = resourceDelta(entries);
+    expect(d.total).toBe(45);
+    // top 2 kinds shown (24 + 9 = 33 units), remainder 45 - 33 = 12
+    expect(plain(deltaBrief(d))).toBe('(24 skills, 9 commands, +12)');
+  });
+
+  it('drops the +N when everything fits in the shown kinds', () => {
+    const d = resourceDelta([e('changed', 'hooks/h.md'), e('changed', 'rules/r.md')]);
+    expect(plain(deltaBrief(d))).toBe('(1 hook, 1 rule)');
+  });
+
+  it('is empty for an empty delta', () => {
+    expect(deltaBrief(resourceDelta([]))).toBe('');
+  });
+});
+
+describe('wrapPhrases', () => {
+  it('packs phrases into lines no wider than the budget', () => {
+    const parts = ['aaaa', 'bbbb', 'cccc']; // each 4 wide, ", " adds 2
+    // width 10 fits "aaaa, bbbb" (10) but not a third -> two lines
+    expect(wrapPhrases(parts, 10)).toEqual(['aaaa, bbbb', 'cccc']);
+  });
+
+  it('keeps an over-long single phrase on its own line rather than dropping it', () => {
+    expect(wrapPhrases(['x'.repeat(30)], 10)).toEqual(['x'.repeat(30)]);
+  });
+
+  it('measures visible width, ignoring ANSI color codes', () => {
+    const red = (s: string) => `[31m${s}[39m`;
+    // Two 4-char words colored; budget 10 fits both on one line by visible width.
+    expect(wrapPhrases([red('aaaa'), red('bbbb')], 10)).toEqual([`${red('aaaa')}, ${red('bbbb')}`]);
+  });
+});
+
+describe('repoSlug', () => {
+  it('extracts owner/repo from ssh and https git URLs', () => {
+    expect(repoSlug('git@github.com:muqsitnawaz/.agents.git')).toBe('muqsitnawaz/.agents');
+    expect(repoSlug('https://github.com/phnx-labs/agents-cli.git')).toBe('phnx-labs/agents-cli');
+    expect(repoSlug('https://github.com/phnx-labs/agents-cli')).toBe('phnx-labs/agents-cli');
+  });
+
+  it('falls back to the raw string for non-github URLs', () => {
+    expect(repoSlug('/local/path/repo')).toBe('/local/path/repo');
   });
 });
