@@ -225,6 +225,75 @@ describe('parseKimi', () => {
     });
   });
 
+  // Tests for the event.args shape (real Kimi wire format as of 2026-06)
+  test('maps Bash tool.call with event.args shape to tool_use with command', () => {
+    const statePath = makeKimiSession(JSON.stringify({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.call',
+        uuid: 'tool_bash_001',
+        toolCallId: 'tool_bash_001',
+        name: 'Bash',
+        args: { command: 'ls -la /tmp', cwd: '/tmp' },
+      },
+      time: 1750723200000,
+    }));
+
+    const events = parseKimi(statePath);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'tool_use',
+      agent: 'kimi',
+      tool: 'Bash',
+      command: 'ls -la /tmp',
+      args: { command: 'ls -la /tmp', cwd: '/tmp' },
+    });
+  });
+
+  test('maps Read tool.call with event.args shape to tool_use with path', () => {
+    const statePath = makeKimiSession(JSON.stringify({
+      type: 'context.append_loop_event',
+      event: {
+        type: 'tool.call',
+        uuid: 'tool_read_002',
+        toolCallId: 'tool_read_002',
+        name: 'Read',
+        args: { path: '/tmp/testfile.txt' },
+      },
+      time: 1750723200001,
+    }));
+
+    const events = parseKimi(statePath);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'tool_use',
+      agent: 'kimi',
+      tool: 'Read',
+      path: '/tmp/testfile.txt',
+      args: { path: '/tmp/testfile.txt' },
+    });
+    expect((events[0] as any).command).toBeUndefined();
+  });
+
+  test('parses kimi-tool-args.jsonl fixture via event.args shape', () => {
+    const fixturePath = path.join(__dirname, '..', 'testdata', 'kimi-tool-args.jsonl');
+    const wireContent = fs.readFileSync(fixturePath, 'utf-8');
+    const statePath = makeKimiSession(wireContent);
+
+    const events = parseKimi(statePath);
+    const toolEvents = events.filter(e => e.type === 'tool_use') as any[];
+    expect(toolEvents.length).toBeGreaterThanOrEqual(3);
+
+    const bash = toolEvents.find(e => e.tool === 'Bash');
+    expect(bash).toBeDefined();
+    expect(bash.command).toBe('ls -la /tmp');
+    expect(bash.args.cwd).toBe('/tmp');
+
+    const read = toolEvents.find(e => e.tool === 'Read');
+    expect(read).toBeDefined();
+    expect(read.path).toBe('/tmp/testfile.txt');
+  });
+
   test('maps usage.record to usage event', () => {
     const statePath = makeKimiSession(JSON.stringify({
       type: 'usage.record',

@@ -1092,7 +1092,9 @@ export function parseKimi(filePath: string): SessionEvent[] {
         const fn = event.function || {};
         const toolName = typeof event.name === 'string' ? event.name : (fn.name || 'unknown');
         let args: Record<string, any> = {};
-        if (typeof fn.arguments === 'string') {
+        if (event.args && typeof event.args === 'object') {
+          args = event.args;
+        } else if (typeof fn.arguments === 'string') {
           try {
             args = JSON.parse(fn.arguments);
           } catch {
