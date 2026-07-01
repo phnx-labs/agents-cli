@@ -230,6 +230,30 @@ Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `age
 
 ---
 
+## Run on your own machines
+
+Dispatch any read-only or config command -- and `agents run` itself -- to another machine over SSH. No daemon.
+
+```bash
+# Enroll a machine (from ~/.ssh/config, or inline with user@address)
+agents hosts add gpu-box
+agents hosts check gpu-box              # reachable? which agents-cli version?
+
+# Run there instead of locally
+agents run claude --host gpu-box "profile this build"
+agents view claude --host gpu-box       # inspect the remote install
+agents sync --host gpu-box              # make the remote machine current
+
+# Your Tailscale fleet, auto-discovered
+agents devices sync                     # ingest `tailscale status`
+agents ssh mac-mini                     # hardened SSH: fails fast if offline,
+                                        # PowerShell on Windows, password-from-Keychain
+```
+
+**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH. See [docs/00-concepts.md](docs/00-concepts.md#devices--hosts).
+
+---
+
 ## Teams
 
 ```bash

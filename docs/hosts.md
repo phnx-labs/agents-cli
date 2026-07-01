@@ -1,7 +1,11 @@
-# Hosts — dispatch agents to your own machines (design)
+# Hosts — dispatch agents to your own machines
 
-> **Status:** Design / RFC. No implementation yet. This document is for review
-> before any code lands.
+> **Status:** Implemented. `agents hosts` and the `-H, --host` flag ship today —
+> on the read-only/config commands (`view`, `inspect`, `usage`, `cost`, `doctor`,
+> `list`, `sync`), on `agents run`, and across the `agents teams` lifecycle. This
+> document is the design rationale; see
+> [00-concepts.md](00-concepts.md#devices--hosts) for the concept overview and how
+> hosts relate to the Tailscale-backed `agents devices` registry.
 
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
 *your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed

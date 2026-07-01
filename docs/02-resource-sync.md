@@ -90,6 +90,23 @@ agents use claude@2.0.65
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Sync Targets: Version Selectors and Repo Scoping
+
+`agents sync` accepts the full [agent-spec vocabulary](01-version-management.md#agent-spec-resolution)
+plus an optional repo scope:
+
+```bash
+agents sync claude              # the resolved default version (interactive preview in a TTY)
+agents sync claude@all          # every installed Claude version
+agents sync claude@all system   # scope to one DotAgent repo: system | user | project | <alias>
+agents sync claude --repo user  # same, via the flag form
+```
+
+A repo scope reconciles **only** that layer's resources into the target
+version(s), leaving the other layers' already-synced resources untouched. Bare
+`agents sync` (no agent) runs the umbrella verb — fetch remote state, then
+reconcile every installed agent.
+
 ## MCP Servers: Per-Agent JSON Write
 
 MCP is the one resource that isn't symlinked. Each agent stores MCP server

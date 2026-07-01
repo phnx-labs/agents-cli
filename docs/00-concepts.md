@@ -90,6 +90,41 @@ See [01-version-management.md](01-version-management.md) for install and switchi
 
 ---
 
+## Devices & Hosts
+
+agents-cli can run commands on **other machines**, not just the local one. Two
+independent registries back this, both using SSH as the only transport (no daemon).
+
+**Devices** — your Tailscale fleet, made addressable. `agents devices sync` reads
+`tailscale status --json` and records a profile per machine (platform, login user,
+Tailscale DNS name / IP, auth method, online status) in
+`~/.agents/.history/devices/registry.json`. That registry is **machine-local** — it
+embeds addresses, so it lives under `.history/` and is *not* carried by
+`agents repo push`. `agents ssh <name>` connects through it: it fails fast when a
+device is offline, runs PowerShell or POSIX per platform, and can pull an SSH
+password from a Keychain bundle via an askpass shim. `agents devices render --write`
+emits a `~/.ssh/config.d/agents` include so plain `ssh`/`scp`/`rsync` resolve the
+same logical names.
+
+**Hosts** — machines you dispatch agent work to. `agents hosts add` enrolls a
+target either from an existing `~/.ssh/config` stanza (connection details stay in
+ssh config; agents-cli stores only a caps/os overlay) or *inline* (with its own
+`user@address`). The host registry lives in `agents.yaml` under `hosts:` and **is**
+git-synced with `agents repo push`/`pull`, so a fleet definition travels between
+machines. The `-H, --host <name>` flag routes a command over SSH to that machine —
+supported today on the read-only/config commands (`view`, `inspect`, `usage`,
+`cost`, `doctor`, `list`, `sync`), on `agents run`, and across the `agents teams`
+lifecycle. The target may be a registered host name, a capability tag
+(`--host gpu --any`), or a raw `user@host`.
+
+The two systems are parallel and independent — a machine can appear in both.
+Devices auto-populate from Tailscale and back the interactive `agents ssh`; hosts
+are enrolled deliberately and back `--host` dispatch. `agents devices render --write`
+bridges them one way (device → ssh_config → enrollable as a host). See
+[hosts.md](hosts.md) for the `--host` execution model.
+
+---
+
 ## Capability matrix
 
 `src/lib/agents.ts` is the canonical capability matrix for resource sync. Every gateable resource kind is declared per agent so prompt, sync, and staleness code can share the same source of truth.
