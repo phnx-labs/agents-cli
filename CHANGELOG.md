@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.31
+
 **`agents sessions <id>`: a catch-up digest for switching between many agents (#502)**
 
 - Opening a single session now leads with its auto-inferred title (user `/rename` > Claude `ai-title` > first-prompt topic) and PR / worktree / ticket badges, then a **Changes** section that groups touched files by directory and tags each as created / modified / deleted (with a `+N ~N -N` summary) instead of the old flat "Modified" list, a **Tools** histogram (per-tool call counts), and a **Tests** verdict parsed from the last `vitest` / `jest` / `pytest` / `go test` / `cargo test` / `tsc` run. The same signals are folded into the interactive picker preview.
