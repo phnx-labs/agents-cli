@@ -9,8 +9,7 @@
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import { spawnSync } from 'child_process';
-import { SSH_TARGET_RE, assertValidSshTarget, type SshExecResult } from '../lib/ssh-exec.js';
+import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
 import {
   parseHostsOption,
   remoteResolveEnv,
@@ -1277,20 +1276,18 @@ Examples:
           const remoteCmd = `bash -lc ${shellQuote(remoteAgents)}`;
           let failures = 0;
           for (const host of hosts) {
-            const res = spawnSync('ssh', ['-o', 'BatchMode=yes', host, remoteCmd], {
-              input,
-              stdio: ['pipe', 'pipe', 'pipe'],
-              encoding: 'utf-8',
-            });
-            if (res.error) {
+            // Routed through the shared ssh engine: full hardened options
+            // (BatchMode, ConnectTimeout, keepalive) + control-socket reuse.
+            const res = sshExec(host, remoteCmd, { input });
+            if (res.code === null) {
               failures++;
-              console.error(chalk.red(`${host}: ${res.error.message}`));
+              console.error(chalk.red(`${host}: ${res.stderr.trim() || (res.timedOut ? 'ssh timed out' : 'ssh failed')}`));
               continue;
             }
-            if (res.status !== 0) {
+            if (res.code !== 0) {
               failures++;
               const msg = (res.stderr || res.stdout || '').trim();
-              console.error(chalk.red(`${host}: remote import failed (exit ${res.status ?? 'signal'})${msg ? `: ${msg}` : ''}`));
+              console.error(chalk.red(`${host}: remote import failed (exit ${res.code})${msg ? `: ${msg}` : ''}`));
               continue;
             }
             const remoteMsg = (res.stdout || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).pop();
