@@ -52,6 +52,7 @@ import {
   syncResourcesToVersion,
   removeVersion,
   printTrashFooter,
+  reconcileStaleLatestForAgent,
 } from '../lib/versions.js';
 import {
   getShimsDir,
@@ -1481,6 +1482,17 @@ export async function viewAction(
     cli: options?.cli,
   };
   const filterIsSet = SECTION_KEYS.some((k) => filter[k]);
+
+  // RUSH-1320: fold any stale literal `latest` version-home into its concrete
+  // version before rendering, so it stops appearing as a bogus "version" next
+  // to the real ones. Best-effort — must never break `agents view`. Scoped to
+  // the queried agent when one is given (cheap no-op for agents with no
+  // `latest` dir, i.e. almost all of them).
+  {
+    const target = agentArg ? resolveAgentName(agentArg.split('@')[0]) : null;
+    const toReconcile = agentArg ? (target ? [target] : []) : ALL_AGENT_IDS;
+    await Promise.all(toReconcile.map((a) => reconcileStaleLatestForAgent(a).catch(() => {})));
+  }
 
   if (!agentArg) {
     if (prune) {

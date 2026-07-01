@@ -1321,6 +1321,25 @@ function removeInstallArtifacts(versionDir: string): void {
  * when nothing was resolved or no stale dir is present, so it is safe to call
  * on every script-based install. Returns the action taken (for tests/logging).
  */
+/**
+ * Proactively fold a stale `latest` version-home into its concrete version,
+ * WITHOUT needing a fresh install (RUSH-1320). `reconcileStaleLatestDir` only
+ * fires at install time, so a `latest` dir left by an old probe-failed install
+ * lingers in `agents view` indefinitely. This resolves the live CLI version and
+ * reconciles — cheap no-op when there's no `latest` dir (the common case, so
+ * `agents view` pays a `--version` shell-out only the once, until it's folded).
+ * Skipped when the active config symlink still points at `latest`, since
+ * renaming that dir would dangle the live symlink.
+ */
+export async function reconcileStaleLatestForAgent(agent: AgentId): Promise<void> {
+  if (!fs.existsSync(getVersionDir(agent, 'latest'))) return;
+  if (getConfigSymlinkVersion(agent) === 'latest') return;
+  const concrete = await getCliVersionFromPath(agent);
+  if (concrete && concrete !== 'latest') {
+    await reconcileStaleLatestDir(agent, concrete);
+  }
+}
+
 export async function reconcileStaleLatestDir(
   agent: AgentId,
   installedVersion: string,
