@@ -218,11 +218,11 @@ async function main() {
     for (let round = 0; round < 4; round++) {
       await c.call('key', { keys: 'ctrl+a' });
       await c.call('key', { keys: 'delete' });
-      for (let i = 0; i < 20; i++) {
-        const g = await c.call('get_text', { pid, element_id: elId });
-        if (normalizeDoc(String(g.text ?? '')) === '') break;
-        await sleep(100);
-      }
+      // NB: don't get_text the now-empty document here — get_text throws
+      // "Start or end specified is past the end of the text range" on an empty
+      // UIA text range (separate get_text-on-empty bug, tracked separately).
+      // A brief settle is enough before typing the next round.
+      await sleep(200);
       await c.call('type_text', { text: SYMBOLS });
       let symText = '';
       let symMatched = false;
