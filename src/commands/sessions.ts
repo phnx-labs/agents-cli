@@ -285,6 +285,20 @@ function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree
 }
 
 /**
+ * Compact provenance badge: how to reach the session, not what it's doing.
+ * `ssh` flags a remote host; the tmux pane id is the send-keys target the feed
+ * would type back into. Local, non-tmux sessions add nothing (the common case).
+ */
+function provenanceBadge(p?: ActiveSession['provenance']): string {
+  if (!p) return '';
+  const parts: string[] = [];
+  if (p.transport === 'ssh') parts.push(chalk.red('ssh'));
+  if (p.mux?.kind === 'tmux' && p.mux.pane) parts.push(chalk.green(`tmux ${p.mux.pane}`));
+  else if (p.mux?.kind === 'screen') parts.push(chalk.green('screen'));
+  return parts.join(' ');
+}
+
+/**
  * Render a single agent-session row inside an already-printed group header.
  * Indent is the leading whitespace (2 spaces for flat groups, 4 inside a
  * window sub-group). Leads with the 8-char session id (the address to read or
@@ -297,7 +311,7 @@ function printActiveRow(s: ActiveSession, indent: string): void {
   const hostCol = chalk.gray(padToWidth(truncateToWidth(s.host ?? '-', 8), 9));
   const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), 8), 9));
   const fork = s.pidCount && s.pidCount > 1 ? chalk.dim(`×${s.pidCount} `) : '';
-  const badges = (fork ? fork : '') + signalBadges(s);
+  const badges = (fork ? fork : '') + [signalBadges(s), provenanceBadge(s.provenance)].filter(Boolean).join(' ');
   const desc = buildSessionDescription(s) || '-';
   // Fill the remaining width with the preview so nothing wraps under tmux/SSH.
   const fixed = stringWidth(indent) + 9 + 9 + 9 + 9 + (badges ? stringWidth(badges) + 1 : 0);
