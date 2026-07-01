@@ -454,14 +454,21 @@ public sealed class Automation
         var sw = System.Diagnostics.Stopwatch.StartNew();
         SetForegroundWindow(hwnd);
         // Poll until the window server actually promotes it (SetForegroundWindow
-        // is asynchronous and rate-limited). Cap at 600ms like the macOS poll;
-        // report ok regardless so a foreground-lock denial still returns a shape.
+        // is asynchronous and rate-limited). Cap at 600ms like the macOS poll.
         while (sw.ElapsedMilliseconds < 600)
         {
             if (GetForegroundWindow() == hwnd) break;
             Thread.Sleep(20);
         }
         sw.Stop();
+
+        // Match the macOS error contract (Mouse.swift:194): Win32 foreground-lock
+        // can silently deny SetForegroundWindow, leaving a different window
+        // frontmost. Surface that instead of a false ok so a caller that
+        // screenshots/describes next doesn't act on the wrong window.
+        if (GetForegroundWindow() != hwnd)
+            throw new RpcError("focus_timeout",
+                $"app pid={pid} did not become frontmost within 600ms");
 
         var result = new Dictionary<string, object?>
         {
