@@ -120,8 +120,11 @@ if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && command -v agents >/dev/null; then
 fi
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 
-# Pick the slug of a running box matching $PROFILE, or empty if none.
-pick_box_for_profile() {
+# List the slugs of running boxes matching $PROFILE, one per line (oldest
+# first). Box slugs are ephemeral -- a box gets reaped and its replacement comes
+# up under a new slug -- so we always resolve by the stable `profile` label at
+# run time, never by a cached/hardcoded name.
+running_slugs_for_profile() {
   crabbox list --json 2>/dev/null | /usr/bin/python3 -c "
 import sys, json, os
 profile = os.environ['PROFILE']
@@ -134,23 +137,53 @@ for b in boxes:
     if b.get('labels', {}).get('profile') != profile: continue
     slug = b.get('labels', {}).get('slug', '')
     if slug:
-        print(slug); break
+        print(slug)
 " 2>/dev/null || true
 }
 
-# Find or create a crabbox bound to $PROFILE
+# Return 0 if $1 is SSH-ready (crabbox reports `ready=true`), else 1. A box whose
+# cloud-init bootstrap failed still reports status=running but never becomes
+# ready; selecting it burns the full ~2min crabbox SSH-wait before hard-failing.
+# `crabbox status` flips to ready=true only once sshd is reachable, so gate on it.
+box_ready() {
+  local slug="$1"
+  [[ -n "$slug" ]] || return 1
+  crabbox status --id "$slug" 2>/dev/null \
+    | grep -qE '(^|[[:space:]])ready=true([[:space:]]|$)'
+}
+
+# Echo the first SSH-ready running box for $PROFILE, or nothing. Not-ready boxes
+# (failed bootstrap or still booting) are skipped, never selected.
+pick_ready_box() {
+  local slug
+  while IFS= read -r slug; do
+    [[ -n "$slug" ]] || continue
+    if box_ready "$slug"; then echo "$slug"; return 0; fi
+  done < <(running_slugs_for_profile)
+}
+
+# Acquire an SSH-ready box for $PROFILE. Reuse a ready one if it exists; else
+# warm a fresh box and poll until it is actually ready. Never selects or destroys
+# a not-ready box -- a dud lease is left for crabbox's idle timeout to reap, which
+# keeps concurrent runs and mid-boot boxes safe.
 get_or_create_box() {
-  local box_id
-  box_id=$(pick_box_for_profile)
+  local box_id waited
+  box_id="$(pick_ready_box)"
+  [[ -n "$box_id" ]] && { echo "$box_id"; return 0; }
 
-  if [[ -z "$box_id" ]]; then
-    echo "No running box for profile '$PROFILE', warming up (~60s)..." >&2
-    crabbox warmup --class "$BOX_CLASS" --profile "$PROFILE" >/dev/null
-    sleep 5
-    box_id=$(pick_box_for_profile)
-  fi
+  echo "No ready box for profile '$PROFILE', warming up (~60s)..." >&2
+  crabbox warmup --class "$BOX_CLASS" --profile "$PROFILE" >/dev/null || die "crabbox warmup failed"
 
-  echo "$box_id"
+  # warmup normally blocks until ready, but can return a box that never finished
+  # bootstrapping -- poll for an actually-ready box rather than trusting it.
+  waited=0
+  while [[ $waited -lt 180 ]]; do
+    box_id="$(pick_ready_box)"
+    [[ -n "$box_id" ]] && { echo "$box_id"; return 0; }
+    sleep 10
+    waited=$((waited + 10))
+  done
+  die "warmed a box for profile '$PROFILE' but none became SSH-ready within 3m (check 'crabbox list' / 'crabbox status')"
 }
 
 # Bootstrap script for remote (repo-specific: agents-cli = TypeScript)
