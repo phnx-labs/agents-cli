@@ -157,6 +157,49 @@ agents sessions --all --sort cost --limit 10 --json | \
   jq '.[] | {shortId, agent, costUsd, durationMs, topic}'
 ```
 
+## Accounts & Usage in `agents view`
+
+`agents view` shows, per installed agent, **who's signed in** and (where the
+provider exposes it) **live quota**. Two separate passes feed the row, joined by
+a stable per-account key:
+
+- **Account identity** — `getAccountInfo` ([`src/lib/agents.ts`](../src/lib/agents.ts))
+  is **local-only, no network**. It reads each agent's on-disk credential and
+  surfaces an email when one is readable, else a stable account id, else a bare
+  `signed in`.
+- **Usage bars** — a separate network pass ([`src/lib/usage.ts`](../src/lib/usage.ts))
+  fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
+  (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
+  block) so `agents view` / `agents run` stay off the network on the hot path.
+
+What each agent can surface is bounded by what its local credential actually
+contains — this is a data-availability limit, not a policy choice:
+
+| Agent | Account column | Usage bars | How it's derived |
+|---|---|---|---|
+| Claude | email + plan | live (`api.anthropic.com`) | email/plan/quota from the local OAuth credential + usage API |
+| Codex | email + plan | last-seen (session logs) | email/plan from the auth JWT; quota parsed from the newest session's rate-limit event |
+| Gemini, Grok | email | — | email read from the local auth file |
+| Droid | email | — | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. No network. Plan needs an authed call, so it's omitted. |
+| Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
+| Antigravity | `signed in` | — | OAuth grant with no id_token — presence is the only signal |
+| others | `not signed in` unless a credential exists | — | `default` case: no detector |
+
+Two deliberate boundaries worth knowing:
+
+- **Droid decrypts a local credential.** We read the user's own credential to
+  show their own email — the same thing the `droid` CLI does. If it can't be
+  decrypted (a `keyring-v2`/legacy login with no on-disk key), the row falls
+  back to `signed in` rather than blanking.
+- **Kimi usage never refreshes the token.** `agents view` is a read/inspect
+  command, so it must not rotate the user's OAuth credential (rewriting the
+  file, invalidating the refresh token, racing a running `kimi`). An expired
+  token simply falls back to the cached snapshot; the `kimi` CLI refreshes on
+  its own launch.
+
+The same fields are exposed programmatically via `agents view --json`
+(`email`, `accountId`, `plan`, `usageStatus`, `windows`).
+
 ## Budget Guardrails (`agents budget`)
 
 `agents cost` is the observability half — it tells you what you already spent.
