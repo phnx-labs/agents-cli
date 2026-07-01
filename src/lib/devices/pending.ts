@@ -37,10 +37,19 @@ function isSafeName(name: string): boolean {
  */
 export function reconcilePendingSentinels(pending: PendingDevice[]): void {
   const dir = getDevicesPendingDir();
-  fs.mkdirSync(dir, { recursive: true });
   const want = new Map(pending.filter((p) => isSafeName(p.name)).map((p) => [p.name, p.platform]));
 
-  const existing = fs.readdirSync(dir).filter((n) => !n.startsWith('.'));
+  // Whole body is best-effort: a filesystem error here must never propagate into
+  // the daemon loop or `agents sync`. The top-level mkdir/readdir are guarded
+  // too, so no caller needs its own try/catch.
+  let existing: string[];
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    existing = fs.readdirSync(dir).filter((n) => !n.startsWith('.'));
+  } catch {
+    return;
+  }
+
   // Remove sentinels that are no longer pending.
   for (const name of existing) {
     if (!want.has(name)) {

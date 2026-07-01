@@ -67,6 +67,25 @@ export function computePendingDevices(
 }
 
 /**
+ * Which discovered nodes to upsert this run — the mode-defining decision, pure
+ * so it is unit-testable without a tailnet. Ignored nodes are always skipped.
+ * In `refresh` mode a node that isn't already registered is skipped too (it
+ * stays pending for approval); `bootstrap` includes every non-ignored node.
+ */
+export function selectNodesToUpsert(
+  nodes: TailscaleNode[],
+  registered: Set<string>,
+  ignored: Set<string>,
+  mode: DeviceSyncMode,
+): TailscaleNode[] {
+  return nodes.filter((n) => {
+    if (ignored.has(n.name)) return false;
+    if (mode === 'refresh' && !registered.has(n.name)) return false;
+    return true;
+  });
+}
+
+/**
  * Ingest `tailscale status --json` into the registry. In soft mode a missing
  * tailscale binary / unreachable daemon resolves to `{ ok: false }` instead of
  * throwing, so callers wiring this into setup/sync never abort the whole run.
@@ -93,18 +112,12 @@ export async function runDeviceSync(
       platform: byName.get(name)?.platform ?? 'unknown',
     }));
 
-    // bootstrap: register/refresh every non-ignored node (newcomers included).
-    // refresh: only refresh nodes already in the registry — newcomers stay in
-    // `pending` for the user to approve, they are never silently added.
-    let synced = 0;
-    for (const node of nodes) {
-      if (ignored.has(node.name)) continue;
-      if (mode === 'refresh' && !registered.has(node.name)) continue;
+    const toUpsert = selectNodesToUpsert(nodes, registered, ignored, mode);
+    for (const node of toUpsert) {
       await upsertDevice(node.name, nodeToDeviceInput(node));
-      synced++;
     }
 
-    return { ok: true, synced, pending };
+    return { ok: true, synced: toUpsert.length, pending };
   } catch (err: any) {
     if (opts.soft) {
       return { ok: false, synced: 0, pending: [], reason: err?.message ?? String(err) };
