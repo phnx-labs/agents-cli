@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planLayouts } from './policy.js';
-import { specForRequest, buildRequests } from './engine.js';
+import { specForRequest, buildRequests, openSurface } from './engine.js';
 import { remoteCommand } from './transport.js';
 import type { LaunchRequest } from './types.js';
 
@@ -43,6 +43,26 @@ describe('specForRequest', () => {
   });
   it('unknown backend throws', () => {
     expect(() => specForRequest({ ...base, backend: 'nope' as any })).toThrow(/unknown backend/);
+  });
+});
+
+describe('openSurface never throws', () => {
+  it('an invalid --host target degrades to a failed result, not a throw', async () => {
+    // 'bad;host' is rejected by the SSH transport's target guard (throws
+    // synchronously before any ssh spawn); openSurface must catch it.
+    const res = await openSurface({
+      backend: 'tmux', layout: 'tab', cwd: '/x', command: ['echo', 'hi'], host: 'bad;host',
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toBeTruthy();
+    expect(res.request.host).toBe('bad;host');
+  });
+  it('an unknown backend degrades to a failed result', async () => {
+    const res = await openSurface({
+      backend: 'nope' as any, layout: 'tab', cwd: '/x', command: ['echo'],
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/unknown backend/);
   });
 });
 

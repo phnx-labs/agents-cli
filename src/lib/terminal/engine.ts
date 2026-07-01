@@ -29,14 +29,16 @@ export interface OpenOptions {
 
 /** Open a single surface for one request. Never throws — failures come back in the result. */
 export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): Promise<LaunchResult> {
-  let spec: LaunchSpec;
   try {
-    spec = specForRequest(req);
+    // Both can throw: specForRequest on an unknown backend, runSpec when the
+    // SSH transport rejects an invalid --host target. Keep them inside the
+    // catch so a bad request degrades to a per-surface failure, never a throw.
+    const spec: LaunchSpec = specForRequest(req);
+    const res = await runSpec(spec, req.host, opts.resolveHost);
+    return { ok: res.ok, request: req, error: res.error };
   } catch (err: any) {
     return { ok: false, request: req, error: err?.message ?? String(err) };
   }
-  const res = await runSpec(spec, req.host, opts.resolveHost);
-  return { ok: res.ok, request: req, error: res.error };
 }
 
 /** One command to run as a surface. */
