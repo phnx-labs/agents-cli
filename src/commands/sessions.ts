@@ -68,6 +68,11 @@ interface SessionsOptions extends SessionFilterOptions {
   tree?: boolean;
   /** With --active: show only sessions waiting on user input; exit 1 if any. */
   waiting?: boolean;
+  /** Enrich the listing with live glyphs/preview for running rows. Default on;
+   * `--no-live` sets this false. Commander's `--no-` convention. */
+  live?: boolean;
+  /** With --active: force local-only, skip cross-machine SSH fan-out. */
+  local?: boolean;
 }
 
 interface ClaudeHistoryEntry {
@@ -266,6 +271,35 @@ function activityLabel(s: ActiveSession): string {
   if (s.activity === 'working') return 'working';
   if (s.activity === 'idle') return 'idle';
   return s.status === 'input_required' ? 'waiting' : s.status;
+}
+
+/**
+ * Index live sessions by their full session UUID so a historical `SessionMeta`
+ * row (`meta.id`) can be matched to the session that is still running now.
+ * Rows without a sessionId (some cloud/headless probes) are skipped — they
+ * can't be correlated back to a transcript on disk.
+ */
+export function indexActiveBySessionId(active: ActiveSession[]): Map<string, ActiveSession> {
+  const byId = new Map<string, ActiveSession>();
+  for (const a of active) {
+    if (a.sessionId) byId.set(a.sessionId, a);
+  }
+  return byId;
+}
+
+/**
+ * The live decoration for a listing row: a status glyph and the latest-turn
+ * preview, when the session is still running. `●` running / `◐` waiting on the
+ * user / `○` idle, colored by the same `statusColor` the --active view uses.
+ * Returns empty strings when there is no live match, so callers render the
+ * plain historical row unchanged.
+ */
+export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: string; preview: string } {
+  if (!a) return { glyph: '', preview: '' };
+  const waiting = a.status === 'input_required' || a.activity === 'waiting_input';
+  const running = a.status === 'running' || a.activity === 'working';
+  const shape = waiting ? '◐' : running ? '●' : '○';
+  return { glyph: statusColor(a.status)(shape), preview: buildSessionDescription(a) };
 }
 
 /**
@@ -634,7 +668,8 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
 
     // Non-interactive fallback (piped output)
     const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
-    printSessionTable(filtered, hiddenCount, options.tree === true);
+    const liveIndex = await maybeLiveIndex(options);
+    printSessionTable(filtered, hiddenCount, options.tree === true, liveIndex);
   } catch (err: any) {
     tracker.stop();
     spinner?.stop();
@@ -663,24 +698,31 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   };
 }
 
-/** One flat table row: shortId · agent · version · project · topic(+badges) · time. */
-function flatSessionRow(session: SessionMeta): string {
+/** One flat table row: shortId · agent · version · project · topic(+badges) · time.
+ * When `live` is set (the session is still running), a status glyph leads the
+ * topic cell and the live preview stands in for the persisted topic. */
+function flatSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.timestamp);
   const project = session.project || '-';
   const tag = teamTag(session);
   const label = (session as any).label;
-  const topic = tag ? `${tag}${session.topic ?? ''}` : session.topic;
+  const { glyph, preview } = liveGlyphAndPreview(live);
+  // A running session's live preview replaces the persisted topic: it says what
+  // the agent is doing now, not what the session opened with.
+  const topic = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
   const versionStr = session.version || '-';
   const badges = signalBadges(metaSignals(session));
   const badgeW = badges ? stringWidth(badges) + 1 : 0;
-  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - badgeW - stringWidth(when) - 1);
+  const glyphW = glyph ? 2 : 0;
+  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - badgeW - stringWidth(when) - 1);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(versionStr, 7), 8)) +
     chalk.cyan(padToWidth(truncateToWidth(project, 14), 16)) +
+    (glyph ? glyph + ' ' : '') +
     renderTopicCell(label, topic, '', topicW, topicW) +
     (badges ? badges + ' ' : '') +
     chalk.gray(when)
@@ -688,28 +730,49 @@ function flatSessionRow(session: SessionMeta): string {
 }
 
 /** One tree-mode row (grouped under a dir header): id · agent · badges · topic · time. No version/project column. */
-function treeSessionRow(session: SessionMeta): string {
+function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.timestamp);
   const tag = teamTag(session);
   const label = (session as any).label;
-  const topic = (tag ? `${tag}${session.topic ?? ''}` : session.topic) || '-';
+  const { glyph, preview } = liveGlyphAndPreview(live);
+  const topic = (preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic)) || '-';
   const badges = signalBadges(metaSignals(session));
   const badgeW = badges ? stringWidth(badges) + 1 : 0;
   const head = label ? `${label} · ${topic}` : topic;
-  const topicW = Math.max(12, terminalWidth() - (2 + 9 + 8) - badgeW - stringWidth(when) - 1);
+  const glyphW = glyph ? 2 : 0;
+  const topicW = Math.max(12, terminalWidth() - (2 + 9 + 8) - glyphW - badgeW - stringWidth(when) - 1);
 
   return (
     '  ' +
     chalk.dim(padToWidth(session.shortId, 9)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 7), 8)) +
     (badges ? badges + ' ' : '') +
+    (glyph ? glyph + ' ' : '') +
     padToWidth(chalk.white(truncateToWidth(head, topicW)), topicW) +
     ' ' + chalk.gray(when)
   );
 }
 
-function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false): void {
+/**
+ * Live-session index for enriching the default listing, or undefined when
+ * enrichment is off (`--no-live`) or irrelevant (`--json`, which serializes
+ * SessionMeta). Full detection (incl. the headless `ps` scan) is deliberate:
+ * bare-CLI and tmux agents are the common case here, and skipping them would
+ * leave the glyph almost never showing. The listing is a one-shot user action,
+ * not a hot loop, so the `ps`/`lsof` cost is acceptable; `--no-live` is the
+ * escape hatch. Never throws — a probe failure just yields a plain listing.
+ */
+async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, ActiveSession> | undefined> {
+  if (options.live === false || options.json) return undefined;
+  try {
+    return indexActiveBySessionId(await getActiveSessions());
+  } catch {
+    return undefined;
+  }
+}
+
+function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
   if (tree) {
     // Group by directory; drop the id/version columns from view. The short id
     // stays as each row's leading handle (the address to read/resume it).
@@ -728,7 +791,7 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
       first = false;
       const group = byDir.get(key)!;
       console.log(`${chalk.cyan.bold(shortCwd(key))} ${chalk.gray(`(${group.length})`)}`);
-      for (const s of group) console.log(treeSessionRow(s));
+      for (const s of group) console.log(treeSessionRow(s, liveIndex?.get(s.id)));
     }
     const dirWord = keys.length === 1 ? 'directory' : 'directories';
     console.log(chalk.gray(`\n${sessions.length} session${sessions.length === 1 ? '' : 's'} across ${keys.length} ${dirWord}.`));
@@ -736,7 +799,7 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
     return;
   }
 
-  for (const session of sessions) console.log(flatSessionRow(session));
+  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id)));
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
   console.log(chalk.gray(`\n${countLine}`));
@@ -1435,6 +1498,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
+    .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)');
 
