@@ -28,6 +28,9 @@ import {
   addPluginToSettings,
   removePluginFromSettings,
   removePluginFromMarketplace,
+  registerDroidInstalledPlugin,
+  unregisterDroidInstalledPlugin,
+  isDroidPluginInstalled,
   marketplaceIsEmpty,
   removeEmptyMarketplaceDir,
   isInstalledInMarketplace,
@@ -485,7 +488,7 @@ export function marketplaceSpecForName(name: string | undefined, cwd: string = p
  * carries, not just the user one.
  */
 function listVersionMarketplaceNames(agent: AgentId, versionHome: string): string[] {
-  const dir = path.join(versionHome, `.${agent}`, 'plugins', 'marketplaces');
+  const dir = path.join(versionHome, agentConfigDirName(agent), 'plugins', 'marketplaces');
   if (!fs.existsSync(dir)) return [];
   try {
     return fs.readdirSync(dir, { withFileTypes: true })
@@ -513,6 +516,11 @@ function listVersionMarketplaceNames(agent: AgentId, versionHome: string): strin
  * MCP servers, bin/, settings.json, and permissions once the plugin lives at the
  * native install path and is marked enabled — see
  * https://code.claude.com/docs/en/plugins.
+ *
+ * Droid (Factory CLI) reuses this same marketplace layout but additionally
+ * requires an installed_plugins.json registry entry and a "local"-source
+ * known_marketplaces.json entry before `droid plugin list` will see the plugin
+ * (steps handled by registerMarketplace's droid branch + step 5c below).
  */
 export function syncPluginToVersion(
   plugin: DiscoveredPlugin,
@@ -582,8 +590,24 @@ export function syncPluginToVersion(
   // .mcp.json, settings.json, permissions/) are only auto-enabled when the
   // caller explicitly opts in. addPluginToSettings does no gating — that moved
   // here, where plugin capabilities are inspected.
-  if (options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root))) {
+  const enablePlugin = options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root));
+  if (enablePlugin) {
     addPluginToSettings(plugin.name, marketplaceName, agent, versionHome);
+  }
+
+  // 5c. Droid diverges from Claude's marketplace+enabledPlugins model: it only
+  //     "sees" a plugin that also has an entry in installed_plugins.json (with
+  //     the marketplace registered as source "local"). Register the install so
+  //     `droid plugin list` shows it — Active when enabled, Inactive otherwise.
+  if (agent === 'droid') {
+    registerDroidInstalledPlugin(
+      plugin.name,
+      marketplaceName,
+      installDir,
+      plugin.manifest.version,
+      agent,
+      versionHome
+    );
   }
 
   // 5b. Convert plugin commands/ to skills for agents that dropped command support
@@ -809,7 +833,14 @@ export function isPluginSynced(
   versionHome: string
 ): boolean {
   if (!isCapable(agent, 'plugins')) return false;
-  return isInstalledInMarketplace(plugin.name, marketplaceSpecForName(plugin.marketplace), agent, versionHome);
+  const spec = marketplaceSpecForName(plugin.marketplace);
+  if (!isInstalledInMarketplace(plugin.name, spec, agent, versionHome)) return false;
+  // Droid additionally requires its installed_plugins.json registry entry —
+  // without it the marketplace copy is invisible to `droid plugin list`.
+  if (agent === 'droid') {
+    return isDroidPluginInstalled(plugin.name, marketplaceNameFor(spec), agent, versionHome);
+  }
+  return true;
 }
 
 // ─── Removal ─────────────────────────────────────────────────────────────────
@@ -853,6 +884,9 @@ export function removePluginFromVersion(
       removedAny = true;
     }
     removePluginFromSettings(pluginName, name, agent, versionHome);
+    if (agent === 'droid') {
+      unregisterDroidInstalledPlugin(pluginName, name, agent, versionHome);
+    }
 
     // Refresh marketplace.json so it reflects what's left under plugins/.
     syncMarketplaceManifest(spec, agent, versionHome);
@@ -1042,6 +1076,9 @@ export function cleanOrphanedPluginSkills(
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(path.join(mktPluginsDir, entry.name), trashDest);
         removePluginFromSettings(entry.name, name, agent, versionHome);
+        if (agent === 'droid') {
+          unregisterDroidInstalledPlugin(entry.name, name, agent, versionHome);
+        }
         removed.push(entry.name);
         trashedHere = true;
       } catch { /* skip on error */ }

@@ -514,11 +514,26 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   // Install: `curl -fsSL https://app.factory.ai/cli | sh` (no npm package).
   // Binary is NOT in node_modules/.bin — the shim resolves the fixed install
   // path ~/.local/bin/droid directly (see the droid branch in shims.ts).
-  // Config: `~/.factory/` (settings.json, mcp.json, droids/, commands/).
-  // Memory: native AGENTS.md. Subagents = custom droids (top-level .md files
-  // in ~/.factory/droids/). Config isolation rides the ~/.factory symlink
-  // switch (no FACTORY_HOME env var exists). Headless: `droid exec "<prompt>"`
-  // with --auto low|medium|high, -o stream-json, -m <model>, -r <effort>.
+  // Config: `~/.factory/` (settings.json, mcp.json, droids/, commands/, hooks/,
+  // plugins/). Memory: native AGENTS.md. Subagents = custom droids (top-level
+  // .md files in ~/.factory/droids/). Config isolation rides the ~/.factory
+  // symlink switch (no FACTORY_HOME env var exists). Headless:
+  // `droid exec "<prompt>"` with --auto low|medium|high, -o stream-json,
+  // -m <model>, -r <effort>.
+  //
+  // Hooks: Claude-shaped. settings.json carries a top-level `hooks` object keyed
+  // by event (PreToolUse, PostToolUse, UserPromptSubmit, SessionStart,
+  // SessionEnd, Stop, SubagentStop, Notification, PreCompact), each an array of
+  // `{ matcher?, hooks: [{ type: "command", command, timeout? }] }` matcher
+  // groups — verified against the droid binary's zod schema. So the Claude
+  // registrar is reused verbatim, just targeting `.factory/settings.json`.
+  //
+  // Plugins: native `droid plugin` command group + ~/.factory/plugins/ with the
+  // same marketplace layout Claude uses (known_marketplaces.json +
+  // marketplaces/<name>/plugins/<plugin>/). Droid's plugin manifest dir is
+  // `.factory-plugin/` (it also reads `.claude-plugin/` for compatibility) — set
+  // pluginManifestDir so syncPluginToVersion mirrors the manifest into it, the
+  // same pattern codex uses with `.codex-plugin`.
   droid: {
     id: 'droid',
     name: 'Droid',
@@ -532,20 +547,21 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsSubdir: 'commands',
     skillsDir: '', // no skills concept
     hooksDir: 'hooks',
+    pluginManifestDir: '.factory-plugin',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
+    supportsHooks: true,
     // Factory Droid Computers (cloud VMs) reached via `droid computer ssh` +
     // remote headless `droid exec`.
     cloudProvider: 'factory',
     capabilities: {
-      hooks: false,
+      hooks: true,
       mcp: true,
       allowlist: false,
       skills: false,
       commands: true,
-      plugins: false,
+      plugins: true,
       subagents: true,
       rules: { file: 'AGENTS.md' },
       workflows: false,

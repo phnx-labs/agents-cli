@@ -893,6 +893,142 @@ describe('syncPluginToVersion (native marketplace install)', () => {
   });
 });
 
+// ─── syncPluginToVersion: Droid (.factory + .factory-plugin manifest) ─────────
+
+describe('syncPluginToVersion (droid native marketplace install)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function setupDroidPlugin(name = 'myplugin'): { pluginRoot: string; versionHome: string; plugin: DiscoveredPlugin } {
+    const pluginRoot = path.join(tmpDir, name);
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: 'test', author: { name: 'tester' } })
+    );
+    const versionHome = path.join(tmpDir, `${name}-home`);
+    fs.mkdirSync(path.join(versionHome, '.factory'), { recursive: true });
+
+    const plugin: DiscoveredPlugin = {
+      name,
+      root: pluginRoot,
+      manifest: { name, version: '1.0.0', description: 'test' },
+      skills: [],
+      hooks: [],
+      scripts: [],
+      commands: [],
+      agentDefs: [],
+      bin: [],
+      mcpServers: [],
+      lspServers: [],
+      monitors: [],
+      hasMcp: false,
+      hasSettings: false,
+    };
+    return { pluginRoot, versionHome, plugin };
+  }
+
+  it('copies plugin source into .factory/plugins/marketplaces/agents-cli/plugins/<name>/', async () => {
+    const { pluginRoot, versionHome, plugin } = setupDroidPlugin();
+    fs.writeFileSync(path.join(pluginRoot, 'README.md'), '# hi');
+
+    const { syncPluginToVersion } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'droid', versionHome);
+
+    const installDir = path.join(versionHome, '.factory', 'plugins', 'marketplaces', 'agents-cli', 'plugins', 'myplugin');
+    expect(fs.existsSync(path.join(installDir, '.claude-plugin', 'plugin.json'))).toBe(true);
+    expect(fs.existsSync(path.join(installDir, 'README.md'))).toBe(true);
+  });
+
+  it('mirrors the manifest into .factory-plugin/plugin.json (droid native manifest dir)', async () => {
+    const { versionHome, plugin } = setupDroidPlugin();
+
+    const { syncPluginToVersion } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'droid', versionHome);
+
+    const installDir = path.join(versionHome, '.factory', 'plugins', 'marketplaces', 'agents-cli', 'plugins', 'myplugin');
+    const factoryManifest = path.join(installDir, '.factory-plugin', 'plugin.json');
+    expect(fs.existsSync(factoryManifest)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(factoryManifest, 'utf-8'));
+    expect(parsed.name).toBe('myplugin');
+    expect(parsed.version).toBe('1.0.0');
+  });
+
+  it('registers the marketplace with source "local" and enables the plugin (top-level)', async () => {
+    const { versionHome, plugin } = setupDroidPlugin();
+    fs.writeFileSync(path.join(versionHome, '.factory', 'settings.json'), JSON.stringify({ logoAnimation: 'off' }));
+
+    const { syncPluginToVersion } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'droid', versionHome);
+
+    // Droid ignores a "directory" source; it must be "local" (+ autoUpdate).
+    const knownPath = path.join(versionHome, '.factory', 'plugins', 'known_marketplaces.json');
+    const known = JSON.parse(fs.readFileSync(knownPath, 'utf-8'));
+    expect(known['agents-cli'].source.source).toBe('local');
+    expect(known['agents-cli'].autoUpdate).toBe(true);
+
+    const settings = JSON.parse(fs.readFileSync(path.join(versionHome, '.factory', 'settings.json'), 'utf-8'));
+    expect(settings.enabledPlugins).toEqual({ 'myplugin@agents-cli': true });
+    // Pre-existing keys are preserved.
+    expect(settings.logoAnimation).toBe('off');
+  });
+
+  it('records the plugin in installed_plugins.json pointing at the marketplace install dir', async () => {
+    const { versionHome, plugin } = setupDroidPlugin();
+
+    const { syncPluginToVersion } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'droid', versionHome);
+
+    const installedPath = path.join(versionHome, '.factory', 'plugins', 'installed_plugins.json');
+    expect(fs.existsSync(installedPath)).toBe(true);
+    const registry = JSON.parse(fs.readFileSync(installedPath, 'utf-8'));
+    expect(registry.schemaVersion).toBe(1);
+    const entries = registry.plugins['myplugin@agents-cli'];
+    expect(Array.isArray(entries)).toBe(true);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].scope).toBe('user');
+    expect(entries[0].version).toBe('1.0.0');
+    expect(entries[0].source).toBe('agents-cli');
+    const installDir = path.join(versionHome, '.factory', 'plugins', 'marketplaces', 'agents-cli', 'plugins', 'myplugin');
+    expect(entries[0].installPath).toBe(installDir);
+    expect(fs.existsSync(path.join(entries[0].installPath, '.claude-plugin', 'plugin.json'))).toBe(true);
+  });
+
+  it('isPluginSynced is true after sync, and false once the installed registry entry is dropped', async () => {
+    const { versionHome, plugin } = setupDroidPlugin();
+    const { syncPluginToVersion, isPluginSynced } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'droid', versionHome);
+    expect(isPluginSynced(plugin, 'droid', versionHome)).toBe(true);
+
+    // Marketplace copy present but registry entry gone => not synced (droid can't see it).
+    fs.rmSync(path.join(versionHome, '.factory', 'plugins', 'installed_plugins.json'));
+    expect(isPluginSynced(plugin, 'droid', versionHome)).toBe(false);
+  });
+
+  it('removePluginFromVersion clears the installed registry entry', async () => {
+    const { versionHome, plugin } = setupDroidPlugin();
+    const { syncPluginToVersion, removePluginFromVersion, isPluginSynced } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'droid', versionHome);
+    expect(isPluginSynced(plugin, 'droid', versionHome)).toBe(true);
+
+    removePluginFromVersion(plugin.name, plugin.root, 'droid', versionHome);
+    const installedPath = path.join(versionHome, '.factory', 'plugins', 'installed_plugins.json');
+    // File removed (registry emptied) or no longer carries the entry.
+    if (fs.existsSync(installedPath)) {
+      const registry = JSON.parse(fs.readFileSync(installedPath, 'utf-8'));
+      expect(registry.plugins['myplugin@agents-cli']).toBeUndefined();
+    }
+    expect(isPluginSynced(plugin, 'droid', versionHome)).toBe(false);
+  });
+});
+
 // ─── syncPluginToVersion: per-marketplace routing ────────────────────────────
 
 describe('syncPluginToVersion (per-marketplace routing)', () => {

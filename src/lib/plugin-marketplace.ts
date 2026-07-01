@@ -44,9 +44,33 @@ export const SYSTEM_MARKETPLACE_NAME = 'agents-system';
 export const PROJECT_MARKETPLACE_NAME = 'agents-project';
 
 interface KnownMarketplaceEntry {
-  source: { source: 'directory'; path: string };
+  source: { source: 'directory' | 'local'; path: string };
   installLocation: string;
   lastUpdated: string;
+  autoUpdate?: boolean;
+}
+
+/**
+ * Droid tracks INSTALLED plugins in .factory/plugins/installed_plugins.json —
+ * a registry distinct from the marketplace catalog. A plugin is only visible to
+ * `droid plugin list` (and loaded at runtime) when it has an entry here; the
+ * marketplace copy + enabledPlugins alone are not enough. Verified against the
+ * Factory CLI (droid 0.161.0): `droid plugin install` writes exactly this shape,
+ * and pointing `installPath` at the marketplace install dir (no separate cache
+ * copy) lists the plugin as Active.
+ */
+interface DroidInstalledEntry {
+  scope: string;
+  installPath: string;
+  version: string;
+  installedAt: string;
+  lastUpdated: string;
+  source: string;
+}
+
+interface DroidInstalledPlugins {
+  schemaVersion: number;
+  plugins: Record<string, DroidInstalledEntry[]>;
 }
 
 interface MarketplacePluginEntry {
@@ -456,14 +480,121 @@ export function registerMarketplace(spec: MarketplaceSpec, agent: AgentId, versi
     }
   }
 
+  // Droid names the on-disk source type "local" (Claude/OpenClaw use
+  // "directory") and stamps autoUpdate — verified against `droid plugin
+  // marketplace add`. A "directory" entry is silently ignored by the Factory
+  // CLI, so the plugin never resolves.
+  const isDroid = agent === 'droid';
   known[name] = {
-    source: { source: 'directory', path: root },
+    source: { source: isDroid ? 'local' : 'directory', path: root },
     installLocation: root,
     lastUpdated: new Date().toISOString(),
+    ...(isDroid ? { autoUpdate: true } : {}),
   };
 
   fs.mkdirSync(path.dirname(knownPath), { recursive: true });
   fs.writeFileSync(knownPath, JSON.stringify(known, null, 2) + '\n', 'utf-8');
+}
+
+// ─── Droid installed-plugins registry ─────────────────────────────────────────
+
+function installedPluginsPath(agent: AgentId, versionHome: string): string {
+  return path.join(pluginsRootForVersion(agent, versionHome), 'installed_plugins.json');
+}
+
+function readInstalledPlugins(agent: AgentId, versionHome: string): DroidInstalledPlugins {
+  const p = installedPluginsPath(agent, versionHome);
+  if (fs.existsSync(p)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as Partial<DroidInstalledPlugins>;
+      if (parsed && typeof parsed === 'object' && parsed.plugins && typeof parsed.plugins === 'object') {
+        return { schemaVersion: parsed.schemaVersion ?? 1, plugins: parsed.plugins };
+      }
+    } catch { /* fall through to fresh registry */ }
+  }
+  return { schemaVersion: 1, plugins: {} };
+}
+
+/**
+ * Record a plugin in Droid's installed_plugins.json (user scope), pointing
+ * installPath at the marketplace install dir so no second copy is needed. This
+ * is what makes `droid plugin list` show the plugin (Active once enabledPlugins
+ * is set). Idempotent: re-running refreshes lastUpdated and preserves the
+ * original installedAt plus any non-user scope entries.
+ */
+export function registerDroidInstalledPlugin(
+  pluginName: string,
+  marketplaceName: string,
+  installDir: string,
+  version: string,
+  agent: AgentId,
+  versionHome: string
+): void {
+  const registry = readInstalledPlugins(agent, versionHome);
+  const key = `${pluginName}@${marketplaceName}`;
+  const now = new Date().toISOString();
+  const existing = registry.plugins[key] ?? [];
+  const priorUser = existing.find(e => e.scope === 'user');
+  const others = existing.filter(e => e.scope !== 'user');
+  registry.plugins[key] = [
+    ...others,
+    {
+      scope: 'user',
+      installPath: installDir,
+      version,
+      installedAt: priorUser?.installedAt ?? now,
+      lastUpdated: now,
+      source: marketplaceName,
+    },
+  ];
+
+  const p = installedPluginsPath(agent, versionHome);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(registry, null, 2) + '\n', 'utf-8');
+}
+
+/** True when Droid's installed_plugins.json carries a user-scope entry for the plugin. */
+export function isDroidPluginInstalled(
+  pluginName: string,
+  marketplaceName: string,
+  agent: AgentId,
+  versionHome: string
+): boolean {
+  const registry = readInstalledPlugins(agent, versionHome);
+  const entries = registry.plugins[`${pluginName}@${marketplaceName}`];
+  return Array.isArray(entries) && entries.some(e => e.scope === 'user');
+}
+
+/**
+ * Remove a plugin's user-scope entry from Droid's installed_plugins.json.
+ * Inverse of registerDroidInstalledPlugin. Drops the key when no scopes remain
+ * and deletes the file when the registry is empty.
+ */
+export function unregisterDroidInstalledPlugin(
+  pluginName: string,
+  marketplaceName: string,
+  agent: AgentId,
+  versionHome: string
+): void {
+  const p = installedPluginsPath(agent, versionHome);
+  if (!fs.existsSync(p)) return;
+  const registry = readInstalledPlugins(agent, versionHome);
+  const key = `${pluginName}@${marketplaceName}`;
+  const entries = registry.plugins[key];
+  if (!Array.isArray(entries)) return;
+
+  const kept = entries.filter(e => e.scope !== 'user');
+  if (kept.length > 0) {
+    registry.plugins[key] = kept;
+  } else {
+    delete registry.plugins[key];
+  }
+
+  if (Object.keys(registry.plugins).length === 0) {
+    try { fs.unlinkSync(p); } catch { /* ignore */ }
+    return;
+  }
+  fs.writeFileSync(p, JSON.stringify(registry, null, 2) + '\n', 'utf-8');
 }
 
 /**

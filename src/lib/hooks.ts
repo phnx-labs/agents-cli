@@ -1036,6 +1036,18 @@ export function registerHooksToSettings(
   if (agentId === 'claude') {
     return registerHooksForClaude(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'droid') {
+    // Droid's settings.json hooks schema is identical to Claude's (top-level
+    // `hooks` object → event → matcher-group array), so reuse the Claude
+    // registrar targeting `.factory/settings.json` (agentConfigDirName('droid')).
+    return registerHooksForClaude(
+      versionHome,
+      manifest,
+      resolveScript,
+      managedPrefixes,
+      agentConfigDirName('droid')
+    );
+  }
   if (agentId === 'codex') {
     return registerHooksForCodex(versionHome, manifest, resolveScript, managedPrefixes);
   }
@@ -1086,12 +1098,13 @@ function registerHooksForClaude(
   versionHome: string,
   manifest: Record<string, ManifestHook>,
   resolveScript: (script: string) => string | null,
-  managedPrefixes: string[]
+  managedPrefixes: string[],
+  configDirName = '.claude'
 ): { registered: string[]; errors: string[] } {
   const registered: string[] = [];
   const errors: string[] = [];
 
-  const configDir = path.join(versionHome, '.claude');
+  const configDir = path.join(versionHome, configDirName);
   const settingsPath = path.join(configDir, 'settings.json');
 
   let config: Record<string, unknown> = {};

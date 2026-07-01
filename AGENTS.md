@@ -92,7 +92,7 @@ Not every harness supports every capability — the registry decides per harness
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
 | Kiro | `kiro` | — | ✓ | — | ✓ | ✓ | — | — | — | edit |
 | Goose | `goose` | — | ✓ | — | — | — | — | — | — | edit |
-| Droid | `droid` | — | ✓ | — | — | ✓ | — | ✓ | — | plan·edit·auto·skip |
+| Droid | `droid` | ✓ | ✓ | — | — | ✓ | ✓ | ✓ | — | plan·edit·auto·skip |
 
 ✓ = supported · — = not supported · version cell = supported only within that range (e.g. `≥0.116` needs version `>= 0.116.0`; `<0.117` only below `0.117.0`). Out-of-range cells are **skipped silently** — `supports()` returns false and the resource is never written.
 
@@ -111,7 +111,7 @@ Not every harness supports every capability — the registry decides per harness
 | Cursor | `commands/` (md) | `.cursorrules` |
 | OpenCode | `commands/` (md) | `OPENCODE.md` |
 | Grok | skills + `.grok/` (hooks, plugins, agents, `config.toml`) | `AGENTS.md` + `~/.grok/memory/` |
-| Droid | `commands/` (md) + `.factory/` (`mcp.json`, `droids/`) | `AGENTS.md` (native) |
+| Droid | `commands/` (md) + `.factory/` (`settings.json` hooks, `mcp.json`, `droids/`, `plugins/`) | `AGENTS.md` (native) |
 
 ## Source layout
 
