@@ -95,8 +95,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 19 (droid binary resolution branch in dispatcher)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(19);
+  it('is 20 (kimi resolves via generic node_modules branch in dispatcher)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(20);
   });
 });
 
@@ -135,6 +135,17 @@ describe('generateShimScript — config-dir env vars', () => {
     expect(script).toContain('"$VERSION_DIR/home/.kimi-code"');
   });
 
+  // Regression (re-exec loop): the dispatcher must resolve kimi through the
+  // generic node_modules/.bin branch, never the old ~/.kimi-code/bin path whose
+  // `command -v kimi` fallback resolves to this dispatcher itself (the shims dir
+  // sits ahead of ~/.local/bin on PATH) and re-execs forever.
+  it('resolves kimi from node_modules/.bin in the dispatcher, without a command -v loop', () => {
+    const script = generateShimScript('kimi');
+    expect(script).toContain('"$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"');
+    expect(script).not.toContain('BINARY=$(command -v kimi');
+    expect(script).not.toContain('KIMI_BINARY="$HOME/.kimi-code/bin/kimi"');
+  });
+
   it('does not export a managed config-dir var for other agents', () => {
     const script = generateShimScript('opencode');
     expect(script).not.toContain('export CLAUDE_CONFIG_DIR=');
@@ -145,7 +156,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(8);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(9);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
@@ -179,10 +190,17 @@ describe('generateVersionedAliasScript', () => {
     expect(script).not.toContain('node_modules/.bin');
   });
 
-  it('resolves kimi from ~/.kimi-code/bin, not node_modules', () => {
+  // Regression (re-exec loop): kimi npm-installs @moonshot-ai/kimi-code, so its
+  // binary is at node_modules/.bin/kimi — NOT ~/.kimi-code/bin (that path only
+  // exists for a curl install, and even then installVersion symlinks it into
+  // node_modules/.bin). The old ~/.kimi-code/bin special-case fell back to
+  // `command -v kimi`, which resolves to the sibling dispatcher shim and
+  // re-execs forever. Resolve via node_modules; keep KIMI_CODE_HOME isolation.
+  it('resolves kimi from node_modules/.bin, not ~/.kimi-code/bin', () => {
     const script = generateVersionedAliasScript('kimi', '0.12.1');
-    expect(script).toContain('KIMI_BINARY="$HOME/.kimi-code/bin/kimi"');
-    expect(script).not.toContain('node_modules/.bin/kimi');
+    expect(script).toContain('node_modules/.bin/kimi');
+    expect(script).not.toContain('KIMI_BINARY="$HOME/.kimi-code/bin/kimi"');
+    expect(script).not.toContain('BINARY=$(command -v kimi');
     expect(script).toContain('export KIMI_CODE_HOME=');
   });
 
