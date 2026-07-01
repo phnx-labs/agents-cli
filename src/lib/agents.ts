@@ -1031,6 +1031,17 @@ export async function getAccountInfo(
         const accountKey = buildIdentityKey(agentId, [['user', userId]]);
         return { ...empty, signedIn: true, accountId: userId, accountKey, lastActive };
       }
+      case 'droid': {
+        // Factory Droid stores auth at ~/.factory/auth.v2.file (+ auth.v2.key,
+        // an encrypted blob). No email/JWT is readable locally, so presence of
+        // the auth file is the only signed-in signal we can derive without a
+        // network call — same pattern as antigravity/kimi. `.factory` is the
+        // config dir on every platform (macOS/Linux ~/.factory, Windows
+        // %USERPROFILE%\.factory), so path.join keeps this cross-platform.
+        const authPath = path.join(base, '.factory', 'auth.v2.file');
+        if (!fs.existsSync(authPath)) return { ...empty, lastActive };
+        return { ...empty, signedIn: true, lastActive };
+      }
       default:
         return { ...empty, lastActive };
     }

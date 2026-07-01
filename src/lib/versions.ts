@@ -33,6 +33,7 @@ import { installMcpServers, parseMcpServerConfig } from './mcp.js';
 import { markdownToToml } from './convert.js';
 import { createVersionedAlias, removeVersionedAlias, switchConfigSymlink, getConfigSymlinkVersion, ensureClaudeInsideSymlink } from './shims.js';
 import { importInstallScriptBinary } from './import.js';
+import { IS_WINDOWS } from './platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from './subagents.js';
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks.js';
@@ -895,12 +896,17 @@ export function getBinaryPath(agent: AgentId, version: string): string {
     return path.join(grokDownloads, `grok-${version}`);
   }
   if (agent === 'droid') {
-    // Factory's installer drops a standalone native binary at ~/.local/bin/droid
-    // (no npm package, nothing in node_modules/.bin). The binary is global, not
-    // per-version — config isolation rides the ~/.factory symlink switch, not a
-    // separate binary per version. Mirror the shim's `droid` branch so
-    // isVersionInstalled/`agents view` agree with what actually executes.
-    return path.join(getHomeDir(), '.local', 'bin', 'droid');
+    // Factory's installer drops a standalone native binary (no npm package,
+    // nothing in node_modules/.bin). The binary is global, not per-version —
+    // config isolation rides the ~/.factory symlink switch, not a separate
+    // binary per version. Install location is platform-specific:
+    //   macOS/Linux: ~/.local/bin/droid       (curl app.factory.ai/cli | sh)
+    //   Windows:     %USERPROFILE%\bin\droid.exe  (irm app.factory.ai/cli/windows | iex)
+    // Mirror the shim's `droid` branch so isVersionInstalled/`agents view`
+    // agree with what actually executes.
+    return IS_WINDOWS
+      ? path.join(getHomeDir(), 'bin', 'droid.exe')
+      : path.join(getHomeDir(), '.local', 'bin', 'droid');
   }
   const versionDir = getVersionDir(agent, version);
   return path.join(versionDir, 'node_modules', '.bin', agentConfig.cliCommand);

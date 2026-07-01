@@ -145,9 +145,37 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(7);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(8);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
+  });
+
+  // Regression: the non-npm harnesses (droid/kimi/grok) ship standalone
+  // binaries that never land in node_modules/.bin. A versioned alias resolving
+  // them via node_modules/.bin always aborts with "not installed" — the
+  // original `ag run droid` bug. Each must resolve its real install location.
+  it('resolves droid to the Factory install path, not node_modules', () => {
+    const script = generateVersionedAliasScript('droid', '0.161.0');
+    expect(script).toContain('$HOME/.local/bin/droid');
+    expect(script).not.toContain('node_modules/.bin');
+  });
+
+  it('resolves kimi to ~/.kimi-code/bin, not node_modules', () => {
+    const script = generateVersionedAliasScript('kimi', '0.19.2');
+    expect(script).toContain('$HOME/.kimi-code/bin/kimi');
+    expect(script).not.toContain('node_modules/.bin');
+  });
+
+  it('resolves grok to ~/.grok/downloads for the pinned version, not node_modules', () => {
+    const script = generateVersionedAliasScript('grok', '0.1.218');
+    expect(script).toContain('$HOME/.grok/downloads');
+    expect(script).toContain('grep -i "0.1.218"');
+    expect(script).not.toContain('node_modules/.bin');
+  });
+
+  it('keeps npm-packaged agents on node_modules/.bin', () => {
+    const script = generateVersionedAliasScript('claude', '2.1.0');
+    expect(script).toContain('/node_modules/.bin/claude');
   });
 });
 

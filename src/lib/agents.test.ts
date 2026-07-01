@@ -408,4 +408,23 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     const info = await getAccountInfo('kimi', makeTempDir());
     expect(info.signedIn).toBe(false);
   });
+
+  it('marks Droid signed in when ~/.factory/auth.v2.file is present', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.factory');
+    fs.mkdirSync(dir, { recursive: true });
+    // auth.v2.file is an opaque encrypted blob (paired with auth.v2.key); its
+    // mere presence is the signed-in signal — no email/JWT is readable locally.
+    fs.writeFileSync(path.join(dir, 'auth.v2.file'), 'opaque-encrypted-blob', 'utf-8');
+
+    const info = await getAccountInfo('droid', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBeNull();
+  });
+
+  it('treats Droid as signed out when the auth file is missing', async () => {
+    const info = await getAccountInfo('droid', makeTempDir());
+    expect(info.signedIn).toBe(false);
+    expect(info.email).toBeNull();
+  });
 });
