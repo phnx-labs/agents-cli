@@ -76,6 +76,7 @@ export const loadBrowser: ModuleLoader = async () => (await import('../../comman
 export const loadComputer: ModuleLoader = async () => (await import('../../commands/computer.js')).registerComputerCommand;
 export const loadHosts: ModuleLoader = async () => (await import('../../commands/hosts.js')).registerHostsCommand;
 export const loadLogs: ModuleLoader = async () => (await import('../../commands/logs.js')).registerLogsCommand;
+export const loadEvents: ModuleLoader = async () => (await import('../../commands/events.js')).registerEventsCommand;
 export const loadSsh: ModuleLoader = async () => (await import('../../commands/ssh.js')).registerSshCommands;
 export const loadPull: ModuleLoader = async () => (await import('../../commands/pull.js')).registerPullCommand;
 export const loadPush: ModuleLoader = async () => (await import('../../commands/push.js')).registerPushCommand;
@@ -163,6 +164,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   computer: [loadComputer],
   hosts: [loadHosts],
   logs: [loadLogs],
+  events: [loadEvents],
   ssh: [loadSsh],
   devices: [loadSsh],
   pull: [loadPull],
