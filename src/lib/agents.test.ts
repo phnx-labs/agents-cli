@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -343,6 +344,26 @@ function makeJwt(payload: Record<string, unknown>): string {
   return `${b64({ alg: 'ES256', typ: 'JWT' })}.${b64(payload)}.sig`;
 }
 
+// Write a Droid credential the way the CLI does: a JSON blob (with a WorkOS
+// access_token JWT) encrypted AES-256-GCM as `ivB64:tagB64:ctB64`, keyed by the
+// base64 contents of auth.v2.key. Uses real crypto — no mocking.
+function writeDroidCredential(dir: string, claims: Record<string, unknown>): void {
+  fs.mkdirSync(dir, { recursive: true });
+  const key = crypto.randomBytes(32);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const credential = JSON.stringify({
+    access_token: makeJwt(claims),
+    refresh_token: 'rt',
+    active_organization_id: 'org_local',
+  });
+  const ct = Buffer.concat([cipher.update(credential, 'utf-8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const blob = [iv, tag, ct].map((b) => b.toString('base64')).join(':');
+  fs.writeFileSync(path.join(dir, 'auth.v2.file'), blob, 'utf-8');
+  fs.writeFileSync(path.join(dir, 'auth.v2.key'), key.toString('base64'), 'utf-8');
+}
+
 describe('getAccountInfo — token-only agents (no local email)', () => {
   // Sign-in is account-global: getAccountInfo falls back from the passed
   // per-version home to the active config under AGENTS_REAL_HOME. Pin that to a
@@ -429,12 +450,28 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     expect(info.signedIn).toBe(false);
   });
 
-  it('marks Droid signed in when ~/.factory/auth.v2.file is present', async () => {
+  it('decrypts auth.v2.file and surfaces the email + org from the WorkOS JWT', async () => {
+    const home = makeTempDir();
+    writeDroidCredential(path.join(home, '.factory'), {
+      email: 'muqsit@getrush.ai',
+      org_id: 'org_abc',
+      role: 'owner',
+      first_name: 'Muqsit',
+    });
+
+    const info = await getAccountInfo('droid', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('muqsit@getrush.ai');
+    expect(info.organizationId).toBe('org_abc');
+    expect(info.accountKey).toBe('droid:org=org_abc');
+  });
+
+  it('falls back to signed-in with no email when the blob cannot be decrypted', async () => {
     const home = makeTempDir();
     const dir = path.join(home, '.factory');
     fs.mkdirSync(dir, { recursive: true });
-    // auth.v2.file is an opaque encrypted blob (paired with auth.v2.key); its
-    // mere presence is the signed-in signal — no email/JWT is readable locally.
+    // Garbage blob with no matching key file: decrypt fails, but the auth file's
+    // presence still reads as signed in (the conservative floor).
     fs.writeFileSync(path.join(dir, 'auth.v2.file'), 'opaque-encrypted-blob', 'utf-8');
 
     const info = await getAccountInfo('droid', home);

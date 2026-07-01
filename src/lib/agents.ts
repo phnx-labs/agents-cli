@@ -10,6 +10,7 @@
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -861,6 +862,50 @@ function resolveAccountCredentialPath(base: string, ...segments: string[]): stri
   return null;
 }
 
+/**
+ * Factory Droid stores its OAuth credential encrypted at ~/.factory/auth.v2.file
+ * (AES-256-GCM, format `ivB64:tagB64:ctB64`) with the 32-byte key base64-stored
+ * in ~/.factory/auth.v2.key. On the keyfile-v2 source there is no OS-keychain /
+ * device binding — the key is on disk — so we can decrypt locally with no
+ * network call. The decrypted JSON credential's `access_token` is a WorkOS JWT
+ * carrying an `email` claim (plus org_id / role). We decode the claim WITHOUT
+ * verifying `exp`: the email is stable identity for display, not an
+ * authorization decision, so an expired token still yields the right address.
+ * Every failure (missing key file — e.g. a keyring-v2/legacy login with no
+ * on-disk key, a bad GCM tag, malformed JSON, or no email claim) returns null so
+ * the caller falls back to the file-presence signed-in signal. Never throws.
+ */
+function decryptDroidCredential(
+  base: string
+): { email: string | null; orgId: string | null; role: string | null } | null {
+  const filePath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
+  const keyPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.key');
+  if (!filePath || !keyPath) return null;
+  try {
+    const blob = fs.readFileSync(filePath, 'utf-8').trim();
+    const key = Buffer.from(fs.readFileSync(keyPath, 'utf-8').trim(), 'base64');
+    if (key.length !== 32) return null;
+    const [ivB64, tagB64, ctB64] = blob.split(':');
+    if (!ivB64 || !tagB64 || !ctB64) return null;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(ctB64, 'base64')),
+      decipher.final(),
+    ]).toString('utf-8');
+    const cred = JSON.parse(plaintext);
+    const claims = typeof cred?.access_token === 'string' ? decodeJwtPayload(cred.access_token) : null;
+    if (!claims) return null;
+    return {
+      email: typeof claims.email === 'string' ? claims.email : null,
+      orgId: normalizeIdentityPart(claims.org_id ?? cred.active_organization_id),
+      role: typeof claims.role === 'string' ? claims.role : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 let cachedAgyKeychainSignedIn: boolean | undefined;
 
 /**
@@ -1096,12 +1141,29 @@ export async function getAccountInfo(
         return { ...empty, signedIn: true, accountId: userId, accountKey, lastActive };
       }
       case 'droid': {
-        // Factory Droid stores auth at ~/.factory/auth.v2.file (+ auth.v2.key,
-        // an encrypted blob). No email/JWT is readable locally, so presence of
-        // the auth file is the only signed-in signal we can derive without a
-        // network call — same pattern as antigravity/kimi. `.factory` is the
-        // config dir on every platform (macOS/Linux ~/.factory, Windows
-        // %USERPROFILE%\.factory), so path.join keeps this cross-platform.
+        // Factory Droid stores auth at ~/.factory/auth.v2.file (AES-256-GCM,
+        // decrypted with the on-disk ~/.factory/auth.v2.key). We decrypt locally
+        // — no network — and surface the email/org/role from the WorkOS
+        // access-token JWT, same as claude/codex/grok. If the credential can't be
+        // decrypted (a keyring-v2/legacy login with no on-disk key, or a decrypt
+        // failure) we fall back to the file-presence signed-in signal so the row
+        // still reads as logged in — the conservative floor antigravity/kimi use.
+        // `.factory` is the config dir on every platform (macOS/Linux
+        // ~/.factory, Windows %USERPROFILE%\.factory).
+        const decoded = decryptDroidCredential(base);
+        if (decoded?.email) {
+          const organizationId = decoded.orgId;
+          const accountKey = buildIdentityKey(agentId, [['org', organizationId]]);
+          return {
+            ...empty,
+            email: decoded.email,
+            organizationId,
+            accountId: organizationId,
+            accountKey,
+            signedIn: true,
+            lastActive,
+          };
+        }
         const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
         if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
