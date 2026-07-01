@@ -214,9 +214,14 @@ Typical workflow:
     .command('list')
     .alias('ls')
     .description('List registered devices with platform, address, and reachability.')
-    .action(async () => {
+    .option('--json', 'output the registry as a JSON array (for scripts and hooks)')
+    .action(async (opts: { json?: boolean }) => {
       const reg = await loadDevices();
       const names = Object.keys(reg).sort();
+      if (opts.json) {
+        process.stdout.write(JSON.stringify(names.map((n) => reg[n]), null, 2) + '\n');
+        return;
+      }
       if (names.length === 0) {
         console.log(chalk.gray("No devices. Run 'agents devices sync' or 'agents devices add <name> <user@host>'."));
         return;
