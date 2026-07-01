@@ -47,4 +47,15 @@ describe('splitProgressOutput', () => {
     const out = `log body${other}0`;
     expect(splitProgressOutput(out, id)).toBeNull();
   });
+
+  it('the printf-emitted sentinel round-trips through the parser (no desync)', () => {
+    // fetchProgress builds the remote printf format by escaping exitMarker's
+    // newlines; when the shell interprets those escapes it must reproduce the
+    // exact marker the parser splits on. Simulate that here.
+    const printfArg = exitMarker(id).replace(/\n/g, '\\n');
+    const emitted = printfArg.replace(/\\n/g, '\n'); // what `printf` writes out
+    expect(emitted).toBe(exitMarker(id));
+    const r = splitProgressOutput(`body${emitted}0`, id);
+    expect(r).toEqual({ logChunk: 'body', exit: '0' });
+  });
 });

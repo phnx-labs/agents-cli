@@ -74,9 +74,14 @@ export function fetchProgress(
   target: string,
   opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number },
 ): { logChunk: string; exit: string } | null {
+  // Derive the printf format from the SAME exitMarker the parser splits on, so
+  // the emitted sentinel and the one we look for can never desync. The marker's
+  // only escape-sensitive bytes are its newlines (→ `\n`); it carries no `%`,
+  // single-quote, or other printf/shell-special chars (task id is hex).
+  const printfArg = exitMarker(opts.taskId).replace(/\n/g, '\\n');
   const remote =
     `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null; ` +
-    `printf '\\n@@AGENTS_HOST_EXIT_${opts.taskId}@@\\n'; ` +
+    `printf '${printfArg}'; ` +
     `cat ${opts.remoteExit} 2>/dev/null`;
   const res = sshExec(target, remote, { timeoutMs: 20000 });
   return splitProgressOutput(res.stdout, opts.taskId);
