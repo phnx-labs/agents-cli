@@ -19,7 +19,7 @@ import { normalizeEvents, AgentType } from './parsers.js';
 import { debug } from './debug.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from '../gemini-settings.js';
 import type { AgentId } from '../types.js';
-import { getAgentsDir as getSystemAgentsDir } from '../state.js';
+import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS } from '../agents.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
 
@@ -346,11 +346,26 @@ export async function ensureGeminiPlanMode(): Promise<void> {
   }
 }
 
-/** Check whether the CLI binary for a given agent type exists in PATH. Returns [available, pathOrError]. */
+/**
+ * Check whether the CLI binary for a given agent type is installed.
+ * Returns [available, pathOrError].
+ *
+ * The agents-managed shims dir (`~/.agents/.cache/shims`) is the canonical
+ * install location, so a shim there means installed regardless of the caller's
+ * PATH. Non-interactive callers — the menu-bar helper, cron, CI — run with a
+ * minimal launchd PATH that omits the shims dir; a bare PATH lookup false-flags
+ * every shim-based CLI as "not installed". Check the shim first, PATH second
+ * (for CLIs the user installed outside agents-cli).
+ */
 export function checkCliAvailable(agentType: AgentType): [boolean, string | null] {
   const executable = AGENTS[agentType as AgentId]?.cliCommand;
   if (!executable) {
     return [false, `Unknown agent type: ${agentType}`];
+  }
+
+  const shimPath = path.join(getShimsDir(), executable);
+  if (fsSync.existsSync(shimPath)) {
+    return [true, shimPath];
   }
 
   const resolved = findExecutable(executable);

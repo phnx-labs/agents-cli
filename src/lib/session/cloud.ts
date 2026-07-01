@@ -67,6 +67,7 @@ function agentToFormat(agent: string): SessionAgentId | null {
   if (agent === 'claude') return 'claude';
   if (agent === 'codex') return 'codex';
   if (agent === 'rush') return 'rush';
+  if (agent === 'droid') return 'droid';
   return null;
 }
 

@@ -1315,7 +1315,7 @@ function safeStat(p: string): fs.Stats | null {
 }
 
 const SESSION_AGENTS: ReadonlySet<string> = new Set([
-  'claude', 'codex', 'gemini', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi',
+  'claude', 'codex', 'gemini', 'opencode', 'openclaw', 'rush', 'hermes', 'grok', 'kimi', 'droid',
 ]);
 
 function safeCountSessions(agent: AgentId): number {

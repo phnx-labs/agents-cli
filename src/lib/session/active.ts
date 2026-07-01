@@ -85,6 +85,7 @@ const AGENT_CLI_NAMES: Record<string, string> = {
   gemini: 'gemini',
   'cursor-agent': 'cursor',
   opencode: 'opencode',
+  droid: 'droid',
 };
 
 function isPidAlive(pid: number): boolean {
