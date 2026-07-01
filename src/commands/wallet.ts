@@ -13,6 +13,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { terminalWidth } from '../lib/session/width.js';
 import {
   addCard,
   detectBrand,
@@ -45,12 +46,16 @@ function formatExp(month: string, year: string): string {
   return `${month}/${year.slice(-2)}`;
 }
 
-function renderRow(c: CardMetadata): string {
+function renderRow(c: CardMetadata, cols = terminalWidth()): string {
   const nick = c.nickname.padEnd(24);
   const brand = brandLabel(c.brand).padEnd(18);
   const last4 = `•••• ${c.last4}`.padEnd(10);
   const exp = formatExp(c.exp_month, c.exp_year);
-  return `  ${chalk.cyan(nick)} ${brand} ${last4} ${chalk.gray('exp ' + exp)}  ${chalk.gray(c.id)}`;
+  // Full 36-char UUID pushed rows to ~106 chars. Show it only when there is room:
+  // short id (8) on a normal terminal, none when very narrow.
+  const id = cols >= 100 ? c.id : cols >= 80 ? c.id.slice(0, 8) : '';
+  const idCol = id ? `  ${chalk.gray(id)}` : '';
+  return `  ${chalk.cyan(nick)} ${brand} ${last4} ${chalk.gray('exp ' + exp)}${idCol}`;
 }
 
 async function promptString(message: string, validate?: (v: string) => true | string): Promise<string> {
@@ -153,8 +158,10 @@ export function registerWalletCommands(program: Command): void {
           console.log(chalk.gray('No cards in wallet. Try: agents wallet add'));
           return;
         }
-        console.log(chalk.bold(`  ${'NICKNAME'.padEnd(24)} ${'BRAND'.padEnd(18)} ${'LAST4'.padEnd(10)} EXP        ID`));
-        for (const c of cards) console.log(renderRow(c));
+        const walletCols = terminalWidth();
+        const idHeader = walletCols >= 80 ? '        ID' : '';
+        console.log(chalk.bold(`  ${'NICKNAME'.padEnd(24)} ${'BRAND'.padEnd(18)} ${'LAST4'.padEnd(10)} EXP${idHeader}`));
+        for (const c of cards) console.log(renderRow(c, walletCols));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

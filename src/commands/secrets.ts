@@ -8,6 +8,7 @@
 
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
 import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
 import {
@@ -319,8 +320,11 @@ function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
   return exp ? chalk.green(`daily · ${compactRemaining(exp)} left`) : chalk.gray('daily');
 }
 
+/** Below this width the fixed date columns no longer fit; `list` uses cards. */
+const SECRETS_WIDE = 96;
+
 /** Format a single bundle as a table row for the `secrets list` output. */
-function renderBundleRow(b: SecretsBundle, held?: Map<string, number>): string {
+function renderBundleRow(b: SecretsBundle, held?: Map<string, number>, cols = terminalWidth()): string {
   const entries = describeBundle(b);
   const keys = entries.length;
   const expiringCount = countExpiringSoon(b.meta);
@@ -346,9 +350,25 @@ function renderBundleRow(b: SecretsBundle, held?: Map<string, number>): string {
     `${padVisible(used, 7)}`;
   // Mark file-backed bundles so `list` distinguishes them from keychain ones.
   const tag = b.backend === 'file' ? chalk.magenta('[file] ') : '';
-  const desc = b.description ? chalk.gray(safePrint(b.description)) : '';
+  // Cap the free-form description to whatever space is left on the line so a long
+  // description can't push the row to 200+ chars and wrap into a smear.
+  const budget = cols - stringWidth(head) - 1 - stringWidth(tag);
+  const desc = b.description && budget > 3
+    ? chalk.gray(truncateToWidth(safePrint(b.description), budget))
+    : '';
   const trailer = `${tag}${desc}`.trimEnd();
   return trailer ? `${head} ${trailer}` : head.trimEnd();
+}
+
+/** Narrow-terminal card: name + compact meta on one line, description below. */
+function renderBundleCard(b: SecretsBundle, held: Map<string, number> | undefined, cols: number): string {
+  const keys = describeBundle(b).length;
+  const used = b.last_used ? relativeAge(b.last_used) : (b.created_at ? 'never' : '?');
+  const tag = b.backend === 'file' ? chalk.magenta(' [file]') : '';
+  const meta = chalk.gray(`${keys} key${keys === 1 ? '' : 's'} · `) + renderPolicyCol(b, held) + chalk.gray(` · used ${used}`);
+  const line1 = `${chalk.cyan(b.name)}  ${meta}${tag}`;
+  if (!b.description) return line1;
+  return `${line1}\n    ${chalk.gray(truncateToWidth(safePrint(b.description), cols - 4))}`;
 }
 
 /** Colorize a variable source kind (literal, keychain, env, file, exec). */
@@ -568,11 +588,18 @@ export function registerSecretsCommands(program: Command): void {
           /* broker not running — render policy without the countdown */
         }
       }
-      console.log(chalk.bold(
-        `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'POLICY'.padEnd(18)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
-      ));
-      for (const b of bundles) {
-        console.log(renderBundleRow(b, held));
+      const cols = terminalWidth();
+      if (cols >= SECRETS_WIDE) {
+        console.log(chalk.bold(
+          `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'POLICY'.padEnd(18)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
+        ));
+        for (const b of bundles) {
+          console.log(renderBundleRow(b, held, cols));
+        }
+      } else {
+        for (const b of bundles) {
+          console.log(renderBundleCard(b, held, cols));
+        }
       }
     });
 

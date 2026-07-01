@@ -9,6 +9,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { checkbox, confirm } from '@inquirer/prompts';
 import { assertValidSshTarget } from '../lib/ssh-exec.js';
 import { getProvider, listAllHosts, resolveHost } from '../lib/hosts/registry.js';
@@ -140,8 +141,11 @@ async function doList(json: boolean): Promise<void> {
   console.log(chalk.bold('NAME').padEnd(20) + chalk.bold('SOURCE').padEnd(13) + chalk.bold('TARGET').padEnd(28) + chalk.bold('CAPS'));
   for (const h of hosts) {
     const tgt = h.source === 'ssh-config' ? chalk.gray('(ssh-config)') : `${h.user ? h.user + '@' : ''}${h.address ?? ''}`;
+    // Cap TARGET at its column so a long user@host can't shove CAPS out of alignment.
+    const tgtW = stringWidth(tgt);
+    const tgtCol = tgtW > 28 ? truncateToWidth(tgt, 28) : tgt + ' '.repeat(28 - tgtW);
     const mark = h.enrolled ? '' : chalk.gray(' ·available');
-    console.log(h.name.padEnd(20) + h.source.padEnd(13) + tgt.padEnd(28) + (h.caps?.join(',') ?? '') + mark);
+    console.log(h.name.padEnd(20) + h.source.padEnd(13) + tgtCol + (h.caps?.join(',') ?? '') + mark);
   }
 }
 
@@ -185,10 +189,13 @@ async function doPs(json: boolean): Promise<void> {
     console.log(chalk.gray('No host tasks yet. Dispatch one: agents run <agent> "<task>" --host <name>'));
     return;
   }
+  const cols = terminalWidth();
   console.log(chalk.bold('ID').padEnd(11) + chalk.bold('HOST').padEnd(16) + chalk.bold('AGENT').padEnd(10) + chalk.bold('STATUS').padEnd(11) + chalk.bold('PROMPT'));
   for (const t of tasks) {
     const status = t.status === 'completed' ? chalk.green(t.status) : t.status === 'failed' ? chalk.red(t.status) : chalk.yellow(t.status);
-    console.log(t.id.padEnd(11) + t.host.padEnd(16) + t.agent.padEnd(10) + status.padEnd(11) + t.prompt.slice(0, 50));
+    // Prompt fills the remaining width instead of a fixed 50-char byte slice (98-char rows).
+    const promptCol = truncateToWidth(t.prompt, Math.max(12, cols - (11 + 16 + 10 + 11)));
+    console.log(t.id.padEnd(11) + t.host.padEnd(16) + t.agent.padEnd(10) + status.padEnd(11) + promptCol);
   }
 }
 
