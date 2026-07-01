@@ -392,9 +392,18 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
     fs.writeFileSync(shimPath, `#!/bin/bash\n# ${marker}\nexec true\n`, { mode: 0o755 });
   }
 
+  // The on-disk shim file ensureShimCurrent actually stats: the `.cmd` companion
+  // on Windows (createShim writes only that), the extensionless script on POSIX.
+  // Fixtures must land where the code looks, or exists/version checks miss them
+  // and every call reports 'created'.
+  function onDiskShim(mod: typeof import('../shims.js')): string {
+    const base = mod.getShimPath('claude');
+    return process.platform === 'win32' ? `${base}.cmd` : base;
+  }
+
   it('does NOT downgrade a shim stamped by a newer install', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShim(mod);
     const newer = mod.SHIM_SCHEMA_VERSION + 1;
     writeShim(shimPath, `agents-shim-version: ${newer}`);
     const before = fs.readFileSync(shimPath, 'utf8');
@@ -405,7 +414,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
 
   it('regenerates a shim from an older install (upgrade)', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShim(mod);
     writeShim(shimPath, 'agents-shim-version: 1');
 
     expect(mod.ensureShimCurrent('claude')).toBe('updated');
@@ -416,7 +425,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
 
   it('regenerates an unversioned (pre-marker) shim', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShim(mod);
     writeShim(shimPath, 'no marker here');
 
     expect(mod.ensureShimCurrent('claude')).toBe('updated');
