@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { exitMarker, splitProgressOutput, mirrorAliasesSource } from './progress.js';
+import { exitMarker, splitProgressBytes, mirrorAliasesSource } from './progress.js';
 
 describe('exitMarker', () => {
   it('embeds the task id so it cannot collide with generic output', () => {
@@ -7,56 +7,66 @@ describe('exitMarker', () => {
   });
 });
 
-describe('splitProgressOutput', () => {
+describe('splitProgressBytes', () => {
   const id = 'a1b2c3d4';
   const M = exitMarker(id);
+  const buf = (s: string): Buffer => Buffer.from(s, 'utf8');
 
   it('splits log bytes from the exit code in a single combined fetch', () => {
-    const out = `hello world${M}0`;
-    expect(splitProgressOutput(out, id)).toEqual({ logChunk: 'hello world', exit: '0' });
+    const r = splitProgressBytes(buf(`hello world${M}0`), id)!;
+    expect(r.logChunk.toString('utf8')).toBe('hello world');
+    expect(r.exit.toString('utf8')).toBe('0');
+    expect(r.consumed).toBe(11); // 'hello world'
   });
 
   it('returns an empty exit while the job is still running', () => {
-    const out = `some streamed output${M}`;
-    expect(splitProgressOutput(out, id)).toEqual({ logChunk: 'some streamed output', exit: '' });
+    const r = splitProgressBytes(buf(`some streamed output${M}`), id)!;
+    expect(r.logChunk.toString('utf8')).toBe('some streamed output');
+    expect(r.exit.toString('utf8')).toBe('');
   });
 
   it('reports an empty log chunk when there is no new output', () => {
-    const out = `${M}`;
-    expect(splitProgressOutput(out, id)).toEqual({ logChunk: '', exit: '' });
+    const r = splitProgressBytes(buf(`${M}`), id)!;
+    expect(r.logChunk.length).toBe(0);
+    expect(r.consumed).toBe(0);
+    expect(r.exit.toString('utf8')).toBe('');
   });
 
   it('returns null when the marker is absent (transient fetch miss)', () => {
-    expect(splitProgressOutput('partial ssh output', id)).toBeNull();
-    expect(splitProgressOutput('', id)).toBeNull();
+    expect(splitProgressBytes(buf('partial ssh output'), id)).toBeNull();
+    expect(splitProgressBytes(buf(''), id)).toBeNull();
   });
 
   it('splits on the LAST marker so a token echoed in the log cannot spoof the boundary', () => {
-    // The agent's own output literally contained the sentinel; the real
-    // trailing marker must still win, keeping the echoed copy inside the log.
     const echoed = `agent printed ${M} in its output`;
-    const out = `${echoed}${M}137`;
-    const r = splitProgressOutput(out, id);
-    expect(r).not.toBeNull();
-    expect(r!.exit).toBe('137');
-    expect(r!.logChunk).toBe(echoed);
+    const r = splitProgressBytes(buf(`${echoed}${M}137`), id)!;
+    expect(r.exit.toString('utf8')).toBe('137');
+    expect(r.logChunk.toString('utf8')).toBe(echoed);
   });
 
   it('is scoped per task id — another run’s marker is not treated as ours', () => {
     const other = exitMarker('ffffffff');
-    const out = `log body${other}0`;
-    expect(splitProgressOutput(out, id)).toBeNull();
+    expect(splitProgressBytes(buf(`log body${other}0`), id)).toBeNull();
   });
 
-  it('the printf-emitted sentinel round-trips through the parser (no desync)', () => {
-    // fetchProgress builds the remote printf format by escaping exitMarker's
-    // newlines; when the shell interprets those escapes it must reproduce the
-    // exact marker the parser splits on. Simulate that here.
-    const printfArg = exitMarker(id).replace(/\n/g, '\\n');
-    const emitted = printfArg.replace(/\\n/g, '\n'); // what `printf` writes out
-    expect(emitted).toBe(exitMarker(id));
-    const r = splitProgressOutput(`body${emitted}0`, id);
-    expect(r).toEqual({ logChunk: 'body', exit: '0' });
+  // The load-bearing cases: byte-exact counting across a multibyte character.
+  it('counts exact wire bytes when a multibyte char precedes the marker', () => {
+    // 'héllo' is 6 UTF-8 bytes (é = 2); a string split would report 5 chars.
+    const r = splitProgressBytes(buf(`héllo${M}0`), id)!;
+    expect(r.consumed).toBe(6);
+    expect(r.logChunk.length).toBe(6);
+    expect(r.logChunk.toString('utf8')).toBe('héllo');
+  });
+
+  it('counts a multibyte char truncated at the buffer end by its raw bytes', () => {
+    // 'café' = 5 bytes; drop the last byte so 'é' is split mid-character. The
+    // next poll must resume exactly 4 bytes on — not skip/re-read — so consumed
+    // MUST be 4, which a re-encoded U+FFFD (3 bytes) string count would get wrong.
+    const half = buf('café').subarray(0, 4);
+    const combined = Buffer.concat([half, Buffer.from(M, 'utf8')]);
+    const r = splitProgressBytes(combined, id)!;
+    expect(r.consumed).toBe(4);
+    expect(r.logChunk.length).toBe(4);
   });
 });
 

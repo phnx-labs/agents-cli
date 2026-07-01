@@ -138,6 +138,39 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
   };
 }
 
+export interface SshExecRawResult {
+  code: number | null;
+  stdout: Buffer;
+  stderr: Buffer;
+  timedOut: boolean;
+}
+
+/**
+ * Like {@link sshExec} but returns raw stdout/stderr Buffers — no UTF-8 decode.
+ *
+ * Use when byte-exactness matters, e.g. offset-tracked log tailing: a multibyte
+ * character split across a read boundary must stay raw bytes, not collapse to a
+ * U+FFFD replacement char (which would desync a byte offset from the wire).
+ */
+export function sshExecRaw(target: string, remoteCmd: string, opts: SshExecOptions = {}): SshExecRawResult {
+  assertValidSshTarget(target);
+  const mux = opts.multiplex === false ? [] : controlOpts();
+  const args = [...SSH_OPTS, ...mux, ...(opts.extraSshArgs ?? []), target, remoteCmd];
+  const res = spawnSync('ssh', args, {
+    input: opts.input,
+    // No `encoding` → spawnSync returns Buffers.
+    timeout: opts.timeoutMs,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const timedOut = !!(res.error && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT');
+  return {
+    code: typeof res.status === 'number' ? res.status : null,
+    stdout: (res.stdout as Buffer | null) ?? Buffer.alloc(0),
+    stderr: (res.stderr as Buffer | null) ?? Buffer.alloc(0),
+    timedOut,
+  };
+}
+
 /** True if `target` is reachable over ssh (a passwordless `true` succeeds quickly). */
 export function sshReachable(target: string, timeoutMs = 10000): boolean {
   return sshExec(target, 'true', { timeoutMs, multiplex: true }).code === 0;

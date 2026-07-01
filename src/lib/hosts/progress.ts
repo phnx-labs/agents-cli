@@ -15,7 +15,7 @@
  */
 
 import * as fs from 'fs';
-import { sshExec } from '../ssh-exec.js';
+import { sshExec, sshExecRaw } from '../ssh-exec.js';
 import { localLogPath } from './tasks.js';
 
 function sleep(ms: number): Promise<void> {
@@ -49,17 +49,31 @@ export function exitMarker(taskId: string): string {
 }
 
 /**
- * Split a combined fetch (`<log bytes><marker><exit>`) back into its parts.
- * Splits on the LAST marker occurrence, so even if the agent's own output
- * happened to echo the token, the real trailing sentinel still wins. Returns
- * null when the marker is absent (a transient fetch miss — the remote shell
- * never ran our printf), telling the caller to retry without advancing.
+ * Split a combined fetch (`<log bytes><marker><exit>`) back into its parts at the
+ * BYTE level. Splits on the LAST marker occurrence, so even if the agent's own
+ * output happened to echo the token, the real trailing sentinel still wins.
+ * Returns null when the marker is absent (a transient fetch miss — the remote
+ * shell never ran our printf), telling the caller to retry without advancing.
+ *
+ * Byte-level (not string) is load-bearing: `logChunk.length` is the EXACT number
+ * of log bytes consumed on the wire, which the follow loop adds to its offset. A
+ * string split would first UTF-8-decode, turning any multibyte char split at the
+ * `tail -c` boundary into a U+FFFD whose re-encoded length ≠ the wire bytes,
+ * drifting the offset (see followHostTask). `consumed` is returned explicitly for
+ * clarity; it always equals `logChunk.length`.
  */
-export function splitProgressOutput(stdout: string, taskId: string): { logChunk: string; exit: string } | null {
-  const marker = exitMarker(taskId);
-  const idx = stdout.lastIndexOf(marker);
+export function splitProgressBytes(
+  buf: Buffer,
+  taskId: string,
+): { logChunk: Buffer; exit: Buffer; consumed: number } | null {
+  const marker = Buffer.from(exitMarker(taskId), 'utf8'); // ASCII-only, unambiguous
+  const idx = buf.lastIndexOf(marker);
   if (idx === -1) return null;
-  return { logChunk: stdout.slice(0, idx), exit: stdout.slice(idx + marker.length) };
+  return {
+    logChunk: buf.subarray(0, idx),
+    exit: buf.subarray(idx + marker.length),
+    consumed: idx,
+  };
 }
 
 /**
@@ -73,7 +87,7 @@ export function splitProgressOutput(stdout: string, taskId: string): { logChunk:
 export function fetchProgress(
   target: string,
   opts: { remoteLog: string; remoteExit: string; taskId: string; offset: number },
-): { logChunk: string; exit: string } | null {
+): { logChunk: Buffer; exit: string } | null {
   // Derive the printf format from the SAME exitMarker the parser splits on, so
   // the emitted sentinel and the one we look for can never desync. The marker's
   // only escape-sensitive bytes are its newlines (→ `\n`); it carries no `%`,
@@ -83,8 +97,14 @@ export function fetchProgress(
     `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null; ` +
     `printf '${printfArg}'; ` +
     `cat ${opts.remoteExit} 2>/dev/null`;
-  const res = sshExec(target, remote, { timeoutMs: 20000 });
-  return splitProgressOutput(res.stdout, opts.taskId);
+  // Raw bytes (no UTF-8 decode): the log tail must be counted and re-emitted
+  // byte-for-byte so a multibyte char split at the `tail -c` boundary neither
+  // drifts the offset nor renders as U+FFFD. The exit code is pure ASCII → safe
+  // to decode to a string for the caller's `.trim()`.
+  const res = sshExecRaw(target, remote, { timeoutMs: 20000 });
+  const parts = splitProgressBytes(res.stdout, opts.taskId);
+  if (!parts) return null;
+  return { logChunk: parts.logChunk, exit: parts.exit.toString('utf8') };
 }
 
 /**
@@ -132,11 +152,11 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
     }
   } catch { /* mirror absent or unstattable → distinct file, keep mirroring */ }
 
-  const flush = (logChunk: string): boolean => {
-    if (!logChunk) return false;
+  const flush = (logChunk: Buffer): boolean => {
+    if (logChunk.length === 0) return false;
     if (opts.echo) process.stdout.write(logChunk);
     if (mirror) { try { fs.appendFileSync(local, logChunk); } catch { /* best-effort */ } }
-    offset += Buffer.byteLength(logChunk, 'utf8');
+    offset += logChunk.length; // exact wire bytes — no re-encode drift
     return true;
   };
 
