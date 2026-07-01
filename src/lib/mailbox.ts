@@ -34,8 +34,26 @@ export interface MailboxMessage {
   text: string;
 }
 
+/**
+ * A mailboxId must be a single, separator-free path segment. Real ids (session
+ * UUID / teams agentId / loop runId) already satisfy this; rejecting anything
+ * else fails loud instead of silently misrouting — a message whose id contained
+ * a `/` would nest under a different dir than the `to` stamp it is matched
+ * against, and would be dropped with no error. Also blocks `.`/`..` traversal
+ * once `agents message` starts accepting external target ids.
+ */
+export function assertValidMailboxId(mailboxId: string): void {
+  if (!/^[A-Za-z0-9._-]+$/.test(mailboxId) || mailboxId === '.' || mailboxId === '..') {
+    throw new Error(
+      `Invalid mailboxId ${JSON.stringify(mailboxId)}: must be a single path segment ` +
+      `matching [A-Za-z0-9._-] (no separators, not '.'/'..').`,
+    );
+  }
+}
+
 /** Absolute path to a box. `root` override is for tests. */
 export function mailboxDir(mailboxId: string, root: string = getMailboxRootDir()): string {
+  assertValidMailboxId(mailboxId);
   return path.join(root, mailboxId);
 }
 
@@ -67,6 +85,7 @@ function newMsgId(): string {
  * is stamped so a drain can refuse a message that lands in the wrong box.
  */
 export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string }): string {
+  assertValidMailboxId(msg.to);
   ensureDirs(boxDir);
   const msgId = newMsgId();
   const record: MailboxMessage = {

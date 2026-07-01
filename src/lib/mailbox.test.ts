@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mailboxDir, enqueue, drain, peek, clear, type MailboxMessage } from './mailbox.js';
+import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, type MailboxMessage } from './mailbox.js';
 
 function tmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-test-'));
@@ -112,6 +112,18 @@ describe('mailbox', () => {
     expect(clear(box)).toBe(2);
     expect(peek(box)).toEqual([]);
     expect(drain(box)).toEqual([]);
+  });
+
+  it('rejects a mailboxId with a path separator or traversal (fail loud, not silent-drop)', () => {
+    const root = tmpRoot();
+    for (const bad of ['team1/subagentA', '..', '.', '', 'a\\b', 'foo/../bar']) {
+      expect(() => mailboxDir(bad, root)).toThrow(/Invalid mailboxId/);
+    }
+    // enqueue validates the `to` stamp at write time too.
+    const box = mailboxDir(BOX, root);
+    expect(() => enqueue(box, { to: 'team1/subagentA', text: 'x' })).toThrow(/Invalid mailboxId/);
+    // a clean id passes.
+    expect(() => assertValidMailboxId('loop-1700000000000-a1b2c3')).not.toThrow();
   });
 
   it('round-trips the `from` field and a host:/path clip token in text', () => {
