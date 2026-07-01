@@ -35,7 +35,7 @@ import { ptyRequest } from '../pty-client.js';
 import { appleScriptStr } from './quote.js';
 import { runSpec, type HostResolver } from './transport.js';
 import { itermBackend, ghosttyBackend } from './backends/index.js';
-import { currentContext, type LaunchSpec, type EngineContext, type Backend } from './types.js';
+import { currentContext, type LaunchSpec, type EngineContext } from './types.js';
 
 /**
  * An already-running surface to type into. A superset of the engine's launch
@@ -91,6 +91,11 @@ const CR = '\r';
  * engine's `tmuxTabArgv`) so the same transport runs it locally or over SSH. The
  * socket, when set, is positioned before the subcommand (`-S` must lead). `-l`
  * sends the keys literally; without it tmux interprets a key name like `Enter`.
+ *
+ * NOTE: distinct from `sendKeys()` in src/lib/tmux/session.ts — that one
+ * addresses by session *name* on the default socket (the `agents tmux` surface)
+ * and shells out directly; this one addresses by *pane id* + arbitrary socket and
+ * returns an SSH-capable `LaunchSpec` for the engine transport. Don't collapse them.
  */
 export function tmuxSendKeysArgv(
   pane: string,
@@ -255,9 +260,4 @@ export async function injectIntoTerminal(
     if (!res.ok) return { ok: false, backend: target.backend, writes: 0, specs, error: res.error };
   }
   return { ok: true, backend: target.backend, writes, specs };
-}
-
-/** The engine's launch `Backend`s that can also be injected into (excludes pty). */
-export function isLaunchBackend(b: InjectBackend): b is Backend {
-  return b === 'tmux' || b === 'iterm' || b === 'ghostty';
 }

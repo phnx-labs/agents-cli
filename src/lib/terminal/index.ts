@@ -38,7 +38,6 @@ export {
   itermInjectScript,
   ghosttyInjectScript,
   appleScriptInjectSpec,
-  isLaunchBackend,
   type InjectTarget,
   type InjectBackend,
   type InjectOptions,
