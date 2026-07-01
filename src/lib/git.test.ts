@@ -7,8 +7,12 @@
  * local paths. These checks are pure string logic, identical on every OS.
  */
 
-import { describe, it, expect } from 'vitest';
-import { assertSafeGitTransport, parseSource } from './git.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import simpleGit from 'simple-git';
+import { assertSafeGitTransport, parseSource, syncRepoGit } from './git.js';
 
 describe('assertSafeGitTransport', () => {
   const allowed = [
@@ -71,5 +75,92 @@ describe('parseSource transport safety', () => {
     const parsed = parseSource('gh:owner/repo');
     expect(parsed.type).toBe('github');
     expect(parsed.url).toBe('https://github.com/owner/repo.git');
+  });
+});
+
+/**
+ * Real-repo tests for syncRepoGit — the git-level `agents sync <repo>` engine.
+ * Uses a bare "remote" plus two clones on the filesystem (no mocking): one
+ * stands in for the remote author, one for the local machine being synced.
+ */
+describe('syncRepoGit', () => {
+  let root: string;
+  let remote: string; // bare origin
+  let local: string; // the repo we sync
+  let author: string; // a second clone that pushes upstream commits
+
+  async function commitFile(dir: string, name: string, body: string, msg: string): Promise<void> {
+    const g = simpleGit(dir);
+    fs.writeFileSync(path.join(dir, name), body);
+    await g.add('-A');
+    await g.commit(msg);
+  }
+
+  async function configIdentity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+  }
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'syncrepo-'));
+    remote = path.join(root, 'remote.git');
+    local = path.join(root, 'local');
+    author = path.join(root, 'author');
+
+    // Bare remote on main.
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+
+    // Author clone seeds the first commit and pushes it.
+    await simpleGit().clone(remote, author);
+    await configIdentity(author);
+    await commitFile(author, 'README.md', 'v1\n', 'init');
+    await simpleGit(author).push('origin', 'main');
+
+    // Local clone is the machine we call syncRepoGit on.
+    await simpleGit().clone(remote, local);
+    await configIdentity(local);
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('refuses to sync when the working tree is dirty', async () => {
+    fs.writeFileSync(path.join(local, 'dirty.txt'), 'uncommitted\n');
+    const res = await syncRepoGit(local, { push: false });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/uncommitted changes/);
+  });
+
+  it('rebases local onto new upstream commits (pull-only)', async () => {
+    // Author advances the remote.
+    await commitFile(author, 'README.md', 'v2\n', 'upstream change');
+    await simpleGit(author).push('origin', 'main');
+
+    const res = await syncRepoGit(local, { push: false });
+    expect(res.success).toBe(true);
+    expect(res.pushed).toBe(false);
+    // Local now carries the upstream file content.
+    expect(fs.readFileSync(path.join(local, 'README.md'), 'utf8')).toBe('v2\n');
+  });
+
+  it('rebases a local commit on top of upstream and pushes it up', async () => {
+    // Upstream moves.
+    await commitFile(author, 'up.txt', 'from-author\n', 'author commit');
+    await simpleGit(author).push('origin', 'main');
+    // Local makes its own commit (diverged, but on a different file → rebases clean).
+    await commitFile(local, 'down.txt', 'from-local\n', 'local commit');
+
+    const res = await syncRepoGit(local, { push: true });
+    expect(res.success).toBe(true);
+    expect(res.pushed).toBe(true);
+
+    // The local commit reached the remote: a fresh clone sees down.txt.
+    const verify = path.join(root, 'verify');
+    await simpleGit().clone(remote, verify);
+    expect(fs.existsSync(path.join(verify, 'down.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(verify, 'up.txt'))).toBe(true);
   });
 });

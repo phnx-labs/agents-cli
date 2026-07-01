@@ -610,6 +610,59 @@ export async function pullRepo(dir: string): Promise<{ success: boolean; commit:
 }
 
 /**
+ * Rebase a repo onto its remote, optionally pushing local commits back up.
+ *
+ * The one-repo counterpart to `pullRepo` used by `agents sync <repo>`:
+ *   1. Refuse if the working tree is dirty (commit or discard first).
+ *   2. `git fetch origin` then `git pull --rebase origin <branch>` — rebase, not
+ *      merge, so a local commit lands cleanly on top of upstream with no merge
+ *      bubble.
+ *   3. When `push` is set, `git push origin <branch>` to send local commits up.
+ *
+ * The branch is read from the repo's current HEAD (falls back to `main`) rather
+ * than hardcoded. System repos pass `push: false` — they are pull-only mirrors
+ * of the npm-shipped upstream.
+ */
+export async function syncRepoGit(
+  dir: string,
+  opts: { push: boolean },
+): Promise<{ success: boolean; commit: string; pushed: boolean; error?: string }> {
+  try {
+    if (!isGitRepo(dir)) {
+      return { success: false, commit: '', pushed: false, error: `Not a git repo: ${dir}` };
+    }
+    const git = simpleGit(dir);
+    const status = await git.status();
+
+    if (!status.isClean()) {
+      return {
+        success: false,
+        commit: '',
+        pushed: false,
+        error: `Working tree has uncommitted changes. Commit or discard them first.\n\n  cd ${dir} && git status`,
+      };
+    }
+
+    const branch = status.current || 'main';
+    await git.fetch('origin');
+    await git.pull('origin', branch, { '--rebase': 'true' });
+
+    installGithooksSymlinks(dir);
+
+    let pushed = false;
+    if (opts.push) {
+      await git.push('origin', branch);
+      pushed = true;
+    }
+
+    const log = await git.log({ maxCount: 1 });
+    return { success: true, commit: log.latest?.hash.slice(0, 8) || 'unknown', pushed };
+  } catch (err) {
+    return { success: false, commit: '', pushed: false, error: (err as Error).message };
+  }
+}
+
+/**
  * Get git status for sync display.
  * Returns files categorized by their status relative to HEAD.
  */
