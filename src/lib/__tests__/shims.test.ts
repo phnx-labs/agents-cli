@@ -145,9 +145,38 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(7);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(8);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
+  });
+
+  // Regression: node_modules/.bin is correct for npm-packaged agents, but Grok,
+  // Kimi, and Droid ship their binaries elsewhere. Hardcoding node_modules made
+  // every versioned alias for these three (the path `agents teams` takes once it
+  // pins a teammate) fail with "<agent>@<version> not installed".
+  it('resolves npm-packaged agents from node_modules/.bin', () => {
+    const script = generateVersionedAliasScript('codex', '0.125.0');
+    expect(script).toContain('node_modules/.bin/codex');
+  });
+
+  it('resolves droid from ~/.local/bin/droid, not node_modules', () => {
+    const script = generateVersionedAliasScript('droid', '0.159.1');
+    expect(script).toContain('DROID_BINARY="$HOME/.local/bin/droid"');
+    expect(script).not.toContain('node_modules/.bin/droid');
+  });
+
+  it('resolves grok from ~/.grok/downloads and exports GROK_HOME', () => {
+    const script = generateVersionedAliasScript('grok', '0.2.33');
+    expect(script).toContain('GROK_DOWNLOADS="$HOME/.grok/downloads"');
+    expect(script).not.toContain('node_modules/.bin/grok');
+    expect(script).toContain('export GROK_HOME=');
+  });
+
+  it('resolves kimi from ~/.kimi-code/bin, not node_modules', () => {
+    const script = generateVersionedAliasScript('kimi', '0.12.1');
+    expect(script).toContain('KIMI_BINARY="$HOME/.kimi-code/bin/kimi"');
+    expect(script).not.toContain('node_modules/.bin/kimi');
+    expect(script).toContain('export KIMI_CODE_HOME=');
   });
 });
 
