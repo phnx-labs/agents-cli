@@ -769,6 +769,39 @@ export async function execAgent(options: ExecOptions): Promise<number> {
 }
 
 /**
+ * Resolve how to spawn a shim target for a platform. Pure — testable on any host.
+ *
+ * POSIX always execs the binary directly (no shell). On Windows:
+ *  - a bare (non-absolute) name or a `.cmd` companion goes through the shell so
+ *    cmd.exe resolves it via PATHEXT — the common, `.cmd`-present path, unchanged.
+ *  - an absolute `.ps1` (the form npm leaves when no `.cmd` companion exists)
+ *    cannot be exec'd directly, and under the shell cmd.exe would hand it to the
+ *    `.ps1` file-association handler (Notepad by default), not run it — so it is
+ *    launched through `powershell -File`. `-ExecutionPolicy Bypass` lets it run
+ *    even under a Restricted/AllSigned policy (see `agents doctor`).
+ */
+export function resolveShimSpawn(
+  platform: NodeJS.Platform,
+  binary: string,
+  extraArgs: string[],
+): { command: string; args: string[]; shell: boolean } {
+  if (platform === 'win32') {
+    // Use win32 path semantics regardless of the host running this (the platform
+    // is the parameter, not process.platform) so `C:\...` reads as absolute.
+    if (path.win32.isAbsolute(binary) && binary.toLowerCase().endsWith('.ps1')) {
+      return {
+        command: 'powershell',
+        args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', binary, ...extraArgs],
+        shell: false,
+      };
+    }
+    const useShell = !path.win32.isAbsolute(binary) || binary.endsWith('.cmd');
+    return { command: binary, args: extraArgs, shell: useShell };
+  }
+  return { command: binary, args: extraArgs, shell: false };
+}
+
+/**
  * Transparent passthrough exec for generated shims — the node-side delegate that
  * Windows `.cmd` shims call. Resolves the active version (explicit pin, else
  * project/default) and execs the real binary with the user's RAW args and the
@@ -800,10 +833,10 @@ export async function execShimPassthrough(
   // mode/effort are required by ExecOptions but unused by buildExecEnv (which only
   // derives the per-version config-dir env); pass the agent's default to satisfy the type.
   const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto' });
-  const useShell = process.platform === 'win32' && (!path.isAbsolute(binary) || binary.endsWith('.cmd'));
+  const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 
   return new Promise((resolve) => {
-    const child = spawn(binary, [...launchArgs, ...rawArgs], { cwd, stdio: 'inherit', env, shell: useShell });
+    const child = spawn(command, args, { cwd, stdio: 'inherit', env, shell });
     child.on('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
     child.on('error', (err) => {
       process.stderr.write(`agents: failed to launch ${agent}: ${err.message}\n`);
