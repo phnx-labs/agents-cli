@@ -303,6 +303,15 @@ export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: stri
 }
 
 /**
+ * The tracker/PR ref for a session's dedicated column: the ticket id when known,
+ * else `PR#<n>`, else empty. Pulled out of the trailing badge blob so refs align
+ * into a scannable column instead of jamming against a truncated topic.
+ */
+export function ticketLabel(s: Pick<SessionMeta, 'ticketId' | 'prNumber'>): string {
+  return s.ticketId ?? (s.prNumber ? `PR#${s.prNumber}` : '');
+}
+
+/**
  * Compact, colour-coded badges for the durable/awaiting signals. Text-only (no
  * emoji, per repo convention): `plan` / `ask` / `perm` for why it's waiting,
  * `PR#N`, `wt:slug`, `TICKET-123`.
@@ -698,33 +707,42 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   };
 }
 
-/** One flat table row: shortId · agent · version · project · topic(+badges) · time.
- * When `live` is set (the session is still running), a status glyph leads the
- * topic cell and the live preview stands in for the persisted topic. */
-function flatSessionRow(session: SessionMeta, live?: ActiveSession): string {
+/** One flat table row:
+ *   shortId · agent · version · project · [glyph] label·doing · [ticket] · [wt] · time
+ * `doing` is the live preview when running, else the topic. The `ticket` column
+ * (tracker/PR ref, pulled out of the badge blob so refs align) is only rendered
+ * when `showTicket` — otherwise a listing with no refs would waste a column of
+ * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
+function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.timestamp);
   const project = session.project || '-';
   const tag = teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
-  // A running session's live preview replaces the persisted topic: it says what
-  // the agent is doing now, not what the session opened with.
-  const topic = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
-  const versionStr = session.version || '-';
-  const badges = signalBadges(metaSignals(session));
-  const badgeW = badges ? stringWidth(badges) + 1 : 0;
+  // A running session's live preview says what the agent is doing now; a
+  // resting one falls back to its opening topic.
+  const doing = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
+  const wt = session.worktreeSlug ? chalk.magenta(`wt:${session.worktreeSlug}`) : '';
+
+  const TICKET_W = 10;
+  const ticketCell = showTicket
+    ? chalk.blue(padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1))
+    : '';
   const glyphW = glyph ? 2 : 0;
-  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - badgeW - stringWidth(when) - 1);
+  const ticketW = showTicket ? TICKET_W + 1 : 0;
+  const wtW = wt ? stringWidth(wt) + 1 : 0;
+  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - ticketW - wtW - stringWidth(when) - 1);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
-    chalk.yellow(padToWidth(truncateToWidth(versionStr, 7), 8)) +
+    chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
     chalk.cyan(padToWidth(truncateToWidth(project, 14), 16)) +
     (glyph ? glyph + ' ' : '') +
-    renderTopicCell(label, topic, '', topicW, topicW) +
-    (badges ? badges + ' ' : '') +
+    renderTopicCell(label, doing, '', topicW, topicW) +
+    ticketCell +
+    (wt ? wt + ' ' : '') +
     chalk.gray(when)
   );
 }
@@ -799,7 +817,10 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
     return;
   }
 
-  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id)));
+  // Only show the ticket column when at least one row carries a ref — otherwise
+  // it's a column of dashes that steals width from every topic.
+  const showTicket = sessions.some((s) => ticketLabel(s) !== '');
+  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket));
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
   console.log(chalk.gray(`\n${countLine}`));
