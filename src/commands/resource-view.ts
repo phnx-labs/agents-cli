@@ -201,10 +201,12 @@ function renderResourceWideTable(
     return padToWidth(color ? color(clipped) : clipped, width);
   };
 
-  const headerParts = [cell(chalk.bold('Name'), L.nameW)];
-  if (L.extraW) headerParts.push(cell(chalk.bold(opts.extraLabel ?? ''), L.extraW));
-  if (L.extra2W) headerParts.push(cell(chalk.bold(opts.extra2Label ?? ''), L.extra2W));
-  headerParts.push(cell(chalk.bold('Description'), L.descW));
+  // Pass the colour as the third arg: cell() truncates the plain text first, then
+  // colours the result. Pre-colouring here would be stripped by truncateToWidth.
+  const headerParts = [cell('Name', L.nameW, chalk.bold)];
+  if (L.extraW) headerParts.push(cell(opts.extraLabel ?? '', L.extraW, chalk.bold));
+  if (L.extra2W) headerParts.push(cell(opts.extra2Label ?? '', L.extra2W, chalk.bold));
+  headerParts.push(cell('Description', L.descW, chalk.bold));
   headerParts.push(chalk.bold('Synced'));
   console.log(headerParts.join(' '));
 
