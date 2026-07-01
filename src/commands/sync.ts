@@ -2,10 +2,12 @@
  * `agents sync` — synchronize central resources into an installed agent version.
  *
  * Forms:
- *   agents sync                                         # umbrella: fetch remote (repos+secrets+sessions) -> reconcile all
+ *   agents sync                                         # umbrella: fetch config repos -> reconcile all (secrets/sessions opt-in)
  *   agents sync --repos|--secrets|--sessions            # umbrella: fetch only those, then reconcile
  *   agents sync --cloud                                 # umbrella: fetch all, skip reconcile
  *   agents sync --local                                 # umbrella: reconcile all, no fetch
+ *   agents sync system                                  # one repo: git pull --rebase (pull-only mirror)
+ *   agents sync user                                    # one repo: git pull --rebase + push
  *   agents sync claude                                  # one agent: uses default/sole installed version
  *   agents sync claude@2.1.142                          # one agent: explicit version
  *   agents sync claude@latest                           # one agent: newest installed
@@ -31,7 +33,7 @@
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { agentLabel, resolveAgentName } from '../lib/agents.js';
+import { agentLabel, resolveAgentName, ALL_AGENT_IDS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
   isVersionInstalled,
@@ -48,16 +50,22 @@ import {
   promptResourceSelection,
   promptNewResourceSelection,
   buildRepoScopedSelection,
+  mergeRepoScopedSelections,
   listRepoNames,
+  getVersionHomePath,
   type ResourceSelection,
   type SyncResult,
   type AvailableResources,
 } from '../lib/versions.js';
+import { capableAgents } from '../lib/capabilities.js';
+import { parseHookManifest, registerHooksToSettings } from '../lib/hooks.js';
 import { compileRulesForProject } from '../lib/rules/compile.js';
 import { runLaunchSync } from '../lib/project-launch.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
 import { addHostOption } from '../lib/hosts/option.js';
+import { syncRepoGit } from '../lib/git.js';
+import { getSystemAgentsDir, getUserAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 
 interface SyncOpts {
   agent?: string;
@@ -81,7 +89,7 @@ interface SyncOpts {
 export function registerSyncCommand(program: Command): void {
   addHostOption(program.command('sync [agentSpec] [repo]'))
     .summary('Make this machine current, or sync resources into one agent')
-    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nWith NO agent, runs the umbrella verb: fetch remote state (config repos + secrets + sessions) then reconcile it into every installed agent. Scope it with --repos / --secrets / --sessions, --cloud (fetch only), or --local (reconcile only).')
+    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nGive a DotAgent repo name ALONE — "agents sync system" / "agents sync user" / "agents sync <alias>" — to git-sync that one repo: refuse if the tree is dirty, else git pull --rebase against origin. The user repo and extra aliases also push local commits up; the system repo is a pull-only mirror.\n\nWith NO agent, runs the umbrella verb: fetch the config repos then reconcile them into every installed agent. Secrets and sessions are opt-in — add --secrets to pull secret bundles or --sessions to sync transcripts (sessions are also queryable live via "agents sessions --host <machine>"). Also: --cloud (fetch only), --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
     .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version")')
     .option('--repo <name>', 'Scope the sync to a single DotAgent repo: system / user / project / <alias> (also accepted as a positional)')
@@ -103,6 +111,149 @@ export function registerSyncCommand(program: Command): void {
 }
 
 /**
+ * Resolve a DotAgent repo name to its git working directory + whether local
+ * commits should be pushed. `system` is a pull-only mirror of the npm-shipped
+ * upstream; `user` and enabled extra aliases are user-owned and push. `project`
+ * (and unknown names) return null — the project `.agents/` lives inside the
+ * user's own project repo and is not independently git-synced here.
+ */
+function resolveRepoGitTarget(repo: string): { dir: string; push: boolean } | null {
+  if (repo === 'system') return { dir: getSystemAgentsDir(), push: false };
+  if (repo === 'user') return { dir: getUserAgentsDir(), push: true };
+  const extra = getEnabledExtraRepos().find((e) => e.alias === repo);
+  if (extra) return { dir: extra.dir, push: true };
+  return null;
+}
+
+/**
+ * `agents sync <repo>` — git-sync a single DotAgent repo: refuse on a dirty
+ * tree, else pull --rebase against origin, pushing local commits for user-owned
+ * repos. Delegates the git work to `syncRepoGit`.
+ */
+async function runRepoGitSync(
+  repo: string,
+  quiet: boolean,
+  outLog: (msg: string) => void,
+  errLog: (msg: string) => void,
+): Promise<void> {
+  const target = resolveRepoGitTarget(repo);
+  if (!target) {
+    errLog(chalk.red(`The '${repo}' repo isn't independently git-synced.`));
+    errLog(chalk.gray('Syncable repos: system (pull-only), user, and enabled extra-repo aliases.'));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!quiet) outLog(chalk.bold(`Syncing ${repo} repo…`) + chalk.gray(` (${target.dir})`));
+  const result = await syncRepoGit(target.dir, { push: target.push });
+
+  if (!result.success) {
+    errLog(chalk.red(`sync ${repo} failed: ${result.error}`));
+    process.exitCode = 1;
+    return;
+  }
+
+  if (!quiet) {
+    const note = result.pushed ? ' · pushed' : ' · pull-only';
+    outLog(chalk.green(`✓ ${repo} → ${result.commit}${note}`));
+  }
+}
+
+/** Human label for a repo choice in the interactive picker. */
+function repoChoiceLabel(repo: string): string {
+  switch (repo) {
+    case 'system': return 'system  — shared, npm-shipped defaults';
+    case 'user': return 'user    — your ~/.agents config';
+    case 'project': return "project — this repo's .agents";
+    default: return `${repo}  — extra repo`;
+  }
+}
+
+/**
+ * Interactive bare `agents sync` (TTY, no flags): two checklists — which
+ * DotAgent repos to sync FROM, and which installed agents to sync INTO. Then
+ * freshen the selected git-syncable repos (pull-only) and reconcile the chosen
+ * repos' resources into each selected agent's default version, registering
+ * hooks so synced hook scripts actually fire.
+ */
+async function runInteractiveReconcile(
+  opts: SyncOpts,
+  outLog: (msg: string) => void,
+  errLog: (msg: string) => void,
+): Promise<void> {
+  const { checkbox } = await import('@inquirer/prompts');
+  const cwd = opts.cwd || process.cwd();
+
+  const installedAgents = ALL_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0);
+  if (installedAgents.length === 0) {
+    errLog(chalk.red('No agents installed. Install one: agents add claude@latest'));
+    process.exitCode = 1;
+    return;
+  }
+
+  let repos: string[];
+  let agents: AgentId[];
+  try {
+    repos = await checkbox<string>({
+      message: 'Sync resources FROM which repos?',
+      choices: listRepoNames().map((r) => ({ value: r, name: repoChoiceLabel(r), checked: true })),
+    });
+    if (repos.length === 0) {
+      outLog(chalk.gray('No repos selected. Nothing to do.'));
+      return;
+    }
+    agents = await checkbox<AgentId>({
+      message: 'Sync INTO which agents?',
+      choices: installedAgents.map((a) => ({ value: a, name: agentLabel(a), checked: true })),
+    });
+    if (agents.length === 0) {
+      outLog(chalk.gray('No agents selected. Nothing to do.'));
+      return;
+    }
+  } catch (e) {
+    if (isPromptCancelled(e)) {
+      outLog(chalk.gray('Cancelled. No changes made.'));
+      return;
+    }
+    throw e;
+  }
+
+  // 1. Freshen the selected git-syncable repos (pull-only; `project` has no
+  //    independent remote). Failures are non-fatal — reconcile still runs.
+  for (const repo of repos) {
+    const target = resolveRepoGitTarget(repo);
+    if (!target) continue;
+    const res = await syncRepoGit(target.dir, { push: false });
+    if (res.success) outLog(chalk.gray(`  pulled ${repo} → ${res.commit}`));
+    else outLog(chalk.yellow(`  ! ${repo}: ${(res.error ?? 'pull failed').split('\n')[0]}`));
+  }
+
+  // 2. One selection spanning the chosen repos.
+  const selection = mergeRepoScopedSelections(repos, cwd);
+  const hasResources = selection.memory === 'all' || Object.entries(selection).some(
+    ([kind, v]) => kind !== 'memory' && Array.isArray(v) && v.length > 0,
+  );
+  if (!hasResources) {
+    outLog(chalk.gray(`Nothing from ${repos.join(', ')} to sync.`));
+    return;
+  }
+
+  // 3. Reconcile into each selected agent's default (or sole) version, then
+  //    register hooks so synced hook scripts fire.
+  const hookManifest = parseHookManifest();
+  const hookCapable = new Set(capableAgents('hooks'));
+  for (const agentId of agents) {
+    const version = resolveVersion(agentId, cwd) || listInstalledVersions(agentId).slice(-1)[0];
+    if (!version) continue;
+    const result = syncResourcesToVersion(agentId, version, selection, { cwd });
+    printSyncDetail(result, agentId, version, cwd);
+    if (result.hooks && hookCapable.has(agentId) && Object.keys(hookManifest).length > 0) {
+      registerHooksToSettings(agentId, getVersionHomePath(agentId, version), hookManifest);
+    }
+  }
+}
+
+/**
  * The umbrella verb: bare `agents sync` (no agent) makes this machine current.
  * Resolves the flags + a secrets passphrase (env-only for now; tokenized auth
  * arrives with `agents login`) and runs the fetch+reconcile stages, then prints
@@ -114,6 +265,15 @@ async function runUmbrella(
   outLog: (msg: string) => void,
   errLog: (msg: string) => void,
 ): Promise<void> {
+  // Interactive bare `agents sync` (a TTY, no --yes, no scope flag) drops into
+  // the two-checklist picker: which repos to sync from, which agents to sync
+  // into. Any explicit flag or --yes keeps the non-interactive umbrella below.
+  const anyExplicitFlag = !!(opts.repos || opts.secrets || opts.sessions || opts.cloud || opts.local);
+  if (!quiet && !opts.yes && !anyExplicitFlag && isInteractiveTerminal()) {
+    await runInteractiveReconcile(opts, outLog, errLog);
+    return;
+  }
+
   const flags: UmbrellaFlags = {
     repos: opts.repos,
     secrets: opts.secrets,
@@ -172,6 +332,16 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   // when an '@' was actually typed, keeping bare `claude` on the
   // default-version path.
   let selector: string | undefined;
+
+  // Repo-level git sync: a DotAgent repo name given ALONE (no agent, no second
+  // positional) means "git-sync that repo" — pull --rebase, and push for
+  // user-owned repos. This is distinct from the [repo] resource-scoping arg
+  // below, and it precedes agent-spec parsing because repo names like
+  // "system"/"user" would otherwise fail parseAgentSpec.
+  if (agentSpec && !opts.agent && !repoArg && listRepoNames().includes(agentSpec)) {
+    await runRepoGitSync(agentSpec, quiet, outLog, errLog);
+    return;
+  }
 
   if (agentSpec) {
     const parsed = parseAgentSpec(agentSpec);
