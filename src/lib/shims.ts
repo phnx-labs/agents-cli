@@ -565,6 +565,19 @@ exec "$BINARY"${launchArgs} "$@"
 }
 
 /**
+ * Which shim files to materialize for a platform. Pure — testable on any host.
+ *
+ * POSIX writes the extensionless `#!/bin/bash` shim — the file PATH resolution
+ * execs. Windows writes only the `.cmd` companion: PATHEXT makes it the runnable
+ * form, and the bash file (mode 0o755 is a no-op there) is never executed — so
+ * emitting it is dead weight that only ever confuses `where agents`.
+ */
+export function shimTargetsFor(platform: NodeJS.Platform): { bash: boolean; cmd: boolean } {
+  if (platform === 'win32') return { bash: false, cmd: true };
+  return { bash: true, cmd: false };
+}
+
+/**
  * Create a shim for an agent.
  */
 export function createShim(agent: AgentId): string {
@@ -573,13 +586,15 @@ export function createShim(agent: AgentId): string {
   const agentConfig = AGENTS[agent];
   const shimPath = path.join(shimsDir, agentConfig.cliCommand);
 
-  const script = generateShimScript(agent);
-  fs.writeFileSync(shimPath, script, { mode: 0o755 });
-
-  // Windows can't execute the bash shim directly. Drop a `.cmd` companion next
-  // to it that delegates to the node-side transparent resolver (`agents __shim`),
-  // so the version resolution stays single-sourced instead of reimplemented in batch.
-  if (IS_WINDOWS) {
+  const targets = shimTargetsFor(process.platform);
+  if (targets.bash) {
+    fs.writeFileSync(shimPath, generateShimScript(agent), { mode: 0o755 });
+  }
+  // Windows can't execute the bash shim directly. Drop a `.cmd` companion — which
+  // delegates to the node-side transparent resolver (`agents __shim`) so version
+  // resolution stays single-sourced instead of reimplemented in batch — and skip
+  // the vestigial bash file entirely.
+  if (targets.cmd) {
     writeWindowsCmdShim(shimPath + '.cmd', agentConfig.cliCommand);
   }
 

@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateShimScript, hasAliasShadowingShim, SHIM_SCHEMA_VERSION } from './shims.js';
+import { generateShimScript, hasAliasShadowingShim, shimTargetsFor, SHIM_SCHEMA_VERSION } from './shims.js';
 import { getProjectVersion } from './versions.js';
 
 const tempDirs: string[] = [];
@@ -259,5 +259,16 @@ describe('hasAliasShadowingShim', () => {
   it('returns false when the rc file mentions a different command', () => {
     const home = makeFakeHome(`alias claude='claude --foo'\n`);
     expect(hasAliasShadowingShim('codex', { homeDir: home })).toBe(false);
+  });
+});
+
+describe('shimTargetsFor (drop the vestigial bash shim on Windows)', () => {
+  it('POSIX writes only the extensionless bash shim', () => {
+    expect(shimTargetsFor('linux')).toEqual({ bash: true, cmd: false });
+    expect(shimTargetsFor('darwin')).toEqual({ bash: true, cmd: false });
+  });
+
+  it('win32 writes only the .cmd companion — the bash file is never executed there', () => {
+    expect(shimTargetsFor('win32')).toEqual({ bash: false, cmd: true });
   });
 });
