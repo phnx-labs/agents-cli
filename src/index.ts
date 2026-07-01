@@ -97,6 +97,7 @@ import {
   loadTrash,
   loadRestore,
   loadDoctor,
+  loadStatus,
   loadProfiles,
   loadSecrets,
   loadWallet,
@@ -890,6 +891,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadTrash);
   await reg(loadRestore);
   await reg(loadDoctor);
+  await reg(loadStatus);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
   await reg(loadSecrets);
