@@ -26,7 +26,12 @@ export interface PidSessionEntry {
   /** The launch session id. Present for agents launched with a known id (Claude). */
   sessionId?: string;
   cwd?: string;
-  /** `$TMUX_PANE` at launch — a second key so pid reuse can't cause a false match. */
+  /**
+   * `$TMUX_PANE` at launch — stored for diagnostics and possible future
+   * disambiguation. NOT currently consulted on read: the listing path keys
+   * purely on pid (stale entries are pruned when the pid dies), so this is
+   * metadata, not an anti-collision key.
+   */
   tmuxPane?: string;
   startedAtMs: number;
 }
