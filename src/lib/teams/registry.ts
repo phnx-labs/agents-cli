@@ -136,7 +136,7 @@ export async function createTeam(name: string, options?: CreateTeamOptions): Pro
   });
   // Audit the lifecycle boundary, not the CLI shell — captures every creation
   // path (create + ensure) with team metadata the generic command log lacks.
-  emit('teams.create', { team: name, worktrees: Boolean(options?.enableWorktrees || options?.useWorktree) });
+  emit('teams.create', { module: 'teams', team: name, worktrees: Boolean(options?.enableWorktrees || options?.useWorktree) });
   return meta;
 }
 
@@ -155,7 +155,7 @@ export async function ensureTeam(name: string): Promise<TeamMeta> {
   });
   // `teams add` auto-creates the team on first teammate — audit that creation
   // too, but only when it actually happened (not the get-existing path).
-  if (created) emit('teams.create', { team: name, worktrees: false });
+  if (created) emit('teams.create', { module: 'teams', team: name, worktrees: false });
   return meta;
 }
 
@@ -170,7 +170,7 @@ export async function removeTeam(name: string): Promise<boolean> {
     return true;
   });
   // "Disband" — only fires when a real team was removed, not a no-op.
-  if (existed) emit('teams.disband', { team: name });
+  if (existed) emit('teams.disband', { module: 'teams', team: name });
   return existed;
 }
 

@@ -77,10 +77,18 @@ describe('team lifecycle audit events', () => {
 
     expect(create.length).toBe(1);
     expect(create[0].worktrees).toBe(true); // --enable-worktrees captured in payload
+    expect(create[0].module).toBe('teams'); // so `--module teams` surfaces it
     expect(disband.length).toBe(1);
     // Attribution rides along like every other event.
     expect(typeof create[0].osUser).toBe('string');
     expect(create[0].transport).toBe('local');
+
+    // The advertised `--module teams` filter must catch the semantic events,
+    // not just the generic command.* pair.
+    const byModule = JSON.parse(
+      runCli(home, ['events', '--module', 'teams', '--event', 'teams.create', '--json']).stdout,
+    ) as Array<Record<string, unknown>>;
+    expect(byModule.some((e) => e.event === 'teams.create' && e.team === 'audit-team')).toBe(true);
   });
 
   it('does NOT emit teams.disband when the team does not exist', () => {
