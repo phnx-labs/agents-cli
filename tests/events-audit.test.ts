@@ -116,4 +116,53 @@ describe('audit event log', () => {
     // Every returned record is from the secrets module, none from events.
     expect(records.every((r) => r.module === 'secrets')).toBe(true);
   });
+
+  it('--command matches a command path by prefix', () => {
+    const home = makeTempHome();
+    runCli(home, ['secrets', 'list']); // command path: "secrets list"
+
+    // A coarse "secrets" must catch the "secrets list" record...
+    const coarse = JSON.parse(runCli(home, ['events', '--command', 'secrets', '--json']).stdout) as Array<Record<string, unknown>>;
+    expect(coarse.some((r) => r.command === 'secrets list')).toBe(true);
+    // ...while a non-matching prefix returns nothing.
+    const none = JSON.parse(runCli(home, ['events', '--command', 'teams', '--json']).stdout) as Array<Record<string, unknown>>;
+    expect(none.length).toBe(0);
+  });
+
+  it('redacts a token-like positional arg before it hits the log', () => {
+    const home = makeTempHome();
+    // `secrets get <name>` no-ops (rc!=0) but the preAction hook still records
+    // the invocation; the token-shaped positional must be masked, not stored.
+    runCli(home, ['secrets', 'get', 'ghp_FAKETOKENVALUE123'], { SSH_CONNECTION: '' });
+
+    const raw = fs.readFileSync(
+      path.join(home, '.agents', '.cache', 'logs',
+        `events-${new Date().toISOString().slice(0, 10)}.jsonl`),
+      'utf-8',
+    );
+    expect(raw).not.toContain('ghp_FAKETOKENVALUE123');
+    expect(raw).toContain('[REDACTED]');
+  });
+
+  it('--since with a sub-day window returns today\'s events (not just whole days)', () => {
+    const home = makeTempHome();
+    runCli(home, ['secrets', 'list']);
+
+    // Regression: query() used to skip today's file when startDate was later
+    // than midnight, so a 2h window returned nothing on the day it was written.
+    const res = runCli(home, ['events', '--since', '2h', '--json']);
+    expect(res.status).toBe(0);
+    const records = JSON.parse(res.stdout) as Array<Record<string, unknown>>;
+    expect(records.length).toBeGreaterThan(0);
+  });
+
+  it('records command.end with a numeric durationMs', () => {
+    const home = makeTempHome();
+    runCli(home, ['secrets', 'list']);
+
+    const end = readEvents(home).find((e) => e.event === 'command.end' && e.command === 'secrets list');
+    expect(end).toBeTruthy();
+    expect(typeof end!.durationMs).toBe('number');
+    expect(end!.durationMs as number).toBeGreaterThanOrEqual(0);
+  });
 });
