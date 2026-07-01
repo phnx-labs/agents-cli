@@ -23,6 +23,7 @@ import * as yaml from 'yaml';
 import type { AgentId, CapabilityName, DiscoveredPlugin, ManifestHook, HookMatches, HookCache } from '../lib/types.js';
 import { AGENTS, getCliState, resolveAgentName } from '../lib/agents.js';
 import { supports } from '../lib/capabilities.js';
+import { resolveSingleAgentTarget, AgentSpecError } from '../lib/agent-spec/index.js';
 import {
   readMeta,
   getUserAgentsDir,
@@ -194,26 +195,19 @@ export async function inspectAction(target: string, options: InspectOptions): Pr
 }
 
 function parseTarget(target: string): { agent: AgentId; version: string } {
-  const [rawAgent, rawVersion] = target.split('@');
-  const agent = resolveAgentName(rawAgent || '');
-  if (!agent) {
-    console.error(chalk.red(`Unknown agent: ${rawAgent}`));
-    console.error(chalk.gray(`Known agents: ${Object.keys(AGENTS).join(', ')}`));
-    process.exit(1);
-  }
-
-  let version = rawVersion;
-  if (!version || version === 'default') {
-    const meta = readMeta();
-    const def = meta.agents?.[agent];
-    if (!def) {
-      console.error(chalk.red(`No default version set for ${agent}.`));
-      console.error(chalk.gray(`Pass a version: agents inspect ${agent}@<version>`));
+  // Route through the agent-spec engine: bare resolves project pin → global
+  // default → sole installed (the meta-only lookup here previously ignored
+  // project pins); @default/@latest/@oldest/@x.y.z all handled uniformly.
+  try {
+    const { agent, version } = resolveSingleAgentTarget(target);
+    return { agent, version };
+  } catch (e) {
+    if (e instanceof AgentSpecError) {
+      console.error(chalk.red(e.message));
       process.exit(1);
     }
-    version = def;
+    throw e;
   }
-  return { agent, version };
 }
 
 function pickDrillKind(options: InspectOptions): { kind: DrillableKind; query: boolean | string } | null {

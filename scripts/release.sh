@@ -375,6 +375,31 @@ fi
 # committing it. Disable the auto-revert.
 PKG_BUMPED=false
 
+# ----- Roll the changelog: promote "## Unreleased" -> "## $TARGET" -----
+# Without this, every release leaves its notes stranded under "Unreleased" and
+# the section grows across releases with no per-version headers. Only fires when
+# the Unreleased section actually has content, so a notes-less release can't
+# create an empty version header.
+if [[ -f CHANGELOG.md ]]; then
+  unrel_content="$(awk '/^## Unreleased[[:space:]]*$/{f=1;next} f&&/^## /{exit} f&&/[^[:space:]]/{print}' CHANGELOG.md)"
+  if [[ -n "$unrel_content" ]]; then
+    tmp_cl="$(mktemp)"
+    awk -v ver="$TARGET" '
+      ins { print; next }
+      seen && /^## / { print; ins=1; seen=0; next }
+      seen && /[^[:space:]]/ { print "## " ver; print ""; print; ins=1; seen=0; next }
+      seen { print; next }
+      /^## Unreleased[[:space:]]*$/ { print; seen=1; next }
+      { print }
+    ' CHANGELOG.md > "$tmp_cl"
+    mv "$tmp_cl" CHANGELOG.md
+    git add CHANGELOG.md
+    green "Rolled CHANGELOG: ## Unreleased -> ## $TARGET"
+  else
+    gray "CHANGELOG: no Unreleased content to roll"
+  fi
+fi
+
 # ----- Commit (idempotent on package.json diff alone) -----
 git add package.json
 if ! git diff --cached --quiet; then

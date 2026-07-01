@@ -37,6 +37,7 @@ import {
   tailscaleStatusJson,
 } from '../lib/devices/tailscale.js';
 import { planDeviceReconciliation, runDeviceSync } from '../lib/devices/sync.js';
+import { clearPendingSentinel } from '../lib/devices/pending.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { hostNameFor, renderSshConfig } from '../lib/devices/ssh-config.js';
 import {
@@ -180,12 +181,34 @@ Typical workflow:
     });
 
   devicesCmd
+    .command('register <name>')
+    .description('Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.')
+    .action(async (name: string) => {
+      try {
+        const nodes = parseTailscaleStatus(tailscaleStatusJson());
+        const node = nodes.find((n) => n.name === name);
+        if (!node) {
+          console.error(chalk.red(`'${name}' is not a current tailscale node. See 'agents devices sync'.`));
+          process.exit(1);
+        }
+        await removeIgnored(name); // a re-registered node is no longer dismissed
+        const d = await upsertDevice(name, nodeToDeviceInput(node));
+        clearPendingSentinel(name); // drop the notification immediately
+        console.log(chalk.green(`Registered '${name}'`) + chalk.gray(` (${d.platform})`));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
     .command('ignore <name>')
     .description('Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).')
     .action(async (name: string) => {
       try {
         await removeDevice(name);
         await addIgnored(name);
+        clearPendingSentinel(name); // drop the notification immediately
         console.log(chalk.green(`Ignored '${name}'`) + chalk.gray(" — it won't be suggested again. Undo with `agents devices unignore`."));
       } catch (err: any) {
         console.error(chalk.red(err.message));

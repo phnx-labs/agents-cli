@@ -56,6 +56,8 @@ interface ExecCommandActionOptions {
   remoteCwd?: string;
   follow?: boolean; // --no-follow sets this false
   any?: boolean;
+  lease?: string | boolean; // --lease [backend]: true when bare, backend string when given
+  keepBox?: boolean; // --keep-box: don't tear down the leased box after the run
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -247,7 +249,12 @@ export function registerRunCommand(program: Command): void {
     )
     .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
-    .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.');
+    .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.')
+    .option(
+      '--lease [backend]',
+      'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.',
+    )
+    .option('--keep-box', 'With --lease, keep the box after the run instead of stopping it.');
 
   // `--on` and `--computer` are hidden aliases of `--host` — same behavior.
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
@@ -305,6 +312,62 @@ export function registerRunCommand(program: Command): void {
       // Use command.args (all positional strings) and strip the declared positional args from the front.
       const declaredArgCount = prompt !== undefined ? 2 : 1;
       const passthroughArgs = command.args.slice(declaredArgCount);
+
+      // --lease: invent a disposable cloud box for this run (via crabbox), run
+      // the agent there, then tear it down. Unlike --host, nothing is registered.
+      if (options.lease) {
+        if (prompt === undefined) {
+          console.error(chalk.red('A prompt is required for leased runs: agents run <agent> "<task>" --lease'));
+          process.exit(1);
+        }
+        const backend = typeof options.lease === 'string' ? options.lease : undefined;
+        const { detectSignedInRuntimes, pickRuntimes } = await import('../lib/crabbox/runtimes.js');
+        const { leaseAndRun } = await import('../lib/crabbox/lease.js');
+        const { confirm } = await import('@inquirer/prompts');
+
+        const detected = await detectSignedInRuntimes();
+        const runtimes = await pickRuntimes(detected);
+        if (runtimes.length === 0) {
+          console.error(chalk.yellow('No runtimes selected. Sign into one locally (e.g. run `claude` once) then retry.'));
+          process.exit(1);
+        }
+
+        // Security gate: copying auth tokens to an ephemeral cloud box is opt-in
+        // per run. Name the runtimes + accounts so the user sees what ships.
+        const names = runtimes
+          .map((id) => {
+            const d = detected.find((x) => x.id === id);
+            return `${d?.label ?? id}${d?.email ? ` (${d.email})` : ''}`;
+          })
+          .join(', ');
+        const ok = await confirm({
+          message: `Copy credentials for ${names} to a disposable cloud box, run there, then destroy it?`,
+          default: false,
+        });
+        if (!ok) {
+          console.error(chalk.yellow('Aborted — no credentials pushed, no box leased.'));
+          process.exit(1);
+        }
+
+        try {
+          const { exitCode, box, toreDown } = await leaseAndRun({
+            agent: agentSpec.split('@')[0],
+            prompt,
+            mode: options.mode,
+            model: options.model,
+            backend,
+            runtimes,
+            detected,
+            secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE,
+            keep: options.keepBox,
+          });
+          console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${box.ip ? ` (${box.ip})` : ''}. Stop it: crabbox stop --id ${box.slug}`));
+          process.exit(exitCode === null ? 1 : exitCode);
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+      }
 
       // --host/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.

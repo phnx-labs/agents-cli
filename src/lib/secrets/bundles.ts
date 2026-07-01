@@ -27,6 +27,7 @@ import {
   getKeychainToken,
   getKeychainTokens,
   hasKeychainToken,
+  keychainUsesFileFallback,
   listKeychainItems,
   parseBundleValue,
   resolveRef,
@@ -467,22 +468,31 @@ export function listBundles(): SecretsBundle[] {
   // prompt instead of N. Bundle metadata items carry user-presence ACLs (same
   // as secret values), so a naive loop over readBundle() spawns a fresh
   // LAContext per item — meaning N biometric prompts for `secrets list`.
-  let keychainServices: string[] = [];
-  try {
-    keychainServices = listKeychainItems(BUNDLE_META_PREFIX);
-  } catch {
-    keychainServices = [];
-  }
-  const keychainNames = keychainServices
-    .map((s) => s.slice(BUNDLE_META_PREFIX.length))
-    .filter((n) => BUNDLE_NAME_PATTERN.test(n));
-  if (keychainNames.length > 0) {
-    const fetched = getKeychainTokens(keychainNames.map(bundleMetaItem));
-    for (const name of keychainNames) {
-      const json = fetched.get(bundleMetaItem(name));
-      if (json === undefined) continue;
-      const bundle = parseBundleMeta(name, json, 'keychain');
-      if (bundle) out.push(bundle);
+  //
+  // SKIP this entirely when the keychain backend is routing to the encrypted
+  // file store (Linux headless / locked-collection fallback): there,
+  // listKeychainItems() returns the SAME items the file enumeration below
+  // reads, so running both would list every file-backed bundle twice — once
+  // mislabeled `keychain`, once correctly `[file]`. Under the fallback the
+  // file store is the single source of truth, so the block below covers all.
+  if (!keychainUsesFileFallback()) {
+    let keychainServices: string[] = [];
+    try {
+      keychainServices = listKeychainItems(BUNDLE_META_PREFIX);
+    } catch {
+      keychainServices = [];
+    }
+    const keychainNames = keychainServices
+      .map((s) => s.slice(BUNDLE_META_PREFIX.length))
+      .filter((n) => BUNDLE_NAME_PATTERN.test(n));
+    if (keychainNames.length > 0) {
+      const fetched = getKeychainTokens(keychainNames.map(bundleMetaItem));
+      for (const name of keychainNames) {
+        const json = fetched.get(bundleMetaItem(name));
+        if (json === undefined) continue;
+        const bundle = parseBundleMeta(name, json, 'keychain');
+        if (bundle) out.push(bundle);
+      }
     }
   }
 

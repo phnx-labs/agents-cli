@@ -38,7 +38,6 @@ import {
 import {
   listInstalledVersions,
   getGlobalDefault,
-  resolveVersionAlias,
   syncResourcesToVersion,
   promptAgentVersionSelection,
   getVersionHomePath,
@@ -55,6 +54,7 @@ import {
   promptRemovalTargets,
   resolveAgentTargetsAutoInstalling,
   type RemovalTarget,
+  resolveListFilterOrExit,
 } from './utils.js';
 
 /** Register the `agents hooks` command tree (list, add, remove, sync, prune, view). */
@@ -111,7 +111,7 @@ When to use:
           console.log(chalk.red(formatAgentError(agentName, [...capableAgents('hooks')])));
           process.exit(1);
         }
-        requestedVersion = resolveVersionAlias(agentId, parts[1]) ?? null;
+        requestedVersion = resolveListFilterOrExit(agentId, parts[1]) ?? null;
       }
 
       // Load hook manifest for event display

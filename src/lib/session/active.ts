@@ -29,6 +29,7 @@ import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTail } from './tail.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import { detectProvenance, type SessionProvenance } from './provenance.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -65,6 +66,13 @@ export interface ActiveSession {
   status: ActiveStatus;
   /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
   pidCount?: number;
+  /**
+   * Where the process actually lives — machine host, local vs SSH, tmux pane,
+   * and whether a rail exists to type back into it. Read from the process env
+   * (`/proc/<pid>/environ` on Linux, `ps eww` on macOS) during enrichment.
+   * Absent for cloud sessions (no local pid) and any pid whose env is unreadable.
+   */
+  provenance?: SessionProvenance;
   teamName?: string;
   agentId?: string;
   cloudProvider?: string;
@@ -601,7 +609,25 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 
   const unattributed = opts.skipHeadless ? [] : await listUnattributedActive(knownPids);
 
-  return dedupeBySession([...teams, ...terminals, ...cloud, ...unattributed]);
+  const merged = dedupeBySession([...teams, ...terminals, ...cloud, ...unattributed]);
+  await enrichProvenance(merged);
+  return merged;
+}
+
+/**
+ * Attach provenance (host / local-vs-SSH / tmux pane / reply rail) to every
+ * session that has a live pid. Mutates in place. Runs after dedupe so we probe
+ * each session once, not once per fork pid. Probes run in parallel — each is a
+ * single /proc read (Linux) or `ps` call (macOS); failures leave `provenance`
+ * undefined rather than blocking the listing.
+ */
+async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
+  await Promise.all(
+    sessions.map(async (s) => {
+      if (s.provenance || !s.pid) return;
+      s.provenance = await detectProvenance(s.pid);
+    }),
+  );
 }
 
 /**

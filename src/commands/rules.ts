@@ -55,6 +55,7 @@ import {
   requireInteractiveSelection,
   requireDestructiveArg,
   resolveAgentTargetsAutoInstalling,
+  resolveListFilterOrExit,
 } from './utils.js';
 
 /** Register the `agents rules` command tree (list, add, view, remove). */
@@ -122,7 +123,7 @@ Project rules & @-imports:
           console.log(chalk.red(formatAgentError(agentName)));
           process.exit(1);
         }
-        requestedVersion = resolveVersionAlias(agentId, parts[1]) ?? null;
+        requestedVersion = resolveListFilterOrExit(agentId, parts[1]) ?? null;
       }
 
       const renderVersionRules = (
