@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, realBundleCount, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -132,6 +132,17 @@ describe('secrets list metadata cache (broker-held snapshot)', () => {
     handleAgentRequest(store, loadReq(metaKey, { __snapshot__: '[]' }, 60_000), 0);
     handleAgentRequest(store, { cmd: 'lock' }, 0);
     expect(handleAgentRequest(store, { cmd: 'get', name: metaKey }, 0)).toMatchObject({ hit: false });
+  });
+
+  it('realBundleCount excludes the metadata cache so it cannot pin the broker on old code (#435)', () => {
+    const store = freshStore();
+    // A metadata-only store must read as empty for self-heal / idle-exit.
+    handleAgentRequest(store, loadReq(metaKey, { __snapshot__: '[]' }, 60_000), 0);
+    expect(store.size).toBe(1);
+    expect(realBundleCount(store)).toBe(0);
+    // A real unlock counts; the meta entry still does not.
+    handleAgentRequest(store, loadReq('prod', { K: 'v' }, 60_000), 0);
+    expect(realBundleCount(store)).toBe(1);
   });
 });
 

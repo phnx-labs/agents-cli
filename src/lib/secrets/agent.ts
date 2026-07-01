@@ -276,6 +276,19 @@ export type Response =
  * unit-testable with a controlled `now`, without a socket or a spawned process.
  * Mutates `store` in place; returns the wire response.
  */
+/**
+ * Count of real unlocked bundles in the store, excluding the internal
+ * `secrets list` metadata cache. Used to decide broker "warmth" for self-heal
+ * and idle-exit: a metadata-only store must read as empty so a disposable list
+ * cache never blocks an upgrade restart (#435) or an idle one-off broker from
+ * exiting. Pure + exported for unit testing.
+ */
+export function realBundleCount(store: Map<string, StoredBundle>): number {
+  let n = 0;
+  for (const name of store.keys()) if (!name.startsWith(META_CACHE_PREFIX)) n++;
+  return n;
+}
+
 export function handleAgentRequest(
   store: Map<string, StoredBundle>,
   req: Request,
@@ -362,20 +375,26 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   // this value for the process lifetime; getCliVersionFresh re-reads on disk.
   const runningVersion = getCliVersion();
 
+  // "Warmth" for self-heal / idle-exit counts only real unlocked bundles, NOT
+  // the internal `secrets list` metadata cache (#524). Otherwise a 24h-TTL list
+  // cache would keep the store non-empty and (a) block the persistent broker
+  // from self-healing onto a freshly-installed version for up to a day (#435's
+  // gate is size===0), and (b) stop a one-off broker from ever idle-exiting. The
+  // metadata cache is a disposable list snapshot — wiping it on upgrade/idle
+  // costs at most one extra prompt on the next `secrets list`.
   const sweep = () => {
     const now = Date.now();
     for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
-    // Self-heal onto a newer in-place install — but ONLY while the store is
-    // empty, so we never wipe live unlocks and force a re-prompt (#435). The
-    // `store.size === 0` short-circuit also keeps getCliVersionFresh (a disk
-    // read) off the hot path. A pending upgrade is adopted at the next idle
-    // sweep instead of immediately.
-    if (store.size === 0 &&
-        shouldSelfHealForUpgrade(persistent, store.size, runningVersion, getCliVersionFresh())) {
+    const live = realBundleCount(store);
+    // Self-heal onto a newer in-place install — but ONLY while no real unlocks
+    // are held, so we never wipe live unlocks and force a re-prompt (#435). A
+    // metadata-only store still self-heals (the list cache is disposable).
+    if (live === 0 &&
+        shouldSelfHealForUpgrade(persistent, live, runningVersion, getCliVersionFresh())) {
       shutdown(0); // KeepAlive relaunches on the new code
       return;
     }
-    if (store.size === 0) {
+    if (live === 0) {
       if (!persistent && now - emptySince >= IDLE_EXIT_MS) shutdown(0);
     } else {
       emptySince = now;
@@ -384,7 +403,7 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
 
   const handle = (req: Request): Response => {
     const resp = handleAgentRequest(store, req);
-    if (store.size > 0) emptySince = Date.now();
+    if (realBundleCount(store) > 0) emptySince = Date.now();
     return resp;
   };
 
@@ -665,10 +684,15 @@ export async function agentLock(name?: string): Promise<number> {
   return r?.ok === true && r.cmd === 'lock' ? r.wiped : 0;
 }
 
-/** List currently-unlocked bundles, or [] when no broker is running. */
+/** List currently-unlocked bundles, or [] when no broker is running. The
+ * internal `secrets list` metadata-cache entry is filtered out here as well as
+ * server-side: during a rollout a NEW client can talk to an OLD broker that
+ * predates the server-side exclusion, so this keeps the internal entry from
+ * surfacing in `agents secrets status` in that skew window. */
 export async function agentStatus(): Promise<AgentStatusEntry[]> {
   const r = await request({ cmd: 'status' });
-  return r?.ok === true && r.cmd === 'status' ? r.entries : [];
+  const entries = r?.ok === true && r.cmd === 'status' ? r.entries : [];
+  return entries.filter((e) => !e.name.startsWith(META_CACHE_PREFIX));
 }
 
 /** Ping result: whether a broker is reachable + speaking our protocol, and the
