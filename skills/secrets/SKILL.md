@@ -17,7 +17,7 @@ Store credentials in your OS keychain and inject them into agent runs. Nothing t
 | macOS | Keychain | Built-in |
 | Linux (desktop) | GNOME Keyring (libsecret) | `sudo apt install libsecret-tools` |
 | Linux (headless/server) | Use `env:` refs | See below |
-| Windows | Not yet supported | — |
+| Windows | Credential Manager (encrypted-file fallback) | Built-in |
 
 **Desktop Linux:** GNOME Keyring (or another Secret Service provider) must be running. Most desktop environments start it automatically.
 

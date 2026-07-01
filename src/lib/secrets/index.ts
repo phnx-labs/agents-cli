@@ -12,7 +12,10 @@
  * Linux: libsecret (GNOME Keyring) via the `secret-tool` CLI. No biometry —
  * items are unlocked when the keyring is open.
  *
- * Windows: not supported.
+ * Windows: Windows Credential Manager (CRED_TYPE_GENERIC,
+ * CRED_PERSIST_LOCAL_MACHINE) via a PowerShell P/Invoke shim, with the same
+ * AES-256-GCM encrypted-file fallback used on Linux when the credential store
+ * is unreachable (no logon session / no powershell.exe). No biometry.
  *
  * Items are device-local: the biometry access control requires the OS to
  * treat them as bound to this device, so cross-machine propagation goes
@@ -25,6 +28,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { linuxBackend, usesFileFallback as linuxUsesFileFallback } from './linux.js';
+import { windowsBackend, usesFileFallback as windowsUsesFileFallback } from './windows.js';
 import { getKeychainHelperPath } from './install-helper.js';
 
 const SERVICE_PREFIX = 'agents-cli';
@@ -68,17 +72,20 @@ export function serializeRef(ref: SecretRef): string {
 }
 
 function assertSupportedPlatform(): void {
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+  if (process.platform !== 'darwin' && process.platform !== 'linux' && process.platform !== 'win32') {
     throw new Error(
-      'agents secrets requires macOS Keychain or Linux libsecret.\n' +
-      'Windows is not supported — use environment variables or a .env file instead.\n' +
-      'WSL2 is supported (libsecret via gnome-keyring).'
+      'agents secrets requires macOS Keychain, Linux libsecret, or Windows Credential Manager.\n' +
+      'Use environment variables or a .env file on unsupported platforms.'
     );
   }
 }
 
 function isLinux(): boolean {
   return process.platform === 'linux';
+}
+
+function isWindows(): boolean {
+  return process.platform === 'win32';
 }
 
 /** Build the keychain item name for a profile provider token. */
@@ -136,6 +143,7 @@ export function hasKeychainToken(item: string): boolean {
   if (backend) return backend.has(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.has(item);
+  if (isWindows()) return windowsBackend.has(item);
   if (!isOurItem(item)) {
     return spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item], {
       stdio: ['ignore', 'ignore', 'ignore'],
@@ -158,6 +166,7 @@ export function getKeychainToken(item: string): string {
   if (backend) return backend.get(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.get(item);
+  if (isWindows()) return windowsBackend.get(item);
   if (!isOurItem(item)) {
     const sec = spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -209,6 +218,12 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
     }
     return result;
   }
+  if (isWindows()) {
+    for (const item of items) {
+      try { result.set(item, windowsBackend.get(item)); } catch { /* missing — skip */ }
+    }
+    return result;
+  }
   const bin = getKeychainHelperPath();
   const child = spawnSync(bin, ['get-batch', os.userInfo().username, ...items], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -257,6 +272,7 @@ export function setKeychainToken(item: string, value: string): void {
   if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
 
   if (isLinux()) { linuxBackend.set(item, value); return; }
+  if (isWindows()) { windowsBackend.set(item, value); return; }
 
   // Bare (non-`agents-cli.`) items are written WITHOUT the biometry ACL so
   // they round-trip with the no-prompt read path in getKeychainToken (which
@@ -295,6 +311,7 @@ export function deleteKeychainToken(item: string): boolean {
   if (backend) return backend.delete(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.delete(item);
+  if (isWindows()) return windowsBackend.delete(item);
   const bin = getKeychainHelperPath();
   return spawnSync(bin, ['delete', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -314,6 +331,7 @@ export function deleteKeychainToken(item: string): boolean {
 export function keychainUsesFileFallback(): boolean {
   if (backend) return false;
   if (isLinux()) return linuxUsesFileFallback();
+  if (isWindows()) return windowsUsesFileFallback();
   return false;
 }
 
@@ -322,6 +340,7 @@ export function listKeychainItems(prefix: string): string[] {
   if (backend) return backend.list(prefix);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.list(prefix);
+  if (isWindows()) return windowsBackend.list(prefix);
   const bin = getKeychainHelperPath();
   const result = spawnSync(bin, ['list', prefix], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -346,6 +365,7 @@ export function migrateKeychainItem(item: string): boolean {
   if (backend) return backend.has(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.has(item);
+  if (isWindows()) return windowsBackend.has(item);
   const bin = getKeychainHelperPath();
   const result = spawnSync(bin, ['migrate-acl', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
