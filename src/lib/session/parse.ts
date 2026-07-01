@@ -1221,7 +1221,7 @@ export function parseDroid(filePath: string): SessionEvent[] {
           tool: toolName,
           args: toolInput,
           path: toolInput.file_path || toolInput.path || undefined,
-          command: toolName === 'Bash' ? toolInput.command : undefined,
+          command: (toolName === 'Bash' || toolName === 'Execute') ? toolInput.command : undefined,
         });
       } else if (block.type === 'tool_result') {
         const toolId = block.tool_use_id;

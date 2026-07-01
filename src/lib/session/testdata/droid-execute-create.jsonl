@@ -1,0 +1,5 @@
+{"type":"session_start","id":"s-droid-exec-create","title":"droid execute+create fixture","cwd":"/work"}
+{"type":"message","timestamp":"2026-07-01T10:00:00Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-exec-1","name":"Execute","input":{"command":"ls -la","riskLevelReason":"read-only","summary":"List files"}}]}}
+{"type":"message","timestamp":"2026-07-01T10:00:01Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-exec-1","content":"total 0\ndrwxr-xr-x 2 user group 64 Jul  1 10:00 ."}]}}
+{"type":"message","timestamp":"2026-07-01T10:00:02Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"tu-create-1","name":"Create","input":{"file_path":"/work/hello.ts","content":"console.log('hello');\n"}}]}}
+{"type":"message","timestamp":"2026-07-01T10:00:03Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu-create-1","content":"File created successfully."}]}}
