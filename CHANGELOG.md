@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**`agents logs`: a top-level, unified run-log viewer (#575)**
+
+- Viewing a dispatched run's output used to be nested and undiscoverable — only `agents hosts logs <id>` and `agents daemon logs` existed, and `agents hosts` wasn't even in `--help`. `agents logs [id]` is now a discoverable top-level command that resolves a run across **two substrates** — host-dispatch task stdout (`agents run --host`) and the local session index — and shows or (`-f`) follows it. `[id]`/`--session` load directly (host task tried first, then session); with no id, `--host`/`--agent`/`--version` filter a merged candidate list (one match shows, several open a fuzzy picker, non-TTY prints the list). Additive: `agents hosts logs` and `agents sessions tail` are unchanged and share the same helpers. Source: `src/commands/logs.ts`, `src/lib/hosts/logs.ts`.
+
+**Host-follow log tailer: no self-corruption on localhost, byte-accurate offsets (#586, #589)**
+
+- Following a run dispatched to **localhost** tripled the on-disk log and triple-printed the output, because the local mirror file and the remote log were the same file and the tailer appended its own reads back into it; it now detects that aliasing by file identity (`dev:ino`) and echoes only. Separately, the offset tracker advanced by a re-encoded string length, so a multibyte UTF-8 char split at a poll boundary drifted the offset and corrupted the stream on non-ASCII output; the tail is now byte-exact (raw `Buffer` via `sshExecRaw`). Source: `src/lib/hosts/progress.ts`, `src/lib/ssh-exec.ts`.
+
 **`agents upgrade`: the "What's new" changelog is now a compact heading list (#562)**
 
 - The post-upgrade changelog dumped every heading *and* every verbose sub-bullet for each version in the range — a screenful across a multi-version jump. It now prints one bullet per feature/fix heading and links to the full CHANGELOG for the details. The parser was extracted to a pure, unit-tested `renderWhatsNew` so it can be exercised without the CLI's import-time side effects. Source: `src/lib/whats-new.ts`, `src/index.ts`.

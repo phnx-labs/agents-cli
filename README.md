@@ -240,7 +240,9 @@ agents hosts add gpu-box
 agents hosts check gpu-box              # reachable? which agents-cli version?
 
 # Run there instead of locally
-agents run claude --host gpu-box "profile this build"
+agents run claude --host gpu-box "profile this build"   # follows live by default
+agents logs --host gpu-box              # pick a dispatched run and view its log
+agents logs <id> -f                     # re-attach to a running one and follow
 agents view claude --host gpu-box       # inspect the remote install
 agents sync --host gpu-box              # make the remote machine current
 
