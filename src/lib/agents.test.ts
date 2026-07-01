@@ -349,14 +349,21 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
   // per-version home to the active config under AGENTS_REAL_HOME. Pin that to a
   // fresh empty dir so "signed out" assertions don't leak into the developer's
   // real ~/.factory / ~/.kimi-code / ~/.gemini login (RUSH-1318 fallback).
+  // Antigravity on macOS stores its token in the real keychain, which can't be
+  // sandboxed per-test — opt out of the probe so "signed out" is hermetic.
   let prevRealHome: string | undefined;
+  let prevNoKeychain: string | undefined;
   beforeEach(() => {
     prevRealHome = process.env.AGENTS_REAL_HOME;
     process.env.AGENTS_REAL_HOME = makeTempDir();
+    prevNoKeychain = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.AGENTS_NO_KEYCHAIN_PROBE = '1';
   });
   afterEach(() => {
     if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
     else process.env.AGENTS_REAL_HOME = prevRealHome;
+    if (prevNoKeychain === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    else process.env.AGENTS_NO_KEYCHAIN_PROBE = prevNoKeychain;
   });
 
   it('marks Antigravity signed in when a refresh token is present', async () => {

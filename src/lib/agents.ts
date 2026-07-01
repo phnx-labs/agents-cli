@@ -869,6 +869,36 @@ function resolveAccountCredentialPath(base: string, ...segments: string[]): stri
   return null;
 }
 
+let cachedAgyKeychainSignedIn: boolean | undefined;
+
+/**
+ * Antigravity (`agy`, a Codeium/Windsurf-based CLI) stores its OAuth token in
+ * the macOS keychain — service `gemini`, account `antigravity` — NOT a file.
+ * The file path (`antigravity-oauth-token`) only exists on Linux, where the Go
+ * keyring falls back to disk. Probe the keychain for existence (metadata only;
+ * `-w` omitted so it never prompts). Cached per process — the keychain is
+ * account-global, so one probe covers every installed version. Returns false on
+ * non-macOS (the file path handles those).
+ */
+async function antigravityKeychainSignedIn(): Promise<boolean> {
+  if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
+  // Test isolation: the real macOS keychain can't be sandboxed per-test, so
+  // allow suites asserting "signed out" to opt out of the probe (same spirit as
+  // AGENTS_REAL_HOME). Not cached, so tests can toggle it.
+  if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return false;
+  if (process.platform !== 'darwin') {
+    cachedAgyKeychainSignedIn = false;
+    return false;
+  }
+  try {
+    await execFileAsync('security', ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'], { timeout: 3000 });
+    cachedAgyKeychainSignedIn = true;
+  } catch {
+    cachedAgyKeychainSignedIn = false;
+  }
+  return cachedAgyKeychainSignedIn;
+}
+
 export async function getAccountInfo(
   agentId: AgentId,
   home?: string
@@ -1026,18 +1056,22 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'antigravity': {
-        // Antigravity (`agy`) stores a Google OAuth token at
-        // ~/.gemini/antigravity-cli/antigravity-oauth-token. It's a consumer
-        // OAuth grant (access + refresh token, no id_token), so there's no email
-        // claim to read locally — presence of a refresh token is the only
-        // signed-in signal we can derive without a network call.
+        // Antigravity (`agy`) stores a consumer Google OAuth grant (access +
+        // refresh token, no id_token) — presence of a refresh token is the only
+        // signed-in signal we can derive without a network call. Storage is
+        // platform-split: on Linux it's a file at
+        // ~/.gemini/antigravity-cli/antigravity-oauth-token; on macOS the Go
+        // keyring puts it in the keychain (service 'gemini', account
+        // 'antigravity'), so no file exists — check both.
         const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
-        if (!tokenPath) return { ...empty, lastActive };
-        const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
-        const hasToken =
-          typeof data?.token?.refresh_token === 'string' && !!data.token.refresh_token;
-        if (!hasToken) return { ...empty, lastActive };
-        return { ...empty, signedIn: true, lastActive };
+        if (tokenPath) {
+          const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
+          if (typeof data?.token?.refresh_token === 'string' && data.token.refresh_token) {
+            return { ...empty, signedIn: true, lastActive };
+          }
+        }
+        if (await antigravityKeychainSignedIn()) return { ...empty, signedIn: true, lastActive };
+        return { ...empty, lastActive };
       }
       case 'kimi': {
         // Kimi Code stores OAuth credentials at
