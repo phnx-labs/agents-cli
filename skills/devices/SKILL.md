@@ -2,7 +2,7 @@
 name: devices
 description: "Register and connect to your machines over Tailscale SSH with agents-cli. Use this skill to sync devices from the tailnet, list them, open a shell on another machine, or see agent sessions running across your whole fleet."
 argument-hint: "[sync|list|show|add|set|ssh]"
-allowed-tools: Bash(agents devices*), Bash(agents ssh*), Bash(agents sessions*)
+allowed-tools: Bash(agents devices*), Bash(agents ssh*), Bash(agents sessions*), Bash(agents run*), Bash(agents hosts*), Bash(agents logs*)
 user-invocable: true
 ---
 
@@ -85,6 +85,24 @@ agents sessions --active --json    # merged, machine-tagged, for scripts
 
 Unreachable or CLI-less hosts are skipped with a note, never fatal. If no
 devices are registered, it prints a tip pointing you at `agents devices sync`.
+
+## Dispatch a run to a machine
+
+Offload `agents run` itself to a registered host over SSH — it follows live by
+default; `--no-follow` detaches and returns immediately.
+
+```bash
+agents run claude "profile this build" --host gpu-box   # run there, follow live
+agents run claude "..." --host gpu-box --no-follow        # detach
+
+agents hosts ps              # list dispatched runs and their status
+agents logs --host gpu-box   # pick a run on that host and view its log
+agents logs <id> -f          # re-attach to a running one and follow
+```
+
+`agents logs [id]` is the unified viewer — it resolves a host-dispatch run OR a
+local session by id, filters with `--host`/`--agent`/`--version`, and `-f`
+follows a live one. `agents hosts logs <id>` is the host-only equivalent.
 
 ## Tips
 

@@ -72,6 +72,12 @@ agents sessions --artifact <filename> <session-id>
 # Live-tail a session file (Claude and Codex only)
 agents sessions tail <session-id>
 # Press Ctrl+C to stop
+
+# Or the unified viewer: resolves a session id OR a host-dispatch run (from
+# `agents run --host`), and -f follows either (a session tail here is
+# `sessions tail` under the hood)
+agents logs <id>          # show the transcript / run log
+agents logs <id> -f       # follow a live one
 ```
 
 ## Cost & Duration
