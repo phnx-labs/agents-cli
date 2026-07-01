@@ -13,7 +13,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { terminalWidth } from '../lib/session/width.js';
+import { terminalWidth, truncateToWidth } from '../lib/session/width.js';
 import {
   addCard,
   detectBrand,
@@ -46,14 +46,25 @@ function formatExp(month: string, year: string): string {
   return `${month}/${year.slice(-2)}`;
 }
 
-function renderRow(c: CardMetadata, cols = terminalWidth()): string {
-  const nick = c.nickname.padEnd(24);
+/** Width of the id column (incl. its 2-space gap): full UUID >=104, short id >=80, none below. */
+export function walletIdWidth(cols: number): number {
+  return cols >= 104 ? 2 + 36 : cols >= 80 ? 2 + 8 : 0;
+}
+
+/** Nickname column width. Shrinks so the whole row fits even at the 60-col floor. */
+export function walletNickWidth(cols: number): number {
+  const rest = 2 + 1 + 18 + 1 + 10 + 1 + 9 + walletIdWidth(cols); // everything but the nickname
+  return Math.max(8, Math.min(24, cols - rest));
+}
+
+export function renderRow(c: CardMetadata, cols = terminalWidth()): string {
+  const nickW = walletNickWidth(cols);
+  const nick = truncateToWidth(c.nickname, nickW).padEnd(nickW);
   const brand = brandLabel(c.brand).padEnd(18);
   const last4 = `•••• ${c.last4}`.padEnd(10);
   const exp = formatExp(c.exp_month, c.exp_year);
-  // Full 36-char UUID pushed rows to ~106 chars. Show it only when there is room:
-  // short id (8) on a normal terminal, none when very narrow.
-  const id = cols >= 100 ? c.id : cols >= 80 ? c.id.slice(0, 8) : '';
+  // Full 36-char UUID pushed rows to ~106 chars; size the id to the terminal.
+  const id = cols >= 104 ? c.id : cols >= 80 ? c.id.slice(0, 8) : '';
   const idCol = id ? `  ${chalk.gray(id)}` : '';
   return `  ${chalk.cyan(nick)} ${brand} ${last4} ${chalk.gray('exp ' + exp)}${idCol}`;
 }
@@ -159,8 +170,9 @@ export function registerWalletCommands(program: Command): void {
           return;
         }
         const walletCols = terminalWidth();
-        const idHeader = walletCols >= 80 ? '        ID' : '';
-        console.log(chalk.bold(`  ${'NICKNAME'.padEnd(24)} ${'BRAND'.padEnd(18)} ${'LAST4'.padEnd(10)} EXP${idHeader}`));
+        const nickW = walletNickWidth(walletCols);
+        const idHeader = walletIdWidth(walletCols) ? '        ID' : '';
+        console.log(chalk.bold(`  ${'NICKNAME'.padEnd(nickW)} ${'BRAND'.padEnd(18)} ${'LAST4'.padEnd(10)} EXP${idHeader}`));
         for (const c of cards) console.log(renderRow(c, walletCols));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
