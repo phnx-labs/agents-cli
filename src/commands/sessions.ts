@@ -1001,6 +1001,15 @@ function resolveViewMode(options: SessionsOptions, filters: FilterOptions): View
   return 'summary';
 }
 
+/**
+ * Render a session's full transcript to stdout — the non-follow view behind
+ * `agents logs <sessionId>`. Reuses the same markdown renderer as
+ * `agents sessions <id> --markdown`.
+ */
+export async function renderSessionLog(session: SessionMeta): Promise<void> {
+  await renderSession(session, 'markdown', {});
+}
+
 async function renderSession(
   session: SessionMeta,
   mode: ViewMode,
@@ -1341,7 +1350,7 @@ interface AgentFilter {
   version?: string;
 }
 
-function parseAgentFilter(agentName?: string): AgentFilter {
+export function parseAgentFilter(agentName?: string): AgentFilter {
   if (!agentName) return {};
   const [name, version] = agentName.split('@', 2);
   let agent: SessionAgentId | null = SESSION_AGENTS.includes(name as SessionAgentId)
