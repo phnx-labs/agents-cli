@@ -646,11 +646,13 @@ By default, secrets sync via iCloud Keychain to your other Macs. With `--no-iclo
 
 Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](src/lib/capabilities.ts). Full matrix also in [docs/00-concepts.md](docs/00-concepts.md).
 
+> **† Gemini CLI is deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agents-cli still manages existing installs, but warns on `agents add gemini` and `agents teams add … gemini`. New setups should use **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
+
 | Agent | Versions | Hooks | MCP | Permissions | Skills | Commands | Plugins | Subagents | Rules | Workflows |
 |-------|----------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
 | Claude Code | yes | yes | yes | yes | yes | yes | yes | yes | `CLAUDE.md` | yes |
 | Codex CLI | yes | >= 0.116.0 | yes | no | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | no | `AGENTS.md` | no |
-| Gemini CLI | yes | >= 0.26.0 | yes | no | yes | yes (.toml) | no | no | `GEMINI.md` | no |
+| Gemini CLI † | yes | >= 0.26.0 | yes | no | yes | yes (.toml) | no | no | `GEMINI.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |
 | Grok Build | yes | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
@@ -672,7 +674,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 |-------|----------|-------|---------------|
 | Claude Code | yes | yes | yes |
 | Codex CLI | yes | yes | yes |
-| Gemini CLI | yes | yes | yes |
+| Gemini CLI † | yes | yes | yes |
 | Cursor | -- | yes | -- |
 | OpenCode | -- | yes | -- |
 | Grok Build | -- | yes | yes |

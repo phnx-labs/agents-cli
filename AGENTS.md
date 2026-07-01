@@ -85,7 +85,7 @@ Not every harness supports every capability — the registry decides per harness
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — | edit·skip |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — | plan·edit·skip |
 | ★ OpenCode | `opencode` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
-| Gemini | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·skip |
+| Gemini † | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·skip |
 | Cursor | `cursor` | — | ✓ | — | ✓ | ✓ | — | — | — | edit·skip |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — | plan·edit·skip |
 | Copilot | `copilot` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·auto·skip |
@@ -100,6 +100,7 @@ Not every harness supports every capability — the registry decides per harness
 - `rules` (the memory file) is supported by **all 15** — each writes its own file (see config matrix below). `workflows` is **Claude-only**. `mcp` is universal.
 - `allowlist` (granular per-tool permission rules) is limited to `claude`, `antigravity`, `grok`, `kimi`.
 - `subagents` is limited to `claude`, `openclaw`, `droid`.
+- **† Gemini (`gemini`) is deprecated by Google.** The Gemini CLI was retired for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); **Antigravity CLI (`antigravity`) is the official successor.** agents-cli still manages existing installs but warns on `agents add gemini` / `agents teams add … gemini` (`warnAgentDeprecated` in [`src/lib/agents.ts`](src/lib/agents.ts); marker on the `gemini` registry entry).
 
 ### Config matrix
 
