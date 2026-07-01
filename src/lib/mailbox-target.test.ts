@@ -56,6 +56,13 @@ describe('resolveMessageTarget', () => {
     expect(resolveMessageTarget('aaaa-1111', sessions, noCloud)).toEqual({ kind: 'local', id: 'aaaa-1111' });
   });
 
+  it('treats an empty target as no match (no startsWith-matches-everything footgun)', () => {
+    const sessions = [mk({ sessionId: 'aaaa-1111' }), mk({ sessionId: 'bbbb-2222' })];
+    expect(resolveMessageTarget('', sessions, noCloud)).toEqual({ kind: 'none' });
+    // even with a single running agent, empty must not silently deliver.
+    expect(resolveMessageTarget('', [mk({ sessionId: 'only-one' })], noCloud)).toEqual({ kind: 'none' });
+  });
+
   it('exact match wins over a prefix that would be ambiguous', () => {
     const sessions = [mk({ sessionId: 'aaaa' }), mk({ sessionId: 'aaaa-longer' })];
     // 'aaaa' is an exact id of the first AND a prefix of the second — exact wins.

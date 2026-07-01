@@ -30,6 +30,9 @@ export function registerMessageCommand(program: Command): void {
     .description('Send a message to a running agent (delivered at its next tool call) or a cloud task.')
     .option('--from <who>', 'Label recorded as the sender of this message')
     .action(async (target: string, text: string, opts: { from?: string }) => {
+      if (!target.trim()) {
+        die('Target must be a session/agent id or cloud task id. Run `agents sessions --active` to list running agents.');
+      }
       const sessions = await getActiveSessions();
       const res = resolveMessageTarget(target, sessions, (id) => getTaskById(id) != null);
 
@@ -47,11 +50,15 @@ export function registerMessageCommand(program: Command): void {
           return;
         }
         case 'local': {
-          const msgId = enqueue(mailboxDir(res.id), { to: res.id, text, from: opts.from });
-          console.log(
-            chalk.green(`Queued message ${msgId} for ${res.id}. `) +
-              chalk.dim('The agent will see it at its next tool call.'),
-          );
+          try {
+            const msgId = enqueue(mailboxDir(res.id), { to: res.id, text, from: opts.from });
+            console.log(
+              chalk.green(`Queued message ${msgId} for ${res.id}. `) +
+                chalk.dim('The agent will see it at its next tool call.'),
+            );
+          } catch (err) {
+            die((err as Error).message);
+          }
           return;
         }
         case 'ambiguous': {

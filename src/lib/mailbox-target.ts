@@ -38,10 +38,10 @@ export function resolveMessageTarget(
   isCloudTask: (id: string) => boolean,
 ): MessageResolution {
   if (isCloudTask(target)) return { kind: 'cloud', id: target };
+  // An empty target would make every `startsWith` prefix match — never guess.
+  if (target.length === 0) return { kind: 'none' };
 
-  const exact = sessions.filter(
-    (s) => s.sessionId === target || s.agentId === target || s.cloudTaskId === target,
-  );
+  const exact = sessions.filter((s) => s.sessionId === target || s.agentId === target);
   const chosen =
     exact.length > 0
       ? exact
