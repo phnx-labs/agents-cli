@@ -1,11 +1,20 @@
 name: CI
 
+# The cross-platform build matrix is EXPENSIVE (macOS is billed 10x, Windows 2x
+# on GitHub-hosted runners) and largely redundant per-PR: every PR to main
+# already runs the real suite cheaply on Linux via `test` (sandbox.yml) plus
+# `gitleaks` (secret-scan.yml). So the full matrix runs only where a green
+# cross-platform picture actually matters — release/** branches and v* tags —
+# plus manual dispatch. It does NOT run on main pushes/PRs. The release flow
+# (scripts/release.sh) opens each release as a chore PR on a release/v<version>
+# branch, which fires this workflow before the release is merged + published.
 on:
   push:
-    branches: ['main', 'release/**']
+    branches: ['release/**']
     tags: ['v*']
   pull_request:
-    branches: ['main', 'release/**']
+    branches: ['release/**']
+  workflow_dispatch:
 
 jobs:
   build:
@@ -18,9 +27,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node-version: [22, 24]
-    # All three OSes gate merges. Windows is now green and required alongside
-    # Linux and macOS — no leg is allowed to fail (was: continue-on-error on
-    # windows-latest while the native-Windows gaps were brought up).
+    # Runs pre-release only (release/** branches + v* tags + manual dispatch),
+    # so this is the last cross-platform gate before a version ships. None of
+    # these legs are required on main PRs — the main-protection ruleset gates
+    # merges on the cheap `test` + `gitleaks` checks instead.
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

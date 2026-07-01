@@ -141,7 +141,7 @@ src/
 bun install && bun run build && bun test
 ```
 
-Tests are `*.test.ts` next to source; integration in `tests/`. CI runs Node 22 + 24 on every PR ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Tests are `*.test.ts` next to source; integration in `tests/`. Every PR to `main` runs the real suite cheaply on Linux — `test` ([`sandbox.yml`](.github/workflows/sandbox.yml)) plus `gitleaks` ([`secret-scan.yml`](.github/workflows/secret-scan.yml)); those two are the required checks. The full cross-platform matrix (ubuntu + macOS + Windows × Node 22/24, [`ci.yml`](.github/workflows/ci.yml)) is cost-gated to `release/**` branches and `v*` tags (plus manual dispatch), so it runs before a release, not on every PR.
 
 **Local dev build:** `scripts/install.sh --skip-tests` builds the working tree and installs at `$HOME/.local/agents-cli-dev/`, symlinked into `$HOME/.local/bin/agents`. The npm-installed global is never touched. Version stamps as `0.0.0-dev.<sha>[-dirty]` so `agents --version` disambiguates which build is on PATH.
 
