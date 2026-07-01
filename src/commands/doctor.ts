@@ -299,7 +299,10 @@ function renderOverviewText(
           : '';
         console.log(prefix + chalk.gray(desc));
       } else {
-        console.log(`  ${chalk.red('miss ')}  ${label}  ${src}  ${chalk.gray(`not installed — run \`agents cli install ${manifest.name}\``)}`);
+        const prefix = `  ${chalk.red('miss ')}  ${label}  ${src}`;
+        const msg = `not installed — run \`agents cli install ${manifest.name}\``;
+        const budget = Math.max(1, terminalWidth() - stringWidth(prefix) - 2);
+        console.log(prefix + chalk.gray(`  ${truncateToWidth(msg, budget)}`));
       }
     }
   }
