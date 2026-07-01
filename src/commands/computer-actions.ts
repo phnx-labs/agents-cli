@@ -556,8 +556,9 @@ export function registerActionCommands(program: Command): void {
     .option('--bundle <id>', 'Bundle id (e.g. com.apple.TextEdit)')
     .option('--path <p>', 'Path to the .app bundle')
     .option('--name <s>', 'App name (resolved via /Applications and LaunchServices)')
+    .option('--host <device>', 'Drive a remote Windows device (requires `agents computer start --host <device>` first)')
     .option('--json', 'Emit JSON')
-    .action(async (opts: { bundle?: string; path?: string; name?: string; json?: boolean }) => {
+    .action(async (opts: { bundle?: string; path?: string; name?: string; host?: string; json?: boolean }) => {
       if (!opts.bundle && !opts.path && !opts.name) {
         console.error('pass one of --bundle, --path, --name');
         process.exit(1);
