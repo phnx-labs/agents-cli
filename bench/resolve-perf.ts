@@ -17,7 +17,7 @@
 
 import { performance } from 'perf_hooks';
 import { listInstalledVersions, invalidateInstalledVersionsCache, getGlobalDefault } from '../src/lib/versions.js';
-import { resolveAgentTargets } from '../src/lib/agent-spec.js';
+import { resolveAgentTargets } from '../src/lib/agent-spec/index.js';
 import { ALL_AGENT_IDS } from '../src/lib/agents.js';
 import type { AgentId } from '../src/lib/types.js';
 
