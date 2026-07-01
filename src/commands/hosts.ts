@@ -21,6 +21,7 @@ import {
   localCliVersion,
 } from '../lib/hosts/ready.js';
 import { listTasks } from '../lib/hosts/tasks.js';
+import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import { showHostTaskLog } from '../lib/hosts/logs.js';
 
 interface AddOptions { cap?: string[]; os?: string; enroll?: boolean; }
@@ -175,7 +176,10 @@ async function doRemove(name: string): Promise<void> {
 }
 
 async function doPs(json: boolean): Promise<void> {
-  const tasks = listTasks();
+  // Heal any 'running' record whose local follower died (dropped connection,
+  // laptop sleep) against the remote `.exit` before listing, so `ps` never shows
+  // a finished run stuck at 'running'.
+  const tasks = reconcileRunningTasks(listTasks());
   if (json) {
     console.log(JSON.stringify(tasks, null, 2));
     return;

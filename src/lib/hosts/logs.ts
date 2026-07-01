@@ -9,8 +9,9 @@
 
 import * as fs from 'fs';
 import chalk from 'chalk';
-import { loadTask, localLogPath } from './tasks.js';
+import { loadTask, localLogPath, updateTask, terminalPatch } from './tasks.js';
 import { followHostTask } from './progress.js';
+import { reconcileTask } from './reconcile.js';
 
 export interface HostLogResult {
   /** False when no host task with this id exists (caller may fall through to sessions). */
@@ -31,9 +32,18 @@ export async function showHostTaskLog(id: string, follow: boolean): Promise<Host
       taskId: id,
       echo: true,
     });
-    return { found: true, exitCode: code === -1 ? 1 : code };
+    // -1 = follow window closed; the run continues on the host (not a failure,
+    // so exit 0). Any real code is the finished run — persist the terminal
+    // status the killed dispatch follower would have written.
+    if (code === -1) return { found: true, exitCode: 0 };
+    updateTask(id, terminalPatch(code));
+    return { found: true, exitCode: code };
   }
 
+  // Non-follow view: heal a still-'running' record from the remote `.exit` so a
+  // plain `logs <id>` also unsticks a task whose follower was killed. No-op (no
+  // ssh) once the record is already terminal.
+  reconcileTask(task);
   try {
     process.stdout.write(fs.readFileSync(localLogPath(id), 'utf-8'));
   } catch {

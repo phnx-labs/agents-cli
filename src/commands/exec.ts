@@ -416,7 +416,11 @@ export function registerRunCommand(program: Command): void {
             console.log(chalk.green(`Dispatched to ${host.name}.`) + chalk.gray(' Track: agents hosts ps · Follow: agents hosts logs <id> -f'));
             process.exit(0);
           }
-          process.exit(exitCode === undefined || exitCode === -1 ? 1 : exitCode);
+          // -1 = the follow window closed but the run continues on the host (the
+          // reattach hint is already printed). That's a detach, not a failure —
+          // exit 0. Any real remote code passes through.
+          if (exitCode === -1) process.exit(0);
+          process.exit(exitCode ?? 1);
         } catch (err) {
           console.error(chalk.red((err as Error).message));
           process.exit(1);

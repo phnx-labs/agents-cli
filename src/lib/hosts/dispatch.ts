@@ -14,7 +14,7 @@ import { sshExec, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { sshTargetFor } from './types.js';
 import { ensureHostReady } from './ready.js';
-import { saveTask, updateTask, type HostTask } from './tasks.js';
+import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
 
 // Use $HOME (not ~) so the path is correct whether or not it's quoted and
@@ -89,12 +89,11 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     echo: true,
     timeoutMs: opts.timeoutMs,
   });
-  const finished = updateTask(id, {
-    status: exitCode === 0 ? 'completed' : exitCode === -1 ? 'unknown' : 'failed',
-    exitCode: exitCode === -1 ? undefined : exitCode,
-    finishedAt: new Date().toISOString(),
-  });
-  return { task: finished ?? task, exitCode };
+  // -1 = the follow window closed while the run continues on the host. Leave the
+  // record 'running' (do NOT freeze it terminal) so a later `hosts ps`/`logs`
+  // reconcile against the remote `.exit` resolves the true final status.
+  const finished = exitCode === -1 ? task : (updateTask(id, terminalPatch(exitCode)) ?? task);
+  return { task: finished, exitCode };
 }
 
 export interface DispatchOptions {
