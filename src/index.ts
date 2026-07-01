@@ -117,6 +117,7 @@ import {
   loadBrowser,
   loadComputer,
   loadHosts,
+  loadLogs,
   loadSsh,
   loadPull,
   loadPush,
@@ -199,6 +200,7 @@ Run and dispatch:
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
+  logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
@@ -882,6 +884,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadBrowser);
   await reg(loadComputer);
   await reg(loadHosts);
+  await reg(loadLogs);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
