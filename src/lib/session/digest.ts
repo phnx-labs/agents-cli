@@ -69,9 +69,11 @@ export function classifyFileChanges(events: SessionEvent[]): FileChange[] {
       if (!seen.has(p) && !readBefore.has(p)) created.add(p);
       else modified.add(p);
       seen.add(p);
+      deleted.delete(p); // a write after a delete recreates the file
     } else if (EDIT_TOOLS.has(tool)) {
       modified.add(p);
       seen.add(p);
+      deleted.delete(p);
     }
   }
 
@@ -136,6 +138,17 @@ function parseTestOutput(runner: string, output: string): { passed?: number; fai
   if (runner === 'tsc') {
     const errs = output.match(/error\s+TS\d+/gi);
     return { failed: errs ? errs.length : 0, ok: true };
+  }
+  // go test: no pass/fail counts — uses `--- PASS/FAIL:` lines and an ok/FAIL
+  // summary. Count the per-test markers; fall back to the summary verdict.
+  if (runner === 'go test') {
+    const passCount = (output.match(/---\s+PASS/gi) || []).length;
+    const failCount = (output.match(/---\s+FAIL/gi) || []).length;
+    const sawFail = failCount > 0 || /(^|\s)FAIL($|\s)/.test(output);
+    const sawOk = /(^|\s)(ok|PASS)($|\s)/.test(output);
+    if (sawFail || sawOk) {
+      return { passed: passCount || undefined, failed: sawFail ? failCount || 1 : 0, ok: true };
+    }
   }
   return { ok: false };
 }

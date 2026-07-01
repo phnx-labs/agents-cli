@@ -43,6 +43,15 @@ describe('classifyFileChanges', () => {
     const changes = classifyFileChanges([tool('Write', '/home/u/.claude/plans/foo.md')]);
     expect(changes).toHaveLength(0);
   });
+
+  it('created then deleted then recreated nets to created (file exists)', () => {
+    const changes = classifyFileChanges([
+      tool('Write', 'tmp/x'),
+      tool('Bash', undefined, 'rm tmp/x'),
+      tool('Write', 'tmp/x'),
+    ]);
+    expect(changes.filter(c => c.path === 'tmp/x')).toEqual([{ path: 'tmp/x', op: 'created' }]);
+  });
 });
 
 describe('extractDeletedPaths', () => {
@@ -50,6 +59,9 @@ describe('extractDeletedPaths', () => {
     expect(extractDeletedPaths('rm -rf dist a.txt')).toEqual(['dist', 'a.txt']);
     expect(extractDeletedPaths('git rm old.ts')).toEqual(['old.ts']);
     expect(extractDeletedPaths('rm *.log')).toEqual([]); // glob skipped
+  });
+  it('parses a delete chained after another command', () => {
+    expect(extractDeletedPaths('bun run build && rm dist/old.js')).toEqual(['dist/old.js']);
   });
   it('ignores non-delete commands', () => {
     expect(extractDeletedPaths('echo rm not-a-delete')).toEqual([]);
@@ -102,5 +114,23 @@ describe('detectTestResult', () => {
 
   it('returns undefined when nothing ran', () => {
     expect(detectTestResult([tool('Read', 'a.ts')])).toBeUndefined();
+  });
+
+  it('reads go test PASS/FAIL markers', () => {
+    const pass = detectTestResult([tool('Bash', undefined, 'go test ./...'), result('--- PASS: TestA (0.01s)\nok  \tpkg\t0.2s')]);
+    expect(pass?.runner).toBe('go test');
+    expect(pass?.failed).toBe(0);
+    const fail = detectTestResult([tool('Bash', undefined, 'go test ./...'), result('--- FAIL: TestB (0.01s)\nFAIL\tpkg\t0.2s')]);
+    expect(fail?.failed).toBe(1);
+    expect(fail?.ok).toBe(true);
+  });
+
+  it('marks the runner failed when the result is an error event', () => {
+    const r = detectTestResult([
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-06-30T10:00:00Z', tool: 'Bash', command: 'bun test' },
+      { type: 'error', agent: 'claude', timestamp: '2026-06-30T10:00:01Z', tool: 'Bash', content: 'exit 1' },
+    ]);
+    expect(r?.runner).toBe('tests');
+    expect(r?.failed).toBe(1);
   });
 });

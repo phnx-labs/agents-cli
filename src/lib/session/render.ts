@@ -710,7 +710,6 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
     return m;
   };
 
-  const modifiedAbsMap = buildAbsMap(filesModifiedAbs);
   const readAbsMap = buildAbsMap(filesReadAbs);
 
   // ── Render sections ───────────────────────────────────────────────────────
