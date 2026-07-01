@@ -63,8 +63,9 @@ describe('itermTabScript', () => {
     expect(s).toContain('tell application "iTerm2"');
     expect(s).toContain('create tab with default profile command');
     expect(s).toContain('if (count of windows) is 0 then');
-    // the resume command is wrapped in a login shell that cd's into the session cwd
-    expect(s).toContain('zsh -lc');
+    // wrapped in an INTERACTIVE login shell (-i) that cd's into the session cwd —
+    // -i is required so ~/.zshrc puts the version-shim dir on PATH
+    expect(s).toContain('zsh -ilc');
     expect(s).toContain('/Users/me/dev');
     expect(s).toContain('exec claude@2.1.187 --resume cad0e546');
   });
@@ -77,7 +78,8 @@ describe('ghosttyTabScript', () => {
     expect(s).toContain('new surface configuration');
     expect(s).toContain('set initial working directory of cfg to "/Users/me/dev"');
     expect(s).toContain('new tab in front window with configuration cfg');
-    // cwd is native, so the command execs without a cd
+    // interactive login shell so the version shim resolves; cwd is native (no cd)
+    expect(s).toContain('zsh -ilc');
     expect(s).toContain('exec claude@2.1.187 --resume cad0e546');
     expect(s).not.toContain('cd ');
   });
@@ -88,9 +90,9 @@ describe('buildLaunchArgv', () => {
     expect(buildLaunchArgv('iterm', '/x', RESUME)[0]).toBe('osascript');
     expect(buildLaunchArgv('ghostty', '/x', RESUME)[0]).toBe('osascript');
   });
-  it('opens a tmux window with the cwd and joined command', () => {
+  it('opens a tmux window with the cwd and an interactive-login-wrapped command', () => {
     expect(buildLaunchArgv('tmux', '/x/y', RESUME)).toEqual([
-      'tmux', 'new-window', '-c', '/x/y', 'claude@2.1.187 --resume cad0e546',
+      'tmux', 'new-window', '-c', '/x/y', "zsh -ilc 'exec claude@2.1.187 --resume cad0e546'",
     ]);
   });
   it('inplace returns the resume argv verbatim', () => {

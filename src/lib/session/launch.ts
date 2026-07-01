@@ -90,14 +90,22 @@ export function availableDestinations(
   return out;
 }
 
-/** Login-shell string that cd's into cwd and execs the resume argv. */
+/**
+ * Shell string that cd's into cwd and execs the resume argv.
+ *
+ * The wrappers below run this via `zsh -ilc` — an *interactive* login shell.
+ * `-i` is load-bearing, not cosmetic: the version-pinned shims (`claude@2.1.187`)
+ * live in `~/.agents/.cache/shims`, which `.zshrc` puts on PATH for interactive
+ * shells only. A plain `zsh -lc` (login, non-interactive) skips `.zshrc`, so the
+ * shim isn't found and the tab dies with "command not found". Do not drop `-i`.
+ */
 function loginExec(cwd: string, resume: string[]): string {
   return `cd ${shellQuote(cwd)} && exec ${resume.join(' ')}`;
 }
 
 /** AppleScript that opens an iTerm tab (a window if none is open) running the resume. */
 export function itermTabScript(cwd: string, resume: string[]): string {
-  const cmd = appleScriptStr(`zsh -lc ${shellQuote(loginExec(cwd, resume))}`);
+  const cmd = appleScriptStr(`zsh -ilc ${shellQuote(loginExec(cwd, resume))}`);
   return [
     'tell application "iTerm2"',
     '  activate',
@@ -112,10 +120,10 @@ export function itermTabScript(cwd: string, resume: string[]): string {
 
 /** AppleScript that opens a Ghostty tab (a window if none is open) running the resume. */
 export function ghosttyTabScript(cwd: string, resume: string[]): string {
-  // Ghostty (>=1.3) runs `command` directly; wrap it in a login shell so the
-  // version-pinned shim (e.g. claude@2.1.187) resolves on PATH and login env
-  // is loaded. cwd is a native surface property, so no `cd` is needed.
-  const cmd = appleScriptStr(`zsh -lc ${shellQuote(`exec ${resume.join(' ')}`)}`);
+  // Ghostty (>=1.3) runs `command` directly; wrap it in an interactive login
+  // shell so the version-pinned shim (e.g. claude@2.1.187) resolves on PATH.
+  // cwd is a native surface property, so no `cd` is needed.
+  const cmd = appleScriptStr(`zsh -ilc ${shellQuote(`exec ${resume.join(' ')}`)}`);
   return [
     'tell application "Ghostty"',
     '  activate',
@@ -140,7 +148,9 @@ export function buildLaunchArgv(target: ResumeTarget, cwd: string, resume: strin
   switch (target) {
     case 'iterm':   return ['osascript', '-e', itermTabScript(cwd, resume)];
     case 'ghostty': return ['osascript', '-e', ghosttyTabScript(cwd, resume)];
-    case 'tmux':    return ['tmux', 'new-window', '-c', cwd, resume.join(' ')];
+    // Wrap in an interactive login shell for the same PATH reason as loginExec:
+    // tmux runs new-window commands via a non-interactive shell otherwise.
+    case 'tmux':    return ['tmux', 'new-window', '-c', cwd, `zsh -ilc ${shellQuote(`exec ${resume.join(' ')}`)}`];
     case 'inplace': return resume;
   }
 }
