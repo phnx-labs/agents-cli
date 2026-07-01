@@ -334,6 +334,24 @@ describe('runMigration', () => {
     expect(g('ls-files', '-v', 'agents.yaml').startsWith('S ')).toBe(false);
   });
 
+  it('clears skip-worktree without rewriting a portable-only central agents.yaml', () => {
+    const original = 'run:\n  claude:\n    strategy: balanced\n';
+    fs.writeFileSync(path.join(userDir, 'agents.yaml'), original);
+    const g = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: userDir, encoding: 'utf-8', stdio: 'pipe' });
+    g('init', '-q');
+    g('add', 'agents.yaml');
+    g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
+    g('update-index', '--skip-worktree', 'agents.yaml');
+
+    runRealMigration();
+
+    // Nothing to split: central portable content preserved, no device file, bit cleared.
+    expect(fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8')).toContain('strategy: balanced');
+    expect(fs.existsSync(devicePinsFile())).toBe(false);
+    expect(g('ls-files', '-v', 'agents.yaml').startsWith('S ')).toBe(false);
+  });
+
   describe('system-repo sweep', () => {
     it('moves system sessions/ filesystem entries into ~/.agents/.history/sessions/', () => {
       const sysSessions = path.join(systemDir, 'sessions');

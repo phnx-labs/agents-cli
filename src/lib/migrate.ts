@@ -1509,46 +1509,52 @@ function migrateSplitDeviceLocalMeta(): void {
 
   const agents = meta.agents as Record<string, string> | undefined;
   const versions = meta.versions as Record<string, unknown> | undefined;
-  if ((!agents || Object.keys(agents).length === 0) && (!versions || Object.keys(versions).length === 0)) {
-    return; // already split — idempotency guard
-  }
+  const hasLocal =
+    (!!agents && Object.keys(agents).length > 0) || (!!versions && Object.keys(versions).length > 0);
 
   const HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agents-cli\n\n';
 
-  // agents: -> per-device file (merge, existing device entries win).
-  if (agents && Object.keys(agents).length > 0) {
-    const devicePath = path.join(USER_DIR, 'devices', machineId(), 'agents.yaml');
-    let existing: Record<string, string> = {};
-    try {
-      const dm = yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as { agents?: Record<string, string> };
-      if (dm?.agents) existing = dm.agents;
-    } catch { /* absent */ }
-    fs.mkdirSync(path.dirname(devicePath), { recursive: true });
-    atomicWriteFileSync(devicePath, HEADER + yaml.stringify({ agents: { ...agents, ...existing } }));
+  // Only rewrite central when it actually carries machine-local fields — a
+  // machine whose agents.yaml is already portable-only is left untouched.
+  if (hasLocal) {
+    // agents: -> per-device file (merge, existing device entries win).
+    if (agents && Object.keys(agents).length > 0) {
+      const devicePath = path.join(USER_DIR, 'devices', machineId(), 'agents.yaml');
+      let existing: Record<string, string> = {};
+      try {
+        const dm = yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as { agents?: Record<string, string> };
+        if (dm?.agents) existing = dm.agents;
+      } catch { /* absent */ }
+      fs.mkdirSync(path.dirname(devicePath), { recursive: true });
+      atomicWriteFileSync(devicePath, HEADER + yaml.stringify({ agents: { ...agents, ...existing } }));
+    }
+
+    // versions: -> machine-local history JSON (merge, existing wins).
+    if (versions && Object.keys(versions).length > 0) {
+      const vrPath = path.join(USER_DIR, '.history', 'version-resources.json');
+      let existing: Record<string, unknown> = {};
+      try { existing = (JSON.parse(fs.readFileSync(vrPath, 'utf-8')) as Record<string, unknown>) || {}; } catch { /* absent */ }
+      fs.mkdirSync(path.dirname(vrPath), { recursive: true });
+      atomicWriteFileSync(vrPath, JSON.stringify({ ...versions, ...existing }, null, 2) + '\n');
+    }
+
+    // Strip machine-local fields from central and rewrite (portable only) — after
+    // the device/history writes above, so a crash never loses data.
+    delete meta.agents;
+    delete meta.versions;
+    atomicWriteFileSync(metaFile, HEADER + yaml.stringify(meta));
   }
 
-  // versions: -> machine-local history JSON (merge, existing wins).
-  if (versions && Object.keys(versions).length > 0) {
-    const vrPath = path.join(USER_DIR, '.history', 'version-resources.json');
-    let existing: Record<string, unknown> = {};
-    try { existing = (JSON.parse(fs.readFileSync(vrPath, 'utf-8')) as Record<string, unknown>) || {}; } catch { /* absent */ }
-    fs.mkdirSync(path.dirname(vrPath), { recursive: true });
-    atomicWriteFileSync(vrPath, JSON.stringify({ ...versions, ...existing }, null, 2) + '\n');
-  }
-
-  // Strip machine-local fields from central and rewrite (portable only) — after
-  // the device/history writes above, so a crash never loses data.
-  delete meta.agents;
-  delete meta.versions;
-  atomicWriteFileSync(metaFile, HEADER + yaml.stringify(meta));
-
-  // LAST: clear any skip-worktree bit (set by earlier setups) so the now-portable
-  // file's content already matches the split shape before git tracks it again.
+  // Always clear any skip-worktree bit (idempotent, best-effort) so agents.yaml
+  // syncs cleanly on every machine — even one that had nothing to split. Runs
+  // after any rewrite so the tracked content already matches the split shape.
   try {
     execSync('git update-index --no-skip-worktree agents.yaml', { cwd: USER_DIR, stdio: 'ignore' });
   } catch { /* not a git repo / bit not set */ }
 
-  console.error('Split agents.yaml: agents: -> devices/, versions: -> .history/version-resources.json');
+  if (hasLocal) {
+    console.error('Split agents.yaml: agents: -> devices/, versions: -> .history/version-resources.json');
+  }
 }
 
 /**
