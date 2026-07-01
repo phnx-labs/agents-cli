@@ -13,9 +13,12 @@ import * as path from 'path';
 import {
   AgentManager,
   checkAllClis,
+  checkCliSignedIn,
   getAgentsDir,
+  resolveSignInAdvisory,
   VALID_TASK_TYPES,
   type AgentType,
+  type SignInAdvisory,
   type TaskType,
 } from '../lib/teams/agents.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
@@ -47,6 +50,7 @@ import {
   removeWorktree,
 } from '../lib/teams/worktree.js';
 import { isVersionInstalled, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/versions.js';
+import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
 import type { SessionMeta } from '../lib/session/types.js';
@@ -193,7 +197,7 @@ function parseTeammate(spec: string): {
 
   die(
     `Unknown teammate '${spec}'. Available agents: ${VALID_AGENTS.join(', ')}.\n` +
-      `  Use 'claude', 'claude@2.1.112', or the name of a profile from 'agents view'.`
+      `  Use 'claude', 'kimi@latest', 'kimi@0.19.2' (a version from 'agents view'), or a profile name.`
   );
 }
 
@@ -252,6 +256,32 @@ export function wireCloudDispatcher(mgr: AgentManager): void {
     const cloudTask = await prov.dispatch(dispatchOpts);
     return { cloudSessionId: cloudTask.id };
   });
+}
+
+/**
+ * Advisory: warn once per agent type of any still-pending (staged `--after`)
+ * teammate whose CLI may not be signed in. Warn-only — never blocks `start`.
+ * Local teammates only; cloud teammates authenticate through their provider.
+ */
+async function warnUnsignedTeammates(mgr: AgentManager, team: string): Promise<void> {
+  let pending;
+  try {
+    pending = (await mgr.listByTask(team)).filter((a) => a.status === 'pending' && !a.cloudProvider);
+  } catch {
+    return; // team not loadable yet — nothing to warn about
+  }
+  const seen = new Set<AgentType>();
+  for (const a of pending) {
+    const agent = a.agentType as AgentType;
+    if (seen.has(agent) || !AGENT_NAMES[agent]) continue;
+    seen.add(agent);
+    if (!(await checkCliSignedIn(agent))) {
+      console.error(
+        chalk.yellow(`⚠ ${AGENT_NAMES[agent]} may not be signed in (detection is unreliable). Launching anyway.`) +
+          chalk.gray(`\n  If it fails to start, run \`${AGENTS[agent].cliCommand}\` to log in, or pass --force to silence this.`)
+      );
+    }
+  }
 }
 
 /** Single-wave start used by `teams start` without --watch. */
@@ -963,11 +993,12 @@ export function registerTeamsCommands(program: Command): void {
     .option('--cloud <provider>', `Dispatch to cloud backend instead of local CLI: ${VALID_CLOUD_PROVIDERS.join('|')}`)
     .option('--repo <owner/repo>', 'GitHub repository (required for --cloud rush)')
     .option('--branch <name>', 'Target git branch for cloud dispatch')
+    .option('--force', "Skip the advisory 'may not be signed in' warning (detection is unreliable)")
     .option('--json', 'Output machine-readable JSON')
     .action(async (team: string, teammate: string, task: string, opts: {
       name?: string; mode: string; effort: string; model?: string; env: string[];
       cwd?: string; worktree?: string; after?: string; json?: boolean;
-      taskType?: string; cloud?: string; repo?: string; branch?: string;
+      taskType?: string; cloud?: string; repo?: string; branch?: string; force?: boolean;
     }) => {
       if (!(VALID_MODES as readonly string[]).includes(opts.mode)) {
         die(`Invalid mode '${opts.mode}'. Use one of: ${VALID_MODES.join(', ')}`);
@@ -1000,7 +1031,17 @@ export function registerTeamsCommands(program: Command): void {
         die(
           `${AGENT_NAMES[agent]} ${version} isn't installed.\n` +
             `  Install it:  agents add ${agent}@${version}\n` +
-            `  Or see what's installed:  agents view ${agent}`
+            `  Or see what's installed (incl. @latest):  agents view ${agent}`
+        );
+      }
+
+      // Advisory sign-in check: warn but NEVER block. Detection is unreliable
+      // for opaque-cred agents, so a false negative must not stop a team. Cloud
+      // dispatch authenticates through the provider, not the local CLI — skip it.
+      if (!opts.force && !cloudProviderId && !(await checkCliSignedIn(agent))) {
+        console.error(
+          chalk.yellow(`⚠ ${AGENT_NAMES[agent]} may not be signed in (detection is unreliable). Adding anyway.`) +
+            chalk.gray(`\n  If it fails to start, run \`${AGENTS[agent].cliCommand}\` to log in, or pass --force to silence this.`)
         );
       }
 
@@ -1315,7 +1356,8 @@ export function registerTeamsCommands(program: Command): void {
     .option('--watch', 'Keep running: poll every --interval seconds, fire new waves, exit when the DAG drains.')
     .option('--interval <seconds>', 'Seconds between waves in --watch mode (default 8)', '8')
     .option('--max-waves <n>', 'Safety cap on waves in --watch mode (default 1000)', '1000')
-    .action(async (team: string | undefined, opts: { json?: boolean; watch?: boolean; interval: string; maxWaves: string }) => {
+    .option('--force', "Skip the advisory 'may not be signed in' warning for staged teammates (detection is unreliable)")
+    .action(async (team: string | undefined, opts: { json?: boolean; watch?: boolean; interval: string; maxWaves: string; force?: boolean }) => {
       const mgr = mkManager();
       wireCloudDispatcher(mgr);
 
@@ -1324,6 +1366,8 @@ export function registerTeamsCommands(program: Command): void {
         if (!picked) return;
         team = picked;
       }
+
+      if (!opts.force && !isJsonMode(opts)) await warnUnsignedTeammates(mgr, team);
 
       if (!opts.watch) {
         await runOneWave(mgr, team, Boolean(opts.json));
@@ -1644,19 +1688,47 @@ export function registerTeamsCommands(program: Command): void {
   teams
     .command('doctor')
     .alias('dr')
-    .description('Check which agents are installed and available to join a team. Verifies CLI paths.')
+    .description('Check which agents are installed and available to join a team. Verifies CLI paths and shows an advisory sign-in hint.')
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts: { json?: boolean }) => {
       const info = checkAllClis();
+
+      // Advisory enrichment only. Sign-in detection is UNRELIABLE, so it never
+      // changes the authoritative installed/ready column — it annotates. And an
+      // agent that is actually running in a team is treated as signed in
+      // regardless of the probe, so doctor never reports a working agent as
+      // logged out ("don't show wrong stuff").
+      const running = new Set<string>();
+      try {
+        for (const a of await mkManager().listRunning()) running.add(a.agentType);
+      } catch { /* no teams yet — leave running empty */ }
+
+      const auth: Record<string, SignInAdvisory> = {};
+      await Promise.all(
+        Object.entries(info).map(async ([name, entry]) => {
+          const isRunning = running.has(name);
+          const probe = entry.installed && !isRunning ? await checkCliSignedIn(name as AgentType) : false;
+          auth[name] = resolveSignInAdvisory(entry.installed, isRunning, probe);
+        })
+      );
+
       if (isJsonMode(opts)) {
-        console.log(JSON.stringify(info, null, 2));
+        const merged: Record<string, unknown> = {};
+        for (const [name, entry] of Object.entries(info)) merged[name] = { ...entry, ...auth[name] };
+        console.log(JSON.stringify(merged, null, 2));
         return;
       }
       console.log(chalk.bold('Who can join a team:'));
       for (const [name, entry] of Object.entries(info)) {
         const pretty = AGENT_NAMES[name as AgentType] || name;
         if (entry.installed) {
-          console.log(`  ${chalk.green('ready')}  ${pretty.padEnd(10)} ${chalk.gray(entry.path || '')}`);
+          const { signedIn, running: isRunning } = auth[name];
+          const hint = isRunning
+            ? chalk.gray('in use')
+            : signedIn
+              ? chalk.gray('signed in')
+              : chalk.gray('sign-in unverified');
+          console.log(`  ${chalk.green('ready')}  ${pretty.padEnd(10)} ${chalk.gray(entry.path || '')}  ${hint}`);
         } else {
           console.log(`  ${chalk.red('no   ')}  ${pretty.padEnd(10)} ${chalk.gray(entry.error || 'not installed')}`);
         }
