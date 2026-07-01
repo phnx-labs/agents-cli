@@ -95,8 +95,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 20 (kimi resolves via generic node_modules branch in dispatcher)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(20);
+  it('is 21 (kimi via generic branch + grok anti-loop guard in dispatcher)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(21);
   });
 });
 
@@ -156,7 +156,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(9);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(10);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
@@ -181,6 +181,22 @@ describe('generateVersionedAliasScript', () => {
     expect(script).toContain('GROK_DOWNLOADS="$HOME/.grok/downloads"');
     expect(script).not.toContain('node_modules/.bin/grok');
     expect(script).toContain('export GROK_HOME=');
+  });
+
+  // Regression (re-exec loop): when ~/.grok/downloads is empty, the grok
+  // fallback runs `command -v grok`, which resolves to this alias's sibling
+  // dispatcher shim (shims dir ahead of ~/.local/bin on PATH). Without a guard
+  // it exec-loops forever. The guard must null out any shims-dir match.
+  it('guards grok command -v fallback against the shims dir (alias)', () => {
+    const script = generateVersionedAliasScript('grok', '0.2.33');
+    expect(script).toContain('command -v grok');
+    expect(script).toContain('"$HOME/.agents/.cache/shims/"*) BINARY="" ;;');
+  });
+
+  it('guards grok command -v fallback against the shims dir (dispatcher)', () => {
+    const script = generateShimScript('grok');
+    expect(script).toContain('command -v grok');
+    expect(script).toContain('"$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;');
   });
 
   it('resolves grok for the pinned version', () => {

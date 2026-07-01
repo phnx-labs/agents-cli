@@ -235,7 +235,9 @@ async function promptConflictStrategy(
 //        node_modules/.bin/kimi, so resolve it via the generic branch. The old
 //        ~/.kimi-code/bin special-case never existed for npm installs and
 //        re-exec-looped through `command -v kimi` (the dispatcher itself).
-export const SHIM_SCHEMA_VERSION = 20;
+// v21 — guard grok's `command -v grok` fallback against resolving to our own
+//        shims dir (same infinite re-exec loop), mirroring droid.
+export const SHIM_SCHEMA_VERSION = 21;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -440,8 +442,16 @@ if [ "$AGENT" = "grok" ]; then
     fi
   fi
   if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
-    # Last resort: whatever is on PATH (user may have installed grok globally)
+    # Last resort: whatever is on PATH (user may have installed grok globally).
+    # Refuse anything under our own shims dir: the shims dir sits ahead of
+    # ~/.local/bin on PATH, so "command -v grok" resolves to THIS dispatcher.
+    # exec-ing it would re-enter and spin in an infinite re-exec loop (the same
+    # bug the droid branch below guards against). Fall through to the clean
+    # "not installed" error instead.
     BINARY=$(command -v grok 2>/dev/null || echo "")
+    case "$BINARY" in
+      "$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;
+    esac
   fi
 # Kimi is a normal npm agent: "agents add kimi" npm-installs
 # @moonshot-ai/kimi-code into the version dir and the binary lands at
@@ -671,8 +681,10 @@ export function removeShim(agent: AgentId): boolean {
  *        install and the `command -v kimi` fallback resolved to this alias's
  *        sibling dispatcher shim, re-exec-looping forever. Resolve kimi via the
  *        generic node_modules/.bin branch.
+ *  v10 — guard grok's `command -v grok` fallback against resolving to our own
+ *        shims dir (same infinite re-exec loop), mirroring droid.
  */
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 9;
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 10;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -758,7 +770,15 @@ if [ -d "$GROK_DOWNLOADS" ]; then
   BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | grep -i "${version}" | head -1)
   [ -n "$BINARY" ] || BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | head -1)
 fi
-[ -n "$BINARY" ] && [ -x "$BINARY" ] || BINARY=$(command -v grok 2>/dev/null || echo "")`
+# Refuse a PATH match under our own shims dir — it resolves to this alias's
+# sibling dispatcher shim (shims dir is ahead of ~/.local/bin on PATH) and
+# re-execs forever. Fall through to the clean "not installed" error instead.
+if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
+  BINARY=$(command -v grok 2>/dev/null || echo "")
+  case "$BINARY" in
+    "$HOME/.agents/.cache/shims/"*) BINARY="" ;;
+  esac
+fi`
       : agent === 'droid'
           ? `# Droid (Factory AI) installs a standalone native binary at ~/.local/bin/droid;
 # there is no npm package and nothing lands in node_modules/.bin. The PATH
