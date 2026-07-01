@@ -10,6 +10,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as yaml from 'yaml';
 import { execSync } from 'child_process';
+import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { machineId } from './machine-id.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
@@ -1523,7 +1524,7 @@ function migrateSplitDeviceLocalMeta(): void {
       if (dm?.agents) existing = dm.agents;
     } catch { /* absent */ }
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
-    fs.writeFileSync(devicePath, HEADER + yaml.stringify({ agents: { ...agents, ...existing } }), 'utf-8');
+    atomicWriteFileSync(devicePath, HEADER + yaml.stringify({ agents: { ...agents, ...existing } }));
   }
 
   // versions: -> machine-local history JSON (merge, existing wins).
@@ -1532,13 +1533,14 @@ function migrateSplitDeviceLocalMeta(): void {
     let existing: Record<string, unknown> = {};
     try { existing = (JSON.parse(fs.readFileSync(vrPath, 'utf-8')) as Record<string, unknown>) || {}; } catch { /* absent */ }
     fs.mkdirSync(path.dirname(vrPath), { recursive: true });
-    fs.writeFileSync(vrPath, JSON.stringify({ ...versions, ...existing }, null, 2) + '\n', 'utf-8');
+    atomicWriteFileSync(vrPath, JSON.stringify({ ...versions, ...existing }, null, 2) + '\n');
   }
 
-  // Strip machine-local fields from central and rewrite (portable only).
+  // Strip machine-local fields from central and rewrite (portable only) — after
+  // the device/history writes above, so a crash never loses data.
   delete meta.agents;
   delete meta.versions;
-  fs.writeFileSync(metaFile, HEADER + yaml.stringify(meta), 'utf-8');
+  atomicWriteFileSync(metaFile, HEADER + yaml.stringify(meta));
 
   // LAST: clear any skip-worktree bit (set by earlier setups) so the now-portable
   // file's content already matches the split shape before git tracks it again.

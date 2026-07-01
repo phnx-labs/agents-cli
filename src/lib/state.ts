@@ -563,7 +563,7 @@ export function createDefaultMeta(): Meta {
   return {};
 }
 
-let metaCache: { mtime: number; meta: Meta } | null = null;
+let metaCache: { stamp: string; meta: Meta } | null = null;
 let metaLockDepth = 0;
 
 /** Return mtimeMs for a file path, or 0 if the file is absent or unreadable. */
@@ -595,18 +595,20 @@ export function getVersionResourcesPath(): string {
 /**
  * Combined cache stamp across all four Meta sources: central + system
  * agents.yaml, this machine's device pins, and the version-resources tracking.
- * Distinct sub-unit weights so a change in any one file invalidates the cache.
+ * A delimited string, NOT a numeric sum — summing down-scaled epoch-ms values
+ * loses precision (float64 rounds sub-unit terms away at ~1.75e12), so a change
+ * in any one file must contribute at full resolution.
  */
-function currentMetaStamp(): number {
+function currentMetaStamp(): string {
   return safeMtimeMs(META_FILE)
-    + safeMtimeMs(SYSTEM_META_FILE) * 1e-3
-    + safeMtimeMs(getDeviceMetaPath()) * 1e-6
-    + safeMtimeMs(getVersionResourcesPath()) * 1e-9;
+    + '|' + safeMtimeMs(SYSTEM_META_FILE)
+    + '|' + safeMtimeMs(getDeviceMetaPath())
+    + '|' + safeMtimeMs(getVersionResourcesPath());
 }
 
 /** Memoize a parsed Meta against the current file mtimes. */
 function rememberMeta(meta: Meta): Meta {
-  metaCache = { mtime: currentMetaStamp(), meta };
+  metaCache = { stamp: currentMetaStamp(), meta };
   return meta;
 }
 
@@ -650,8 +652,9 @@ function writeIfChanged(filePath: string, content: string): void {
  */
 function writeMetaUnlocked(meta: Meta): void {
   const { agents, versions, ...central } = meta;
-  writeIfChanged(META_FILE, META_HEADER + yaml.stringify(central));
 
+  // Write the machine-local files FIRST, then strip central — so a crash mid-write
+  // never removes pins/versions from central before they're persisted elsewhere.
   if (agents && Object.keys(agents).length > 0) {
     const devicePath = getDeviceMetaPath();
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
@@ -664,6 +667,7 @@ function writeMetaUnlocked(meta: Meta): void {
     writeIfChanged(vrPath, JSON.stringify(versions, null, 2) + '\n');
   }
 
+  writeIfChanged(META_FILE, META_HEADER + yaml.stringify(central));
   metaCache = null;
 }
 
@@ -750,7 +754,7 @@ export function readMeta(): Meta {
   // what we last parsed. Reduces N readMeta calls per CLI invocation to ~2 stat
   // syscalls plus an in-memory object spread.
   if (metaCache) {
-    if (currentMetaStamp() === metaCache.mtime) {
+    if (currentMetaStamp() === metaCache.stamp) {
       return metaCache.meta;
     }
   }

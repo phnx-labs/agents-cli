@@ -453,4 +453,27 @@ describe('agents.yaml device-local split (routing + read overlay)', () => {
     `);
     expect(JSON.parse(out).deviceExists).toBe(false);
   });
+
+  it('invalidates the cache when the history version-resources file changes out-of-band', () => {
+    // Regression guard: the cache stamp must detect changes to the history file
+    // at full mtime resolution (a numeric-sum stamp rounded these away).
+    const out = execFileSync('node', ['--import', 'tsx', '--input-type=module', '-e', `
+      import fs from 'fs';
+      import { readMeta, writeMeta, getVersionResourcesPath } from ${JSON.stringify(moduleUrl)};
+      writeMeta({ versions: { claude: { '2.1.0': { rulesPreset: 'a' } } }, run: { claude: { strategy: 'balanced' } } });
+      const before = readMeta().versions?.claude?.['2.1.0']?.rulesPreset;
+      await new Promise((r) => setTimeout(r, 1100));
+      fs.writeFileSync(getVersionResourcesPath(), JSON.stringify({ claude: { '2.1.0': { rulesPreset: 'b' } } }, null, 2));
+      const after = readMeta().versions?.claude?.['2.1.0']?.rulesPreset;
+      console.log(JSON.stringify({ before, after }));
+    `], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
+      stdio: 'pipe',
+      encoding: 'utf8',
+    }).trim();
+    const r = JSON.parse(out);
+    expect(r.before).toBe('a');
+    expect(r.after).toBe('b');
+  });
 });
