@@ -150,6 +150,11 @@ export function summarizeToolUse(tool: string, args?: Record<string, any>): stri
     case 'WebSearch':
     case 'WebFetch':
       return `${tool}: ${truncate(args.query || args.url || '', 80)}`;
+    // Codex plan tool: arrives as a function_call with {plan:[{step,status}]}.
+    case 'update_plan': {
+      const steps = Array.isArray(args.plan) ? args.plan.length : 0;
+      return `Plan: ${steps} step${steps === 1 ? '' : 's'}`;
+    }
     // Codex tools
     case 'exec_command':
       return `Bash: ${truncate(String(args.command || args.cmd || '').replace(/\n/g, ' ').trim(), 120)}`;
@@ -395,6 +400,17 @@ export function parseCodex(filePath: string): SessionEvent[] {
 }
 
 /**
+ * Extract the target file path from a Codex apply_patch envelope. The patch body
+ * opens with `*** Begin Patch` and carries one or more file ops of the form
+ * `*** Update File: <path>` / `*** Add File: <path>` / `*** Delete File: <path>`.
+ * Returns the first file path found, or undefined for an unparseable body.
+ */
+function applyPatchTargetPath(input: string): string | undefined {
+  const m = input.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/m);
+  return m ? m[1].trim() : undefined;
+}
+
+/**
  * Parse Codex JSONL *content* (already read into a string) into normalized
  * events. Split from `parseCodex` so the tail reader can parse just the last
  * chunk without re-reading the whole file.
@@ -426,6 +442,24 @@ export function parseCodexContent(content: string): SessionEvent[] {
         timestamp,
         content: `Codex ${payload.cli_version || ''} session in ${payload.cwd || ''}`.trim(),
       });
+      continue;
+    }
+
+    if (lineType === 'event_msg') {
+      // Web search is reported out-of-band as event_msg (not response_item).
+      // The paired begin (`web_search_call`) has no query; only `web_search_end`
+      // carries the resolved query string, so we emit exactly one tool_use per
+      // search off the end event and ignore the begin to avoid duplicates.
+      if (payload.type === 'web_search_end') {
+        const query = typeof payload.query === 'string' ? payload.query : '';
+        events.push({
+          type: 'tool_use',
+          agent: 'codex',
+          timestamp,
+          tool: 'WebSearch',
+          args: { query },
+        });
+      }
       continue;
     }
 
@@ -489,6 +523,44 @@ export function parseCodexContent(content: string): SessionEvent[] {
           path: args.file_path || args.path || undefined,
         });
       } else if (ptype === 'function_call_output') {
+        const callId = payload.call_id || payload.id;
+        const callInfo = callId ? callMap.get(callId) : undefined;
+        const output = String(payload.output || '');
+
+        events.push({
+          type: 'tool_result',
+          agent: 'codex',
+          timestamp,
+          tool: callInfo?.name,
+          success: true,
+          output: output.length > 500 ? output.slice(0, 497) + '...' : output,
+        });
+
+        if (callId) callMap.delete(callId);
+      } else if (ptype === 'custom_tool_call') {
+        // Codex edits arrive as custom_tool_call (apply_patch), NOT function_call.
+        const rawName = payload.name || 'unknown';
+        const input = typeof payload.input === 'string' ? payload.input : '';
+        const isApplyPatch = rawName === 'apply_patch';
+        const patchPath = isApplyPatch ? applyPatchTargetPath(input) : undefined;
+        // Normalize apply_patch to the shared Edit tool so it flows through
+        // artifact discovery (WRITE_TOOLS) and the Edit summarizer.
+        const tool = isApplyPatch ? 'Edit' : rawName;
+        const args: any = { input: input.length > 500 ? input.slice(0, 497) + '...' : input };
+        if (patchPath) args.file_path = patchPath;
+
+        const callId = payload.call_id || payload.id;
+        if (callId) callMap.set(callId, { name: tool, args });
+
+        events.push({
+          type: 'tool_use',
+          agent: 'codex',
+          timestamp,
+          tool,
+          args,
+          path: patchPath,
+        });
+      } else if (ptype === 'custom_tool_call_output') {
         const callId = payload.call_id || payload.id;
         const callInfo = callId ? callMap.get(callId) : undefined;
         const output = String(payload.output || '');
