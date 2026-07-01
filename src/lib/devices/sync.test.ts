@@ -7,7 +7,7 @@
  *   3. A genuinely-new, non-ignored node IS surfaced.
  */
 import { describe, expect, it } from 'vitest';
-import { computePendingDevices } from './sync.js';
+import { computePendingDevices, planDeviceReconciliation } from './sync.js';
 import type { TailscaleNode } from './tailscale.js';
 
 function node(name: string): TailscaleNode {
@@ -33,5 +33,41 @@ describe('computePendingDevices', () => {
 
   it('returns nothing for an empty tailnet', () => {
     expect(computePendingDevices([], ['zion'], ['ipad165'])).toEqual([]);
+  });
+});
+
+describe('planDeviceReconciliation', () => {
+  const all = ['zion', 'yosemite-s0', 'ipad165', 'win-mini', 'mac-mini'];
+
+  it('registers checked, removes+ignores unchecked-that-were-registered', () => {
+    // registered: zion, yosemite-s0, win-mini. ignored: ipad165. mac-mini is new.
+    // user keeps zion + yosemite-s0, unchecks win-mini (registered) and leaves
+    // ipad165/mac-mini unchecked.
+    const plan = planDeviceReconciliation(
+      all,
+      ['zion', 'yosemite-s0'],
+      ['zion', 'yosemite-s0', 'win-mini'],
+      ['ipad165'],
+    );
+    expect(plan.toRegister).toEqual(['zion', 'yosemite-s0']);
+    expect(plan.toRemove).toEqual(['win-mini']); // was registered, now unchecked
+    expect(plan.toIgnore).toEqual(['ipad165', 'win-mini', 'mac-mini']); // every unchecked
+    expect(plan.toUnignore).toEqual([]);
+  });
+
+  it('un-ignores a previously-dismissed node when the user re-checks it', () => {
+    const plan = planDeviceReconciliation(['ipad165'], ['ipad165'], [], ['ipad165']);
+    expect(plan.toRegister).toEqual(['ipad165']);
+    expect(plan.toUnignore).toEqual(['ipad165']);
+    expect(plan.toRemove).toEqual([]);
+    expect(plan.toIgnore).toEqual([]);
+  });
+
+  it('does not try to remove an unchecked node that was never registered', () => {
+    // mac-mini is newly discovered (not registered, not ignored) and left
+    // unchecked: it should be ignored but NOT removed (nothing to remove).
+    const plan = planDeviceReconciliation(['mac-mini'], [], [], []);
+    expect(plan.toRemove).toEqual([]);
+    expect(plan.toIgnore).toEqual(['mac-mini']);
   });
 });

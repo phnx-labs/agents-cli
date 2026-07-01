@@ -35,7 +35,7 @@ import {
   parseTailscaleStatus,
   tailscaleStatusJson,
 } from '../lib/devices/tailscale.js';
-import { runDeviceSync } from '../lib/devices/sync.js';
+import { planDeviceReconciliation, runDeviceSync } from '../lib/devices/sync.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { hostNameFor, renderSshConfig } from '../lib/devices/ssh-config.js';
 import {
@@ -104,13 +104,16 @@ async function runInteractiveDeviceSync(): Promise<void> {
   let selected: string[];
   try {
     selected = await checkbox({
-      message: 'Devices to keep registered (unchecked = removed and ignored):',
+      // Everything not already dismissed starts checked, so pressing Enter keeps
+      // the fleet as-is (matching what auto-sync would register). Unchecking a
+      // device removes it AND dismisses it so auto-sync never re-adds it.
+      message: 'Your fleet — uncheck a device to remove and stop suggesting it:',
       pageSize: Math.min(nodes.length, 20),
       choices: nodes.map((n) => {
         const flags = [n.platform, n.online ? undefined : 'offline', ignored.has(n.name) ? 'ignored' : undefined]
           .filter(Boolean)
           .join(', ');
-        return { value: n.name, name: `${n.name}  ${chalk.gray(`(${flags})`)}`, checked: registered.has(n.name) };
+        return { value: n.name, name: `${n.name}  ${chalk.gray(`(${flags})`)}`, checked: !ignored.has(n.name) };
       }),
     });
   } catch (err) {
@@ -121,30 +124,17 @@ async function runInteractiveDeviceSync(): Promise<void> {
     throw err;
   }
 
-  const keep = new Set(selected);
   const byName = new Map(nodes.map((n) => [n.name, n]));
-  let registeredCount = 0;
-  let removedCount = 0;
-  let ignoredCount = 0;
-  for (const node of nodes) {
-    if (keep.has(node.name)) {
-      await upsertDevice(node.name, nodeToDeviceInput(byName.get(node.name)!));
-      if (ignored.has(node.name)) await removeIgnored(node.name);
-      registeredCount++;
-    } else {
-      if (registered.has(node.name)) {
-        await removeDevice(node.name);
-        removedCount++;
-      }
-      await addIgnored(node.name);
-      ignoredCount++;
-    }
-  }
+  const plan = planDeviceReconciliation(byName.keys(), selected, registered, ignored);
+  for (const name of plan.toRegister) await upsertDevice(name, nodeToDeviceInput(byName.get(name)!));
+  for (const name of plan.toUnignore) await removeIgnored(name);
+  for (const name of plan.toRemove) await removeDevice(name);
+  for (const name of plan.toIgnore) await addIgnored(name);
 
   const parts = [
-    chalk.green(`${registeredCount} registered`),
-    removedCount ? chalk.yellow(`${removedCount} removed`) : null,
-    ignoredCount ? chalk.gray(`${ignoredCount} ignored`) : null,
+    chalk.green(`${plan.toRegister.length} registered`),
+    plan.toRemove.length ? chalk.yellow(`${plan.toRemove.length} removed`) : null,
+    plan.toIgnore.length ? chalk.gray(`${plan.toIgnore.length} ignored`) : null,
   ].filter(Boolean);
   console.log(parts.join(chalk.gray(' · ')));
 }

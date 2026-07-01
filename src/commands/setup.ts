@@ -129,16 +129,13 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
     }
   }
 
-  // Populate the device registry from the tailnet on first setup. Soft: no
-  // tailscale is a clean no-op, never a setup failure.
-  try {
-    const { runDeviceSync } = await import('../lib/devices/sync.js');
-    const dev = await runDeviceSync({ soft: true });
-    if (dev.ok && dev.synced > 0) {
-      console.log(chalk.gray(`Discovered ${dev.synced} device${dev.synced === 1 ? '' : 's'} on your tailnet (agents devices list).`));
-    }
-  } catch {
-    // Never let device discovery block setup.
+  // Populate the device registry from the tailnet on first setup. Soft mode is
+  // guaranteed non-throwing (no tailscale / corrupt file / lock contention all
+  // resolve to ok:false), so this can never block setup.
+  const { runDeviceSync } = await import('../lib/devices/sync.js');
+  const dev = await runDeviceSync({ soft: true });
+  if (dev.ok && dev.synced > 0) {
+    console.log(chalk.gray(`Discovered ${dev.synced} device${dev.synced === 1 ? '' : 's'} on your tailnet (agents devices list).`));
   }
 
   // Offer to import existing unmanaged installations
