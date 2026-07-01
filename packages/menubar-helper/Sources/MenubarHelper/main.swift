@@ -16,6 +16,12 @@ if ProcessInfo.processInfo.environment["MENUBAR_BENCH"] == "1" {
     exit(0)
 }
 
+// Clip test: persist the current clipboard image + print the scp token, then
+// exit. No GUI, no hotkey, no Accessibility grant — verifies persist+format.
+if ProcessInfo.processInfo.environment["MENUBAR_CLIP_TEST"] == "1" {
+    Clip.printTokenAndExit()
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
@@ -24,8 +30,10 @@ let controller = StatusItemController()
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller: StatusItemController
     init(_ c: StatusItemController) { self.controller = c }
+    let hotkey = HotkeyManager(onFire: { Clip.run() })
     func applicationDidFinishLaunching(_ notification: Notification) {
         controller.install()
+        hotkey.register()
     }
 }
 
