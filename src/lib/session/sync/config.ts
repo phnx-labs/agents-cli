@@ -4,7 +4,6 @@
  * bundle (OS keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
-import * as os from 'os';
 import { readAndResolveBundleEnv } from '../../secrets/bundles.js';
 
 /** Secrets bundle holding the R2 credentials. */
@@ -109,13 +108,7 @@ export function isSyncConfigured(now: number = Date.now()): boolean {
   }
 }
 
-/**
- * This machine's stable, human-readable id, used as its R2 prefix and mirror
- * directory name. Tailnet hostnames (zion, yosemite-s0, mac-mini) are already
- * unique and readable; we lowercase and strip any domain suffix. Overridable
- * via AGENTS_SYNC_MACHINE_ID for tests and unusual setups.
- */
-export function machineId(): string {
-  const raw = process.env.AGENTS_SYNC_MACHINE_ID || os.hostname();
-  return raw.split('.')[0].trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-') || 'unknown';
-}
+// machineId() now lives in the dependency-free leaf ../../machine-id.ts so
+// low-level modules (state.ts) can use it without an import cycle. Re-exported
+// here for existing importers.
+export { machineId } from '../../machine-id.js';
