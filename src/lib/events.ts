@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'node:crypto';
+import { parseSshConnection } from './session/provenance.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,11 @@ export interface EventMeta {
   pid: number;
   ppid: number;
   event: EventType;
+  // Audit attribution — who ran this and from where. Answers "was this agent
+  // started on the host by a remote user?" for every event, not just runs.
+  osUser: string;
+  transport: 'local' | 'ssh';
+  sshClientIp?: string;
 }
 
 export interface EventPayload {
@@ -116,6 +122,9 @@ export interface EventPayload {
 
   // Context
   cwd?: string;
+  /** Top-level command group, e.g. 'teams', 'secrets' — the audit filter key. */
+  module?: string;
+  /** Full command path, e.g. 'teams create', 'secrets get'. */
   command?: string;
   args?: string[];
 
@@ -247,6 +256,37 @@ function truncatePayload(payload: EventPayload, maxLength: number = DEFAULT_TRUN
   return result;
 }
 
+// ─── Audit attribution ────────────────────────────────────────────────────────
+
+interface AuditOrigin {
+  osUser: string;
+  transport: 'local' | 'ssh';
+  sshClientIp?: string;
+}
+
+/**
+ * Who is running this process and from where. Derived once per process from the
+ * OS user and $SSH_CONNECTION (via the same parser the sessions layer uses), then
+ * cached — provenance can't change mid-process, so every emit() pays for it once.
+ */
+let _origin: AuditOrigin | undefined;
+function auditOrigin(): AuditOrigin {
+  if (_origin) return _origin;
+  let osUser = 'unknown';
+  try {
+    osUser = os.userInfo().username;
+  } catch {
+    // Container/edge cases where the uid has no passwd entry.
+  }
+  const ssh = process.env.SSH_CONNECTION ? parseSshConnection(process.env.SSH_CONNECTION) : undefined;
+  _origin = {
+    osUser,
+    transport: ssh ? 'ssh' : 'local',
+    ...(ssh ? { sshClientIp: ssh.clientIp } : {}),
+  };
+  return _origin;
+}
+
 // ─── Core API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -271,23 +311,34 @@ export function emit(event: EventType, payload: EventPayload = {}): void {
       pid: process.pid,
       ppid: process.ppid,
       event,
+      ...auditOrigin(),
       ...truncatePayload(payload),
     };
 
     const line = JSON.stringify(record) + '\n';
     const logPath = getLogFilePath();
+    const isNew = !fs.existsSync(logPath);
     fs.appendFileSync(logPath, line, { mode: FILE_MODE });
 
-    // Ensure file permissions (appendFileSync doesn't respect mode on existing files)
-    try {
-      fs.chmodSync(logPath, FILE_MODE);
-    } catch {
-      // May fail if not owner
+    // appendFileSync's mode only applies when it CREATES the file, so we chmod
+    // to guarantee 0600 — but only on first write to a given path this process.
+    // command.start/end fire on every invocation; chmod-per-append would double
+    // the syscalls on the hot path for no gain (perms don't drift mid-run).
+    if (isNew || logPath !== _chmoddedPath) {
+      _chmoddedPath = logPath;
+      try {
+        fs.chmodSync(logPath, FILE_MODE);
+      } catch {
+        // May fail if not owner
+      }
     }
   } catch {
     // Silent failure - logging should never break the CLI
   }
 }
+
+/** Last log path this process chmod'd — avoids a redundant chmod per append. */
+let _chmoddedPath: string | undefined;
 
 /**
  * Convenience wrapper for timed operations.
@@ -566,9 +617,10 @@ export function query(options: {
   eventTypes?: EventType[];
   agent?: string;
   command?: string;
+  module?: string;
   limit?: number;
 }): EventRecord[] {
-  const { startDate, endDate = new Date(), eventTypes, agent, command, limit } = options;
+  const { startDate, endDate = new Date(), eventTypes, agent, command, module, limit } = options;
   const results: EventRecord[] = [];
 
   if (!fs.existsSync(LOGS_DIR)) return results;
@@ -597,7 +649,12 @@ export function query(options: {
 
         if (eventTypes && !eventTypes.includes(record.event)) continue;
         if (agent && record.agent !== agent) continue;
-        if (command && record.command !== command) continue;
+        // `--command` matches by path prefix on a word boundary, so a coarse
+        // "teams" catches "teams create"/"teams remove" while an exact
+        // "teams create" stays exact.
+        if (command && record.command !== command &&
+            !(typeof record.command === 'string' && record.command.startsWith(command + ' '))) continue;
+        if (module && record.module !== module) continue;
 
         results.push(record);
 
