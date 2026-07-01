@@ -57,6 +57,10 @@ export const SSH_OPTS: readonly string[] = [
  */
 let controlDirEnsured = false;
 export function controlOpts(): string[] {
+  // OpenSSH on Windows has no ControlMaster/ControlPath (unix-socket) support —
+  // passing those options makes ssh error out. Multiplexing is a pure latency
+  // optimisation, so on Windows we simply skip it and use a fresh connection.
+  if (process.platform === 'win32') return [];
   const dir = path.join(getCacheDir(), 'ssh');
   if (!controlDirEnsured) {
     try {

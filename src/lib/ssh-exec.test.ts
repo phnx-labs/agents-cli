@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as path from 'path';
 import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts } from './ssh-exec.js';
 
 describe('assertValidSshTarget', () => {
@@ -44,7 +45,13 @@ describe('shellQuote', () => {
 });
 
 describe('controlOpts (connection multiplexing)', () => {
+  it('is empty on Windows (OpenSSH there has no ControlMaster support)', () => {
+    if (process.platform !== 'win32') return; // asserted on the other branch below
+    expect(controlOpts()).toEqual([]);
+  });
+
   it('returns ControlMaster/ControlPath/ControlPersist and creates the socket dir', () => {
+    if (process.platform === 'win32') return; // multiplexing skipped on Windows
     const opts = controlOpts();
     expect(opts).toContain('ControlMaster=auto');
     expect(opts).toContain('ControlPersist=60s');
@@ -52,7 +59,7 @@ describe('controlOpts (connection multiplexing)', () => {
     expect(cp).toBeDefined();
     // %C keeps the socket path short (macOS sun_path limit) and the dir must exist.
     expect(cp).toContain('%C');
-    const dir = cp!.replace('ControlPath=', '').replace(/\/cm-%C$/, '');
+    const dir = path.dirname(cp!.replace('ControlPath=', ''));
     expect(fs.existsSync(dir)).toBe(true);
   });
 });
