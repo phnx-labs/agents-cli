@@ -302,11 +302,414 @@ public sealed class Automation
         return new() { ["ok"] = true };
     }
 
+    // ---- scroll ---------------------------------------------------------
+    // element_id -> UIA ScrollItemPattern.ScrollIntoView(); else a synthesized
+    // wheel event at (x,y) or the current cursor. Mirrors the macOS scroll
+    // (AX.swift:392-441): { ok, method, at? }.
+    public Dictionary<string, object?> Scroll(JsonElement p)
+    {
+        int pid = P.Int(p, "pid");
+        string? elementId = P.StringOpt(p, "element_id");
+        if (elementId != null)
+        {
+            var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
+            try
+            {
+                if (el.TryGetCurrentPattern(ScrollItemPattern.Pattern, out var sip))
+                {
+                    ((ScrollItemPattern)sip).ScrollIntoView();
+                    return new() { ["ok"] = true, ["method"] = "ScrollIntoView" };
+                }
+            }
+            catch (ElementNotAvailableException) { throw RpcError.Stale(); }
+            // No ScrollItemPattern — fall through to a wheel event (needs dx/dy).
+        }
+
+        int dx = P.IntOr(p, "dx", 0);
+        int dy = P.IntOr(p, "dy", 0);
+        if (dx == 0 && dy == 0) throw RpcError.Invalid("either element_id or dx/dy required");
+
+        int[]? at = null;
+        if (p.TryGetProperty("x", out var xe) && xe.ValueKind == JsonValueKind.Number &&
+            p.TryGetProperty("y", out var ye) && ye.ValueKind == JsonValueKind.Number)
+        {
+            int x = xe.GetInt32(), y = ye.GetInt32();
+            MoveCursor(x, y);
+            at = new[] { x, y };
+        }
+        if (dy != 0) SendWheelNotches(MOUSEEVENTF_WHEEL, dy);
+        if (dx != 0) SendWheelNotches(MOUSEEVENTF_HWHEEL, dx);
+
+        var result = new Dictionary<string, object?> { ["ok"] = true, ["method"] = "wheel" };
+        if (at != null) result["at"] = at;
+        return result;
+    }
+
+    // ---- drag -----------------------------------------------------------
+    // MoveCursor(from) -> LEFTDOWN -> interpolated MOVE steps -> MoveCursor(to)
+    // -> LEFTUP. Endpoints come from element_id/to_element_id or from/to=[x,y].
+    // Mirrors the macOS drag (Mouse.swift:20-58): { ok, method }.
+    public Dictionary<string, object?> Drag(JsonElement p)
+    {
+        int pid = P.Int(p, "pid");
+        var from = ResolvePoint(p, pid, "element_id", "from");
+        var to = ResolvePoint(p, pid, "to_element_id", "to");
+
+        MoveCursor(from[0], from[1]);
+        SendMouse(MOUSEEVENTF_LEFTDOWN);
+        const int steps = 20;
+        for (int i = 1; i <= steps; i++)
+        {
+            int x = from[0] + (to[0] - from[0]) * i / steps;
+            int y = from[1] + (to[1] - from[1]) * i / steps;
+            MoveCursor(x, y);
+            Thread.Sleep(8);
+        }
+        MoveCursor(to[0], to[1]);
+        SendMouse(MOUSEEVENTF_LEFTUP);
+        return new() { ["ok"] = true, ["method"] = "drag" };
+    }
+
+    // ---- right_click ----------------------------------------------------
+    // RIGHTDOWN/RIGHTUP at coords or the resolved element center. Mirrors the
+    // macOS right-click (Mouse.swift:63-106): { ok, method, at? }.
+    public Dictionary<string, object?> RightClick(JsonElement p)
+    {
+        int pid = P.Int(p, "pid");
+        string? elementId = P.StringOpt(p, "element_id");
+        if (elementId == null)
+        {
+            if (p.TryGetProperty("x", out var xe) && p.TryGetProperty("y", out var ye))
+            {
+                int x = xe.GetInt32(), y = ye.GetInt32();
+                MoveCursor(x, y);
+                SendMouse(MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_RIGHTUP);
+                return new() { ["ok"] = true, ["method"] = "right_click", ["at"] = new[] { x, y } };
+            }
+            throw RpcError.Invalid("pass either element_id or x,y");
+        }
+
+        var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
+        try
+        {
+            var center = CenterOf(el) ?? throw new RpcError("action_failed", "element has no frame");
+            MoveCursor(center[0], center[1]);
+            SendMouse(MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_RIGHTUP);
+            return new() { ["ok"] = true, ["method"] = "right_click", ["at"] = center };
+        }
+        catch (ElementNotAvailableException) { throw RpcError.Stale(); }
+    }
+
+    // ---- focus_window ---------------------------------------------------
+    // Resolve a top-level window (optionally by window_id=HWND or title),
+    // restore it if minimized (WindowPattern), then SetForegroundWindow.
+    // Mirrors the macOS focusWindow (Mouse.swift:120-194):
+    //   { ok, was_minimized, focus_elapsed_ms, raised_window, window_id?, title?, method? }.
+    public Dictionary<string, object?> FocusWindow(JsonElement p)
+    {
+        int pid = P.Int(p, "pid");
+        var windows = TopLevelWindows(pid);
+        if (windows.Count == 0) throw RpcError.AppMissing(pid);
+
+        int? windowId = null;
+        if (p.TryGetProperty("window_id", out var wv) && wv.ValueKind == JsonValueKind.Number)
+            windowId = wv.GetInt32();
+        string? title = P.StringOpt(p, "title");
+
+        var target = windows[0];
+        bool raisedWindow = false;
+        if (windowId != null || title != null)
+        {
+            AutomationElement? match = null;
+            foreach (var w in windows)
+            {
+                try
+                {
+                    if (windowId != null && w.Current.NativeWindowHandle == windowId.Value) { match = w; break; }
+                    if (title != null && (w.Current.Name ?? "").Contains(title, StringComparison.OrdinalIgnoreCase)) { match = w; break; }
+                }
+                catch (ElementNotAvailableException) { }
+            }
+            target = match ?? throw RpcError.NotFound(
+                $"no window matching window_id={windowId?.ToString() ?? "-"} title={title ?? "-"} for pid {pid}");
+            raisedWindow = true;
+        }
+
+        bool wasMinimized = false;
+        try
+        {
+            if (target.TryGetCurrentPattern(WindowPattern.Pattern, out var wp))
+            {
+                var win = (WindowPattern)wp;
+                if (win.Current.WindowVisualState == WindowVisualState.Minimized)
+                {
+                    wasMinimized = true;
+                    win.SetWindowVisualState(WindowVisualState.Normal);
+                }
+            }
+        }
+        catch (ElementNotAvailableException) { throw RpcError.Stale(); }
+
+        var hwnd = new IntPtr(target.Current.NativeWindowHandle);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        SetForegroundWindow(hwnd);
+        // Poll until the window server actually promotes it (SetForegroundWindow
+        // is asynchronous and rate-limited). Cap at 600ms like the macOS poll;
+        // report ok regardless so a foreground-lock denial still returns a shape.
+        while (sw.ElapsedMilliseconds < 600)
+        {
+            if (GetForegroundWindow() == hwnd) break;
+            Thread.Sleep(20);
+        }
+        sw.Stop();
+
+        var result = new Dictionary<string, object?>
+        {
+            ["ok"] = true,
+            ["was_minimized"] = wasMinimized,
+            ["focus_elapsed_ms"] = (int)sw.ElapsedMilliseconds,
+            ["raised_window"] = raisedWindow,
+        };
+        if (raisedWindow)
+        {
+            result["window_id"] = target.Current.NativeWindowHandle;
+            var t = NullIfEmpty(target.Current.Name);
+            if (t != null) result["title"] = t;
+            result["method"] = "set_foreground";
+        }
+        return result;
+    }
+
+    // ---- ax_action ------------------------------------------------------
+    // Map an action name to the UIA pattern the element advertises and invoke
+    // it. Mirrors the macOS axAction (AX.swift:237-256): { ok, action }; on an
+    // unknown action, throws action_unsupported with the available list.
+    public Dictionary<string, object?> AxAction(JsonElement p)
+    {
+        int pid = P.Int(p, "pid");
+        string elementId = P.StringOpt(p, "element_id") ?? throw RpcError.Invalid("ax_action needs `element_id`");
+        string action = P.StringOpt(p, "action") ?? throw RpcError.Invalid("ax_action needs `action`");
+        var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
+
+        try
+        {
+            switch (action)
+            {
+                case "Invoke":
+                    if (el.TryGetCurrentPattern(InvokePattern.Pattern, out var iv))
+                    { ((InvokePattern)iv).Invoke(); return new() { ["ok"] = true, ["action"] = action }; }
+                    break;
+                case "Toggle":
+                    if (el.TryGetCurrentPattern(TogglePattern.Pattern, out var tg))
+                    { ((TogglePattern)tg).Toggle(); return new() { ["ok"] = true, ["action"] = action }; }
+                    break;
+                case "Expand":
+                    if (el.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var ex))
+                    { ((ExpandCollapsePattern)ex).Expand(); return new() { ["ok"] = true, ["action"] = action }; }
+                    break;
+                case "Collapse":
+                    if (el.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out var co))
+                    { ((ExpandCollapsePattern)co).Collapse(); return new() { ["ok"] = true, ["action"] = action }; }
+                    break;
+                case "Select":
+                    if (el.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var se))
+                    { ((SelectionItemPattern)se).Select(); return new() { ["ok"] = true, ["action"] = action }; }
+                    break;
+                case "ScrollIntoView":
+                    if (el.TryGetCurrentPattern(ScrollItemPattern.Pattern, out var sc))
+                    { ((ScrollItemPattern)sc).ScrollIntoView(); return new() { ["ok"] = true, ["action"] = action }; }
+                    break;
+            }
+            var available = AvailableActions(el);
+            throw RpcError.Unsupported(
+                $"element does not support {action}; available: {string.Join(", ", available)}");
+        }
+        catch (ElementNotAvailableException) { throw RpcError.Stale(); }
+    }
+
+    // Enumerate the action verbs an element's supported patterns expose, for the
+    // ax_action error path (matches the Swift "available: ..." list).
+    private static List<string> AvailableActions(AutomationElement el)
+    {
+        var available = new List<string>();
+        var supported = new HashSet<AutomationPattern>(el.GetSupportedPatterns());
+        if (supported.Contains(InvokePattern.Pattern)) available.Add("Invoke");
+        if (supported.Contains(TogglePattern.Pattern)) available.Add("Toggle");
+        if (supported.Contains(ExpandCollapsePattern.Pattern)) { available.Add("Expand"); available.Add("Collapse"); }
+        if (supported.Contains(SelectionItemPattern.Pattern)) available.Add("Select");
+        if (supported.Contains(ScrollItemPattern.Pattern)) available.Add("ScrollIntoView");
+        return available;
+    }
+
+    // ---- wait -----------------------------------------------------------
+    // Three modes, mirroring the macOS Wait.run (Wait.swift:22-84):
+    //   1. duration_ms  -> unconditional sleep (clamped [50, 30000]).
+    //   2. element_id   -> poll the cached handle for until=exists|enabled|disappears.
+    //   3. locator      -> re-walk the live UIA tree each tick for until=exists|enabled.
+    // Returns { ok, waited_ms, satisfied, element_id? }.
+    public Dictionary<string, object?> Wait(JsonElement p)
+    {
+        if (p.TryGetProperty("duration_ms", out var dv) && dv.ValueKind == JsonValueKind.Number)
+        {
+            int duration = Math.Clamp(dv.GetInt32(), WaitMinMs, WaitMaxMs);
+            Thread.Sleep(duration);
+            return new() { ["ok"] = true, ["waited_ms"] = duration, ["satisfied"] = true };
+        }
+
+        int pid = P.Int(p, "pid");
+        string until = P.StringOpt(p, "until") ?? "exists";
+        if (until is not ("exists" or "enabled" or "disappears"))
+            throw RpcError.Invalid("until must be 'exists', 'enabled', or 'disappears'");
+
+        string? elementId = P.StringOpt(p, "element_id");
+        bool hasLocator = p.TryGetProperty("locator", out var locator) && locator.ValueKind == JsonValueKind.Object;
+        if (elementId == null && !hasLocator)
+            throw RpcError.Invalid("pass either duration_ms, or pid + (element_id or locator) + until");
+        if (hasLocator && until == "disappears")
+            throw RpcError.Invalid("locator mode supports until='exists' or 'enabled' only");
+
+        string? role = null, label = null, identifier = null;
+        if (hasLocator)
+        {
+            role = P.StringOpt(locator, "role");
+            label = P.StringOpt(locator, "label");
+            identifier = P.StringOpt(locator, "identifier");
+            if (role == null && label == null && identifier == null)
+                throw RpcError.Invalid("locator needs role, label, or identifier");
+        }
+
+        int timeoutMs = P.IntOr(p, "timeout_ms", WaitDefaultTimeoutMs);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        bool satisfied = false;
+        string? foundId = null;
+
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (hasLocator)
+            {
+                foreach (var w in TopLevelWindows(pid))
+                {
+                    var found = SearchLocator(w, 0, role, label, identifier, until);
+                    if (found != null)
+                    {
+                        foundId = _cache.NextRefId(pid);
+                        _cache.Put(pid, foundId, found);
+                        satisfied = true;
+                        break;
+                    }
+                }
+                if (satisfied) break;
+            }
+            else if (ElementSatisfies(pid, elementId!, until))
+            {
+                satisfied = true;
+                break;
+            }
+            Thread.Sleep(WaitPollMs);
+        }
+        sw.Stop();
+
+        var result = new Dictionary<string, object?>
+        {
+            ["ok"] = true,
+            ["waited_ms"] = (int)sw.ElapsedMilliseconds,
+            ["satisfied"] = satisfied,
+        };
+        if (foundId != null) result["element_id"] = foundId;
+        return result;
+    }
+
+    // Probe a cached element handle against the until condition.
+    private bool ElementSatisfies(int pid, string elementId, string until)
+    {
+        var el = _cache.Get(pid, elementId);
+        switch (until)
+        {
+            case "disappears":
+                if (el == null) return true;
+                try { _ = el.Current.ControlType; return false; }
+                catch (ElementNotAvailableException) { return true; }
+            case "exists":
+                if (el == null) return false;
+                try { _ = el.Current.ControlType; return true; }
+                catch (ElementNotAvailableException) { return false; }
+            case "enabled":
+                if (el == null) return false;
+                try { return el.Current.IsEnabled; }
+                catch (ElementNotAvailableException) { return false; }
+            default:
+                return false;
+        }
+    }
+
+    // Depth-bounded walk of the live UIA tree matching a locator (role = UIA
+    // ControlType short name, label = Name, identifier = AutomationId). For
+    // until="enabled", a matched-but-disabled element keeps the search going.
+    private AutomationElement? SearchLocator(
+        AutomationElement el, int depth, string? role, string? label, string? identifier, string until)
+    {
+        if (depth > WaitLocatorMaxDepth) return null;
+
+        if (LocatorMatches(el, role, label, identifier))
+        {
+            if (until != "enabled") return el;
+            bool enabled;
+            try { enabled = el.Current.IsEnabled; }
+            catch (ElementNotAvailableException) { enabled = false; }
+            if (enabled) return el;
+            // matched but not yet enabled — fall through and keep searching
+        }
+
+        try
+        {
+            var walker = TreeWalker.ControlViewWalker;
+            for (var child = walker.GetFirstChild(el); child != null; child = walker.GetNextSibling(child))
+            {
+                var found = SearchLocator(child, depth + 1, role, label, identifier, until);
+                if (found != null) return found;
+            }
+        }
+        catch (ElementNotAvailableException) { }
+        return null;
+    }
+
+    private static bool LocatorMatches(AutomationElement el, string? role, string? label, string? identifier)
+    {
+        try
+        {
+            var info = el.Current;
+            if (role != null && ControlTypeName(info.ControlType) != role) return false;
+            if (identifier != null && (info.AutomationId ?? "") != identifier) return false;
+            if (label != null && (info.Name ?? "") != label) return false;
+            return true;
+        }
+        catch (ElementNotAvailableException) { return false; }
+    }
+
+    // ---- notify ---------------------------------------------------------
+    // PASS-THROUGH ONLY. No Windows Toast/notification API — the Rush
+    // computer-manager intercepts the return value. Mirrors Notify.swift:13-26.
+    public Dictionary<string, object?> Notify(JsonElement p)
+    {
+        string message = P.StringOpt(p, "message") ?? throw RpcError.Invalid("notify needs `message`");
+        int pid = P.IntOr(p, "pid", 0);
+        var result = new Dictionary<string, object?> { ["notified"] = true, ["message"] = message };
+        if (pid > 0) result["pid"] = pid;
+        return result;
+    }
+
     // ---- describe/value tuning ------------------------------------------
     private const int MaxElements = 500;
     private const int MaxDepthDefault = 25;
     private const int MaxTextChars = 20_000;
     private const int MaxValueDisplayChars = 400;
+
+    // ---- wait tuning ----------------------------------------------------
+    private const int WaitMinMs = 50;
+    private const int WaitMaxMs = 30_000;
+    private const int WaitDefaultTimeoutMs = 5_000;
+    private const int WaitPollMs = 100;
+    private const int WaitLocatorMaxDepth = 40;
 
     // Roles surfaced to the agent as interactable (UIA ControlType short names).
     private static readonly HashSet<string> InteractableRoles = new()
@@ -405,6 +808,9 @@ public sealed class Automation
     private const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
     private const uint MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_ABSOLUTE = 0x8000;
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010;
+    private const uint MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x1000;
+    private const int WheelDelta = 120; // one wheel notch (WHEEL_DELTA)
     private const uint KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
     private const ushort VK_BACK = 0x08, VK_TAB = 0x09, VK_RETURN = 0x0D, VK_SHIFT = 0x10,
         VK_CONTROL = 0x11, VK_MENU = 0x12, VK_ESCAPE = 0x1B, VK_SPACE = 0x20,
@@ -424,6 +830,8 @@ public sealed class Automation
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
     [DllImport("user32.dll")] private static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int n);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
 
     private static void MoveCursor(int x, int y) => SetCursorPos(x, y);
 
@@ -434,6 +842,51 @@ public sealed class Automation
             new() { type = INPUT_MOUSE, U = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags } } },
         };
         SendInput((uint)inp.Length, inp, Marshal.SizeOf<INPUT>());
+    }
+
+    // A wheel event (vertical MOUSEEVENTF_WHEEL or horizontal MOUSEEVENTF_HWHEEL)
+    // carries its rotation amount in mouseData: +/-WheelDelta per notch.
+    private static void SendMouseWheel(uint flags, int mouseData)
+    {
+        var inp = new INPUT[]
+        {
+            new() { type = INPUT_MOUSE, U = new InputUnion { mi = new MOUSEINPUT { dwFlags = flags, mouseData = unchecked((uint)mouseData) } } },
+        };
+        SendInput((uint)inp.Length, inp, Marshal.SizeOf<INPUT>());
+    }
+
+    // Convert a (pixel-ish) delta to whole wheel notches — rounding away from
+    // zero so a small delta still moves one notch — and emit one WHEEL event per
+    // notch at +/-WheelDelta, matching the macOS scroll cadence.
+    private static void SendWheelNotches(uint flags, int delta)
+    {
+        int notches = delta / WheelDelta;
+        if (notches == 0) notches = delta > 0 ? 1 : -1;
+        int step = notches > 0 ? WheelDelta : -WheelDelta;
+        for (int i = 0; i < Math.Abs(notches); i++) SendMouseWheel(flags, step);
+    }
+
+    // On-screen center of an element from its bounding rectangle, or null when
+    // it has no usable frame. Mirrors the id-addressable click center math.
+    private static int[]? CenterOf(AutomationElement el)
+    {
+        var b = RectToBounds(el.Current.BoundingRectangle);
+        if (b == null) return null;
+        return new[] { b[0] + b[2] / 2, b[1] + b[3] / 2 };
+    }
+
+    // Resolve a drag endpoint: an element id's center, or a [x, y] JSON pair.
+    private int[] ResolvePoint(JsonElement p, int pid, string elemKey, string coordKey)
+    {
+        string? eid = P.StringOpt(p, elemKey);
+        if (eid != null)
+        {
+            var el = _cache.Get(pid, eid) ?? throw RpcError.Stale();
+            return CenterOf(el) ?? throw new RpcError("action_failed", $"{elemKey} element has no frame");
+        }
+        if (p.TryGetProperty(coordKey, out var arr) && arr.ValueKind == JsonValueKind.Array && arr.GetArrayLength() == 2)
+            return new[] { (int)arr[0].GetDouble(), (int)arr[1].GetDouble() };
+        throw RpcError.Invalid($"pass either {elemKey} or {coordKey}=[x, y]");
     }
 
     private static void SendKeyEvent(ushort vk, bool keyUp)

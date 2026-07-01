@@ -46,11 +46,13 @@ public sealed class Dispatcher
             "key" => _automation.SendKey(@params),
             "set_focus" => _automation.SetFocus(@params),
             "get_text" => _automation.GetText(@params),
-            // Parity stubs — not yet implemented on Windows. Returning
-            // action_unsupported (not method_not_found) tells the caller the
-            // verb is known but unavailable on this backend.
-            "scroll" or "drag" or "right_click" or "focus_window" or "ax_action" or "wait" or "notify"
-                => throw RpcError.Unsupported($"{method} not yet implemented on the windows backend"),
+            "scroll" => _automation.Scroll(@params),
+            "drag" => _automation.Drag(@params),
+            "right_click" => _automation.RightClick(@params),
+            "focus_window" => _automation.FocusWindow(@params),
+            "ax_action" => _automation.AxAction(@params),
+            "wait" => _automation.Wait(@params),
+            "notify" => _automation.Notify(@params),
             _ => throw RpcError.MethodNotFound(method),
         };
     }

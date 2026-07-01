@@ -79,6 +79,16 @@ function countNodes(node) {
   for (const c of node.children ?? []) n += countNodes(c);
   return n;
 }
+// First node carrying an on-screen [x,y,w,h] rect (DFS) — a target for the
+// pointer verbs (drag/right_click/scroll) when the edit control has no bounds.
+function firstBounds(node) {
+  if (node && Array.isArray(node.bounds)) return node.bounds;
+  for (const c of node?.children ?? []) {
+    const b = firstBounds(c);
+    if (b) return b;
+  }
+  return null;
+}
 
 async function connectWithRetry(p, tries = 50) {
   for (let i = 0; i < tries; i++) {
@@ -163,6 +173,64 @@ async function main() {
     const png = Buffer.from(shot.image_data, 'base64');
     if (!(png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47)) fail('screenshot is not a PNG');
     ok(`screenshot ${shot.width}x${shot.height} (${png.length} bytes)`);
+
+    // ---- parity verbs: match the macOS helper's result shapes ----------
+
+    // 7. notify — pure pass-through (no Windows toast API); the manager
+    // intercepts the return value.
+    const notif = await c.call('notify', { message: TYPED, pid });
+    if (notif?.notified !== true || notif.message !== TYPED) fail(`notify wrong shape: ${JSON.stringify(notif)}`);
+    if (notif.pid !== pid) fail(`notify did not echo pid: ${JSON.stringify(notif)}`);
+    ok('notify pass-through');
+
+    // 8. wait — unconditional duration, then poll the cached edit element.
+    const waited = await c.call('wait', { duration_ms: 100 });
+    if (waited?.satisfied !== true || typeof waited.waited_ms !== 'number') fail(`wait duration wrong: ${JSON.stringify(waited)}`);
+    ok(`wait duration (${waited.waited_ms}ms)`);
+    const waitEl = await c.call('wait', { pid, element_id: elId, until: 'exists', timeout_ms: 2000 });
+    if (waitEl?.satisfied !== true) fail(`wait element exists not satisfied: ${JSON.stringify(waitEl)}`);
+    ok('wait element exists');
+
+    // 9. focus_window — app-level activate (no window_id/title → raised_window false).
+    const focused = await c.call('focus_window', { pid });
+    if (focused?.ok !== true || typeof focused.focus_elapsed_ms !== 'number' || focused.raised_window !== false) {
+      fail(`focus_window wrong shape: ${JSON.stringify(focused)}`);
+    }
+    ok(`focus_window (${focused.focus_elapsed_ms}ms, was_minimized=${focused.was_minimized})`);
+
+    // 10. scroll — synthesized wheel. Notepad has little to scroll, but the RPC
+    // must still succeed with the {ok, method} shape.
+    const scrolled = await c.call('scroll', { pid, dy: -3 });
+    if (scrolled?.ok !== true || scrolled.method !== 'wheel') fail(`scroll wrong shape: ${JSON.stringify(scrolled)}`);
+    ok(`scroll (${scrolled.method})`);
+
+    // A point inside the notepad window for the pointer verbs.
+    const bounds = (Array.isArray(editable[0].bounds) && editable[0].bounds) || firstBounds(desc.tree);
+    if (!bounds) fail('no bounds available to target pointer verbs');
+    const [bx, by, bw, bh] = bounds;
+    const cx = bx + Math.floor(bw / 2), cy = by + Math.floor(bh / 2);
+
+    // 11. drag — press → interpolated move → release inside the edit region.
+    const dragged = await c.call('drag', { pid, from: [cx, cy], to: [cx + Math.min(40, Math.floor(bw / 4)), cy] });
+    if (dragged?.ok !== true || dragged.method !== 'drag') fail(`drag wrong shape: ${JSON.stringify(dragged)}`);
+    ok(`drag (${dragged.method})`);
+
+    // 12. right_click — opens the context menu; Escape closes it so the session
+    // stays clean for the next run.
+    const rclick = await c.call('right_click', { pid, x: cx, y: cy });
+    if (rclick?.ok !== true || rclick.method !== 'right_click' || !Array.isArray(rclick.at)) {
+      fail(`right_click wrong shape: ${JSON.stringify(rclick)}`);
+    }
+    await c.call('key', { keys: 'escape' });
+    ok(`right_click at [${rclick.at}]`);
+
+    // 13. ax_action — the Edit control advertises no invoke/toggle/select action,
+    // so an unknown action must surface action_unsupported with the available list.
+    let axErr = null;
+    try { await c.call('ax_action', { pid, element_id: elId, action: '__nope__' }); }
+    catch (e) { axErr = e; }
+    if (!axErr || !/action_unsupported/.test(axErr.message)) fail(`ax_action did not reject unknown action: ${axErr?.message}`);
+    ok('ax_action rejects unknown action (action_unsupported)');
 
     console.log('SMOKE PASS');
   } finally {
