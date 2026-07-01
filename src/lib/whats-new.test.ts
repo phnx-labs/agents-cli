@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { renderWhatsNew } from './whats-new.js';
 
-// Strip ANSI so assertions read against plain text.
-const plain = (s: string) => s.replace(/\[[0-9;]*m/g, '');
+// Strip ANSI so assertions read against plain text (robust under FORCE_COLOR).
+// eslint-disable-next-line no-control-regex
+const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
 const CHANGELOG = `# Changelog
 
