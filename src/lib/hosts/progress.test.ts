@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { exitMarker, splitProgressOutput } from './progress.js';
+import { exitMarker, splitProgressOutput, mirrorAliasesSource } from './progress.js';
 
 describe('exitMarker', () => {
   it('embeds the task id so it cannot collide with generic output', () => {
@@ -57,5 +57,23 @@ describe('splitProgressOutput', () => {
     expect(emitted).toBe(exitMarker(id));
     const r = splitProgressOutput(`body${emitted}0`, id);
     expect(r).toEqual({ logChunk: 'body', exit: '0' });
+  });
+});
+
+describe('mirrorAliasesSource', () => {
+  it('flags aliasing when local and remote are the same file (localhost host)', () => {
+    // Same dev:ino → the mirror IS the tailed file → skip the append.
+    expect(mirrorAliasesSource('66306:1234567', '66306:1234567')).toBe(true);
+  });
+
+  it('does not flag distinct files (a genuine remote host)', () => {
+    expect(mirrorAliasesSource('66306:1234567', '2049:9999999')).toBe(false);
+  });
+
+  it('does not flag when either identity is unknown', () => {
+    // Missing local (mirror not created yet) or unstattable remote → keep mirroring.
+    expect(mirrorAliasesSource(null, '2049:9999999')).toBe(false);
+    expect(mirrorAliasesSource('66306:1234567', null)).toBe(false);
+    expect(mirrorAliasesSource(null, null)).toBe(false);
   });
 });

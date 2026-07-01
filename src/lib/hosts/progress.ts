@@ -87,6 +87,30 @@ export function fetchProgress(
   return splitProgressOutput(res.stdout, opts.taskId);
 }
 
+/**
+ * File identity (`dev:ino`) of a path on the remote host, or null if it can't be
+ * stat'd. GNU (`-c`) then BSD (`-f`) format, so it works on Linux and macOS hosts.
+ */
+export function readRemoteFileId(target: string, remotePath: string): string | null {
+  const res = sshExec(
+    target,
+    `stat -c '%d:%i' ${remotePath} 2>/dev/null || stat -f '%d:%i' ${remotePath} 2>/dev/null`,
+    { timeoutMs: 8000 },
+  );
+  const id = res.stdout.trim();
+  return id || null;
+}
+
+/**
+ * True when the local mirror file IS the very file we're tailing — the
+ * localhost-as-host case, where `remoteLog` ($HOME-expanded) and `localLogPath`
+ * resolve to the same inode. Appending our read bytes back into it would feed the
+ * tail and multiply the log, so the caller must skip the mirror write.
+ */
+export function mirrorAliasesSource(localId: string | null, remoteId: string | null): boolean {
+  return localId !== null && remoteId !== null && localId === remoteId;
+}
+
 /** Tail the remote log to stdout until the run finishes; return its exit code. */
 export async function followHostTask(target: string, opts: FollowOptions): Promise<number> {
   const fastMs = opts.pollMs ?? 1500;
@@ -96,10 +120,22 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
   let offset = 0;
   let waitMs = fastMs;
 
+  // localhost-as-host guard: when the local mirror and the remote log are the
+  // same physical file, appending our read bytes back would feed the tail and
+  // multiply the log (a plain `--host localhost` follow otherwise tripled it).
+  // Detect via file identity and echo-only in that case.
+  let mirror = true;
+  try {
+    const s = fs.statSync(local);
+    if (mirrorAliasesSource(`${s.dev}:${s.ino}`, readRemoteFileId(target, opts.remoteLog))) {
+      mirror = false;
+    }
+  } catch { /* mirror absent or unstattable → distinct file, keep mirroring */ }
+
   const flush = (logChunk: string): boolean => {
     if (!logChunk) return false;
     if (opts.echo) process.stdout.write(logChunk);
-    try { fs.appendFileSync(local, logChunk); } catch { /* best-effort */ }
+    if (mirror) { try { fs.appendFileSync(local, logChunk); } catch { /* best-effort */ } }
     offset += Buffer.byteLength(logChunk, 'utf8');
     return true;
   };
