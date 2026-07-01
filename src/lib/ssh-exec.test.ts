@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { assertValidSshTarget, SSH_TARGET_RE, shellQuote } from './ssh-exec.js';
+import * as fs from 'fs';
+import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts } from './ssh-exec.js';
 
 describe('assertValidSshTarget', () => {
   it('accepts bare host aliases and user@host', () => {
@@ -39,5 +40,19 @@ describe('shellQuote', () => {
   it('escapes embedded single quotes correctly', () => {
     // it's -> 'it'\''s'  (close, escaped quote, reopen)
     expect(shellQuote("it's")).toBe("'it'\\''s'");
+  });
+});
+
+describe('controlOpts (connection multiplexing)', () => {
+  it('returns ControlMaster/ControlPath/ControlPersist and creates the socket dir', () => {
+    const opts = controlOpts();
+    expect(opts).toContain('ControlMaster=auto');
+    expect(opts).toContain('ControlPersist=60s');
+    const cp = opts.find((o) => o.startsWith('ControlPath='));
+    expect(cp).toBeDefined();
+    // %C keeps the socket path short (macOS sun_path limit) and the dir must exist.
+    expect(cp).toContain('%C');
+    const dir = cp!.replace('ControlPath=', '').replace(/\/cm-%C$/, '');
+    expect(fs.existsSync(dir)).toBe(true);
   });
 });
