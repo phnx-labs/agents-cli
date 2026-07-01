@@ -271,6 +271,16 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     nativeAgentsSkillsDir: true,
+    // Google retired the Gemini CLI (announced at Google I/O 2026, May 19); the `gemini`
+    // command stopped serving free/Pro/Ultra requests on June 18, 2026. Antigravity CLI
+    // (`agy`) is the official successor. See warnAgentDeprecated() for the surfaced warning.
+    deprecated: {
+      by: 'Google',
+      date: 'June 18, 2026',
+      reason: 'The Gemini CLI was retired for free, Pro, and Ultra tiers and no longer serves requests (announced at Google I/O 2026 on May 19).',
+      replacement: 'antigravity',
+      url: 'https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/',
+    },
     // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
     capabilities: { hooks: { since: '0.26.0' }, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'GEMINI.md' }, workflows: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
   },
@@ -1969,6 +1979,38 @@ export function resolveAgentName(input: string): AgentId | null {
 /** Check whether the input string matches any known agent name or alias. */
 export function isAgentName(input: string): boolean {
   return resolveAgentName(input) !== null;
+}
+
+/**
+ * Build the deprecation notice lines for an agent, or null if it isn't
+ * deprecated. Split from the printer so tests can assert the content without
+ * capturing stdout. Lines are plain (uncolored) text.
+ */
+export function deprecationNotice(agent: AgentId): string[] | null {
+  const dep = AGENTS[agent].deprecated;
+  if (!dep) return null;
+  const name = AGENTS[agent].name;
+  const lines = [
+    `Warning: ${name} was deprecated by ${dep.by} (${dep.date}).`,
+    `  ${dep.reason}`,
+  ];
+  if (dep.replacement) {
+    const rep = AGENTS[dep.replacement];
+    lines.push(`  Consider using ${rep.name} instead:  agents add ${rep.id}`);
+  }
+  if (dep.url) lines.push(`  ${dep.url}`);
+  return lines;
+}
+
+/**
+ * Print a deprecation warning (yellow) if the agent's registry entry carries a
+ * `deprecated` marker; no-op otherwise. Call from any user entry point that
+ * acts on a chosen agent — install (`agents add`) and `agents teams add`.
+ */
+export function warnAgentDeprecated(agent: AgentId): void {
+  const lines = deprecationNotice(agent);
+  if (!lines) return;
+  for (const line of lines) console.log(chalk.yellow(line));
 }
 
 /** Format an error message for an unrecognized agent name, listing valid options. */

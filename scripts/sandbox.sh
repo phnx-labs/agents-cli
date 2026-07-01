@@ -21,7 +21,10 @@ BOX_CLASS="${CRABBOX_CLASS:-cpx62}"
 
 # Read profile from .crabbox.yaml so we only pick boxes warmed for THIS repo.
 # Falls back to "default" if the file is missing or unparseable.
-PROFILE="${CRABBOX_PROFILE:-$(awk '/^profile:/ {print $2; exit}' "$REPO_ROOT/.crabbox.yaml" 2>/dev/null)}"
+# `|| true` is required: under `set -e`, awk exiting non-zero on a missing
+# .crabbox.yaml would abort the whole script inside this assignment before the
+# `:-default` fallback below could run.
+PROFILE="${CRABBOX_PROFILE:-$(awk '/^profile:/ {print $2; exit}' "$REPO_ROOT/.crabbox.yaml" 2>/dev/null || true)}"
 PROFILE="${PROFILE:-default}"
 export PROFILE
 
@@ -35,7 +38,7 @@ command -v crabbox >/dev/null || die "crabbox not installed"
 # otherwise fall back to the agents-cli Keychain bundle (local dev path).
 if [[ -z "${HCLOUD_TOKEN:-}" ]]; then
   command -v agents >/dev/null || die "HCLOUD_TOKEN not set and agents-cli not installed"
-  eval "$(agents secrets export hetzner.com 2>/dev/null)" || die "Failed to load hetzner.com secrets"
+  eval "$(agents secrets export hetzner.com --plaintext 2>/dev/null)" || die "Failed to load hetzner.com secrets"
 fi
 [[ -n "${HCLOUD_TOKEN:-}" ]] || die "HCLOUD_TOKEN is empty after secret resolution"
 export HCLOUD_TOKEN
@@ -45,7 +48,7 @@ export HCLOUD_TOKEN
 # works regardless of whether the App is installed on a user or an org.
 # TOKEN_REPO env var (required) picks which installation.
 generate_github_token() {
-  eval "$(agents secrets export github.com 2>/dev/null)" || return 1
+  eval "$(agents secrets export github.com --plaintext 2>/dev/null)" || return 1
   [[ -n "${APP_ID:-}" && -n "${APP_PRIVATE_KEY:-}" ]] || return 1
 
   local target_repo="${TOKEN_REPO:?TOKEN_REPO must be set (e.g. owner/.agents) to pick the GitHub App installation}"
@@ -113,7 +116,7 @@ fi
 
 # Load Claude token for running agents on sandbox. Honor a pre-set env var first.
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && command -v agents >/dev/null; then
-  eval "$(agents secrets export anthropic.com 2>/dev/null)" || true
+  eval "$(agents secrets export anthropic.com --plaintext 2>/dev/null)" || true
 fi
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 
@@ -215,32 +218,38 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   echo "GitHub App token configured for private repos"
 fi
 
-# agents-cli + coding agents (for running agents in sandbox)
-if ! command -v agents &>/dev/null; then
-  echo "Installing agents-cli..."
-  sudo npm install -g @phnx-labs/agents-cli 2>/dev/null || true
-fi
-if command -v agents &>/dev/null; then
-  # First-time setup: clones ~/.agents/.system (public) and provisions ~/.agents
-  if [[ ! -d ~/.agents/.system ]]; then
-    echo "Setting up agents-cli..."
-    agents setup 2>&1 | tail -3 || true
+# agents-cli + coding agents: PR mode only. Agents run in the sandbox only when
+# authoring PRs; test mode just builds + runs the suite and needs none of this.
+# Skipping the install in test mode also keeps the box matching GitHub CI, where
+# claude is absent so the claude-dependent model-catalog tests skip rather than
+# fail on a partially-installed CLI (0 models => "mid-install", see models.ts).
+if [[ "$PR_MODE" == "1" ]]; then
+  if ! command -v agents &>/dev/null; then
+    echo "Installing agents-cli..."
+    sudo npm install -g @phnx-labs/agents-cli 2>/dev/null || true
   fi
-  # Put agents shims on PATH so installed CLIs (claude, codex, etc.) are reachable
-  export PATH="$HOME/.agents/.cache/shims:$PATH"
-  if ! grep -q '\.agents/\.cache/shims' ~/.bashrc 2>/dev/null; then
-    echo 'export PATH="$HOME/.agents/.cache/shims:$PATH"' >> ~/.bashrc
+  if command -v agents &>/dev/null; then
+    # First-time setup: clones ~/.agents/.system (public) and provisions ~/.agents
+    if [[ ! -d ~/.agents/.system ]]; then
+      echo "Setting up agents-cli..."
+      agents setup 2>&1 | tail -3 || true
+    fi
+    # Put agents shims on PATH so installed CLIs (claude, codex, etc.) are reachable
+    export PATH="$HOME/.agents/.cache/shims:$PATH"
+    if ! grep -q '\.agents/\.cache/shims' ~/.bashrc 2>/dev/null; then
+      echo 'export PATH="$HOME/.agents/.cache/shims:$PATH"' >> ~/.bashrc
+    fi
+    # Install Claude Code if not present
+    if ! command -v claude &>/dev/null; then
+      echo "Installing Claude Code via agents-cli..."
+      agents add claude 2>&1 | tail -3 || true
+    fi
   fi
-  # Install Claude Code if not present
-  if ! command -v claude &>/dev/null; then
-    echo "Installing Claude Code via agents-cli..."
-    agents add claude 2>&1 | tail -3 || true
-  fi
-fi
 
-# Claude Code auth (passed from local via env)
-if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  echo "Claude Code OAuth token configured"
+  # Claude Code auth (passed from local via env)
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    echo "Claude Code OAuth token configured"
+  fi
 fi
 
 echo "Bootstrap complete."

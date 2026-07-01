@@ -13,6 +13,7 @@ export { shellQuote };
 // the single ssh-tunnel helper. Calling it with no options preserves this
 // driver's original foreground, stderr-captured behavior exactly.
 import { startSSHTunnel } from '../../ssh-tunnel.js';
+import { encodePwshBase64 } from '../../pwsh.js';
 
 export interface SSHConnection {
   cdp: CDPClient;
@@ -194,8 +195,7 @@ function psSingleQuote(s: string): string {
  * `powershell -Command "…"` is fragile the moment a path or URL is involved).
  */
 export function encodePowerShell(script: string): string {
-  const b64 = Buffer.from(script, 'utf16le').toString('base64');
-  return `powershell -NoProfile -EncodedCommand ${b64}`;
+  return `powershell -NoProfile -EncodedCommand ${encodePwshBase64(script)}`;
 }
 
 /**

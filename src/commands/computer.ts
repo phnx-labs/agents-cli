@@ -58,6 +58,40 @@ export function shouldBlockOffPlatform(opts: {
   return true;
 }
 
+/**
+ * Sniff the image format from the leading magic bytes: PNG starts with the
+ * 8-byte signature `89 50 4E 47` ("\x89PNG"), JPEG with `FF D8 FF`. Returns the
+ * canonical file extension, or null for anything else.
+ */
+export function detectImageFormat(buf: Buffer): '.png' | '.jpg' | null {
+  if (buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return '.png';
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
+  return null;
+}
+
+/**
+ * Make the screenshot filename honest about its bytes. The two helper backends
+ * encode DIFFERENT formats and neither re-encodes to match the requested name:
+ * the macOS helper (ScreenCaptureKit) returns JPEG
+ * (packages/computer-helper/Sources/ComputerHelper/Screenshot.swift:207,212),
+ * the Windows helper returns PNG
+ * (packages/computer-helper-win/Screenshot.cs:33). So a fixed default extension
+ * cannot be correct for both — the only honest path is to sniff the real format
+ * and swap the extension to match. Pure so it's unit-testable.
+ *
+ * Returns the path to write to (caller's path with its extension corrected) and
+ * whether a correction was made. Unknown formats pass through unchanged.
+ */
+export function reconcileScreenshotExt(outPath: string, buf: Buffer): { path: string; corrected: boolean } {
+  const actual = detectImageFormat(buf);
+  if (!actual) return { path: outPath, corrected: false };
+  const cur = path.extname(outPath).toLowerCase();
+  const alreadyMatches = cur === actual || (actual === '.jpg' && (cur === '.jpg' || cur === '.jpeg'));
+  if (alreadyMatches) return { path: outPath, corrected: false };
+  const base = outPath.slice(0, outPath.length - path.extname(outPath).length);
+  return { path: base + actual, corrected: true };
+}
+
 export function registerComputerCommand(program: Command): void {
   const computer = program
     .command('computer')
@@ -160,8 +194,8 @@ function registerScreenshotCommand(program: Command): void {
     .option('--list', 'List the app\'s windows (id/title/layer/bounds) instead of capturing — reveals modals/popups')
     .option('--window-id <n>', 'Capture a specific window by id (from --list)', (v) => parseInt(v, 10))
     .option('--display', 'Capture the whole display the app is on (composites stacked modals)')
-    .option('--out <path>', 'Output JPEG path', './computer-screenshot.jpg')
-    .option('--quality <n>', 'JPEG quality 1-100', (v) => parseInt(v, 10), 85)
+    .option('--out <path>', 'Output image path — extension auto-corrected to the encoded format (JPEG on macOS, PNG on a Windows --host)', './computer-screenshot.jpg')
+    .option('--quality <n>', 'JPEG quality 1-100 (macOS capture only; the Windows helper encodes lossless PNG and ignores this)', (v) => parseInt(v, 10), 85)
     .option('--json', 'Emit JSON (metadata for captures; window list for --list)')
     .action(async (opts: {
       bundle?: string;
@@ -218,7 +252,10 @@ function registerScreenshotCommand(program: Command): void {
           process.exit(1);
         }
         const buf = Buffer.from(b64, 'base64');
-        const outPath = path.resolve(opts.out);
+        // Sniff the real format and correct the extension so the filename never
+        // lies about its bytes (macOS -> JPEG, Windows helper -> PNG).
+        const requested = path.resolve(opts.out);
+        const { path: outPath, corrected } = reconcileScreenshotExt(requested, buf);
         fs.writeFileSync(outPath, buf);
 
         if (opts.json) {
@@ -226,6 +263,9 @@ function registerScreenshotCommand(program: Command): void {
           const meta = { ...res, image_data: `<saved to ${outPath}>` };
           console.log(JSON.stringify(meta, null, 2));
         } else {
+          if (corrected) {
+            console.log(`note: bytes are ${path.extname(outPath).slice(1).toUpperCase()}; corrected extension from ${path.basename(requested)}`);
+          }
           const origin = (res.origin as number[]) || [];
           const originStr = origin.length === 2 ? `, origin [${origin.join(',')}], scale ${res.scale ?? '?'}` : '';
           console.log(`saved: ${outPath} (${res.width ?? '?'}x${res.height ?? '?'}, ${buf.byteLength} bytes${originStr})`);

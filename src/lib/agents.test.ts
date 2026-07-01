@@ -4,7 +4,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AGENTS, ALL_AGENT_IDS, getAccountInfo, resolveAgentName, resolveLastActive } from './agents.js';
+import { AGENTS, ALL_AGENT_IDS, deprecationNotice, getAccountInfo, resolveAgentName, resolveLastActive, warnAgentDeprecated } from './agents.js';
 import { IS_WINDOWS } from './platform/index.js';
 import type { CapabilityName } from './types.js';
 
@@ -447,6 +447,51 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     const info = await getAccountInfo('droid', makeTempDir());
     expect(info.signedIn).toBe(false);
     expect(info.email).toBeNull();
+  });
+});
+
+describe('agent deprecation warnings', () => {
+  it('marks gemini deprecated by Google with a dated notice and antigravity successor', () => {
+    const dep = AGENTS.gemini.deprecated;
+    expect(dep).toBeDefined();
+    expect(dep?.by).toBe('Google');
+    expect(dep?.date).toBe('June 18, 2026');
+    expect(dep?.replacement).toBe('antigravity');
+  });
+
+  it('builds a notice whose header names the agent, vendor, and date and points at the successor', () => {
+    const lines = deprecationNotice('gemini');
+    expect(lines).not.toBeNull();
+    expect(lines![0]).toBe('Warning: Gemini was deprecated by Google (June 18, 2026).');
+    // The successor line uses the replacement's display name + install command, not a hardcoded string.
+    expect(lines!.some((l) => l.includes('Consider using Antigravity instead:  agents add antigravity'))).toBe(true);
+    expect(lines!.some((l) => l.includes('developers.googleblog.com'))).toBe(true);
+  });
+
+  it('returns null for agents that are not deprecated', () => {
+    for (const id of ALL_AGENT_IDS) {
+      if (id === 'gemini') continue;
+      expect(deprecationNotice(id)).toBeNull();
+    }
+    // Sanity: only gemini carries a marker today, so exactly one agent warns.
+    const deprecated = ALL_AGENT_IDS.filter((id) => AGENTS[id].deprecated);
+    expect(deprecated).toEqual(['gemini']);
+  });
+
+  it('warnAgentDeprecated prints the gemini notice and stays silent for others', () => {
+    const printed: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => { printed.push(args.join(' ')); };
+    try {
+      warnAgentDeprecated('claude');
+      expect(printed).toHaveLength(0);
+      warnAgentDeprecated('gemini');
+    } finally {
+      console.log = original;
+    }
+    expect(printed.length).toBeGreaterThan(0);
+    // chalk wraps in ANSI codes; assert the visible substring survives.
+    expect(printed.join('\n')).toContain('was deprecated by Google');
   });
 });
 
