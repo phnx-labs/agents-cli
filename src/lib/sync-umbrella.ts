@@ -1,11 +1,12 @@
 /**
  * Umbrella `agents sync` orchestration — "make this machine current".
  *
- * Bare `agents sync` fetches remote state (config repos + secrets + sessions)
- * then reconciles it into every installed agent's version home. Each stage is
- * an existing exported library function; this module only sequences them and
- * decides — from the flags — which stages run (`planUmbrellaStages`). The
- * planner is pure so the flag matrix is unit-tested without any I/O.
+ * Bare `agents sync` fetches the config repos then reconciles them into every
+ * installed agent's version home. Secrets and sessions are opt-in stages
+ * (`--secrets` / `--sessions`) — see `planUmbrellaStages` for why they're off by
+ * default. Each stage is an existing exported library function; this module only
+ * sequences them and decides — from the flags — which stages run. The planner is
+ * pure so the flag matrix is unit-tested without any I/O.
  *
  * Stage backends:
  *   repos    -> git pull of ~/.agents + enabled ~/.agents-* extras (pullRepo)
@@ -39,11 +40,17 @@ export interface UmbrellaPlan {
 
 /**
  * Decide which stages run. Pure — no I/O. Semantics:
- *   bare (no flags)        fetch all three, then reconcile
+ *   bare (no flags)        fetch repos, then reconcile
  *   --local                reconcile only, no fetch
- *   --cloud                fetch (all, or the selected subset), skip reconcile
+ *   --cloud                fetch repos (or the selected subset), skip reconcile
  *   --repos/--secrets/...  fetch only the selected types, then reconcile
  * `--local` wins over everything; `--cloud` suppresses reconcile.
+ *
+ * Secrets and sessions are NOT part of the bare default — they are opt-in via
+ * `--secrets` / `--sessions`. Pulling every secret bundle onto the machine on a
+ * bare `agents sync` is more blast radius than the verb should carry by
+ * default, and session transcripts are queryable on demand (`agents sessions
+ * --host <machine>`) so they don't need eager mirroring.
  */
 export function planUmbrellaStages(f: UmbrellaFlags): UmbrellaPlan {
   if (f.local) {
@@ -58,8 +65,9 @@ export function planUmbrellaStages(f: UmbrellaFlags): UmbrellaPlan {
       reconcile: !f.cloud,
     };
   }
-  // No per-type selector: bare = all + reconcile; --cloud = all, no reconcile.
-  return { fetchRepos: true, fetchSecrets: true, fetchSessions: true, reconcile: !f.cloud };
+  // No per-type selector: bare = repos + reconcile; --cloud = repos, no
+  // reconcile. Secrets/sessions stay off unless explicitly selected above.
+  return { fetchRepos: true, fetchSecrets: false, fetchSessions: false, reconcile: !f.cloud };
 }
 
 export interface UmbrellaResult {

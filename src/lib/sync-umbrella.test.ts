@@ -7,9 +7,9 @@ import { planUmbrellaStages } from './sync-umbrella.js';
  * tested library functions.
  */
 describe('planUmbrellaStages', () => {
-  it('bare: fetch all three, then reconcile', () => {
+  it('bare: fetch repos only, then reconcile (secrets/sessions are opt-in)', () => {
     expect(planUmbrellaStages({})).toEqual({
-      fetchRepos: true, fetchSecrets: true, fetchSessions: true, reconcile: true,
+      fetchRepos: true, fetchSecrets: false, fetchSessions: false, reconcile: true,
     });
   });
 
@@ -25,9 +25,9 @@ describe('planUmbrellaStages', () => {
     });
   });
 
-  it('--cloud: fetch all three, skip reconcile', () => {
+  it('--cloud: fetch repos only, skip reconcile (secrets/sessions are opt-in)', () => {
     expect(planUmbrellaStages({ cloud: true })).toEqual({
-      fetchRepos: true, fetchSecrets: true, fetchSessions: true, reconcile: false,
+      fetchRepos: true, fetchSecrets: false, fetchSessions: false, reconcile: false,
     });
   });
 
