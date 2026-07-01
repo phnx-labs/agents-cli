@@ -56,6 +56,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [PTY](pty.md) | Persistent pseudo-terminals for REPLs and TUIs — start, exec, screen-snapshot, signal. |
 | [Computer](computer.md) | macOS Accessibility automation — screenshot the active app, click by label. |
 | [Menu bar](menubar.md) | macOS status item — live sessions, agents awaiting input, routines, + new session. Auto-enabled; `agents menubar enable/disable/status`. |
+| [Terminal engine](terminal-engine.md) | Open a command as a tab or split pane in iTerm / Ghostty / tmux, local or over `--host`. Powers `sessions resume`. |
 
 ---
 
