@@ -239,3 +239,74 @@ trades correctness guarantees for speed.
 |------|--------|
 | `src/lib/versions.ts` | Guard + manifest write in `syncResourcesToVersion`; `force?` option; skip dotfiles in `copyDir` |
 | `src/lib/rules-compile.ts` | Add `mtime?`/`size?` to `CompileManifest`; two-tier fast path in `isRulesStale` |
+
+---
+
+## OPT-02: SSH Transport — One Multiplexed Engine
+
+Full design rationale: [09-ssh-transport.md](09-ssh-transport.md).
+
+### Problem
+
+Every remote surface (`run/view/sync/sessions/teams … --host`, remote secrets,
+the CDP tunnel) forks the system `ssh`. On the laptop that drives the fleet, each
+fork is a process, a socket, and a full TCP+auth handshake. OpenSSH connection
+multiplexing was implemented in the choke point but was **opt-in**, and only 3 of
+~13 call paths opted in — the hottest ones did not:
+
+```
+followHostTask  poll loop      2 un-muxed ssh / 1.5s   ≈ 4,800 spawns/hour
+ensureHostReady dispatch gate  3 sequential connections (2 un-muxed)
+runRemoteSessions fan-out      private SSH_OPTS copy, no multiplexing
+SSH_OPTS                       no keepalive → dropped links hang as zombies
+```
+
+### Design
+
+Two shared primitives; everything composes from them:
+
+- **`SSH_OPTS`** — the one hardened baseline, now with keepalive
+  (`ServerAliveInterval=15` / `ServerAliveCountMax=3`, ~45 s to reap a dead link).
+- **`controlOpts()`** — multiplexing, flipped to **default-on**
+  (`opts.multiplex === false ? [] : controlOpts()`). Every routed caller reuses
+  the control socket for free; degrades to a fresh connection if the socket can't
+  open; no-ops on Windows.
+
+Plus two hot-path rewrites: the follow loop now does **one** combined round-trip
+per cycle (sentinel-framed `tail; printf; cat`) with adaptive backoff, and
+readiness collapses **3 probes into 1** compound `readyProbe`.
+
+### Results
+
+Live Tailscale-relayed host, `scripts/bench-ssh.mjs`, wall-clock on the laptop:
+
+```
+┌──────────────────────────────┬──────────┬──────────┬───────────────────────────┐
+│            Path              │  Before  │  After   │           Win             │
+├──────────────────────────────┼──────────┼──────────┼───────────────────────────┤
+│ P3 repeated --host (per call)│  ~444ms  │  ~75ms   │ ~6-7x                     │
+│ P2 readiness per dispatch    │ 1.5-1.8s │  ~0.8s   │ ~2x                       │
+│ P1 follow loop (per cycle)   │  ~706ms  │  ~33ms   │ ~21-23x, 50% fewer spawns │
+└──────────────────────────────┴──────────┴──────────┴───────────────────────────┘
+```
+
+Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
+
+### New files
+
+| File | Role |
+|------|------|
+| `docs/09-ssh-transport.md` | Design rationale for the shared SSH transport |
+| `scripts/bench-ssh.mjs` | A/B benchmark harness (needs a live host) |
+
+### Modified files
+
+| File | Change |
+|------|--------|
+| `src/lib/ssh-exec.ts` | Keepalive in `SSH_OPTS`; multiplexing default-on |
+| `src/lib/hosts/progress.ts` | One combined round-trip/cycle + adaptive backoff; `splitProgressOutput` |
+| `src/lib/hosts/ready.ts` | `readyProbe` collapses 3 probes into 1 |
+| `src/commands/hosts.ts` | Thread the probe result through `maybeBootstrap` (drop duplicate probe) |
+| `src/lib/session/remote.ts` | Import canonical `SSH_OPTS` + `controlOpts` (drop private copy) |
+| `src/commands/secrets.ts` | Route the remote push through `sshExec` |
+| `src/lib/ssh-tunnel.ts` | `buildTunnelArgs` composes `SSH_OPTS` (inherits keepalive) |

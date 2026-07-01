@@ -17,7 +17,8 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Resource sync](02-resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
 | [Sessions](05-sessions.md) | Unified transcript discovery across Claude, Codex, Gemini, OpenCode. |
 | [Observability](06-observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view. |
-| [Optimizations](99-optimizations.md) | Sync manifest, startup profiling, hot-path notes. |
+| [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
+| [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
 | [Landscape](04-landscape.md) | Where agents-cli sits next to similar tools. |
 
 ## Credentials and model routing
