@@ -482,3 +482,51 @@ describe('resolveVersionAliasLoose — @any', () => {
     expect(JSON.parse(child.stdout.trim())).toEqual({ strictAny: null, looseAny: null, strictDefault: null });
   });
 });
+
+describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () => {
+  // Scaffold a user skill and a system skill in an isolated HOME, then confirm
+  // scoping to one repo returns only that layer's resources. Guards against
+  // layer-misattribution — the bug where `--repo system` would sweep in (or
+  // drop) the wrong repo's skills.
+  function runBuildScoped(home: string, repo: string): { skills?: string[] } {
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+      import { buildRepoScopedSelection } from ${JSON.stringify(moduleUrl)};
+      const home = ${JSON.stringify(home)};
+      console.log(JSON.stringify(buildRepoScopedSelection(${JSON.stringify(repo)}, home)));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    expect(child.status, child.stderr).toBe(0);
+    return JSON.parse(child.stdout.trim());
+  }
+
+  function scaffoldSkills(home: string): void {
+    const userSkill = path.join(home, '.agents', 'skills', 'user-only', 'SKILL.md');
+    const systemSkill = path.join(home, '.agents', '.system', 'skills', 'system-only', 'SKILL.md');
+    fs.mkdirSync(path.dirname(userSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(systemSkill), { recursive: true });
+    fs.writeFileSync(userSkill, 'user skill body', 'utf-8');
+    fs.writeFileSync(systemSkill, 'system skill body', 'utf-8');
+  }
+
+  it('scopes to the system repo — only system-layer skills, not user', () => {
+    const home = makeTempHome();
+    scaffoldSkills(home);
+    const sel = runBuildScoped(home, 'system');
+    expect(sel.skills).toEqual(['system-only']);
+  });
+
+  it('scopes to the user repo — only user-layer skills, not system', () => {
+    const home = makeTempHome();
+    scaffoldSkills(home);
+    const sel = runBuildScoped(home, 'user');
+    expect(sel.skills).toEqual(['user-only']);
+  });
+
+  it('omits the memory file — a repo-scoped sync leaves merged rules untouched', () => {
+    const home = makeTempHome();
+    scaffoldSkills(home);
+    const sel = runBuildScoped(home, 'system') as Record<string, unknown>;
+    expect(sel.memory).toBeUndefined();
+  });
+});

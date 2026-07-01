@@ -47,6 +47,8 @@ import {
   hasNewResources,
   promptResourceSelection,
   promptNewResourceSelection,
+  buildRepoScopedSelection,
+  listRepoNames,
   type ResourceSelection,
   type SyncResult,
   type AvailableResources,
@@ -59,6 +61,7 @@ import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
 interface SyncOpts {
   agent?: string;
   agentVersion?: string;
+  repo?: string;
   projectDir?: string;
   cwd?: string;
   launch?: boolean;
@@ -76,11 +79,12 @@ interface SyncOpts {
 /** Register the `agents sync` command. */
 export function registerSyncCommand(program: Command): void {
   program
-    .command('sync [agentSpec]')
+    .command('sync [agentSpec] [repo]')
     .summary('Make this machine current, or sync resources into one agent')
-    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", or a selector: @latest / @oldest / @pinned (= @default).\n\nWith NO agent, runs the umbrella verb: fetch remote state (config repos + secrets + sessions) then reconcile it into every installed agent. Scope it with --repos / --secrets / --sessions, --cloud (fetch only), or --local (reconcile only).')
+    .description('With an [agentSpec], syncs resources (commands, skills, hooks, rules, MCPs, plugins, etc.) into that installed agent version — previews changes and lets you pick. e.g. "claude", "claude@2.1.142", a selector: @latest / @oldest / @pinned (= @default), or @all for every installed version.\n\nAppend a [repo] (or pass --repo) to scope the sync to a single DotAgent repo — system / user / project / <alias>. e.g. "agents sync claude@all system" reconciles only the system repo\'s resources into every installed Claude.\n\nWith NO agent, runs the umbrella verb: fetch remote state (config repos + secrets + sessions) then reconcile it into every installed agent. Scope it with --repos / --secrets / --sessions, --cloud (fetch only), or --local (reconcile only).')
     .option('--agent <agent>', 'Agent identifier (legacy form; prefer the positional spec)')
     .option('--agent-version <version>', 'Version to sync into (legacy form; prefer "agent@version")')
+    .option('--repo <name>', 'Scope the sync to a single DotAgent repo: system / user / project / <alias> (also accepted as a positional)')
     .option('--project-dir <path>', 'Path to project-level .agents/ directory containing project-scoped resources')
     .option('--cwd <path>', 'Working directory for discovering project manifest and resources')
     .option('--launch', 'Hot-path mode (shim only): skip version-home reconciliation, run project-scoped compile + workspace mirror + plugin marketplaces', false)
@@ -93,8 +97,8 @@ export function registerSyncCommand(program: Command): void {
     .option('--sessions', 'Umbrella: sync session transcripts across machines', false)
     .option('--cloud', 'Umbrella: fetch all remote state but skip the local reconcile', false)
     .option('--local', "Umbrella: reconcile resources into installed agents only (no fetch)", false)
-    .action(async (agentSpec: string | undefined, opts: SyncOpts) => {
-      await runSync(agentSpec, opts);
+    .action(async (agentSpec: string | undefined, repo: string | undefined, opts: SyncOpts) => {
+      await runSync(agentSpec, repo, opts);
     });
 }
 
@@ -152,7 +156,7 @@ async function runUmbrella(
   }
 }
 
-async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<void> {
+async function runSync(agentSpec: string | undefined, repoArg: string | undefined, opts: SyncOpts): Promise<void> {
   const quiet = !!opts.quiet;
   const errLog = (msg: string) => { if (!quiet) console.error(msg); };
   const outLog = (msg: string) => { if (!quiet) console.log(msg); };
@@ -162,22 +166,36 @@ async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<v
   let version: string | undefined;
 
   // A positional @selector typed by the user (latest/oldest/pinned/default/
-  // explicit). parseAgentSpec defaults a missing version to 'latest', so a bare
-  // `agents sync claude` and `agents sync claude@latest` are indistinguishable
-  // after parsing — we only treat the version as a selector when an '@' was
-  // actually typed, keeping bare `claude` on the default-version path.
+  // all/explicit). parseAgentSpec defaults a missing version to 'latest', so a
+  // bare `agents sync claude` and `agents sync claude@latest` are
+  // indistinguishable after parsing — we only treat the version as a selector
+  // when an '@' was actually typed, keeping bare `claude` on the
+  // default-version path.
   let selector: string | undefined;
 
   if (agentSpec) {
     const parsed = parseAgentSpec(agentSpec);
     if (!parsed) {
       errLog(chalk.red(`Invalid agent spec '${agentSpec}'.`));
-      errLog(chalk.gray('Examples: claude, claude@2.1.142, claude@latest, claude@oldest, claude@pinned'));
+      errLog(chalk.gray('Examples: claude, claude@2.1.142, claude@latest, claude@oldest, claude@pinned, claude@all'));
       process.exitCode = 1;
       return;
     }
     agentId = parsed.agent;
     if (agentSpec.includes('@')) selector = parsed.version;
+  }
+
+  // Repo scope: --repo flag wins over the positional. Validate against the
+  // known DotAgent repos so a typo fails loudly instead of syncing nothing.
+  const repoScope = opts.repo || repoArg;
+  if (repoScope !== undefined) {
+    const known = listRepoNames();
+    if (!known.includes(repoScope)) {
+      errLog(chalk.red(`Unknown repo '${repoScope}'.`));
+      errLog(chalk.gray(`Known repos: ${known.join(', ')}`));
+      process.exitCode = 1;
+      return;
+    }
   }
 
   if (opts.agent) {
@@ -199,6 +217,38 @@ async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<v
     // No agent specified → the umbrella verb: make this machine current
     // (fetch repos + secrets + sessions, then reconcile all installed agents).
     await runUmbrella(opts, quiet, outLog, errLog);
+    return;
+  }
+
+  const projectDir = opts.projectDir;
+  const cwd = opts.cwd || process.cwd();
+  const force = !!opts.force;
+
+  // ---------- 2a. @all: reconcile every installed version of this agent ----------
+  // Non-interactive by design — fanning an interactive preview across N
+  // versions is unusable. Honors an optional repo scope.
+  if (selector === 'all') {
+    const installed = listInstalledVersions(agentId);
+    if (installed.length === 0) {
+      errLog(chalk.red(`No ${agentLabel(agentId)} versions installed.`));
+      errLog(chalk.gray(`Install one: agents add ${agentId}@latest`));
+      process.exitCode = 1;
+      return;
+    }
+    let selection: ResourceSelection | undefined;
+    if (repoScope) {
+      selection = buildRepoScopedSelection(repoScope, cwd);
+      if (Object.keys(selection).length === 0) {
+        outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync.`));
+        return;
+      }
+    }
+    const scopeLabel = repoScope ? chalk.gray(` (repo: ${repoScope})`) : '';
+    outLog(chalk.cyan(`Syncing ${installed.length} ${agentLabel(agentId)} version(s)${scopeLabel}.`));
+    for (const v of installed) {
+      const result = syncResourcesToVersion(agentId, v, selection, { projectDir, cwd, force });
+      if (!quiet) printSyncDetail(result, agentId, v, cwd);
+    }
     return;
   }
 
@@ -244,17 +294,27 @@ async function runSync(agentSpec: string | undefined, opts: SyncOpts): Promise<v
     return;
   }
 
-  const projectDir = opts.projectDir;
-  const cwd = opts.cwd || process.cwd();
-
   // ---------- 3. --launch mode bypasses everything below ----------
   if (opts.launch) {
     runLaunchMode(agentId, version, cwd, quiet);
     return;
   }
 
+  // ---------- 3b. Repo-scoped single-version sync ----------
+  // An explicit --repo / positional repo is a targeted request, so skip the
+  // interactive preview and reconcile just that repo's resources.
+  if (repoScope) {
+    const scoped = buildRepoScopedSelection(repoScope, cwd);
+    if (Object.keys(scoped).length === 0) {
+      outLog(chalk.gray(`Nothing from repo '${repoScope}' to sync into ${agentLabel(agentId)}@${version}.`));
+      return;
+    }
+    const result = syncResourcesToVersion(agentId, version, scoped, { projectDir, cwd, force });
+    if (!quiet) printSyncDetail(result, agentId, version, cwd);
+    return;
+  }
+
   // ---------- 4. Decide selection (interactive preview vs auto) ----------
-  const force = !!opts.force;
   const yes = !!opts.yes;
   const interactive = !quiet && !yes && isInteractiveTerminal();
 

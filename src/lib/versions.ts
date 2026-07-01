@@ -1797,6 +1797,60 @@ export function getResourceDiff(agent: AgentId, version: string): ResourceDiff {
 }
 
 /**
+ * Enumerate the DotAgent repo names that resources can be scoped to:
+ * the fixed `project` / `user` / `system` layers plus every enabled extra
+ * repo alias. Used to validate `agents sync <agent> --repo <name>`.
+ */
+export function listRepoNames(): string[] {
+  return ['project', 'user', 'system', ...getEnabledExtraRepos().map(e => e.alias)];
+}
+
+/**
+ * Build a ResourceSelection scoped to a single DotAgent repo (`system`,
+ * `user`, `project`, or an extra-repo alias). Every resource kind is filtered
+ * to the entries whose source layer matches `repo`, reusing the same
+ * name→source maps and `source:*` pattern expansion the persisted-pattern
+ * sync path uses. Passing the result as an explicit `selection` means the sync
+ * touches only that repo's resources — no orphan-sweep of the other layers.
+ *
+ * `memory` is intentionally omitted: the memory file is a merge of all layers,
+ * not a per-repo artifact, so a repo-scoped sync leaves it untouched.
+ */
+export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd()): ResourceSelection {
+  const patterns = [`${repo}:*`];
+  const selection: ResourceSelection = {};
+  const available = getAvailableResources(cwd);
+
+  const listableKinds = ['commands', 'skills', 'hooks', 'subagents'] as const;
+  for (const kind of listableKinds) {
+    const sourceMap = new Map(listResources(kind, cwd).map(r => [r.name, r.source]));
+    const names = expandPatterns(patterns, sourceMap);
+    if (names.length > 0) selection[kind] = names;
+  }
+
+  // permissions: all groups originate from the system repo.
+  const permMap = new Map(available.permissions.map(n => [n, 'system' as const]));
+  const perms = expandPatterns(patterns, permMap);
+  if (perms.length > 0) selection.permissions = perms;
+
+  // mcp: preserve project vs user scope (system/alias MCPs won't match those).
+  const mcpMap = new Map(getScopedMcpResources(cwd).map(r => [r.name, r.scope]));
+  const mcp = expandPatterns(patterns, mcpMap);
+  if (mcp.length > 0) selection.mcp = mcp;
+
+  // plugins / workflows: treated as user-source (mirrors the default patterns).
+  const pluginMap = new Map(available.plugins.map(n => [n, 'user' as const]));
+  const plugins = expandPatterns(patterns, pluginMap);
+  if (plugins.length > 0) selection.plugins = plugins;
+
+  const workflowMap = new Map(available.workflows.map(n => [n, 'user' as const]));
+  const workflows = expandPatterns(patterns, workflowMap);
+  if (workflows.length > 0) selection.workflows = workflows;
+
+  return selection;
+}
+
+/**
  * Sync central resources (~/.agents/) into a specific version's config directory.
  * Copies selected resources from central storage into {versionHome}/.{agent}/.
  *
