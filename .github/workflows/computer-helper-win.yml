@@ -4,8 +4,8 @@ name: computer-helper-win
 # runner. Self-contained (does not touch the main CI matrix) so it can land on
 # the win-computer-use branch without rebasing onto main's CI changes.
 #
-# Non-blocking for now (continue-on-error) until the verb set reaches parity
-# with the macOS helper — promote to a required check once green and stable.
+# Required check: the verb set is at parity with the macOS helper and the smoke
+# is green on windows-latest, so a failure blocks the merge.
 
 on:
   push:
@@ -21,7 +21,6 @@ on:
 jobs:
   build-and-smoke:
     runs-on: windows-latest
-    continue-on-error: true
     permissions: {}
     defaults:
       run:
