@@ -416,7 +416,11 @@ function installDroidVersions(home: string, versions: string[]): void {
     fs.mkdirSync(path.join(droidVersionDir(home, v), 'home'), { recursive: true });
   }
   // droid's binary is global and per-host, not per-version (getBinaryPath).
-  const bin = path.join(home, '.local', 'bin', 'droid');
+  // Mirror getBinaryPath's platform split so the fixture binary lands where the
+  // SUT actually looks: Windows -> ~/bin/droid.exe, macOS/Linux -> ~/.local/bin/droid.
+  const bin = process.platform === 'win32'
+    ? path.join(home, 'bin', 'droid.exe')
+    : path.join(home, '.local', 'bin', 'droid');
   fs.mkdirSync(path.dirname(bin), { recursive: true });
   fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n', 'utf-8');
   fs.chmodSync(bin, 0o755);
