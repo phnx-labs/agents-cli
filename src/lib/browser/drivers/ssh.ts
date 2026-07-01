@@ -363,8 +363,22 @@ function sleep(ms: number): Promise<void> {
  *
  * Best-effort match against the ssh -L command line via `ps`. If we
  * can't read the cmd or the args don't look like ours, treat as not-ours.
+ *
+ * Windows has no `ps`, so the POSIX branch below always throws there and every
+ * reuse check returned false — the second invocation to the same host:port then
+ * failed "port in use". On win32 we instead reuse the netstat -ano + tasklist
+ * occupant lookup (getPortOccupant): the tunnel binds `remotePort` locally
+ * (localPort === remotePort in the caller), so the pid holding that port is our
+ * ssh.exe. tasklist only exposes the image name, not the full command line, so
+ * we can't match host/remotePort as tightly as the POSIX branch — an ssh
+ * process on our exact local port is our tunnel in practice.
  */
-function isOwnTunnel(pid: number, host: string, remotePort: number): boolean {
+export function isOwnTunnel(pid: number, host: string, remotePort: number): boolean {
+  if (process.platform === 'win32') {
+    const occupant = getPortOccupant(remotePort);
+    if (!occupant || occupant.pid !== pid) return false;
+    return occupant.command.toLowerCase().startsWith('ssh');
+  }
   try {
     const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
       encoding: 'utf-8',

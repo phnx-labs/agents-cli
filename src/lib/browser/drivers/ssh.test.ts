@@ -1,14 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+
+// isOwnTunnel's win32 branch delegates to getPortOccupant; mock it so the test
+// exercises the branch logic without shelling out to netstat/tasklist.
+vi.mock('../chrome.js', () => ({ getPortOccupant: vi.fn() }));
+
 import {
   buildLaunchCmd,
   buildKillCmd,
   buildWindowsLaunchScript,
   buildWindowsKillScript,
   encodePowerShell,
+  isOwnTunnel,
 } from './ssh.js';
+import { getPortOccupant } from '../chrome.js';
+
+const mockedOccupant = vi.mocked(getPortOccupant);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sshSrc = readFileSync(join(here, 'ssh.ts'), 'utf8');
@@ -98,6 +107,50 @@ describe('buildLaunchCmd (posix)', () => {
   it('uses a custom binary path verbatim', () => {
     const cmd = buildLaunchCmd('posix', 'custom', 9222, '/opt/edge/edge');
     expect(cmd).toContain('/opt/edge/edge');
+  });
+});
+
+describe('isOwnTunnel (win32)', () => {
+  const realPlatform = process.platform;
+
+  function setPlatform(p: string) {
+    Object.defineProperty(process, 'platform', { value: p, configurable: true });
+  }
+
+  afterEach(() => {
+    setPlatform(realPlatform);
+    mockedOccupant.mockReset();
+  });
+
+  it('treats an ssh.exe holding our local port as our tunnel (ps is absent on Windows)', () => {
+    setPlatform('win32');
+    mockedOccupant.mockReturnValue({ pid: 4242, command: 'ssh.exe' });
+
+    expect(isOwnTunnel(4242, 'win-mini', 9222)).toBe(true);
+    // Verified via the netstat/tasklist occupant path against the local port
+    // (localPort === remotePort), not by shelling out to POSIX `ps`.
+    expect(mockedOccupant).toHaveBeenCalledWith(9222);
+  });
+
+  it('rejects a non-ssh occupant on our port', () => {
+    setPlatform('win32');
+    mockedOccupant.mockReturnValue({ pid: 4242, command: 'msedge.exe' });
+
+    expect(isOwnTunnel(4242, 'win-mini', 9222)).toBe(false);
+  });
+
+  it('rejects when the occupant pid does not match the one we found', () => {
+    setPlatform('win32');
+    mockedOccupant.mockReturnValue({ pid: 9999, command: 'ssh.exe' });
+
+    expect(isOwnTunnel(4242, 'win-mini', 9222)).toBe(false);
+  });
+
+  it('rejects when nothing occupies the port', () => {
+    setPlatform('win32');
+    mockedOccupant.mockReturnValue(null);
+
+    expect(isOwnTunnel(4242, 'win-mini', 9222)).toBe(false);
   });
 });
 
