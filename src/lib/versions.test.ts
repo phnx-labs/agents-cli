@@ -611,3 +611,53 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
     expect(fs.existsSync(agentsPath)).toBe(false);
   });
 });
+
+describe('unionResourceSelections + mergeRepoScopedSelections — interactive multi-repo sync', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function evalExpr(home: string, expr: string): any {
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+      import * as V from ${JSON.stringify(moduleUrl)};
+      const home = ${JSON.stringify(home)};
+      console.log(JSON.stringify(${expr}));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    expect(child.status, child.stderr).toBe(0);
+    return JSON.parse(child.stdout.trim());
+  }
+
+  it('unions selections and dedupes names per kind', () => {
+    const home = makeTempHome();
+    const out = evalExpr(home,
+      "V.unionResourceSelections([{skills:['a','b']},{skills:['b','c'],commands:['x']}], false)");
+    expect(out.skills.sort()).toEqual(['a', 'b', 'c']);
+    expect(out.commands).toEqual(['x']);
+    expect(out.memory).toEqual([]); // includeMemory=false → skip sentinel
+  });
+
+  it('includeMemory=true requests a full memory write', () => {
+    const home = makeTempHome();
+    const out = evalExpr(home, "V.unionResourceSelections([{skills:['a']}], true)");
+    expect(out.memory).toBe('all');
+  });
+
+  it('merges system + user skills and writes memory when a memory layer is picked', () => {
+    const home = makeTempHome();
+    const userSkill = path.join(home, '.agents', 'skills', 'user-only', 'SKILL.md');
+    const systemSkill = path.join(home, '.agents', '.system', 'skills', 'system-only', 'SKILL.md');
+    fs.mkdirSync(path.dirname(userSkill), { recursive: true });
+    fs.mkdirSync(path.dirname(systemSkill), { recursive: true });
+    fs.writeFileSync(userSkill, 'user skill body', 'utf-8');
+    fs.writeFileSync(systemSkill, 'system skill body', 'utf-8');
+
+    const out = evalExpr(home, "V.mergeRepoScopedSelections(['user','system'], home)");
+    expect(out.skills.sort()).toEqual(['system-only', 'user-only']);
+    expect(out.memory).toBe('all'); // user/system layer selected → memory written
+  });
+
+  it('a project-only pick leaves the memory file untouched', () => {
+    const home = makeTempHome();
+    const out = evalExpr(home, "V.mergeRepoScopedSelections(['project'], home)");
+    expect(out.memory).toEqual([]); // neither user nor system → skip sentinel
+  });
+});

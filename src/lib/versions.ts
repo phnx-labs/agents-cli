@@ -1879,6 +1879,44 @@ export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd
 }
 
 /**
+ * Union several ResourceSelections into one, deduping names per kind. Pure — no
+ * FS — so the merge logic is unit-tested without a DotAgents layout. `memory` is
+ * a whole-file merge of the user+system layers, not a per-repo artifact: pass
+ * `includeMemory` to request a full memory write (`'all'`), else the skip
+ * sentinel (`[]`) is kept.
+ */
+export function unionResourceSelections(
+  selections: ResourceSelection[],
+  includeMemory: boolean,
+): ResourceSelection {
+  const merged: ResourceSelection = {};
+  const kinds: SelectableKind[] = ['commands', 'skills', 'hooks', 'subagents', 'permissions', 'mcp', 'plugins', 'workflows'];
+  for (const sel of selections) {
+    for (const kind of kinds) {
+      const names = sel[kind];
+      if (!Array.isArray(names) || names.length === 0) continue;
+      const existing = (merged[kind] as string[] | undefined) ?? [];
+      merged[kind] = Array.from(new Set([...existing, ...names]));
+    }
+  }
+  merged.memory = includeMemory ? 'all' : [];
+  return merged;
+}
+
+/**
+ * Build one selection spanning several DotAgent repos — the source set an
+ * interactive `agents sync` picker collects. Each repo is scoped via
+ * `buildRepoScopedSelection`, then unioned. Memory is written whole when the
+ * `user` or `system` layer is among the selected repos (that's where the memory
+ * file's content comes from); a project-only / alias-only pick leaves it
+ * untouched.
+ */
+export function mergeRepoScopedSelections(repos: string[], cwd: string = process.cwd()): ResourceSelection {
+  const includeMemory = repos.includes('user') || repos.includes('system');
+  return unionResourceSelections(repos.map((r) => buildRepoScopedSelection(r, cwd)), includeMemory);
+}
+
+/**
  * Sync central resources (~/.agents/) into a specific version's config directory.
  * Copies selected resources from central storage into {versionHome}/.{agent}/.
  *
