@@ -47,4 +47,22 @@ describe('buildJobCommand', () => {
     expect(argv).toEqual(['agents', 'run', 'autodev', '<prompt>', '--mode', 'edit']);
     expect(argv).not.toContain('--non-interactive');
   });
+
+  // Regression: kimi daemon jobs run headless via `--prompt`, which cannot be
+  // combined with --plan/--auto/--yolo (kimi aborts "Cannot combine --prompt
+  // with --X"). Write-modes must omit the flag; plan must fail closed.
+  it('kimi skip mode omits --yolo (incompatible with headless --prompt)', () => {
+    const argv = buildJobCommand(baseJob({ agent: 'kimi', mode: 'skip' }), 'Do the task.');
+    expect(argv).toContain('--prompt');
+    expect(argv).not.toContain('--yolo');
+  });
+
+  it('kimi auto mode omits --auto', () => {
+    const argv = buildJobCommand(baseJob({ agent: 'kimi', mode: 'auto' }), 'Do the task.');
+    expect(argv).not.toContain('--auto');
+  });
+
+  it('kimi plan mode throws (no headless read-only mode)', () => {
+    expect(() => buildJobCommand(baseJob({ agent: 'kimi', mode: 'plan' }), 'Do the task.')).toThrow(/read-only/);
+  });
 });

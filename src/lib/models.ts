@@ -237,6 +237,24 @@ export function locateModelSource(
     return null;
   }
 
+  if (agent === 'antigravity') {
+    // The `agy` shim under node_modules/.bin exposes `agy models`. We don't parse
+    // any bundle; the CLI produces its own (display-name-only) catalog.
+    const cli = path.join(versionDir, 'node_modules', '.bin', 'agy');
+    if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
+    const pathBin = findOnPath('agy');
+    if (pathBin) return { path: pathBin, kind: 'cli' };
+    return null;
+  }
+
+  if (agent === 'kimi') {
+    const cli = path.join(versionDir, 'node_modules', '.bin', 'kimi');
+    if (fs.existsSync(cli)) return { path: cli, kind: 'cli' };
+    const pathBin = findOnPath('kimi');
+    if (pathBin) return { path: pathBin, kind: 'cli' };
+    return null;
+  }
+
   if (agent === 'cursor') {
     // cursor-agent is installed via curl script, not agents-cli. Version argument
     // is accepted for API symmetry but ignored -- cursor lives on PATH.
@@ -682,6 +700,114 @@ function extractOpenClawCatalog(binaryPath: string): { models: ModelInfo[]; alia
 }
 
 /**
+ * Extract Antigravity's catalog via `agy models`. Antigravity is unusual: it
+ * prints DISPLAY NAMES ONLY, one per line, with no machine ids and no --json:
+ *   Gemini 3.5 Flash (Medium)
+ *   Claude Sonnet 4.6 (Thinking)
+ * Verified (agy 1.0.11) that those display strings ARE the accepted `--model`
+ * values -- `agy --model "Claude Opus 4.6 (Thinking)"` routes to that model,
+ * and an unknown value silently falls back to the first row. So we use each
+ * display string as both id and displayName, and mark the first row default.
+ */
+function extractAntigravityCatalog(binaryPath: string): { models: ModelInfo[]; aliases: Record<string, string> } {
+  let stdout: string;
+  try {
+    stdout = execFileSync(binaryPath, ['models'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 15_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch {
+    return { models: [], aliases: {} };
+  }
+
+  // Strip ANSI in case a spinner or color codes slip through.
+  // eslint-disable-next-line no-control-regex
+  const plain = stdout.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+  const models: ModelInfo[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of plain.split('\n')) {
+    const name = raw.trim();
+    if (!name) continue;
+    // Guard against any stray banner/usage lines: real rows look like
+    // "<Vendor> <Model> (<Level>)". Require an alphanumeric start and a
+    // parenthesized suffix, which every observed model row has.
+    if (!/^[A-Za-z0-9].*\([^)]+\)\s*$/.test(name)) continue;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    models.push({
+      id: name,
+      displayName: name,
+      // Antigravity's first listed model is its default (unknown --model values
+      // fall back to it), so flag the first row we accept.
+      isDefault: models.length === 0,
+    });
+  }
+
+  return { models, aliases: {} };
+}
+
+/**
+ * Extract Kimi's catalog via `kimi provider list --json`, which emits the raw
+ * providers/models config. Model ids are the `models` object keys (e.g.
+ * `kimi-code/kimi-for-coding`). The default is reported on a separate plain
+ * `Default model: <id>` line by `kimi provider list` (no flags), so we run that
+ * too to flag the default row.
+ */
+function extractKimiCatalog(binaryPath: string): { models: ModelInfo[]; aliases: Record<string, string> } {
+  let jsonOut: string;
+  try {
+    jsonOut = execFileSync(binaryPath, ['provider', 'list', '--json'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 15_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch {
+    return { models: [], aliases: {} };
+  }
+
+  const firstBrace = jsonOut.indexOf('{');
+  if (firstBrace === -1) return { models: [], aliases: {} };
+  let parsed: any;
+  try {
+    parsed = JSON.parse(jsonOut.slice(firstBrace));
+  } catch {
+    return { models: [], aliases: {} };
+  }
+
+  // Resolve the default model id from the plain listing's "Default model:" line.
+  let defaultId: string | null = null;
+  try {
+    const plain = execFileSync(binaryPath, ['provider', 'list'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 10_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    const m = plain.match(/Default model:\s*(\S+)/);
+    if (m) defaultId = m[1];
+  } catch {
+    /* default flag is best-effort */
+  }
+
+  const modelsObj = parsed?.models && typeof parsed.models === 'object' ? parsed.models : {};
+  const models: ModelInfo[] = [];
+  for (const id of Object.keys(modelsObj)) {
+    const info = modelsObj[id] ?? {};
+    models.push({
+      id,
+      displayName: typeof info.displayName === 'string' ? info.displayName : undefined,
+      isDefault: defaultId != null && id === defaultId,
+    });
+  }
+
+  return { models, aliases: {} };
+}
+
+/**
  * Build (or load from cache) the model catalog for a specific (agent, version).
  * Cache is keyed on source-file mtime (binary or js module), so re-extracts
  * automatically when the user upgrades or reinstalls a version.
@@ -724,6 +850,8 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     if (agent === 'opencode') ({ models, aliases } = extractOpenCodeCatalog(src.path));
     else if (agent === 'cursor') ({ models, aliases } = extractCursorCatalog(src.path));
     else if (agent === 'openclaw') ({ models, aliases } = extractOpenClawCatalog(src.path));
+    else if (agent === 'antigravity') ({ models, aliases } = extractAntigravityCatalog(src.path));
+    else if (agent === 'kimi') ({ models, aliases } = extractKimiCatalog(src.path));
   }
 
   const catalog: ModelCatalog = {
@@ -735,11 +863,12 @@ export function getModelCatalog(agent: AgentId, version: string): ModelCatalog |
     aliases,
   };
 
-  // Don't cache empty CLI extractions: the CLI may have been mid-install,
-  // network-dependent, or transiently failing. Caching 0 models would mask
-  // the real catalog forever (mtime won't change). Bundle/binary/js sources
-  // are deterministic, so cache those even when empty.
-  if (src.kind !== 'cli' || models.length > 0) {
+  // Never cache an empty extraction, regardless of source kind. A 0-model
+  // result is always suspect: the CLI may have been mid-install, network-
+  // dependent, or transiently failing, and a js/bundle/binary extractor that
+  // regex-misses would otherwise pin an empty catalog forever (mtime won't
+  // change until the source file does). Only persist a non-empty catalog.
+  if (models.length > 0) {
     cache.entries[key] = { sourcePath: src.path, mtime, catalog };
     saveCache();
   }

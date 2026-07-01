@@ -638,6 +638,21 @@ export function buildExecCommand(options: ExecOptions): string[] {
     if (!interactive && resolvedMode !== 'plan') {
       cmd.push('--dangerously-bypass-approvals-and-sandbox');
     }
+  } else if (options.agent === 'kimi' && !interactive) {
+    // kimi's headless prompt mode (`-p`/`--prompt`) is self-contained and REFUSES
+    // to be combined with any startup-mode flag: `--plan`, `--auto`, and `--yolo`
+    // all abort with "Cannot combine --prompt with --X" (verified against the live
+    // kimi CLI). The write-capable modes (edit/auto/skip) all collapse to kimi's
+    // default `-p` behavior, which already auto-approves tool calls, so we emit no
+    // mode flag. Plan (read-only) has no headless equivalent, so fail closed rather
+    // than silently letting a plan-mode run mutate the workspace.
+    if (resolvedMode === 'plan') {
+      throw new Error(
+        'kimi has no headless read-only mode: `--prompt` cannot be combined with `--plan`. ' +
+          'Run kimi in plan mode interactively (omit the prompt), or use --mode edit, auto, or skip.',
+      );
+    }
+    // edit/auto/skip: emit no mode flag — `kimi -p` auto-runs.
   } else {
     cmd.push(...modeFlags);
   }

@@ -21,7 +21,7 @@ import type { AgentId } from '../lib/types.js';
 import { listInstalledVersions, getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
 import { getModelCatalog, locateModelSource } from '../lib/models.js';
 
-const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'openclaw'];
+const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi'];
 
 /**
  * Agents that don't necessarily install under ~/.agents/versions (cursor ships
@@ -90,7 +90,13 @@ async function resolveTargets(agentSpec: string | undefined): Promise<Target[]> 
       if (!version && PATH_ONLY_AGENTS.has(agent)) {
         version = fallbackPathVersion(agent);
       }
-      if (version) targets.push({ agent, version, isDefault: true });
+      if (version) {
+        targets.push({ agent, version, isDefault: true });
+      } else {
+        // Surface the gap instead of silently dropping the agent -- an
+        // uninstalled model-capable agent should tell the user how to add it.
+        console.error(chalk.gray(`${agentLabel(agent)}: not installed (run 'agents add ${agent}@latest')`));
+      }
     }
     if (targets.length === 0) {
       console.error(chalk.yellow('No installed agent versions found. Run `agents add claude@latest` to install one.'));

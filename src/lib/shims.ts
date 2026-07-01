@@ -637,11 +637,11 @@ export function removeShim(agent: AgentId): boolean {
  *   v6 — versions moved from ~/.agents-system/versions to ~/.agents/versions
  *        (two-repo split: system = shipped defaults, user = operational state).
  *   v7 — runtime state split into ~/.agents/.history and ~/.agents/.cache.
- *   v8 — resolve the binary per-agent for the non-npm harnesses (droid, kimi,
- *        grok) instead of hard-coding node_modules/.bin. The droid template fix
- *        landed at v7 without a bump, so old-v7 aliases (node_modules/.bin/droid)
- *        and new-v7 aliases (~/.local/bin/droid) collided under one stamp and
- *        never regenerated — bumping forces every stale alias to be rewritten.
+ *   v8 — resolve grok/kimi/droid binaries from their real install locations
+ *        (~/.grok/downloads, ~/.kimi-code/bin, ~/.local/bin) instead of the
+ *        hardcoded node_modules/.bin, which never exists for these three and
+ *        made every versioned alias (the path `agents teams` pins to) fail
+ *        with "<agent>@<version> not installed". Also emit GROK_HOME.
  */
 export const VERSIONED_ALIAS_SCHEMA_VERSION = 8;
 
@@ -690,45 +690,64 @@ export CODEX_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${co
 # version MCP and session state are isolated.
 export COPILOT_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
-        : agent === 'kimi'
+        : agent === 'grok'
           ? `
+# Grok Build uses GROK_HOME to isolate its entire configuration tree (skills,
+# hooks, plugins, agents, memory, sessions, config.toml, MCP). Point direct
+# aliases at the versioned home for isolation parity with the main shim.
+export GROK_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+`
+          : agent === 'kimi'
+            ? `
 # Kimi Code CLI honors KIMI_CODE_HOME to relocate ~/.kimi-code (config.toml,
 # mcp.json, sessions, skills, hooks). Point direct aliases at the versioned home.
 export KIMI_CODE_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
 `
-          : '';
+            : '';
   const launchArgs = agent === 'codex' ? ' -c check_for_update_on_startup=false' : '';
 
-  // Resolve the binary the same way generateShimScript does: the non-npm
-  // harnesses (droid/kimi/grok) ship standalone binaries that never land in
-  // node_modules/.bin, so a hard-coded node_modules path fails for them. This
-  // template is unix-only — on Windows the .cmd companion delegates to
+  // Resolve the binary the same way the main shim does (see generateShimScript).
+  // Grok, Kimi, and Droid do NOT ship into node_modules/.bin — Grok downloads a
+  // native binary to ~/.grok/downloads, Kimi to ~/.kimi-code/bin, and Droid
+  // (Factory AI) installs a standalone binary to ~/.local/bin. Hardcoding the
+  // node_modules path made every versioned alias for these three fail with
+  // "<agent>@<version> not installed", which is exactly the path `agents teams`
+  // takes once it pins a teammate's version.
+  // This template is unix-only — on Windows the .cmd companion delegates to
   // "agents __shim" which resolves via getBinaryPath() instead.
+  const versionDir = `$HOME/.agents/.history/versions/${agent}/${version}`;
   const binaryResolution =
     agent === 'grok'
-      ? `GROK_DOWNLOADS="$HOME/.grok/downloads"
+      ? `# Grok ships its native binary in ~/.grok/downloads, not node_modules.
+GROK_DOWNLOADS="$HOME/.grok/downloads"
 BINARY=""
 if [ -d "$GROK_DOWNLOADS" ]; then
   BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | grep -i "${version}" | head -1)
   [ -n "$BINARY" ] || BINARY=$(ls "$GROK_DOWNLOADS"/grok-* 2>/dev/null | head -1)
 fi
-if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
-  BINARY=$(command -v grok 2>/dev/null || echo "")
-fi`
+[ -n "$BINARY" ] && [ -x "$BINARY" ] || BINARY=$(command -v grok 2>/dev/null || echo "")`
       : agent === 'kimi'
-        ? `BINARY="$HOME/.kimi-code/bin/kimi"
-if [ ! -x "$BINARY" ]; then
+        ? `# Kimi ships its binary in ~/.kimi-code/bin, not node_modules.
+KIMI_BINARY="$HOME/.kimi-code/bin/kimi"
+if [ -x "$KIMI_BINARY" ]; then
+  BINARY="$KIMI_BINARY"
+else
   BINARY=$(command -v kimi 2>/dev/null || echo "")
 fi`
         : agent === 'droid'
-          ? `BINARY="$HOME/.local/bin/droid"
-if [ ! -x "$BINARY" ]; then
+          ? `# Droid (Factory AI) installs a standalone native binary at ~/.local/bin/droid;
+# there is no npm package and nothing lands in node_modules/.bin. The PATH
+# fallback refuses anything under our shims dir to avoid an infinite re-exec.
+DROID_BINARY="$HOME/.local/bin/droid"
+if [ -x "$DROID_BINARY" ]; then
+  BINARY="$DROID_BINARY"
+else
   BINARY=$(command -v droid 2>/dev/null || echo "")
   case "$BINARY" in
     "$HOME/.agents/.cache/shims/"*) BINARY="" ;;
   esac
 fi`
-          : `BINARY="$HOME/.agents/.history/versions/${agent}/${version}/node_modules/.bin/${agentConfig.cliCommand}"`;
+          : `BINARY="${versionDir}/node_modules/.bin/${agentConfig.cliCommand}"`;
 
   return `#!/bin/bash
 # Auto-generated by agents-cli - do not edit
@@ -737,7 +756,7 @@ fi`
 
 ${binaryResolution}
 
-if [ ! -x "$BINARY" ]; then
+if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
   echo "agents: ${agent}@${version} not installed" >&2
   exit 1
 fi
