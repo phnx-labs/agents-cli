@@ -449,3 +449,51 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     expect(info.email).toBeNull();
   });
 });
+
+describe('getAccountInfo — grok (nested auth.json)', () => {
+  // Isolate the HOME fallback so a missing fixture doesn't read the dev's real ~/.grok.
+  let prevRealHome: string | undefined;
+  beforeEach(() => { prevRealHome = process.env.AGENTS_REAL_HOME; process.env.AGENTS_REAL_HOME = makeTempDir(); });
+  afterEach(() => {
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+  });
+
+  it('reads the nested "<issuer>::<client_id>" record — signed in with email + ids', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.grok');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify({
+      'https://auth.x.ai::abc-123': {
+        email: 'muqsitnawaz@icloud.com',
+        user_id: '5b5643da',
+        team_id: '4af61418',
+        refresh_token: 'rt_xxx',
+        create_time: '2026-07-01T03:11:20Z',
+        auth_mode: 'oidc',
+      },
+    }));
+
+    const info = await getAccountInfo('grok', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('muqsitnawaz@icloud.com');
+    expect(info.accountId).toBe('5b5643da');
+  });
+
+  it('picks the newest record when multiple providers are present', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.grok');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify({
+      old: { email: 'old@x.ai', refresh_token: 'a', create_time: '2026-01-01T00:00:00Z' },
+      new: { email: 'new@x.ai', refresh_token: 'b', create_time: '2026-07-01T00:00:00Z' },
+    }));
+    const info = await getAccountInfo('grok', home);
+    expect(info.email).toBe('new@x.ai');
+  });
+
+  it('treats grok as signed out when auth.json is absent', async () => {
+    const info = await getAccountInfo('grok', makeTempDir());
+    expect(info.signedIn).toBe(false);
+  });
+});

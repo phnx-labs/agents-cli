@@ -1044,13 +1044,28 @@ export async function getAccountInfo(
         return { ...empty, email, signedIn: !!email, lastActive };
       }
       case 'grok': {
-        // Grok stores auth in ~/.grok/auth.json
+        // Grok stores auth in ~/.grok/auth.json as a map keyed by
+        // "<oidc_issuer>::<client_id>" -> { email, user_id, refresh_token,
+        // create_time, expires_at, team_id, ... }. (Older builds wrote a flat
+        // object with a top-level email.) The old code only read a TOP-LEVEL
+        // `email`, so the current nested format always looked signed-out even
+        // when logged in. Read the newest account record: a refresh token means
+        // signed in, and we surface the email/ids like claude/codex.
+        const authPath = resolveAccountCredentialPath(base, '.grok', 'auth.json');
+        if (!authPath) return { ...empty, lastActive };
         try {
-          const authPath = path.join(base, '.grok', 'auth.json');
-          if (fs.existsSync(authPath)) {
-            const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
-            const email = data.email || data.user?.email || data.account?.email || null;
-            return { ...empty, email, signedIn: !!email, lastActive };
+          const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
+          const records = (data && typeof data === 'object' ? [data, ...Object.values(data)] : [])
+            .filter((r): r is Record<string, any> => !!r && typeof r === 'object');
+          const account = records
+            .filter(r => typeof r.refresh_token === 'string' || typeof r.email === 'string')
+            .sort((a, b) => String(b.create_time || '').localeCompare(String(a.create_time || '')))[0];
+          if (account) {
+            const email = typeof account.email === 'string' ? account.email : null;
+            const accountId = normalizeIdentityPart(account.user_id ?? account.principal_id);
+            const organizationId = normalizeIdentityPart(account.team_id);
+            const accountKey = buildIdentityKey(agentId, [['user', accountId], ['org', organizationId]]);
+            return { ...empty, email, accountId, organizationId, accountKey, signedIn: true, lastActive };
           }
         } catch {}
         return { ...empty, lastActive };
