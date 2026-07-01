@@ -481,3 +481,42 @@ describe('recordStop ffmpeg exit handling (#560)', () => {
     }
   });
 });
+
+describe('BrowserService.stopProfile — composite-key cleanup (#559)', () => {
+  it('cleans up a connection stored under the composite `<profile>@<endpoint>` when called with the bare profile name', async () => {
+    writeProfile('winmini', ['ssh://muqsit@win-mini?port=9222&os=windows'], 'edge');
+    const service = new BrowserService();
+
+    const cleanup = vi.fn();
+    const fakeConn = {
+      cdp: { close: vi.fn() },
+      pid: 2_000_000_000, // non-existent → killChrome's process.kill throws ESRCH (caught)
+      cleanup,
+      tasks: new Map(),
+      sessionCache: new Map(),
+    };
+    // start() keys the map on the composite, not the bare name.
+    const conns = (service as unknown as { connections: Map<string, unknown> }).connections;
+    conns.set('winmini@win-mini', fakeConn);
+
+    await service.stopProfile('winmini');
+
+    // Before the fix, get('winmini') missed the composite key and cleanup never ran.
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(fakeConn.cdp.close).toHaveBeenCalledTimes(1);
+    expect(conns.has('winmini@win-mini')).toBe(false);
+  });
+
+  it('does not touch a different profile that happens to share a name prefix', async () => {
+    const service = new BrowserService();
+    const conns = (service as unknown as { connections: Map<string, unknown> }).connections;
+    const otherCleanup = vi.fn();
+    conns.set('winmini2@ep', { cdp: { close: vi.fn() }, pid: 2_000_000_000, cleanup: otherCleanup, tasks: new Map() });
+
+    await service.stopProfile('winmini');
+
+    // "winmini2@ep" must NOT match the "winmini" stop (prefix must be `winmini@`).
+    expect(otherCleanup).not.toHaveBeenCalled();
+    expect(conns.has('winmini2@ep')).toBe(true);
+  });
+});

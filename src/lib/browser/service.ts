@@ -502,12 +502,24 @@ export class BrowserService {
   }
 
   async stopProfile(profileName: string): Promise<void> {
-    const conn = this.connections.get(profileName);
-    if (conn) {
+    // Connections are keyed by the composite `<profile>@<endpoint>` (see start()),
+    // but callers pass the bare profile name (or, occasionally, an exact composite).
+    // A plain `connections.get(profileName)` therefore missed every real remote
+    // connection, so `cleanup()` never ran — leaving the SSH tunnel and, on
+    // Windows, the WMI-spawned browser orphaned on the remote host after every
+    // `browser stop --profile` (#559). Match the exact key AND every
+    // `<profileName>@<endpoint>` composite so all of a profile's live connections
+    // are torn down.
+    const keys = [...this.connections.keys()].filter(
+      (k) => k === profileName || k.startsWith(`${profileName}@`)
+    );
+    for (const key of keys) {
+      const conn = this.connections.get(key);
+      if (!conn) continue;
       conn.cdp.close();
       killChrome(conn.pid);
       conn.cleanup?.();
-      this.connections.delete(profileName);
+      this.connections.delete(key);
     }
 
     const runtimeDir = getProfileRuntimeDir(profileName);
