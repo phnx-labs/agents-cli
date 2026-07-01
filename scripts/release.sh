@@ -415,33 +415,40 @@ if $PHNX_TARGET_PUBLISHED; then
   exit 0
 fi
 
-# ----- Wait for CI to go green on a PR (fail-closed) -----
-# gh pr checks --watch can exit 0 on an empty/partial check set right after the
-# push, so this brackets the watch with a readiness poll and a final re-assert
-# that every expected context is present AND passed. It waits on the WHOLE
-# matrix (incl. windows, which the main ruleset does not require) because the
-# whole point is a green cross-platform picture before we publish.
+# ----- Wait for CI to go green on a PR (bounded + fail-closed) -----
+# Poll `gh pr checks` on a hard deadline rather than `gh pr checks --watch`: the
+# watch is UNBOUNDED (a check that registers then stalls -- e.g. sandbox.yml's
+# self-hosted `test` runner offline -- would hang the release forever) and it can
+# exit 0 on a partial set. This loop waits until every expected context is
+# present AND terminal (capped at 60m), then re-asserts each is a pass and dies
+# otherwise. It waits on the WHOLE matrix (incl. windows, which the main ruleset
+# does not require) because the point is a green cross-platform picture before we
+# publish. NOTE: these names are the job/matrix labels of ci.yml (the build
+# matrix), sandbox.yml (test), and secret-scan.yml (gitleaks) -- a rename there
+# must be mirrored here, or the release times out (fail-closed, never publishes).
 EXPECTED_CHECKS=(test gitleaks \
   "build (ubuntu-latest, 22)" "build (ubuntu-latest, 24)" \
   "build (macos-latest, 22)"  "build (macos-latest, 24)" \
   "build (windows-latest, 22)" "build (windows-latest, 24)")
+check_bucket() { jq -r --arg n "$1" 'map(select(.name==$n)) | (.[0].bucket // "missing")' <<<"$2"; }
 wait_for_ci_green() {
-  local pr="$1" names ctx b results problem=0
-  bold "Waiting for CI checks to register on PR #$pr..."
-  local deadline=$(( $(date +%s) + 600 ))
+  local pr="$1" ctx b results problem=0
+  bold "Waiting for CI on PR #$pr (full matrix + test + gitleaks; up to 60m)..."
+  local deadline=$(( $(date +%s) + 3600 ))
   while :; do
-    names="$(gh pr checks "$pr" --json name --jq '.[].name' 2>/dev/null || true)"
-    local missing=0
-    for ctx in "${EXPECTED_CHECKS[@]}"; do grep -qxF "$ctx" <<<"$names" || { missing=1; break; }; done
-    [[ "$missing" == 0 ]] && break
-    (( $(date +%s) > deadline )) && { yellow "Timed out waiting for all checks to register; watching what did."; break; }
-    sleep 10
+    results="$(gh pr checks "$pr" --json name,bucket 2>/dev/null || echo '[]')"
+    local waiting=0
+    for ctx in "${EXPECTED_CHECKS[@]}"; do
+      b="$(check_bucket "$ctx" "$results")"
+      [[ "$b" == "missing" || "$b" == "pending" ]] && { waiting=1; break; }
+    done
+    (( waiting == 0 )) && break
+    (( $(date +%s) > deadline )) && { red "Timed out after 60m waiting for CI on PR #$pr."; break; }
+    sleep 20
   done
-  bold "Watching CI to completion (this waits on the full matrix)..."
-  gh pr checks "$pr" --watch --interval 20 >/dev/null 2>&1 || true
   results="$(gh pr checks "$pr" --json name,bucket 2>/dev/null || echo '[]')"
   for ctx in "${EXPECTED_CHECKS[@]}"; do
-    b="$(jq -r --arg n "$ctx" 'map(select(.name==$n)) | (.[0].bucket // "missing")' <<<"$results")"
+    b="$(check_bucket "$ctx" "$results")"
     [[ "$b" == "pass" ]] || { red "  $ctx: $b"; problem=1; }
   done
   (( problem == 0 )) || die "CI not all-green on PR #$pr -- PR left OPEN. Fix on a normal PR to $DEFAULT_BRANCH, then re-run this script."
@@ -494,7 +501,12 @@ if ! $MAIN_AT_TARGET; then
       gray "Updated PR #$PR_NUMBER branch to the freshly built release commit."
     fi
   else
-    git push origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"
+    # force-with-lease, not a plain push: a prior run may have left a stale
+    # release/v<version> branch with no open PR. RELEASE_COMMIT is a fresh
+    # commit-tree (a sibling of that stale tip, not a descendant), so a non-force
+    # push would be rejected non-fast-forward and brick the re-run. The lease is
+    # safe -- preflight fetched origin, so we only overwrite a ref we have seen.
+    git push --force-with-lease origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"
     green "Pushed $RELEASE_BRANCH"
   fi
 
@@ -503,9 +515,11 @@ if ! $MAIN_AT_TARGET; then
   git checkout -q HEAD -- package.json CHANGELOG.md
 
   if [[ -z "$PR_NUMBER" ]]; then
-    PR_NUMBER="$(gh pr create --base "$DEFAULT_BRANCH" --head "$RELEASE_BRANCH" \
-      --title "chore(release): $TARGET" --body "$PR_BODY" | grep -oE '[0-9]+$' | tail -1)"
-    [[ -n "$PR_NUMBER" ]] || die "failed to open release PR for $RELEASE_BRANCH"
+    gh pr create --base "$DEFAULT_BRANCH" --head "$RELEASE_BRANCH" \
+      --title "chore(release): $TARGET" --body "$PR_BODY" >/dev/null \
+      || die "failed to open release PR for $RELEASE_BRANCH"
+    PR_NUMBER="$(gh pr view "$RELEASE_BRANCH" --json number --jq .number 2>/dev/null || true)"
+    [[ -n "$PR_NUMBER" ]] || die "opened PR but could not resolve its number for $RELEASE_BRANCH"
     green "Opened release PR #$PR_NUMBER"
   fi
 
