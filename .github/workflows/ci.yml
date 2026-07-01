@@ -42,8 +42,16 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
+      # NOT --ignore-scripts: the daemon integration test spawns the real
+      # daemon, which loads node-pty (@homebridge/node-pty-prebuilt-multiarch).
+      # That package ships prebuilt binaries only for Linux; macOS/Windows get
+      # their pty.node from its install script (prebuild-install download, else
+      # node-gyp compile). --ignore-scripts skipped it, so pty.node was absent
+      # and the daemon crashed on macOS/Windows (green on Linux only). bun runs
+      # lifecycle scripts solely for `trustedDependencies` (package.json pins
+      # exactly that one native dep), so this stays a minimal, audited surface.
       - name: Install dependencies
-        run: bun install --ignore-scripts
+        run: bun install
 
       # --with-deps installs OS-level libs for headless Chromium and only works
       # on Linux (apt). macOS and Windows ship the needed libs already.

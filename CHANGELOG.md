@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**CI: build node-pty's native binary on macOS/Windows so the release matrix is green cross-platform**
+
+- The cross-platform matrix (`ci.yml`, runs only on `release/**` + `v*`) installed deps with `bun install --ignore-scripts`, which skipped the install script of `@homebridge/node-pty-prebuilt-multiarch`. That package ships prebuilt binaries only for Linux; macOS/Windows obtain `pty.node` via its install script (prebuild-install download, else a node-gyp compile). With scripts suppressed the native module was absent, so the daemon-liveness integration test added in #568 — which spawns the real daemon (it loads node-pty) and asserts the browser IPC socket stays up — crashed on macOS/Windows while passing on Linux, and had been red on every release since. The matrix runs only on release branches, so it never surfaced on normal PRs. CI now runs `bun install` (no `--ignore-scripts`); bun executes lifecycle scripts solely for `trustedDependencies`, which pins exactly that one native dep, so the fix is minimal and audited. Production (`npm install`) already built the native module, so end users were unaffected. Source: `.github/workflows/ci.yml`.
+
 **`agents logs`: a top-level, unified run-log viewer (#575)**
 
 - Viewing a dispatched run's output used to be nested and undiscoverable — only `agents hosts logs <id>` and `agents daemon logs` existed, and `agents hosts` wasn't even in `--help`. `agents logs [id]` is now a discoverable top-level command that resolves a run across **two substrates** — host-dispatch task stdout (`agents run --host`) and the local session index — and shows or (`-f`) follows it. `[id]`/`--session` load directly (host task tried first, then session); with no id, `--host`/`--agent`/`--version` filter a merged candidate list (one match shows, several open a fuzzy picker, non-TTY prints the list). Additive: `agents hosts logs` and `agents sessions tail` are unchanged and share the same helpers. Source: `src/commands/logs.ts`, `src/lib/hosts/logs.ts`.
