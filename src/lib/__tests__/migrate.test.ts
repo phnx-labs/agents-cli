@@ -27,10 +27,15 @@ function runRealMigration(): void {
     ['-e', `import { runMigration } from ${JSON.stringify(modulePath)}; await runMigration();`],
     {
       cwd: process.cwd(),
-      env: { ...process.env, HOME: testHome },
+      env: { ...process.env, HOME: testHome, AGENTS_SYNC_MACHINE_ID: 'testdev' },
       stdio: 'pipe',
     },
   );
+}
+
+/** Path to this machine's per-device pin file after the split migration. */
+function devicePinsFile(): string {
+  return path.join(userDir, 'devices', 'testdev', 'agents.yaml');
 }
 
 describe('runMigration', () => {
@@ -43,7 +48,9 @@ describe('runMigration', () => {
 
     runRealMigration();
 
-    expect(fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8')).toContain('claude');
+    // The legacy pin was moved from system -> user central, then split out to
+    // this machine's per-device file.
+    expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toContain('claude');
     expect(fs.existsSync(path.join(systemDir, 'agents.yaml'))).toBe(false);
     expect(fs.existsSync(path.join(systemDir, 'prompts.json'))).toBe(false);
     // Legacy ~/.agents-system/config.json (old teams agent registry) is just deleted.
@@ -249,7 +256,8 @@ describe('runMigration', () => {
       expect(meta).toContain('hooks:');
       expect(meta).toContain('capture-session');
       expect(meta).toContain('script: capture.sh');
-      expect(meta).toMatch(/agents:\s*\n\s+claude:/);
+      // The pin was split out to the per-device file; central keeps hooks:.
+      expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toMatch(/agents:\s*\n\s+claude:/);
     });
 
     it('creates agents.yaml when only hooks.yaml exists', () => {
@@ -292,9 +300,38 @@ describe('runMigration', () => {
       runRealMigration();
       runRealMigration();
 
-      const meta = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8');
-      expect(meta).toContain('claude: 2.1.0');
+      // Pin split to the per-device file on the first run; second run is a no-op.
+      expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toContain('claude: 2.1.0');
     });
+  });
+
+  it('splits machine-local fields out of central and clears skip-worktree in a git repo', () => {
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      'agents:\n  claude: "2.1.0"\nversions:\n  claude:\n    "2.1.0":\n      rulesPreset: default\nrun:\n  claude:\n    strategy: balanced\n',
+    );
+    const g = (...args: string[]): string =>
+      execFileSync('git', args, { cwd: userDir, encoding: 'utf-8', stdio: 'pipe' });
+    g('init', '-q');
+    g('add', 'agents.yaml');
+    g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
+    g('update-index', '--skip-worktree', 'agents.yaml'); // the old machine-local hack
+
+    runRealMigration();
+
+    // Central -> portable only; pins -> per-device file; versions -> history JSON.
+    const central = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8');
+    expect(central).not.toMatch(/^agents:/m);
+    expect(central).not.toMatch(/^versions:/m);
+    expect(central).toContain('run:');
+    expect(fs.readFileSync(devicePinsFile(), 'utf-8')).toContain('2.1.0');
+    const history = JSON.parse(
+      fs.readFileSync(path.join(userDir, '.history', 'version-resources.json'), 'utf-8'),
+    );
+    expect(history.claude['2.1.0'].rulesPreset).toBe('default');
+
+    // The skip-worktree bit is cleared (git ls-files -v no longer shows 'S ').
+    expect(g('ls-files', '-v', 'agents.yaml').startsWith('S ')).toBe(false);
   });
 
   describe('system-repo sweep', () => {

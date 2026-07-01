@@ -106,6 +106,12 @@ function writeLocalPackageRepo(): string {
   return repo;
 }
 
+/** Version pins now live in this machine's per-device file, not central agents.yaml. */
+const DEVICE_ID = 'testdev';
+function devicePinsPath(home: string): string {
+  return path.join(home, '.agents', 'devices', DEVICE_ID, 'agents.yaml');
+}
+
 function runAgents(home: string, args: string[], extraEnv: Record<string, string> = {}) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,
@@ -113,6 +119,7 @@ function runAgents(home: string, args: string[], extraEnv: Record<string, string
       ...process.env,
       HOME: home,
       SHELL: '/bin/zsh',
+      AGENTS_SYNC_MACHINE_ID: DEVICE_ID,
       ...extraEnv,
     },
     encoding: 'utf-8',
@@ -272,7 +279,10 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const storedPath = readSessionFilePath(home, sessionId);
     expect(storedPath).toBe(trashedSessionFile);
     expect(fs.existsSync(storedPath!)).toBe(true);
-    expect(fs.readFileSync(metaPath, 'utf-8')).toContain(version);
+    // versions: tracking now lives in the machine-local history file.
+    expect(
+      fs.readFileSync(path.join(home, '.agents', '.history', 'version-resources.json'), 'utf-8'),
+    ).toContain(version);
   });
 
   it('keeps remove as an alias for version prune', () => {
@@ -446,7 +456,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
 
     const result = runAgents(home, ['use', 'codex@0.1.0']);
-    const agentsYaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
+    const agentsYaml = fs.readFileSync(devicePinsPath(home), 'utf-8');
     const codexSymlink = path.join(home, '.codex');
 
     expect(result.status).toBe(0);
@@ -465,7 +475,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const result = runAgents(home, ['add', 'codex@0.2.0', '-y'], {
       PATH: `${fakeNpmBin}${path.delimiter}${process.env.PATH || ''}`,
     });
-    const agentsYaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
+    const agentsYaml = fs.readFileSync(devicePinsPath(home), 'utf-8');
     const installedBinary = path.join(
       home,
       '.agents',

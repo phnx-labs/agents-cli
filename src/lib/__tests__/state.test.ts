@@ -340,8 +340,11 @@ describe('readMeta merges agents.yaml from both repos', () => {
     expect(result.after).toBe('9.9.9');
   });
 
-  it('refreshes the cache when agents.yaml is modified out-of-band', () => {
+  it('refreshes the cache when the device pin file is modified out-of-band', () => {
     const moduleUrl = pathToFileURL(modulePath).href;
+    // A central pin is transitional; the first readMeta lifts it into the
+    // per-device file (which is authoritative). Out-of-band edits to that file
+    // must invalidate the cache.
     fs.writeFileSync(
       path.join(userDir, 'agents.yaml'),
       'agents:\n  claude: "1.0.0"\n',
@@ -351,14 +354,15 @@ describe('readMeta merges agents.yaml from both repos', () => {
     const output = runStateScriptWithNode(testDir, `
       import fs from 'fs';
       import path from 'path';
-      import { readMeta } from ${JSON.stringify(moduleUrl)};
+      import { readMeta, getDeviceMetaPath } from ${JSON.stringify(moduleUrl)};
 
-      const target = path.join(process.env.HOME, '.agents', 'agents.yaml');
-      const before = readMeta();
+      const before = readMeta(); // reads the central pin, lifting it into the device file
+      const devicePath = getDeviceMetaPath();
 
       // Wait long enough for the mtime to definitely advance (HFS+ mtime is per-second).
       await new Promise((r) => setTimeout(r, 1100));
-      fs.writeFileSync(target, 'agents:\\n  claude: "2.0.0"\\n', 'utf-8');
+      fs.mkdirSync(path.dirname(devicePath), { recursive: true });
+      fs.writeFileSync(devicePath, 'agents:\\n  claude: "2.0.0"\\n', 'utf-8');
 
       const after = readMeta();
       console.log(JSON.stringify({ before: before.agents?.claude, after: after.agents?.claude }));
@@ -367,5 +371,86 @@ describe('readMeta merges agents.yaml from both repos', () => {
 
     expect(result.before).toBe('1.0.0');
     expect(result.after).toBe('2.0.0');
+  });
+});
+
+describe('agents.yaml device-local split (routing + read overlay)', () => {
+  let home: string;
+  const MACHINE = 'testbox';
+  const modulePath = path.resolve(process.cwd(), 'src/lib/state.ts');
+  const moduleUrl = pathToFileURL(modulePath).href;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-split-'));
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+  });
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  function run(script: string): string {
+    return execFileSync('bun', ['-e', script], {
+      cwd: process.cwd(),
+      env: { ...process.env, HOME: home, AGENTS_SYNC_MACHINE_ID: MACHINE },
+      stdio: 'pipe',
+      encoding: 'utf8',
+    }).trim();
+  }
+
+  it('routes agents: -> per-device file, versions: -> history json, rest -> central', () => {
+    const out = run(`
+      import * as fs from 'fs';
+      import * as yaml from 'yaml';
+      import { writeMeta, getDeviceMetaPath, getVersionResourcesPath } from ${JSON.stringify(moduleUrl)};
+      writeMeta({
+        agents: { claude: '2.1.0' },
+        versions: { claude: { '2.1.0': { rulesPreset: 'default' } } },
+        run: { claude: { strategy: 'balanced' } },
+      });
+      const central = yaml.parse(fs.readFileSync(process.env.HOME + '/.agents/agents.yaml', 'utf8')) || {};
+      const device = yaml.parse(fs.readFileSync(getDeviceMetaPath(), 'utf8'));
+      const history = JSON.parse(fs.readFileSync(getVersionResourcesPath(), 'utf8'));
+      console.log(JSON.stringify({
+        centralHasAgents: 'agents' in central,
+        centralHasVersions: 'versions' in central,
+        centralRun: central.run && central.run.claude && central.run.claude.strategy,
+        deviceAgents: device.agents,
+        history,
+        devicePath: getDeviceMetaPath(),
+      }));
+    `);
+    const r = JSON.parse(out);
+    expect(r.centralHasAgents).toBe(false);
+    expect(r.centralHasVersions).toBe(false);
+    expect(r.centralRun).toBe('balanced');
+    expect(r.deviceAgents).toEqual({ claude: '2.1.0' });
+    expect(r.history).toEqual({ claude: { '2.1.0': { rulesPreset: 'default' } } });
+    expect(r.devicePath).toContain(path.join('devices', MACHINE, 'agents.yaml'));
+  });
+
+  it('readMeta re-assembles agents: and versions: from the split files', () => {
+    const out = run(`
+      import { writeMeta, readMeta } from ${JSON.stringify(moduleUrl)};
+      writeMeta({
+        agents: { claude: '2.1.0', codex: '0.1.0' },
+        versions: { claude: { '2.1.0': { rulesPreset: 'x' } } },
+        hosts: { box: { source: 'inline', address: 'h' } },
+      });
+      console.log(JSON.stringify(readMeta()));
+    `);
+    const meta = JSON.parse(out);
+    expect(meta.agents).toEqual({ claude: '2.1.0', codex: '0.1.0' });
+    expect(meta.versions).toEqual({ claude: { '2.1.0': { rulesPreset: 'x' } } });
+    expect(meta.hosts).toBeDefined();
+  });
+
+  it('does not create a device file when there are no pins', () => {
+    const out = run(`
+      import * as fs from 'fs';
+      import { writeMeta, getDeviceMetaPath } from ${JSON.stringify(moduleUrl)};
+      writeMeta({ run: { claude: { strategy: 'balanced' } } });
+      console.log(JSON.stringify({ deviceExists: fs.existsSync(getDeviceMetaPath()) }));
+    `);
+    expect(JSON.parse(out).deviceExists).toBe(false);
   });
 });
