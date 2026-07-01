@@ -63,6 +63,8 @@ export interface ActiveSession {
   sessionFile?: string;
   startedAtMs?: number;
   status: ActiveStatus;
+  /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
+  pidCount?: number;
   teamName?: string;
   agentId?: string;
   cloudProvider?: string;
@@ -599,5 +601,30 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 
   const unattributed = opts.skipHeadless ? [] : await listUnattributedActive(knownPids);
 
-  return [...teams, ...terminals, ...cloud, ...unattributed];
+  return dedupeBySession([...teams, ...terminals, ...cloud, ...unattributed]);
+}
+
+/**
+ * Collapse rows that resolve to the *same* session — a session with many
+ * subagent/fork PIDs (all matched to one transcript file) would otherwise print
+ * dozens of identical rows. Keyed by session id (falling back to the file), the
+ * first row wins and carries a `pidCount`. Rows with no session identity (cloud,
+ * unresolved headless) pass through untouched.
+ */
+function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
+  const out: ActiveSession[] = [];
+  const byKey = new Map<string, ActiveSession>();
+  for (const s of sessions) {
+    const key = s.sessionId || s.sessionFile;
+    if (!key) { out.push(s); continue; }
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.pidCount = (existing.pidCount ?? 1) + 1;
+    } else {
+      s.pidCount = 1;
+      byKey.set(key, s);
+      out.push(s);
+    }
+  }
+  return out;
 }
