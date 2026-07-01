@@ -6,9 +6,14 @@ import AppKit
 // has exactly one home — no section restates another.
 final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let accent = NSColor(red: 0x39 / 255.0, green: 0xd3 / 255.0, blue: 0x53 / 255.0, alpha: 1) // #39d353
-    private let alert = NSColor.systemRed
-    private let warning = NSColor.systemOrange
+    // Factory Floor status palette (design-system.css). Brand green is accent /
+    // selection only — never a status. running/idle/waiting/failed are the four
+    // status colors, shared with the full dashboard so this reads as its quick view.
+    private let brand = NSColor(srgbRed: 0xa3 / 255.0, green: 0xe6 / 255.0, blue: 0x35 / 255.0, alpha: 1) // #a3e635
+    private let run   = NSColor(srgbRed: 0x22 / 255.0, green: 0xc5 / 255.0, blue: 0x5e / 255.0, alpha: 1) // #22C55E
+    private let idleC = NSColor(srgbRed: 0x6b / 255.0, green: 0x72 / 255.0, blue: 0x80 / 255.0, alpha: 1) // #6B7280
+    private let wait  = NSColor(srgbRed: 0xd4 / 255.0, green: 0xa7 / 255.0, blue: 0x2c / 255.0, alpha: 1) // #D4A72C
+    private let fail  = NSColor(srgbRed: 0xef / 255.0, green: 0x44 / 255.0, blue: 0x44 / 255.0, alpha: 1) // #EF4444
 
     // Cached cheap snapshot for the badge (no teams scan).
     private var badgeSessions: [Session] = []
@@ -137,9 +142,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let attention = badgeSessions.filter { $0.status == .attention }.count
         let running = badgeSessions.filter { $0.status == .running }.count
         if attention > 0 {
-            button.attributedTitle = badge("!", alert)
+            button.attributedTitle = badge("⚠", wait)
         } else if running > 0 {
-            button.attributedTitle = badge(" \(running)", accent)
+            button.attributedTitle = badge(" \(running)", run)
         } else {
             button.title = ""
         }
@@ -209,14 +214,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let status: String
         let color: NSColor
         if attn > 0 {
-            status = "! \(attn) awaiting input"
-            color = alert
+            status = "⚠ \(attn) needs you"
+            color = wait
         } else if running > 0 {
             status = "\u{25CF} \(running) running"
-            color = accent
+            color = run
         } else {
             status = "idle"
-            color = .secondaryLabelColor
+            color = idleC
         }
 
         let left = "agents-cli"
@@ -239,13 +244,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     // Returns true if anything was rendered (caller adds the trailing separator).
+    // Order mirrors the Factory Floor phase rank: waiting first, then failed.
     private func addNeedsAttention(_ menu: NSMenu, sessions: [Session],
                                    routines: [Routine], daemonPid: Int?) -> Bool {
-        var rows: [(String, NSMenu?)] = []
+        var rows: [(String, NSColor, String, NSMenu?)] = []   // glyph, color, text, submenu
 
         for s in sessions where s.status == .attention {
             let detail = s.detail.isEmpty ? "awaiting input" : trim(s.detail, 34)
-            rows.append(("  ! \(LocalState.agentLabel(s.agent)) · \(s.repo) — \(detail)",
+            rows.append(("⚠", wait, "\(LocalState.agentLabel(s.agent)) · \(s.repo) — \(detail)",
                          s.cwd.map { revealSubmenu($0) }))
         }
 
@@ -257,21 +263,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             sub.addItem(.separator())
             let next = routines.compactMap { $0.enabled ? $0.nextRunHuman : nil }.first(where: { $0 != "-" }) ?? "—"
             sub.addItem(disabled("\(routines.count) routines waiting · next \(next)"))
-            rows.append(("  ! Scheduler stopped — routines won’t run", sub))
+            rows.append(("⚠", wait, "Scheduler stopped — routines won’t run", sub))
         }
 
         let bad = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
         if bad.count == 1, let r = bad.first {
             let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
-            rows.append(("  ! Routine \(r.name) \(why)", allRoutinesSubmenu(bad)))
+            rows.append(("✕", fail, "Routine \(r.name) \(why)", allRoutinesSubmenu(bad)))
         } else if bad.count > 1 {
-            rows.append(("  ! \(bad.count) routines failing", allRoutinesSubmenu(bad)))
+            rows.append(("✕", fail, "\(bad.count) routines failing", allRoutinesSubmenu(bad)))
         }
 
         if rows.isEmpty { return false }
-        addSectionTitle(menu, "NEEDS ATTENTION", color: warning)
-        for (title, sub) in rows {
-            let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        addSectionTitle(menu, "⚠ NEEDS YOU", color: wait)
+        for (glyph, color, text, sub) in rows {
+            let it = statusRow(glyph, color, text)
             it.submenu = sub
             menu.addItem(it)
         }
@@ -299,17 +305,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         addSectionTitle(menu, title, color: .secondaryLabelColor)
 
         for s in live {
-            let mark = s.status == .attention ? "! " : (s.status == .running ? "● " : "○ ")
+            let glyph = s.status == .attention ? "⚠" : (s.status == .running ? "●" : "◐")
+            let color = s.status == .attention ? wait : (s.status == .running ? run : idleC)
             let detail = s.detail.isEmpty ? "" : " — \(trim(s.detail, 32))"
-            let row = NSMenuItem(title: "  \(mark)\(LocalState.agentLabel(s.agent))   \(s.repo)\(detail)",
-                                 action: nil, keyEquivalent: "")
+            let row = statusRow(glyph, color, "\(LocalState.agentLabel(s.agent))   \(s.repo)\(detail)")
             if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
             menu.addItem(row)
         }
         for task in browserTasks {
             let tabs = task.tabCount == 1 ? "1 tab" : "\(task.tabCount) tabs"
-            let row = NSMenuItem(title: "  ◦ Browser   \(trim(task.name, 24)) · \(shortProfile(task.profile)) · \(tabs)",
-                                 action: nil, keyEquivalent: "")
+            let row = statusRow("◦", idleC, "Browser   \(trim(task.name, 24)) · \(shortProfile(task.profile)) · \(tabs)")
             row.submenu = browserTaskSubmenu(task)
             menu.addItem(row)
         }
@@ -558,6 +563,23 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func disabled(_ title: String) -> NSMenuItem {
         let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         it.isEnabled = false
+        return it
+    }
+
+    // A row whose leading status glyph is tinted with the Factory palette while
+    // the label stays default — mirrors the dashboard's color-coded status dots.
+    private func statusRow(_ glyph: String, _ glyphColor: NSColor, _ rest: String) -> NSMenuItem {
+        let title = "  \(glyph) \(rest)"
+        let it = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        let attr = NSMutableAttributedString(string: title, attributes: [
+            .font: NSFont.menuFont(ofSize: 0),
+            .foregroundColor: NSColor.labelColor,
+        ])
+        let r = (title as NSString).range(of: glyph)
+        if r.location != NSNotFound {
+            attr.addAttribute(.foregroundColor, value: glyphColor, range: r)
+        }
+        it.attributedTitle = attr
         return it
     }
 
