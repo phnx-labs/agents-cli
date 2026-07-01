@@ -29,9 +29,9 @@ describe('compareVersions — OpenClaw date-style versions', () => {
     expect(sorted).toEqual(['2026.2.19', '2026.2.19-1', '2026.2.19-2']);
   });
 
-  it('is a total order — never returns 0 for distinct strings (stable sort safety)', () => {
-    expect(compareVersions('1.0.0-a', '1.0.0-b')).not.toBe(0); // localeCompare fallback
-    expect(compareVersions('1.0.0-b', '1.0.0-a')).toBeGreaterThan(0);
+  it('preserves legacy equality for numeric-equal versions (segment count / non-numeric tail)', () => {
+    expect(compareVersions('1.0', '1.0.0')).toBe(0);
+    expect(compareVersions('1.0.beta', '1.0.0')).toBe(0);
   });
 });
 

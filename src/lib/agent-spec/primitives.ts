@@ -37,13 +37,15 @@ function buildSuffix(v: string): number {
 }
 
 /**
- * Total, deterministic ordering for version strings (ascending).
+ * Ordering for version strings (ascending).
  *   1. numeric segment comparison (semver-ish: `2.1.187` > `2.1.143`)
  *   2. tie → trailing `-N` build suffix, numerically (`2026.2.19-2` > `2026.2.19`)
- *   3. tie → raw-string compare, so `listInstalledVersions` is never order-unstable
+ *   3. still tied → 0 (legacy behavior: `1.0` == `1.0.0`, non-numeric tails == 0)
  *
  * Deliberately NOT a full semver comparator: OpenClaw's `-N` is a rebuild marker
- * (higher = newer); a semver comparator would invert it.
+ * (higher = newer); a semver comparator would invert it. The `-N` tiebreak is the
+ * only addition over the historical numeric-only compare, so suffix-free versions
+ * (claude/codex semver) are unaffected.
  */
 export function compareVersions(a: string, b: string): number {
   const na = numericParts(a);
@@ -56,5 +58,5 @@ export function compareVersions(a: string, b: string): number {
   const sa = buildSuffix(a);
   const sb = buildSuffix(b);
   if (sa !== sb) return sa - sb;
-  return a < b ? -1 : a > b ? 1 : 0;
+  return 0;
 }
