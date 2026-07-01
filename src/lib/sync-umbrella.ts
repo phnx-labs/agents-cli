@@ -159,15 +159,18 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     await refresh({ skipPrompts: yes });
     result.reconciled = true;
 
-    // Keep the local device registry current with the tailnet. Soft: a machine
-    // without tailscale is a clean no-op, never a sync failure. This is the
-    // wiring that fixes the "registry stays empty until you remember to run
-    // `agents devices sync`" gap — the SessionStart autosync now populates it.
+    // Keep already-registered devices' reachability current, and surface newly
+    // appeared tailnet nodes as "pending" for the menu-bar Register/Ignore gate
+    // rather than silently adding them (refresh mode). Soft: a machine without
+    // tailscale is a clean no-op, never a sync failure. First-run population is
+    // `agents setup` / manual `agents devices sync` (bootstrap).
     const { runDeviceSync } = await import('./devices/sync.js');
-    const dev = await runDeviceSync({ soft: true });
+    const { reconcilePendingSentinels } = await import('./devices/pending.js');
+    const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
+    if (dev.ok) reconcilePendingSentinels(dev.pending);
     result.devices = { synced: dev.synced, pending: dev.pending.length, skipped: !dev.ok };
     if (dev.ok) {
-      log(`devices: ${dev.synced} synced${dev.pending.length ? `, ${dev.pending.length} new` : ''}`);
+      log(`devices: ${dev.synced} refreshed${dev.pending.length ? `, ${dev.pending.length} new pending` : ''}`);
     }
   }
 

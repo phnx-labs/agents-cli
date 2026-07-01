@@ -91,6 +91,12 @@ enum AgentsCLI {
     static func startScheduler() { runDetached(argv(["routines", "start"])) }
     static func stopDaemon() { runDetached(argv(["routines", "stop"])) }
 
+    // NEW DEVICES actions. `register` adds the pending node to the registry;
+    // `ignore` dismisses it for good. Both clear the pending sentinel CLI-side,
+    // so the badge/section updates on the next 10s poll. TS owns the truth.
+    static func deviceRegister(_ name: String) { runDetached(argv(["devices", "register", name])) }
+    static func deviceIgnore(_ name: String) { runDetached(argv(["devices", "ignore", name])) }
+
     // Surface CLI health in a terminal — `agents doctor` is interactive output.
     static func runDoctor() {
         let cmd = "\(shellQuote(binary)) doctor"

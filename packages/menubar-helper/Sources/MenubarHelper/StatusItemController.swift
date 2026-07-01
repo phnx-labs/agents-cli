@@ -14,9 +14,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let idleC = NSColor(srgbRed: 0x6b / 255.0, green: 0x72 / 255.0, blue: 0x80 / 255.0, alpha: 1) // #6B7280
     private let wait  = NSColor(srgbRed: 0xd4 / 255.0, green: 0xa7 / 255.0, blue: 0x2c / 255.0, alpha: 1) // #D4A72C
     private let fail  = NSColor(srgbRed: 0xef / 255.0, green: 0x44 / 255.0, blue: 0x44 / 255.0, alpha: 1) // #EF4444
+    private let info  = NSColor(srgbRed: 0x58 / 255.0, green: 0xa6 / 255.0, blue: 0xff / 255.0, alpha: 1) // #58a6ff (new devices)
 
     // Cached cheap snapshot for the badge (no teams scan).
     private var badgeSessions: [Session] = []
+    // New tailnet devices awaiting Register/Ignore (cheap sentinel-dir read).
+    private var badgePending: [PendingDevice] = []
 
     // These three reads shell the CLI or touch the sessions DB. They are kept
     // off the click path and rendered from warm caches when the menu opens.
@@ -64,8 +67,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func tick() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let s = LocalState.sessions(includeTeams: false)
+            let pending = LocalState.pendingDevices()
             DispatchQueue.main.async {
                 self?.badgeSessions = s
+                self?.badgePending = pending
                 self?.refreshBadge()
             }
         }
@@ -141,8 +146,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         guard let button = statusItem.button else { return }
         let attention = badgeSessions.filter { $0.status == .attention }.count
         let running = badgeSessions.filter { $0.status == .running }.count
+        let pending = badgePending.count
         if attention > 0 {
             button.attributedTitle = badge("⚠", wait)
+        } else if pending > 0 {
+            // New devices to review — a blue count (◆) distinct from run/attention.
+            button.attributedTitle = badge(" ◆\(pending)", info)
         } else if running > 0 {
             button.attributedTitle = badge(" \(running)", run)
         } else {
@@ -164,10 +173,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let sessions = LocalState.sessions(includeTeams: true)
         let browserTasks = LocalState.browserTasks(limit: 3)
         let daemonPid = AgentsCLI.daemonPid()
+        let pending = LocalState.pendingDevices()
         badgeSessions = sessions
+        badgePending = pending
         rebuild(menu, sessions: sessions, browserTasks: browserTasks,
                 recentSessions: cachedRecentSessions, routines: cachedRoutines,
-                doctor: cachedDoctorOverview, daemonPid: daemonPid)
+                doctor: cachedDoctorOverview, daemonPid: daemonPid, pending: pending)
         refreshBadge()
         refreshRoutines()
         refreshRecentSessions()
@@ -176,7 +187,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func rebuild(_ menu: NSMenu, sessions: [Session], browserTasks: [BrowserTask],
                          recentSessions: [RecentSession], routines: [Routine],
-                         doctor: DoctorOverview?, daemonPid: Int?) {
+                         doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice]) {
         menu.removeAllItems()
 
         addHeader(menu, sessions: sessions)
@@ -184,6 +195,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // What needs me now — rendered only when there's something actionable.
         if addNeedsAttention(menu, sessions: sessions, routines: routines, daemonPid: daemonPid) {
+            menu.addItem(.separator())
+        }
+
+        // New tailnet devices to approve — only when there are any.
+        if addNewDevices(menu, pending: pending) {
             menu.addItem(.separator())
         }
 
@@ -280,6 +296,30 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let it = statusRow(glyph, color, text)
             it.submenu = sub
             menu.addItem(it)
+        }
+        return true
+    }
+
+    // Returns true if anything was rendered (caller adds the trailing separator).
+    // One row per newly-discovered tailnet node, each with a Register / Ignore
+    // submenu that shells `agents devices register|ignore` (which also clear the
+    // sentinel, so the row disappears on the next poll).
+    private func addNewDevices(_ menu: NSMenu, pending: [PendingDevice]) -> Bool {
+        if pending.isEmpty { return false }
+        addSectionTitle(menu, "◆ NEW DEVICES (\(pending.count))", color: info)
+        for d in pending {
+            let sub = NSMenu()
+            let reg = NSMenuItem(title: "Register", action: #selector(onRegisterDevice(_:)), keyEquivalent: "")
+            reg.target = self
+            reg.representedObject = d.name
+            sub.addItem(reg)
+            let ign = NSMenuItem(title: "Ignore", action: #selector(onIgnoreDevice(_:)), keyEquivalent: "")
+            ign.target = self
+            ign.representedObject = d.name
+            sub.addItem(ign)
+            let row = statusRow("◆", info, "\(d.name) — \(d.platform)")
+            row.submenu = sub
+            menu.addItem(row)
         }
         return true
     }
@@ -543,6 +583,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     @objc private func onOpenAgentsHome() { AgentsCLI.openPath("\(AgentsCLI.home)/.agents") }
     @objc private func onStartScheduler() { AgentsCLI.startScheduler() }
     @objc private func onRunDoctor() { AgentsCLI.runDoctor() }
+
+    @objc private func onRegisterDevice(_ sender: NSMenuItem) {
+        withName(sender) { name in
+            AgentsCLI.deviceRegister(name)
+            badgePending.removeAll { $0.name == name } // optimistic; CLI clears the sentinel
+            refreshBadge()
+        }
+    }
+    @objc private func onIgnoreDevice(_ sender: NSMenuItem) {
+        withName(sender) { name in
+            AgentsCLI.deviceIgnore(name)
+            badgePending.removeAll { $0.name == name }
+            refreshBadge()
+        }
+    }
     @objc private func onStopScheduler() { AgentsCLI.stopDaemon() }
     @objc private func onQuit() { AgentsCLI.menubarDisable(); NSApp.terminate(nil) }
 

@@ -288,6 +288,34 @@ export async function runDaemon(): Promise<void> {
   const healInterval = setInterval(() => { void runHealCheck(); }, 6 * 60 * 60_000);
   const healKickoff = setTimeout(() => { void runHealCheck(); }, 30_000);
 
+  // Device probe: refresh registered devices' reachability and detect newly
+  // appeared tailnet nodes, dropping a sentinel per pending device so the
+  // menu-bar helper can surface "NEW DEVICES → Register / Ignore". Refresh mode
+  // never auto-registers a newcomer. Soft + overlap-guarded like session sync;
+  // a machine without tailscale is a clean no-op. ~every 3 min.
+  let probingDevices = false;
+  const runDeviceProbe = async () => {
+    if (probingDevices) return;
+    probingDevices = true;
+    try {
+      const { runDeviceSync } = await import('./devices/sync.js');
+      const { reconcilePendingSentinels } = await import('./devices/pending.js');
+      const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
+      if (dev.ok) {
+        reconcilePendingSentinels(dev.pending);
+        if (dev.pending.length) {
+          log('INFO', `devices: ${dev.pending.length} new pending (${dev.pending.map((p) => p.name).join(', ')})`);
+        }
+      }
+    } catch (err) {
+      log('ERROR', `device probe failed: ${(err as Error).message}`);
+    } finally {
+      probingDevices = false;
+    }
+  };
+  const deviceProbeInterval = setInterval(() => { void runDeviceProbe(); }, 3 * 60_000);
+  const deviceProbeKickoff = setTimeout(() => { void runDeviceProbe(); }, 15_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     scheduler.reloadAll();
@@ -306,6 +334,8 @@ export async function runDaemon(): Promise<void> {
     clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
+    clearInterval(deviceProbeInterval);
+    clearTimeout(deviceProbeKickoff);
     removeDaemonPid();
     process.exit(0);
   };

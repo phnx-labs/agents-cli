@@ -25,14 +25,26 @@ import {
   tailscaleStatusJson,
   type TailscaleNode,
 } from './tailscale.js';
+import type { PendingDevice } from './pending.js';
+
+/**
+ * bootstrap — register every non-ignored node (opt-out). First-run `agents
+ *   setup` and manual `agents devices sync`, so the fleet is usable out of box.
+ * refresh — only refresh reachability of already-registered nodes; a brand-new
+ *   node is NOT auto-added, it is surfaced as `pending` for the user to approve
+ *   (opt-in). Ongoing autosync and the daemon probe use this, so newcomers flow
+ *   through the menu-bar "NEW DEVICES → Register / Ignore" gate instead of
+ *   silently landing in the registry.
+ */
+export type DeviceSyncMode = 'bootstrap' | 'refresh';
 
 export interface DeviceSyncResult {
   /** False when discovery could not run (e.g. tailscale absent) in soft mode. */
   ok: boolean;
   /** Number of tailscale nodes upserted into the registry. */
   synced: number;
-  /** Node names discovered but neither registered-before nor ignored. */
-  pending: string[];
+  /** Nodes discovered but neither registered-before nor ignored (name+platform). */
+  pending: PendingDevice[];
   /** Populated when ok is false: why discovery was skipped. */
   reason?: string;
 }
@@ -61,7 +73,10 @@ export function computePendingDevices(
  * The `pending` list is computed against the registry state BEFORE this sync so
  * "new" means "not previously registered and not ignored".
  */
-export async function runDeviceSync(opts: { soft?: boolean } = {}): Promise<DeviceSyncResult> {
+export async function runDeviceSync(
+  opts: { soft?: boolean; mode?: DeviceSyncMode } = {},
+): Promise<DeviceSyncResult> {
+  const mode: DeviceSyncMode = opts.mode ?? 'bootstrap';
   // Soft mode must be non-fatal for ANY failure, not just a missing tailscale:
   // a corrupted registry/ignore file (both throw by design), a disk error, or
   // registry lock contention (plausible when many agents SessionStart-autosync
@@ -70,14 +85,21 @@ export async function runDeviceSync(opts: { soft?: boolean } = {}): Promise<Devi
   try {
     const nodes = parseTailscaleStatus(tailscaleStatusJson());
     const [registeredBefore, ignored] = await Promise.all([loadDevices(), loadIgnored()]);
-    const pending = computePendingDevices(nodes, Object.keys(registeredBefore), ignored);
+    const registered = new Set(Object.keys(registeredBefore));
+    const pendingNames = computePendingDevices(nodes, registered, ignored);
+    const byName = new Map(nodes.map((n) => [n.name, n]));
+    const pending: PendingDevice[] = pendingNames.map((name) => ({
+      name,
+      platform: byName.get(name)?.platform ?? 'unknown',
+    }));
 
-    // Register/refresh every node the user has NOT dismissed. Skipping ignored
-    // nodes is what makes the "register all" default safe: a phone or someone
-    // else's laptop the user once dismissed never silently comes back.
+    // bootstrap: register/refresh every non-ignored node (newcomers included).
+    // refresh: only refresh nodes already in the registry — newcomers stay in
+    // `pending` for the user to approve, they are never silently added.
     let synced = 0;
     for (const node of nodes) {
       if (ignored.has(node.name)) continue;
+      if (mode === 'refresh' && !registered.has(node.name)) continue;
       await upsertDevice(node.name, nodeToDeviceInput(node));
       synced++;
     }
