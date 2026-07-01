@@ -118,6 +118,14 @@ export function setKeychainBackendForTest(b: KeychainBackend | null): KeychainBa
   return prev;
 }
 
+/** True when a test backend is installed (real keychain / biometry bypassed).
+ * Callers that gate on the live secrets-agent broker use this to stay hermetic —
+ * with an in-memory backend there is no real keychain to dedup, so the broker
+ * fast-path must not engage. Always false in production (`backend` is null). */
+export function isKeychainBackendOverridden(): boolean {
+  return backend !== null;
+}
+
 /**
  * Items whose name does NOT start with `agents-cli.` belong to another
  * application (e.g. Anthropic's `Claude Code-credentials-*`). Their ACL

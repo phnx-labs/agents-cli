@@ -41,6 +41,20 @@ const PROTOCOL_VERSION = 1;
 /** Default lifetime of an unlocked bundle when `--ttl` is not given. */
 export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
+/**
+ * Reserved store-key prefix for the `secrets list` metadata snapshot cache.
+ * The broker holds the resolved bundle-metadata array (names/policy/timestamps,
+ * NO resolved secret values beyond the literals already in metadata) keyed by a
+ * hash of the current keychain bundle name-set, so the second and later
+ * `secrets list` within the daily window read metadata without a Touch ID
+ * prompt. Keyed by the name-set hash so adding/removing/renaming a bundle
+ * changes the key and misses the cache automatically — no active invalidation.
+ * The '!' sentinel can never collide with a real bundle name
+ * (BUNDLE_NAME_PATTERN requires an alphanumeric first char) and is safe as
+ * spawnSync argv (unlike a NUL byte); `status` hides these entries.
+ */
+export const META_CACHE_PREFIX = '!meta:';
+
 /** After the store goes empty (all bundles locked or expired) for this long,
  * the broker exits so no idle process lingers holding a socket. */
 const IDLE_EXIT_MS = 5 * 60 * 1000; // 5m
@@ -297,6 +311,7 @@ export function handleAgentRequest(
       const entries: AgentStatusEntry[] = [];
       for (const [name, e] of store) {
         if (now >= e.expiresAt) continue;
+        if (name.startsWith(META_CACHE_PREFIX)) continue; // internal list cache, not a user bundle
         entries.push({ name, expiresAt: e.expiresAt, keyCount: Object.keys(e.env).length });
       }
       return { ok: true, cmd: 'status', entries };
@@ -527,6 +542,43 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
   } catch {
     return null;
   }
+}
+
+// Key inside the cached entry's env that holds the JSON metadata snapshot.
+const META_SNAPSHOT_KEY = '__snapshot__';
+
+/**
+ * Read the cached `secrets list` metadata snapshot for the given keychain
+ * name-set hash, or null on miss / no broker / off-darwin. Reuses the value
+ * fast-path socket read (agentGetSync) — no prompt, no wire change. The hash is
+ * the cache key: a changed name-set (bundle added/removed/renamed) yields a
+ * different key and therefore a clean miss, so the stale set is never served.
+ */
+export function agentGetMetaSync(nameSetHash: string): SecretsBundle[] | null {
+  if (!onDarwin()) return null;
+  const hit = agentGetSync(META_CACHE_PREFIX + nameSetHash);
+  const raw = hit?.env?.[META_SNAPSHOT_KEY];
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SecretsBundle[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fire-and-forget: populate the broker with a freshly-read metadata snapshot so
+ * the next `secrets list` within the daily window renders without a prompt.
+ * Stored as an ordinary entry (placeholder bundle, snapshot in env) under the
+ * reserved META_CACHE_PREFIX key; the snapshot travels over stdin to the
+ * detached worker (never argv/disk), same as value caching. macOS only.
+ */
+export function agentAutoLoadMetaSync(nameSetHash: string, bundles: SecretsBundle[], ttlMs: number): void {
+  if (!onDarwin()) return;
+  const key = META_CACHE_PREFIX + nameSetHash;
+  const placeholder: SecretsBundle = { name: key, vars: {} };
+  agentAutoLoadSync(key, placeholder, { [META_SNAPSHOT_KEY]: JSON.stringify(bundles) }, ttlMs);
 }
 
 /** True unless `secrets.agent.auto` is explicitly disabled in agents.yaml. The
