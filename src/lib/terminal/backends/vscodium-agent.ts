@@ -48,18 +48,28 @@ function appExists(p: string): boolean {
   }
 }
 
-/** The `<scheme>://swarmify.swarm-ext/spawn?…` URL the extension handles. */
+/**
+ * The `<scheme>://swarmify.swarm-ext/spawn?p=<payload>` URL the extension handles.
+ *
+ * The payload is base64url-encoded JSON in a single `p` param — NOT one param per
+ * field. VS Code percent-*decodes* `uri.query` once before the extension parses
+ * it, so a `command`/`cwd` containing `&` (or `=`) would be mis-split by a naive
+ * multi-param query. base64url is `[A-Za-z0-9_-]` only (no `&`, `=`, `%`, `+`,
+ * `/`), so it survives that decode untouched and round-trips exactly.
+ */
 export function spawnUri(
   scheme: string,
   cwd: string,
   command: string[],
   direction?: SplitDirection,
 ): string {
-  const params = new URLSearchParams();
-  params.set('cwd', cwd);
-  params.set('command', command.join(' '));
-  if (direction) params.set('split', direction);
-  return `${scheme}://${EXTENSION_AUTHORITY}/spawn?${params.toString()}`;
+  const payload: { command: string; cwd: string; split?: SplitDirection } = {
+    command: command.join(' '),
+    cwd,
+  };
+  if (direction) payload.split = direction;
+  const p = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  return `${scheme}://${EXTENSION_AUTHORITY}/spawn?p=${p}`;
 }
 
 /** Build a backend bound to one editor variant. */

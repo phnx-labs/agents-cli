@@ -61,7 +61,7 @@ Each backend opens either a **tab** or a **split** (`right` = side-by-side,
 | `iterm` | macOS + `/Applications/iTerm.app` | `create tab … command` (a window if none open) | `split vertically`/`split horizontally … command` |
 | `ghostty` | macOS + `/Applications/Ghostty.app` | `new tab … with configuration cfg` | `split (focused terminal of selected tab of front window) direction …` |
 | `tmux` | inside tmux (`$TMUX` set) | `tmux new-window -c <cwd>` | `tmux split-window -h`/`-v -c <cwd>` |
-| `vscodium-agent` | macOS + `/Applications/VSCodium.app` | `codium --open-url 'vscodium://swarmify.swarm-ext/spawn?…'` | same URL with `&split=right\|down` |
+| `vscodium-agent` | macOS + `/Applications/VSCodium.app` | `codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<payload>'` | same URL, payload carries `split` |
 
 `buildTab`/`buildSplit` return a `LaunchSpec { argv }`. Ghostty carries `cwd`
 natively via the surface configuration; iTerm/tmux `cd` inside the wrapped shell.
@@ -145,20 +145,25 @@ running VSCodium (or Cursor / VS Code) window, driven by the **swarmify**
 running — the engine hands it a URL rather than scripting a GUI app:
 
 ```
-codium --open-url 'vscodium://swarmify.swarm-ext/spawn?cwd=<dir>&command=<cmd>[&split=right|down]'
+codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
 ```
 
+- **The payload is one base64url-encoded JSON param** (`{command, cwd, split?}`),
+  not one param per field. VS Code percent-*decodes* `uri.query` once before the
+  extension parses it, so a `command`/`cwd` containing `&` or `=` would be
+  mis-split by a multi-param query; base64url (`[A-Za-z0-9_-]`) survives that
+  decode untouched and round-trips exactly (see `spawnUri`).
 - **The `/spawn` verb** (swarmify `extension.ts`) opens an editor-tab terminal in
   `cwd`, sends `command`, and arms *shell adoption* — so a resume command like
   `claude --resume <id>` is auto-promoted to the Claude chip with session
   tracking. `split` splits beside the previous `/spawn` pane, giving the same
   two-per-tab packing as the other backends.
 - **Why `--open-url`, not `open`** — the editor CLI forwards the URL to the
-  running instance over a user-scoped IPC socket. That needs no OS URL-scheme
-  handler registration, works on Linux, and flows over `--host` (the SSH session
-  reaches the same socket as the logged-in user). The per-product scheme must
-  match the CLI: `codium`→`vscodium://`, `cursor`→`cursor://`, `code`→`vscode://`
-  (see `EDITOR_VARIANTS` / `makeVscodiumAgentBackend`).
+  running instance. That needs no OS URL-scheme handler registration, works on
+  Linux, and flows over `--host` (the SSH session reaches the same user's editor).
+  The per-product scheme must match the CLI: `codium`→`vscodium://`,
+  `cursor`→`cursor://`, `code`→`vscode://` (see `EDITOR_VARIANTS` /
+  `makeVscodiumAgentBackend`).
 - **No `zsh -ilc` wrap** — the command runs in an editor terminal that is already
   an interactive login shell (see [above](#interactive-login-shell)).
 

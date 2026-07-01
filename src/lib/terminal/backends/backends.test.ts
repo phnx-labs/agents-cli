@@ -69,32 +69,39 @@ describe('tmux backend', () => {
   });
 });
 
+// Decode the base64url `p` payload the way the swarm-ext handler does.
+const payloadOf = (url: string): any => {
+  const p = new URLSearchParams(url.split('?')[1]).get('p')!;
+  return JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+};
+
 describe('vscodium-agent backend', () => {
   it('tab: codium --open-url with a vscodium:// spawn URI carrying cwd + raw command (no zsh wrap)', () => {
     const argv = vscodiumAgentBackend.buildTab('/Users/me/dev', CMD);
     expect(argv.argv[0]).toBe('codium');
     expect(argv.argv[1]).toBe('--open-url');
     const url = argv.argv[2];
-    expect(url.startsWith('vscodium://swarmify.swarm-ext/spawn?')).toBe(true);
+    expect(url.startsWith('vscodium://swarmify.swarm-ext/spawn?p=')).toBe(true);
     // the editor terminal is already an interactive login shell — no zsh -ilc wrap
     expect(url).not.toContain('zsh');
-    const q = new URLSearchParams(url.split('?')[1]);
-    expect(q.get('cwd')).toBe('/Users/me/dev');
-    expect(q.get('command')).toBe('claude@2.1.187 --resume cad0e546');
-    expect(q.get('split')).toBeNull();
+    const payload = payloadOf(url);
+    expect(payload.cwd).toBe('/Users/me/dev');
+    expect(payload.command).toBe('claude@2.1.187 --resume cad0e546');
+    expect(payload.split).toBeUndefined();
   });
   it('split: carries the direction so the extension splits beside the prior pane', () => {
-    const right = new URLSearchParams(vscodiumAgentBackend.buildSplit('/d', CMD, 'right').argv[2].split('?')[1]);
-    expect(right.get('split')).toBe('right');
-    const down = new URLSearchParams(vscodiumAgentBackend.buildSplit('/d', CMD, 'down').argv[2].split('?')[1]);
-    expect(down.get('split')).toBe('down');
+    expect(payloadOf(vscodiumAgentBackend.buildSplit('/d', CMD, 'right').argv[2]).split).toBe('right');
+    expect(payloadOf(vscodiumAgentBackend.buildSplit('/d', CMD, 'down').argv[2]).split).toBe('down');
   });
-  it('spawnUri percent-encodes spaces and special chars in cwd + command', () => {
-    const url = spawnUri('vscodium', '/Users/me/my project', ['claude', '--resume', 'a b&c']);
-    expect(url).not.toContain(' ');
-    const q = new URLSearchParams(url.split('?')[1]);
-    expect(q.get('cwd')).toBe('/Users/me/my project');
-    expect(q.get('command')).toBe('claude --resume a b&c');
+  it('spawnUri survives &, spaces, and = in cwd + command (base64url payload, URL-safe)', () => {
+    const url = spawnUri('vscodium', '/Users/me/my project', ['claude', '--resume', 'a b&c=d']);
+    // base64url payload — no raw special chars VS Code would decode or mis-split on
+    const query = url.split('?')[1];
+    expect(query.startsWith('p=')).toBe(true);
+    expect(/^p=[A-Za-z0-9_-]+$/.test(query)).toBe(true);
+    const payload = payloadOf(url);
+    expect(payload.cwd).toBe('/Users/me/my project');
+    expect(payload.command).toBe('claude --resume a b&c=d');
   });
   it('makeVscodiumAgentBackend binds a variant CLI + scheme (Cursor, VS Code)', () => {
     const cursor = makeVscodiumAgentBackend(EDITOR_VARIANTS[1]);
