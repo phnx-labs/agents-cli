@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+**`agents sessions <id>`: a catch-up digest for switching between many agents (#502)**
+
+- Opening a single session now leads with its auto-inferred title (user `/rename` > Claude `ai-title` > first-prompt topic) and PR / worktree / ticket badges, then a **Changes** section that groups touched files by directory and tags each as created / modified / deleted (with a `+N ~N -N` summary) instead of the old flat "Modified" list, a **Tools** histogram (per-tool call counts), and a **Tests** verdict parsed from the last `vitest` / `jest` / `pytest` / `go test` / `cargo test` / `tsc` run. The same signals are folded into the interactive picker preview.
+- `agents sessions --active` now collapses the many subagent/fork PIDs of one session into a single row with a `×N` count instead of printing dozens of identical lines. Source: `src/lib/session/digest.ts`, `src/lib/session/render.ts`, `src/lib/session/active.ts`, `src/commands/sessions.ts`, `src/commands/sessions-picker.ts`.
+
+## 1.20.30
+
+**`agents sessions` live state engine: waiting / PR / worktree / ticket detection + reliable preview (#494)**
+
+- `agents sessions --active` infers real activity from each transcript's tail — **working** / **waiting** / **idle** — rather than the old mtime-only running/idle guess, using structural signals (Claude `ExitPlanMode` / `AskUserQuestion`) plus a question + mtime heuristic for Codex. It detects and badges a PR opened during the session (`gh pr create` + the resulting pull URL), a git worktree (`.agents/worktrees/<slug>/`), and a Linear/Jira ticket (from the prompt or branch), and shows the latest turn as the preview instead of the first prompt.
+- `--waiting` filters `--active` to only sessions blocked on your input and exits non-zero (a scriptable gate); `--tree` groups the listing by directory, dropping the id/version columns while keeping the short-id handle.
+- The preview line is now width-correct: measurement is ANSI- and wide-char-aware and reads `$COLUMNS` first, so it no longer wraps or drifts under tmux or over `--host` SSH (the remote is handed the caller's width). Session index schema v7 persists the PR / worktree / ticket signals so historical listings carry them too. Source: `src/lib/session/state.ts`, `src/lib/session/tail.ts`, `src/lib/session/width.ts`, `src/lib/session/{discover,db,active}.ts`, `src/commands/sessions.ts`.
+
 **`agents sessions --host <machine>`: query a remote machine's sessions live over SSH**
 
 - `agents sessions "<query>" --host <alias|user@host>` runs the same session query on a remote machine's own index over SSH and streams the result back — repeat `--host` (or pass several) to fan out across machines. SSH access is the only auth; there's no daemon or shared store. Targets are validated against a strict allowlist (`SSH_TARGET_RE`) to block flag-smuggling, and the forwarded invocation is double-quoted (`shellQuote`) so a query like `$(whoami)` survives as a literal string on both shell layers. Source: `src/lib/session/remote.ts`, `src/commands/sessions.ts`, `docs/05-sessions.md`.
