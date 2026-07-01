@@ -1,16 +1,26 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, mkdtempSync } from 'fs';
+import { mkdirSync, rmSync, mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import * as state from '../state.js';
+import { sshReachable } from '../ssh-exec.js';
 
 // Redirect the cache dir to a temp tree (real fs, no service mocking) so
 // reconcile can read/write real task sidecars the way a dispatch would.
-let CACHE_ROOT: string;
+// Initialized eagerly (not just in beforeEach) so the module-load reachability
+// probe below sees a valid dir for ssh's control socket; beforeEach reassigns it
+// per test.
+let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-reconcile-boot-'));
 vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 
 import { classifyExit, reconcileTask, reconcileRunningTasks } from './reconcile.js';
 import { saveTask, loadTask, terminalPatch, type HostTask } from './tasks.js';
+
+// The heal path needs a real ssh round-trip (no mocking, per repo policy). Gate
+// it on localhost being ssh-reachable so it exercises the true path where a host
+// is available (dev machines, self-hosted runners) and skips cleanly where it
+// isn't (hosted CI), rather than flaking.
+const LOCALHOST_SSH = sshReachable('localhost', 5000);
 
 function makeTask(overrides: Partial<HostTask> = {}): HostTask {
   return {
@@ -30,6 +40,10 @@ function makeTask(overrides: Partial<HostTask> = {}): HostTask {
 beforeEach(() => {
   CACHE_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-reconcile-'));
   mkdirSync(join(CACHE_ROOT, 'hosts'), { recursive: true });
+  // ssh's control-socket dir lives under getCacheDir(); ssh-exec only ensures it
+  // once (module-level flag), so with a fresh cache dir per test we must create
+  // it ourselves or multiplexed ssh can't open its socket and reports 255.
+  mkdirSync(join(CACHE_ROOT, 'ssh'), { recursive: true, mode: 0o700 });
 });
 
 afterEach(() => {
@@ -116,5 +130,58 @@ describe('reconcileRunningTasks — no running tasks means no ssh', () => {
 
   it('returns an empty list unchanged', () => {
     expect(reconcileRunningTasks([])).toEqual([]);
+  });
+});
+
+// The literal bug the PR fixes: a 'running' record whose remote `.exit` now
+// holds a code must be healed to a terminal status AND persisted to disk. Driven
+// over a real `ssh localhost` cat of a real `.exit` file — no mocking.
+describe.skipIf(!LOCALHOST_SSH)('reconcile over real ssh (localhost)', () => {
+  let exitFile: string;
+
+  beforeEach(() => {
+    exitFile = join(CACHE_ROOT, 'run.exit');
+  });
+
+  it('heals a running record from a code-0 .exit and persists it', () => {
+    writeFileSync(exitFile, '0\n');
+    const task = makeTask({ id: 'heal0000', target: 'localhost', remoteExit: exitFile });
+    saveTask(task);
+
+    const out = reconcileTask(task);
+
+    expect(out.status).toBe('completed');
+    expect(out.exitCode).toBe(0);
+    expect(loadTask('heal0000')?.status).toBe('completed'); // written through to disk
+  });
+
+  it('heals a non-zero .exit to failed with the code preserved', () => {
+    writeFileSync(exitFile, '137\n');
+    const task = makeTask({ id: 'heal0137', target: 'localhost', remoteExit: exitFile });
+    saveTask(task);
+
+    reconcileTask(task);
+
+    const disk = loadTask('heal0137');
+    expect(disk?.status).toBe('failed');
+    expect(disk?.exitCode).toBe(137);
+  });
+
+  it('leaves a running record running when the .exit is absent (still going)', () => {
+    const task = makeTask({ id: 'still001', target: 'localhost', remoteExit: join(CACHE_ROOT, 'nope.exit') });
+    saveTask(task);
+
+    expect(reconcileTask(task).status).toBe('running');
+    expect(loadTask('still001')?.status).toBe('running');
+  });
+
+  it('reconcileRunningTasks: unreachable host stays running, never failed', () => {
+    const down = makeTask({ id: 'downhost', target: 'no-such-host-xyzzy-12345', remoteExit: exitFile });
+    saveTask(down);
+
+    const [out] = reconcileRunningTasks([down]);
+
+    expect(out.status).toBe('running');
+    expect(loadTask('downhost')?.status).toBe('running');
   });
 });
