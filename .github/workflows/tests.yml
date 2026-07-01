@@ -1,9 +1,11 @@
-name: Sandbox tests
+name: Tests
 
-# Temporary fallback to GitHub-hosted runners while the phnx-labs self-hosted
-# pool (cpx41, 4 ephemeral runner processes; infra at agents/infra/ci-runner)
-# is offline. Restore `runs-on: [self-hosted, linux, x64]` once the pool is
-# back online. Tracking: https://github.com/phnx-labs/agents-cli/issues/94
+# Per-PR test gate: build + run the suite on a GitHub-hosted Linux runner. One
+# of the two required checks (with gitleaks). The full cross-platform matrix
+# (ubuntu/macOS/Windows × Node 22/24) lives in ci.yml and is cost-gated to
+# release/** branches and v* tags, so it runs before a release, not on every PR.
+# The `test` job name is a required-check context (branch protection) and is
+# matched by scripts/release.sh EXPECTED_CHECKS -- don't rename it.
 #
 # Tool versions are NOT pinned here — setup-bun and any future setup-* steps
 # read the source of truth out of package.json / go.mod / etc.
@@ -13,7 +15,7 @@ on:
     branches: ['main', 'release/**']
 
 concurrency:
-  group: sandbox-${{ github.ref }}
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

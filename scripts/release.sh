@@ -417,14 +417,14 @@ fi
 
 # ----- Wait for CI to go green on a PR (bounded + fail-closed) -----
 # Poll `gh pr checks` on a hard deadline rather than `gh pr checks --watch`: the
-# watch is UNBOUNDED (a check that registers then stalls -- e.g. sandbox.yml's
-# self-hosted `test` runner offline -- would hang the release forever) and it can
+# watch is UNBOUNDED (a check that registers then stalls -- e.g. tests.yml's
+# `test` job hanging -- would hang the release forever) and it can
 # exit 0 on a partial set. This loop waits until every expected context is
 # present AND terminal (capped at 60m), then re-asserts each is a pass and dies
 # otherwise. It waits on the WHOLE matrix (incl. windows, which the main ruleset
 # does not require) because the point is a green cross-platform picture before we
 # publish. NOTE: these names are the job/matrix labels of ci.yml (the build
-# matrix), sandbox.yml (test), and secret-scan.yml (gitleaks) -- a rename there
+# matrix), tests.yml (test), and secret-scan.yml (gitleaks) -- a rename there
 # must be mirrored here, or the release times out (fail-closed, never publishes).
 EXPECTED_CHECKS=(test gitleaks \
   "build (ubuntu-latest, 22)" "build (ubuntu-latest, 24)" \

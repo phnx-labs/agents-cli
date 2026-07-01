@@ -17,6 +17,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
+import { writePidSessionEntry } from './session/pid-registry.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -853,6 +854,15 @@ interface SpawnResult {
  * unbuffered.
  */
 async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
+  // Assign a known session id up front for agents that accept one, so the
+  // launcher can record an EXACT pid -> session mapping (see pid-registry) —
+  // otherwise the headless `ag sessions --active` path can only guess
+  // "newest .jsonl in the cwd" and collapses co-located agents onto one row.
+  // Claude: `--session-id <uuid>` CREATES the session with that id (wired in
+  // buildExecCommand). Skip on resume — the id is the one being resumed.
+  if (options.agent === 'claude' && !options.resume && !options.sessionId) {
+    options = { ...options, sessionId: randomUUID() };
+  }
   const cmd = buildExecCommand(options);
   const [executable, ...args] = cmd;
 
@@ -907,6 +917,19 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       stdio,
       env: buildExecEnv(options),
       shell: useShell,
+    });
+
+    // Record this launch so `ag sessions --active` can map the pid to its exact
+    // session (sessionId is set for Claude above) instead of guessing the newest
+    // .jsonl in the cwd — the collapse that made co-located agents indistinguishable.
+    // Best-effort: pruned when the pid dies; a failed write just degrades to the heuristic.
+    writePidSessionEntry({
+      pid: child.pid ?? 0,
+      agent: options.agent,
+      sessionId: options.sessionId,
+      cwd: options.cwd || process.cwd(),
+      tmuxPane: process.env.TMUX_PANE,
+      startedAtMs: Date.now(),
     });
 
     // Mark startup time (time from function call to process spawn)

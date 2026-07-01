@@ -7,6 +7,27 @@ import { dirname, join } from 'node:path';
 // exercises the branch logic without shelling out to netstat/tasklist.
 vi.mock('../chrome.js', () => ({ getPortOccupant: vi.fn() }));
 
+// Stub `child_process.spawn` so the ssh-transport tests (launch-failure
+// propagation, kill-on-cleanup) drive fake ssh processes instead of shelling
+// out to a real `ssh`. `execFileSync` (used by isOwnTunnel) is preserved.
+const cp = vi.hoisted(() => {
+  const { EventEmitter } = require('node:events') as typeof import('node:events');
+  const calls: { cmd: string; args: string[]; child: any }[] = [];
+  const spawn = (cmd: string, args: string[]) => {
+    const child: any = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    calls.push({ cmd, args, child });
+    return child;
+  };
+  return { calls, spawn };
+});
+vi.mock('child_process', async (importActual) => {
+  const actual = await importActual<typeof import('child_process')>();
+  return { ...actual, spawn: cp.spawn };
+});
+
 import {
   buildLaunchCmd,
   buildKillCmd,
@@ -14,6 +35,8 @@ import {
   buildWindowsKillScript,
   encodePowerShell,
   isOwnTunnel,
+  ensureRemoteBrowser,
+  killRemoteBrowser,
 } from './ssh.js';
 import { getPortOccupant } from '../chrome.js';
 
@@ -51,6 +74,20 @@ describe('buildWindowsLaunchScript', () => {
   it('resolves the real .exe from App Paths for a known browser', () => {
     expect(buildWindowsLaunchScript('edge', 9222)).toContain('App Paths\\msedge.exe');
     expect(buildWindowsLaunchScript('chrome', 9222)).toContain('App Paths\\chrome.exe');
+  });
+
+  it('falls back to HKCU App Paths for per-user installs (Edge/Chrome default)', () => {
+    const s = buildWindowsLaunchScript('edge', 9222);
+    // Per-user installs live under HKCU, not HKLM — an HKLM-only lookup missed
+    // the default Edge/Chrome install and the launch failed. Both hives probed.
+    expect(s).toContain("HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe");
+    expect(s).toContain("HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe");
+    // HKLM must be tried first, HKCU only as the fallback.
+    expect(s.indexOf('HKLM:')).toBeLessThan(s.indexOf('HKCU:'));
+    // PowerShell 5.1 has no `??`; the fallback is an explicit `if`.
+    expect(s).not.toContain('??');
+    // A missing exe throws so it rides out as a non-zero ssh exit.
+    expect(s).toContain('throw');
   });
 
   it('uses a custom binary path verbatim (no App Paths lookup)', () => {
@@ -169,5 +206,60 @@ describe('buildKillCmd', () => {
     expect(cmd).toContain('lsof -ti');
     expect(cmd).toContain(':9222');
     expect(cmd).not.toContain('Stop-Process');
+  });
+});
+
+describe('ensureRemoteBrowser launch-failure propagation (#558)', () => {
+  afterEach(() => {
+    cp.calls.length = 0;
+  });
+
+  it('rejects with the captured stderr on a non-zero ssh exit', async () => {
+    const p = ensureRemoteBrowser('me', 'win-mini', 'edge', 9222, 'windows');
+    const child = cp.calls.at(-1)!.child;
+    child.stderr.emit('data', Buffer.from('msedge.exe not found in HKLM/HKCU App Paths'));
+    child.emit('close', 1);
+    await expect(p).rejects.toThrow(/ssh exit 1/);
+    await expect(p).rejects.toThrow(/not found in HKLM\/HKCU/);
+  });
+
+  it('resolves on a clean (exit 0) launch — an already-running browser is fine', async () => {
+    const p = ensureRemoteBrowser('me', 'win-mini', 'edge', 9222, 'windows');
+    cp.calls.at(-1)!.child.emit('close', 0);
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  it('captures ssh auth failure (exit 255) rather than swallowing it', async () => {
+    const p = ensureRemoteBrowser('me', 'win-mini', 'edge', 9222, 'windows');
+    const child = cp.calls.at(-1)!.child;
+    child.stderr.emit('data', Buffer.from('Permission denied (publickey).'));
+    child.emit('close', 255);
+    await expect(p).rejects.toThrow(/ssh exit 255.*Permission denied/s);
+  });
+});
+
+describe('killRemoteBrowser on stop/cleanup (#559)', () => {
+  afterEach(() => {
+    cp.calls.length = 0;
+  });
+
+  it('invokes the encoded Windows kill script over ssh', async () => {
+    const p = killRemoteBrowser('me', 'win-mini', 'windows', 9222);
+    const rec = cp.calls.at(-1)!;
+    expect(rec.cmd).toBe('ssh');
+    expect(rec.args[0]).toBe('me@win-mini');
+    // The remote command is the exact encoded Get-NetTCPConnection -> Stop-Process
+    // script, so `browser stop` reaps the WMI-spawned browser (not just the tunnel).
+    expect(rec.args).toContain(buildKillCmd('windows', 9222));
+    rec.child.emit('close', 0);
+    await p;
+  });
+
+  it('tears down the posix remote via lsof + kill', async () => {
+    const p = killRemoteBrowser('me', 'host', 'posix', 9222);
+    const rec = cp.calls.at(-1)!;
+    expect(rec.args).toContain(buildKillCmd('posix', 9222));
+    rec.child.emit('close', 0);
+    await p;
   });
 });

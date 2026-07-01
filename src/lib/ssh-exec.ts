@@ -35,11 +35,22 @@ export function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
-/** Hardened ssh options applied to every connection. */
+/**
+ * Hardened ssh options applied to every connection — the single baseline every
+ * `ssh` in the codebase composes from (directly here, or as `[...SSH_OPTS, …]`
+ * in the few callers that need extra flags like `-L`/`-N`/`ProxyCommand`).
+ *
+ * `ServerAliveInterval`/`ServerAliveCountMax` add in-connection keepalive: a
+ * silently-dropped link (laptop sleeps, Wi-Fi flips) is detected and the ssh
+ * process exits within ~45s instead of hanging forever — so a followed run or a
+ * long-lived `-N` tunnel can't leave a zombie ssh + socket pinned on the laptop.
+ */
 export const SSH_OPTS: readonly string[] = [
   '-o', 'StrictHostKeyChecking=accept-new',
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=10',
+  '-o', 'ServerAliveInterval=15',
+  '-o', 'ServerAliveCountMax=3',
 ];
 
 /**
@@ -50,6 +61,12 @@ export const SSH_OPTS: readonly string[] = [
  * each. `ControlPersist=60s` keeps the master alive briefly after the last
  * client exits. `%C` (a short fixed-length hash of local-host/remote/port/user)
  * keeps the socket path well under macOS's 104-char `sun_path` limit.
+ *
+ * This is **on by default** for every `sshExec`/`sshStream` call: the poll loops
+ * (`followHostTask`), readiness probes, and per-host fan-outs are exactly the
+ * high-frequency callers that benefit most from socket reuse, and they should
+ * never have to remember to opt in. A caller passes `multiplex: false` only for
+ * a genuine one-shot where a lingering 60s master is pure overhead.
  *
  * The socket directory is created lazily; if ssh can't open the control socket
  * it falls back to a normal connection (multiplexing is an optimisation, never a
@@ -84,7 +101,7 @@ export interface SshExecOptions {
   timeoutMs?: number;
   /** Extra ssh flags inserted before the target (e.g. `-tt`). */
   extraSshArgs?: string[];
-  /** Reuse a persistent control socket across calls (see `controlOpts`). */
+  /** Reuse a persistent control socket across calls (default true; see `controlOpts`). */
   multiplex?: boolean;
 }
 
@@ -104,7 +121,7 @@ export interface SshExecResult {
  */
 export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions = {}): SshExecResult {
   assertValidSshTarget(target);
-  const mux = opts.multiplex ? controlOpts() : [];
+  const mux = opts.multiplex === false ? [] : controlOpts();
   const args = [...SSH_OPTS, ...mux, ...(opts.extraSshArgs ?? []), target, remoteCmd];
   const res = spawnSync('ssh', args, {
     input: opts.input,
@@ -134,7 +151,7 @@ export interface SshStreamOptions {
    * leave it off and forward a non-interactive invocation instead.
    */
   tty?: boolean;
-  /** Reuse a persistent control socket across calls (see `controlOpts`). */
+  /** Reuse a persistent control socket across calls (default true; see `controlOpts`). */
   multiplex?: boolean;
 }
 
@@ -147,7 +164,7 @@ export interface SshStreamOptions {
  */
 export function sshStream(target: string, remoteCmd: string, opts: SshStreamOptions = {}): number {
   assertValidSshTarget(target);
-  const mux = opts.multiplex ? controlOpts() : [];
+  const mux = opts.multiplex === false ? [] : controlOpts();
   const tty = opts.tty ? ['-tt'] : [];
   const args = [...SSH_OPTS, ...mux, ...tty, target, remoteCmd];
   const res = spawnSync('ssh', args, { stdio: 'inherit' });

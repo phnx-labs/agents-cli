@@ -3,7 +3,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as TOML from 'smol-toml';
-import { applyPermissionsToVersion, buildPermissionsFromGroups, containsBroadGrants, convertDenyToCodexRules, convertToKimiFormat } from './permissions.js';
+import {
+  COMPUTER_APP_GATED_VERBS,
+  applyPermissionsToVersion,
+  buildPermissionsFromGroups,
+  containsBroadGrants,
+  convertDenyToCodexRules,
+  convertToKimiFormat,
+  formatComputerPermissionGrantHint,
+} from './permissions.js';
 
 const tempDirs: string[] = [];
 
@@ -55,6 +63,19 @@ describe('containsBroadGrants', () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+describe('computer permission hints', () => {
+  it('tells users the app-targeted verbs gated by Computer(bundle-id)', () => {
+    const hint = formatComputerPermissionGrantHint('Microsoft.WindowsNotepad');
+
+    expect(hint).toContain('Computer(Microsoft.WindowsNotepad)');
+    expect(hint).toContain('agents computer reload');
+    expect(hint).toContain('type-text');
+    expect(hint).toContain('key');
+    expect(COMPUTER_APP_GATED_VERBS).toContain('type-text');
+    expect(COMPUTER_APP_GATED_VERBS).toContain('key');
   });
 });
 

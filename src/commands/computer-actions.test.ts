@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   pickTarget,
   parseXY,
@@ -6,11 +9,26 @@ import {
   buildRaiseParams,
   buildWaitParams,
   clampCharDelay,
+  resolveTargetPidDecision,
   CHAR_DELAY_MIN_MS,
   CHAR_DELAY_MAX_MS,
   type AppInfo,
 } from './computer-actions.js';
-import { resolveRpcTimeoutMs, RPC_TIMEOUT_MS } from '../lib/computer-rpc.js';
+import { resolveRpcTimeoutMs, RPC_TIMEOUT_MS, type ComputerClient, type RPCResponse } from '../lib/computer-rpc.js';
+
+const tempDirs: string[] = [];
+
+function makeTempDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-computer-actions-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 const apps: AppInfo[] = [
   { pid: 100, name: 'Finder', bundle_id: 'com.apple.finder', active: false },
@@ -62,6 +80,128 @@ describe('pickTarget', () => {
     const noneActive = apps.map((a) => ({ ...a, active: false }));
     const r = pickTarget(noneActive, {});
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('resolveTargetPidDecision session admissions', () => {
+  it('keeps an admitted input target stable for repeated type-text calls in the same session', async () => {
+    const cachePath = path.join(makeTempDir(), 'admissions.json');
+    let calls = 0;
+    const client: ComputerClient = {
+      async call(method: string): Promise<RPCResponse> {
+        expect(method).toBe('list_apps');
+        calls += 1;
+        return {
+          id: calls,
+          result: {
+            apps: calls === 1
+              ? [{ pid: 4242, name: 'Notepad', bundle_id: 'Microsoft.WindowsNotepad', active: true }]
+              : [],
+          },
+        };
+      },
+      async close(): Promise<void> {},
+    };
+    const env = {
+      CODEX_THREAD_ID: 'session-557',
+      AGENTS_COMPUTER_ADMISSION_CACHE: cachePath,
+    } as NodeJS.ProcessEnv;
+
+    await expect(resolveTargetPidDecision(client, {}, { verb: 'type-text', env, nowMs: 10 }))
+      .resolves.toEqual({ ok: true, pid: 4242, source: 'list_apps' });
+    await expect(resolveTargetPidDecision(client, {}, { verb: 'type-text', env, nowMs: 11 }))
+      .resolves.toEqual({ ok: true, pid: 4242, source: 'session_admission' });
+  });
+
+  it('shares the admitted target across input verbs in the same session', async () => {
+    const cachePath = path.join(makeTempDir(), 'admissions.json');
+    let calls = 0;
+    const client: ComputerClient = {
+      async call(method: string): Promise<RPCResponse> {
+        expect(method).toBe('list_apps');
+        calls += 1;
+        return {
+          id: calls,
+          result: {
+            apps: calls === 1
+              ? [{ pid: 5150, name: 'Notepad', bundle_id: 'Microsoft.WindowsNotepad', active: true }]
+              : [],
+          },
+        };
+      },
+      async close(): Promise<void> {},
+    };
+    const env = {
+      CODEX_THREAD_ID: 'session-557-cross-verb',
+      AGENTS_COMPUTER_ADMISSION_CACHE: cachePath,
+    } as NodeJS.ProcessEnv;
+
+    await expect(resolveTargetPidDecision(client, {}, { verb: 'type-text', env, nowMs: 20 }))
+      .resolves.toEqual({ ok: true, pid: 5150, source: 'list_apps' });
+    await expect(resolveTargetPidDecision(client, {}, { verb: 'key', env, nowMs: 21 }))
+      .resolves.toEqual({ ok: true, pid: 5150, source: 'session_admission' });
+  });
+
+  it('keeps an admitted explicit bundle stable for repeated input calls', async () => {
+    const cachePath = path.join(makeTempDir(), 'admissions.json');
+    let calls = 0;
+    const client: ComputerClient = {
+      async call(method: string): Promise<RPCResponse> {
+        expect(method).toBe('list_apps');
+        calls += 1;
+        return {
+          id: calls,
+          result: {
+            apps: calls === 1
+              ? [{ pid: 7070, name: 'Notepad', bundle_id: 'Microsoft.WindowsNotepad', active: true }]
+              : [],
+          },
+        };
+      },
+      async close(): Promise<void> {},
+    };
+    const env = {
+      CODEX_THREAD_ID: 'session-557-bundle',
+      AGENTS_COMPUTER_ADMISSION_CACHE: cachePath,
+    } as NodeJS.ProcessEnv;
+
+    await expect(resolveTargetPidDecision(client, { bundle: 'Microsoft.WindowsNotepad' }, { verb: 'type-text', env, nowMs: 25 }))
+      .resolves.toEqual({ ok: true, pid: 7070, source: 'list_apps' });
+    await expect(resolveTargetPidDecision(client, { bundle: 'Microsoft.WindowsNotepad' }, { verb: 'key', env, nowMs: 26 }))
+      .resolves.toEqual({ ok: true, pid: 7070, source: 'session_admission' });
+  });
+
+  it('does not reuse an input admission outside the session that admitted it', async () => {
+    const cachePath = path.join(makeTempDir(), 'admissions.json');
+    let calls = 0;
+    const client: ComputerClient = {
+      async call(method: string): Promise<RPCResponse> {
+        calls += 1;
+        return {
+          id: calls,
+          result: {
+            apps: calls === 1
+              ? [{ pid: 6001, name: 'Notepad', bundle_id: 'Microsoft.WindowsNotepad', active: true }]
+              : [],
+          },
+        };
+      },
+      async close(): Promise<void> {},
+    };
+
+    await expect(resolveTargetPidDecision(client, {}, {
+      verb: 'type-text',
+      env: { CODEX_THREAD_ID: 'session-a', AGENTS_COMPUTER_ADMISSION_CACHE: cachePath } as NodeJS.ProcessEnv,
+      nowMs: 30,
+    })).resolves.toEqual({ ok: true, pid: 6001, source: 'list_apps' });
+
+    const denied = await resolveTargetPidDecision(client, {}, {
+      verb: 'type-text',
+      env: { CODEX_THREAD_ID: 'session-b', AGENTS_COMPUTER_ADMISSION_CACHE: cachePath } as NodeJS.ProcessEnv,
+      nowMs: 31,
+    });
+    expect(denied.ok).toBe(false);
+    if (!denied.ok) expect(denied.error).toContain('no active app found in allow list');
   });
 });
 

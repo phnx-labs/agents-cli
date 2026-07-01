@@ -847,6 +847,7 @@ export class BrowserService {
     maxBytes: number;
     durationMs: number;
     ffmpeg: import('child_process').ChildProcess;
+    ffmpegStderr: () => string;
     sessionId: string;
     conn: ProfileConnection;
     frameHandler: (params: unknown) => void;
@@ -884,16 +885,24 @@ export class BrowserService {
 
     // Resolve ffmpeg lazily so non-recording paths don't pay the import cost.
     const { spawn } = await import('child_process');
+    // CDP `Page.startScreencast` delivers frames at a VARIABLE cadence (paints
+    // are event-driven, not clocked). Feeding those into a fixed `-framerate`
+    // input made ffmpeg assume every frame was 1/fps apart, so a page that
+    // painted slower/faster than `fps` played back at the wrong speed. Instead
+    // stamp each frame with its wall-clock arrival time
+    // (`-use_wallclock_as_timestamps 1`) and keep those timings on output
+    // (`-vsync vfr`), so playback duration matches the real capture.
     const ffmpeg = spawn(
       'ffmpeg',
       [
         '-loglevel', 'error',
         '-f', 'image2pipe',
-        '-framerate', String(fps),
+        '-use_wallclock_as_timestamps', '1',
         '-i', '-',
         '-c:v', 'libvpx-vp9',
         '-b:v', '1M',
         '-pix_fmt', 'yuv420p',
+        '-vsync', 'vfr',
         '-y',
         outputPath,
       ],
@@ -919,9 +928,15 @@ export class BrowserService {
       ffmpeg.once('spawn', onSpawn);
     });
 
-    // Surface ffmpeg's own diagnostics (encoder error, etc.) in case stderr
-    // arrives after spawn.
-    ffmpeg.stderr?.on('data', () => { /* drain so the pipe doesn't fill */ });
+    // Capture ffmpeg's own diagnostics (encoder error, bad codec, etc.) so a
+    // failing encode is DIAGNOSABLE at recordStop instead of being discarded.
+    // Cap the buffer so a chatty ffmpeg can't grow it unbounded.
+    let stderrBuf = '';
+    ffmpeg.stderr?.on('data', (d: Buffer) => {
+      stderrBuf += d.toString();
+      if (stderrBuf.length > 64 * 1024) stderrBuf = stderrBuf.slice(-64 * 1024);
+    });
+    const ffmpegStderr = () => stderrBuf;
     ffmpeg.on('error', () => { /* post-spawn errors get reported via exit code */ });
 
     // 30 fps is CDP's screencast cap; everyNthFrame = round(30/fps).
@@ -954,6 +969,7 @@ export class BrowserService {
       durationMs,
       maxBytes,
       ffmpeg,
+      ffmpegStderr,
       sessionId,
       conn,
       frameHandler,
@@ -1003,27 +1019,57 @@ export class BrowserService {
       // session may already be gone
     }
 
-    // Close ffmpeg stdin so it flushes the output file cleanly.
-    await new Promise<void>((resolve) => {
-      rec.ffmpeg.on('exit', () => resolve());
+    // Close ffmpeg stdin so it flushes the output file cleanly, and observe how
+    // it exits. A non-zero exit means the encode failed — the recording must
+    // NOT be reported as success. If ffmpeg hangs, KILL it (don't just abandon
+    // the promise, which leaked the process) and treat the recording as failed.
+    const finalize = await new Promise<{ code: number | null; timedOut: boolean }>((resolve) => {
+      let done = false;
+      const settle = (r: { code: number | null; timedOut: boolean }) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(r);
+      };
+      const timer = setTimeout(() => {
+        try { rec.ffmpeg.kill('SIGKILL'); } catch { /* already gone */ }
+        settle({ code: null, timedOut: true });
+      }, 5000);
+      rec.ffmpeg.once('exit', (code) => settle({ code, timedOut: false }));
       try {
         rec.ffmpeg.stdin?.end();
       } catch {
-        resolve();
+        // stdin already closed; wait for exit or the hard timeout above.
       }
-      setTimeout(resolve, 5000); // Hard timeout if ffmpeg hangs
     });
+
+    const durationMs = Date.now() - rec.startedAt;
+    // Drop the recording from the map before any throw, so a failed stop
+    // doesn't wedge the task in a permanent "already recording" state.
+    this.recordings.delete(taskId);
+
+    if (finalize.timedOut) {
+      throw new Error(
+        `ffmpeg did not exit within 5s while finalizing the recording; killed it. ` +
+          `The recording at ${rec.outputPath} is incomplete.`
+      );
+    }
+    if (finalize.code !== 0) {
+      const err = rec.ffmpegStderr().trim();
+      throw new Error(
+        `ffmpeg exited abnormally (code ${finalize.code}) while finalizing the recording at ` +
+          `${rec.outputPath}; the file is likely corrupt or empty.` +
+          (err ? ` ffmpeg: ${err.slice(-800)}` : '')
+      );
+    }
 
     let bytes = 0;
     try {
       const st = await fs.promises.stat(rec.outputPath);
       bytes = st.size;
     } catch {
-      // ffmpeg may have failed; file missing
+      // ffmpeg exited 0 but the file is missing — still a failed recording.
     }
-    const durationMs = Date.now() - rec.startedAt;
-
-    this.recordings.delete(taskId);
     return { path: rec.outputPath, bytes, durationMs, reason };
   }
 

@@ -392,9 +392,20 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
     fs.writeFileSync(shimPath, `#!/bin/bash\n# ${marker}\nexec true\n`, { mode: 0o755 });
   }
 
+  // The file createShim actually writes on this platform: `<cmd>.cmd` on Windows,
+  // the bare script on POSIX. Fixtures must land here — since #543, shimExists /
+  // readShimSchemaVersion key off the on-disk filename (onDiskShimFile), while
+  // getShimPath returns the logical (extensionless) launch path that isn't a real
+  // file on Windows. Writing the fixture to getShimPath left Windows looking for a
+  // `.cmd` that never existed, so ensureShimCurrent always returned 'created'.
+  function onDiskShimPath(mod: typeof import('../shims.js'), agent: 'claude'): string {
+    const logical = mod.getShimPath(agent);
+    return path.join(path.dirname(logical), mod.onDiskShimFile(path.basename(logical), process.platform));
+  }
+
   it('does NOT downgrade a shim stamped by a newer install', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShimPath(mod, 'claude');
     const newer = mod.SHIM_SCHEMA_VERSION + 1;
     writeShim(shimPath, `agents-shim-version: ${newer}`);
     const before = fs.readFileSync(shimPath, 'utf8');
@@ -405,7 +416,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
 
   it('regenerates a shim from an older install (upgrade)', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShimPath(mod, 'claude');
     writeShim(shimPath, 'agents-shim-version: 1');
 
     expect(mod.ensureShimCurrent('claude')).toBe('updated');
@@ -416,7 +427,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
 
   it('regenerates an unversioned (pre-marker) shim', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShimPath(mod, 'claude');
     writeShim(shimPath, 'no marker here');
 
     expect(mod.ensureShimCurrent('claude')).toBe('updated');

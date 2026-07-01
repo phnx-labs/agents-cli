@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+**`agents upgrade`: the "What's new" changelog is now a compact heading list (#562)**
+
+- The post-upgrade changelog dumped every heading *and* every verbose sub-bullet for each version in the range — a screenful across a multi-version jump. It now prints one bullet per feature/fix heading and links to the full CHANGELOG for the details. The parser was extracted to a pure, unit-tested `renderWhatsNew` so it can be exercised without the CLI's import-time side effects. Source: `src/lib/whats-new.ts`, `src/index.ts`.
+
+**`agents sessions --active`: a per-pid registry de-collapses co-located agents (#546)**
+
+- On a host with no terminal extension (bare SSH/tmux — e.g. any Linux box), `--active` could only map a discovered agent process to a session by guessing the newest `.jsonl` in its cwd, so several agents in the same repo collapsed onto one session row (observed live: a single id listed 28 times), and `/restore` couldn't tell them apart. `agents run` now records each launch to `~/.agents/.cache/terminals/by-pid/<pid>.json` (`{agent, cwd, tmuxPane, sessionId, startedAtMs}`) — the headless equivalent of the terminal extension's `live-terminals.json` — so `--active` and `/restore` attribute each co-located agent correctly. Source: `src/lib/session/pid-registry.ts`, `src/lib/session/active.ts`, `src/lib/exec.ts`.
+
+## 1.20.34
+
+**Test suite runs remotely on a crabbox VM (#525, #540)**
+
+- `scripts/release.sh`'s test gate now runs `bun install && bun run build && bun run test` on a leased crabbox VM via `scripts/sandbox.sh` instead of freezing the local machine, matching CI's Build→Test order (crabbox's sync honors `.gitignore`, so the gitignored `dist/` is built on the box). A new `bun run test:remote` offloads the suite the same way for local dev. Publishing still happens locally — only the signed macOS keychain helper can be produced and notarized here, and crabbox boxes are Linux. Source: `scripts/sandbox.sh`, `scripts/release.sh`, `package.json`.
+- `scripts/sandbox.sh` box acquisition is now robust: secrets load via `agents secrets export --plaintext` (the bare form now hard-errors), a missing `.crabbox.yaml` no longer aborts the script under `set -e`, and the agents-cli/claude install is gated to PR mode so test-mode runs match GitHub CI. Box selection gates on `crabbox status … ready=true` — skipping failed-bootstrap duds (which still report `status=running`) and warming a fresh box if none are ready — keyed on the stable `profile` label rather than an ephemeral slug. A dedicated `agents-cli` crabbox profile (`.crabbox.yaml`) isolates this repo's warm pool. Source: `scripts/sandbox.sh`, `.crabbox.yaml`.
+
 ## 1.20.31
 
 **`agents sessions <id>`: a catch-up digest for switching between many agents (#502)**

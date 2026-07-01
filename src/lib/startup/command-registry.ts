@@ -55,6 +55,7 @@ export const loadPrune: ModuleLoader = async () => (await import('../../commands
 export const loadTrash: ModuleLoader = async () => (await import('../../commands/trash.js')).registerTrashCommands;
 export const loadRestore: ModuleLoader = async () => (await import('../../commands/trash.js')).registerRestoreCommand;
 export const loadDoctor: ModuleLoader = async () => (await import('../../commands/doctor.js')).registerDoctorCommand;
+export const loadStatus: ModuleLoader = async () => (await import('../../commands/status.js')).registerStatusCommand;
 export const loadProfiles: ModuleLoader = async () => (await import('../../commands/profiles.js')).registerProfilesCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../../commands/secrets.js')).registerSecretsCommands;
 export const loadWallet: ModuleLoader = async () => (await import('../../commands/wallet.js')).registerWalletCommands;
@@ -74,6 +75,7 @@ export const loadTmux: ModuleLoader = async () => (await import('../../commands/
 export const loadBrowser: ModuleLoader = async () => (await import('../../commands/browser.js')).registerBrowserCommand;
 export const loadComputer: ModuleLoader = async () => (await import('../../commands/computer.js')).registerComputerCommand;
 export const loadHosts: ModuleLoader = async () => (await import('../../commands/hosts.js')).registerHostsCommand;
+export const loadLogs: ModuleLoader = async () => (await import('../../commands/logs.js')).registerLogsCommand;
 export const loadSsh: ModuleLoader = async () => (await import('../../commands/ssh.js')).registerSshCommands;
 export const loadPull: ModuleLoader = async () => (await import('../../commands/pull.js')).registerPullCommand;
 export const loadPush: ModuleLoader = async () => (await import('../../commands/push.js')).registerPushCommand;
@@ -140,6 +142,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   trash: [loadTrash],
   restore: [loadRestore],
   doctor: [loadDoctor],
+  status: [loadStatus],
   profiles: [loadProfiles],
   secrets: [loadSecrets],
   wallet: [loadWallet],
@@ -159,6 +162,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   browser: [loadBrowser],
   computer: [loadComputer],
   hosts: [loadHosts],
+  logs: [loadLogs],
   ssh: [loadSsh],
   devices: [loadSsh],
   pull: [loadPull],

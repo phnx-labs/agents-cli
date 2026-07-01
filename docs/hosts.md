@@ -5,7 +5,9 @@
 > `list`, `sync`), on `agents run`, and across the `agents teams` lifecycle. This
 > document is the design rationale; see
 > [00-concepts.md](00-concepts.md#devices--hosts) for the concept overview and how
-> hosts relate to the Tailscale-backed `agents devices` registry.
+> hosts relate to the Tailscale-backed `agents devices` registry, and
+> [09-ssh-transport.md](09-ssh-transport.md) for the shared, multiplexed SSH
+> transport every `--host` command rides.
 
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
 *your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed

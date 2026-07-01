@@ -1,14 +1,17 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { rmSync } from 'fs';
+import { rmSync, mkdirSync, writeFileSync } from 'fs';
+import * as net from 'net';
 import * as path from 'path';
 import {
   BrowserDaemonNotRunningError,
   formatBrowserDaemonNotRunningError,
   getSocketPath,
+  isDaemonReachable,
   sendIPCRequest,
   shouldRestartStaleDaemon,
 } from './ipc.js';
 import { getHelpersDir } from '../state.js';
+import { ipcEndpoint } from '../platform/index.js';
 import { startDaemon } from '../daemon.js';
 
 const HELPER_DIR = `/tmp/agents-cli-browser-ipc-${process.pid}`;
@@ -46,6 +49,43 @@ describe('sendIPCRequest', () => {
       sendIPCRequest({ action: 'status' }, { autoStartDaemon: false })
     ).rejects.toThrow(formatBrowserDaemonNotRunningError());
     expect(startDaemon).not.toHaveBeenCalled();
+  });
+});
+
+// #556: the daemon binds its browser IPC socket, then a crash / immediate
+// self-teardown leaves the socket *file* on disk with nothing listening. The
+// old reachability check was `fs.existsSync(socketPath)`, which treats that
+// stale file as a live daemon — the client then connects and gets ECONNREFUSED.
+// isDaemonReachable must be an actual connection probe: reachable only when a
+// process is really accepting on the socket.
+describe('isDaemonReachable (connection probe, not file existence)', () => {
+  it('is false when no socket exists at all', async () => {
+    expect(await isDaemonReachable()).toBe(false);
+  });
+
+  it('is false for a stale socket file that nothing is listening on', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    // A plain file at the socket path: exists on disk, but no listener.
+    // fs.existsSync would report this as "reachable" — the bug we are fixing.
+    writeFileSync(socketPath, '');
+    expect(await isDaemonReachable()).toBe(false);
+  });
+
+  it('is true only when a process is actually accepting on the socket', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    const server = net.createServer();
+    // Listen on the same endpoint the probe connects to (a named pipe on
+    // Windows, the socket file path on POSIX).
+    await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
+    try {
+      expect(await isDaemonReachable()).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    // After the listener goes away, reachability flips back to false.
+    expect(await isDaemonReachable()).toBe(false);
   });
 });
 

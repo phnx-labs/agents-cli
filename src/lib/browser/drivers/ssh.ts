@@ -78,11 +78,12 @@ export async function connectSSH(
     );
   }
 
-  try {
-    await ensureRemoteBrowser(user, host, profile.browser, remotePort, remoteOs, profile.binary);
-  } catch {
-    // Browser may already be running, continue
-  }
+  // A non-zero remote exit (missing exe, auth failure, bad launch) now rejects
+  // with the captured stderr and propagates. An already-running browser exits 0
+  // (the launch backgrounds/WMI-spawns regardless), so this does not spuriously
+  // fail the reconnect path — only genuine launch failures reach the caller
+  // instead of being swallowed and mis-reported later as a tunnel timeout.
+  await ensureRemoteBrowser(user, host, profile.browser, remotePort, remoteOs, profile.binary);
 
   let tunnel: ChildProcess;
   if (occupant) {
@@ -130,6 +131,11 @@ export async function connectSSH(
     pid: tunnelPid,
     cleanup: () => {
       cdp.close();
+      // Kill the remote browser BEFORE tearing down the tunnel. It runs on a
+      // separate ssh connection (independent of the tunnel we're about to
+      // kill), so tunnel teardown can't cut it off. Fire-and-forget — cleanup
+      // stays synchronous, and killRemoteBrowser never rejects.
+      killRemoteBrowser(user, host, remoteOs, remotePort).catch(() => {});
       tunnel.kill();
       clearProfileRuntime(profile.name);
     },
@@ -217,21 +223,32 @@ export function buildWindowsLaunchScript(
   port: number,
   customBinary?: string
 ): string {
-  let exeExpr: string;
+  let exeStmts: string[];
   if (customBinary) {
-    exeExpr = psSingleQuote(customBinary);
+    exeStmts = [`$exe = ${psSingleQuote(customBinary)}`];
   } else if (browserType === 'custom') {
     throw new Error('browser: custom requires a binary path in the profile');
   } else {
     const exeKey = WIN_BROWSER_APPPATH[browserType];
     if (!exeKey) throw new Error(`Unknown browser type for windows remote: ${browserType}`);
-    exeExpr =
-      `(Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exeKey}').'(default)'`;
+    const appPath = `SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exeKey}`;
+    // Per-user installs — the DEFAULT for Edge and Chrome — register App Paths
+    // under HKCU, not HKLM, so an HKLM-only lookup silently missed them and the
+    // launch failed. Resolve from HKLM first, then fall through to HKCU.
+    // Windows PowerShell 5.1 (what `powershell.exe` is) has no `??`, so the
+    // fallback is an explicit `if`. A missing exe `throw`s so the failure rides
+    // out as a non-zero ssh exit (surfaced by ensureRemoteBrowser) instead of a
+    // silent empty launch.
+    exeStmts = [
+      `$exe = (Get-ItemProperty 'HKLM:\\${appPath}' -EA SilentlyContinue).'(default)'`,
+      `if (-not $exe) { $exe = (Get-ItemProperty 'HKCU:\\${appPath}' -EA SilentlyContinue).'(default)' }`,
+      `if (-not $exe) { throw 'browser exe not found in HKLM/HKCU App Paths: ${exeKey}' }`,
+    ];
   }
   // Keep the `--remote-allow-origins=http://127.0.0.1:${port}` literal in
   // source — a test asserts CDP is never opened to `*`.
   return [
-    `$exe = ${exeExpr}`,
+    ...exeStmts,
     `$cl = '"' + $exe + '" --remote-debugging-port=${port}` +
       ` --remote-allow-origins=http://127.0.0.1:${port}` +
       ` --disable-background-timer-throttling --user-data-dir="' + $env:TEMP + '\\agents-browser-${port}"'`,
@@ -290,7 +307,7 @@ export function buildKillCmd(remoteOs: RemoteOs, port: number): string {
   return `pids=$(lsof -ti ${shellQuote(`:${port}`)} 2>/dev/null); [ -z "$pids" ] || kill -9 $pids 2>/dev/null || true`;
 }
 
-async function ensureRemoteBrowser(
+export async function ensureRemoteBrowser(
   user: string,
   host: string,
   browserType: string,
@@ -301,6 +318,11 @@ async function ensureRemoteBrowser(
   const remoteCmd = buildLaunchCmd(remoteOs, browserType, port, customBinary);
 
   return new Promise((resolve, reject) => {
+    // Capture stderr so a real launch failure (missing exe, auth denied, bad
+    // CreateProcess) surfaces here as a clear error. Previously stdio was
+    // ignored and this resolved on close regardless of exit code, so failures
+    // were swallowed and only re-emerged 8s later as a generic
+    // "SSH tunnel failed to establish".
     const child = spawn(
       'ssh',
       [
@@ -309,16 +331,48 @@ async function ensureRemoteBrowser(
         'BatchMode=yes',
         remoteCmd,
       ],
-      { stdio: 'ignore' }
+      { stdio: ['ignore', 'ignore', 'pipe'] }
     );
 
-    child.on('close', () => resolve());
-    child.on('error', reject);
+    let stderr = '';
+    child.stderr?.on('data', (d) => {
+      stderr += d.toString();
+    });
 
-    setTimeout(() => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      // ssh is still running the backgrounding launch command past our window.
+      // Killing the local ssh client does NOT reap the WMI/detached remote
+      // browser, so treat this as launched and let waitForPort confirm.
       child.kill();
       resolve();
     }, 2000);
+
+    child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code && code !== 0) {
+        const detail = stderr.trim();
+        reject(
+          new Error(
+            `Remote browser launch failed on ${host} (ssh exit ${code})` +
+              (detail ? `: ${detail}` : '')
+          )
+        );
+      } else {
+        resolve();
+      }
+    });
+
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
   });
 }
 
@@ -335,6 +389,21 @@ export async function restartRemoteBrowser(
   await sleep(500);
   await ensureRemoteBrowser(user, host, browserType, port, remoteOs, customBinary);
   await sleep(1500);
+}
+
+/**
+ * Kill the remote browser holding the CDP port. Invoked on stop/cleanup so the
+ * WMI-spawned (Windows) / detached (posix) browser process is not orphaned when
+ * the ssh tunnel is torn down — killing only the tunnel left it running on
+ * win-mini after every `browser stop`. Best-effort: never rejects.
+ */
+export function killRemoteBrowser(
+  user: string,
+  host: string,
+  remoteOs: RemoteOs,
+  port: number
+): Promise<void> {
+  return runSSHCommand(user, host, buildKillCmd(remoteOs, port));
 }
 
 function runSSHCommand(user: string, host: string, cmd: string): Promise<void> {

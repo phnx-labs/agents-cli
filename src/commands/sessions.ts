@@ -20,6 +20,8 @@ import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { machineId, normalizeHost } from '../lib/session/sync/config.js';
+import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
@@ -68,6 +70,11 @@ interface SessionsOptions extends SessionFilterOptions {
   tree?: boolean;
   /** With --active: show only sessions waiting on user input; exit 1 if any. */
   waiting?: boolean;
+  /** Enrich the listing with live glyphs/preview for running rows. Default on;
+   * `--no-live` sets this false. Commander's `--no-` convention. */
+  live?: boolean;
+  /** With --active: force local-only, skip cross-machine SSH fan-out. */
+  local?: boolean;
 }
 
 interface ClaudeHistoryEntry {
@@ -269,6 +276,44 @@ function activityLabel(s: ActiveSession): string {
 }
 
 /**
+ * Index live sessions by their full session UUID so a historical `SessionMeta`
+ * row (`meta.id`) can be matched to the session that is still running now.
+ * Rows without a sessionId (some cloud/headless probes) are skipped — they
+ * can't be correlated back to a transcript on disk.
+ */
+export function indexActiveBySessionId(active: ActiveSession[]): Map<string, ActiveSession> {
+  const byId = new Map<string, ActiveSession>();
+  for (const a of active) {
+    if (a.sessionId) byId.set(a.sessionId, a);
+  }
+  return byId;
+}
+
+/**
+ * The live decoration for a listing row: a status glyph and the latest-turn
+ * preview, when the session is still running. `●` running / `◐` waiting on the
+ * user / `○` idle, colored by the same `statusColor` the --active view uses.
+ * Returns empty strings when there is no live match, so callers render the
+ * plain historical row unchanged.
+ */
+export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: string; preview: string } {
+  if (!a) return { glyph: '', preview: '' };
+  const waiting = a.status === 'input_required' || a.activity === 'waiting_input';
+  const running = a.status === 'running' || a.activity === 'working';
+  const shape = waiting ? '◐' : running ? '●' : '○';
+  return { glyph: statusColor(a.status)(shape), preview: buildSessionDescription(a) };
+}
+
+/**
+ * The tracker/PR ref for a session's dedicated column: the ticket id when known,
+ * else `PR#<n>`, else empty. Pulled out of the trailing badge blob so refs align
+ * into a scannable column instead of jamming against a truncated topic.
+ */
+export function ticketLabel(s: Pick<SessionMeta, 'ticketId' | 'prNumber'>): string {
+  return s.ticketId ?? (s.prNumber ? `PR#${s.prNumber}` : '');
+}
+
+/**
  * Compact, colour-coded badges for the durable/awaiting signals. Text-only (no
  * emoji, per repo convention): `plan` / `ask` / `perm` for why it's waiting,
  * `PR#N`, `wt:slug`, `TICKET-123`.
@@ -398,14 +443,143 @@ export function groupActiveSessions(sessions: ActiveSession[]): ActiveSessionsLa
   return { workspaces };
 }
 
-/** Render the unified active-session view. */
-async function renderActiveSessions(asJson: boolean, waitingOnly = false): Promise<void> {
-  const all = await getActiveSessions();
+/** One machine's active sessions, keeping the within-machine workspace layout. */
+export interface MachineGroup {
+  /** Normalized device id (machineId() form). */
+  machine: string;
+  /** The machine this command is running on — pinned first and marked. */
+  isLocal: boolean;
+  total: number;
+  layout: ActiveSessionsLayout;
+}
+
+/** Active sessions grouped by the machine they run on. */
+export interface MachineGroupedLayout {
+  machines: MachineGroup[];
+}
+
+/**
+ * The machine a session belongs to: an explicit tag (set when merging
+ * cross-machine results) wins; else the process's provenance host (normalized
+ * to the same id form); else the local machine. Never keys off `ActiveSession.host`
+ * — that is the terminal *app* (code/tmux), not the computer.
+ */
+function machineKeyFor(s: ActiveSession, localMachine: string): string {
+  if (s.machine) return s.machine;
+  if (s.provenance?.host) return normalizeHost(s.provenance.host);
+  return localMachine;
+}
+
+/**
+ * Group active sessions by machine, then delegate each machine's sessions to the
+ * existing workspace/window grouping. Local machine is pinned first and flagged;
+ * the rest sort by session count descending, then name. Pure — `localMachine` is
+ * injected so the function stays testable without reading os.hostname().
+ */
+export function groupSessionsByMachine(sessions: ActiveSession[], localMachine: string): MachineGroupedLayout {
+  const byMachine = new Map<string, ActiveSession[]>();
+  for (const s of sessions) {
+    const key = machineKeyFor(s, localMachine);
+    (byMachine.get(key) ?? byMachine.set(key, []).get(key)!).push(s);
+  }
+  const keys = Array.from(byMachine.keys()).sort((a, b) => {
+    if (a === localMachine) return -1;
+    if (b === localMachine) return 1;
+    const ac = byMachine.get(a)!.length, bc = byMachine.get(b)!.length;
+    if (ac !== bc) return bc - ac;
+    return a.localeCompare(b);
+  });
+  const machines = keys.map((machine) => ({
+    machine,
+    isLocal: machine === localMachine,
+    total: byMachine.get(machine)!.length,
+    layout: groupActiveSessions(byMachine.get(machine)!),
+  }));
+  return { machines };
+}
+
+/**
+ * Collapse duplicate sessions after a cross-machine merge. Two rows collapse
+ * only when they share both machine and session UUID (the same host listed
+ * twice, or a local/remote overlap); rows without a sessionId can't be
+ * correlated, so they're all kept.
+ */
+export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession[] {
+  const seen = new Set<string>();
+  const out: ActiveSession[] = [];
+  for (const s of sessions) {
+    if (!s.sessionId) { out.push(s); continue; }
+    const key = `${s.machine ?? ''}:${s.sessionId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+/** Print one machine's workspace tree, indented under its machine header. */
+function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string): void {
+  let first = true;
+  for (const ws of layout.workspaces) {
+    if (!first) console.log();
+    first = false;
+
+    const header = ws.key === '__cloud__'
+      ? chalk.magenta.bold('cloud')
+      : ws.key === '__unknown__'
+        ? chalk.gray.bold('unknown')
+        : chalk.cyan.bold(shortCwd(ws.key));
+    console.log(`${base}${header} ${chalk.gray(`(${ws.total})`)}`);
+
+    for (const win of ws.windows) {
+      // Host is per-process, but every terminal in the same IDE window shares
+      // an ancestor — take the first non-empty host as the window's label.
+      const host = win.sessions.find((s) => s.host)?.host ?? 'terminal';
+      const winHeader = `${chalk.gray(host)} ${chalk.gray('·')} ${chalk.gray(shortWindowLabel(win.windowId))} ${chalk.gray(`(${win.sessions.length})`)}`;
+      console.log(base + '  ' + winHeader);
+      for (const s of win.sessions) printActiveRow(s, base + '    ');
+    }
+
+    for (const s of ws.flat) printActiveRow(s, base + '  ');
+  }
+}
+
+/** Machine header: `▸ <name> ← this machine` for the local box (cyan), matching
+ * the `ag devices list` treatment; a plain `▸ <name>` for remotes. */
+function printMachineHeader(mg: MachineGroup): void {
+  const marker = mg.isLocal ? chalk.cyan('▸ ') : chalk.gray('▸ ');
+  const name = mg.isLocal ? chalk.bold.cyan(mg.machine) : chalk.bold(mg.machine);
+  const here = mg.isLocal ? chalk.cyan('  ← this machine') : '';
+  console.log(`${marker}${name} ${chalk.gray(`(${mg.total})`)}${here}`);
+}
+
+/**
+ * Render the unified active-session view, grouped by machine. Local sessions
+ * come from `getActiveSessions()`; unless `--local`, sessions from other
+ * machines are folded in over SSH (explicit `--host` targets, else the
+ * registered online devices from `ag devices`). A tip is shown when there are
+ * no other machines to include.
+ */
+async function renderActiveSessions(
+  asJson: boolean,
+  waitingOnly = false,
+  opts: { local?: boolean; hosts?: string[] } = {},
+): Promise<void> {
+  const self = machineId();
+  const local = await getActiveSessions();
+  for (const s of local) if (!s.machine) s.machine = self;
+
+  let remoteDeviceCount = 0;
+  let merged = local;
+  if (!opts.local) {
+    const remote = await gatherRemoteActive(opts.hosts);
+    remoteDeviceCount = remote.deviceCount;
+    merged = dedupeByMachineSession([...local, ...remote.sessions]);
+  }
+
   // --waiting: only sessions blocked on the user. Exits non-zero when any are
   // present so a supervising agent or hook can poll it as a gate.
-  const sessions = waitingOnly
-    ? all.filter(s => s.status === 'input_required')
-    : all;
+  const sessions = waitingOnly ? merged.filter(s => s.status === 'input_required') : merged;
 
   if (asJson) {
     process.stdout.write(JSON.stringify(sessions, null, 2) + '\n');
@@ -415,34 +589,17 @@ async function renderActiveSessions(asJson: boolean, waitingOnly = false): Promi
 
   if (sessions.length === 0) {
     console.log(chalk.gray(waitingOnly ? 'No sessions waiting on input.' : 'No active agent sessions.'));
+    if (!opts.local && !opts.hosts?.length && remoteDeviceCount === 0) printCrossMachineTip();
     return;
   }
 
-  const layout = groupActiveSessions(sessions);
-
-  let first = true;
-  for (const ws of layout.workspaces) {
-    if (!first) console.log();
-    first = false;
-
-    // Print workspace header
-    const header = ws.key === '__cloud__'
-      ? chalk.magenta.bold('cloud')
-      : ws.key === '__unknown__'
-        ? chalk.gray.bold('unknown')
-        : chalk.cyan.bold(shortCwd(ws.key));
-    console.log(`${header} ${chalk.gray(`(${ws.total})`)}`);
-
-    for (const win of ws.windows) {
-      // Host is per-process, but every terminal in the same IDE window shares
-      // an ancestor — take the first non-empty host as the window's label.
-      const host = win.sessions.find((s) => s.host)?.host ?? 'terminal';
-      const winHeader = `${chalk.gray(host)} ${chalk.gray('·')} ${chalk.gray(shortWindowLabel(win.windowId))} ${chalk.gray(`(${win.sessions.length})`)}`;
-      console.log('  ' + winHeader);
-      for (const s of win.sessions) printActiveRow(s, '    ');
-    }
-
-    for (const s of ws.flat) printActiveRow(s, '  ');
+  const grouped = groupSessionsByMachine(sessions, self);
+  let firstMachine = true;
+  for (const mg of grouped.machines) {
+    if (!firstMachine) console.log();
+    firstMachine = false;
+    printMachineHeader(mg);
+    renderWorkspaceLayout(mg.layout, '  ');
   }
 
   const runningCount = sessions.filter(s => s.status === 'running').length;
@@ -453,15 +610,29 @@ async function renderActiveSessions(asJson: boolean, waitingOnly = false): Promi
   if (runningCount > 0) parts.push(`${runningCount} running`);
   if (idleCount > 0) parts.push(`${idleCount} idle`);
   if (queuedCount > 0) parts.push(`${queuedCount} queued`);
-  console.log(chalk.gray(`\n${sessions.length} active (${parts.join(', ')}).`));
+  const machineWord = grouped.machines.length === 1 ? 'machine' : 'machines';
+  console.log(chalk.gray(`\n${sessions.length} active (${parts.join(', ')}) across ${grouped.machines.length} ${machineWord}.`));
+
+  // Tip only when nothing else could be included and the user didn't opt out.
+  if (!opts.local && !opts.hosts?.length && remoteDeviceCount === 0) printCrossMachineTip();
 
   // Scriptable gate: a non-zero exit when anything is waiting on the user.
   if (waitingOnly && sessions.length > 0) process.exitCode = 1;
 }
 
+/** Nudge shown when `--active` has no other machines to fold in. */
+function printCrossMachineTip(): void {
+  console.log(chalk.gray(
+    "\nTip: include sessions from your other machines — register them with 'ag devices sync', then rerun. Use --local to skip.",
+  ));
+}
+
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
 async function sessionsAction(query: string | undefined, options: SessionsOptions): Promise<void> {
-  if (options.host && options.host.length > 0) {
+  // --host WITHOUT --active keeps the legacy per-host stream (each remote's raw
+  // stdout under a `── host ──` banner). With --active, the hosts are folded
+  // into the merged machine-grouped view instead (handled below).
+  if (options.host && options.host.length > 0 && !options.active) {
     try {
       runRemoteSessions(options.host);
     } catch (err: any) {
@@ -472,7 +643,13 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   }
 
   if (options.active) {
-    await renderActiveSessions(options.json === true, options.waiting === true);
+    // AGENTS_SESSIONS_LOCAL is set by a parent fan-out invocation (see
+    // remote-active.ts) so a peer answers for itself without recursing.
+    const forceLocal = options.local === true || process.env.AGENTS_SESSIONS_LOCAL === '1';
+    await renderActiveSessions(options.json === true, options.waiting === true, {
+      local: forceLocal,
+      hosts: options.host,
+    });
     return;
   }
 
@@ -634,7 +811,8 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
 
     // Non-interactive fallback (piped output)
     const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
-    printSessionTable(filtered, hiddenCount, options.tree === true);
+    const liveIndex = await maybeLiveIndex(options);
+    printSessionTable(filtered, hiddenCount, options.tree === true, liveIndex);
   } catch (err: any) {
     tracker.stop();
     spinner?.stop();
@@ -663,53 +841,90 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   };
 }
 
-/** One flat table row: shortId · agent · version · project · topic(+badges) · time. */
-function flatSessionRow(session: SessionMeta): string {
+/** One flat table row:
+ *   shortId · agent · version · project · [glyph] label·doing · [ticket] · [wt] · time
+ * `doing` is the live preview when running, else the topic. The `ticket` column
+ * (tracker/PR ref, pulled out of the badge blob so refs align) is only rendered
+ * when `showTicket` — otherwise a listing with no refs would waste a column of
+ * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
+function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.timestamp);
   const project = session.project || '-';
   const tag = teamTag(session);
   const label = (session as any).label;
-  const topic = tag ? `${tag}${session.topic ?? ''}` : session.topic;
-  const versionStr = session.version || '-';
-  const badges = signalBadges(metaSignals(session));
-  const badgeW = badges ? stringWidth(badges) + 1 : 0;
-  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - badgeW - stringWidth(when) - 1);
+  const { glyph, preview } = liveGlyphAndPreview(live);
+  // A running session's live preview says what the agent is doing now; a
+  // resting one falls back to its opening topic.
+  const doing = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
+  const wt = session.worktreeSlug ? chalk.magenta(`wt:${session.worktreeSlug}`) : '';
+
+  const TICKET_W = 10;
+  const ticketCell = showTicket
+    ? chalk.blue(padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1))
+    : '';
+  const glyphW = glyph ? 2 : 0;
+  const ticketW = showTicket ? TICKET_W + 1 : 0;
+  const wtW = wt ? stringWidth(wt) + 1 : 0;
+  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - ticketW - wtW - stringWidth(when) - 1);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
-    chalk.yellow(padToWidth(truncateToWidth(versionStr, 7), 8)) +
+    chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
     chalk.cyan(padToWidth(truncateToWidth(project, 14), 16)) +
-    renderTopicCell(label, topic, '', topicW, topicW) +
-    (badges ? badges + ' ' : '') +
+    (glyph ? glyph + ' ' : '') +
+    renderTopicCell(label, doing, '', topicW, topicW) +
+    ticketCell +
+    (wt ? wt + ' ' : '') +
     chalk.gray(when)
   );
 }
 
 /** One tree-mode row (grouped under a dir header): id · agent · badges · topic · time. No version/project column. */
-function treeSessionRow(session: SessionMeta): string {
+function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.timestamp);
   const tag = teamTag(session);
   const label = (session as any).label;
-  const topic = (tag ? `${tag}${session.topic ?? ''}` : session.topic) || '-';
+  const { glyph, preview } = liveGlyphAndPreview(live);
+  const topic = (preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic)) || '-';
   const badges = signalBadges(metaSignals(session));
   const badgeW = badges ? stringWidth(badges) + 1 : 0;
   const head = label ? `${label} · ${topic}` : topic;
-  const topicW = Math.max(12, terminalWidth() - (2 + 9 + 8) - badgeW - stringWidth(when) - 1);
+  const glyphW = glyph ? 2 : 0;
+  const topicW = Math.max(12, terminalWidth() - (2 + 9 + 8) - glyphW - badgeW - stringWidth(when) - 1);
 
   return (
     '  ' +
     chalk.dim(padToWidth(session.shortId, 9)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 7), 8)) +
     (badges ? badges + ' ' : '') +
+    (glyph ? glyph + ' ' : '') +
     padToWidth(chalk.white(truncateToWidth(head, topicW)), topicW) +
     ' ' + chalk.gray(when)
   );
 }
 
-function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false): void {
+/**
+ * Live-session index for enriching the default listing, or undefined when
+ * enrichment is off (`--no-live`) or irrelevant (`--json`, which serializes
+ * SessionMeta). Full detection (incl. the headless `ps` scan) is deliberate:
+ * bare-CLI and tmux agents are the common case here, and skipping them would
+ * leave the glyph almost never showing. The listing is a one-shot user action,
+ * not a hot loop, so the `ps`/`lsof` cost is acceptable; `--no-live` is the
+ * escape hatch. Never throws — a probe failure just yields a plain listing.
+ */
+async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, ActiveSession> | undefined> {
+  if (options.live === false || options.json) return undefined;
+  try {
+    return indexActiveBySessionId(await getActiveSessions());
+  } catch {
+    return undefined;
+  }
+}
+
+function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
   if (tree) {
     // Group by directory; drop the id/version columns from view. The short id
     // stays as each row's leading handle (the address to read/resume it).
@@ -728,7 +943,7 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
       first = false;
       const group = byDir.get(key)!;
       console.log(`${chalk.cyan.bold(shortCwd(key))} ${chalk.gray(`(${group.length})`)}`);
-      for (const s of group) console.log(treeSessionRow(s));
+      for (const s of group) console.log(treeSessionRow(s, liveIndex?.get(s.id)));
     }
     const dirWord = keys.length === 1 ? 'directory' : 'directories';
     console.log(chalk.gray(`\n${sessions.length} session${sessions.length === 1 ? '' : 's'} across ${keys.length} ${dirWord}.`));
@@ -736,7 +951,10 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
     return;
   }
 
-  for (const session of sessions) console.log(flatSessionRow(session));
+  // Only show the ticket column when at least one row carries a ref — otherwise
+  // it's a column of dashes that steals width from every topic.
+  const showTicket = sessions.some((s) => ticketLabel(s) !== '');
+  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket));
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
   console.log(chalk.gray(`\n${countLine}`));
@@ -781,6 +999,15 @@ function resolveViewMode(options: SessionsOptions, filters: FilterOptions): View
   if (options.json) return 'json';
   if (hasAnyFilter(filters)) return 'markdown';
   return 'summary';
+}
+
+/**
+ * Render a session's full transcript to stdout — the non-follow view behind
+ * `agents logs <sessionId>`. Reuses the same markdown renderer as
+ * `agents sessions <id> --markdown`.
+ */
+export async function renderSessionLog(session: SessionMeta): Promise<void> {
+  await renderSession(session, 'markdown', {});
 }
 
 async function renderSession(
@@ -1123,7 +1350,7 @@ interface AgentFilter {
   version?: string;
 }
 
-function parseAgentFilter(agentName?: string): AgentFilter {
+export function parseAgentFilter(agentName?: string): AgentFilter {
   if (!agentName) return {};
   const [name, version] = agentName.split('@', 2);
   let agent: SessionAgentId | null = SESSION_AGENTS.includes(name as SessionAgentId)
@@ -1433,8 +1660,10 @@ export function registerSessionsCommands(program: Command): void {
     .option('--artifacts', 'List all files written or edited during a session')
     .option('--artifact <name>', 'Read a specific artifact by filename or path (outputs to stdout)')
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
+    .option('--local', 'With --active: only this machine — skip the cross-machine SSH fan-out')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
+    .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)');
 

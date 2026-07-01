@@ -656,6 +656,12 @@ export function registerDoctorCommand(program: Command): void {
           return;
         }
         renderOverviewText(clis, syncRows, orphanRows, hostClis);
+        // Point at the interactive reconcile when anything is out of sync — the
+        // report shouldn't be a dead end. `agents status` runs the unified
+        // home-reading engine and offers to sync (opt-in, never auto-fires here).
+        if (syncRows.some((r) => r.status !== 'fresh')) {
+          console.log(chalk.gray('\nRun `agents status` to review and sync what has drifted.'));
+        }
         return;
       }
 

@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { buildCommandSkillContent, commandSkillName } from '../command-skills.js';
 
 let testHome: string;
 let systemDir: string;
@@ -151,5 +152,50 @@ describe('diffVersionResources — rules', () => {
     const report2 = runDiff(projectDir, 'codex', '0.100.0', ['rules']);
     const agents2 = report2.kinds.rules.find((r) => r.name === 'AGENTS');
     expect(agents2?.status).toBe('ok');
+  });
+});
+
+describe('diffVersionResources — command-as-skill agents', () => {
+  // Kimi (and Codex >= 0.117, Grok) install commands as SKILL wrappers, not
+  // native command files. The diff must compare against the wrapper or it
+  // false-reports every command as drifted forever.
+  function installKimiCommandSkill(version: string, name: string, srcPath: string): void {
+    const agentDir = path.join(userDir, '.history', 'versions', 'kimi', version, 'home', '.kimi-code');
+    const skillDir = path.join(agentDir, 'skills', commandSkillName(name));
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), buildCommandSkillContent(name, srcPath));
+  }
+
+  it('reports ok when the installed command-skill matches source (not a false diff)', () => {
+    const srcCmds = path.join(userDir, 'commands');
+    fs.mkdirSync(srcCmds, { recursive: true });
+    const srcPath = path.join(srcCmds, 'foo.md');
+    fs.writeFileSync(srcPath, '# Foo\nrun foo\n');
+    installKimiCommandSkill('0.19.0', 'foo', srcPath);
+
+    const report = runDiff(projectDir, 'kimi', '0.19.0', ['commands']);
+    expect(report.kinds.commands.find((c) => c.name === 'foo')?.status).toBe('ok');
+  });
+
+  it('reports diff when the source changes after the command-skill was installed', () => {
+    const srcCmds = path.join(userDir, 'commands');
+    fs.mkdirSync(srcCmds, { recursive: true });
+    const srcPath = path.join(srcCmds, 'foo.md');
+    fs.writeFileSync(srcPath, '# Foo\nrun foo\n');
+    installKimiCommandSkill('0.19.0', 'foo', srcPath);
+    // Source changed after install — the wrapper no longer matches.
+    fs.writeFileSync(srcPath, '# Foo v2\nrun foo differently\n');
+
+    const report = runDiff(projectDir, 'kimi', '0.19.0', ['commands']);
+    expect(report.kinds.commands.find((c) => c.name === 'foo')?.status).toBe('diff');
+  });
+
+  it('does not report commands as missing for an agent that holds neither commands nor skills (goose)', () => {
+    fs.mkdirSync(path.join(userDir, 'commands'), { recursive: true });
+    fs.writeFileSync(path.join(userDir, 'commands', 'foo.md'), '# Foo\n');
+    fs.mkdirSync(path.join(userDir, '.history', 'versions', 'goose', '1.0.0', 'home'), { recursive: true });
+
+    const report = runDiff(projectDir, 'goose', '1.0.0', ['commands']);
+    expect(report.kinds.commands).toEqual([]);
   });
 });

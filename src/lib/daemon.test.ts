@@ -10,12 +10,21 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as net from 'net';
+import * as path from 'path';
+import { execFileSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import {
   generateLaunchdPlist,
   generateSystemdUnit,
   readDaemonClaudeOAuthToken,
   buildDetachedDaemonEnv,
+  getDaemonLaunch,
+  startDetached,
 } from './daemon.js';
+import { ipcEndpoint } from './platform/index.js';
 import {
   secretsKeychainItem,
   setKeychainToken,
@@ -160,4 +169,101 @@ describe('buildDetachedDaemonEnv', () => {
     const env = buildDetachedDaemonEnv({ PATH: '/usr/bin' });
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
   });
+});
+
+describe('getDaemonLaunch', () => {
+  // #556: the detached daemon must be launched as `node <entry> daemon _run`,
+  // not by executing the entry path directly. Executing a `.js`/shim path relies
+  // on a shebang (POSIX) or a console-owning shell wrapper (Windows); on Windows
+  // that wrapper's exit closes its console and tears the daemon down ~36ms after
+  // it binds the browser IPC socket.
+  it('launches a .js entry through the Node runtime', () => {
+    const { command, args } = getDaemonLaunch('/opt/agents/dist/index.js');
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual(['/opt/agents/dist/index.js', 'daemon', '_run']);
+  });
+
+  it('launches .mjs and .cjs entries through the Node runtime too', () => {
+    expect(getDaemonLaunch('/x/index.mjs').command).toBe(process.execPath);
+    expect(getDaemonLaunch('/x/index.mjs').args[0]).toBe('/x/index.mjs');
+    expect(getDaemonLaunch('/x/index.cjs').command).toBe(process.execPath);
+  });
+
+  it('runs a non-JS launcher (resolved shim) directly', () => {
+    const { command, args } = getDaemonLaunch('/usr/local/bin/agents');
+    expect(command).toBe('/usr/local/bin/agents');
+    expect(args).toEqual(['daemon', '_run']);
+  });
+});
+
+/** Open a real connection to the daemon endpoint; resolve true only if a
+ * process is accepting on it (mirrors the client's own liveness probe). */
+function probeEndpoint(endpoint: string, timeoutMs = 500): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = net.createConnection(endpoint);
+    let done = false;
+    const finish = (ok: boolean) => { if (done) return; done = true; sock.destroy(); resolve(ok); };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    sock.on('connect', () => { clearTimeout(timer); finish(true); });
+    sock.on('error', () => { clearTimeout(timer); finish(false); });
+  });
+}
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const DIST_ENTRY = path.join(REPO_ROOT, 'dist', 'index.js');
+
+// #556 / #561 (missing e2e coverage): drive the REAL startDetached path and
+// prove the daemon it spawns is always-on — the socket comes up AND is still up
+// after >1s, i.e. it did not self-terminate the way the bug report describes
+// ("Browser IPC server started" then "Daemon shutting down" ~36ms later).
+describe('startDetached (integration: daemon stays alive)', () => {
+  it('spawns a detached daemon whose socket comes up and stays up past 1s', async () => {
+    // Exercises the built CLI entry the way `browser start` does. CI runs the
+    // build before tests; self-heal for a bare `vitest` run without a prior build.
+    if (!fs.existsSync(DIST_ENTRY)) {
+      execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+    }
+
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon556-'));
+    // Satisfy the setup gate (`ensureInitialized`): ~/.agents/.system must be a repo.
+    const systemDir = path.join(tmpHome, '.agents', '.system');
+    fs.mkdirSync(systemDir, { recursive: true });
+    execFileSync('git', ['init', '-q', systemDir]);
+
+    const logPath = path.join(tmpHome, 'daemon-stdio.log');
+    const socketPath = path.join(tmpHome, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
+    const endpoint = ipcEndpoint(socketPath);
+    const daemonLog = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'logs.jsonl');
+
+    const childEnv = { ...process.env, HOME: tmpHome };
+    delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const { pid } = startDetached({ agentsBin: DIST_ENTRY, logPath, env: childEnv });
+    expect(pid).toBeTruthy();
+    const alive = () => { try { process.kill(pid!, 0); return true; } catch { return false; } };
+
+    try {
+      // Wait for the browser IPC socket to accept connections (issue: ~400ms).
+      let up = false;
+      for (let i = 0; i < 80 && !up; i++) {
+        up = await probeEndpoint(endpoint);
+        if (!up) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(up).toBe(true);
+
+      // The crux of #556: it must NOT tear itself down. Wait well past the 36ms
+      // window and re-probe.
+      await new Promise((r) => setTimeout(r, 1500));
+      expect(await probeEndpoint(endpoint)).toBe(true);
+      expect(alive()).toBe(true);
+
+      // The daemon's own structured log confirms it came up and never shut down.
+      const logText = fs.existsSync(daemonLog) ? fs.readFileSync(daemonLog, 'utf-8') : '';
+      expect(logText).toContain('Browser IPC server started');
+      expect(logText).not.toContain('Daemon shutting down');
+    } finally {
+      try { if (pid) process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

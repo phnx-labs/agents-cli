@@ -252,6 +252,8 @@ agents ssh mac-mini                     # hardened SSH: fails fast if offline,
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH. See [docs/00-concepts.md](docs/00-concepts.md#devices--hosts).
 
+Every `--host` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/09-ssh-transport.md](docs/09-ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
+
 ---
 
 ## Teams
