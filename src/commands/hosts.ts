@@ -20,9 +20,8 @@ import {
   bootstrapAgentsCli,
   localCliVersion,
 } from '../lib/hosts/ready.js';
-import { listTasks, loadTask, localLogPath } from '../lib/hosts/tasks.js';
-import { followHostTask } from '../lib/hosts/progress.js';
-import * as fs from 'fs';
+import { listTasks } from '../lib/hosts/tasks.js';
+import { showHostTaskLog } from '../lib/hosts/logs.js';
 
 interface AddOptions { cap?: string[]; os?: string; enroll?: boolean; }
 
@@ -193,22 +192,13 @@ async function doPs(json: boolean): Promise<void> {
 }
 
 async function doLogs(id: string, follow: boolean): Promise<void> {
-  const task = loadTask(id);
-  if (!task) {
+  const res = await showHostTaskLog(id, follow);
+  if (!res.found) {
     console.log(chalk.red(`Unknown task "${id}".`));
     process.exitCode = 1;
     return;
   }
-  if (follow && task.status === 'running') {
-    const code = await followHostTask(task.target, { remoteLog: task.remoteLog, remoteExit: task.remoteExit, taskId: id, echo: true });
-    process.exitCode = code === -1 ? 1 : code;
-    return;
-  }
-  try {
-    process.stdout.write(fs.readFileSync(localLogPath(id), 'utf-8'));
-  } catch {
-    console.log(chalk.gray('(no local log captured for this task)'));
-  }
+  if (res.exitCode !== undefined) process.exitCode = res.exitCode;
 }
 
 /** Register the `agents hosts` command tree. */
