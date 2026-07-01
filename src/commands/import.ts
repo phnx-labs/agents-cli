@@ -293,7 +293,7 @@ When to use:
   pointing at the existing install — nothing is copied or moved (except the
   agent's config dir, which is moved into the version's home). Works for both
   npm-style packages (claude, codex, gemini, opencode, openclaw) and
-  installScript-based agents (grok, antigravity, cursor, kiro, goose, roo).
+  installScript-based agents (grok, antigravity, cursor, kiro, goose).
 `)
     .action(runImport);
 }

@@ -65,11 +65,11 @@ See [`docs/00-concepts.md`](docs/00-concepts.md) for the full mental model and r
 
 ## Supported harnesses
 
-15 harnesses ship support today. The full id list is `AgentId` ([`src/lib/types.ts:10`](src/lib/types.ts)); per-harness config + capabilities live in the `AGENTS` registry ([`src/lib/agents.ts:215-550`](src/lib/agents.ts)) and are gated through `supports()` ([`src/lib/capabilities.ts`](src/lib/capabilities.ts)).
+14 harnesses ship support today. The full id list is `AgentId` ([`src/lib/types.ts:10`](src/lib/types.ts)); per-harness config + capabilities live in the `AGENTS` registry ([`src/lib/agents.ts:215-550`](src/lib/agents.ts)) and are gated through `supports()` ([`src/lib/capabilities.ts`](src/lib/capabilities.ts)).
 
 ### Prioritized (first-class) harnesses
 
-These six are the support-priority set — new features and parity work target them first. When a feature can't reach all 15 at once, it must reach these:
+These six are the support-priority set — new features and parity work target them first. When a feature can't reach all 14 at once, it must reach these:
 
 **Claude Code** (`claude`) · **Codex CLI** (`codex`) · **Kimi CLI** (`kimi`) · **Antigravity CLI** (`antigravity`) · **Grok CLI** (`grok`) · **OpenCode** (`opencode`)
 
@@ -92,12 +92,11 @@ Not every harness supports every capability — the registry decides per harness
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
 | Kiro | `kiro` | — | ✓ | — | ✓ | ✓ | — | — | — | edit |
 | Goose | `goose` | — | ✓ | — | — | — | — | — | — | edit |
-| Roo Code | `roo` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
 | Droid | `droid` | — | ✓ | — | — | ✓ | — | ✓ | — | plan·edit·auto·skip |
 
 ✓ = supported · — = not supported · version cell = supported only within that range (e.g. `≥0.116` needs version `>= 0.116.0`; `<0.117` only below `0.117.0`). Out-of-range cells are **skipped silently** — `supports()` returns false and the resource is never written.
 
-- `rules` (the memory file) is supported by **all 15** — each writes its own file (see config matrix below). `workflows` is **Claude-only**. `mcp` is universal.
+- `rules` (the memory file) is supported by **all 14** — each writes its own file (see config matrix below). `workflows` is **Claude-only**. `mcp` is universal.
 - `allowlist` (granular per-tool permission rules) is limited to `claude`, `antigravity`, `grok`, `kimi`.
 - `subagents` is limited to `claude`, `openclaw`, `droid`.
 

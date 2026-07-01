@@ -322,7 +322,6 @@ describe('resolveAgentName', () => {
 
   it('corrects a single typo against multi-letter aliases', () => {
     expect(resolveAgentName('clw')).toBe('openclaw'); // claw minus a letter
-    expect(resolveAgentName('roocod')).toBe('roo'); // roocode minus a letter
   });
 
   it('returns null when the correction is ambiguous', () => {

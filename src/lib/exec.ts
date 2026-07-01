@@ -474,15 +474,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
       edit: [],
     },
   },
-  roo: {
-    base: ['roo'],
-    promptFlag: 'positional',
-    modeFlags: {
-      plan: ['--mode', 'architect'],
-      edit: ['--mode', 'code'],
-    },
-    modelFlag: '--model',
-  },
   // TODO: --output-format json is documented but currently broken upstream
   // ("flags provided but not defined: -output-format"). Track resolution at
   // https://github.com/google-antigravity/antigravity-cli/issues/7 before

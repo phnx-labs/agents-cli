@@ -2,7 +2,7 @@
  * Core agent configuration and detection module.
  *
  * Defines the canonical registry of all supported AI coding agents (Claude, Codex,
- * Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Roo, Grok) with their
+ * Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Grok) with their
  * CLI commands, config paths, capability flags, and MCP integration points.
  *
  * Provides functions for detecting installed CLIs, resolving version-managed binaries,
@@ -407,24 +407,6 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
     capabilities: { hooks: false, mcp: true, allowlist: false, skills: false, commands: false, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit'] },
-  },
-  roo: {
-    id: 'roo',
-    name: 'Roo Code',
-    color: 'cyanBright',
-    cliCommand: 'roo',
-    npmPackage: '',
-    installScript: 'curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh',
-    configDir: path.join(HOME, '.roo'),
-    commandsDir: path.join(HOME, '.roo', 'commands'),
-    commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.roo', 'skills'),
-    hooksDir: 'hooks',
-    instructionsFile: 'AGENTS.md',
-    format: 'markdown',
-    variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -1745,8 +1727,6 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
       return path.join(home, '.kiro', 'settings', 'mcp.json');
     case 'goose':
       return path.join(home, '.config', 'goose', 'config.yaml');
-    case 'roo':
-      return path.join(home, '.roo', 'mcp.json');
     case 'antigravity':
       return path.join(home, '.gemini', 'antigravity-cli', 'mcp_config.json');
     case 'grok':
@@ -1784,8 +1764,6 @@ function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()):
       return path.join(cwd, '.kiro', 'settings', 'mcp.json');
     case 'goose':
       return path.join(cwd, '.goose', 'config.yaml');
-    case 'roo':
-      return path.join(cwd, '.roo', 'mcp.json');
     case 'antigravity':
       return path.join(cwd, '.gemini', 'antigravity-cli', 'mcp_config.json');
     case 'grok':
@@ -1937,9 +1915,6 @@ export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   'kiro-cli': 'kiro',
   goose: 'goose',
   'block-goose': 'goose',
-  roo: 'roo',
-  'roo-code': 'roo',
-  roocode: 'roo',
   antigravity: 'antigravity',
   'google-antigravity': 'antigravity',
   agy: 'antigravity',
