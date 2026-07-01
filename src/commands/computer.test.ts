@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { shouldBlockOffPlatform } from './computer.js';
+import { detectImageFormat, reconcileScreenshotExt, shouldBlockOffPlatform } from './computer.js';
+
+// Real leading magic bytes, matching what each helper actually encodes.
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // Windows helper (ImageFormat.Png)
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]); // macOS helper (.jpeg representation)
+
+describe('detectImageFormat', () => {
+  it('recognizes PNG from its 8-byte signature', () => {
+    expect(detectImageFormat(PNG)).toBe('.png');
+  });
+  it('recognizes JPEG from FF D8 FF', () => {
+    expect(detectImageFormat(JPEG)).toBe('.jpg');
+  });
+  it('returns null for unknown/empty bytes', () => {
+    expect(detectImageFormat(Buffer.from([0x00, 0x01, 0x02, 0x03]))).toBeNull();
+    expect(detectImageFormat(Buffer.alloc(0))).toBeNull();
+  });
+});
+
+describe('reconcileScreenshotExt', () => {
+  it('corrects the .jpg default when the Windows helper returns PNG (issue #521)', () => {
+    // The exact bug: default out is ./computer-screenshot.jpg, bytes are PNG.
+    expect(reconcileScreenshotExt('/tmp/computer-screenshot.jpg', PNG)).toEqual({
+      path: '/tmp/computer-screenshot.png',
+      corrected: true,
+    });
+  });
+  it('leaves a matching .jpg alone for JPEG bytes (macOS default path)', () => {
+    expect(reconcileScreenshotExt('/tmp/shot.jpg', JPEG)).toEqual({ path: '/tmp/shot.jpg', corrected: false });
+  });
+  it('treats .jpeg as already-matching for JPEG bytes', () => {
+    expect(reconcileScreenshotExt('/tmp/shot.jpeg', JPEG)).toEqual({ path: '/tmp/shot.jpeg', corrected: false });
+  });
+  it('appends the real extension when the path has none', () => {
+    expect(reconcileScreenshotExt('/tmp/shot-test', PNG)).toEqual({ path: '/tmp/shot-test.png', corrected: true });
+  });
+  it('swaps a wrong .png to .jpg for JPEG bytes', () => {
+    expect(reconcileScreenshotExt('/tmp/shot.png', JPEG)).toEqual({ path: '/tmp/shot.jpg', corrected: true });
+  });
+  it('passes unknown bytes through untouched', () => {
+    const junk = Buffer.from([0x00, 0x01]);
+    expect(reconcileScreenshotExt('/tmp/shot.jpg', junk)).toEqual({ path: '/tmp/shot.jpg', corrected: false });
+  });
+});
 
 // The `computer` preAction hook calls process.exit(1) exactly when
 // shouldBlockOffPlatform() is true. These cases pin the rule that off-macOS
