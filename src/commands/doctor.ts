@@ -49,6 +49,7 @@ import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
+import { blocksLocalScripts, getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
 import * as fs from 'fs';
 
 const AGENT_NAMES: Record<string, string> = Object.fromEntries(
@@ -267,6 +268,44 @@ function renderOverviewText(
   }
   for (const err of hostClis.errors) {
     console.log(`  ${chalk.red('err  ')}  ${chalk.gray(err.file)}: ${chalk.gray(err.reason)}`);
+  }
+
+  // On Windows a Restricted/AllSigned execution policy silently breaks the
+  // generated `agents.ps1` launcher — postinstall diagnoses it interactively,
+  // but a non-interactive install never sees that. Surface it here too.
+  renderExecPolicyAdvisory();
+}
+
+// ─── windows execution-policy advisory ─────────────────────────────────────────
+
+/**
+ * Windows-only advisory lines. When the effective PowerShell execution policy
+ * blocks unsigned local `.ps1` scripts (`Restricted`/`AllSigned`), the generated
+ * `agents.ps1` launcher fails in PowerShell even when it is on PATH. Surface the
+ * remediation; the `.cmd` companion still works, so this is a warning, not an
+ * error, and doctor never auto-changes the policy. Pure — returns `[]` on
+ * non-Windows or a permissive policy, so it is testable without invoking
+ * PowerShell.
+ */
+export function execPolicyWarningLines(platform: NodeJS.Platform, policy: string | null): string[] {
+  if (platform !== 'win32') return [];
+  if (!blocksLocalScripts(policy)) return [];
+  return [
+    `PowerShell execution policy is ${policy} — it blocks the generated agents.ps1 launcher.`,
+    'Fix: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned',
+    'The agents.cmd shim still works regardless of the policy.',
+  ];
+}
+
+function renderExecPolicyAdvisory(): void {
+  const lines = execPolicyWarningLines(process.platform, getEffectiveExecutionPolicy());
+  if (lines.length === 0) return;
+  console.log();
+  console.log(chalk.bold('Execution policy (Windows)'));
+  const [headline, ...rest] = lines;
+  console.log(`  ${chalk.yellow('warn ')}  ${headline}`);
+  for (const line of rest) {
+    console.log(chalk.gray(`           ${line}`));
   }
 }
 
