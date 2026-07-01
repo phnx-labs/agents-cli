@@ -40,6 +40,7 @@ import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsSyncCommand } from './sessions-sync.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
+import { registerSessionsInjectCommand } from './sessions-inject.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
 
@@ -1722,6 +1723,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsTailCommand(sessionsCmd);
   registerSessionsSyncCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
+  registerSessionsInjectCommand(sessionsCmd);
 }
 
 function formatNoSessionsMessage(
