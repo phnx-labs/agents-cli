@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.34
+
 **Test suite runs remotely on a crabbox VM (#525, #540)**
 
 - `scripts/release.sh`'s test gate now runs `bun install && bun run build && bun run test` on a leased crabbox VM via `scripts/sandbox.sh` instead of freezing the local machine, matching CI's Build→Test order (crabbox's sync honors `.gitignore`, so the gitignored `dist/` is built on the box). A new `bun run test:remote` offloads the suite the same way for local dev. Publishing still happens locally — only the signed macOS keychain helper can be produced and notarized here, and crabbox boxes are Linux. Source: `scripts/sandbox.sh`, `scripts/release.sh`, `package.json`.
