@@ -1,7 +1,7 @@
 /**
  * Centralized event logging for agents-cli.
  *
- * Structured JSONL logs at ~/.agents/logs/events-YYYY-MM-DD.jsonl
+ * Structured JSONL logs at ~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl
  * with automatic daily rotation and rich metadata for debugging/auditing.
  *
  * Features:
@@ -630,6 +630,19 @@ export function query(options: {
     .sort()
     .reverse();
 
+  // Coarse file skip works on whole days, so floor the bounds to midnight —
+  // otherwise a sub-day window (`--since 2h` at 15:00 → startDate 13:00) would
+  // drop *today's* file, whose date stamps to 00:00. Precise filtering below is
+  // per-record on `ts`.
+  const startDay = startDate
+    ? new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
+    : undefined;
+  const endDay = endDate
+    ? new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate())
+    : undefined;
+  const startMs = startDate?.getTime();
+  const endMs = endDate?.getTime();
+
   for (const file of files) {
     const match = file.match(/^events-(\d{4})-(\d{2})-(\d{2})\.jsonl$/);
     if (!match) continue;
@@ -637,8 +650,8 @@ export function query(options: {
     const [, yyyy, mm, dd] = match;
     const fileDate = new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
 
-    if (startDate && fileDate < startDate) continue;
-    if (endDate && fileDate > endDate) continue;
+    if (startDay && fileDate < startDay) continue;
+    if (endDay && fileDate > endDay) continue;
 
     const content = fs.readFileSync(path.join(LOGS_DIR, file), 'utf-8');
     const lines = content.trim().split('\n').filter(Boolean);
@@ -646,6 +659,11 @@ export function query(options: {
     for (const line of lines.reverse()) {
       try {
         const record = JSON.parse(line) as EventRecord;
+
+        // Precise per-record window — the file skip above is day-granular only.
+        const recMs = Date.parse(record.ts);
+        if (startMs !== undefined && !isNaN(recMs) && recMs < startMs) continue;
+        if (endMs !== undefined && !isNaN(recMs) && recMs > endMs) continue;
 
         if (eventTypes && !eventTypes.includes(record.event)) continue;
         if (agent && record.agent !== agent) continue;
