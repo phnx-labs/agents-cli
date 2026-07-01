@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**`agents upgrade`: the "What's new" changelog is now a compact heading list (#562)**
+
+- The post-upgrade changelog dumped every heading *and* every verbose sub-bullet for each version in the range — a screenful across a multi-version jump. It now prints one bullet per feature/fix heading and links to the full CHANGELOG for the details. The parser was extracted to a pure, unit-tested `renderWhatsNew` so it can be exercised without the CLI's import-time side effects. Source: `src/lib/whats-new.ts`, `src/index.ts`.
+
+**`agents sessions --active`: a per-pid registry de-collapses co-located agents (#546)**
+
+- On a host with no terminal extension (bare SSH/tmux — e.g. any Linux box), `--active` could only map a discovered agent process to a session by guessing the newest `.jsonl` in its cwd, so several agents in the same repo collapsed onto one session row (observed live: a single id listed 28 times), and `/restore` couldn't tell them apart. `agents run` now records each launch to `~/.agents/.cache/terminals/by-pid/<pid>.json` (`{agent, cwd, tmuxPane, sessionId, startedAtMs}`) — the headless equivalent of the terminal extension's `live-terminals.json` — so `--active` and `/restore` attribute each co-located agent correctly. Source: `src/lib/session/pid-registry.ts`, `src/lib/session/active.ts`, `src/lib/exec.ts`.
+
 ## 1.20.34
 
 **Test suite runs remotely on a crabbox VM (#525, #540)**
