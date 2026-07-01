@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'bun:test';
+import { describe, it, expect, afterEach } from 'vitest';
 import { writePidSessionEntry, readPidSessionEntry, prunePidSessionRegistry } from './pid-registry.js';
 
 // A pid far above any real process on this box, so the test never clobbers a
