@@ -33,9 +33,16 @@ function parseTarget(target: string): { address: string; user?: string } {
   return { user: target.slice(0, at), address: target.slice(at + 1) };
 }
 
-/** Bootstrap/verify agents-cli on a freshly-enrolled host (best-effort, prompts). */
-async function maybeBootstrap(target: string, hostName: string): Promise<void> {
-  const probe = probeHost(target);
+/**
+ * Bootstrap/verify agents-cli on a freshly-enrolled host (best-effort, prompts).
+ * Callers that just probed the host pass the result through to avoid a second,
+ * redundant `uname` round-trip; otherwise we probe here.
+ */
+async function maybeBootstrap(
+  target: string,
+  hostName: string,
+  probe: { reachable: boolean; os?: string } = probeHost(target),
+): Promise<void> {
   if (!probe.reachable) {
     console.log(chalk.yellow(`  Not reachable over SSH yet — skipping bootstrap. Fix key auth, then: agents hosts check ${hostName}`));
     return;
@@ -86,7 +93,7 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
       const probe = probeHost(c);
       await registerHost({ name: c, provider: 'local', source, ...(source === 'inline' ? { address: c } : {}), os: probe.os, caps: opts.cap });
       console.log(chalk.green(`Enrolled ${c}`) + chalk.gray(` (${source}${probe.os ? `, ${probe.os}` : ''})`));
-      if (opts.enroll !== false) await maybeBootstrap(c, c);
+      if (opts.enroll !== false) await maybeBootstrap(c, c, probe);
     }
     return;
   }
@@ -117,7 +124,7 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
   if (!spec.os && probe.os) spec.os = probe.os;
   await registerHost(spec);
   console.log(chalk.green(`Enrolled ${name}`) + chalk.gray(` (${spec.source}${spec.os ? `, ${spec.os}` : ''}${spec.caps?.length ? `, caps: ${spec.caps.join(',')}` : ''})`));
-  if (opts.enroll !== false) await maybeBootstrap(sshTarget, name);
+  if (opts.enroll !== false) await maybeBootstrap(sshTarget, name, probe);
 }
 
 async function doList(json: boolean): Promise<void> {
