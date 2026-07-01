@@ -224,7 +224,15 @@ describe('startDetached (integration: daemon stays alive)', () => {
       execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
     }
 
-    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon556-'));
+    // The daemon's browser IPC binds an AF_UNIX socket at
+    // <HOME>/.agents/.cache/helpers/browser/browser.sock. macOS caps AF_UNIX
+    // paths at 104 bytes (sun_path); os.tmpdir() there is the long
+    // /var/folders/…/T/… (~48 chars), so nesting the socket under it overflows
+    // to ~116 chars and bind() fails with EADDRINUSE. Root the fake HOME at a
+    // short base on POSIX so the socket path stays well under the limit. Windows
+    // uses named pipes (no path-length limit), so os.tmpdir() is fine there.
+    const tmpRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+    const tmpHome = fs.mkdtempSync(path.join(tmpRoot, 'agd-'));
     // Satisfy the setup gate (`ensureInitialized`): ~/.agents/.system must be a repo.
     const systemDir = path.join(tmpHome, '.agents', '.system');
     fs.mkdirSync(systemDir, { recursive: true });
@@ -248,13 +256,6 @@ describe('startDetached (integration: daemon stays alive)', () => {
       for (let i = 0; i < 80 && !up; i++) {
         up = await probeEndpoint(endpoint);
         if (!up) await new Promise((r) => setTimeout(r, 100));
-      }
-      if (!up) {
-        // TEMP DIAGNOSTIC (remove before merge): the detached daemon's stdio and
-        // structured log are the only window into why the socket never bound.
-        const stdio = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf-8') : '(no stdio log)';
-        const structured = fs.existsSync(daemonLog) ? fs.readFileSync(daemonLog, 'utf-8') : '(no structured log)';
-        console.error(`\n===== DAEMON STDIO (${logPath}) =====\n${stdio}\n===== DAEMON LOG (${daemonLog}) =====\n${structured}\n===== daemon alive=${alive()} pid=${pid} =====\n`);
       }
       expect(up).toBe(true);
 
