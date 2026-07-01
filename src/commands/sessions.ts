@@ -39,6 +39,7 @@ import { sessionPicker, type PickedSession } from './sessions-picker.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsSyncCommand } from './sessions-sync.js';
+import { registerSessionsResumeCommand } from './sessions-resume.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
 
@@ -1126,7 +1127,7 @@ function renderTopicCell(
   return out + padding;
 }
 
-function formatPickerLabel(s: SessionMeta, query: string): string {
+export function formatPickerLabel(s: SessionMeta, query: string): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.timestamp);
   const project = s.project || '-';
@@ -1179,17 +1180,27 @@ async function handlePickedSession(picked: PickedSession): Promise<void> {
     await renderSession(picked.session, 'summary', {});
     return;
   }
+  await resumeSessionInPlace(picked.session);
+}
 
-  const cwd = picked.session.cwd && fs.existsSync(picked.session.cwd)
-    ? picked.session.cwd
+/**
+ * Resume a session in the current terminal — a foreground takeover of this
+ * process. Used by the single-select picker and by `sessions resume` when the
+ * chosen destination is "in place" (unknown emulator / off-macOS, single pick).
+ * Falls back to the current version via `/continue` when the version-pinned
+ * binary is missing (ENOENT).
+ */
+export async function resumeSessionInPlace(session: SessionMeta): Promise<void> {
+  const cwd = session.cwd && fs.existsSync(session.cwd)
+    ? session.cwd
     : process.cwd();
 
-  const resume = buildResumeCommand(picked.session);
+  const resume = buildResumeCommand(session);
   if (!resume) {
     console.log(chalk.yellow(
-      `Resume is not supported for ${picked.session.agent} sessions yet. Showing summary instead.`
+      `Resume is not supported for ${session.agent} sessions yet. Showing summary instead.`
     ));
-    await renderSession(picked.session, 'summary', {});
+    await renderSession(session, 'summary', {});
     return;
   }
 
@@ -1202,11 +1213,11 @@ async function handlePickedSession(picked: PickedSession): Promise<void> {
       shell: false,
     });
     child.on('error', (err: any) => {
-      if (err.code === 'ENOENT' && picked.session.version) {
-        const fallback = buildFallbackCommand(picked.session);
+      if (err.code === 'ENOENT' && session.version) {
+        const fallback = buildFallbackCommand(session);
         if (fallback) {
           console.log(chalk.gray(
-            `Version ${picked.session.version} is not installed. Falling back to current version via /continue...`
+            `Version ${session.version} is not installed. Falling back to current version via /continue...`
           ));
           const fb = spawn(fallback[0], fallback.slice(1), { cwd, stdio: 'inherit', shell: false });
           fb.on('error', (e: any) => { console.error(chalk.red(`Failed: ${e.message}`)); resolve(); });
@@ -1709,6 +1720,7 @@ export function registerSessionsCommands(program: Command): void {
 
   registerSessionsTailCommand(sessionsCmd);
   registerSessionsSyncCommand(sessionsCmd);
+  registerSessionsResumeCommand(sessionsCmd);
 }
 
 function formatNoSessionsMessage(
