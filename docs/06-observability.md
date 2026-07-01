@@ -15,7 +15,9 @@ The recording is a single choke point — a commander `preAction`/`postAction`
 hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
 / `command.end` for *every* subcommand, so coverage is automatic and no per-command
 wiring can drift out of date. Richer typed events (`secrets.get`, `version.install`,
-…) layer on top where the extra payload earns it.
+`teams.create`, `teams.disband`, …) layer on top where the extra payload earns it —
+e.g. team lifecycle events are emitted at the registry source with the team name,
+so they fire for every path (`teams create` and the auto-create in `teams add`).
 
 Every record carries **attribution** computed once per process
 ([`src/lib/events.ts`](../src/lib/events.ts)):
@@ -33,6 +35,7 @@ agents events                          # recent activity across everything
 agents events --module teams           # team lifecycle (create / add / disband)
 agents events --module secrets         # every secret accessed or revealed
 agents events --command "teams create" # a command path — prefix match
+agents events --event teams.disband    # a semantic event: a team torn down
 agents events --event secrets.get --since 7d --json
 agents events -f                       # live tail of today's log
 ```
