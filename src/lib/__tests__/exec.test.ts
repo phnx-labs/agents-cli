@@ -192,26 +192,57 @@ describe('buildExecCommand', () => {
       expect(cmd).toContain('--always-approve');
     });
 
-    it('kimi plan produces --plan', () => {
-      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'plan' }));
+    // kimi's startup-mode flags are valid only for the interactive TUI. In
+    // headless (`-p`) runs kimi rejects them (see the "kimi headless" block
+    // below), so these interactive assertions pin the TUI flag mapping.
+    it('kimi plan (interactive TUI) produces --plan', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'plan', prompt: undefined, interactive: true }));
       expect(cmd).toContain('--plan');
     });
 
-    it('kimi auto produces --auto', () => {
-      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'auto' }));
+    it('kimi auto (interactive TUI) produces --auto', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'auto', prompt: undefined, interactive: true }));
       expect(cmd).toContain('--auto');
     });
 
-    it('kimi skip produces --yolo', () => {
-      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip' }));
+    it('kimi skip (interactive TUI) produces --yolo', () => {
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip', prompt: undefined, interactive: true }));
       expect(cmd).toContain('--yolo');
     });
 
     it('kimi edit produces no mode flags', () => {
-      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'edit' }));
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'edit', prompt: undefined, interactive: true }));
       expect(cmd).not.toContain('--plan');
       expect(cmd).not.toContain('--auto');
       expect(cmd).not.toContain('--yolo');
+    });
+
+    // Regression: `agents teams` launches kimi headless with `-p`. Emitting any
+    // startup-mode flag alongside `-p` made kimi abort with
+    // "Cannot combine --prompt with --<flag>" — so skip/auto teammates failed at
+    // spawn. Headless write-modes must omit the flag; plan must fail closed.
+    describe('kimi headless -p cannot carry startup-mode flags', () => {
+      it('headless skip omits --yolo (kimi -p already auto-approves)', () => {
+        const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip' }));
+        expect(cmd).not.toContain('--yolo');
+        expect(cmd).toContain('-p');
+      });
+
+      it('headless auto omits --auto', () => {
+        const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'auto' }));
+        expect(cmd).not.toContain('--auto');
+      });
+
+      it('headless edit carries no mode flags', () => {
+        const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'edit' }));
+        expect(cmd).not.toContain('--plan');
+        expect(cmd).not.toContain('--auto');
+        expect(cmd).not.toContain('--yolo');
+      });
+
+      it('headless plan throws (kimi has no read-only -p mode)', () => {
+        expect(() => buildExecCommand(opts({ agent: 'kimi', mode: 'plan' }))).toThrow(/read-only/);
+      });
     });
 
     it('kimi json adds --output-format stream-json', () => {
@@ -353,7 +384,7 @@ describe('buildExecCommand', () => {
     });
 
     it('forwards flags after -- without breaking the prompt', () => {
-      const cmd = buildExecCommand(opts({ agent: 'kimi', prompt: 'fix auth', passthroughArgs: ['--custom-flag'] }));
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'edit', prompt: 'fix auth', passthroughArgs: ['--custom-flag'] }));
       const promptIdx = cmd.indexOf('fix auth');
       const flagIdx = cmd.indexOf('--custom-flag');
       expect(promptIdx).toBeGreaterThan(-1);
@@ -367,7 +398,7 @@ describe('buildExecCommand', () => {
     });
 
     it('does not include passthrough args when empty', () => {
-      const cmd = buildExecCommand(opts({ agent: 'kimi' }));
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'edit' }));
       expect(cmd).not.toContain('--custom-flag');
     });
 
@@ -376,8 +407,9 @@ describe('buildExecCommand', () => {
       expect(cmd.slice(-3)).toEqual(['--verbose', '--timeout', '10m']);
     });
 
-    it('combines --mode mapping and passthrough args for kimi', () => {
-      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip', passthroughArgs: ['--extra'] }));
+    it('combines interactive --mode mapping and passthrough args for kimi', () => {
+      // Interactive: the --yolo startup flag is valid alongside passthrough args.
+      const cmd = buildExecCommand(opts({ agent: 'kimi', mode: 'skip', prompt: undefined, interactive: true, passthroughArgs: ['--extra'] }));
       expect(cmd).toContain('--yolo');
       expect(cmd[cmd.length - 1]).toBe('--extra');
     });

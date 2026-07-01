@@ -114,12 +114,16 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   }
 
   if (config.agent === 'kimi') {
+    // kimi daemon jobs always run headless via `--prompt`, which cannot be
+    // combined with any startup-mode flag (--plan/--auto/--yolo all abort with
+    // "Cannot combine --prompt with --X"). edit/auto/skip reduce to kimi's default
+    // headless auto-run, so emit no flag; plan has no headless read-only
+    // equivalent, so fail closed rather than silently allowing writes.
     if (mode === 'plan') {
-      cmd.push('--plan');
-    } else if (mode === 'auto') {
-      cmd.push('--auto');
-    } else if (mode === 'skip') {
-      cmd.push('--yolo');
+      throw new Error(
+        'kimi has no headless read-only mode: routine jobs cannot run kimi with --mode plan ' +
+          '(kimi rejects --prompt + --plan). Use --mode edit, auto, or skip.',
+      );
     }
 
     appendModelAndReasoning(cmd, config);
