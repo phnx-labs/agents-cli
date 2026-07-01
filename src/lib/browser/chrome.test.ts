@@ -51,6 +51,21 @@ describe('findFirstInstalledBrowser', () => {
     expect(result?.browserType).toBe('edge');
   });
 
+  it('auto-detects a per-user (Store) Edge install under LOCALAPPDATA', () => {
+    // Per-user / Microsoft Store Edge installs land in %LOCALAPPDATA%, not
+    // Program Files. Edge is the win32 default, so missing this candidate meant
+    // auto-detect silently failed on machines with only a per-user Edge.
+    const localAppData = process.env.LOCALAPPDATA || `${os.homedir()}\\AppData\\Local`;
+    presentPaths.add(`${localAppData}\\Microsoft\\Edge\\Application\\msedge.exe`);
+
+    const result = findFirstInstalledBrowser('win32');
+
+    expect(result).toEqual({
+      browserType: 'edge',
+      binary: `${localAppData}\\Microsoft\\Edge\\Application\\msedge.exe`,
+    });
+  });
+
   it('walks the Linux priority list (chrome > chromium > brave > edge)', () => {
     presentPaths.add('/usr/bin/chromium');
     presentPaths.add('/usr/bin/brave-browser');

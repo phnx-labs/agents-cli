@@ -57,6 +57,7 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     edge: [
       `${WIN_PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
       `${WIN_PROGRAMFILES_X86}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${WIN_LOCALAPPDATA}\\Microsoft\\Edge\\Application\\msedge.exe`,
     ],
     custom: [],
   },
