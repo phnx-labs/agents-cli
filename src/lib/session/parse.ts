@@ -90,6 +90,7 @@ export function parseSession(filePath: string, agent?: SessionAgentId): SessionE
     case 'claude': events = parseClaude(filePath); break;
     case 'codex': events = parseCodex(filePath); break;
     case 'gemini': events = parseGemini(filePath); break;
+    case 'antigravity': events = parseAntigravity(filePath); break;
     case 'opencode': events = parseOpenCode(filePath); break;
     case 'grok': events = parseGrok(filePath); break;
     case 'rush': events = parseRush(filePath); break;
@@ -110,6 +111,11 @@ export function parseSession(filePath: string, agent?: SessionAgentId): SessionE
 export function detectAgent(filePath: string): SessionAgentId | null {
   if (filePath.includes('/.claude/') || filePath.includes('\\.claude\\')) return 'claude';
   if (filePath.includes('/.codex/') || filePath.includes('\\.codex\\')) return 'codex';
+  // Antigravity lives under ~/.gemini/antigravity-cli/conversations/<uuid>.db, so
+  // it must be matched BEFORE the generic /.gemini/ check below or it would be
+  // misdetected as Gemini.
+  if ((filePath.includes('/antigravity-cli/conversations/') || filePath.includes('\\antigravity-cli\\conversations\\'))
+      && filePath.endsWith('.db')) return 'antigravity';
   if (filePath.includes('/.gemini/') || filePath.includes('\\.gemini\\')) return 'gemini';
   if (filePath.includes('/.grok/') || filePath.includes('\\.grok\\')) return 'grok';
   if (filePath.includes('/.rush/') || filePath.includes('\\.rush\\')) return 'rush';
@@ -657,6 +663,233 @@ function extractGeminiContent(content: any): string {
       .trim();
   }
   return '';
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity parser
+//
+// Antigravity (Google's Gemini-CLI successor) stores each conversation as a
+// SQLite DB at ~/.gemini/antigravity-cli/conversations/<trajectory-uuid>.db.
+// Table `steps(idx, step_type, ..., step_payload BLOB, ...)`; step_payload is
+// protobuf with no .proto shipped. The wire layout, reverse-engineered and
+// uniform across every tool step, nests a tool-call sub-message with:
+//   f1  (string) = call id       (shared by the request + completion steps)
+//   f2  (string) = tool name     e.g. run_command / view_file / grep_search
+//   f3  (string) = JSON args     e.g. {"CommandLine":"date","Cwd":"…","toolAction":…}
+//   f30 (string) = toolSummary   short human label ("Run date")
+//   f31 (string) = toolAction    ("Running date command")
+// We never decode the step_type enum: extracting the tool name (f2) + JSON args
+// (f3) generically keeps the parser tool-agnostic, so a future tool (web search,
+// etc.) is captured automatically. Each tool surfaces TWICE — a request step
+// (step_type 15) and a completion step share the same f1 call id — so we dedupe
+// by that id. Mirrors parseOpenCode(): shell out to sqlite3, normalize to
+// SessionEvent[].
+// ---------------------------------------------------------------------------
+
+/** One decoded protobuf field at a single nesting level. */
+type ProtoField = { field: number; wire: number; value: number | Uint8Array };
+
+/** Read a base-128 varint from `b` at offset `i`; returns [value, nextOffset]. */
+function readVarint(b: Uint8Array, i: number): [number, number] {
+  let shift = 0;
+  let val = 0;
+  for (;;) {
+    const byte = b[i++];
+    val += (byte & 0x7f) * 2 ** shift;
+    if ((byte & 0x80) === 0) break;
+    shift += 7;
+  }
+  return [val, i];
+}
+
+/** Decode a protobuf message into a flat list of fields (one nesting level). */
+function decodeProtoMessage(b: Uint8Array): ProtoField[] {
+  const out: ProtoField[] = [];
+  let i = 0;
+  while (i < b.length) {
+    let tag: number;
+    [tag, i] = readVarint(b, i);
+    const field = tag >>> 3;
+    const wire = tag & 7;
+    if (wire === 0) {
+      let v: number;
+      [v, i] = readVarint(b, i);
+      out.push({ field, wire, value: v });
+    } else if (wire === 2) {
+      let len: number;
+      [len, i] = readVarint(b, i);
+      out.push({ field, wire, value: b.subarray(i, i + len) });
+      i += len;
+    } else if (wire === 5) {
+      i += 4; // fixed32 — skipped
+      out.push({ field, wire, value: 0 });
+    } else if (wire === 1) {
+      i += 8; // fixed64 — skipped
+      out.push({ field, wire, value: 0 });
+    } else {
+      break; // unknown wire type — stop to avoid runaway reads
+    }
+  }
+  return out;
+}
+
+const ANTIGRAVITY_TEXT_DECODER = new TextDecoder('utf-8', { fatal: false });
+
+/** A tool-call node recovered from a step payload. */
+interface AntigravityToolCall {
+  id?: string;
+  name: string;
+  args: Record<string, any>;
+  summary?: string;
+  action?: string;
+}
+
+/**
+ * Recursively locate the tool-call node: the first sub-message that carries an
+ * f2 string tool-name AND an f3 JSON-args string. Also captures the f1 call id
+ * (used to dedupe the request + completion steps) and the f30/f31 human labels.
+ */
+function findAntigravityToolCall(fields: ProtoField[]): AntigravityToolCall | null {
+  let id: string | undefined;
+  let name: string | undefined;
+  let argsJson: string | undefined;
+  let summary: string | undefined;
+  let action: string | undefined;
+  const subs: ProtoField[][] = [];
+
+  for (const f of fields) {
+    if (f.wire !== 2) continue;
+    const bytes = f.value as Uint8Array;
+    const s = ANTIGRAVITY_TEXT_DECODER.decode(bytes);
+    if (f.field === 1 && !id && /^[a-z0-9]{4,16}$/.test(s)) id = s;
+    else if (f.field === 2 && !name && /^[a-z][a-z_]{2,30}$/.test(s)) name = s;
+    else if (f.field === 3 && !argsJson && s.startsWith('{') && s.includes('"toolAction"')) argsJson = s;
+    else if (f.field === 30 && !summary) summary = s;
+    else if (f.field === 31 && !action) action = s;
+    else {
+      try {
+        subs.push(decodeProtoMessage(bytes));
+      } catch {
+        /* not a nested message */
+      }
+    }
+  }
+
+  if (name && argsJson) {
+    let args: Record<string, any> = {};
+    try {
+      args = JSON.parse(argsJson);
+    } catch {
+      args = { _raw: argsJson };
+    }
+    return { id, name, args, summary, action };
+  }
+  for (const sub of subs) {
+    const hit = findAntigravityToolCall(sub);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+/**
+ * Map an Antigravity tool name onto the shared normalized vocabulary that the
+ * renderer already handles (so no render.ts changes are needed). Unknown tools
+ * pass through untouched (with their JSON args) so future tools are captured.
+ */
+const ANTIGRAVITY_TOOL_MAP: Record<string, string> = {
+  run_command: 'Bash',
+  view_file: 'Read',
+  read_file: 'Read',
+  list_dir: 'LS',
+  grep_search: 'Grep',
+  replace_file_content: 'Edit',
+  write_to_file: 'Write',
+  // Web tools surface identically once observed:
+  search_web: 'WebSearch',
+  read_url: 'WebFetch',
+  execute_url: 'WebFetch',
+};
+
+/**
+ * Parse an Antigravity conversation SQLite DB into normalized tool_use events.
+ * Deduped by the tool-call id so each tool appears once (Antigravity writes a
+ * request step and a completion step that share the id).
+ */
+export function parseAntigravity(dbPath: string): SessionEvent[] {
+  let rows: string;
+  try {
+    rows = execFileSync(
+      'sqlite3',
+      ['-separator', '\t', dbPath, 'SELECT idx, step_type, quote(step_payload) FROM steps ORDER BY idx;'],
+      {
+        encoding: 'utf-8',
+        timeout: 10000,
+        maxBuffer: 64 * 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    );
+  } catch {
+    /* DB not accessible, sqlite3 missing, or query failed */
+    return [];
+  }
+
+  // Single timestamp for the whole session: the steps table carries no per-step
+  // time column, so fall back to the DB file's mtime for a stable, sortable value.
+  let timestamp = new Date().toISOString();
+  try {
+    timestamp = fs.statSync(dbPath).mtime.toISOString();
+  } catch {
+    /* file vanished between query and stat — keep now() */
+  }
+
+  const events: SessionEvent[] = [];
+  const seenCallIds = new Set<string>();
+
+  for (const line of rows.split('\n')) {
+    if (!line.trim()) continue;
+    const tab1 = line.indexOf('\t');
+    if (tab1 === -1) continue;
+    const tab2 = line.indexOf('\t', tab1 + 1);
+    if (tab2 === -1) continue;
+    const hex = line.slice(tab2 + 1).trim();
+    // sqlite3 quote() renders a BLOB as X'...'; anything else (NULL) is skipped.
+    if (!hex.startsWith("X'") || !hex.endsWith("'")) continue;
+
+    const bytes = Uint8Array.from(Buffer.from(hex.slice(2, -1), 'hex'));
+    let fields: ProtoField[];
+    try {
+      fields = decodeProtoMessage(bytes);
+    } catch {
+      continue;
+    }
+    const call = findAntigravityToolCall(fields);
+    if (!call) continue;
+
+    // Dedupe: the request + completion steps of one tool share the f1 call id.
+    if (call.id) {
+      if (seenCallIds.has(call.id)) continue;
+      seenCallIds.add(call.id);
+    }
+
+    const norm = ANTIGRAVITY_TOOL_MAP[call.name] || call.name;
+    const a = call.args || {};
+    events.push({
+      type: 'tool_use',
+      agent: 'antigravity',
+      timestamp,
+      tool: norm,
+      args: a,
+      command: norm === 'Bash' ? a.CommandLine : undefined,
+      // Antigravity uses PascalCase arg keys; probe the known path-bearing ones.
+      path: a.AbsolutePath || a.TargetFile || a.DirectoryPath || a.SearchPath || undefined,
+      // Antigravity's own short human label — free, high quality. It surfaces
+      // either as the f30 string or (more reliably) as `toolSummary` inside the
+      // f3 JSON args.
+      content: call.summary || (typeof a.toolSummary === 'string' ? a.toolSummary : undefined) || undefined,
+    });
+  }
+
+  return events;
 }
 
 // ---------------------------------------------------------------------------

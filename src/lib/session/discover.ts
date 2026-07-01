@@ -24,6 +24,7 @@ import { walkForFiles } from '../fs-walk.js';
 import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { extractSessionTopic } from './prompt.js';
+import { parseAntigravity } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand } from './state.js';
 import { costOfUsage } from '../pricing/index.js';
 import {
@@ -171,6 +172,7 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
             case 'claude': return scanClaudeIncremental(onProgress);
             case 'codex': return scanCodexIncremental(onProgress);
             case 'gemini': return scanGeminiIncremental(onProgress);
+            case 'antigravity': return scanAntigravityIncremental(onProgress);
             case 'opencode': return scanOpenCodeIncremental();
             case 'openclaw': return scanOpenClawIncremental();
             case 'rush': return scanRushIncremental(onProgress);
@@ -1036,6 +1038,105 @@ function buildGeminiProjectMap(): Map<string, { name: string; path: string }> {
   }
 
   return map;
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity
+//
+// Antigravity stores one SQLite DB per conversation at
+// ~/.gemini/antigravity-cli/conversations/<trajectory-uuid>.db. The filename
+// (minus .db) is the canonical session id. Each DB is stat'd against the ledger;
+// only changed DBs are re-parsed (via parseAntigravity, which shells out to
+// sqlite3). Tool count doubles as the message count; the toolSummary of the
+// first tool call becomes the topic, and any run_command's Cwd fills in cwd.
+// ---------------------------------------------------------------------------
+
+/** Incrementally re-scan changed Antigravity conversation DBs and upsert into the DB. */
+async function scanAntigravityIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
+  const currentVersion = await getCurrentAgentVersion('antigravity');
+
+  const filePaths: string[] = [];
+  const seenPaths = new Set<string>();
+  for (const conversationsDir of getAgentSessionDirs('antigravity', 'conversations')) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(conversationsDir).filter(f => f.endsWith('.db'));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      const fp = path.join(conversationsDir, file);
+      if (seenPaths.has(fp)) continue;
+      seenPaths.add(fp);
+      filePaths.push(fp);
+    }
+  }
+
+  const changed = filterChangedFiles(filePaths);
+  if (changed.length === 0) return;
+
+  onProgress?.({ agent: 'antigravity', parsed: 0, total: changed.length });
+
+  const entries: ScanEntry[] = [];
+  const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
+  const seen = new Set<string>();
+  let parsed = 0;
+  for (const { filePath, scan } of changed) {
+    try {
+      const result = readAntigravityMeta(filePath, currentVersion);
+      if (result && !seen.has(result.meta.id)) {
+        seen.add(result.meta.id);
+        entries.push({ meta: result.meta, content: result.content, scan });
+      } else {
+        touched.push({ filePath, scan });
+      }
+    } catch {
+      touched.push({ filePath, scan });
+    }
+    parsed++;
+    onProgress?.({ agent: 'antigravity', parsed, total: changed.length });
+  }
+
+  upsertSessionsBatch(entries);
+  recordScans(touched);
+}
+
+/** Parse a single Antigravity conversation DB to extract session metadata. */
+function readAntigravityMeta(
+  filePath: string,
+  currentVersion?: string,
+): { meta: SessionMeta; content: string } | null {
+  const sessionId = path.basename(filePath).replace(/\.db$/, '');
+  if (!sessionId) return null;
+
+  const events = parseAntigravity(filePath);
+
+  // cwd: first run_command carries the working directory in its Cwd arg.
+  let cwd: string | undefined;
+  const contentParts: string[] = [];
+  for (const e of events) {
+    if (!cwd && typeof e.args?.Cwd === 'string' && e.args.Cwd) cwd = e.args.Cwd;
+    if (e.content) contentParts.push(e.content);
+  }
+  const normalizedCwd = cwd ? normalizeCwd(cwd) : undefined;
+
+  // Topic: the first tool's human summary is a decent one-line label.
+  const topic = events.find(e => e.content)?.content;
+
+  const stat = safeStatSync(filePath);
+  const meta: SessionMeta = {
+    id: sessionId,
+    shortId: sessionId.slice(0, 8),
+    agent: 'antigravity',
+    timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
+    project: normalizedCwd ? path.basename(normalizedCwd) : undefined,
+    cwd: normalizedCwd,
+    filePath,
+    version: resolveSessionVersion('antigravity', filePath, undefined, currentVersion),
+    topic: topic ? topic.slice(0, 120) : undefined,
+    messageCount: events.length,
+  };
+  return { meta, content: contentParts.join('\n') };
 }
 
 // ---------------------------------------------------------------------------
