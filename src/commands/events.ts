@@ -56,6 +56,7 @@ function originLabel(r: EventRecord): string {
 function detailFor(r: EventRecord): string {
   if (r.command) return r.command;
   const bits: string[] = [];
+  if (typeof r.team === 'string') bits.push(`team=${r.team}`);
   if (typeof r.bundle === 'string') bits.push(`bundle=${r.bundle}`);
   if (typeof r.skill === 'string') bits.push(`skill=${r.skill}`);
   if (typeof r.version === 'string') bits.push(`v=${r.version}`);

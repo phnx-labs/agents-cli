@@ -13,6 +13,7 @@ import * as path from 'path';
 import { randomBytes } from 'crypto';
 import lockfile from 'proper-lockfile';
 import { getTeamsRegistryPath } from '../state.js';
+import { emit } from '../events.js';
 
 /** Metadata for a registered team. */
 export interface TeamMeta {
@@ -118,46 +119,59 @@ export async function createTeam(name: string, options?: CreateTeamOptions): Pro
     throw new Error('Cannot use both --enable-worktrees and --use-worktree. Pick one.');
   }
   const p = await registryPath();
-  return withRegistryLock(p, async () => {
+  const meta = await withRegistryLock(p, async () => {
     const reg = await loadTeams();
     if (reg[name]) {
       throw new Error(`Team '${name}' already exists`);
     }
-    const meta: TeamMeta = {
+    const m: TeamMeta = {
       created_at: new Date().toISOString(),
       ...(options?.description ? { description: options.description } : {}),
       ...(options?.enableWorktrees ? { enable_worktrees: true } : {}),
       ...(options?.useWorktree ? { use_worktree: options.useWorktree } : {}),
     };
-    reg[name] = meta;
+    reg[name] = m;
     await saveTeams(reg);
-    return meta;
+    return m;
   });
+  // Audit the lifecycle boundary, not the CLI shell — captures every creation
+  // path (create + ensure) with team metadata the generic command log lacks.
+  emit('teams.create', { team: name, worktrees: Boolean(options?.enableWorktrees || options?.useWorktree) });
+  return meta;
 }
 
 /** Return existing team metadata or create a new team if it does not exist. */
 export async function ensureTeam(name: string): Promise<TeamMeta> {
   const p = await registryPath();
-  return withRegistryLock(p, async () => {
+  let created = false;
+  const meta = await withRegistryLock(p, async () => {
     const reg = await loadTeams();
     if (reg[name]) return reg[name];
-    const meta: TeamMeta = { created_at: new Date().toISOString() };
-    reg[name] = meta;
+    const m: TeamMeta = { created_at: new Date().toISOString() };
+    reg[name] = m;
     await saveTeams(reg);
-    return meta;
+    created = true;
+    return m;
   });
+  // `teams add` auto-creates the team on first teammate — audit that creation
+  // too, but only when it actually happened (not the get-existing path).
+  if (created) emit('teams.create', { team: name, worktrees: false });
+  return meta;
 }
 
 /** Remove a team from the registry. Returns false if the team did not exist. */
 export async function removeTeam(name: string): Promise<boolean> {
   const p = await registryPath();
-  return withRegistryLock(p, async () => {
+  const existed = await withRegistryLock(p, async () => {
     const reg = await loadTeams();
     if (!reg[name]) return false;
     delete reg[name];
     await saveTeams(reg);
     return true;
   });
+  // "Disband" — only fires when a real team was removed, not a no-op.
+  if (existed) emit('teams.disband', { team: name });
+  return existed;
 }
 
 /** Check whether a team with the given name exists in the registry. */

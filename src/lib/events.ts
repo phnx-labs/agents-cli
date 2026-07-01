@@ -77,6 +77,7 @@ export type EventType =
   | 'teams.add'
   | 'teams.start'
   | 'teams.complete'
+  | 'teams.disband'
   // Hooks
   | 'hook.fire'
   | 'hook.complete'
