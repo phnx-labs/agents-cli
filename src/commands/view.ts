@@ -788,58 +788,10 @@ async function showAgentResources(
   }
   const home = getVersionHomePath(agentId, version);
 
-  // Get git sync status if ~/.agents/ is a git repo
-  const userAgentsDir = getUserAgentsDir();
-  const hasGitRepo = isGitRepo(userAgentsDir);
-  const commandsSync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'commands') : null;
-  const skillsSync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'skills') : null;
-  const hooksSync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'hooks') : null;
-  const memorySync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'rules') : null;
-
-  // Helper to determine sync state for a resource
-  const getSyncState = (
-    resourceName: string,
-    resourceType: 'commands' | 'skills' | 'hooks' | 'memory',
-    syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>
-  ): SyncState | undefined => {
-    if (!syncStatus) return undefined;
-
-    let relativePath: string;
-    if (resourceType === 'commands') {
-      relativePath = `commands/${resourceName}.md`;
-    } else if (resourceType === 'skills') {
-      relativePath = `skills/${resourceName}`;
-    } else if (resourceType === 'hooks') {
-      relativePath = `hooks/${resourceName}`;
-    } else {
-      // Rules files: map agent-specific name (CLAUDE.md) back to canonical (AGENTS.md)
-      const centralName = getCentralRulesFileName(agentId);
-      relativePath = `rules/${centralName}`;
-    }
-
-    const matchesPath = (f: string) => f === relativePath || f.startsWith(relativePath + '/');
-
-    const isNew = syncStatus.new.some(matchesPath);
-    const isStaged = syncStatus.staged.some(matchesPath);
-    const isModified = syncStatus.modified.some(matchesPath);
-    const isDeleted = syncStatus.deleted.some(matchesPath);
-    const isSynced = syncStatus.synced.some(matchesPath);
-
-    if (isNew || isStaged) {
-      return 'new';
-    }
-    if (isModified) {
-      return 'modified';
-    }
-    if (isDeleted) {
-      return 'deleted';
-    }
-    if (isSynced) {
-      return 'synced';
-    }
-    // Not in any array = local-only (untracked with no files)
-    return 'new';
-  };
+  // Git sync status if ~/.agents/ is a git repo (shared loader — see
+  // loadResourceSyncData / resolveResourceSyncState, reused by --json --resources).
+  const { hasGitRepo, commands: commandsSync, skills: skillsSync, hooks: hooksSync, memory: memorySync } =
+    await loadResourceSyncData();
 
   // Collect resources for the specific version
   interface SkillError {
@@ -874,23 +826,23 @@ async function showAgentResources(
     version,
     commands: resources.commands.map(r => ({
       ...r,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'commands', commandsSync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'commands', commandsSync),
     })),
     skills: resources.skills.map(r => ({
       ...r,
       // ruleCount of 0 is noise — every skill has 0 unless it ships subrules, which is rare.
       ruleCount: r.ruleCount && r.ruleCount > 0 ? r.ruleCount : undefined,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'skills', skillsSync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'skills', skillsSync),
     })),
     skillErrors: resources.skillErrors,
     mcp: resources.mcp.map(r => ({ name: r.name, scope: r.scope, syncState: r.scope === 'project' ? undefined : 'synced' as SyncState })),
     memory: resources.memory.map(r => ({
       ...r,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'memory', memorySync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'memory', memorySync),
     })),
     hooks: resources.hooks.map(r => ({
       ...r,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'hooks', hooksSync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'hooks', hooksSync),
     })),
     workflows: resources.workflows.map(r => ({ name: r.name, path: r.path, scope: r.scope })),
   };
@@ -1128,6 +1080,9 @@ export interface ViewJsonVersion {
   }>;
   lastActive: string | null;
   path: string;
+  /** Present only when --resources / --detailed (or --json with a section
+   *  flag) is passed: this version's resource inventory with git sync-state. */
+  resources?: VersionResourcesJson;
 }
 
 /** Machine-readable entry for one agent's installed versions. */
@@ -1137,14 +1092,194 @@ export interface ViewJsonAgent {
   profiles: ProfileSummary[];
 }
 
+/** Resource sections that --resources can include in --json output. */
+export type ResourceSection = 'commands' | 'skills' | 'mcp' | 'memory' | 'hooks' | 'workflows' | 'plugins';
+
+const ALL_RESOURCE_SECTIONS: ResourceSection[] = ['commands', 'skills', 'mcp', 'memory', 'hooks', 'workflows', 'plugins'];
+
+/** One resource entry in `--json --resources` output. */
+export interface ResourceItemJson {
+  name: string;
+  scope?: 'user' | 'project';
+  /** Git sync-state vs ~/.agents. Omitted for project-scoped resources or when
+   *  ~/.agents isn't a git repo. When queried via --host it reflects the
+   *  remote's ~/.agents — i.e. per-host resource drift. */
+  syncState?: SyncState;
+  description?: string;
+  /** Skills only, when > 0. */
+  ruleCount?: number;
+}
+
+/** Per-version resource inventory; one key per requested section. */
+export interface VersionResourcesJson {
+  commands?: ResourceItemJson[];
+  skills?: ResourceItemJson[];
+  mcp?: ResourceItemJson[];
+  memory?: ResourceItemJson[];
+  hooks?: ResourceItemJson[];
+  workflows?: ResourceItemJson[];
+  plugins?: ResourceItemJson[];
+}
+
+type ResourceSyncType = 'commands' | 'skills' | 'hooks' | 'memory';
+
+/** Git sync-state for the four tracked resource kinds, loaded once from ~/.agents. */
+interface ResourceSyncData {
+  hasGitRepo: boolean;
+  commands: Awaited<ReturnType<typeof getGitSyncStatus>>;
+  skills: Awaited<ReturnType<typeof getGitSyncStatus>>;
+  hooks: Awaited<ReturnType<typeof getGitSyncStatus>>;
+  memory: Awaited<ReturnType<typeof getGitSyncStatus>>;
+}
+
+/** Load git sync-state for the tracked resource kinds. Shared by the human
+ *  detail view (showAgentResources) and the `--json --resources` path. */
+async function loadResourceSyncData(): Promise<ResourceSyncData> {
+  const userAgentsDir = getUserAgentsDir();
+  const hasGitRepo = isGitRepo(userAgentsDir);
+  return {
+    hasGitRepo,
+    commands: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'commands') : null,
+    skills: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'skills') : null,
+    hooks: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'hooks') : null,
+    memory: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'rules') : null,
+  };
+}
+
+/** Resolve one resource's git sync-state. Extracted from showAgentResources so
+ *  the human view and the JSON path derive drift identically. */
+function resolveResourceSyncState(
+  agentId: AgentId,
+  resourceName: string,
+  resourceType: ResourceSyncType,
+  syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>,
+): SyncState | undefined {
+  if (!syncStatus) return undefined;
+
+  let relativePath: string;
+  if (resourceType === 'commands') {
+    relativePath = `commands/${resourceName}.md`;
+  } else if (resourceType === 'skills') {
+    relativePath = `skills/${resourceName}`;
+  } else if (resourceType === 'hooks') {
+    relativePath = `hooks/${resourceName}`;
+  } else {
+    // Rules files: map agent-specific name (CLAUDE.md) back to canonical (AGENTS.md)
+    const centralName = getCentralRulesFileName(agentId);
+    relativePath = `rules/${centralName}`;
+  }
+
+  const matchesPath = (f: string) => f === relativePath || f.startsWith(relativePath + '/');
+
+  if (syncStatus.new.some(matchesPath) || syncStatus.staged.some(matchesPath)) return 'new';
+  if (syncStatus.modified.some(matchesPath)) return 'modified';
+  if (syncStatus.deleted.some(matchesPath)) return 'deleted';
+  if (syncStatus.synced.some(matchesPath)) return 'synced';
+  // Not in any array = local-only (untracked with no files)
+  return 'new';
+}
+
+/** Collect one version's resources for `--json`, limited to `sections`. Scans
+ *  the version's `home`, so per-version differences are reported accurately. */
+function collectVersionResources(
+  agentId: AgentId,
+  home: string,
+  cwd: string,
+  cliInstalled: boolean,
+  sections: Set<ResourceSection>,
+  sync: ResourceSyncData,
+): VersionResourcesJson {
+  const res = getAgentResources(agentId, { cwd, scope: 'all', cliInstalled, home });
+  const out: VersionResourcesJson = {};
+
+  const withSync = (
+    r: { name: string; scope: 'user' | 'project'; description?: string },
+    type: ResourceSyncType,
+    syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>,
+  ): ResourceItemJson => {
+    const item: ResourceItemJson = { name: r.name, scope: r.scope };
+    if (r.scope !== 'project') {
+      const s = resolveResourceSyncState(agentId, r.name, type, syncStatus);
+      if (s) item.syncState = s;
+    }
+    if (r.description) item.description = r.description;
+    return item;
+  };
+
+  if (sections.has('commands')) out.commands = res.commands.map((r) => withSync(r, 'commands', sync.commands));
+  if (sections.has('skills')) {
+    out.skills = res.skills.map((r) => {
+      const item = withSync(r, 'skills', sync.skills);
+      // ruleCount of 0 is noise — every skill has 0 unless it ships subrules.
+      if (r.ruleCount && r.ruleCount > 0) item.ruleCount = r.ruleCount;
+      return item;
+    });
+  }
+  if (sections.has('mcp')) {
+    out.mcp = res.mcp.map((r) => {
+      const item: ResourceItemJson = { name: r.name, scope: r.scope };
+      if (r.scope !== 'project') item.syncState = 'synced';
+      return item;
+    });
+  }
+  if (sections.has('memory')) out.memory = res.memory.map((r) => withSync(r, 'memory', sync.memory));
+  if (sections.has('hooks')) out.hooks = res.hooks.map((r) => withSync(r, 'hooks', sync.hooks));
+  if (sections.has('workflows')) out.workflows = res.workflows.map((r) => ({ name: r.name, scope: r.scope }));
+  if (sections.has('plugins')) {
+    out.plugins = discoverPlugins()
+      .filter((p) => pluginSupportsAgent(p, agentId))
+      .map((p) => ({ name: p.name }));
+  }
+  return out;
+}
+
+/** Build the set of resource sections to include in `--json` from the
+ *  `--resources` / `--detailed` flags, plus (in --json mode) the per-section
+ *  boolean filters (`--skills` etc.) that plain `--json` historically ignored. */
+export function parseResourceSections(
+  options: { resources?: string | boolean; detailed?: boolean } & ViewSectionFilter,
+  jsonMode: boolean,
+): Set<ResourceSection> {
+  const set = new Set<ResourceSection>();
+  const addAll = () => ALL_RESOURCE_SECTIONS.forEach((s) => set.add(s));
+
+  if (options.detailed) addAll();
+
+  const rv = options.resources;
+  if (rv !== undefined) {
+    if (rv === true || String(rv).trim() === '' || String(rv).toLowerCase() === 'all') {
+      addAll();
+    } else {
+      for (const raw of String(rv).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) {
+        const section = raw === 'rules' ? 'memory' : raw; // --rules is the memory file
+        if ((ALL_RESOURCE_SECTIONS as string[]).includes(section)) set.add(section as ResourceSection);
+      }
+    }
+  }
+
+  if (jsonMode) {
+    const flagToSection: Array<[keyof ViewSectionFilter, ResourceSection]> = [
+      ['commands', 'commands'], ['skills', 'skills'], ['mcp', 'mcp'],
+      ['workflows', 'workflows'], ['plugins', 'plugins'], ['hooks', 'hooks'], ['rules', 'memory'],
+    ];
+    for (const [flag, section] of flagToSection) if (options[flag]) set.add(section);
+  }
+
+  return set;
+}
+
 /**
  * Collect structured info for one or more agents without rendering to the
  * terminal. Used by `--json` output and any programmatic consumer (e.g. the
  * agents-cli extension's "resume current session in best available version"
  * command).
  */
-async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent[]> {
+async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set<ResourceSection>): Promise<ViewJsonAgent[]> {
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
+  const wantResources = !!resourceSections && resourceSections.size > 0;
+  // Only pay for the git-status + resource scans when resources were requested.
+  const resourceSync = wantResources ? await loadResourceSyncData() : null;
+  const cliStates = wantResources ? await getAllCliStates() : null;
   const infoFetches: Promise<{ agentId: AgentId; version: string; home: string; info: AccountInfo }>[] = [];
   for (const agentId of agentsToShow) {
     for (const ver of listInstalledVersions(agentId)) {
@@ -1183,7 +1318,7 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
   };
 
   const byAgent = new Map<AgentId, ViewJsonVersion[]>();
-  for (const { agentId, version, info: rawInfo } of infoResults) {
+  for (const { agentId, version, home, info: rawInfo } of infoResults) {
     const info = mergeCanonical(rawInfo);
     const globalDefault = getGlobalDefault(agentId);
     const usageKey = getUsageLookupKey(info);
@@ -1208,6 +1343,17 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
       lastActive: info.lastActive ? info.lastActive.toISOString() : null,
       path: getVersionDir(agentId, version),
     };
+
+    if (wantResources && resourceSync) {
+      entry.resources = collectVersionResources(
+        agentId,
+        home,
+        process.cwd(),
+        cliStates?.[agentId]?.installed ?? false,
+        resourceSections!,
+        resourceSync,
+      );
+    }
 
     const existing = byAgent.get(agentId);
     if (existing) existing.push(entry);
@@ -1465,9 +1611,14 @@ export async function viewAction(
     prune?: boolean;
     yes?: boolean;
     dryRun?: boolean;
+    resources?: string | boolean;
+    detailed?: boolean;
   } & ViewSectionFilter,
 ): Promise<void> {
-  const json = options?.json === true;
+  // --resources / --detailed imply --json (they only shape structured output).
+  const explicitResources = options?.detailed === true || options?.resources !== undefined;
+  const json = options?.json === true || explicitResources;
+  const resourceSections = parseResourceSections(options ?? {}, json);
   const prune = options?.prune === true;
   const yes = options?.yes === true;
   const dryRun = options?.dryRun === true;
@@ -1501,7 +1652,7 @@ export async function viewAction(
       return;
     }
     if (json) {
-      const data = await collectAgentsJson();
+      const data = await collectAgentsJson(undefined, resourceSections);
       console.log(JSON.stringify(data, null, 2));
       return;
     }
@@ -1552,9 +1703,9 @@ export async function viewAction(
   }
 
   if (json) {
-    // --json ignores the @version suffix (detailed resource view is not yet
-    // exposed as structured data). Emit the version list for the agent.
-    const data = await collectAgentsJson(agentId);
+    // --json ignores the @version suffix, but --resources/--detailed (or a
+    // section flag) now attach each version's resource inventory + sync-state.
+    const data = await collectAgentsJson(agentId, resourceSections);
     console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [], profiles: [] }, null, 2));
     return;
   }
@@ -1577,6 +1728,8 @@ export function registerViewCommand(program: Command): void {
   addHostOption(program.command('view [agent]'))
     .description('Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.')
     .option('--json', 'Emit machine-readable JSON (version list, usage, signed-in status).')
+    .option('--resources [sections]', 'In --json mode, include each version\'s resources: "all" (default) or a comma list (skills,plugins,mcp,commands,workflows,memory,hooks). Implies --json.')
+    .option('--detailed', 'Include all resources in --json output (alias for --resources all). Implies --json.')
     .option('--prune', 'Remove older installed versions that share an account with a newer installed version. Skips the global default.')
     .option('--dry-run', 'With --prune, show duplicate versions without deleting')
     .option('-y, --yes', 'Skip the prune confirmation prompt.')
@@ -1603,6 +1756,11 @@ Examples:
 
   # Machine-readable output (used by tools that pick a version programmatically)
   agents view claude --json
+
+  # One call: full inventory + what's synced on a host (installed agents,
+  # versions, accounts, usage, and per-version resource sync-state)
+  agents view claude --host yosemite-s0 --json --resources all
+  agents view claude --json --resources skills,plugins   # just those sections
 
   # Prune older versions that duplicate an account already used by a newer version
   agents view --prune --dry-run
@@ -1637,6 +1795,8 @@ Output:
         prune?: boolean;
         yes?: boolean;
         dryRun?: boolean;
+        resources?: string | boolean;
+        detailed?: boolean;
       } & ViewSectionFilter,
     ) => viewAction(agentArg, options));
 }
