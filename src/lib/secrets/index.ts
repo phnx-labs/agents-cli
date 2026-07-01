@@ -88,6 +88,25 @@ function isWindows(): boolean {
   return process.platform === 'win32';
 }
 
+/**
+ * Guard a secret value before it is written to the current platform's primary
+ * backend.
+ *
+ * A value is empty on every platform → always rejected. Embedded newlines are
+ * rejected ONLY on darwin: the macOS batch read path (`get-batch`, see
+ * getKeychainTokens) is newline-delimited, so a value with a newline would
+ * corrupt record framing on read. Linux (secret-tool), Windows (Credential
+ * Manager stores the raw UTF-8 blob and emits base64), and the encrypted-file
+ * fallback all store raw bytes and round-trip multiline values (PEM / SSH keys)
+ * faithfully, so they accept newlines. `platform` is injectable for tests.
+ */
+export function assertValueStorable(value: string, platform: NodeJS.Platform = process.platform): void {
+  if (!value || !value.trim()) throw new Error('Secret value is empty.');
+  if (platform === 'darwin' && /[\r\n]/.test(value)) {
+    throw new Error('Secret value contains newlines, which are not supported.');
+  }
+}
+
 /** Build the keychain item name for a profile provider token. */
 export function profileKeychainItem(provider: string): string {
   return `${SERVICE_PREFIX}.${provider}.token`;
@@ -275,8 +294,7 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
 export function setKeychainToken(item: string, value: string): void {
   if (backend) { backend.set(item, value); return; }
   assertSupportedPlatform();
-  if (!value || !value.trim()) throw new Error('Secret value is empty.');
-  if (/[\r\n]/.test(value)) throw new Error('Secret value contains newlines, which are not supported.');
+  assertValueStorable(value);
   if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
 
   if (isLinux()) { linuxBackend.set(item, value); return; }
