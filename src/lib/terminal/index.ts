@@ -31,3 +31,16 @@ export {
   type SurfaceItem,
 } from './engine.js';
 export { runLocal, runRemote, runSpec, remoteCommand, type HostResolver, type RunResult } from './transport.js';
+export {
+  injectIntoTerminal,
+  tmuxSendKeysArgv,
+  tmuxInjectSpecs,
+  itermInjectScript,
+  ghosttyInjectScript,
+  appleScriptInjectSpec,
+  isLaunchBackend,
+  type InjectTarget,
+  type InjectBackend,
+  type InjectOptions,
+  type InjectResult,
+} from './inject.js';
