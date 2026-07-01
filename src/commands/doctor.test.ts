@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { execPolicyWarningLines } from './doctor.js';
+import { execPolicyWarningLines, wrapLine } from './doctor.js';
+import { stringWidth } from '../lib/session/width.js';
 
 describe('execPolicyWarningLines (Windows exec-policy advisory in `agents doctor`)', () => {
   it('fires when the policy blocks local scripts (Restricted) — with the RemoteSigned remediation', () => {
@@ -26,5 +27,18 @@ describe('execPolicyWarningLines (Windows exec-policy advisory in `agents doctor
   it('never fires off Windows, even under a blocking policy', () => {
     expect(execPolicyWarningLines('linux', 'Restricted')).toEqual([]);
     expect(execPolicyWarningLines('darwin', 'AllSigned')).toEqual([]);
+  });
+});
+
+describe('wrapLine', () => {
+  it('wraps advisory text under its prefix', () => {
+    const lines = wrapLine('  ', 'Reconcile with `agents doctor claude@latest --fix` or `agents sync claude@latest` (not applied on launch).', 62);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(lines.every((line) => stringWidth(line) <= 62)).toBe(true);
+    expect(lines[1].startsWith('  ')).toBe(true);
+  });
+
+  it('collapses embedded newlines before wrapping', () => {
+    expect(wrapLine('  ', 'one\n\n  two\tthree', 80)).toEqual(['  one two three']);
   });
 });

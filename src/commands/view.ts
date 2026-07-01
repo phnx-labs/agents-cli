@@ -75,6 +75,7 @@ import { listProfiles, profileSummary, type ProfileSummary } from '../lib/profil
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 
 // Shown in the email column for agents that are signed in but expose no email
 // address locally (Antigravity stores an opaque OAuth grant with no identity).
@@ -120,6 +121,7 @@ function profileKindAndModel(model: string, planWidth: number): string {
 }
 
 function termLink(text: string, filePath: string): string {
+  if (!process.stdout.isTTY) return text;
   const url = `file://${filePath}`;
   return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
@@ -224,11 +226,17 @@ function shouldRenderSection(key: SectionKey, filter: ViewSectionFilter | undefi
 }
 
 /** Trim a description to a column-friendly snippet. Strips newlines, collapses whitespace. */
-function summarizeDescription(desc: string | undefined, maxLen = 80): string {
+export function summarizeDescription(desc: string | undefined, maxLen = 80): string {
   if (!desc) return '';
   const cleaned = desc.replace(/\s+/g, ' ').trim();
-  if (cleaned.length <= maxLen) return cleaned;
-  return cleaned.slice(0, maxLen - 1).trimEnd() + '…';
+  return truncateToWidth(cleaned, maxLen);
+}
+
+export function descriptionForPrefix(desc: string | undefined, prefix: string): string {
+  if (!desc) return '';
+  const visiblePrefix = prefix.replace(/\x1b]8;;[^\x1b]*(?:\x1b\\|\x07)/g, '');
+  const budget = Math.max(1, terminalWidth() - stringWidth(visiblePrefix));
+  return summarizeDescription(desc, budget);
 }
 
 function getProfileSummaries(filterAgentId?: AgentId): ProfileSummary[] {
@@ -299,8 +307,10 @@ function renderHostClisSection(cwd: string): void {
       const status = installed ? chalk.green('installed') : chalk.red('missing  ');
       const linkedName = termLink(manifest.name.padEnd(nameWidth), linkTarget(manifest.path));
       const tag = hostCliSourceTag(manifest.source);
-      const desc = manifest.description ? chalk.gray(`  ${summarizeDescription(manifest.description, 60)}`) : '';
-      console.log(`  ${status}  ${chalk.cyan(linkedName)} ${tag}${desc}`);
+      const prefix = `  ${status}  ${chalk.cyan(linkedName)} ${tag}`;
+      const descSnippet = descriptionForPrefix(manifest.description, `${prefix}  `);
+      const desc = descSnippet ? chalk.gray(`  ${descSnippet}`) : '';
+      console.log(prefix + desc);
     }
     if (anyMissing) {
       console.log(chalk.gray('  Install missing with `agents cli install`'));
@@ -901,9 +911,10 @@ async function showAgentResources(
         : chalk.gray('[system]');
       display += ` ${sourceTag}`;
       const syncStr = r.syncState ? chalk.gray(` [${r.syncState}]`) : '';
-      const descSnippet = summarizeDescription(r.description);
+      const prefix = `    ${display}${syncStr}`;
+      const descSnippet = descriptionForPrefix(r.description, `${prefix}  `);
       const descStr = descSnippet ? chalk.gray(`  ${descSnippet}`) : '';
-      console.log(`    ${display}${syncStr}${descStr}`);
+      console.log(prefix + descStr);
     }
   }
 

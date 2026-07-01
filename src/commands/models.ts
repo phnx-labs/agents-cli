@@ -20,6 +20,8 @@ import {
 import type { AgentId } from '../lib/types.js';
 import { listInstalledVersions, getGlobalDefault, resolveVersion, resolveVersionAlias } from '../lib/versions.js';
 import { getModelCatalog, locateModelSource } from '../lib/models.js';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
+import { wrapJoined } from './inspect.js';
 
 const MODEL_CAPABLE_AGENTS: AgentId[] = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'openclaw', 'antigravity', 'kimi'];
 
@@ -155,25 +157,22 @@ function printCatalog(agent: AgentId, version: string, isDefault: boolean, optio
     return;
   }
 
-  console.log(chalk.gray(`  source: ${src.kind} (${shortPath(src.path)})`));
+  console.log(chalk.gray(formatModelSourceLine(src.kind, shortPath(src.path))));
 
   if (Object.keys(catalog.aliases).length > 0) {
     const parts = Object.entries(catalog.aliases).map(([alias, id]) => `${chalk.cyan(alias)}=${id}`);
-    console.log(chalk.gray(`  aliases: `) + parts.join(', '));
+    for (const line of formatModelAliasLines(parts)) console.log(line);
   }
 
   console.log();
 
   for (const model of catalog.models) {
     const star = model.isDefault ? chalk.green('*') : ' ';
-    const display = model.displayName && model.displayName !== model.id
-      ? chalk.gray(` (${model.displayName})`)
-      : '';
-    const aliasTag = model.alias ? chalk.cyan(` [${model.alias}]`) : '';
-    console.log(`  ${star} ${chalk.bold(model.id)}${display}${aliasTag}`);
+    console.log(formatModelSummaryLine(star, model.id, model.displayName, model.alias));
 
     if (model.description) {
-      console.log(chalk.gray(`      ${model.description}`));
+      const descPrefix = '      ';
+      console.log(chalk.gray(descPrefix + truncateToWidth(model.description, Math.max(1, terminalWidth() - stringWidth(descPrefix)))));
     }
 
     if (options.cloud && model.perCloud) {
@@ -201,4 +200,32 @@ function printCatalog(agent: AgentId, version: string, isDefault: boolean, optio
 /** Abbreviate a path by replacing the home directory with ~. */
 function shortPath(p: string): string {
   return p.replace(homeDir(), '~');
+}
+
+export function formatModelSourceLine(kind: string, sourcePath: string, width = terminalWidth()): string {
+  const prefix = `  source: ${kind} (`;
+  const suffix = ')';
+  const room = Math.max(1, width - stringWidth(prefix) - stringWidth(suffix));
+  return prefix + truncateToWidth(sourcePath, room) + suffix;
+}
+
+export function formatModelAliasLines(parts: string[], width = terminalWidth()): string[] {
+  return wrapJoined(chalk.gray('  aliases: '), parts, ', ', width);
+}
+
+export function formatModelSummaryLine(
+  star: string,
+  id: string,
+  displayName?: string,
+  alias?: string,
+  width = terminalWidth(),
+): string {
+  const display = displayName && displayName !== id ? ` (${displayName})` : '';
+  const aliasTag = alias ? ` [${alias}]` : '';
+  const prefix = `  ${star} `;
+  const plain = `${id}${display}${aliasTag}`;
+  if (stringWidth(plain) > Math.max(1, width - stringWidth(prefix))) {
+    return prefix + truncateToWidth(plain, Math.max(1, width - stringWidth(prefix)));
+  }
+  return prefix + chalk.bold(id) + chalk.gray(display) + chalk.cyan(aliasTag);
 }

@@ -21,6 +21,7 @@ import {
 } from '../lib/session/db.js';
 import { formatUsd, PRICING_VERSION } from '../lib/pricing/index.js';
 import { formatDuration } from '../lib/session/render.js';
+import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 
 interface CostOptions {
   json?: boolean;
@@ -126,16 +127,19 @@ async function costAction(options: CostOptions): Promise<void> {
   // Top sessions by cost.
   if (top.length > 0) {
     out.push(chalk.bold('Top sessions by cost'));
+    const cols = terminalWidth();
+    const showProject = cols >= 100;
     const costW = Math.max(...top.map(t => formatUsd(t.costUsd).length), 4);
     for (const t of top) {
       const cost = formatUsd(t.costUsd).padStart(costW);
       const dur = t.durationMs > 0 ? formatDuration(t.durationMs) : '—';
-      const label = t.meta.label || t.meta.topic || '(untitled)';
-      const proj = t.meta.project ? chalk.gray(` ${t.meta.project}`) : '';
+      const label = (t.meta.label || t.meta.topic || '(untitled)').replace(/\s+/g, ' ').trim();
+      const proj = showProject && t.meta.project ? chalk.gray(` ${t.meta.project}`) : '';
+      const prefix = `  ${chalk.green(cost)}  ${chalk.gray(t.meta.shortId)}  ${chalk.cyan(t.meta.agent.padEnd(7))} `;
+      const suffix = proj + chalk.gray(`  ${dur}`);
+      const topicW = Math.max(12, cols - stringWidth(prefix) - stringWidth(suffix));
       out.push(
-        `  ${chalk.green(cost)}  ${chalk.gray(t.meta.shortId)}  ${chalk.cyan(t.meta.agent.padEnd(7))} ${truncate(label, 48)}` +
-          proj +
-          chalk.gray(`  ${dur}`),
+        prefix + truncateToWidth(label, topicW) + suffix,
       );
     }
     out.push('');
@@ -144,13 +148,19 @@ async function costAction(options: CostOptions): Promise<void> {
   // Per-agent / per-project / per-day breakdown.
   const groupLabel = groupBy === 'agent' ? 'agent' : groupBy === 'project' ? 'project' : 'day';
   out.push(chalk.bold(`By ${groupLabel}`));
-  const keyW = Math.max(...breakdown.map(r => r.key.length), groupLabel.length);
+  const cols = terminalWidth();
   const costW2 = Math.max(...breakdown.map(r => formatUsd(r.costUsd).length), 4);
+  const countW = Math.max(...breakdown.map(r => String(r.sessionCount).length), 1);
+  const sessionW = Math.max(...breakdown.map(r => `${String(r.sessionCount).padStart(countW)} session${r.sessionCount !== 1 ? 's' : ''}`.length));
+  const durationW = Math.max(...breakdown.map(r => r.durationMs > 0 ? stringWidth(formatDuration(r.durationMs)) : 1), 1);
+  const fixedW = 2 + 2 + costW2 + 2 + sessionW + 2 + durationW;
+  const keyW = Math.max(8, Math.min(Math.max(...breakdown.map(r => stringWidth(r.key)), groupLabel.length), cols - fixedW));
   for (const r of breakdown) {
     const cost = formatUsd(r.costUsd).padStart(costW2);
     const dur = r.durationMs > 0 ? formatDuration(r.durationMs) : '—';
+    const sessions = `${String(r.sessionCount).padStart(countW)} session${r.sessionCount !== 1 ? 's' : ''}`;
     out.push(
-      `  ${r.key.padEnd(keyW)}  ${chalk.green(cost)}  ${chalk.gray(`${r.sessionCount} session${r.sessionCount !== 1 ? 's' : ''}`)}  ${chalk.gray(dur)}`,
+      `  ${padToWidth(truncateToWidth(r.key, keyW), keyW)}  ${chalk.green(cost)}  ${chalk.gray(padToWidth(sessions, sessionW))}  ${chalk.gray(padToWidth(dur, durationW))}`,
     );
   }
 
@@ -181,10 +191,4 @@ function renderDailyHistogram(daily: Array<{ key: string; costUsd: number }>): s
     lines.push(`  ${chalk.gray(d.key)}  ${chalk.green(formatUsd(d.costUsd).padStart(costW))}`);
   }
   return lines.join('\n');
-}
-
-/** Truncate a string to n chars with an ellipsis. */
-function truncate(s: string, n: number): string {
-  const oneLine = s.replace(/\s+/g, ' ').trim();
-  return oneLine.length > n ? oneLine.slice(0, n - 1) + '…' : oneLine;
 }

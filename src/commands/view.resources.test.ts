@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { parseResourceSections } from './view.js';
+import { descriptionForPrefix, parseResourceSections, summarizeDescription } from './view.js';
+import { stringWidth } from '../lib/session/width.js';
 
 // parseResourceSections is the merge point between the --resources/--detailed
 // flags and the historically-ignored per-section booleans in --json mode. These
@@ -58,5 +59,25 @@ describe('parseResourceSections', () => {
 
   test('--resources value unions with section booleans', () => {
     expect(sections({ resources: 'skills', plugins: true }, true)).toEqual(['plugins', 'skills']);
+  });
+});
+
+describe('responsive descriptions', () => {
+  test('summarizeDescription collapses whitespace and truncates to display width', () => {
+    expect(summarizeDescription('one\n\n two\tthree', 80)).toBe('one two three');
+    expect(stringWidth(summarizeDescription('abcdef', 4))).toBeLessThanOrEqual(4);
+  });
+
+  test('descriptionForPrefix budgets against the visible row prefix', () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = '60';
+    try {
+      const prefix = '    long-resource-name [system] [synced]  ';
+      const desc = descriptionForPrefix('a long description that should fit the remaining cells only', prefix);
+      expect(stringWidth(prefix + desc)).toBeLessThanOrEqual(60);
+    } finally {
+      if (prev === undefined) delete process.env.COLUMNS;
+      else process.env.COLUMNS = prev;
+    }
   });
 });

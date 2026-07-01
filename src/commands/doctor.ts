@@ -50,6 +50,7 @@ import { listCliStatus } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
 import { heal, healChangedAnything, type HealResult } from '../lib/heal.js';
 import { blocksLocalScripts, getEffectiveExecutionPolicy } from '../lib/platform/winpath.js';
+import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
 
 const AGENT_NAMES: Record<string, string> = Object.fromEntries(
@@ -94,7 +95,6 @@ function divergenceLines(report: VersionResourceReport): string[] {
     if (p.status === 'missing') lines.push(`plugin ${p.name} — not installed`);
     else if (p.status === 'diff') lines.push(`plugin ${p.name} — ${p.detail ?? 'mirror drifted'}`);
   }
-  const counts: string[] = [];
   for (const kind of ['commands', 'skills', 'hooks', 'rules', 'mcp', 'permissions', 'subagents'] as const) {
     const rows = report.kinds[kind];
     const miss = rows.filter((r) => r.status === 'missing').length;
@@ -102,10 +102,43 @@ function divergenceLines(report: VersionResourceReport): string[] {
     const bits: string[] = [];
     if (miss) bits.push(`${miss} missing`);
     if (dif) bits.push(`${dif} drifted`);
-    if (bits.length) counts.push(`${kind} ${bits.join('/')}`);
+    if (bits.length) lines.push(`${kind.padEnd(11)} ${bits.join(' · ')}`);
   }
-  if (counts.length) lines.push(counts.join(' · '));
   return lines;
+}
+
+function collapseWhitespace(s: string): string {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+export function wrapLine(prefix: string, text: string, width = terminalWidth()): string[] {
+  const words = collapseWhitespace(text).split(' ').filter(Boolean);
+  if (words.length === 0) return [prefix.trimEnd()];
+  const continuation = ' '.repeat(stringWidth(prefix));
+  const lines: string[] = [];
+  let linePrefix = prefix;
+  let line = prefix;
+  let hasWord = false;
+  for (const word of words) {
+    const room = Math.max(1, width - stringWidth(linePrefix));
+    const piece = stringWidth(word) > room ? truncateToWidth(word, room) : word;
+    const candidate = hasWord ? `${line} ${piece}` : `${line}${piece}`;
+    if (hasWord && stringWidth(candidate) > width) {
+      lines.push(line);
+      linePrefix = continuation;
+      line = continuation + piece;
+      hasWord = true;
+    } else {
+      line = candidate;
+      hasWord = true;
+    }
+  }
+  lines.push(line);
+  return lines;
+}
+
+function printWrappedLine(prefix: string, text: string): void {
+  for (const line of wrapLine(prefix, text)) console.log(chalk.gray(line));
 }
 
 function checkSyncStatus(cwd: string): SyncStatusRow[] {
@@ -196,7 +229,7 @@ function renderOverviewText(
     }
   }
   if (hidden.length > 0) {
-    console.log(chalk.gray(`  +${hidden.length} more supported (${hidden.join(', ')}) — \`agents add <name>\` to manage`));
+    printWrappedLine('  ', `+${hidden.length} more supported (${hidden.join(', ')}) — \`agents add <name>\` to manage`);
   }
   console.log();
 
@@ -226,7 +259,7 @@ function renderOverviewText(
     // Version homes are reconciled only by management commands, so point at one
     // rather than promising an auto-sync that never happens.
     if (anyOutOfSync) {
-      console.log(chalk.gray('  Reconcile with `agents doctor <agent>@<version> --fix` or `agents sync <agent>@<version>` (not applied on launch).'));
+      printWrappedLine('  ', 'Reconcile with `agents doctor <agent>@<version> --fix` or `agents sync <agent>@<version>` (not applied on launch).');
     }
   }
   console.log();
@@ -260,7 +293,11 @@ function renderOverviewText(
       const label = manifest.name.padEnd(nameWidth);
       const src = chalk.gray(`[${manifest.source}]`);
       if (installed) {
-        console.log(`  ${chalk.green('ready')}  ${label}  ${src}  ${chalk.gray(manifest.description || '')}`);
+        const prefix = `  ${chalk.green('ready')}  ${label}  ${src}`;
+        const desc = manifest.description
+          ? `  ${truncateToWidth(collapseWhitespace(manifest.description), Math.max(1, terminalWidth() - stringWidth(prefix) - 2))}`
+          : '';
+        console.log(prefix + chalk.gray(desc));
       } else {
         console.log(`  ${chalk.red('miss ')}  ${label}  ${src}  ${chalk.gray(`not installed — run \`agents cli install ${manifest.name}\``)}`);
       }
@@ -427,8 +464,12 @@ function renderKindSection(
 
   for (const r of visible) {
     const src = sourceLabel(r, layers);
-    const detail = r.detail ? chalk.gray(`  ${r.detail}`) : '';
-    console.log(`    ${statusLabel(r.status)}  ${r.name.padEnd(28)} ${src}${detail}`);
+    const name = padToWidth(truncateToWidth(r.name, 28), 28);
+    const prefix = `    ${statusLabel(r.status)}  ${name} ${src}`;
+    const detail = r.detail
+      ? chalk.gray(`  ${truncateToWidth(collapseWhitespace(r.detail), Math.max(1, terminalWidth() - stringWidth(prefix) - 2))}`)
+      : '';
+    console.log(prefix + detail);
 
     if (options.showDiff && r.status === 'diff' && r.sourcePath && r.homePath) {
       const expected = readExpectedForDiff(kind, r);
@@ -461,8 +502,10 @@ function readExpectedForDiff(kind: DoctorKind, row: ResourceDiff): string | null
 function renderTargetText(report: VersionResourceReport, options: { showDiff: boolean; requestedKinds?: Set<DoctorKind> }): void {
   const label = `${AGENT_NAMES[report.agent] || report.agent}@${report.version}`;
   console.log(chalk.bold(label));
-  console.log(chalk.gray(`  home: ${report.home}`));
-  console.log(chalk.gray(`  cwd:  ${report.cwd}`));
+  const homePrefix = '  home: ';
+  const cwdPrefix = '  cwd:  ';
+  console.log(chalk.gray(homePrefix + truncateToWidth(report.home, Math.max(1, terminalWidth() - stringWidth(homePrefix)))));
+  console.log(chalk.gray(cwdPrefix + truncateToWidth(report.cwd, Math.max(1, terminalWidth() - stringWidth(cwdPrefix)))));
   const layerStr = [
     report.layers.project ? `project=${report.layers.project}` : null,
     `user=${report.layers.user}`,
@@ -471,7 +514,7 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
       ? `extras=[${report.layers.extras.map((e) => e.alias).join(',')}]`
       : null,
   ].filter(Boolean).join(' ');
-  console.log(chalk.gray(`  layers: ${layerStr}`));
+  printWrappedLine('  layers: ', layerStr);
 
   // Staleness manifest verdict — single-line summary from the staleness
   // library, sitting alongside the detailed per-resource diff below.
@@ -508,7 +551,7 @@ function renderTargetText(report: VersionResourceReport, options: { showDiff: bo
     console.log(chalk.green(`  Verdict: ${ok} resource${ok === 1 ? '' : 's'} reconciled. Version home matches resolved sources.`));
   } else {
     console.log(`  Verdict: ${verdictParts.join(', ')}.`);
-    console.log(chalk.gray(`  Run \`agents doctor ${report.agent}@${report.version} --fix\` to heal, or \`agents prune cleanup\` to drop extras.`));
+    printWrappedLine('  ', `Run \`agents doctor ${report.agent}@${report.version} --fix\` to heal, or \`agents prune cleanup\` to drop extras.`);
   }
 }
 

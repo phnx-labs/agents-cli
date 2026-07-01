@@ -72,7 +72,7 @@ describe('agents cost', () => {
     const big = costOfUsage({ model: 'claude-opus-4', inputTokens: 2_000_000, outputTokens: 1_000_000 });   // ~$35
     const mid = costOfUsage({ model: 'claude-opus-4', inputTokens: 1_000_000, outputTokens: 200_000 });      // ~$10
     const small = costOfUsage({ model: 'claude-haiku-4', inputTokens: 500_000, outputTokens: 100_000 });     // ~$1
-    seed('big0001', 'claude', '2026-05-20T10:00:00.000Z', big, 3_600_000, 'rush', 'expensive refactor');
+    seed('big0001', 'claude', '2026-05-20T10:00:00.000Z', big, 3_600_000, 'rush', 'expensive refactor with a long topic that used to push narrow terminals past eighty columns');
     seed('mid0002', 'claude', '2026-05-21T10:00:00.000Z', mid, 1_800_000, 'agents-cli', 'mid task');
     seed('sml0003', 'codex', '2026-05-21T12:00:00.000Z', small, 300_000, 'agents-cli', 'small fix');
   });
@@ -108,6 +108,22 @@ describe('agents cost', () => {
     expect(out).toContain('expensive refactor');
     // dollar figure rendered cents-precise
     expect(out).toMatch(/\$\d+\.\d{2}/);
+  });
+
+  it('keeps human output within an 80-column terminal', async () => {
+    const prev = process.env.COLUMNS;
+    process.env.COLUMNS = '80';
+    try {
+      const out = await runCost([]);
+      const lines = out.split('\n');
+      expect(Math.max(...lines.map((line) => line.length))).toBeLessThanOrEqual(80);
+      const topRows = lines.filter((line) => line.includes('big0001'));
+      expect(topRows).toHaveLength(1);
+      expect(topRows[0]).not.toContain(' rush ');
+    } finally {
+      if (prev === undefined) delete process.env.COLUMNS;
+      else process.env.COLUMNS = prev;
+    }
   });
 
   it('--by project groups the breakdown by project', async () => {
