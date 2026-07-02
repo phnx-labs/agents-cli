@@ -16,7 +16,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
-import { query, LOGS_PATH, type EventRecord, type EventType } from '../lib/events.js';
+import { query, getLogsPath, type EventRecord, type EventType } from '../lib/events.js';
 
 interface EventsOptions {
   module?: string;
@@ -129,7 +129,7 @@ Examples:
 
       // query() returns newest-first; print oldest-first so a tail reads naturally.
       for (const r of records.slice().reverse()) console.log(renderRow(r));
-      console.log(chalk.gray(`\n${records.length} event(s). Log: ${LOGS_PATH}`));
+      console.log(chalk.gray(`\n${records.length} event(s). Log: ${getLogsPath()}`));
     });
 }
 
@@ -141,7 +141,7 @@ function collect(value: string, previous: string[]): string[] {
 /** Tail today's event file, printing new lines as they land. */
 async function followLog(): Promise<void> {
   const today = new Date();
-  const file = `${LOGS_PATH}/events-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}.jsonl`;
+  const file = `${getLogsPath()}/events-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}.jsonl`;
   let offset = 0;
   try {
     offset = fs.statSync(file).size;

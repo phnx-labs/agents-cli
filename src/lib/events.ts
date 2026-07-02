@@ -28,7 +28,16 @@ import { getLogsDir } from './state.js';
 // have its events silently written to the real profile instead. state.getLogsDir()
 // honors the HOME override on every platform while falling back to os.homedir()
 // (== USERPROFILE on Windows) in production where HOME is unset.
-const LOGS_DIR = getLogsDir();
+//
+// Resolved lazily + memoized: importing this module must NOT call getLogsDir()
+// at eval time. events.ts is pulled in transitively (skills/versions/exec/
+// runner), and several tests mock './state.js' with partial factories that omit
+// getLogsDir — an eager call would crash those on import. Deferring to first use
+// keeps a bare import side-effect-free while staying a one-time resolution.
+let _logsDir: string | undefined;
+function logsDir(): string {
+  return (_logsDir ??= getLogsDir());
+}
 
 /** Default retention period in days. */
 const DEFAULT_RETENTION_DAYS = 7;
@@ -183,16 +192,16 @@ function getLogFilePath(date: Date = new Date()): string {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
-  return path.join(LOGS_DIR, `events-${yyyy}-${mm}-${dd}.jsonl`);
+  return path.join(logsDir(), `events-${yyyy}-${mm}-${dd}.jsonl`);
 }
 
 function ensureLogsDir(): void {
-  if (!fs.existsSync(LOGS_DIR)) {
-    fs.mkdirSync(LOGS_DIR, { recursive: true, mode: DIR_MODE });
+  if (!fs.existsSync(logsDir())) {
+    fs.mkdirSync(logsDir(), { recursive: true, mode: DIR_MODE });
   } else {
     // Ensure permissions are correct on existing dir
     try {
-      fs.chmodSync(LOGS_DIR, DIR_MODE);
+      fs.chmodSync(logsDir(), DIR_MODE);
     } catch {
       // May fail if not owner
     }
@@ -572,10 +581,10 @@ export function emitError(
  */
 export function rotate(retentionDays: number = DEFAULT_RETENTION_DAYS): number {
   try {
-    if (!fs.existsSync(LOGS_DIR)) return 0;
+    if (!fs.existsSync(logsDir())) return 0;
 
     const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
-    const files = fs.readdirSync(LOGS_DIR).filter(f => f.startsWith('events-') && f.endsWith('.jsonl'));
+    const files = fs.readdirSync(logsDir()).filter(f => f.startsWith('events-') && f.endsWith('.jsonl'));
     let removed = 0;
 
     for (const file of files) {
@@ -586,7 +595,7 @@ export function rotate(retentionDays: number = DEFAULT_RETENTION_DAYS): number {
       const fileDate = new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
 
       if (fileDate.getTime() < cutoff) {
-        fs.unlinkSync(path.join(LOGS_DIR, file));
+        fs.unlinkSync(path.join(logsDir(), file));
         removed++;
       }
     }
@@ -631,9 +640,9 @@ export function query(options: {
   const { startDate, endDate = new Date(), eventTypes, agent, command, module, limit } = options;
   const results: EventRecord[] = [];
 
-  if (!fs.existsSync(LOGS_DIR)) return results;
+  if (!fs.existsSync(logsDir())) return results;
 
-  const files = fs.readdirSync(LOGS_DIR)
+  const files = fs.readdirSync(logsDir())
     .filter(f => f.startsWith('events-') && f.endsWith('.jsonl'))
     .sort()
     .reverse();
@@ -661,7 +670,7 @@ export function query(options: {
     if (startDay && fileDate < startDay) continue;
     if (endDay && fileDate > endDay) continue;
 
-    const content = fs.readFileSync(path.join(LOGS_DIR, file), 'utf-8');
+    const content = fs.readFileSync(path.join(logsDir(), file), 'utf-8');
     const lines = content.trim().split('\n').filter(Boolean);
 
     for (const line of lines.reverse()) {
@@ -735,4 +744,6 @@ export function getTimingStats(label: string, options: { days?: number } = {}): 
 
 // ─── Exports ──────────────────────────────────────────────────────────────────
 
-export const LOGS_PATH = LOGS_DIR;
+export function getLogsPath(): string {
+  return logsDir();
+}
