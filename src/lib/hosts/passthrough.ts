@@ -28,6 +28,7 @@ import {
   HOST_ROUTING_SPECS,
   type StripSpec,
 } from './remote-cmd.js';
+import { resolveRemoteOsSync } from './remote-os.js';
 import { machineId } from '../session/sync/config.js';
 
 /** Per-command remote behaviour. Absence from this map = not host-routable here. */
@@ -144,7 +145,7 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
     return true;
   }
 
-  const remoteCmd = buildRemoteAgentsInvocation(forwarded, remoteCwd);
+  const remoteCmd = buildRemoteAgentsInvocation(forwarded, remoteCwd, resolveRemoteOsSync(host.name));
   const code = sshStream(target, remoteCmd, { tty: interactive, multiplex: true });
   if (code === 255) {
     console.error(

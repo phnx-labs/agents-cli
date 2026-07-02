@@ -21,6 +21,7 @@ import {
   bootstrapAgentsCli,
   localCliVersion,
 } from '../lib/hosts/ready.js';
+import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { listTasks } from '../lib/hosts/tasks.js';
 import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import { showHostTaskLog } from '../lib/hosts/logs.js';
@@ -42,19 +43,21 @@ function parseTarget(target: string): { address: string; user?: string } {
 async function maybeBootstrap(
   target: string,
   hostName: string,
-  probe: { reachable: boolean; os?: string } = probeHost(target),
+  probe: { reachable: boolean; os?: string } = probeHost(target, resolveRemoteOsSync(hostName)),
 ): Promise<void> {
   if (!probe.reachable) {
     console.log(chalk.yellow(`  Not reachable over SSH yet — skipping bootstrap. Fix key auth, then: agents hosts check ${hostName}`));
     return;
   }
-  const remoteVer = remoteAgentsVersion(target);
+  // Prefer the OS the probe just observed; fall back to the registry hint.
+  const os = probe.os ?? resolveRemoteOsSync(hostName);
+  const remoteVer = remoteAgentsVersion(target, os);
   const localVer = localCliVersion();
   if (!remoteVer) {
     const ok = await confirm({ message: `  agents-cli not found on ${hostName}. Install ${localVer ? `v${localVer}` : 'latest'} now?`, default: true });
     if (ok) {
       console.log(chalk.gray('  Installing agents-cli on the host…'));
-      const r = bootstrapAgentsCli(target, localVer);
+      const r = bootstrapAgentsCli(target, localVer, os);
       console.log(r.ok ? chalk.green('  Installed.') : chalk.red(`  Install failed:\n${r.output}`));
     }
     return;
@@ -63,7 +66,7 @@ async function maybeBootstrap(
   if (localVer && remoteClean !== localVer) {
     const ok = await confirm({ message: `  ${hostName} has agents-cli ${remoteClean}, you have ${localVer}. Upgrade to match?`, default: false });
     if (ok) {
-      const r = bootstrapAgentsCli(target, localVer);
+      const r = bootstrapAgentsCli(target, localVer, os);
       console.log(r.ok ? chalk.green('  Upgraded.') : chalk.red(`  Upgrade failed:\n${r.output}`));
     }
   }
@@ -157,15 +160,16 @@ async function doCheck(name: string): Promise<void> {
     return;
   }
   const target = sshTargetFor(host);
+  const os = host.os ?? resolveRemoteOsSync(name);
   process.stdout.write(`Probing ${chalk.cyan(name)} (${target})… `);
-  const probe = probeHost(target);
+  const probe = probeHost(target, os);
   if (!probe.reachable) {
     console.log(chalk.red('unreachable'));
     process.exitCode = 1;
     return;
   }
   console.log(chalk.green('reachable') + chalk.gray(probe.os ? ` · ${probe.os}` : ''));
-  const ver = remoteAgentsVersion(target);
+  const ver = remoteAgentsVersion(target, probe.os ?? os);
   console.log(`  agents-cli: ${ver ? chalk.green(ver) : chalk.yellow('not installed')}`);
 }
 
