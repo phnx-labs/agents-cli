@@ -33,57 +33,67 @@ export function localCliVersion(): string | null {
   return null;
 }
 
+/** ssh command that confirms reachability and echoes the OS. POSIX boxes answer
+ * `uname -s`; a Windows target has no `uname` (ssh lands in cmd.exe/PowerShell),
+ * so it runs a tiny PowerShell probe. Pure/exported so both branches are
+ * unit-testable without ssh. */
+export function buildProbeCommand(os?: string): string {
+  if (remoteShellFor(os) === 'powershell') {
+    return `powershell -NoProfile -EncodedCommand ${encodePowershell('[System.Environment]::OSVersion.Platform.ToString()')}`;
+  }
+  return 'uname -s 2>/dev/null || echo unknown';
+}
+
 /**
- * Reachability + OS probe over ssh. POSIX boxes answer `uname -s`; a Windows
- * target has no `uname` and ssh lands in cmd.exe/PowerShell, so we run a tiny
- * PowerShell probe instead and report the already-known platform. `os` is the
- * caller's hint (device-registry platform / enrolled `HostEntry.os`); when it
- * marks the host Windows we take the PowerShell path, otherwise POSIX.
+ * Reachability + OS probe over ssh. `os` is the caller's hint (device-registry
+ * platform / enrolled `HostEntry.os`); when it marks the host Windows we take
+ * the PowerShell path and report that known platform, otherwise POSIX + uname.
  */
 export function probeHost(target: string, os?: string): { reachable: boolean; os?: string } {
-  if (remoteShellFor(os) === 'powershell') {
-    const probe = encodePowershell('[System.Environment]::OSVersion.Platform.ToString()');
-    const r = sshExec(target, `powershell -NoProfile -EncodedCommand ${probe}`, { timeoutMs: 12000 });
-    if (r.code !== 0) return { reachable: false };
-    return { reachable: true, os };
-  }
-  const r = sshExec(target, 'uname -s 2>/dev/null || echo unknown', { timeoutMs: 12000 });
+  const r = sshExec(target, buildProbeCommand(os), { timeoutMs: 12000 });
   if (r.code !== 0) return { reachable: false };
+  if (remoteShellFor(os) === 'powershell') return { reachable: true, os };
   const uname = r.stdout.trim();
   return { reachable: true, os: uname && uname !== 'unknown' ? uname : undefined };
 }
 
+/** ssh command that prints the remote agents-cli version. Pure/exported. */
+export function buildRemoteVersionCommand(os?: string): string {
+  return remoteShellFor(os) === 'powershell'
+    ? buildWindowsAgentsCommand({ args: ['--version'] })
+    : 'bash -lc "agents --version 2>/dev/null"';
+}
+
 /** Remote agents-cli version (PATH-resolved on the remote), or null if not installed. */
 export function remoteAgentsVersion(target: string, os?: string): string | null {
-  const cmd =
-    remoteShellFor(os) === 'powershell'
-      ? buildWindowsAgentsCommand({ args: ['--version'] })
-      : 'bash -lc "agents --version 2>/dev/null"';
-  const r = sshExec(target, cmd, { timeoutMs: 20000 });
+  const r = sshExec(target, buildRemoteVersionCommand(os), { timeoutMs: 20000 });
   if (r.code !== 0) return null;
   const v = r.stdout.trim();
   return v || null;
 }
 
-/** Install (or upgrade to) a specific agents-cli version on the remote, then `agents setup`. */
-export function bootstrapAgentsCli(target: string, version: string | null, os?: string): { ok: boolean; output: string } {
-  const spec = version ? `@phnx-labs/agents-cli@${version}` : '@phnx-labs/agents-cli';
-  let cmd: string;
+/** ssh command that installs/upgrades agents-cli to `spec` then `agents setup`.
+ * PowerShell has no `tail`/`[ -d ]`/`||`, so the Windows branch uses native
+ * equivalents (`Select-Object -Last`, `Test-Path`). Pure/exported. */
+export function buildBootstrapCommand(spec: string, os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
-    // PowerShell has no `tail`/`[ -d ]`/`||`; use its native equivalents.
     const script =
       `npm install -g ${powershellQuote(spec)} 2>&1 | Select-Object -Last 3; ` +
       `if (-not (Test-Path "$HOME/.agents/.system")) { agents setup 2>&1 | Select-Object -Last 3 }; ` +
       `agents --version`;
-    cmd = `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
-  } else {
-    const script =
-      `npm install -g ${shellQuote(spec)} 2>&1 | tail -3; ` +
-      `if [ ! -d ~/.agents/.system ]; then agents setup 2>&1 | tail -3 || true; fi; ` +
-      `agents --version`;
-    cmd = `bash -lc ${shellQuote(script)}`;
+    return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
   }
-  const r = sshExec(target, cmd, { timeoutMs: 300000 });
+  const script =
+    `npm install -g ${shellQuote(spec)} 2>&1 | tail -3; ` +
+    `if [ ! -d ~/.agents/.system ]; then agents setup 2>&1 | tail -3 || true; fi; ` +
+    `agents --version`;
+  return `bash -lc ${shellQuote(script)}`;
+}
+
+/** Install (or upgrade to) a specific agents-cli version on the remote, then `agents setup`. */
+export function bootstrapAgentsCli(target: string, version: string | null, os?: string): { ok: boolean; output: string } {
+  const spec = version ? `@phnx-labs/agents-cli@${version}` : '@phnx-labs/agents-cli';
+  const r = sshExec(target, buildBootstrapCommand(spec, os), { timeoutMs: 300000 });
   return { ok: r.code === 0, output: (r.stdout + r.stderr).trim() };
 }
 
@@ -107,22 +117,28 @@ export interface ReadyProbe {
  * rather than the exit code, so a command that ran-but-failed is never mistaken
  * for a dead connection (only ssh's own failure drops the sentinel).
  */
-export function readyProbe(target: string, os?: string): ReadyProbe {
-  let cmd: string;
+/**
+ * The one-shot readiness command (version + sentinel + agent listing). The
+ * Windows branch emits the sentinel with `Write-Output` and branches on
+ * `$LASTEXITCODE` (no `printf`/`||`); `parseReadyProbe` keys off the sentinel
+ * substring, so the missing leading newline vs the POSIX `printf '\n…'` form is
+ * absorbed by its `.trim()`. Pure/exported so both branches are unit-testable.
+ */
+export function buildReadyProbeCommand(os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
-    // No `printf`/`||`; emit the sentinel with Write-Output and branch on
-    // $LASTEXITCODE. Reachability still keys off the sentinel, not the code.
     const script =
       `agents --version 2>$null; Write-Output "${READY_MARKER}"; ` +
       `agents view 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`;
-    cmd = `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
-  } else {
-    const script =
-      `agents --version 2>/dev/null; printf '\\n${READY_MARKER}\\n'; ` +
-      `agents view 2>/dev/null || agents list 2>/dev/null`;
-    cmd = `bash -lc ${shellQuote(script)}`;
+    return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
   }
-  const r = sshExec(target, cmd, { timeoutMs: 20000 });
+  const script =
+    `agents --version 2>/dev/null; printf '\\n${READY_MARKER}\\n'; ` +
+    `agents view 2>/dev/null || agents list 2>/dev/null`;
+  return `bash -lc ${shellQuote(script)}`;
+}
+
+export function readyProbe(target: string, os?: string): ReadyProbe {
+  const r = sshExec(target, buildReadyProbeCommand(os), { timeoutMs: 20000 });
   return parseReadyProbe(r.stdout);
 }
 
