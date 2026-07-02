@@ -3,6 +3,7 @@ import {
   parseProcEnviron,
   extractKnownEnv,
   parseSshConnection,
+  parseItermSession,
   deriveProvenance,
   detectProvenance,
   PROVENANCE_ENV_KEYS,
@@ -67,6 +68,21 @@ describe('parseSshConnection', () => {
   });
 });
 
+describe('parseItermSession', () => {
+  it('extracts the UUID after the wNtNpN: prefix (what `id of session` returns)', () => {
+    expect(parseItermSession('w0t1p0:9F2A-UUID')).toBe('9F2A-UUID');
+  });
+
+  it('tolerates a bare value with no colon', () => {
+    expect(parseItermSession('9F2A-UUID')).toBe('9F2A-UUID');
+  });
+
+  it('returns undefined for empty / absent', () => {
+    expect(parseItermSession(undefined)).toBeUndefined();
+    expect(parseItermSession('')).toBeUndefined();
+  });
+});
+
 describe('deriveProvenance', () => {
   it('local + tmux pane yields a tmux reply rail (addressable)', () => {
     const p = deriveProvenance(
@@ -88,11 +104,28 @@ describe('deriveProvenance', () => {
     expect(p.ssh).toEqual({ clientIp: '203.0.113.7', clientPort: 51828, serverIp: '10.0.0.3', serverPort: 22 });
   });
 
-  it('no tmux, no ssh => local and NOT addressable (reply null)', () => {
+  it('iTerm split (no tmux) yields an iterm reply rail carrying the session UUID', () => {
+    const p = deriveProvenance(
+      { TERM_PROGRAM: 'iTerm.app', ITERM_SESSION_ID: 'w0t2p1:AAAA-BBBB' },
+      'zion',
+    );
+    expect(p.mux).toBeUndefined();
+    expect(p.reply).toEqual({ rail: 'iterm', session: 'AAAA-BBBB' });
+  });
+
+  it('tmux inside iTerm still prefers the tmux rail (works inside any host app)', () => {
+    const p = deriveProvenance(
+      { TERM_PROGRAM: 'iTerm.app', ITERM_SESSION_ID: 'w0t0p0:UUID', TMUX: '/tmp/s,1,0', TMUX_PANE: '%7' },
+      'zion',
+    );
+    expect(p.reply).toEqual({ rail: 'tmux', target: '%7', socket: '/tmp/s' });
+  });
+
+  it('no tmux, no iterm, no ssh => local and NOT addressable (reply null)', () => {
     const p = deriveProvenance({ TERM_PROGRAM: 'vscode' }, 'this-mac');
     expect(p.transport).toBe('local');
     expect(p.mux).toBeUndefined();
-    expect(p.reply).toBeNull(); // inherited/ignored stdin — feed shows read-only
+    expect(p.reply).toBeNull(); // plain VS Code integrated terminal — resolver checks disk instead
   });
 
   it('screen session is recognized but not (yet) addressable', () => {

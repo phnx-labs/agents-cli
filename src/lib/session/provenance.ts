@@ -15,9 +15,22 @@
  * (gone, or owned by another uid) yields `undefined`, never a guess.
  *
  * `reply` is a read-only hint, not a send channel: it reports whether a rail
- * that can type back into this session exists today (tmux pane => addressable;
- * inherited/ignored stdin => null). The feed uses it to decide whether to show
- * a Send box. Actually delivering the keystrokes is Gap 2 (pty/tmux send-keys).
+ * that can type back into this session exists today and, if so, the exact
+ * address to type into. Two env-derived rails, in precedence order:
+ *
+ *   - tmux  — `$TMUX_PANE` (+ `$TMUX` socket): `tmux send-keys -t <pane>`. Works
+ *             inside ANY host app (a tmux pane can live under iTerm/Ghostty/VS
+ *             Code), so it wins whenever present.
+ *   - iterm — `$ITERM_SESSION_ID` (`w<n>t<n>p<n>:<UUID>`): the exact iTerm2
+ *             split, addressable by its session UUID via `tell session id …`
+ *             (focus-safe, no `activate`). Used when there's no tmux above it.
+ *
+ * Both are inherited env vars, so the split the agent lives in is recovered with
+ * zero cooperation from the agent. Inherited/ignored stdin with neither rail =>
+ * null (not env-addressable — resolution may still find an IDE rail off disk,
+ * see src/lib/terminal/resolve.ts). The feed uses `reply` to decide whether to
+ * show a Send box; the resolver turns it into a concrete inject target (Gap 2,
+ * src/lib/terminal/inject.ts).
  */
 import * as os from 'os';
 import { execFile } from 'child_process';
@@ -43,9 +56,11 @@ export interface MuxLocation {
   session?: string;
 }
 
-/** How the feed can type back into a session, derived from rails that exist today. */
+/** How the feed can type back into a session, derived from env rails that exist today. */
 export type ReplyRail =
   | { rail: 'tmux'; target: string; socket?: string }
+  /** iTerm2 split addressed by its session UUID (the part of $ITERM_SESSION_ID after ':'). */
+  | { rail: 'iterm'; session: string }
   | null;
 
 export interface SessionProvenance {
@@ -71,7 +86,20 @@ export const PROVENANCE_ENV_KEYS = [
   'TMUX_PANE',
   'TERM_PROGRAM',
   'STY',
+  'ITERM_SESSION_ID',
 ] as const;
+
+/**
+ * Extract the iTerm2 session UUID from `$ITERM_SESSION_ID`, whose value is
+ * `w<window>t<tab>p<pane>:<UUID>` — the `:`-suffix is exactly what iTerm2's
+ * `id of session` returns, so it's the address for `tell session id …`. Returns
+ * undefined for an empty/absent value; tolerates a bare value with no `:`.
+ */
+export function parseItermSession(value?: string): string | undefined {
+  if (!value) return undefined;
+  const uuid = value.includes(':') ? value.slice(value.lastIndexOf(':') + 1) : value;
+  return uuid.trim() || undefined;
+}
 
 /** Parse the NUL-separated body of /proc/<pid>/environ into a plain object. */
 export function parseProcEnviron(buf: string): Record<string, string> {
@@ -140,13 +168,19 @@ export function deriveProvenance(env: Record<string, string>, hostname: string):
     mux = { kind: 'screen', session: env.STY };
   }
 
-  // A tmux pane is the one rail that lets an external process type into an
-  // already-running interactive agent (`tmux send-keys -t <pane>`). Everything
-  // else (inherited stdin from `agents run`, ignored stdin from teams) is not
-  // externally addressable without relaunching under a pty/tmux rail.
-  const reply: ReplyRail = mux?.kind === 'tmux' && mux.pane
-    ? { rail: 'tmux', target: mux.pane, socket: mux.socket }
-    : null;
+  // Env-addressable rails, in precedence order. A tmux pane wins because it can
+  // live inside any host app (`tmux send-keys -t <pane>` reaches it regardless of
+  // whether iTerm/Ghostty/VS Code is above it). Absent tmux, an iTerm2 split is
+  // addressable by its session UUID. Everything else (inherited stdin from
+  // `agents run`, ignored stdin from teams, a plain VS Code integrated terminal)
+  // is not env-addressable — the resolver may still find an IDE rail off disk.
+  const itermSession = parseItermSession(env.ITERM_SESSION_ID);
+  const reply: ReplyRail =
+    mux?.kind === 'tmux' && mux.pane
+      ? { rail: 'tmux', target: mux.pane, socket: mux.socket }
+      : itermSession
+        ? { rail: 'iterm', session: itermSession }
+        : null;
 
   return {
     host: hostname,
