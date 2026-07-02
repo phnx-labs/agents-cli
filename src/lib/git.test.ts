@@ -119,6 +119,14 @@ describe('syncRepoGit', () => {
     // Author clone seeds the first commit and pushes it.
     await simpleGit().clone(remote, author);
     await configIdentity(author);
+    // Commit `* -text` so every clone checks out byte-identical LF content
+    // regardless of the machine's core.autocrlf. On Windows CI (autocrlf=true)
+    // the *checkout* during `git clone` runs before configIdentity() can set
+    // autocrlf=false on the fresh clone, so the local working tree would come
+    // out as CRLF and `status.isClean()` would see a phantom modification —
+    // making syncRepoGit refuse with "uncommitted changes". A committed
+    // .gitattributes wins over autocrlf at checkout time and prevents that.
+    fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
     await commitFile(author, 'README.md', 'v1\n', 'init');
     await simpleGit(author).push('origin', 'main');
 
