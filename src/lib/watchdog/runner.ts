@@ -226,12 +226,34 @@ interface NudgeDecision {
   text?: string;
 }
 
+/**
+ * Minimal local mirror of COMPLETION_HINTS in watchdog.ts:42-47. We cannot lean
+ * on isLikelyTrulyBlocked to screen completions out: its FORCE_REVIEW_STALL_MS
+ * short-circuit (watchdog.ts:171 — `stalledForMs >= 15m` returns true) fires
+ * BEFORE its own COMPLETION_HINTS check (watchdog.ts:176), so a session idle
+ * 15m-60m whose tail says "done"/"finished" would be reported as blocked. Keep
+ * this list in sync with the core.
+ */
+const COMPLETION_HINTS = ['done', 'completed', 'all set', 'finished'];
+
+function tailShowsCompletion(candidate: WatchdogCandidate): boolean {
+  if (candidate.tailLines.length === 0) return false;
+  const lowerTail = candidate.tailLines.join('\n').toLowerCase();
+  return COMPLETION_HINTS.some((hint) => lowerTail.includes(hint));
+}
+
 function deterministicDecision(
   session: ActiveSession,
   candidate: WatchdogCandidate,
 ): NudgeDecision {
   if (session.activity === 'waiting_input') {
     return { nudge: false, reason: `waiting on user${session.awaitingReason ? ` (${session.awaitingReason})` : ''}` };
+  }
+  // Completion is checked EXPLICITLY here — never nudge a finished session, even
+  // past the 15m force-review window where isLikelyTrulyBlocked would return true
+  // before reaching its completion check (see COMPLETION_HINTS note above).
+  if (tailShowsCompletion(candidate)) {
+    return { nudge: false, reason: 'tail shows completion (done / finished / all set) — skip regardless of stall age' };
   }
   if (isLikelyTrulyBlocked(candidate)) {
     return { nudge: true, reason: 'stalled after announcing an action with no follow-through' };
@@ -310,8 +332,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       outcomes.push({ ...base, reason: 'no session id (cannot address or track)' });
       continue;
     }
-    // `off` = fully opted out. classifyTerminal short-circuits to opted_out too,
-    // but we report the policy reason explicitly.
+    // `off` = fully opted out. We short-circuit here rather than relying on
+    // classifyTerminal (which is always called with optedOut: false below), so the
+    // policy reason is reported explicitly.
     if (policy === 'off') {
       outcomes.push({ ...base, stall: 'opted_out', reason: 'policy: off (opted out)' });
       continue;
@@ -381,8 +404,14 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       continue;
     }
 
-    // handsoff = detect + flag, but never inject.
+    // handsoff = detect + flag, but never inject. Record a flag so the tray can
+    // surface "would-nudge but hands-off" alongside the un-addressable flags.
     if (policy === 'handsoff') {
+      flags[session.sessionId] = {
+        reason: `handsoff: would nudge via ${resolution.rail} but policy is hands-off`,
+        host: session.host,
+        atMs: nowMs,
+      };
       outcomes.push({
         ...base, decision: 'nudge', addressable: true, rail: resolution.rail, injected: false,
         reason: `handsoff: flagged, not injected (would nudge via ${resolution.rail})`,
