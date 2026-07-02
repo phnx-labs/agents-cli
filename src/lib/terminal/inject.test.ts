@@ -23,6 +23,8 @@ import {
   itermInjectScript,
   ghosttyInjectScript,
   appleScriptInjectSpec,
+  vscodiumInjectUri,
+  vscodiumInjectSpec,
 } from './inject.js';
 
 const linuxCtx: EngineContext = { platform: 'linux', env: {} as NodeJS.ProcessEnv };
@@ -69,26 +71,71 @@ describe('tmuxInjectSpecs', () => {
 });
 
 describe('itermInjectScript', () => {
-  it('keystrokes the text then a SEPARATE Return (Ink-safe) into the current session', () => {
+  it('writes into the current session with NO activate (focus-safe) and a separate CR Enter', () => {
     const s = itermInjectScript('continue', { enter: true });
     expect(s).toContain('tell application "iTerm2"');
-    expect(s).toContain('keystroke "continue"');
-    expect(s).toContain('key code 36');
-    expect(s.indexOf('keystroke "continue"')).toBeLessThan(s.indexOf('key code 36'));
+    expect(s).toContain('tell current session of current window');
+    // Focus-safe: never activates iTerm or steals the frontmost split.
+    expect(s).not.toContain('activate');
+    // Ink-safe: text without a fused newline, then a SEPARATE lone CR.
+    expect(s).toContain('write text "continue" newline no');
+    expect(s).toContain('write text (character id 13) newline no');
+    expect(s.indexOf('write text "continue"')).toBeLessThan(s.indexOf('character id 13'));
   });
 
-  it('addresses a specific session by id when given one', () => {
+  it('addresses the EXACT split by session id (tell session id …), never the frontmost', () => {
     const s = itermInjectScript('go', { session: 'ABC-123', enter: true });
-    expect(s).toContain('if (id of s) is "ABC-123" then');
-    expect(s).toContain('select w');
+    expect(s).toContain('tell session id "ABC-123"');
+    expect(s).not.toContain('current session');
+    expect(s).not.toContain('activate');
   });
 
-  it('omits the Return event when enter is false', () => {
-    expect(itermInjectScript('partial', { enter: false })).not.toContain('key code 36');
+  it('combined fuses text+Enter into one auto-newline write (plain shells / REPLs)', () => {
+    const s = itermInjectScript('go', { enter: true, combined: true });
+    expect(s).toContain('write text "go"');
+    expect(s).not.toContain('newline no');
+    expect(s).not.toContain('character id 13');
+  });
+
+  it('omits the Return event when enter is false (text only, no newline)', () => {
+    const s = itermInjectScript('partial', { enter: false });
+    expect(s).toContain('write text "partial" newline no');
+    expect(s).not.toContain('character id 13');
   });
 
   it('escapes quotes in the injected text via the engine appleScriptStr', () => {
-    expect(itermInjectScript('say "hi"', { enter: false })).toContain('keystroke "say \\"hi\\""');
+    expect(itermInjectScript('say "hi"', { enter: false })).toContain('write text "say \\"hi\\"" newline no');
+  });
+});
+
+describe('vscodiumInjectUri', () => {
+  it('builds a base64url /inject URL whose decoded payload carries id + text + flags', () => {
+    const uri = vscodiumInjectUri('vscodium', 'sess-uuid', 'continue', { enter: true, combined: false });
+    expect(uri.startsWith('vscodium://swarmify.swarm-ext/inject?p=')).toBe(true);
+    const p = uri.split('p=')[1];
+    // base64url alphabet only — survives VS Code's single percent-decode of uri.query.
+    expect(p).toMatch(/^[A-Za-z0-9_-]+$/);
+    const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+    expect(payload).toEqual({ terminalId: 'sess-uuid', text: 'continue', enter: true, combined: false });
+  });
+
+  it('round-trips a text containing & and = untouched (the reason for base64url)', () => {
+    const uri = vscodiumInjectUri('cursor', 't1', 'echo a && b = c', { enter: true, combined: false });
+    const payload = JSON.parse(Buffer.from(uri.split('p=')[1], 'base64url').toString('utf8'));
+    expect(payload.text).toBe('echo a && b = c');
+  });
+});
+
+describe('vscodiumInjectSpec', () => {
+  it('invokes the editor CLI with --open-url and the inject URI', () => {
+    const spec = vscodiumInjectSpec(
+      { backend: 'vscodium', terminalId: 't1', cli: 'codium', scheme: 'vscodium' },
+      'hi',
+      { enter: true, combined: false },
+    );
+    expect(spec.argv[0]).toBe('codium');
+    expect(spec.argv[1]).toBe('--open-url');
+    expect(spec.argv[2].startsWith('vscodium://swarmify.swarm-ext/inject?p=')).toBe(true);
   });
 });
 
@@ -109,10 +156,16 @@ describe('ghosttyInjectScript', () => {
 });
 
 describe('appleScriptInjectSpec', () => {
-  it('wraps the script as an osascript spec', () => {
+  it('wraps the iterm write-text script as an osascript spec', () => {
     const spec = appleScriptInjectSpec({ backend: 'iterm' }, 'hi', true);
     expect(spec.argv[0]).toBe('osascript');
     expect(spec.argv[1]).toBe('-e');
+    expect(spec.argv[2]).toContain('write text "hi"');
+  });
+
+  it('wraps the ghostty keystroke script as an osascript spec (coarse path)', () => {
+    const spec = appleScriptInjectSpec({ backend: 'ghostty' }, 'hi', true);
+    expect(spec.argv[0]).toBe('osascript');
     expect(spec.argv[2]).toContain('keystroke "hi"');
   });
 });
@@ -130,6 +183,31 @@ describe('injectIntoTerminal — macOS backends off-darwin', () => {
     expect(res.ok).toBe(true);
     expect(res.writes).toBe(2);
     expect(res.specs?.[0].argv.join(' ')).toContain('keystroke "hi"');
+  });
+});
+
+describe('injectIntoTerminal — vscodium routing', () => {
+  it('dryRun returns the editor-CLI --open-url spec and the Ink-safe two-write count', async () => {
+    const res = await injectIntoTerminal(
+      { backend: 'vscodium', terminalId: 't1', cli: 'codium', scheme: 'vscodium' },
+      'continue',
+      { dryRun: true },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.backend).toBe('vscodium');
+    expect(res.writes).toBe(2);
+    expect(res.specs?.[0].argv[0]).toBe('codium');
+    expect(res.specs?.[0].argv[1]).toBe('--open-url');
+    expect(res.specs?.[0].argv[2]).toContain('swarmify.swarm-ext/inject');
+  });
+
+  it('combined collapses to a single write on the extension side', async () => {
+    const res = await injectIntoTerminal(
+      { backend: 'vscodium', terminalId: 't1', cli: 'cursor', scheme: 'cursor' },
+      'ls',
+      { dryRun: true, combined: true },
+    );
+    expect(res.writes).toBe(1);
   });
 });
 

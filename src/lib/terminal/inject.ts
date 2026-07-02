@@ -15,13 +15,24 @@
  * (`--host` over SSH) execution for free. A `LaunchSpec` never opens anything;
  * building one is side-effect-free and unit-testable without a display.
  *
- * Backends:
+ * Backends (each addresses the EXACT split, not the frontmost surface):
  *   - tmux  → `tmux send-keys -t <pane>` — the send-keys primitive addressed by
- *             pane id + socket (the exact rail provenance.ts:147-149 identifies).
- *   - iterm/ghostty (macOS) → AppleScript that ADDRESSES the target window/tab
- *             and injects via System Events keystrokes. Uses the engine's
- *             `appleScriptStr` escaper; guarded by the backend's own
- *             `isAvailable` (platform + app installed).
+ *             pane id + socket (the exact rail provenance.ts identifies).
+ *   - iterm (macOS) → AppleScript `tell session id "<uuid>" to write text` —
+ *             addresses the precise iTerm2 split by its session UUID WITHOUT
+ *             `activate`, so it never steals focus or types into the wrong split.
+ *             Uses the engine's `appleScriptStr` escaper; guarded by the iterm
+ *             backend's `isAvailable` (platform + app installed).
+ *   - vscodium (VSCodium / Cursor / VS Code) → the editor CLI's `--open-url`
+ *             into the swarmify `swarm-ext` extension's `/inject` verb, targeting
+ *             a live-terminals.json terminal by id. Focus-independent, exact
+ *             terminal, and (like the launch backend, src/lib/terminal/backends/
+ *             vscodium-agent.ts) works over `--host` SSH and on Linux.
+ *   - ghostty (macOS) → COARSE only: Ghostty has no scripting dictionary, so
+ *             there is no per-split addressing — this raises a window and types
+ *             via System Events keystrokes, stealing focus. The resolver refuses
+ *             to route here by default (see resolve.ts); it stays behind an
+ *             explicit opt-in.
  *   - pty   → the `agents pty write` sidecar path (ptyRequest). Local-only —
  *             the sidecar is not an engine transport surface.
  *
@@ -45,6 +56,13 @@ import { currentContext, type LaunchSpec, type EngineContext } from './types.js'
 export type InjectTarget =
   | { backend: 'tmux'; pane: string; socket?: string }
   | { backend: 'iterm'; session?: string }
+  /**
+   * A VSCodium / Cursor / VS Code integrated terminal, addressed by the id the
+   * swarm-ext extension keys `live-terminals.json` on (the session UUID). `cli`
+   * is the editor CLI on PATH (`codium` / `cursor` / `code`); `scheme` is its
+   * URL scheme (`vscodium` / `cursor` / `vscode`) — the resolver fills both.
+   */
+  | { backend: 'vscodium'; terminalId: string; cli: string; scheme: string }
   | { backend: 'ghostty'; window?: string }
   | { backend: 'pty'; id: string };
 
@@ -129,31 +147,46 @@ export function tmuxInjectSpecs(
 // --- macOS (iterm / ghostty) ------------------------------------------------
 
 /**
- * AppleScript that brings the target iTerm2 session (tab) to the front, then
- * injects `text` and — when `enter` — a SEPARATE Return keypress (`key code 36`)
- * so the Ink TUI sees Enter as its own event. Omitting `session` types into the
- * current session.
+ * AppleScript that types into a SPECIFIC iTerm2 split via `tell session id
+ * "<uuid>" to write text` — the exact split provenance's iterm rail identifies,
+ * addressed by its session UUID. Crucially there is NO `activate`: `write text`
+ * delivers to that session directly, so injection never brings iTerm forward or
+ * types into whatever split happens to be focused. Omitting `session` targets
+ * the current session (a direct-call convenience; the resolver always supplies
+ * one).
+ *
+ * Enter semantics — iTerm's `write text` appends a trailing newline, which fuses
+ * text+Enter into ONE write and Claude's Ink TUI swallows it. So the Ink-safe
+ * default (enter, not combined) suppresses that newline (`write text … newline
+ * no`) and sends the Return as a SEPARATE `write text` of a lone CR (`character
+ * id 13`) — two distinct pty writes, Enter seen on its own. `combined` opts into
+ * the single fused `write text` (auto-newline) for plain shells / REPLs.
+ *
+ * NOTE (macOS-only verification pending): the two-write CR path is the safe
+ * choice because it mirrors the tmux/pty Ink-safe split that IS verified here on
+ * Linux; whether a single `write text T` would also submit under Ink can only be
+ * confirmed on a Mac running iTerm (see the PR body).
  */
-export function itermInjectScript(text: string, opts: { session?: string; enter: boolean }): string {
-  const lines: string[] = ['tell application "iTerm2"', '  activate'];
-  if (opts.session) {
-    lines.push(
-      '  repeat with w in windows',
-      '    repeat with t in tabs of w',
-      '      repeat with s in sessions of t',
-      `        if (id of s) is ${appleScriptStr(opts.session)} then`,
-      '          select w',
-      '          tell w to select t',
-      '        end if',
-      '      end repeat',
-      '    end repeat',
-      '  end repeat',
-    );
-  }
-  lines.push('end tell');
-  lines.push(`tell application "System Events" to keystroke ${appleScriptStr(text)}`);
-  if (opts.enter) lines.push('tell application "System Events" to key code 36');
-  return lines.join('\n');
+export function itermInjectScript(text: string, opts: { session?: string; enter: boolean; combined?: boolean }): string {
+  // Two writes for the Ink-safe default; one fused write for combined / enter=false.
+  const body: string[] =
+    opts.enter && opts.combined
+      ? [`write text ${appleScriptStr(text)}`]
+      : opts.enter
+        ? [`write text ${appleScriptStr(text)} newline no`, 'write text (character id 13) newline no']
+        : [`write text ${appleScriptStr(text)} newline no`];
+
+  const target = opts.session
+    ? `session id ${appleScriptStr(opts.session)}`
+    : 'current session of current window';
+
+  return [
+    'tell application "iTerm2"',
+    `  tell ${target}`,
+    ...body.map((l) => `    ${l}`),
+    '  end tell',
+    'end tell',
+  ].join('\n');
 }
 
 /**
@@ -173,17 +206,62 @@ export function ghosttyInjectScript(text: string, opts: { window?: string; enter
   return lines.join('\n');
 }
 
-/** The osascript spec for a macOS injection. One invocation delivers keystroke + Return. */
+/** The osascript spec for a macOS injection. One invocation delivers the text + Return. */
 export function appleScriptInjectSpec(
   target: Extract<InjectTarget, { backend: 'iterm' | 'ghostty' }>,
   text: string,
   enter: boolean,
+  combined = false,
 ): LaunchSpec {
   const script =
     target.backend === 'iterm'
-      ? itermInjectScript(text, { session: target.session, enter })
+      ? itermInjectScript(text, { session: target.session, enter, combined })
       : ghosttyInjectScript(text, { window: target.window, enter });
   return { argv: ['osascript', '-e', script] };
+}
+
+// --- vscodium (VSCodium / Cursor / VS Code integrated terminal) -------------
+
+/** The swarmify extension identifier that owns the swarm-ext URI verbs (matches the launch backend). */
+const EXTENSION_AUTHORITY = 'swarmify.swarm-ext';
+
+/**
+ * The `<scheme>://swarmify.swarm-ext/inject?p=<payload>` URL the extension
+ * handles to type into an ALREADY-open integrated terminal (the inject sibling
+ * of the launch backend's `/spawn`, src/lib/terminal/backends/vscodium-agent.ts).
+ *
+ * Payload is base64url-encoded JSON in a single `p` param — identical encoding
+ * to `spawnUri`, and for the same reason: VS Code percent-decodes `uri.query`
+ * once before the extension parses it, so a naive multi-param query would
+ * mis-split a text containing `&`/`=`; base64url (`[A-Za-z0-9_-]`) survives that
+ * decode untouched. `terminalId` is the id the extension keys live-terminals.json
+ * on (the session UUID); `enter` tells the extension to submit; `combined` asks
+ * it to fuse text+Enter into one write (default is the Ink-safe two-write split,
+ * mirroring the tmux/iterm paths — the extension owns that split on its side).
+ *
+ * DEPENDENCY: the `/inject` verb ships in the swarm-ext extension via PR #608's
+ * successor (PR #608 introduces `/spawn`; the inject verb + `write`/`enter`
+ * handling is its follow-up). Until that lands, this routes correctly on the CLI
+ * side but the extension will no-op the unknown verb. See the PR body.
+ */
+export function vscodiumInjectUri(
+  scheme: string,
+  terminalId: string,
+  text: string,
+  opts: { enter: boolean; combined: boolean },
+): string {
+  const payload = { terminalId, text, enter: opts.enter, combined: opts.combined };
+  const p = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  return `${scheme}://${EXTENSION_AUTHORITY}/inject?p=${p}`;
+}
+
+/** The editor-CLI spec for a VSCodium/Cursor/VS Code injection (one `--open-url` invocation). */
+export function vscodiumInjectSpec(
+  target: Extract<InjectTarget, { backend: 'vscodium' }>,
+  text: string,
+  opts: { enter: boolean; combined: boolean },
+): LaunchSpec {
+  return { argv: [target.cli, '--open-url', vscodiumInjectUri(target.scheme, target.terminalId, text, opts)] };
 }
 
 // --- pty --------------------------------------------------------------------
@@ -231,15 +309,18 @@ export async function injectIntoTerminal(
     return injectPty(target, text, { enter, combined, host: opts.host, dryRun: opts.dryRun });
   }
 
-  // tmux + AppleScript backends run through the engine transport.
+  // tmux + AppleScript + editor-CLI backends all run through the engine transport.
   const specs =
     target.backend === 'tmux'
       ? tmuxInjectSpecs(target, text, { enter, combined, socket: opts.socket })
-      : [appleScriptInjectSpec(target, text, enter)];
+      : target.backend === 'vscodium'
+        ? [vscodiumInjectSpec(target, text, { enter, combined })]
+        : [appleScriptInjectSpec(target, text, enter, combined)];
 
-  // A macOS keystroke injection is one osascript spec that emits keystroke +
-  // Return, i.e. two writes; tmux/pty count their discrete send-keys/write calls.
-  const writes = target.backend === 'tmux' ? specs.length : enter ? 2 : 1;
+  // tmux counts its discrete send-keys calls; the single-invocation backends
+  // (osascript / editor CLI) deliver text + a separate Return = two writes on
+  // their side (one when there's no Enter, or when fused via `combined`).
+  const writes = target.backend === 'tmux' ? specs.length : enter && !combined ? 2 : 1;
 
   if (opts.dryRun) return { ok: true, backend: target.backend, writes, specs };
 
