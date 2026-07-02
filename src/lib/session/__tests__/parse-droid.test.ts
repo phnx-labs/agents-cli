@@ -8,9 +8,12 @@ import { describe, expect, test } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'node:url';
 import { parseDroid, detectAgent, parseSession } from '../parse.js';
 
-const TESTDATA = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'testdata');
+// fileURLToPath (not new URL().pathname) — on Windows the latter yields
+// "/C:/…", so path.join produces a doubled-drive "C:\C:\…" that ENOENTs.
+const TESTDATA = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'testdata');
 
 function writeTmp(content: string): string {
   const dir = path.join(os.tmpdir(), `droid-parse-${Date.now()}-${Math.random()}`, '.factory', 'sessions', 'proj');
