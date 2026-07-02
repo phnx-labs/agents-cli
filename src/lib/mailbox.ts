@@ -42,8 +42,12 @@ export interface MailboxMessage {
  * against, and would be dropped with no error. Also blocks `.`/`..` traversal
  * once `agents message` starts accepting external target ids.
  */
+export function isValidMailboxId(mailboxId: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(mailboxId) && mailboxId !== '.' && mailboxId !== '..';
+}
+
 export function assertValidMailboxId(mailboxId: string): void {
-  if (!/^[A-Za-z0-9._-]+$/.test(mailboxId) || mailboxId === '.' || mailboxId === '..') {
+  if (!isValidMailboxId(mailboxId)) {
     throw new Error(
       `Invalid mailboxId ${JSON.stringify(mailboxId)}: must be a single path segment ` +
       `matching [A-Za-z0-9._-] (no separators, not '.'/'..').`,
