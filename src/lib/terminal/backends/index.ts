@@ -5,12 +5,14 @@ import type { Backend, EngineContext, TerminalBackend } from '../types.js';
 import { itermBackend } from './iterm.js';
 import { ghosttyBackend } from './ghostty.js';
 import { tmuxBackend } from './tmux.js';
+import { vscodiumAgentBackend } from './vscodium-agent.js';
 
 /** All known interactive backends, keyed by id. */
 export const BACKENDS: Record<Backend, TerminalBackend> = {
   iterm: itermBackend,
   ghostty: ghosttyBackend,
   tmux: tmuxBackend,
+  'vscodium-agent': vscodiumAgentBackend,
 };
 
 /**
@@ -31,4 +33,4 @@ export function availableBackends(ctx: EngineContext): TerminalBackend[] {
   return Object.values(BACKENDS).filter((b) => b.isAvailable(ctx));
 }
 
-export { itermBackend, ghosttyBackend, tmuxBackend };
+export { itermBackend, ghosttyBackend, tmuxBackend, vscodiumAgentBackend };
