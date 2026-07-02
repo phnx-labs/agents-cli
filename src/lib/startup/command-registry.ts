@@ -72,6 +72,7 @@ export const loadBudget: ModuleLoader = async () => (await import('../../command
 export const loadAlias: ModuleLoader = async () => (await import('../../commands/alias.js')).registerAliasCommand;
 export const loadPty: ModuleLoader = async () => (await import('../../commands/pty.js')).registerPtyCommands;
 export const loadTmux: ModuleLoader = async () => (await import('../../commands/tmux.js')).registerTmuxCommands;
+export const loadWatchdog: ModuleLoader = async () => (await import('../../commands/watchdog.js')).registerWatchdogCommand;
 export const loadBrowser: ModuleLoader = async () => (await import('../../commands/browser.js')).registerBrowserCommand;
 export const loadComputer: ModuleLoader = async () => (await import('../../commands/computer.js')).registerComputerCommand;
 export const loadHosts: ModuleLoader = async () => (await import('../../commands/hosts.js')).registerHostsCommand;
@@ -161,6 +162,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   alias: [loadAlias],
   pty: [loadPty],
   tmux: [loadTmux],
+  watchdog: [loadWatchdog],
   browser: [loadBrowser],
   computer: [loadComputer],
   hosts: [loadHosts],

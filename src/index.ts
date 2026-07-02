@@ -114,6 +114,7 @@ import {
   loadAlias,
   loadPty,
   loadTmux,
+  loadWatchdog,
   loadBrowser,
   loadComputer,
   loadHosts,
@@ -934,6 +935,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadAlias);
   await reg(loadPty);
   await reg(loadTmux);
+  await reg(loadWatchdog);
   await reg(loadBrowser);
   await reg(loadComputer);
   await reg(loadHosts);
