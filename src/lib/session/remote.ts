@@ -28,6 +28,8 @@ import { createHash } from 'crypto';
 import chalk from 'chalk';
 import { getCacheDir } from '../state.js';
 import { SSH_OPTS, controlOpts } from '../ssh-exec.js';
+import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { formatRelativeTime } from './relative-time.js';
 import { terminalWidth } from './width.js';
 
@@ -91,8 +93,18 @@ export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set(
  * Build the single remote command string for `ssh <host> <cmd>`. Forwarded args
  * are quoted for the inner login shell, then the whole `agents …` invocation is
  * quoted again so it survives `bash -lc <...>`.
+ *
+ * `os` selects the remote shell: a Windows host gets a PowerShell invocation
+ * (ssh lands in cmd.exe/PowerShell there, where `bash -lc` does not exist);
+ * anything else — including unknown/absent — keeps the POSIX form unchanged.
+ * The forwarded terminal width rides across as an env var either way so the
+ * remote renders its table to the local screen.
  */
-export function buildRemoteCommand(forwardedArgs: string[], columns?: number): string {
+export function buildRemoteCommand(forwardedArgs: string[], columns?: number, os?: string): string {
+  if (remoteShellFor(os) === 'powershell') {
+    const env = columns && columns > 0 ? { COLUMNS: String(columns) } : undefined;
+    return buildWindowsAgentsCommand({ args: forwardedArgs, env });
+  }
   const inner = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
   // Forward the caller's terminal width so the remote renders the table to the
   // local screen (over SSH the remote's own COLUMNS is unset/wrong). `VAR=val
@@ -187,12 +199,14 @@ export function runRemoteSessions(hosts: string[], argv: string[] = process.argv
   for (const host of hosts) assertValidSshTarget(host); // fail fast on any bad target
 
   const forwarded = buildForwardedArgs(argv, new Set(hosts));
-  const remoteCmd = buildRemoteCommand(forwarded, terminalWidth());
+  const cols = terminalWidth();
   const multi = hosts.length > 1;
   let failures = 0;
 
   for (const host of hosts) {
     if (multi) process.stdout.write(chalk.cyan(`\n── ${host} ──\n`));
+    // Per-host: a Windows peer needs a PowerShell command, POSIX peers `bash -lc`.
+    const remoteCmd = buildRemoteCommand(forwarded, cols, resolveRemoteOsSync(host));
     const res = spawnSync('ssh', [...SSH_OPTS, ...controlOpts(), host, remoteCmd], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,

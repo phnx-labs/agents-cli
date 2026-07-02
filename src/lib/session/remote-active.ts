@@ -19,6 +19,8 @@ import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { loadDevices, type DeviceProfile } from '../devices/registry.js';
+import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import type { ActiveSession } from './active.js';
 
@@ -33,8 +35,16 @@ const REMOTE_TIMEOUT_MS = 12_000;
  */
 export const NO_FANOUT_ENV = 'AGENTS_SESSIONS_LOCAL';
 
-/** The command run on each peer: answer for itself, as JSON, without recursing. */
-function remoteActiveCommand(): string {
+/** The command run on each peer: answer for itself, as JSON, without recursing.
+ * A Windows peer gets a PowerShell invocation (ssh lands in cmd.exe/PowerShell
+ * there, where `bash -lc` is not a command); every other OS keeps `bash -lc`. */
+function remoteActiveCommand(os?: string): string {
+  if (remoteShellFor(os) === 'powershell') {
+    return buildWindowsAgentsCommand({
+      args: ['sessions', '--active', '--json'],
+      env: { [NO_FANOUT_ENV]: '1' },
+    });
+  }
   const inner = `${NO_FANOUT_ENV}=1 agents sessions --active --json`;
   return `bash -lc ${shellQuote(inner)}`;
 }
@@ -84,8 +94,8 @@ function sshCapture(target: string, remoteCmd: string, timeoutMs: number): Promi
   });
 }
 
-async function fetchByTarget(target: string, machine: string, display: string): Promise<ActiveSession[]> {
-  const { code, stdout } = await sshCapture(target, remoteActiveCommand(), REMOTE_TIMEOUT_MS);
+async function fetchByTarget(target: string, machine: string, display: string, os?: string): Promise<ActiveSession[]> {
+  const { code, stdout } = await sshCapture(target, remoteActiveCommand(os), REMOTE_TIMEOUT_MS);
   if (code !== 0) {
     process.stderr.write(chalk.gray(`  ${display}: unreachable or no agents CLI — skipped\n`));
     return [];
@@ -107,7 +117,7 @@ export interface RemoteActiveResult {
  */
 export async function gatherRemoteActive(hosts?: string[]): Promise<RemoteActiveResult> {
   const self = machineId();
-  const targets: Array<{ target: string; machine: string; name: string }> = [];
+  const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
 
   if (hosts && hosts.length > 0) {
     for (const h of hosts) {
@@ -118,7 +128,9 @@ export async function gatherRemoteActive(hosts?: string[]): Promise<RemoteActive
         continue;
       }
       const bareHost = h.split('@').pop() || h;
-      targets.push({ target: h, machine: normalizeHost(bareHost), name: h });
+      // Resolve the OS by the name the user passed (a bare alias like `win-mini`
+      // matches a device-registry entry; a raw `user@host` falls back to POSIX).
+      targets.push({ target: h, machine: normalizeHost(bareHost), name: h, os: resolveRemoteOsSync(h) });
     }
   } else {
     let reg: Record<string, DeviceProfile>;
@@ -135,13 +147,13 @@ export async function gatherRemoteActive(hosts?: string[]): Promise<RemoteActive
       // full ConnectTimeout on each.
       if (d.platform !== 'windows' && d.platform !== 'linux' && d.platform !== 'macos') continue;
       try {
-        targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name });
+        targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: d.platform });
       } catch {
         // No address on the profile — nothing to dial; skip silently.
       }
     }
   }
 
-  const results = await Promise.all(targets.map((t) => fetchByTarget(t.target, t.machine, t.name)));
+  const results = await Promise.all(targets.map((t) => fetchByTarget(t.target, t.machine, t.name, t.os)));
   return { sessions: results.flat(), deviceCount: targets.length };
 }
