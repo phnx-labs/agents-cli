@@ -1,7 +1,7 @@
 ---
 version: alpha
 name: "agents-cli"
-description: "The meta harness engineering system for agents. A Phoenix Labs OSS product (MIT), terminal-coded — NOT the Rush/Swarmify brand. Two surfaces, one identity: a chalk-colored terminal CLI and the agents-cli.sh web landing, both a dark #0a0a0a canvas with a single neon-lime accent. The web is monospace-dominant (JetBrains Mono wordmark over a system ui-monospace body); the CLI speaks in chalk-semantic ANSI color."
+description: "The meta harness engineering system for agents. A Phoenix Labs OSS product (Apache-2.0), terminal-coded — NOT the Rush/Swarmify brand. Two surfaces, one identity: a chalk-colored terminal CLI and the agents-cli.sh web landing, both a dark #0a0a0a canvas with a single neon-lime accent. The web is monospace-dominant (JetBrains Mono wordmark over a system ui-monospace body); the CLI speaks in chalk-semantic ANSI color."
 
 colors:
   # Brand — one lime on black. #a3e635 is THE accent (confirmed on the live

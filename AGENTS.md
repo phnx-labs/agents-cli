@@ -2,7 +2,7 @@
 
 CLI for managing AI coding agent versions, config, sessions, and cloud dispatch (Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok Build, Droid).
 
-> Phoenix Labs OSS (MIT). **NOT part of the Rush brand** — see [§Brand identity](#brand-identity) before touching assets, demos, or website.
+> Phoenix Labs OSS (Apache-2.0). **NOT part of the Rush brand** — see [§Brand identity](#brand-identity) before touching assets, demos, or website.
 
 ## Core design choices (read this first)
 
@@ -195,7 +195,7 @@ scripts/release.sh <version> --apply  # commits chore(release), tags v<version>,
 
 ## Brand identity
 
-`agents-cli` is a Phoenix Labs OSS product (MIT). **NOT part of the Rush brand.** Phoenix Horizon, Inc. owns several brands; agents-cli sits in the OSS lane, Rush in the consumer-product lane.
+`agents-cli` is a Phoenix Labs OSS product (Apache-2.0). **NOT part of the Rush brand.** Phoenix Horizon, Inc. owns several brands; agents-cli sits in the OSS lane, Rush in the consumer-product lane.
 
 When working on this repo or the sibling `agent-cli-web` landing:
 
