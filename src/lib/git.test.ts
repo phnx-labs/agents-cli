@@ -101,6 +101,10 @@ describe('syncRepoGit', () => {
     await g.addConfig('user.email', 'test@example.com');
     await g.addConfig('user.name', 'Test');
     await g.addConfig('commit.gpgsign', 'false');
+    // Keep line endings byte-identical across OSes: without this, Windows
+    // checks out committed '\n' content as '\r\n' (core.autocrlf defaults to
+    // true there), breaking exact readFileSync content assertions below.
+    await g.addConfig('core.autocrlf', 'false');
   }
 
   beforeEach(async () => {
