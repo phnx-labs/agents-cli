@@ -156,6 +156,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // CLI's cooldown ledger already prevents re-nudging the same split.
     private func refreshWatchdog() {
         if watchdogInFlight { return }
+        // Throttle like the sibling refreshers: a 30s floor keeps this well under
+        // the 5m stall threshold (still timely) while cutting the two subprocess
+        // spawns per tick from 6x/min to ~2x/min on a battery-sensitive helper.
+        if let t = watchdogFetchedAt, Date().timeIntervalSince(t) < 30 { return }
         watchdogInFlight = true
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let enabled = AgentsCLI.watchdogStatus()?.enabled ?? false
