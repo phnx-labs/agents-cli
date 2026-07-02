@@ -184,6 +184,15 @@ describe('injectIntoTerminal — macOS backends off-darwin', () => {
     expect(res.writes).toBe(2);
     expect(res.specs?.[0].argv.join(' ')).toContain('keystroke "hi"');
   });
+
+  it('ghostty write-count tracks enter alone (its coarse script ignores combined)', async () => {
+    // The keystroke path always emits keystroke + a separate Return, so combined
+    // does NOT fuse it — the count must stay 2, not collapse to 1.
+    const combined = await injectIntoTerminal({ backend: 'ghostty' }, 'hi', { dryRun: true, combined: true });
+    expect(combined.writes).toBe(2);
+    const noEnter = await injectIntoTerminal({ backend: 'ghostty' }, 'hi', { dryRun: true, enter: false });
+    expect(noEnter.writes).toBe(1);
+  });
 });
 
 describe('injectIntoTerminal — vscodium routing', () => {

@@ -317,10 +317,16 @@ export async function injectIntoTerminal(
         ? [vscodiumInjectSpec(target, text, { enter, combined })]
         : [appleScriptInjectSpec(target, text, enter, combined)];
 
-  // tmux counts its discrete send-keys calls; the single-invocation backends
-  // (osascript / editor CLI) deliver text + a separate Return = two writes on
-  // their side (one when there's no Enter, or when fused via `combined`).
-  const writes = target.backend === 'tmux' ? specs.length : enter && !combined ? 2 : 1;
+  // Discrete writes delivered on the far side. tmux counts its send-keys calls.
+  // iterm/vscodium honor `combined` (text+Enter fused into one write). ghostty's
+  // coarse keystroke path ignores `combined` (it always emits keystroke + a
+  // separate Return), so its count tracks `enter` alone.
+  const writes =
+    target.backend === 'tmux'
+      ? specs.length
+      : target.backend === 'ghostty'
+        ? enter ? 2 : 1
+        : enter && !combined ? 2 : 1;
 
   if (opts.dryRun) return { ok: true, backend: target.backend, writes, specs };
 
