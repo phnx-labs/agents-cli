@@ -61,9 +61,11 @@ Each backend opens either a **tab** or a **split** (`right` = side-by-side,
 | `iterm` | macOS + `/Applications/iTerm.app` | `create tab … command` (a window if none open) | `split vertically`/`split horizontally … command` |
 | `ghostty` | macOS + `/Applications/Ghostty.app` | `new tab … with configuration cfg` | `split (focused terminal of selected tab of front window) direction …` |
 | `tmux` | inside tmux (`$TMUX` set) | `tmux new-window -c <cwd>` | `tmux split-window -h`/`-v -c <cwd>` |
+| `vscodium-agent` | macOS + `/Applications/VSCodium.app` | `codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<payload>'` | same URL, payload carries `split` |
 
 `buildTab`/`buildSplit` return a `LaunchSpec { argv }`. Ghostty carries `cwd`
 natively via the surface configuration; iTerm/tmux `cd` inside the wrapped shell.
+`vscodium-agent` is different in kind — see [VSCodium agent terminals](#vscodium-agent-terminals).
 
 ## Layout policy — two panes per tab
 
@@ -95,13 +97,19 @@ works".
 Caveat: driving a GUI app (iTerm/Ghostty) over SSH needs the remote user logged
 into the Mac's GUI session — `osascript` reaches the app through it. `tmux` over
 `--host` is unconditional (headless), which is why remote defaults to `tmux`.
+`vscodium-agent` also needs a running editor: `codium --open-url` forwards the URL
+to the already-open VSCodium instance over its user-scoped IPC socket, so it works
+from an SSH session as the same user (no `osascript`, no new window spawned).
 
 ## Interactive login shell
 
-Every backend wraps its command in `zsh -ilc '…'`. The `-i` is load-bearing: the
-version-pinned shims (`claude@2.1.187`) live in `~/.agents/.cache/shims`, which
-`.zshrc` adds to PATH for *interactive* shells only. A non-interactive
-`zsh -lc` can't find the shim and the surface dies with "command not found".
+The `iterm`, `ghostty`, and `tmux` backends wrap their command in `zsh -ilc '…'`.
+The `-i` is load-bearing: the version-pinned shims (`claude@2.1.187`) live in
+`~/.agents/.cache/shims`, which `.zshrc` adds to PATH for *interactive* shells
+only. A non-interactive `zsh -lc` can't find the shim and the surface dies with
+"command not found". The `vscodium-agent` backend does **not** wrap — the command
+is sent (via the extension's `sendText`) into an editor terminal that is already
+an interactive login shell, so the shims are on PATH already.
 
 ## Usage
 
@@ -121,7 +129,7 @@ await openSurfaces(items, {
 
 | Flag | Effect |
 |---|---|
-| `--iterm` / `--ghostty` / `--tmux` | Force a backend (else auto-detect / prompt). |
+| `--iterm` / `--ghostty` / `--tmux` / `--vscodium` | Force a backend (else auto-detect / prompt). |
 | `--host <alias>` | Resume on a remote host over SSH (defaults to `tmux`). |
 | `--tabs` | One tab per session (default packs two-per-tab). |
 
@@ -129,12 +137,37 @@ Non-resumable agents (where `buildResumeCommand` returns null) are skipped with 
 note, never silently dropped. With no GUI backend and no tmux, resume falls back
 to an in-place, sequential takeover of the current terminal.
 
-## Not yet: VSCodium agent terminals
+## VSCodium agent terminals
 
-A `vscodium-agent` backend is planned but needs a change in the **swarmify**
-extension: it can only *focus* existing terminals from outside (its
-`vscode://…/focus` URI handler and `~/.agents/.tmp/watchdog.sock`), with no
-"open a terminal" verb. Adding a `/spawn` path to that URI handler — wired to the
-extension's `openSingleAgent` — is the seam; the engine backend would then just
-build an `open "vscode://…/spawn?…"` argv, which flows over `--host` like the
-rest. Tracked as a separate, cross-repo change.
+The `vscodium-agent` backend opens each session as an **agent terminal tab** in a
+running VSCodium (or Cursor / VS Code) window, driven by the **swarmify**
+`swarm-ext` extension. Unlike the terminal-app backends, the editor is already
+running — the engine hands it a URL rather than scripting a GUI app:
+
+```
+codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
+```
+
+- **The payload is one base64url-encoded JSON param** (`{command, cwd, split?}`),
+  not one param per field. VS Code percent-*decodes* `uri.query` once before the
+  extension parses it, so a `command`/`cwd` containing `&` or `=` would be
+  mis-split by a multi-param query; base64url (`[A-Za-z0-9_-]`) survives that
+  decode untouched and round-trips exactly (see `spawnUri`).
+- **The `/spawn` verb** (swarmify `extension.ts`) opens an editor-tab terminal in
+  `cwd`, sends `command`, and arms *shell adoption* — so a resume command like
+  `claude --resume <id>` is auto-promoted to the Claude chip with session
+  tracking. `split` splits beside the previous `/spawn` pane, giving the same
+  two-per-tab packing as the other backends.
+- **Why `--open-url`, not `open`** — the editor CLI forwards the URL to the
+  running instance. That needs no OS URL-scheme handler registration, works on
+  Linux, and flows over `--host` (the SSH session reaches the same user's editor).
+  The per-product scheme must match the CLI: `codium`→`vscodium://`,
+  `cursor`→`cursor://`, `code`→`vscode://` (see `EDITOR_VARIANTS` /
+  `makeVscodiumAgentBackend`).
+- **No `zsh -ilc` wrap** — the command runs in an editor terminal that is already
+  an interactive login shell (see [above](#interactive-login-shell)).
+
+Auto-detection is intentionally *not* wired for this backend: a VS Code integrated
+terminal reports `TERM_PROGRAM=vscode` for all three products, so the engine can't
+tell which one to target. Select it explicitly with `--vscodium` (defaults to
+VSCodium), or it appears in the picker when `/Applications/VSCodium.app` is present.
