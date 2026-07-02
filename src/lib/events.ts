@@ -17,11 +17,18 @@ import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'node:crypto';
 import { parseSshConnection } from './session/provenance.js';
+import { getLogsDir } from './state.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Logs live under the cache bucket — they're regenerable telemetry.
-const LOGS_DIR = path.join(os.homedir(), '.agents', '.cache', 'logs');
+// Logs live under the cache bucket — they're regenerable telemetry. Route
+// through state's canonical home anchor (HOME override → os.homedir()) rather
+// than a bare os.homedir(): on Windows os.homedir() reads USERPROFILE and
+// ignores a HOME override, so a test (or any caller) that redirects HOME would
+// have its events silently written to the real profile instead. state.getLogsDir()
+// honors the HOME override on every platform while falling back to os.homedir()
+// (== USERPROFILE on Windows) in production where HOME is unset.
+const LOGS_DIR = getLogsDir();
 
 /** Default retention period in days. */
 const DEFAULT_RETENTION_DAYS = 7;
