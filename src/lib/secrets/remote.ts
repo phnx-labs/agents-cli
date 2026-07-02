@@ -16,11 +16,20 @@
  * in argv / `ps` / remote shell history. Nothing is persisted locally.
  */
 
-import { sshExec, assertValidSshTarget, shellQuote, type SshExecResult } from '../ssh-exec.js';
+import { sshExec, assertValidSshTarget, type SshExecResult } from '../ssh-exec.js';
 import { resolveHost } from '../hosts/registry.js';
 import { sshTargetFor } from '../hosts/types.js';
+import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 
 const REMOTE_TIMEOUT_MS = 30_000;
+
+/** Remote OS for a target string (bare alias matches a device entry; a raw
+ * `user@host` falls back to POSIX). Threaded into the command builder so a
+ * Windows host gets PowerShell instead of `bash -lc`. */
+function osForTarget(target: string): string | undefined {
+  return resolveRemoteOsSync(target.split('@').pop() ?? target);
+}
 
 /**
  * Resolve a `--host` value to an ssh target string. Tries the `agents hosts`
@@ -82,8 +91,7 @@ export function remoteSecretsRaw(
   args: string[],
   opts: { tty?: boolean; input?: string } = {},
 ): SshExecResult {
-  const inner = ['agents', 'secrets', ...args].map(shellQuote).join(' ');
-  const remoteCmd = `bash -lc ${shellQuote(inner)}`;
+  const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target));
   return sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
     input: opts.input,
@@ -106,8 +114,12 @@ export function remoteSecretsRaw(
  */
 export async function remoteResolveEnv(target: string, bundle: string): Promise<Record<string, string>> {
   assertValidSshTarget(target);
-  const exportCmd = `agents secrets export ${shellQuote(bundle)} --plaintext --format json`;
-  const res: SshExecResult = sshExec(target, `bash -lc ${shellQuote(exportCmd)}`, {
+  const remoteCmd = buildRemoteAgentsInvocation(
+    ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
+    undefined,
+    osForTarget(target),
+  );
+  const res: SshExecResult = sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
   });
 
