@@ -135,11 +135,16 @@ describe('audit event log', () => {
     // the invocation; the token-shaped positional must be masked, not stored.
     runCli(home, ['secrets', 'get', 'ghp_FAKETOKENVALUE123'], { SSH_CONNECTION: '' });
 
-    const raw = fs.readFileSync(
-      path.join(home, '.agents', '.cache', 'logs',
-        `events-${new Date().toISOString().slice(0, 10)}.jsonl`),
-      'utf-8',
-    );
+    // Read whatever file the writer actually produced — it names the file from
+    // the LOCAL date, so reconstructing it here from a UTC toISOString() would
+    // point at the wrong day (and ENOENT) whenever the runner's local date and
+    // UTC date straddle midnight. Glob the dir instead, like readEvents does.
+    const logsDir = path.join(home, '.agents', '.cache', 'logs');
+    const raw = fs
+      .readdirSync(logsDir)
+      .filter((n) => n.startsWith('events-') && n.endsWith('.jsonl'))
+      .map((n) => fs.readFileSync(path.join(logsDir, n), 'utf-8'))
+      .join('');
     expect(raw).not.toContain('ghp_FAKETOKENVALUE123');
     expect(raw).toContain('[REDACTED]');
   });
