@@ -38,8 +38,17 @@ export {
   itermInjectScript,
   ghosttyInjectScript,
   appleScriptInjectSpec,
+  vscodiumInjectUri,
+  vscodiumInjectSpec,
   type InjectTarget,
   type InjectBackend,
   type InjectOptions,
   type InjectResult,
 } from './inject.js';
+export {
+  resolveInjectTarget,
+  resolveInjectTargetForSession,
+  type InjectResolution,
+  type InjectRail,
+  type ResolveOptions,
+} from './resolve.js';
