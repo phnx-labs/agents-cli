@@ -1160,6 +1160,20 @@ export function machineLabeler(machines: string[]): (m: string) => string {
   };
 }
 
+/**
+ * Column flags for a picker, computed once over the whole pool so every row
+ * aligns: the machine column only earns its width when the listing spans more
+ * than one box, the ticket column only when some row carries a PR/ticket ref.
+ */
+export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
+  const machines = sessions.map((s) => s.machine).filter((m): m is string => !!m);
+  return {
+    showMachine: new Set(machines).size > 1,
+    machineLabel: machineLabeler(machines),
+    showTicket: sessions.some((s) => ticketLabel(s) !== ''),
+  };
+}
+
 export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.timestamp);
@@ -1228,15 +1242,7 @@ export async function pickSessionInteractive(
   if (hiddenCount > 0) {
     console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
   }
-  // Machine column only earns its width when the listing actually spans boxes;
-  // the ticket column only when some row carries a PR/ticket ref. Both computed
-  // once over the whole pool so every row aligns.
-  const machines = sessions.map((s) => s.machine).filter((m): m is string => !!m);
-  const cols: PickerColumns = {
-    showMachine: new Set(machines).size > 1,
-    machineLabel: machineLabeler(machines),
-    showTicket: sessions.some((s) => ticketLabel(s) !== ''),
-  };
+  const cols = pickerColumnsFor(sessions);
   try {
     return await sessionPicker({
       message,

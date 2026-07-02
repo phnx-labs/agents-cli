@@ -19,6 +19,7 @@ import { buildPreview } from './sessions-picker.js';
 import {
   filterSessionsByQuery,
   formatPickerLabel,
+  pickerColumnsFor,
   buildResumeCommand,
   resumeSessionInPlace,
   parseAgentFilter,
@@ -125,13 +126,14 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
   }
 
   // 1. Multi-select the sessions.
+  const cols = pickerColumnsFor(sessions);
   let chosen: SessionMeta[] | null;
   try {
     chosen = await multiItemPicker<SessionMeta>({
       message: 'Select sessions to resume:',
       items: sessions,
       filter: (q: string) => (q.trim() ? filterSessionsByQuery(sessions, q) : sessions),
-      labelFor: (s, q) => formatPickerLabel(s, q),
+      labelFor: (s, q) => formatPickerLabel(s, q, cols),
       keyFor: (s) => s.id,
       buildPreview,
       pageSize: 15,
