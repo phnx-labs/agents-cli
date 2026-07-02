@@ -44,6 +44,8 @@ export interface PickedSession {
 
 export interface SessionPickerConfig {
   message: string;
+  /** Dim hint line shown under the header (filters/flags tip). */
+  subtitle?: string;
   sessions: SessionMeta[];
   filter: (query: string) => SessionMeta[];
   labelFor: (s: SessionMeta, query: string) => string;
@@ -373,6 +375,7 @@ function truncate(s: string, max: number): string {
 export async function sessionPicker(config: SessionPickerConfig): Promise<PickedSession | null> {
   const picked = await itemPicker<SessionMeta>({
     message: config.message,
+    subtitle: config.subtitle,
     items: config.sessions,
     filter: config.filter,
     labelFor: config.labelFor,

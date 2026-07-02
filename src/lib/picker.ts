@@ -35,6 +35,8 @@ import { stripVTControlCharacters } from 'node:util';
 /** Configuration for the interactive picker prompt. */
 export interface PickerConfig<T> {
   message: string;
+  /** Optional dim hint line rendered directly under the header (above the rows). */
+  subtitle?: string;
   items: T[];
   filter: (query: string) => T[];
   labelFor: (item: T, query: string) => string;
@@ -254,7 +256,9 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
           `↑↓ navigate${hasPreview ? ' · space: preview' : ''} · ⏎ ${enter} · esc: cancel`
         );
 
-    const parts: string[] = [header, page];
+    const parts: string[] = [header];
+    if (cfg.subtitle) parts.push(cfg.subtitle);
+    parts.push(page);
     if (results.length === 0) {
       parts.push(chalk.gray(`  ${cfg.emptyMessage ?? 'No matches.'}`));
     }
