@@ -9,6 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import Database from '../sqlite.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
 
 /**
@@ -754,8 +755,8 @@ function extractGeminiContent(content: any): string {
 // (f3) generically keeps the parser tool-agnostic, so a future tool (web search,
 // etc.) is captured automatically. Each tool surfaces TWICE — a request step
 // (step_type 15) and a completion step share the same f1 call id — so we dedupe
-// by that id. Mirrors parseOpenCode(): shell out to sqlite3, normalize to
-// SessionEvent[].
+// by that id. Reads the BLOB payloads via the node/bun SQLite wrapper (portable,
+// no `sqlite3` CLI dependency) and normalizes to SessionEvent[].
 // ---------------------------------------------------------------------------
 
 /** One decoded protobuf field at a single nesting level. */
@@ -888,21 +889,24 @@ const ANTIGRAVITY_TOOL_MAP: Record<string, string> = {
  * request step and a completion step that share the id).
  */
 export function parseAntigravity(dbPath: string): SessionEvent[] {
-  let rows: string;
+  // Read the raw BLOB payloads through the node/bun SQLite wrapper (not the
+  // `sqlite3` CLI) so this works on every OS — the CLI is absent on Windows.
+  let rows: Array<{ step_payload: unknown }>;
+  let db: Database.Database | undefined;
   try {
-    rows = execFileSync(
-      'sqlite3',
-      ['-separator', '\t', dbPath, 'SELECT idx, step_type, quote(step_payload) FROM steps ORDER BY idx;'],
-      {
-        encoding: 'utf-8',
-        timeout: 10000,
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      },
-    );
+    db = new Database(dbPath);
+    rows = db
+      .prepare('SELECT idx, step_type, step_payload FROM steps ORDER BY idx;')
+      .all() as Array<{ step_payload: unknown }>;
   } catch {
-    /* DB not accessible, sqlite3 missing, or query failed */
+    /* DB not accessible, sqlite module unavailable, or query failed */
     return [];
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* best-effort close */
+    }
   }
 
   // Single timestamp for the whole session: the steps table carries no per-step
@@ -917,17 +921,12 @@ export function parseAntigravity(dbPath: string): SessionEvent[] {
   const events: SessionEvent[] = [];
   const seenCallIds = new Set<string>();
 
-  for (const line of rows.split('\n')) {
-    if (!line.trim()) continue;
-    const tab1 = line.indexOf('\t');
-    if (tab1 === -1) continue;
-    const tab2 = line.indexOf('\t', tab1 + 1);
-    if (tab2 === -1) continue;
-    const hex = line.slice(tab2 + 1).trim();
-    // sqlite3 quote() renders a BLOB as X'...'; anything else (NULL) is skipped.
-    if (!hex.startsWith("X'") || !hex.endsWith("'")) continue;
-
-    const bytes = Uint8Array.from(Buffer.from(hex.slice(2, -1), 'hex'));
+  for (const row of rows) {
+    const payload = row.step_payload;
+    // Both node:sqlite and bun:sqlite return a BLOB as a Uint8Array (Buffer is
+    // a subclass). NULL / non-blob payloads are skipped.
+    if (!(payload instanceof Uint8Array)) continue;
+    const bytes = payload;
     let fields: ProtoField[];
     try {
       fields = decodeProtoMessage(bytes);

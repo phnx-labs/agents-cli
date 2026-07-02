@@ -7,15 +7,18 @@
  *
  * The fixture is built here from scratch — a tiny SQLite `steps` table whose
  * `step_payload` BLOBs are hand-encoded protobuf messages (deterministic,
- * synthetic, no private conversation content). This exercises the real critical
- * path (real sqlite3 subprocess, real protobuf decode), not a mock.
+ * synthetic, no private conversation content). Both the fixture writer and the
+ * parser under test read/write through the node/bun SQLite wrapper (the same
+ * one production uses), so this exercises the real critical path (real SQLite
+ * BLOB round-trip, real protobuf decode) on every OS — the `sqlite3` CLI is
+ * absent on the Windows runner.
  */
 
 import { describe, expect, test } from 'vitest';
-import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import Database from '../../sqlite.js';
 import { parseAntigravity, detectAgent, parseSession } from '../parse.js';
 
 // ── Minimal protobuf wire encoder (mirror of the decoder under test) ────────
@@ -68,19 +71,15 @@ function buildDb(steps: Array<{ stepType: number; payload: Buffer }>): string {
   fs.mkdirSync(conv, { recursive: true });
   const dbPath = path.join(conv, 'fixture-uuid.db');
 
-  const inserts = steps
-    .map(
-      (s, i) =>
-        `INSERT INTO steps (idx, step_type, step_payload) VALUES (${i}, ${s.stepType}, X'${s.payload.toString('hex')}');`,
-    )
-    .join('\n');
-
-  const sql = [
+  const db = new Database(dbPath);
+  db.exec(
     'CREATE TABLE steps (idx integer PRIMARY KEY, step_type integer NOT NULL DEFAULT 0, step_payload blob);',
-    inserts,
-  ].join('\n');
-
-  execFileSync('sqlite3', [dbPath, sql], { encoding: 'utf-8' });
+  );
+  const insert = db.prepare(
+    'INSERT INTO steps (idx, step_type, step_payload) VALUES (?, ?, ?);',
+  );
+  steps.forEach((s, i) => insert.run(i, s.stepType, s.payload));
+  db.close();
   return dbPath;
 }
 
