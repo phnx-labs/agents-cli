@@ -126,10 +126,13 @@ export function registerWatchdogCommand(program: Command): void {
       };
       // Injection gate: --nudge is the explicit per-run opt-in; the global sentinel
       // enables the automatic daemon. Default OFF: bare `agents watchdog` is dry.
-      const globalEnabled = isGloballyEnabled();
-      const willInject = opts.nudge === true || (opts.watch === true && globalEnabled);
+      // Re-read the sentinel every tick so a running `--watch` daemon reflects a
+      // later `agents watchdog enable`/`disable` (or the Swift menu-bar toggle)
+      // from another shell without a restart.
+      const computeWillInject = (): boolean =>
+        opts.nudge === true || (opts.watch === true && isGloballyEnabled());
 
-      const tickOnce = async (): Promise<WatchdogTickResult> =>
+      const tickOnce = async (willInject: boolean): Promise<WatchdogTickResult> =>
         runWatchdogTick({
           nudge: willInject,
           nudgeText: opts.text,
@@ -141,7 +144,8 @@ export function registerWatchdogCommand(program: Command): void {
         });
 
       if (!opts.watch) {
-        const result = await tickOnce();
+        const willInject = computeWillInject();
+        const result = await tickOnce(willInject);
         if (opts.json) console.log(JSON.stringify(result, null, 2));
         else printTick(result, willInject);
         return;
@@ -149,15 +153,17 @@ export function registerWatchdogCommand(program: Command): void {
 
       // Daemon loop.
       const intervalMs = durationMsOr(opts.interval, 30_000);
-      if (!willInject && !opts.json) {
+      if (!computeWillInject() && !opts.json) {
         console.log(chalk.yellow(
-          `watchdog --watch is DETECT-ONLY (global auto-nudge is ${globalEnabled ? 'on' : 'off'}). ` +
+          `watchdog --watch is DETECT-ONLY (global auto-nudge is ${isGloballyEnabled() ? 'on' : 'off'}). ` +
           `Pass --nudge or run 'agents watchdog enable' to inject.`,
         ));
       }
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const result = await tickOnce();
+        // Re-evaluated each tick: picks up enable/disable flips mid-run.
+        const willInject = computeWillInject();
+        const result = await tickOnce(willInject);
         if (opts.json) console.log(JSON.stringify(result));
         else printTick(result, willInject);
         await sleep(intervalMs);
