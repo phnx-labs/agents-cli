@@ -85,6 +85,14 @@ export interface SessionMeta {
    * `entrypoint` field ('sdk-cli' for team spawns, 'cli' for real sessions).
    */
   isTeamOrigin?: boolean;
+  /**
+   * The machine (normalized hostname) this session's transcript originated on:
+   * the local machine for live-home sessions, or the origin machine parsed from
+   * the cross-machine mirror path (backups/<agent>/<machine>/…, see
+   * sync/agents.ts). Populated by discoverSessions for the listing/picker;
+   * undefined for sessions obtained outside that path.
+   */
+  machine?: string;
   /** Terms that matched the current search query */
   _matchedTerms?: string[];
   /** BM25 relevance score from the most recent content-index search */

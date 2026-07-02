@@ -27,6 +27,7 @@ import { extractSessionTopic } from './prompt.js';
 import { parseAntigravity } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand } from './state.js';
 import { costOfUsage } from '../pricing/index.js';
+import { machineId } from './sync/config.js';
 import {
   getDB,
   getScanStampByPath,
@@ -188,7 +189,26 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   }
 
   const sessions = querySessions(buildQueryOptions(options, agents, { includeLimit: true }));
+  for (const s of sessions) s.machine = machineForSessionFile(s.filePath, s.agent);
   return sessions;
+}
+
+let _localMachineId: string | undefined;
+
+/**
+ * The machine a discovered session originated on. Cross-machine sync mirrors a
+ * remote transcript to backups/<agent>/<machine>/<subdir>/… (see mirrorPath in
+ * sync/agents.ts); every other transcript is a live-home file on this box. So:
+ * when the path sits under the agent's backups root, the first segment below it
+ * is the origin machine id; otherwise it's the local machine.
+ */
+export function machineForSessionFile(filePath: string, agent: string): string {
+  const base = path.join(getHistoryDir(), 'backups', agent) + path.sep;
+  if (filePath.startsWith(base)) {
+    const seg = filePath.slice(base.length).split(path.sep)[0];
+    if (seg) return seg;
+  }
+  return (_localMachineId ??= machineId());
 }
 
 /**

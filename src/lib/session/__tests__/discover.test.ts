@@ -4,7 +4,26 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { buildFtsQuery } from '../db.js';
-import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend } from '../discover.js';
+import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile } from '../discover.js';
+import { machineId } from '../sync/config.js';
+import { getHistoryDir } from '../../state.js';
+
+describe('machineForSessionFile', () => {
+  it('reads the origin machine from the cross-machine mirror path', () => {
+    const p = path.join(getHistoryDir(), 'backups', 'claude', 'zion', 'projects', 'foo', 'sess.jsonl');
+    expect(machineForSessionFile(p, 'claude')).toBe('zion');
+  });
+
+  it('keys the mirror machine off the correct agent segment', () => {
+    const p = path.join(getHistoryDir(), 'backups', 'codex', 'yosemite-s1', 'sessions', 'x.jsonl');
+    expect(machineForSessionFile(p, 'codex')).toBe('yosemite-s1');
+  });
+
+  it('falls back to the local machine for live-home (non-mirror) files', () => {
+    const p = path.join(os.homedir(), '.claude', 'projects', 'foo', 'sess.jsonl');
+    expect(machineForSessionFile(p, 'claude')).toBe(machineId());
+  });
+});
 
 describe('buildFtsQuery', () => {
   it('returns empty expression for whitespace-only input', () => {
