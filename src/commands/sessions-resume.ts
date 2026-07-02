@@ -125,8 +125,9 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
     return;
   }
 
-  // 1. Multi-select the sessions.
-  const cols = pickerColumnsFor(sessions);
+  // 1. Multi-select the sessions. gutter: 6 = the multi-select cursor + checkbox
+  // ('> [x] ') that multiItemPicker prepends, so rows size to fit without wrapping.
+  const cols = { ...pickerColumnsFor(sessions), gutter: 6 };
   let chosen: SessionMeta[] | null;
   try {
     chosen = await multiItemPicker<SessionMeta>({

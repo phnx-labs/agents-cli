@@ -89,6 +89,34 @@ describe('formatPickerLabel', () => {
   });
 });
 
+describe('formatPickerLabel width fits the gutter (no wrap)', () => {
+  // Wide enough that the topic cell isn't pinned to its 16-col floor, so the
+  // test isolates gutter accounting rather than the narrow-terminal floor.
+  const WIDTH = 120;
+  function rowFits(gutter: number): boolean {
+    const orig = process.stdout.columns;
+    try {
+      (process.stdout as any).columns = WIDTH;
+      const cols = { showTicket: true, gutter };
+      // Long topic forces the topic cell to the binding width so the row fills the line.
+      const row = strip(formatPickerLabel(meta({ prNumber: 569, worktreeSlug: 'responsive-list', topic: 'x'.repeat(300) }), '', cols));
+      return row.length + gutter <= WIDTH;
+    } finally {
+      (process.stdout as any).columns = orig;
+    }
+  }
+
+  it('single-select rows fit with the 2-cell cursor gutter', () => {
+    expect(rowFits(2)).toBe(true);
+  });
+
+  it('multi-select rows fit with the 6-cell cursor+checkbox gutter', () => {
+    // Regression: the resume picker prepends "> [x] " (6 cells). If the width
+    // calc reserved only 2, the row would overflow by 4 and wrap every line.
+    expect(rowFits(6)).toBe(true);
+  });
+});
+
 describe('formatPickerTip', () => {
   it('returns a tip and is stable for a given pool size', () => {
     const pool = [meta(), meta()];

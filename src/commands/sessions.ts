@@ -1136,6 +1136,12 @@ export interface PickerColumns {
   machineLabel?: (m: string) => string;
   /** Render the ticket/PR column (only when at least one row carries a ref). */
   showTicket?: boolean;
+  /**
+   * Cells the picker prepends before each row: 2 for the single-select cursor
+   * ('> '), 6 for the multi-select cursor + checkbox ('> [x] '). Reserved from
+   * the topic width so rows never wrap. Defaults to 2.
+   */
+  gutter?: number;
 }
 
 const PICKER_MACHINE_W = 11;
@@ -1193,15 +1199,16 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
     ? chalk.blue(padRight(truncate(ticketLabel(s) || '-', TICKET_W), TICKET_W + 1))
     : '';
 
-  // The picker prepends a 2-cell cursor ('> '/'  '); reserve it, plus the
-  // conditional columns, so the topic shrinks to fit and rows never wrap.
-  const CURSOR_W = 2;
+  // The picker prepends a gutter (cursor, plus a checkbox in multi-select mode);
+  // reserve it, plus the conditional columns, so the topic shrinks to fit and
+  // rows never wrap.
+  const gutter = cols.gutter ?? 2;
   const machineW = cols.showMachine ? PICKER_MACHINE_W : 0;
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const topicW = Math.max(
     16,
-    terminalWidth() - CURSOR_W - (10 + 9 + 8 + 16) - machineW - ticketW - wtW - stringWidth(when) - 1,
+    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineW - ticketW - wtW - stringWidth(when) - 1,
   );
 
   return (
