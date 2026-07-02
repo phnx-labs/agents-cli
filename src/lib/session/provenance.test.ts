@@ -1,0 +1,124 @@
+import { describe, it, expect } from 'vitest';
+import {
+  parseProcEnviron,
+  extractKnownEnv,
+  parseSshConnection,
+  deriveProvenance,
+  detectProvenance,
+  PROVENANCE_ENV_KEYS,
+} from './provenance.js';
+
+describe('parseProcEnviron', () => {
+  it('parses the NUL-separated /proc/<pid>/environ body', () => {
+    const raw = 'SHELL=/bin/zsh\0TERM_PROGRAM=iTerm.app\0TMUX_PANE=%3\0';
+    expect(parseProcEnviron(raw)).toEqual({
+      SHELL: '/bin/zsh',
+      TERM_PROGRAM: 'iTerm.app',
+      TMUX_PANE: '%3',
+    });
+  });
+
+  it('keeps values that themselves contain =', () => {
+    const raw = 'FOO=a=b=c\0BAR=x\0';
+    expect(parseProcEnviron(raw)).toEqual({ FOO: 'a=b=c', BAR: 'x' });
+  });
+
+  it('ignores empty entries and malformed (no =) pairs', () => {
+    const raw = '\0JUSTNAME\0OK=1\0';
+    expect(parseProcEnviron(raw)).toEqual({ OK: '1' });
+  });
+});
+
+describe('extractKnownEnv (macOS `ps eww` output)', () => {
+  it('extracts known keys from a command+env line, preserving spaces in values', () => {
+    // Real shape: the full command, then space-joined KEY=VALUE env entries.
+    const line =
+      '/usr/local/bin/node /path/to/claude --resume LANG=en_US.UTF-8 ' +
+      'SSH_CONNECTION=203.0.113.7 51828 10.0.0.3 22 TMUX=/tmp/tmux-501/default,914,2 ' +
+      'TMUX_PANE=%5 TERM_PROGRAM=iTerm.app PWD=/Users/m/src';
+    const env = extractKnownEnv(line, PROVENANCE_ENV_KEYS);
+    // SSH_CONNECTION has three internal spaces — must survive intact.
+    expect(env.SSH_CONNECTION).toBe('203.0.113.7 51828 10.0.0.3 22');
+    expect(env.TMUX).toBe('/tmp/tmux-501/default,914,2');
+    expect(env.TMUX_PANE).toBe('%5');
+    expect(env.TERM_PROGRAM).toBe('iTerm.app');
+    // Unknown keys (LANG, PWD) are not captured.
+    expect(env.LANG).toBeUndefined();
+  });
+
+  it('returns empty when no known keys are present', () => {
+    expect(extractKnownEnv('node script.js PWD=/tmp HOME=/root', PROVENANCE_ENV_KEYS)).toEqual({});
+  });
+});
+
+describe('parseSshConnection', () => {
+  it('parses the four space-joined fields', () => {
+    expect(parseSshConnection('203.0.113.7 51828 10.0.0.3 22')).toEqual({
+      clientIp: '203.0.113.7',
+      clientPort: 51828,
+      serverIp: '10.0.0.3',
+      serverPort: 22,
+    });
+  });
+
+  it('rejects malformed values', () => {
+    expect(parseSshConnection('nope')).toBeUndefined();
+    expect(parseSshConnection('a b c d')).toBeUndefined(); // non-numeric ports
+  });
+});
+
+describe('deriveProvenance', () => {
+  it('local + tmux pane yields a tmux reply rail (addressable)', () => {
+    const p = deriveProvenance(
+      { TMUX: '/tmp/tmux-501/default,914,2', TMUX_PANE: '%5', TERM_PROGRAM: 'tmux' },
+      'zion',
+    );
+    expect(p.host).toBe('zion');
+    expect(p.transport).toBe('local');
+    expect(p.mux).toEqual({ kind: 'tmux', socket: '/tmp/tmux-501/default', pane: '%5' });
+    expect(p.reply).toEqual({ rail: 'tmux', target: '%5', socket: '/tmp/tmux-501/default' });
+  });
+
+  it('ssh session flags transport and captures the origin', () => {
+    const p = deriveProvenance(
+      { SSH_CONNECTION: '203.0.113.7 51828 10.0.0.3 22', SSH_TTY: '/dev/pts/4' },
+      'phoenix-horizon',
+    );
+    expect(p.transport).toBe('ssh');
+    expect(p.ssh).toEqual({ clientIp: '203.0.113.7', clientPort: 51828, serverIp: '10.0.0.3', serverPort: 22 });
+  });
+
+  it('no tmux, no ssh => local and NOT addressable (reply null)', () => {
+    const p = deriveProvenance({ TERM_PROGRAM: 'vscode' }, 'this-mac');
+    expect(p.transport).toBe('local');
+    expect(p.mux).toBeUndefined();
+    expect(p.reply).toBeNull(); // inherited/ignored stdin — feed shows read-only
+  });
+
+  it('screen session is recognized but not (yet) addressable', () => {
+    const p = deriveProvenance({ STY: '12345.pts-0.host' }, 'box');
+    expect(p.mux).toEqual({ kind: 'screen', session: '12345.pts-0.host' });
+    expect(p.reply).toBeNull();
+  });
+});
+
+describe('detectProvenance (real process, no mocks)', () => {
+  it('reads the running test process env and reports its own host', async () => {
+    const p = await detectProvenance(process.pid);
+    // On Linux (/proc) and macOS (ps eww) this must resolve; other platforms undefined.
+    if (process.platform === 'linux' || process.platform === 'darwin') {
+      expect(p).toBeDefined();
+      expect(p!.host.length).toBeGreaterThan(0);
+      expect(p!.transport === 'local' || p!.transport === 'ssh').toBe(true);
+      // transport must agree with the actual env of this very process.
+      expect(p!.transport).toBe(process.env.SSH_CONNECTION ? 'ssh' : 'local');
+    } else {
+      expect(p).toBeUndefined();
+    }
+  });
+
+  it('returns undefined for an impossible pid', async () => {
+    expect(await detectProvenance(0)).toBeUndefined();
+    expect(await detectProvenance(-1)).toBeUndefined();
+  });
+});

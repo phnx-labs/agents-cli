@@ -27,6 +27,10 @@ import type { AgentId, VersionResources } from './types.js';
 import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from './state.js';
 import { defaultPatterns, expandPatterns } from './resource-patterns.js';
 import { resolveResource, listResources } from './resources.js';
+// VERSION_RE + compareVersions are owned by the agent-spec engine primitives
+// (single source of truth). Re-exported below so existing importers of
+// `compareVersions` from './versions.js' keep working.
+import { VERSION_RE, compareVersions } from './agent-spec/primitives.js';
 import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath } from './agents.js';
 import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
 import { installMcpServers, parseMcpServerConfig } from './mcp.js';
@@ -51,11 +55,8 @@ const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const RULES_DOC_FILENAME = 'README.md';
 
-// Strict shape for an agent version string. Anything outside this is rejected
-// at parse time so it can't reach an exec/shell boundary or get interpolated
-// into a generated bash alias. Must allow "latest" plus npm-dist-tag /
-// semver-shaped values (digits, dots, dashes, +, _).
-const VERSION_RE = /^(?:latest|(?!.*\.\.)[A-Za-z0-9._+-]{1,64})$/;
+// VERSION_RE and compareVersions now live in ./agent-spec/primitives.ts and are
+// imported above — kept as the single validation/ordering authority.
 
 /**
  * Resource selection for syncing to a version.
@@ -1321,6 +1322,25 @@ function removeInstallArtifacts(versionDir: string): void {
  * when nothing was resolved or no stale dir is present, so it is safe to call
  * on every script-based install. Returns the action taken (for tests/logging).
  */
+/**
+ * Proactively fold a stale `latest` version-home into its concrete version,
+ * WITHOUT needing a fresh install (RUSH-1320). `reconcileStaleLatestDir` only
+ * fires at install time, so a `latest` dir left by an old probe-failed install
+ * lingers in `agents view` indefinitely. This resolves the live CLI version and
+ * reconciles — cheap no-op when there's no `latest` dir (the common case, so
+ * `agents view` pays a `--version` shell-out only the once, until it's folded).
+ * Skipped when the active config symlink still points at `latest`, since
+ * renaming that dir would dangle the live symlink.
+ */
+export async function reconcileStaleLatestForAgent(agent: AgentId): Promise<void> {
+  if (!fs.existsSync(getVersionDir(agent, 'latest'))) return;
+  if (getConfigSymlinkVersion(agent) === 'latest') return;
+  const concrete = await getCliVersionFromPath(agent);
+  if (concrete && concrete !== 'latest') {
+    await reconcileStaleLatestDir(agent, concrete);
+  }
+}
+
 export async function reconcileStaleLatestDir(
   agent: AgentId,
   installedVersion: string,
@@ -1585,23 +1605,9 @@ export function getProjectVersion(agent: AgentId, startPath: string): string | n
   return null;
 }
 
-/**
- * Compare semver versions for sorting.
- */
-export function compareVersions(a: string, b: string): number {
-  const aParts = a.split('.').map((n) => parseInt(n, 10) || 0);
-  const bParts = b.split('.').map((n) => parseInt(n, 10) || 0);
-
-  for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
-    const aVal = aParts[i] || 0;
-    const bVal = bParts[i] || 0;
-    if (aVal !== bVal) {
-      return aVal - bVal;
-    }
-  }
-
-  return 0;
-}
+// compareVersions is defined in ./agent-spec/primitives.ts and re-exported here
+// so existing `import { compareVersions } from './versions.js'` sites keep working.
+export { compareVersions };
 
 /**
  * Get actual version from an installed 'latest' directory.
@@ -1852,9 +1858,13 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
  * sync path uses. Passing the result as an explicit `selection` means the sync
  * touches only that repo's resources — no orphan-sweep of the other layers.
  *
- * `memory` is set to `[]` (not omitted): that empty-array sentinel is what
- * `syncResourcesToVersion`'s `skipMemory` gate keys on to leave the memory
- * file untouched — it's a merge of all layers, not a per-repo artifact.
+ * `memory` is set to `'all'`, NOT `[]`: the composed rules-memory file is a
+ * merge of ALL layers, so scoping the sync to a single repo must still
+ * recompile it in the same pass (RUSH-1354). Leaving it out — or using the
+ * `[]` skip-sentinel — silently strands the memory file at its old content
+ * whenever a repo-scoped sync runs after a rules change. `'all'` makes
+ * `syncResourcesToVersion` recompose from every layer via the active preset,
+ * exactly as an unscoped full reconcile does.
  */
 export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd()): ResourceSelection {
   const patterns = [`${repo}:*`];
@@ -1867,8 +1877,9 @@ export function buildRepoScopedSelection(repo: string, cwd: string = process.cwd
     if (names.length > 0) selection[kind] = names;
   }
 
-  // Empty-array sentinel → skip the memory writer (see skipMemory below).
-  selection.memory = [];
+  // Recompile the memory file from all layers even under a repo scope — it is
+  // composed, not a per-repo artifact (see skipMemory below and RUSH-1354).
+  selection.memory = 'all';
   return selection;
 }
 

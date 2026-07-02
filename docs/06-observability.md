@@ -2,6 +2,49 @@
 
 Using agents-cli as a programmatic observability layer for agent fleets.
 
+## Audit Event Log (`agents events`)
+
+Separate from the fleet-state sources below (which answer "what's running *now*"),
+the **audit event log** answers "who did what, and from where". Every
+`agents <module> <command>` invocation is recorded — team create/disband, agent
+run, secrets access, version installs — as a structured JSONL line at
+`~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl` (dir `0700`, files `0600`, 7-day
+rotation).
+
+The recording is a single choke point — a commander `preAction`/`postAction`
+hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
+/ `command.end` for *every* subcommand, so coverage is automatic and no per-command
+wiring can drift out of date. Richer typed events (`secrets.get`, `version.install`,
+`teams.create`, `teams.disband`, …) layer on top where the extra payload earns it —
+e.g. team lifecycle events are emitted at the registry source with the team name,
+so they fire for every path (`teams create` and the auto-create in `teams add`).
+
+Every record carries **attribution** computed once per process
+([`src/lib/events.ts`](../src/lib/events.ts)):
+
+- `osUser` — the OS account that ran it.
+- `transport` — `local`, or `ssh` when `$SSH_CONNECTION` is present.
+- `sshClientIp` — the remote client IP when over SSH.
+
+So "was this agent started on the host by a remote user?" is answerable for any
+event, not just runs. The write is a synchronous single-line append (durable
+before the action proceeds); `AGENTS_DISABLE_EVENT_LOG=1` turns it off.
+
+```bash
+agents events                          # recent activity across everything
+agents events --module teams           # team lifecycle (create / add / disband)
+agents events --module secrets         # every secret accessed or revealed
+agents events --command "teams create" # a command path — prefix match
+agents events --event teams.disband    # a semantic event: a team torn down
+agents events --event secrets.get --since 7d --json
+agents events -f                       # live tail of today's log
+```
+
+`--module` filters the top-level group; `--command` matches a command path by
+prefix (`teams` catches `teams create`); `--event` filters a typed event
+(repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
+raw records for external consumers.
+
 External tools (dashboards, voice assistants, CI runners, monitoring) can read
 fleet state via three canonical `--json` sources. No direct DB access, no re-parsing
 of agent-specific formats, no auth to manage.
@@ -156,6 +199,49 @@ spend or wall-clock time (NULLs last).
 agents sessions --all --sort cost --limit 10 --json | \
   jq '.[] | {shortId, agent, costUsd, durationMs, topic}'
 ```
+
+## Accounts & Usage in `agents view`
+
+`agents view` shows, per installed agent, **who's signed in** and (where the
+provider exposes it) **live quota**. Two separate passes feed the row, joined by
+a stable per-account key:
+
+- **Account identity** — `getAccountInfo` ([`src/lib/agents.ts`](../src/lib/agents.ts))
+  is **local-only, no network**. It reads each agent's on-disk credential and
+  surfaces an email when one is readable, else a stable account id, else a bare
+  `signed in`.
+- **Usage bars** — a separate network pass ([`src/lib/usage.ts`](../src/lib/usage.ts))
+  fetches live quota and renders `S:`/`W:` bars + plan. It's **stale-while-revalidate**
+  (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
+  block) so `agents view` / `agents run` stay off the network on the hot path.
+
+What each agent can surface is bounded by what its local credential actually
+contains — this is a data-availability limit, not a policy choice:
+
+| Agent | Account column | Usage bars | How it's derived |
+|---|---|---|---|
+| Claude | email + plan | live (`api.anthropic.com`) | email/plan/quota from the local OAuth credential + usage API |
+| Codex | email + plan | last-seen (session logs) | email/plan from the auth JWT; quota parsed from the newest session's rate-limit event |
+| Gemini, Grok | email | — | email read from the local auth file |
+| Droid | email | — | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. No network. Plan needs an authed call, so it's omitted. |
+| Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
+| Antigravity | `signed in` | — | OAuth grant with no id_token — presence is the only signal |
+| others | `not signed in` unless a credential exists | — | `default` case: no detector |
+
+Two deliberate boundaries worth knowing:
+
+- **Droid decrypts a local credential.** We read the user's own credential to
+  show their own email — the same thing the `droid` CLI does. If it can't be
+  decrypted (a `keyring-v2`/legacy login with no on-disk key), the row falls
+  back to `signed in` rather than blanking.
+- **Kimi usage never refreshes the token.** `agents view` is a read/inspect
+  command, so it must not rotate the user's OAuth credential (rewriting the
+  file, invalidating the refresh token, racing a running `kimi`). An expired
+  token simply falls back to the cached snapshot; the `kimi` CLI refreshes on
+  its own launch.
+
+The same fields are exposed programmatically via `agents view --json`
+(`email`, `accountId`, `plan`, `usageStatus`, `windows`).
 
 ## Budget Guardrails (`agents budget`)
 

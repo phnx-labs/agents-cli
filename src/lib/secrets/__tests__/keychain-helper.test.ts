@@ -115,15 +115,21 @@ describe('keychain-helper forward migration (file-based -> data-protection)', ()
     expect(block).toContain('return (value, fileStatus, true)');
   });
 
-  it('migrateInline deletes the legacy copy and re-adds into the DP keychain', () => {
+  it('migrateInline adds the DP copy and does NOT delete the legacy copy inline', () => {
     const source = helperSource();
     const block = source.slice(source.indexOf('func migrateInline('), source.indexOf('func dieIfCancelled('));
-    // Remove the legacy file-based copy so the next read resolves from DP.
-    expect(block).toContain('SecItemDelete(fileBase(service: service, account: account) as CFDictionary)');
-    // Re-add carries the DP base (incl. access group) plus the biometry ACL.
+    // Clears any stale DP copy first (DP-scoped) so the add can't hit errSecDuplicateItem.
+    expect(block).toContain('SecItemDelete(dpBase(service: service, account: account) as CFDictionary)');
+    // Adds the DP copy: DP base (incl. access group) plus the biometry ACL.
     expect(block).toContain('var addAttrs = dpBase(service: service, account: account)');
     expect(block).toContain('addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()');
     expect(block).toContain('SecItemAdd(addAttrs as CFDictionary, nil)');
+    // Regression guard: migrateInline must NOT delete the legacy copy inline.
+    // On macOS 26 the unscoped SecItemDelete(fileBase) also removes the
+    // just-added DP copy (same service+account), so the relocation never sticks.
+    // Legacy purge is migrate-acl's job (it clears both keychains before its add,
+    // after an encrypted backup).
+    expect(block).not.toContain('SecItemDelete(fileBase(service: service, account: account) as CFDictionary)');
   });
 
   it('get and get-batch only migrate items in our own namespace', () => {

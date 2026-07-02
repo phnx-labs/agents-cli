@@ -219,7 +219,7 @@ public sealed class Automation
 
             // No ValuePattern — focus and type the characters.
             el.SetFocus();
-            foreach (char ch in text) SendUnicode(ch);
+            SendUnicodeString(text);
             bool committed = false;
             if (P.BoolOr(p, "commit", false)) { SendVirtualKey(VK_RETURN); committed = true; }
             return new() { ["ok"] = true, ["committed"] = committed };
@@ -250,7 +250,31 @@ public sealed class Automation
             // Prefer rich document text, then ValuePattern, then the Name.
             if (el.TryGetCurrentPattern(TextPattern.Pattern, out var tp))
             {
-                var text = ((TextPattern)tp).DocumentRange.GetText(MaxTextChars);
+                // GetText(maxLength > 0) makes the provider compute an endpoint at
+                // start+maxLength; the Windows 11 Notepad UIA provider rejects that as
+                // "Start or end specified is past the end of the text range" when the
+                // document is shorter than maxLength. GetText(-1) returns the whole
+                // range with no endpoint arithmetic; clamp the length in managed code.
+                string text;
+                try
+                {
+                    text = ((TextPattern)tp).DocumentRange.GetText(-1) ?? "";
+                }
+                catch (Exception ex) when (
+                    ex is not ElementNotAvailableException &&
+                    (ex.Message.Contains("past the end of the text range") ||
+                     ex is System.Runtime.InteropServices.COMException ||
+                     ex is ArgumentException ||
+                     ex is InvalidOperationException))
+                {
+                    // An EMPTY editable document (e.g. right after ctrl+a/delete)
+                    // makes the Win11 Notepad UIA provider raise "Start or end
+                    // specified is past the end of the text range" even for
+                    // GetText(-1). A field with no text is not an error — report it
+                    // as empty so get_text is total over all editable states. (#587)
+                    text = "";
+                }
+                if (text.Length > MaxTextChars) text = text.Substring(0, MaxTextChars);
                 return new() { ["text"] = text };
             }
             if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
@@ -265,11 +289,7 @@ public sealed class Automation
     {
         string text = P.StringOpt(p, "text") ?? throw RpcError.Invalid("type_text needs `text`");
         int delayMs = P.IntOr(p, "char_delay_ms", 0);
-        foreach (char ch in text)
-        {
-            SendUnicode(ch);
-            if (delayMs > 0) Thread.Sleep(delayMs);
-        }
+        SendUnicodeString(text, delayMs);
         if (P.BoolOr(p, "commit", false)) SendVirtualKey(VK_RETURN);
         return new() { ["ok"] = true, ["chars"] = text.Length };
     }
@@ -907,11 +927,55 @@ public sealed class Automation
 
     private static void SendVirtualKey(ushort vk) { SendKeyEvent(vk, false); SendKeyEvent(vk, true); }
 
+    private static INPUT UnicodeDown(char ch) =>
+        new() { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE } } };
+    private static INPUT UnicodeUp(char ch) =>
+        new() { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP } } };
+
     private static void SendUnicode(char ch)
     {
-        var down = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE } } };
-        var up = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wScan = ch, dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP } } };
-        var inp = new[] { down, up };
+        var inp = new[] { UnicodeDown(ch), UnicodeUp(ch) };
         SendInput((uint)inp.Length, inp, Marshal.SizeOf<INPUT>());
+    }
+
+    // A minimal per-character settle so the foreground thread's message pump
+    // drains each injected VK_PACKET before the next one arrives (see
+    // SendUnicodeString). Small enough to be imperceptible for field-sized text,
+    // large enough to yield a scheduling slice to a busy receiver (e.g. Edge).
+    private const int TypeSettleMs = 5;
+
+    // Type an arbitrary string as KEYEVENTF_UNICODE key events. Every character
+    // is delivered by its own atomic down/up SendInput call carrying the literal
+    // UTF-16 code unit in wScan (with wVk = 0), so SendKeys metacharacters
+    // (+ ^ % ~ ( ) { } [ ] < > = & * ! @ #) and spaces land byte-for-byte —
+    // there is no SendKeys operator layer to escape.
+    //
+    // Per KEYBDINPUT/KEYEVENTF_UNICODE, each event is posted to the foreground
+    // thread's queue as a WM_KEYDOWN/WM_KEYUP whose wParam is VK_PACKET and whose
+    // wScan is the code unit; TranslateMessage turns the KEYDOWN into the WM_CHAR
+    // the control renders. Because EVERY unicode event shares the same virtual key
+    // (VK_PACKET), a contiguous run of them dumped into the queue at once can be
+    // coalesced by a busy receiver onto the surviving (last) VK_PACKET message —
+    // the tail of the run collapses onto the final code unit. That is issue #581:
+    // "Fidelity probe 12345 +^%(){}=" landed as "Fidelity probe 12345 ========"
+    // and "(){}[]<>" as "(>>>>>>>" (letters/digits pumped first survive; the
+    // symbol run piled up behind them and coalesced). #554 had the mirror bug: a
+    // one-SendInput-per-char loop with NO settle still let the events pile up, so
+    // the tail stuck on the last char ("reliability probe 12345" -> "...55555").
+    //
+    // The fix keeps the down/up of a single character atomic (one SendInput call)
+    // AND yields a real settle between characters, so the pump consumes each
+    // VK_PACKET before the next is queued — nothing piles up, nothing coalesces.
+    // Alphanumerics stay correct (the #554 race was purely the missing settle); a
+    // larger char_delay_ms lets a caller pace extra for laggy fields.
+    private static void SendUnicodeString(string text, int delayMs = 0)
+    {
+        if (text.Length == 0) return;
+        int settle = delayMs > 0 ? delayMs : TypeSettleMs;
+        for (int i = 0; i < text.Length; i++)
+        {
+            SendUnicode(text[i]);
+            if (i != text.Length - 1) Thread.Sleep(settle);
+        }
     }
 }

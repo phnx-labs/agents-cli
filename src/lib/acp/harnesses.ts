@@ -2,7 +2,7 @@
  * Per-harness spawn configuration for Agent Client Protocol (ACP) mode.
  *
  * Each entry describes how to launch a coding agent CLI as an ACP server
- * (stdio JSON-RPC). Unsupported harnesses (amp, roo, goose-stdio) are omitted;
+ * (stdio JSON-RPC). Unsupported harnesses (amp, goose-stdio) are omitted;
  * callers should fall back to the legacy direct-exec path for those.
  *
  * Sources: https://agentclientprotocol.com/get-started/agents + vendor docs.
@@ -76,7 +76,7 @@ export const ACP_HARNESSES: Partial<Record<AgentId, AcpHarnessSpec>> = {
   // goose: ACP over HTTP via `goosed`, not a clean stdio subcommand.
   // copilot, kiro: excluded for now (not installed in the reference environment,
   //                no local verification possible).
-  // amp, roo: not on the ACP agents list.
+  // amp: not on the ACP agents list.
 };
 
 /** Returns the ACP spawn spec for an agent, or undefined if the harness does not speak ACP. */

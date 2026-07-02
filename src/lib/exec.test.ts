@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume } from './exec.js';
+import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn } from './exec.js';
 import type { ExecOptions } from './exec.js';
 
 /** Minimal ExecOptions with required fields, overridable per test. */
@@ -110,5 +110,25 @@ describe('resolveInteractive (sanity for the gating inputs above)', () => {
   });
   it('--headless forces non-interactive even without a prompt', () => {
     expect(resolveInteractive({ headless: true, prompt: undefined })).toBe(false);
+  });
+});
+
+describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
+  it('POSIX execs the binary directly, no shell', () => {
+    const r = resolveShimSpawn('linux', '/home/u/.agents/.../claude', ['--help']);
+    expect(r).toEqual({ command: '/home/u/.agents/.../claude', args: ['--help'], shell: false });
+  });
+
+  it('win32 keeps the common .cmd-present path on the shell (unchanged)', () => {
+    const r = resolveShimSpawn('win32', 'C:\\bin\\claude.cmd', ['run']);
+    expect(r.command).toBe('C:\\bin\\claude.cmd');
+    expect(r.args).toEqual(['run']);
+    expect(r.shell).toBe(true);
+  });
+
+  it('win32 sends a bare (non-absolute) name to the shell for PATHEXT resolution', () => {
+    const r = resolveShimSpawn('win32', 'claude', []);
+    expect(r.command).toBe('claude');
+    expect(r.shell).toBe(true);
   });
 });

@@ -51,6 +51,21 @@ export interface PickedItem<T> {
   item: T;
 }
 
+/** Configuration for the multi-select picker prompt. */
+export interface MultiPickerConfig<T> {
+  message: string;
+  items: T[];
+  filter: (query: string) => T[];
+  labelFor: (item: T, query: string) => string;
+  /** Stable identity for an item — drives the selected set. */
+  keyFor: (item: T) => string;
+  buildPreview?: (item: T) => string;
+  pageSize?: number;
+  initialSearch?: string;
+  emptyMessage?: string;
+  enterHint?: string;
+}
+
 interface Choice<T> {
   value: T;
   label: string;
@@ -238,6 +253,148 @@ export function itemPicker<T>(config: PickerConfig<T>): Promise<PickedItem<T> | 
       : chalk.gray(
           `↑↓ navigate${hasPreview ? ' · space: preview' : ''} · ⏎ ${enter} · esc: cancel`
         );
+
+    const parts: string[] = [header, page];
+    if (results.length === 0) {
+      parts.push(chalk.gray(`  ${cfg.emptyMessage ?? 'No matches.'}`));
+    }
+
+    if (previewOpen && selected && cfg.buildPreview) {
+      const width = terminalWidth();
+      const separator = chalk.gray('─'.repeat(Math.min(width, 80)));
+      const fixedRows =
+        renderedRows(header, width) +
+        renderedRows(parts.slice(1).join('\n'), width) +
+        renderedRows(separator, width) +
+        renderedRows(help, width);
+      const availablePreviewRows = terminalRows() - fixedRows;
+      const preview = limitPreviewHeight(cfg.buildPreview(selected.value), availablePreviewRows, width);
+      if (preview) {
+        parts.push(separator);
+        parts.push(preview);
+      }
+    }
+
+    parts.push(help);
+
+    return [header, parts.slice(1).join('\n')];
+  });
+  return prompt(config);
+}
+
+/**
+ * Multi-select variant of {@link itemPicker}. Same searchable, paginated list
+ * and preview pane, but `space` toggles a checkbox on the active row instead of
+ * the preview (preview moves to `tab`), and `enter` confirms every checked row.
+ *
+ * Returns the selected items (in the config's `items` order) or `null` on
+ * cancel. Pressing `enter` with nothing checked confirms just the highlighted
+ * row, so a quick single-pick still works.
+ */
+export function multiItemPicker<T>(config: MultiPickerConfig<T>): Promise<T[] | null> {
+  const prompt = createPrompt<T[] | null, MultiPickerConfig<T>>((cfg, done) => {
+    const theme = makeTheme({});
+    const [status, setStatus] = useState<'idle' | 'done'>('idle');
+    const [searchTerm, setSearchTerm] = useState(cfg.initialSearch ?? '');
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set());
+    const [active, setActive] = useState(0);
+    const prefix = usePrefix({ status, theme });
+
+    const results = useMemo(() => {
+      const filtered = cfg.filter(searchTerm).slice(0, 200);
+      return filtered.map<Choice<T>>((item) => ({
+        value: item,
+        label: cfg.labelFor(item, searchTerm),
+      }));
+    }, [searchTerm]);
+
+    useEffect(() => {
+      if (active >= results.length) setActive(0);
+    }, [results]);
+
+    const selected = results[active];
+
+    // Selected items resolved in the original list order for deterministic fan-out.
+    const collectSelected = (): T[] => cfg.items.filter((it) => selectedKeys.has(cfg.keyFor(it)));
+
+    useKeypress((key, rl) => {
+      if (isEnterKey(key)) {
+        const chosen = selectedKeys.size > 0 ? collectSelected() : selected ? [selected.value] : [];
+        if (chosen.length === 0) return;
+        setStatus('done');
+        done(chosen);
+        return;
+      }
+
+      // space toggles the active row's checkbox; strip the space from the buffer
+      // so it never leaks into the filter.
+      if (isSpaceKey(key)) {
+        rl.clearLine(0);
+        if (selected) {
+          const k = cfg.keyFor(selected.value);
+          const next = new Set(selectedKeys);
+          if (next.has(k)) next.delete(k);
+          else next.add(k);
+          setSelectedKeys(next);
+        }
+        return;
+      }
+
+      if (key.name === 'tab' && cfg.buildPreview) {
+        rl.clearLine(0);
+        setPreviewOpen(!previewOpen);
+        return;
+      }
+
+      if (isUpKey(key)) {
+        rl.clearLine(0);
+        if (results.length > 0) setActive((active - 1 + results.length) % results.length);
+        return;
+      }
+
+      if (isDownKey(key)) {
+        rl.clearLine(0);
+        if (results.length > 0) setActive((active + 1) % results.length);
+        return;
+      }
+
+      setSearchTerm(rl.line);
+    });
+
+    const message = theme.style.message(cfg.message, status);
+    const count = selectedKeys.size;
+
+    if (status === 'done') {
+      return `${prefix} ${message} ${chalk.cyan(`${count || 1} session${(count || 1) === 1 ? '' : 's'}`)}`;
+    }
+
+    const placeholder = '(type to filter · space to toggle · enter to resume)';
+    const searchStr = searchTerm ? chalk.cyan(searchTerm) : chalk.gray(placeholder);
+    const header = [prefix, message, searchStr].filter(Boolean).join(' ');
+
+    const page = usePagination({
+      items: results as any,
+      active,
+      renderItem({ item, isActive }: { item: Choice<T>; isActive: boolean }) {
+        if (Separator.isSeparator(item)) return ` ${(item as any).separator}`;
+        const checked = selectedKeys.has(cfg.keyFor(item.value));
+        const box = checked ? chalk.green('[x]') : chalk.gray('[ ]');
+        const cursor = isActive ? chalk.cyan('>') : ' ';
+        const row = isActive ? chalk.bold(item.label) : item.label;
+        return `${cursor} ${box} ${row}`;
+      },
+      pageSize: cfg.pageSize ?? 10,
+      loop: false,
+    });
+
+    const enter = cfg.enterHint ?? 'resume';
+    const countStr = count > 0 ? chalk.green(`${count} selected`) : chalk.gray('0 selected');
+    const help = chalk.gray(
+      `${countStr}${chalk.gray(' · ↑↓ navigate · space toggle')}${
+        cfg.buildPreview ? chalk.gray(' · tab preview') : ''
+      }${chalk.gray(` · ⏎ ${enter} · esc cancel`)}`,
+    );
 
     const parts: string[] = [header, page];
     if (results.length === 0) {

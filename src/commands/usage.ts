@@ -8,6 +8,7 @@
  *     don't publish per-account usage today)
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 
 import {
@@ -26,8 +27,7 @@ import { formatUsageSection, getUsageInfoForIdentity } from '../lib/usage.js';
 const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex']);
 
 export function registerUsageCommand(program: Command): void {
-  program
-    .command('usage [agent]')
+  addHostOption(program.command('usage [agent]'))
     .description('Show rate-limit / quota usage per agent')
     .addHelpText('after', `
 Examples:

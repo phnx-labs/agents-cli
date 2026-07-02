@@ -150,17 +150,28 @@ export function resourceUnit(file: string): { kind: RepoResourceKind; unit: stri
   return { kind: 'other', unit: file };
 }
 
+/** One resource kind + action, collapsed to a unit count (e.g. 2 new skills). */
+export interface CountedResource {
+  action: ChangeAction;
+  kind: RepoResourceKind;
+  count: number;
+}
+
+/** Resource-level summary of a changed-file set. */
+export interface ResourceDelta {
+  /** Counts in display order (grouped new -> changed -> removed, then RESOURCE_ORDER). */
+  counts: CountedResource[];
+  /** Total distinct resource units changed. */
+  total: number;
+}
+
 /**
- * Render a set of changed files as a resource-level summary, e.g.
- * `2 new skills, 1 changed hook`. Counts distinct resource units (a skill whose
- * three files all changed is "1 changed skill"), grouped by action then kind,
- * and colors each phrase green/yellow/red for new/changed/removed. Caps at
- * `maxParts` phrases, appending `+N more` so a big diff stays scannable.
+ * Collapse a changed-file set to distinct resource units, then count them by
+ * (action, kind). A skill whose three files all changed counts as one changed
+ * skill; a unit with mixed add+modify reads as a single change. This is the
+ * shared structured core behind every SYNC / CHANGES rendering.
  */
-export function formatResourceDelta(
-  entries: { action: ChangeAction; file: string }[],
-  maxParts = 5,
-): string {
+export function resourceDelta(entries: { action: ChangeAction; file: string }[]): ResourceDelta {
   // Gather every action seen across a unit's files, then collapse to one action.
   const units = new Map<string, { kind: RepoResourceKind; actions: Set<ChangeAction> }>();
   for (const { action, file } of entries) {
@@ -182,24 +193,69 @@ export function formatResourceDelta(
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
 
-  const COLOR: Record<ChangeAction, (s: string) => string> = {
-    new: chalk.green, changed: chalk.yellow, removed: chalk.red,
-  };
-  const parts: string[] = [];
+  const ordered: CountedResource[] = [];
   for (const action of ['new', 'changed', 'removed'] as ChangeAction[]) {
     for (const kind of RESOURCE_ORDER) {
       const n = counts.get(`${action} ${kind}`);
-      if (!n) continue;
-      const [singular, plural] = RESOURCE_LABELS[kind];
-      parts.push(COLOR[action](`${n} ${action} ${n === 1 ? singular : plural}`));
+      if (n) ordered.push({ action, kind, count: n });
     }
   }
+  return { counts: ordered, total: units.size };
+}
+
+const ACTION_COLOR: Record<ChangeAction, (s: string) => string> = {
+  new: chalk.green, changed: chalk.yellow, removed: chalk.red,
+};
+
+/** One colored phrase per counted resource, e.g. `2 new skills`. */
+function deltaPhrases(delta: ResourceDelta): string[] {
+  return delta.counts.map(({ action, kind, count }) => {
+    const [singular, plural] = RESOURCE_LABELS[kind];
+    return ACTION_COLOR[action](`${count} ${action} ${count === 1 ? singular : plural}`);
+  });
+}
+
+/** Join phrases with `, `, capping at `maxParts` and appending `+N more`. */
+function joinPhrases(parts: string[], maxParts: number): string {
   if (parts.length > maxParts) {
     const shown = parts.slice(0, maxParts);
     shown.push(chalk.gray(`+${parts.length - maxParts} more`));
     return shown.join(', ');
   }
   return parts.join(', ');
+}
+
+/**
+ * Kind-only brief for the compact (wide-terminal) layout: `(24 skills, 9 commands, +20)`
+ * — the top `maxKinds` kinds by display order, with a `+N` remainder. Drops the
+ * new/changed verb (the arrow already carries direction) to stay short. Returns
+ * '' when there is nothing to summarize.
+ */
+export function deltaBrief(delta: ResourceDelta, maxKinds = 2): string {
+  if (delta.total === 0) return '';
+  const shown = delta.counts.slice(0, maxKinds);
+  const shownUnits = shown.reduce((s, c) => s + c.count, 0);
+  const rest = delta.total - shownUnits;
+  const kinds = shown.map(({ kind, count }) => {
+    const [singular, plural] = RESOURCE_LABELS[kind];
+    return `${count} ${count === 1 ? singular : plural}`;
+  });
+  if (rest > 0) kinds.push(`+${rest}`);
+  return chalk.gray(`(${kinds.join(', ')})`);
+}
+
+/**
+ * Render a set of changed files as a resource-level summary, e.g.
+ * `2 new skills, 1 changed hook`. Counts distinct resource units (a skill whose
+ * three files all changed is "1 changed skill"), grouped by action then kind,
+ * and colors each phrase green/yellow/red for new/changed/removed. Caps at
+ * `maxParts` phrases, appending `+N more` so a big diff stays scannable.
+ */
+export function formatResourceDelta(
+  entries: { action: ChangeAction; file: string }[],
+  maxParts = 5,
+): string {
+  return joinPhrases(deltaPhrases(resourceDelta(entries)), maxParts);
 }
 
 /** Parse `git diff --name-status <range>` into resource-delta entries. */
@@ -237,21 +293,35 @@ function padVisible(s: string, width: number): string {
   return s + ' '.repeat(Math.max(0, width - visibleWidth(s)));
 }
 
-/**
- * One rendered row. `cells` (branch / sync / changes / remote) feeds the aligned
- * table; `raw` is a single free-form trailer for special cases (missing repo,
- * no git remote, error) that don't fit the columns.
- */
-interface RepoRow {
-  alias: string;
-  cells?: [string, string, string, string];
-  raw?: string;
+/** One side of a divergence: the resource delta plus the raw commit count (fallback). */
+interface RepoDivergence {
+  delta: ResourceDelta;
+  commits: number;
 }
 
 /**
- * Render one repo's row data: branch, resource-level sync (what a pull/push would
- * move), resource-level local edits, and the remote URL + commit. Used by
- * `agents repo list` and the hidden `agents repo status` alias.
+ * Structured status for one repo. `raw` is a free-form trailer for special cases
+ * (missing repo, no git remote, error) that don't fit the columns; otherwise the
+ * fields feed whichever layout (table / cards) the terminal width selects.
+ */
+interface RepoRow {
+  alias: string;
+  raw?: string;
+  branch?: string;
+  tracking?: boolean;
+  pull?: RepoDivergence; // present only when behind > 0
+  push?: RepoDivergence; // present only when ahead > 0
+  clean?: boolean;
+  local?: ResourceDelta; // present only when the working tree is dirty
+  url?: string;
+  commit?: string;
+}
+
+/**
+ * Read one repo's status into structured data: branch, resource-level sync (what
+ * a pull/push would move), resource-level local edits, and remote URL + commit.
+ * Formatting is deferred to the layout renderers so the same data can drive both
+ * the wide table and the narrow cards.
  */
 async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
   if (!fs.existsSync(t.dir)) {
@@ -266,28 +336,20 @@ async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
     const status = await git.status();
     // Show the local branch name; the upstream remote is already implied by URL.
     const branch = status.current || (status.tracking ? status.tracking.replace(/^origin\//, '') : '(detached)');
+    const row: RepoRow = { alias: t.alias, branch, tracking: !!status.tracking };
 
     // SYNC: what a pull brings in / a push sends out, described by resource.
     const ahead = status.ahead ?? 0;
     const behind = status.behind ?? 0;
-    let sync: string;
-    if (!status.tracking) {
-      sync = chalk.gray('no upstream');
-    } else if (ahead === 0 && behind === 0) {
-      sync = chalk.green('up to date');
-    } else {
-      const pieces: string[] = [];
+    if (status.tracking) {
       if (behind > 0) {
         // Three-dot isolates upstream's side via the merge-base, so a diverged
         // branch reports exactly what a pull adds (not the inverse of local commits).
-        const incoming = formatResourceDelta(await diffResourceEntries(git, 'HEAD...@{upstream}'));
-        pieces.push(`${incoming || chalk.yellow(`${behind} commit${behind > 1 ? 's' : ''}`)} ${chalk.gray('to pull')}`);
+        row.pull = { delta: resourceDelta(await diffResourceEntries(git, 'HEAD...@{upstream}')), commits: behind };
       }
       if (ahead > 0) {
-        const outgoing = formatResourceDelta(await diffResourceEntries(git, '@{upstream}...HEAD'));
-        pieces.push(`${outgoing || chalk.yellow(`${ahead} commit${ahead > 1 ? 's' : ''}`)} ${chalk.gray('to push')}`);
+        row.push = { delta: resourceDelta(await diffResourceEntries(git, '@{upstream}...HEAD')), commits: ahead };
       }
-      sync = pieces.join(chalk.gray('  ·  '));
     }
 
     // CHANGES: uncommitted working-tree edits, described by resource.
@@ -299,30 +361,186 @@ async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
       ...status.renamed.map((r) => ({ action: 'changed' as const, file: (r as { to: string }).to })),
       ...status.deleted.map((f) => ({ action: 'removed' as const, file: f })),
     ];
-    const changes = status.isClean() ? chalk.green('clean') : formatResourceDelta(localEntries);
+    row.clean = status.isClean();
+    if (!row.clean) row.local = resourceDelta(localEntries);
 
     const remotes = await git.getRemotes(true);
     const origin = remotes.find((r) => r.name === 'origin');
-    const url = origin?.refs?.fetch || '';
-    const commit = (await git.log({ maxCount: 1 })).latest?.hash.slice(0, 8) || '';
-    const remote = url
-      ? chalk.gray(`${url}${commit ? ` (${commit})` : ''}`)
-      : commit
-        ? chalk.gray(`(${commit})`)
-        : '';
-
-    return { alias: t.alias, cells: [branch, sync, changes, remote] };
+    row.url = origin?.refs?.fetch || '';
+    row.commit = (await git.log({ maxCount: 1 })).latest?.hash.slice(0, 8) || '';
+    return row;
   } catch (err) {
     return { alias: t.alias, raw: `${chalk.red('error')} ${(err as Error).message}` };
   }
 }
 
+/** Terminal width at or above which `list` uses the wide table instead of cards. */
+const WIDE_COLS = 120;
+
+const commitsWord = (n: number): string => chalk.yellow(`${n} commit${n > 1 ? 's' : ''}`);
+
+/** `owner/repo` from a git URL, for the compact card header. Falls back to the raw URL. */
+export function repoSlug(url: string): string {
+  const m = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+  return m ? m[1]! : url;
+}
+
+/** Full SYNC string: `24 new skills, ... to pull  ·  ... to push` (verbose table). */
+function syncFull(row: RepoRow): string {
+  if (!row.tracking) return chalk.gray('no upstream');
+  if (!row.pull && !row.push) return chalk.green('up to date');
+  const pieces: string[] = [];
+  if (row.pull) {
+    const detail = joinPhrases(deltaPhrases(row.pull.delta), 5) || commitsWord(row.pull.commits);
+    pieces.push(`${detail} ${chalk.gray('to pull')}`);
+  }
+  if (row.push) {
+    const detail = joinPhrases(deltaPhrases(row.push.delta), 5) || commitsWord(row.push.commits);
+    pieces.push(`${detail} ${chalk.gray('to push')}`);
+  }
+  return pieces.join(chalk.gray('  ·  '));
+}
+
+/** Compact SYNC for the wide table: `↓53 (24 skills, 9 commands, +20)  ↑13`. */
+function syncCompact(row: RepoRow): string {
+  if (!row.tracking) return chalk.gray('no upstream');
+  if (!row.pull && !row.push) return chalk.green('up to date');
+  const pieces: string[] = [];
+  if (row.pull) {
+    const n = row.pull.delta.total || row.pull.commits;
+    const brief = deltaBrief(row.pull.delta);
+    pieces.push(`${chalk.yellow(`↓${n}`)}${brief ? ` ${brief}` : ''}`);
+  }
+  if (row.push) {
+    const n = row.push.delta.total || row.push.commits;
+    pieces.push(chalk.magenta(`↑${n}`));
+  }
+  return pieces.join('  ');
+}
+
+/** Full CHANGES string for the verbose table. */
+function changesFull(row: RepoRow): string {
+  if (row.clean) return chalk.green('clean');
+  return joinPhrases(deltaPhrases(row.local!), 5);
+}
+
+/** Compact CHANGES for the wide table: `clean` or `~1 edit`. */
+function changesCompact(row: RepoRow): string {
+  if (row.clean) return chalk.green('clean');
+  const n = row.local!.total;
+  return chalk.yellow(`~${n} edit${n === 1 ? '' : 's'}`);
+}
+
+/**
+ * Print the aligned table. `compact` picks short (arrow-count) SYNC/CHANGES cells
+ * that keep the table bounded; verbose passes `compact: false` for full detail.
+ * Only the trailing REMOTE column is allowed to run long.
+ */
+function renderTable(rows: RepoRow[], compact: boolean): void {
+  const cells = new Map<string, [string, string, string, string]>();
+  for (const r of rows) {
+    if (r.raw) continue;
+    const remote = r.url
+      ? chalk.gray(`${r.url}${r.commit ? ` (${r.commit})` : ''}`)
+      : r.commit ? chalk.gray(`(${r.commit})`) : '';
+    cells.set(r.alias, [
+      r.branch ?? '',
+      compact ? syncCompact(r) : syncFull(r),
+      compact ? changesCompact(r) : changesFull(r),
+      remote,
+    ]);
+  }
+
+  const headers = ['REPO', 'BRANCH', 'SYNC', 'CHANGES'];
+  const tableCells = [...cells.values()];
+  const aliasW = Math.max(headers[0].length, ...rows.map((r) => r.alias.length));
+  const branchW = Math.max(headers[1].length, 0, ...tableCells.map((c) => visibleWidth(c[0])));
+  const syncW = Math.max(headers[2].length, 0, ...tableCells.map((c) => visibleWidth(c[1])));
+  const changesW = Math.max(headers[3].length, 0, ...tableCells.map((c) => visibleWidth(c[2])));
+
+  console.log(
+    `  ${chalk.gray(headers[0].padEnd(aliasW))}  ${chalk.gray(headers[1].padEnd(branchW))}  ${chalk.gray(headers[2].padEnd(syncW))}  ${chalk.gray(headers[3].padEnd(changesW))}  ${chalk.gray('REMOTE')}`,
+  );
+  for (const r of rows) {
+    const aliasCol = chalk.cyan(r.alias.padEnd(aliasW));
+    const c = cells.get(r.alias);
+    if (c) {
+      console.log(`  ${aliasCol}  ${padVisible(c[0], branchW)}  ${padVisible(c[1], syncW)}  ${padVisible(c[2], changesW)}  ${c[3]}`);
+    } else {
+      console.log(`  ${aliasCol}  ${r.raw}`);
+    }
+  }
+}
+
+/** Pack colored phrases into `, `-joined lines no wider than `width`. */
+export function wrapPhrases(parts: string[], width: number): string[] {
+  const lines: string[] = [];
+  let cur = '';
+  for (const p of parts) {
+    const cand = cur ? `${cur}, ${p}` : p;
+    if (cur && visibleWidth(cand) > width) {
+      lines.push(cur);
+      cur = p;
+    } else {
+      cur = cand;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/**
+ * Print one block per repo, width-independent. The category list wraps under an
+ * indented `↓ pull` / `↑ push` / `local` label instead of running off the edge,
+ * so a narrow terminal stays readable.
+ */
+function renderCards(rows: RepoRow[], cols: number): void {
+  const LABEL = '      '; // indent for detail labels
+  const detailWidth = Math.max(20, cols - LABEL.length - 9); // 9 ≈ "↓ pull   "
+  let first = true;
+  for (const r of rows) {
+    if (!first) console.log('');
+    first = false;
+
+    if (r.raw) {
+      console.log(`  ${chalk.cyan(r.alias)}  ${r.raw}`);
+      continue;
+    }
+
+    const head = [r.branch, r.commit || null, r.url ? repoSlug(r.url) : null].filter(Boolean).join(chalk.gray(' · '));
+    console.log(`  ${chalk.green('●')} ${chalk.cyan(r.alias)}  ${chalk.gray(head)}`);
+
+    const detail = (label: string, div: RepoDivergence, color: (s: string) => string) => {
+      const phrases = div.delta.total ? deltaPhrases(div.delta) : [commitsWord(div.commits)];
+      const lines = wrapPhrases(phrases, detailWidth);
+      lines.forEach((line, i) => {
+        const lab = i === 0 ? color(label.padEnd(9)) : ' '.repeat(9);
+        console.log(`${LABEL}${lab}${line}`);
+      });
+    };
+    if (r.tracking === false) {
+      console.log(`${LABEL}${chalk.gray('no upstream')}`);
+    } else if (r.pull || r.push) {
+      if (r.pull) detail('↓ pull', r.pull, chalk.yellow);
+      if (r.push) detail('↑ push', r.push, chalk.magenta);
+    }
+
+    const local = r.clean ? chalk.green('clean') : wrapPhrases(deltaPhrases(r.local!), detailWidth);
+    if (Array.isArray(local)) {
+      local.forEach((line, i) => console.log(`${LABEL}${chalk.gray((i === 0 ? 'local' : '').padEnd(9))}${line}`));
+    } else {
+      console.log(`${LABEL}${chalk.gray('local'.padEnd(9))}${local}`);
+    }
+  }
+}
+
 /**
  * Shared action body for `agents repo list` and the hidden `agents repo status`
- * alias. Prints an aligned table: repo, branch, resource-level sync (to pull /
- * to push), resource-level local changes, and remote URL + short commit.
+ * alias. Responsive: a wide terminal gets an aligned table with compact SYNC /
+ * CHANGES cells; a narrow one gets one card per repo with wrapping detail;
+ * `--verbose` forces the full-detail table at any width.
  */
-async function listRepos(alias: string | undefined): Promise<void> {
+async function listRepos(alias: string | undefined, opts: { verbose?: boolean } = {}): Promise<void> {
   const targets = collectRepoTargets(alias);
   if (!targets) {
     process.exitCode = 1;
@@ -334,30 +552,16 @@ async function listRepos(alias: string | undefined): Promise<void> {
   }
 
   const rows = await Promise.all(targets.map(renderRepoRow));
-  const tableRows = rows.filter((r) => r.cells);
-
-  // Column widths grow to fit the widest visible content (resource summaries vary
-  // a lot in length), so the table stays aligned without truncating detail.
-  const headers = ['REPO', 'BRANCH', 'SYNC', 'CHANGES'];
-  const aliasW = Math.max(headers[0].length, ...rows.map((r) => r.alias.length));
-  const branchW = Math.max(headers[1].length, 0, ...tableRows.map((r) => visibleWidth(r.cells![0])));
-  const syncW = Math.max(headers[2].length, 0, ...tableRows.map((r) => visibleWidth(r.cells![1])));
-  const changesW = Math.max(headers[3].length, 0, ...tableRows.map((r) => visibleWidth(r.cells![2])));
+  // TTY width when interactive; fall back to $COLUMNS (honored when piped) then 80.
+  const cols = process.stdout.columns || Number(process.env.COLUMNS) || 80;
 
   console.log('');
-  console.log(
-    `  ${chalk.gray(headers[0].padEnd(aliasW))}  ${chalk.gray(headers[1].padEnd(branchW))}  ${chalk.gray(headers[2].padEnd(syncW))}  ${chalk.gray(headers[3].padEnd(changesW))}  ${chalk.gray('REMOTE')}`,
-  );
-  for (const r of rows) {
-    const aliasCol = chalk.cyan(r.alias.padEnd(aliasW));
-    if (r.cells) {
-      const [branch, sync, changes, remote] = r.cells;
-      console.log(
-        `  ${aliasCol}  ${padVisible(branch, branchW)}  ${padVisible(sync, syncW)}  ${padVisible(changes, changesW)}  ${remote}`,
-      );
-    } else {
-      console.log(`  ${aliasCol}  ${r.raw}`);
-    }
+  if (opts.verbose) {
+    renderTable(rows, false);
+  } else if (cols >= WIDE_COLS) {
+    renderTable(rows, true);
+  } else {
+    renderCards(rows, cols);
   }
 
   const userDir = getUserAgentsDir();
@@ -572,8 +776,9 @@ export function registerRepoCommands(program: Command): void {
     .command('list [alias]')
     .alias('ls')
     .description('Show all repos with resource-level sync (skills/commands/plugins to pull or push) and local changes.')
-    .action(async (alias: string | undefined) => {
-      await listRepos(alias);
+    .option('-v, --verbose', 'Full per-resource detail in a table, regardless of terminal width')
+    .action(async (alias: string | undefined, options: { verbose?: boolean }) => {
+      await listRepos(alias, options);
     });
 
   repoCmd
@@ -816,8 +1021,9 @@ export function registerRepoCommands(program: Command): void {
   repoCmd
     .command('status [alias]', { hidden: true })
     .description('Alias of `list` (kept for muscle memory).')
-    .action(async (alias: string | undefined) => {
-      await listRepos(alias);
+    .option('-v, --verbose', 'Full per-resource detail in a table, regardless of terminal width')
+    .action(async (alias: string | undefined, options: { verbose?: boolean }) => {
+      await listRepos(alias, options);
     });
 }
 

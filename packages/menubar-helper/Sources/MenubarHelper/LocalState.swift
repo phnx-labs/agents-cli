@@ -29,6 +29,12 @@ struct Session {
     let detail: String
 }
 
+// A newly-discovered tailnet node awaiting the user's Register / Ignore.
+struct PendingDevice {
+    let name: String
+    let platform: String
+}
+
 enum LocalState {
     private static let home = NSHomeDirectory()
     private static let fm = FileManager.default
@@ -93,6 +99,20 @@ enum LocalState {
         let dir = "\(home)/.agents/.cache/state/attention"
         let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
         return Set(names.filter { !$0.hasPrefix(".") })
+    }
+
+    // MARK: Pending devices (written by the daemon device probe)
+    // Each sentinel file's NAME is the tailscale node name; its CONTENT is the
+    // platform. Cheap dir read, safe on the badge poll path. Mirrors the
+    // attention sentinel contract (src/lib/devices/pending.ts).
+    static func pendingDevices() -> [PendingDevice] {
+        let dir = "\(home)/.agents/.cache/state/devices-pending"
+        let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
+        return names.filter { !$0.hasPrefix(".") }.sorted().map { name in
+            let raw = (try? String(contentsOfFile: "\(dir)/\(name)", encoding: .utf8)) ?? ""
+            let platform = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return PendingDevice(name: name, platform: platform.isEmpty ? "unknown" : platform)
+        }
     }
 
     // MARK: All active sessions

@@ -1,10 +1,11 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AGENTS, ALL_AGENT_IDS, getAccountInfo, resolveAgentName, resolveLastActive } from './agents.js';
+import { AGENTS, ALL_AGENT_IDS, deprecationNotice, getAccountInfo, resolveAgentName, resolveLastActive, warnAgentDeprecated } from './agents.js';
 import { IS_WINDOWS } from './platform/index.js';
 import type { CapabilityName } from './types.js';
 
@@ -322,7 +323,6 @@ describe('resolveAgentName', () => {
 
   it('corrects a single typo against multi-letter aliases', () => {
     expect(resolveAgentName('clw')).toBe('openclaw'); // claw minus a letter
-    expect(resolveAgentName('roocod')).toBe('roo'); // roocode minus a letter
   });
 
   it('returns null when the correction is ambiguous', () => {
@@ -344,19 +344,46 @@ function makeJwt(payload: Record<string, unknown>): string {
   return `${b64({ alg: 'ES256', typ: 'JWT' })}.${b64(payload)}.sig`;
 }
 
+// Write a Droid credential the way the CLI does: a JSON blob (with a WorkOS
+// access_token JWT) encrypted AES-256-GCM as `ivB64:tagB64:ctB64`, keyed by the
+// base64 contents of auth.v2.key. Uses real crypto — no mocking.
+function writeDroidCredential(dir: string, claims: Record<string, unknown>): void {
+  fs.mkdirSync(dir, { recursive: true });
+  const key = crypto.randomBytes(32);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const credential = JSON.stringify({
+    access_token: makeJwt(claims),
+    refresh_token: 'rt',
+    active_organization_id: 'org_local',
+  });
+  const ct = Buffer.concat([cipher.update(credential, 'utf-8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const blob = [iv, tag, ct].map((b) => b.toString('base64')).join(':');
+  fs.writeFileSync(path.join(dir, 'auth.v2.file'), blob, 'utf-8');
+  fs.writeFileSync(path.join(dir, 'auth.v2.key'), key.toString('base64'), 'utf-8');
+}
+
 describe('getAccountInfo — token-only agents (no local email)', () => {
   // Sign-in is account-global: getAccountInfo falls back from the passed
   // per-version home to the active config under AGENTS_REAL_HOME. Pin that to a
   // fresh empty dir so "signed out" assertions don't leak into the developer's
   // real ~/.factory / ~/.kimi-code / ~/.gemini login (RUSH-1318 fallback).
+  // Antigravity on macOS stores its token in the real keychain, which can't be
+  // sandboxed per-test — opt out of the probe so "signed out" is hermetic.
   let prevRealHome: string | undefined;
+  let prevNoKeychain: string | undefined;
   beforeEach(() => {
     prevRealHome = process.env.AGENTS_REAL_HOME;
     process.env.AGENTS_REAL_HOME = makeTempDir();
+    prevNoKeychain = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.AGENTS_NO_KEYCHAIN_PROBE = '1';
   });
   afterEach(() => {
     if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
     else process.env.AGENTS_REAL_HOME = prevRealHome;
+    if (prevNoKeychain === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    else process.env.AGENTS_NO_KEYCHAIN_PROBE = prevNoKeychain;
   });
 
   it('marks Antigravity signed in when a refresh token is present', async () => {
@@ -423,12 +450,28 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     expect(info.signedIn).toBe(false);
   });
 
-  it('marks Droid signed in when ~/.factory/auth.v2.file is present', async () => {
+  it('decrypts auth.v2.file and surfaces the email + org from the WorkOS JWT', async () => {
+    const home = makeTempDir();
+    writeDroidCredential(path.join(home, '.factory'), {
+      email: 'muqsit@getrush.ai',
+      org_id: 'org_abc',
+      role: 'owner',
+      first_name: 'Muqsit',
+    });
+
+    const info = await getAccountInfo('droid', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('muqsit@getrush.ai');
+    expect(info.organizationId).toBe('org_abc');
+    expect(info.accountKey).toBe('droid:org=org_abc');
+  });
+
+  it('falls back to signed-in with no email when the blob cannot be decrypted', async () => {
     const home = makeTempDir();
     const dir = path.join(home, '.factory');
     fs.mkdirSync(dir, { recursive: true });
-    // auth.v2.file is an opaque encrypted blob (paired with auth.v2.key); its
-    // mere presence is the signed-in signal — no email/JWT is readable locally.
+    // Garbage blob with no matching key file: decrypt fails, but the auth file's
+    // presence still reads as signed in (the conservative floor).
     fs.writeFileSync(path.join(dir, 'auth.v2.file'), 'opaque-encrypted-blob', 'utf-8');
 
     const info = await getAccountInfo('droid', home);
@@ -440,5 +483,98 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     const info = await getAccountInfo('droid', makeTempDir());
     expect(info.signedIn).toBe(false);
     expect(info.email).toBeNull();
+  });
+});
+
+describe('agent deprecation warnings', () => {
+  it('marks gemini deprecated by Google with a dated notice and antigravity successor', () => {
+    const dep = AGENTS.gemini.deprecated;
+    expect(dep).toBeDefined();
+    expect(dep?.by).toBe('Google');
+    expect(dep?.date).toBe('June 18, 2026');
+    expect(dep?.replacement).toBe('antigravity');
+  });
+
+  it('builds a notice whose header names the agent, vendor, and date and points at the successor', () => {
+    const lines = deprecationNotice('gemini');
+    expect(lines).not.toBeNull();
+    expect(lines![0]).toBe('Warning: Gemini was deprecated by Google (June 18, 2026).');
+    // The successor line uses the replacement's display name + install command, not a hardcoded string.
+    expect(lines!.some((l) => l.includes('Consider using Antigravity instead:  agents add antigravity'))).toBe(true);
+    expect(lines!.some((l) => l.includes('developers.googleblog.com'))).toBe(true);
+  });
+
+  it('returns null for agents that are not deprecated', () => {
+    for (const id of ALL_AGENT_IDS) {
+      if (id === 'gemini') continue;
+      expect(deprecationNotice(id)).toBeNull();
+    }
+    // Sanity: only gemini carries a marker today, so exactly one agent warns.
+    const deprecated = ALL_AGENT_IDS.filter((id) => AGENTS[id].deprecated);
+    expect(deprecated).toEqual(['gemini']);
+  });
+
+  it('warnAgentDeprecated prints the gemini notice and stays silent for others', () => {
+    const printed: string[] = [];
+    const original = console.log;
+    console.log = (...args: unknown[]) => { printed.push(args.join(' ')); };
+    try {
+      warnAgentDeprecated('claude');
+      expect(printed).toHaveLength(0);
+      warnAgentDeprecated('gemini');
+    } finally {
+      console.log = original;
+    }
+    expect(printed.length).toBeGreaterThan(0);
+    // chalk wraps in ANSI codes; assert the visible substring survives.
+    expect(printed.join('\n')).toContain('was deprecated by Google');
+  });
+});
+
+describe('getAccountInfo — grok (nested auth.json)', () => {
+  // Isolate the HOME fallback so a missing fixture doesn't read the dev's real ~/.grok.
+  let prevRealHome: string | undefined;
+  beforeEach(() => { prevRealHome = process.env.AGENTS_REAL_HOME; process.env.AGENTS_REAL_HOME = makeTempDir(); });
+  afterEach(() => {
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+  });
+
+  it('reads the nested "<issuer>::<client_id>" record — signed in with email + ids', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.grok');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify({
+      'https://auth.x.ai::abc-123': {
+        email: 'muqsitnawaz@icloud.com',
+        user_id: '5b5643da',
+        team_id: '4af61418',
+        refresh_token: 'rt_xxx',
+        create_time: '2026-07-01T03:11:20Z',
+        auth_mode: 'oidc',
+      },
+    }));
+
+    const info = await getAccountInfo('grok', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.email).toBe('muqsitnawaz@icloud.com');
+    expect(info.accountId).toBe('5b5643da');
+  });
+
+  it('picks the newest record when multiple providers are present', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.grok');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify({
+      old: { email: 'old@x.ai', refresh_token: 'a', create_time: '2026-01-01T00:00:00Z' },
+      new: { email: 'new@x.ai', refresh_token: 'b', create_time: '2026-07-01T00:00:00Z' },
+    }));
+    const info = await getAccountInfo('grok', home);
+    expect(info.email).toBe('new@x.ai');
+  });
+
+  it('treats grok as signed out when auth.json is absent', async () => {
+    const info = await getAccountInfo('grok', makeTempDir());
+    expect(info.signedIn).toBe(false);
   });
 });

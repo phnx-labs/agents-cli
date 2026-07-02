@@ -39,6 +39,45 @@ export const CODEX_RULES_FILENAME = 'agents-deny.rules';
 
 export type ParsedRules = PermissionSet;
 
+export const COMPUTER_PERMISSION_RULE_PREFIX = 'Computer';
+
+export const COMPUTER_APP_GATED_VERBS = [
+  'screenshot',
+  'describe',
+  'get-text',
+  'launch',
+  'raise',
+  'click',
+  'right-click',
+  'type',
+  'type-text',
+  'key',
+  'drag',
+  'scroll',
+  'ax-action',
+  'focus',
+  'wait',
+] as const;
+
+export const COMPUTER_INPUT_GATED_VERBS = [
+  'raise',
+  'click',
+  'right-click',
+  'type',
+  'type-text',
+  'key',
+  'drag',
+  'scroll',
+  'ax-action',
+  'focus',
+] as const;
+
+export function formatComputerPermissionGrantHint(bundleId?: string): string {
+  const target = bundleId && bundleId.length > 0 ? bundleId : '<bundle-id>';
+  return `add Computer(${target}) to a permissions group, then \`agents computer reload\`\n` +
+    `app-targeted computer verbs are gated by Computer(<bundle-id>): ${COMPUTER_APP_GATED_VERBS.join(', ')}`;
+}
+
 export function containsBroadGrants(rules: ParsedRules): { broad: string[]; reason: string } | null {
   const broad: string[] = [];
   const reasons = new Set<string>();

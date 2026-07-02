@@ -27,6 +27,8 @@ import {
   unregisterMarketplace,
   addPluginToSettings,
   removePluginFromSettings,
+  registerCopilotInstalledPlugin,
+  unregisterCopilotInstalledPlugin,
   validateClaudePluginManifest,
 } from './plugin-marketplace.js';
 import type { DiscoveredPlugin, MarketplaceSpec } from './types.js';
@@ -359,6 +361,101 @@ describe('register/unregister marketplace', () => {
     registerMarketplace(SPECS.user, 'claude', versionHome);
     unregisterMarketplace('agents-cli', 'claude', versionHome);
     expect(fs.existsSync(knownMarketplacesPath('claude', versionHome))).toBe(false);
+  });
+});
+
+// ─── Copilot plugin registration ─────────────────────────────────────────────
+
+describe('copilot plugin registration', () => {
+  let tmpDir: string;
+  let versionHome: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cp-'));
+    versionHome = path.join(tmpDir, 'home');
+    fs.mkdirSync(path.join(versionHome, '.copilot'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const settingsPath = () => path.join(versionHome, '.copilot', 'settings.json');
+  const configPath = () => path.join(versionHome, '.copilot', 'config.json');
+  const readSettings = () => JSON.parse(fs.readFileSync(settingsPath(), 'utf-8'));
+  const readConfig = () => JSON.parse(fs.readFileSync(configPath(), 'utf-8'));
+
+  it('marketplace manifest for copilot lives at the marketplace ROOT (not .claude-plugin/)', () => {
+    const p = marketplaceManifestPath(SPECS.user, 'copilot', versionHome);
+    expect(p).toBe(path.join(marketplaceRoot(SPECS.user, 'copilot', versionHome), 'marketplace.json'));
+    // Claude keeps the canonical .claude-plugin/ location.
+    expect(marketplaceManifestPath(SPECS.user, 'claude', versionHome)).toContain(
+      path.join('.claude-plugin', 'marketplace.json')
+    );
+  });
+
+  it('registerMarketplace writes settings.json#extraKnownMarketplaces, not known_marketplaces.json', () => {
+    registerMarketplace(SPECS.user, 'copilot', versionHome);
+    const settings = readSettings();
+    expect(settings.extraKnownMarketplaces['agents-cli']).toEqual({
+      source: { source: 'directory', path: marketplaceRoot(SPECS.user, 'copilot', versionHome) },
+    });
+    expect(fs.existsSync(knownMarketplacesPath('copilot', versionHome))).toBe(false);
+  });
+
+  it('registerMarketplace preserves unrelated settings and other marketplaces', () => {
+    fs.writeFileSync(settingsPath(), JSON.stringify({ theme: 'dark', enabledPlugins: { 'x@y': true } }));
+    registerMarketplace(SPECS.user, 'copilot', versionHome);
+    registerMarketplace(SPECS.project('/p/plugins'), 'copilot', versionHome);
+    const settings = readSettings();
+    expect(settings.theme).toBe('dark');
+    expect(settings.enabledPlugins).toEqual({ 'x@y': true });
+    expect(Object.keys(settings.extraKnownMarketplaces).sort()).toEqual(['agents-cli', 'agents-project']);
+  });
+
+  it('unregisterMarketplace drops only its own extraKnownMarketplaces entry', () => {
+    registerMarketplace(SPECS.user, 'copilot', versionHome);
+    registerMarketplace(SPECS.extra('extras', '/x/plugins'), 'copilot', versionHome);
+    unregisterMarketplace(SPECS.extra('extras', '/x/plugins'), 'copilot', versionHome);
+    expect(Object.keys(readSettings().extraKnownMarketplaces)).toEqual(['agents-cli']);
+  });
+
+  it('unregisterMarketplace prunes the empty key when the last marketplace goes', () => {
+    registerMarketplace(SPECS.user, 'copilot', versionHome);
+    unregisterMarketplace('agents-cli', 'copilot', versionHome);
+    expect(readSettings().extraKnownMarketplaces).toBeUndefined();
+  });
+
+  it('registerCopilotInstalledPlugin records config.json#installedPlugins with a cache_path', () => {
+    const installDir = marketplaceRoot(SPECS.user, 'copilot', versionHome) + '/plugins/demo';
+    registerCopilotInstalledPlugin('demo', 'agents-cli', installDir, '2.0.0', true, 'copilot', versionHome);
+    const config = readConfig();
+    expect(config.installedPlugins).toHaveLength(1);
+    expect(config.installedPlugins[0]).toMatchObject({
+      name: 'demo', marketplace: 'agents-cli', version: '2.0.0', enabled: true, cache_path: installDir,
+    });
+    expect(typeof config.installedPlugins[0].installed_at).toBe('string');
+  });
+
+  it('registerCopilotInstalledPlugin is idempotent and preserves installed_at + other keys', () => {
+    fs.writeFileSync(configPath(), '// managed\n' + JSON.stringify({ someKey: 1, installedPlugins: [] }));
+    registerCopilotInstalledPlugin('demo', 'agents-cli', '/i/demo', '1.0.0', true, 'copilot', versionHome);
+    const first = readConfig().installedPlugins[0].installed_at;
+    registerCopilotInstalledPlugin('demo', 'agents-cli', '/i/demo', '1.1.0', false, 'copilot', versionHome);
+    const config = readConfig();
+    expect(config.someKey).toBe(1);
+    expect(config.installedPlugins).toHaveLength(1);
+    expect(config.installedPlugins[0].version).toBe('1.1.0');
+    expect(config.installedPlugins[0].enabled).toBe(false);
+    expect(config.installedPlugins[0].installed_at).toBe(first);
+  });
+
+  it('unregisterCopilotInstalledPlugin removes only the matching entry', () => {
+    registerCopilotInstalledPlugin('a', 'agents-cli', '/i/a', '1.0.0', true, 'copilot', versionHome);
+    registerCopilotInstalledPlugin('b', 'agents-cli', '/i/b', '1.0.0', true, 'copilot', versionHome);
+    unregisterCopilotInstalledPlugin('a', 'agents-cli', 'copilot', versionHome);
+    const names = readConfig().installedPlugins.map((e: { name: string }) => e.name);
+    expect(names).toEqual(['b']);
   });
 });
 

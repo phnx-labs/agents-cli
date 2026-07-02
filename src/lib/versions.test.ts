@@ -119,6 +119,62 @@ describe('reconcileStaleLatestDir', () => {
   });
 });
 
+// Full path (RUSH-1320): resolve the live CLI version via a real `--version`
+// shell-out, then fold the stale `latest` dir onto it. Uses a fake `droid` on
+// PATH — no mocking — so getCliVersionFromPath returns a concrete version.
+function runReconcileForAgent(home: string, agent: string, fakeBinDir: string): void {
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    import { reconcileStaleLatestForAgent } from ${JSON.stringify(moduleUrl)};
+    (async () => { await reconcileStaleLatestForAgent(${JSON.stringify(agent)}); })();
+  `], {
+    // Prepend the fake-bin dir so `droid --version` resolves to our stub.
+    env: { ...process.env, HOME: home, PATH: `${fakeBinDir}${path.delimiter}${process.env.PATH}` },
+    encoding: 'utf-8',
+  });
+  expect(child.status, child.stderr).toBe(0);
+}
+
+describe('reconcileStaleLatestForAgent (proactive)', () => {
+  it.skipIf(process.platform === 'win32')('folds a stale `latest` onto the live CLI version, preserving home/', () => {
+    const home = makeTempHome();
+    // Stale latest home with a credential-like file that must survive the fold.
+    const latestFactory = path.join(droidVersionDir(home, 'latest'), 'home', '.factory');
+    fs.mkdirSync(latestFactory, { recursive: true });
+    fs.writeFileSync(path.join(latestFactory, 'auth.v2.file'), 'LOGIN');
+
+    // Fake `droid --version` -> 0.161.0.
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const droidStub = path.join(binDir, 'droid');
+    fs.writeFileSync(droidStub, '#!/bin/sh\necho "droid 0.161.0"\n');
+    fs.chmodSync(droidStub, 0o755);
+
+    runReconcileForAgent(home, 'droid', binDir);
+
+    // `latest` is gone; its home (incl. the login file) now lives under 0.161.0.
+    expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
+    expect(fs.readFileSync(path.join(droidVersionDir(home, '0.161.0'), 'home', '.factory', 'auth.v2.file'), 'utf8')).toBe('LOGIN');
+  });
+
+  it.skipIf(process.platform === 'win32')('is a no-op when there is no stale `latest` dir', () => {
+    const home = makeTempHome();
+    fs.mkdirSync(path.join(droidVersionDir(home, '0.161.0'), 'home'), { recursive: true });
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const droidStub = path.join(binDir, 'droid');
+    fs.writeFileSync(droidStub, '#!/bin/sh\necho "droid 0.161.0"\n');
+    fs.chmodSync(droidStub, 0o755);
+
+    runReconcileForAgent(home, 'droid', binDir);
+
+    // 0.161.0 untouched, no `latest` created.
+    expect(fs.existsSync(droidVersionDir(home, '0.161.0'))).toBe(true);
+    expect(fs.existsSync(droidVersionDir(home, 'latest'))).toBe(false);
+  });
+});
+
 describe('version resource sync path handling', () => {
   it('intersects explicit resource selections with discovered resources before syncing', async () => {
     const home = makeTempHome();
@@ -492,7 +548,7 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
   // scoping to one repo returns only that layer's resources. Guards against
   // layer-misattribution — the bug where `--repo system` would sweep in (or
   // drop) the wrong repo's skills.
-  function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] } {
+  function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] | 'all' } {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(process.execPath, [tsxBin, '-e', `
@@ -527,12 +583,14 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
     expect(sel.skills).toEqual(['user-only']);
   });
 
-  it('skips the memory file through a real sync — leaves merged rules untouched', () => {
+  it('recompiles a STALE memory file through a real repo-scoped sync (RUSH-1354)', () => {
     const home = makeTempHome();
-    // Same fixture the "writes missing grok AGENTS.md" test uses to PROVE the
-    // memory file IS written for a partial selection. Under a repo scope the
-    // memory:[] sentinel must make syncResourcesToVersion skip it entirely —
-    // so this is a real negative control, not a check of the returned object.
+    // The composed rules-memory file is a merge of ALL layers, so a repo-scoped
+    // sync must still recompile it — otherwise a rules change followed by a
+    // repo-scoped `agents sync <agent> <repo>` silently strands the file at its
+    // old content. Same rules fixture the "writes missing grok AGENTS.md" test
+    // uses; here we PRE-SEED a stale AGENTS.md and prove the scoped sync
+    // overwrites it with the freshly composed content.
     const rulesDir = path.join(home, '.agents', '.system', 'rules');
     fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
     fs.writeFileSync(
@@ -540,18 +598,28 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
       'presets:\n  default:\n    subrules:\n      - core\n',
       'utf-8'
     );
-    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'scoped memory body\n', 'utf-8');
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'fresh scoped memory body\n', 'utf-8');
 
-    // The empty-array sentinel is what the skipMemory gate keys on.
-    expect(runBuildScoped(home, 'system').memory).toEqual([]);
+    // Pre-seed a stale memory file in the version home — this is what a prior
+    // sync left behind before the rules changed.
+    const agentDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.grok');
+    const agentsPath = path.join(agentDir, 'AGENTS.md');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(agentsPath, 'STALE memory body — must be overwritten\n', 'utf-8');
+
+    // The scoped selection now recomposes memory from all layers (memory:'all',
+    // not the old []-skip sentinel).
+    expect(runBuildScoped(home, 'system').memory).toEqual('all');
 
     const result = runVersionSync(
       home,
       "syncResourcesToVersion('grok', '0.2.33', buildRepoScopedSelection('system', home), { cwd: home })"
     ) as { memory: string[] };
 
-    const agentsPath = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.grok', 'AGENTS.md');
-    expect(result.memory).toEqual([]);
-    expect(fs.existsSync(agentsPath)).toBe(false);
+    expect(result.memory).toContain('AGENTS.md');
+    expect(fs.existsSync(agentsPath)).toBe(true);
+    const written = fs.readFileSync(agentsPath, 'utf-8');
+    expect(written).toContain('fresh scoped memory body');
+    expect(written).not.toContain('STALE memory body');
   });
 });

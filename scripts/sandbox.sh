@@ -21,7 +21,10 @@ BOX_CLASS="${CRABBOX_CLASS:-cpx62}"
 
 # Read profile from .crabbox.yaml so we only pick boxes warmed for THIS repo.
 # Falls back to "default" if the file is missing or unparseable.
-PROFILE="${CRABBOX_PROFILE:-$(awk '/^profile:/ {print $2; exit}' "$REPO_ROOT/.crabbox.yaml" 2>/dev/null)}"
+# `|| true` is required: under `set -e`, awk exiting non-zero on a missing
+# .crabbox.yaml would abort the whole script inside this assignment before the
+# `:-default` fallback below could run.
+PROFILE="${CRABBOX_PROFILE:-$(awk '/^profile:/ {print $2; exit}' "$REPO_ROOT/.crabbox.yaml" 2>/dev/null || true)}"
 PROFILE="${PROFILE:-default}"
 export PROFILE
 
@@ -35,7 +38,7 @@ command -v crabbox >/dev/null || die "crabbox not installed"
 # otherwise fall back to the agents-cli Keychain bundle (local dev path).
 if [[ -z "${HCLOUD_TOKEN:-}" ]]; then
   command -v agents >/dev/null || die "HCLOUD_TOKEN not set and agents-cli not installed"
-  eval "$(agents secrets export hetzner.com 2>/dev/null)" || die "Failed to load hetzner.com secrets"
+  eval "$(agents secrets export hetzner.com --plaintext 2>/dev/null)" || die "Failed to load hetzner.com secrets"
 fi
 [[ -n "${HCLOUD_TOKEN:-}" ]] || die "HCLOUD_TOKEN is empty after secret resolution"
 export HCLOUD_TOKEN
@@ -45,7 +48,7 @@ export HCLOUD_TOKEN
 # works regardless of whether the App is installed on a user or an org.
 # TOKEN_REPO env var (required) picks which installation.
 generate_github_token() {
-  eval "$(agents secrets export github.com 2>/dev/null)" || return 1
+  eval "$(agents secrets export github.com --plaintext 2>/dev/null)" || return 1
   [[ -n "${APP_ID:-}" && -n "${APP_PRIVATE_KEY:-}" ]] || return 1
 
   local target_repo="${TOKEN_REPO:?TOKEN_REPO must be set (e.g. owner/.agents) to pick the GitHub App installation}"
@@ -113,12 +116,15 @@ fi
 
 # Load Claude token for running agents on sandbox. Honor a pre-set env var first.
 if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && command -v agents >/dev/null; then
-  eval "$(agents secrets export anthropic.com 2>/dev/null)" || true
+  eval "$(agents secrets export anthropic.com --plaintext 2>/dev/null)" || true
 fi
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
 
-# Pick the slug of a running box matching $PROFILE, or empty if none.
-pick_box_for_profile() {
+# List the slugs of running boxes matching $PROFILE, one per line (oldest
+# first). Box slugs are ephemeral -- a box gets reaped and its replacement comes
+# up under a new slug -- so we always resolve by the stable `profile` label at
+# run time, never by a cached/hardcoded name.
+running_slugs_for_profile() {
   crabbox list --json 2>/dev/null | /usr/bin/python3 -c "
 import sys, json, os
 profile = os.environ['PROFILE']
@@ -131,23 +137,53 @@ for b in boxes:
     if b.get('labels', {}).get('profile') != profile: continue
     slug = b.get('labels', {}).get('slug', '')
     if slug:
-        print(slug); break
+        print(slug)
 " 2>/dev/null || true
 }
 
-# Find or create a crabbox bound to $PROFILE
+# Return 0 if $1 is SSH-ready (crabbox reports `ready=true`), else 1. A box whose
+# cloud-init bootstrap failed still reports status=running but never becomes
+# ready; selecting it burns the full ~2min crabbox SSH-wait before hard-failing.
+# `crabbox status` flips to ready=true only once sshd is reachable, so gate on it.
+box_ready() {
+  local slug="$1"
+  [[ -n "$slug" ]] || return 1
+  crabbox status --id "$slug" 2>/dev/null \
+    | grep -qE '(^|[[:space:]])ready=true([[:space:]]|$)'
+}
+
+# Echo the first SSH-ready running box for $PROFILE, or nothing. Not-ready boxes
+# (failed bootstrap or still booting) are skipped, never selected.
+pick_ready_box() {
+  local slug
+  while IFS= read -r slug; do
+    [[ -n "$slug" ]] || continue
+    if box_ready "$slug"; then echo "$slug"; return 0; fi
+  done < <(running_slugs_for_profile)
+}
+
+# Acquire an SSH-ready box for $PROFILE. Reuse a ready one if it exists; else
+# warm a fresh box and poll until it is actually ready. Never selects or destroys
+# a not-ready box -- a dud lease is left for crabbox's idle timeout to reap, which
+# keeps concurrent runs and mid-boot boxes safe.
 get_or_create_box() {
-  local box_id
-  box_id=$(pick_box_for_profile)
+  local box_id waited
+  box_id="$(pick_ready_box)"
+  [[ -n "$box_id" ]] && { echo "$box_id"; return 0; }
 
-  if [[ -z "$box_id" ]]; then
-    echo "No running box for profile '$PROFILE', warming up (~60s)..." >&2
-    crabbox warmup --class "$BOX_CLASS" --profile "$PROFILE" >/dev/null
-    sleep 5
-    box_id=$(pick_box_for_profile)
-  fi
+  echo "No ready box for profile '$PROFILE', warming up (~60s)..." >&2
+  crabbox warmup --class "$BOX_CLASS" --profile "$PROFILE" >/dev/null || die "crabbox warmup failed"
 
-  echo "$box_id"
+  # warmup normally blocks until ready, but can return a box that never finished
+  # bootstrapping -- poll for an actually-ready box rather than trusting it.
+  waited=0
+  while [[ $waited -lt 180 ]]; do
+    box_id="$(pick_ready_box)"
+    [[ -n "$box_id" ]] && { echo "$box_id"; return 0; }
+    sleep 10
+    waited=$((waited + 10))
+  done
+  die "warmed a box for profile '$PROFILE' but none became SSH-ready within 3m (check 'crabbox list' / 'crabbox status')"
 }
 
 # Bootstrap script for remote (repo-specific: agents-cli = TypeScript)
@@ -215,32 +251,38 @@ if [[ -n "${GITHUB_TOKEN:-}" ]]; then
   echo "GitHub App token configured for private repos"
 fi
 
-# agents-cli + coding agents (for running agents in sandbox)
-if ! command -v agents &>/dev/null; then
-  echo "Installing agents-cli..."
-  sudo npm install -g @phnx-labs/agents-cli 2>/dev/null || true
-fi
-if command -v agents &>/dev/null; then
-  # First-time setup: clones ~/.agents/.system (public) and provisions ~/.agents
-  if [[ ! -d ~/.agents/.system ]]; then
-    echo "Setting up agents-cli..."
-    agents setup 2>&1 | tail -3 || true
+# agents-cli + coding agents: PR mode only. Agents run in the sandbox only when
+# authoring PRs; test mode just builds + runs the suite and needs none of this.
+# Skipping the install in test mode also keeps the box matching GitHub CI, where
+# claude is absent so the claude-dependent model-catalog tests skip rather than
+# fail on a partially-installed CLI (0 models => "mid-install", see models.ts).
+if [[ "$PR_MODE" == "1" ]]; then
+  if ! command -v agents &>/dev/null; then
+    echo "Installing agents-cli..."
+    sudo npm install -g @phnx-labs/agents-cli 2>/dev/null || true
   fi
-  # Put agents shims on PATH so installed CLIs (claude, codex, etc.) are reachable
-  export PATH="$HOME/.agents/.cache/shims:$PATH"
-  if ! grep -q '\.agents/\.cache/shims' ~/.bashrc 2>/dev/null; then
-    echo 'export PATH="$HOME/.agents/.cache/shims:$PATH"' >> ~/.bashrc
+  if command -v agents &>/dev/null; then
+    # First-time setup: clones ~/.agents/.system (public) and provisions ~/.agents
+    if [[ ! -d ~/.agents/.system ]]; then
+      echo "Setting up agents-cli..."
+      agents setup 2>&1 | tail -3 || true
+    fi
+    # Put agents shims on PATH so installed CLIs (claude, codex, etc.) are reachable
+    export PATH="$HOME/.agents/.cache/shims:$PATH"
+    if ! grep -q '\.agents/\.cache/shims' ~/.bashrc 2>/dev/null; then
+      echo 'export PATH="$HOME/.agents/.cache/shims:$PATH"' >> ~/.bashrc
+    fi
+    # Install Claude Code if not present
+    if ! command -v claude &>/dev/null; then
+      echo "Installing Claude Code via agents-cli..."
+      agents add claude 2>&1 | tail -3 || true
+    fi
   fi
-  # Install Claude Code if not present
-  if ! command -v claude &>/dev/null; then
-    echo "Installing Claude Code via agents-cli..."
-    agents add claude 2>&1 | tail -3 || true
-  fi
-fi
 
-# Claude Code auth (passed from local via env)
-if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  echo "Claude Code OAuth token configured"
+  # Claude Code auth (passed from local via env)
+  if [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+    echo "Claude Code OAuth token configured"
+  fi
 fi
 
 echo "Bootstrap complete."

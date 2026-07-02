@@ -17,7 +17,8 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Resource sync](02-resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
 | [Sessions](05-sessions.md) | Unified transcript discovery across Claude, Codex, Gemini, OpenCode. |
 | [Observability](06-observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view. |
-| [Optimizations](99-optimizations.md) | Sync manifest, startup profiling, hot-path notes. |
+| [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
+| [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
 | [Landscape](04-landscape.md) | Where agents-cli sits next to similar tools. |
 
 ## Credentials and model routing
@@ -34,6 +35,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 |---|---|
 | [Teams](teams.md) | Multi-agent DAG teams, boundary contracts, `--watch` supervisor, `--worktree` isolation, `--cloud` dispatch. |
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
+| [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--host`); track with `agents hosts ps` and view/follow with `agents logs`. |
 | [Routines](03-routines.md) | Cron-scheduled agent runs with sandboxed permissions and a long-running daemon. |
 
 ## Extensibility
@@ -54,6 +56,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [PTY](pty.md) | Persistent pseudo-terminals for REPLs and TUIs — start, exec, screen-snapshot, signal. |
 | [Computer](computer.md) | macOS Accessibility automation — screenshot the active app, click by label. |
 | [Menu bar](menubar.md) | macOS status item — live sessions, agents awaiting input, routines, + new session. Auto-enabled; `agents menubar enable/disable/status`. |
+| [Terminal engine](terminal-engine.md) | Open a command as a tab or split pane in iTerm / Ghostty / tmux, local or over `--host`. Powers `sessions resume`. |
 
 ---
 

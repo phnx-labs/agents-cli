@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildTunnelArgs,
+  buildScpArgs,
   buildPushScript,
+  buildVerifyPushScript,
   buildRegisterTaskScript,
   buildUnregisterTaskScript,
   pickFreePort,
@@ -11,7 +13,9 @@ import {
   REMOTE_HELPER_PORT,
   REMOTE_TASK_NAME,
   WIN_HELPER_EXE,
+  scpRemotePath,
 } from './ssh-tunnel.js';
+import { SSH_OPTS } from './ssh-exec.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
 
 describe('buildTunnelArgs', () => {
@@ -27,32 +31,35 @@ describe('buildTunnelArgs', () => {
     expect(args.join(' ')).toContain('ConnectTimeout=10');
   });
 
-  it('matches the args the browser driver historically spawned (behavior unchanged)', () => {
-    // The browser CDP driver used exactly this argv shape before extraction.
+  it('is the -L mapping + target + -N followed by the shared hardened baseline', () => {
+    // The tunnel now composes the canonical SSH_OPTS instead of re-listing the
+    // options, so it automatically inherits the keepalive (which lets a dropped
+    // -N tunnel exit instead of zombying) and any future baseline hardening.
     expect(buildTunnelArgs('u', 'h', 9222, 9222)).toEqual([
       '-L',
       '9222:127.0.0.1:9222',
       'u@h',
       '-N',
-      '-o',
-      'StrictHostKeyChecking=accept-new',
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=10',
+      ...SSH_OPTS,
     ]);
+  });
+
+  it('inherits the keepalive from the shared baseline', () => {
+    const args = buildTunnelArgs('u', 'h', 9222, 9222);
+    expect(args.join(' ')).toContain('ServerAliveInterval=15');
+    expect(args.join(' ')).toContain('ServerAliveCountMax=3');
   });
 });
 
 describe('buildPushScript', () => {
-  it('streams a base64 decode from stdin to %LOCALAPPDATA%\\agents (memory-safe)', () => {
+  it('resolves %LOCALAPPDATA%\\agents and does not decode base64 from stdin', () => {
     const s = buildPushScript();
     expect(s).toContain('$env:LOCALAPPDATA');
     expect(s).toContain(WIN_HELPER_EXE);
-    // Streaming decode — not a single giant [Convert]::FromBase64String string.
-    expect(s).toContain('FromBase64Transform');
-    expect(s).toContain('CryptoStream');
-    expect(s).toContain('OpenStandardInput');
+    expect(s).toContain('Write-Output $dst');
+    expect(s).not.toContain('FromBase64Transform');
+    expect(s).not.toContain('CryptoStream');
+    expect(s).not.toContain('OpenStandardInput');
     expect(s).not.toContain('FromBase64String');
   });
 
@@ -60,9 +67,25 @@ describe('buildPushScript', () => {
     expect(buildPushScript()).toContain("Stop-Process");
   });
 
-  it('rides through ssh as a single quote-free EncodedCommand token', () => {
-    const b64 = encodePowerShell(buildPushScript()).replace('powershell -NoProfile -EncodedCommand ', '');
-    expect(b64).toMatch(/^[A-Za-z0-9+/=]+$/);
+  it('builds scp args for a binary transfer with BatchMode enabled', () => {
+    const args = buildScpArgs('muqsit@win-mini', String.raw`C:\Users\muqsit\AppData\Local\agents\computer-helper-win.exe`, '/tmp/helper.exe');
+    expect(args).toContain('BatchMode=yes');
+    expect(args).toContain('/tmp/helper.exe');
+    expect(args[args.length - 1]).toBe('muqsit@win-mini:C:/Users/muqsit/AppData/Local/agents/computer-helper-win.exe');
+    expect(args.join(' ')).not.toContain('powershell');
+    expect(args.join(' ')).not.toContain('base64');
+  });
+
+  it('normalizes Windows paths for scp without changing the remote destination', () => {
+    expect(scpRemotePath(String.raw`C:\Users\muqsit\AppData\Local\agents\computer-helper-win.exe`))
+      .toBe('C:/Users/muqsit/AppData/Local/agents/computer-helper-win.exe');
+  });
+
+  it('verifies the copied helper byte count with LiteralPath', () => {
+    const s = buildVerifyPushScript(String.raw`C:\Users\muqsit\AppData\Local\agents\computer-helper-win.exe`, 165);
+    expect(s).toContain('Get-Item -LiteralPath $dst -ErrorAction Stop');
+    expect(s).toContain('$item.Length -ne 165');
+    expect(s).toContain('helper copy length mismatch');
   });
 });
 

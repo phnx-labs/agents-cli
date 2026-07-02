@@ -38,15 +38,19 @@ describe('capableAgents("commands")', () => {
 });
 
 describe('droid (Factory AI)', () => {
-  it('is registered with the four supported resource capabilities', () => {
+  it('is registered with its supported resource capabilities', () => {
     expect(ALL_AGENT_IDS).toContain('droid');
     expect(capableAgents('mcp')).toContain('droid');
     expect(capableAgents('commands')).toContain('droid');
     expect(capableAgents('subagents')).toContain('droid');
+    // Factory CLI (droid) supports Claude-shaped hooks in .factory/settings.json
+    // (RUSH-1327) and plugins via the marketplace + installed_plugins.json model
+    // (RUSH-1340). Both route through supports() like every other capability.
+    expect(capableAgents('hooks')).toContain('droid');
+    expect(capableAgents('plugins')).toContain('droid');
     // No Droid equivalent for these — must stay false so the registry
     // assertion doesn't demand writers we can't provide.
     expect(capableAgents('skills')).not.toContain('droid');
-    expect(capableAgents('plugins')).not.toContain('droid');
     expect(capableAgents('workflows')).not.toContain('droid');
   });
 

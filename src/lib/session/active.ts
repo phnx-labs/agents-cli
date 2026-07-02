@@ -24,11 +24,13 @@ import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
+import { readPidSessionEntry, prunePidSessionRegistry } from './pid-registry.js';
 import { buildClaudeLabelMap } from './discover.js';
 import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTail } from './tail.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import { detectProvenance, type SessionProvenance } from './provenance.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -63,6 +65,22 @@ export interface ActiveSession {
   sessionFile?: string;
   startedAtMs?: number;
   status: ActiveStatus;
+  /** How many live PIDs resolve to this same session (subagents/forks). 1 unless collapsed. */
+  pidCount?: number;
+  /**
+   * Where the process actually lives — machine host, local vs SSH, tmux pane,
+   * and whether a rail exists to type back into it. Read from the process env
+   * (`/proc/<pid>/environ` on Linux, `ps eww` on macOS) during enrichment.
+   * Absent for cloud sessions (no local pid) and any pid whose env is unreadable.
+   */
+  provenance?: SessionProvenance;
+  /**
+   * The machine this session runs on, as a normalized device id (machineId()
+   * form). Set when merging cross-machine results so the grouped `--active`
+   * view can bucket by computer. Absent for a purely local query (the renderer
+   * falls back to provenance.host, then the local machine).
+   */
+  machine?: string;
   teamName?: string;
   agentId?: string;
   cloudProvider?: string;
@@ -561,8 +579,13 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   const out: ActiveSession[] = [];
   for (let i = 0; i < candidates.length; i++) {
     const { pid, kind } = candidates[i];
-    const cwd = cwds[i];
-    const sessionFile = findSessionFileForKind(kind, cwd);
+    // The per-pid registry (written by `ag run`) gives the EXACT session id this
+    // pid was launched with — so N agents in one cwd resolve to N distinct
+    // sessions instead of all collapsing onto the newest .jsonl. Absent (agent
+    // not launched via `ag run`, or one that takes no session id) → heuristic.
+    const entry = readPidSessionEntry(pid);
+    const cwd = cwds[i] ?? entry?.cwd ?? undefined;
+    const sessionFile = findSessionFileForKind(kind, cwd, entry?.sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
@@ -573,11 +596,13 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       host,
       pid,
       cwd,
-      sessionId: sessionIdFromFile(sessionFile),
+      sessionId: entry?.sessionId ?? sessionIdFromFile(sessionFile),
       topic,
       sessionFile,
     }, state, sessionFile));
   }
+  // Housekeeping: drop registry files for pids that have since died.
+  prunePidSessionRegistry(isPidAlive);
   return out;
 }
 
@@ -599,5 +624,48 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
 
   const unattributed = opts.skipHeadless ? [] : await listUnattributedActive(knownPids);
 
-  return [...teams, ...terminals, ...cloud, ...unattributed];
+  const merged = dedupeBySession([...teams, ...terminals, ...cloud, ...unattributed]);
+  await enrichProvenance(merged);
+  return merged;
+}
+
+/**
+ * Attach provenance (host / local-vs-SSH / tmux pane / reply rail) to every
+ * session that has a live pid. Mutates in place. Runs after dedupe so we probe
+ * each session once, not once per fork pid. Probes run in parallel — each is a
+ * single /proc read (Linux) or `ps` call (macOS); failures leave `provenance`
+ * undefined rather than blocking the listing.
+ */
+async function enrichProvenance(sessions: ActiveSession[]): Promise<void> {
+  await Promise.all(
+    sessions.map(async (s) => {
+      if (s.provenance || !s.pid) return;
+      s.provenance = await detectProvenance(s.pid);
+    }),
+  );
+}
+
+/**
+ * Collapse rows that resolve to the *same* session — a session with many
+ * subagent/fork PIDs (all matched to one transcript file) would otherwise print
+ * dozens of identical rows. Keyed by session id (falling back to the file), the
+ * first row wins and carries a `pidCount`. Rows with no session identity (cloud,
+ * unresolved headless) pass through untouched.
+ */
+function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
+  const out: ActiveSession[] = [];
+  const byKey = new Map<string, ActiveSession>();
+  for (const s of sessions) {
+    const key = s.sessionId || s.sessionFile;
+    if (!key) { out.push(s); continue; }
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.pidCount = (existing.pidCount ?? 1) + 1;
+    } else {
+      s.pidCount = 1;
+      byKey.set(key, s);
+      out.push(s);
+    }
+  }
+  return out;
 }

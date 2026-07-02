@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { assertValidSshTarget, SSH_TARGET_RE, shellQuote } from './ssh-exec.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { assertValidSshTarget, SSH_TARGET_RE, shellQuote, controlOpts, SSH_OPTS } from './ssh-exec.js';
 
 describe('assertValidSshTarget', () => {
   it('accepts bare host aliases and user@host', () => {
@@ -39,5 +41,40 @@ describe('shellQuote', () => {
   it('escapes embedded single quotes correctly', () => {
     // it's -> 'it'\''s'  (close, escaped quote, reopen)
     expect(shellQuote("it's")).toBe("'it'\\''s'");
+  });
+});
+
+describe('SSH_OPTS (hardened baseline)', () => {
+  it('keeps the connection hardening', () => {
+    expect(SSH_OPTS).toContain('StrictHostKeyChecking=accept-new');
+    expect(SSH_OPTS).toContain('BatchMode=yes');
+    expect(SSH_OPTS).toContain('ConnectTimeout=10');
+  });
+
+  it('adds keepalive so a dropped link exits instead of zombying', () => {
+    // ServerAliveInterval * ServerAliveCountMax bounds how long a dead
+    // connection can hang before ssh gives up (~45s here).
+    expect(SSH_OPTS).toContain('ServerAliveInterval=15');
+    expect(SSH_OPTS).toContain('ServerAliveCountMax=3');
+  });
+});
+
+describe('controlOpts (connection multiplexing)', () => {
+  it('is empty on Windows (OpenSSH there has no ControlMaster support)', () => {
+    if (process.platform !== 'win32') return; // asserted on the other branch below
+    expect(controlOpts()).toEqual([]);
+  });
+
+  it('returns ControlMaster/ControlPath/ControlPersist and creates the socket dir', () => {
+    if (process.platform === 'win32') return; // multiplexing skipped on Windows
+    const opts = controlOpts();
+    expect(opts).toContain('ControlMaster=auto');
+    expect(opts).toContain('ControlPersist=60s');
+    const cp = opts.find((o) => o.startsWith('ControlPath='));
+    expect(cp).toBeDefined();
+    // %C keeps the socket path short (macOS sun_path limit) and the dir must exist.
+    expect(cp).toContain('%C');
+    const dir = path.dirname(cp!.replace('ControlPath=', ''));
+    expect(fs.existsSync(dir)).toBe(true);
   });
 });

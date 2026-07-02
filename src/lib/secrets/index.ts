@@ -12,7 +12,10 @@
  * Linux: libsecret (GNOME Keyring) via the `secret-tool` CLI. No biometry —
  * items are unlocked when the keyring is open.
  *
- * Windows: not supported.
+ * Windows: Windows Credential Manager (CRED_TYPE_GENERIC,
+ * CRED_PERSIST_LOCAL_MACHINE) via a PowerShell P/Invoke shim, with the same
+ * AES-256-GCM encrypted-file fallback used on Linux when the credential store
+ * is unreachable (no logon session / no powershell.exe). No biometry.
  *
  * Items are device-local: the biometry access control requires the OS to
  * treat them as bound to this device, so cross-machine propagation goes
@@ -24,7 +27,8 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { linuxBackend } from './linux.js';
+import { linuxBackend, usesFileFallback as linuxUsesFileFallback } from './linux.js';
+import { windowsBackend, usesFileFallback as windowsUsesFileFallback } from './windows.js';
 import { getKeychainHelperPath } from './install-helper.js';
 
 const SERVICE_PREFIX = 'agents-cli';
@@ -68,17 +72,39 @@ export function serializeRef(ref: SecretRef): string {
 }
 
 function assertSupportedPlatform(): void {
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+  if (process.platform !== 'darwin' && process.platform !== 'linux' && process.platform !== 'win32') {
     throw new Error(
-      'agents secrets requires macOS Keychain or Linux libsecret.\n' +
-      'Windows is not supported — use environment variables or a .env file instead.\n' +
-      'WSL2 is supported (libsecret via gnome-keyring).'
+      'agents secrets requires macOS Keychain, Linux libsecret, or Windows Credential Manager.\n' +
+      'Use environment variables or a .env file on unsupported platforms.'
     );
   }
 }
 
 function isLinux(): boolean {
   return process.platform === 'linux';
+}
+
+function isWindows(): boolean {
+  return process.platform === 'win32';
+}
+
+/**
+ * Guard a secret value before it is written to the current platform's primary
+ * backend.
+ *
+ * A value is empty on every platform → always rejected. Embedded newlines are
+ * rejected ONLY on darwin: the macOS batch read path (`get-batch`, see
+ * getKeychainTokens) is newline-delimited, so a value with a newline would
+ * corrupt record framing on read. Linux (secret-tool), Windows (Credential
+ * Manager stores the raw UTF-8 blob and emits base64), and the encrypted-file
+ * fallback all store raw bytes and round-trip multiline values (PEM / SSH keys)
+ * faithfully, so they accept newlines. `platform` is injectable for tests.
+ */
+export function assertValueStorable(value: string, platform: NodeJS.Platform = process.platform): void {
+  if (!value || !value.trim()) throw new Error('Secret value is empty.');
+  if (platform === 'darwin' && /[\r\n]/.test(value)) {
+    throw new Error('Secret value contains newlines, which are not supported.');
+  }
 }
 
 /** Build the keychain item name for a profile provider token. */
@@ -118,6 +144,14 @@ export function setKeychainBackendForTest(b: KeychainBackend | null): KeychainBa
   return prev;
 }
 
+/** True when a test backend is installed (real keychain / biometry bypassed).
+ * Callers that gate on the live secrets-agent broker use this to stay hermetic —
+ * with an in-memory backend there is no real keychain to dedup, so the broker
+ * fast-path must not engage. Always false in production (`backend` is null). */
+export function isKeychainBackendOverridden(): boolean {
+  return backend !== null;
+}
+
 /**
  * Items whose name does NOT start with `agents-cli.` belong to another
  * application (e.g. Anthropic's `Claude Code-credentials-*`). Their ACL
@@ -136,6 +170,7 @@ export function hasKeychainToken(item: string): boolean {
   if (backend) return backend.has(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.has(item);
+  if (isWindows()) return windowsBackend.has(item);
   if (!isOurItem(item)) {
     return spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item], {
       stdio: ['ignore', 'ignore', 'ignore'],
@@ -158,6 +193,7 @@ export function getKeychainToken(item: string): string {
   if (backend) return backend.get(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.get(item);
+  if (isWindows()) return windowsBackend.get(item);
   if (!isOurItem(item)) {
     const sec = spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -209,6 +245,12 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
     }
     return result;
   }
+  if (isWindows()) {
+    for (const item of items) {
+      try { result.set(item, windowsBackend.get(item)); } catch { /* missing — skip */ }
+    }
+    return result;
+  }
   const bin = getKeychainHelperPath();
   const child = spawnSync(bin, ['get-batch', os.userInfo().username, ...items], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -252,11 +294,11 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
 export function setKeychainToken(item: string, value: string): void {
   if (backend) { backend.set(item, value); return; }
   assertSupportedPlatform();
-  if (!value || !value.trim()) throw new Error('Secret value is empty.');
-  if (/[\r\n]/.test(value)) throw new Error('Secret value contains newlines, which are not supported.');
+  assertValueStorable(value);
   if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
 
   if (isLinux()) { linuxBackend.set(item, value); return; }
+  if (isWindows()) { windowsBackend.set(item, value); return; }
 
   // Bare (non-`agents-cli.`) items are written WITHOUT the biometry ACL so
   // they round-trip with the no-prompt read path in getKeychainToken (which
@@ -295,10 +337,28 @@ export function deleteKeychainToken(item: string): boolean {
   if (backend) return backend.delete(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.delete(item);
+  if (isWindows()) return windowsBackend.delete(item);
   const bin = getKeychainHelperPath();
   return spawnSync(bin, ['delete', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
   }).status === 0;
+}
+
+/**
+ * True when the active keychain backend transparently routes reads/writes to
+ * the encrypted-file store instead of the OS credential store. This only
+ * happens on Linux under the headless / locked-collection fallback
+ * (src/lib/secrets/linux.ts); macOS and the test backend always return false.
+ *
+ * Callers that ALSO enumerate the file store directly (e.g. `listBundles`)
+ * use this to avoid double-counting: under the fallback `listKeychainItems`
+ * and the direct file enumeration return the same items.
+ */
+export function keychainUsesFileFallback(): boolean {
+  if (backend) return false;
+  if (isLinux()) return linuxUsesFileFallback();
+  if (isWindows()) return windowsUsesFileFallback();
+  return false;
 }
 
 /** Enumerate keychain/keyring item names starting with the given prefix. */
@@ -306,6 +366,7 @@ export function listKeychainItems(prefix: string): string[] {
   if (backend) return backend.list(prefix);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.list(prefix);
+  if (isWindows()) return windowsBackend.list(prefix);
   const bin = getKeychainHelperPath();
   const result = spawnSync(bin, ['list', prefix], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -313,6 +374,32 @@ export function listKeychainItems(prefix: string): string[] {
   if (result.status !== 0) {
     const msg = result.stderr?.toString().trim();
     throw new Error(msg || `Failed to enumerate keychain items with prefix '${prefix}'.`);
+  }
+  const out = result.stdout?.toString() || '';
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Enumerate ONLY legacy file-based-keychain item names with the given prefix —
+ * the items that still carry a pre-migration (trusted-app) ACL and pop a
+ * separate auth sheet on read. Items already in the data-protection keychain are
+ * excluded (they need no migration). Silent (attributes only, never decrypts).
+ *
+ * macOS only: on Linux / the test backend there is no separate legacy keychain,
+ * so this returns []. Used by `agents secrets migrate-acl` to rewrite only the
+ * stragglers instead of every item (which would be a Touch ID storm).
+ */
+export function listLegacyKeychainItems(prefix: string): string[] {
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['list-legacy', prefix], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to enumerate legacy keychain items with prefix '${prefix}'.`);
   }
   const out = result.stdout?.toString() || '';
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -330,6 +417,7 @@ export function migrateKeychainItem(item: string): boolean {
   if (backend) return backend.has(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.has(item);
+  if (isWindows()) return windowsBackend.has(item);
   const bin = getKeychainHelperPath();
   const result = spawnSync(bin, ['migrate-acl', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],

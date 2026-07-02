@@ -20,7 +20,7 @@ import { debug } from './debug.js';
 import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from '../gemini-settings.js';
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
-import { AGENTS } from '../agents.js';
+import { AGENTS, getAccountInfo } from '../agents.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
 
 let lastMemoryWarnAt = 0;
@@ -386,6 +386,47 @@ export function checkAllClis(): Record<string, { installed: boolean; path: strin
     }
   }
   return results;
+}
+
+/**
+ * Advisory sign-in probe for a teammate's agent. Reads the account-global login
+ * (no `home` → active config) via `getAccountInfo`. Deliberately best-effort:
+ * sign-in detection is UNRELIABLE for opaque-credential agents (Kimi/Antigravity
+ * store an OAuth/JWT with no email claim) and for keychain-probed agents, so a
+ * `false` here is often a false negative. Callers must WARN and continue — never
+ * block a team on this result. Never throws (returns false on any error).
+ */
+export async function checkCliSignedIn(agentType: AgentType): Promise<boolean> {
+  try {
+    const info = await getAccountInfo(agentType as AgentId);
+    return info.signedIn;
+  } catch {
+    return false;
+  }
+}
+
+/** Advisory sign-in status for a `teams doctor` row. */
+export interface SignInAdvisory {
+  /** true / false from the probe, or null when the agent isn't installed. */
+  signedIn: boolean | null;
+  /** Whether the agent is currently a running teammate. */
+  running: boolean;
+}
+
+/**
+ * Resolve the advisory sign-in status shown by `teams doctor`. An agent that is
+ * currently RUNNING in a team is live proof it works, so it overrides a
+ * (frequently false-negative) sign-in probe — doctor must never report a
+ * working agent as logged out. Not installed → `signedIn: null` (nothing to
+ * probe). Never flips the authoritative installed/ready column.
+ */
+export function resolveSignInAdvisory(
+  installed: boolean,
+  running: boolean,
+  probeSignedIn: boolean
+): SignInAdvisory {
+  if (!installed) return { signedIn: null, running: false };
+  return { signedIn: running ? true : probeSignedIn, running };
 }
 
 let AGENTS_DIR: string | null = null;

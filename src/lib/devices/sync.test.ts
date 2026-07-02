@@ -7,7 +7,7 @@
  *   3. A genuinely-new, non-ignored node IS surfaced.
  */
 import { describe, expect, it } from 'vitest';
-import { computePendingDevices, planDeviceReconciliation } from './sync.js';
+import { computePendingDevices, planDeviceReconciliation, selectNodesToUpsert } from './sync.js';
 import type { TailscaleNode } from './tailscale.js';
 
 function node(name: string): TailscaleNode {
@@ -33,6 +33,29 @@ describe('computePendingDevices', () => {
 
   it('returns nothing for an empty tailnet', () => {
     expect(computePendingDevices([], ['zion'], ['ipad165'])).toEqual([]);
+  });
+});
+
+describe('selectNodesToUpsert (bootstrap vs refresh)', () => {
+  const nodes = ['zion', 'yosemite-s0', 'ipad165', 'win-mini'].map(node);
+  const registered = new Set(['yosemite-s0', 'win-mini']);
+  const ignored = new Set(['ipad165']);
+
+  it('bootstrap upserts every non-ignored node, newcomers included', () => {
+    const got = selectNodesToUpsert(nodes, registered, ignored, 'bootstrap').map((n) => n.name);
+    expect(got).toEqual(['zion', 'yosemite-s0', 'win-mini']); // ipad165 ignored, zion (new) INCLUDED
+  });
+
+  it('refresh upserts only already-registered non-ignored nodes — newcomers are skipped', () => {
+    const got = selectNodesToUpsert(nodes, registered, ignored, 'refresh').map((n) => n.name);
+    expect(got).toEqual(['yosemite-s0', 'win-mini']); // zion (new) SKIPPED so it can stay pending
+  });
+
+  it('never upserts an ignored node in either mode', () => {
+    for (const mode of ['bootstrap', 'refresh'] as const) {
+      const got = selectNodesToUpsert(nodes, registered, ignored, mode).map((n) => n.name);
+      expect(got).not.toContain('ipad165');
+    }
   });
 });
 

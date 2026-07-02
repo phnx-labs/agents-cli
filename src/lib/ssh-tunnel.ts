@@ -23,7 +23,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
-import { sshExec } from './ssh-exec.js';
+import { sshExec, SSH_OPTS } from './ssh-exec.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
 import { getDevice, type DeviceProfile } from './devices/registry.js';
 import { sshTargetFor } from './devices/connect.js';
@@ -46,7 +46,11 @@ export interface StartTunnelOptions {
   detached?: boolean;
 }
 
-/** Build the ssh argv (after the `ssh` program name) for an `-L` tunnel. Pure. */
+/** Build the ssh argv (after the `ssh` program name) for an `-L` tunnel. Pure.
+ *
+ * Composes the shared hardened baseline (`SSH_OPTS`) rather than re-listing it,
+ * so the tunnel inherits the same options — crucially the keepalive, which lets
+ * a dropped `-N` tunnel exit instead of lingering as a zombie on the laptop. */
 export function buildTunnelArgs(
   user: string,
   host: string,
@@ -58,12 +62,7 @@ export function buildTunnelArgs(
     `${localPort}:127.0.0.1:${remotePort}`,
     `${user}@${host}`,
     '-N',
-    '-o',
-    'StrictHostKeyChecking=accept-new',
-    '-o',
-    'BatchMode=yes',
-    '-o',
-    'ConnectTimeout=10',
+    ...SSH_OPTS,
   ];
 }
 
@@ -203,10 +202,16 @@ export async function resolveRemoteDevice(
 }
 
 /**
- * PowerShell that streams base64 from stdin, decodes it incrementally to
- * %LOCALAPPDATA%\agents\computer-helper-win.exe, and stops any running instance
- * first so the file isn't locked. The CryptoStream/FromBase64Transform decode
- * is streaming — the ~156MB exe never lands in memory whole on the remote.
+ * Single-quote a string for embedding inside a PowerShell literal.
+ */
+function psSingleQuote(s: string): string {
+  return "'" + s.replace(/'/g, "''") + "'";
+}
+
+/**
+ * PowerShell that resolves the destination under %LOCALAPPDATA%\agents and
+ * stops any running instance first so the file is not locked. The caller copies
+ * the exe with scp and then verifies the byte count separately.
  */
 export function buildPushScript(): string {
   return [
@@ -214,13 +219,17 @@ export function buildPushScript(): string {
     `New-Item -ItemType Directory -Force -Path $dir | Out-Null`,
     `$dst = Join-Path $dir '${WIN_HELPER_EXE}'`,
     `Get-Process -Name 'computer-helper-win' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue`,
-    `$si = [Console]::OpenStandardInput()`,
-    `$t = New-Object Security.Cryptography.FromBase64Transform`,
-    `$cs = New-Object Security.Cryptography.CryptoStream($si, $t, [Security.Cryptography.CryptoStreamMode]::Read)`,
-    `$fs = [IO.File]::Create($dst)`,
-    `$cs.CopyTo($fs)`,
-    `$fs.Close(); $cs.Close()`,
     `Write-Output $dst`,
+  ].join('; ');
+}
+
+/** PowerShell that verifies scp wrote the expected number of bytes. */
+export function buildVerifyPushScript(remotePath: string, expectedBytes: number): string {
+  return [
+    `$dst = ${psSingleQuote(remotePath)}`,
+    `$item = Get-Item -LiteralPath $dst -ErrorAction Stop`,
+    `if ($item.Length -ne ${expectedBytes}) { throw "helper copy length mismatch: expected ${expectedBytes}, got $($item.Length)" }`,
+    `Write-Output "$dst $($item.Length)"`,
   ].join('; ');
 }
 
@@ -251,11 +260,60 @@ export function buildUnregisterTaskScript(taskName: string): string {
   ].join('; ');
 }
 
+/** Convert a Windows path returned by PowerShell into the scp/SFTP path form. */
+export function scpRemotePath(remotePath: string): string {
+  return remotePath.replace(/\\/g, '/');
+}
+
 /**
- * `setup --host`: push the exe, then register + start the LOGON task. Both hops
- * go through `sshExec` (BatchMode key auth — the same hardening the browser
- * driver and `agents ssh` use). Throws with the remote stderr on any failure.
+ * Build the scp argv used for the helper exe transfer. Exported so tests can
+ * assert the real binary copy path keeps BatchMode and does not route bytes
+ * through a PowerShell decoder.
  */
+export function buildScpArgs(target: string, remotePath: string, filePath: string): string[] {
+  return [...SSH_OPTS, filePath, `${target}:${scpRemotePath(remotePath)}`];
+}
+
+/**
+ * Copy a local file to the remote destination with scp. This is a binary
+ * transfer; no base64 transform runs on either side.
+ */
+function copyFileOverScp(
+  target: string,
+  remotePath: string,
+  filePath: string,
+  timeoutMs = 600_000,
+): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('scp', buildScpArgs(target, remotePath, filePath), {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (d) => (stderr += d.toString()));
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error(`scp push to ${target} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    const fail = (e: Error) => {
+      clearTimeout(timer);
+      child.kill('SIGKILL');
+      reject(e);
+    };
+    child.on('error', fail);
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code, stderr });
+    });
+  });
+}
+
+/**
+ * `setup --host`: push the exe, then register + start the LOGON task. Remote
+ * PowerShell hops go through `sshExec` (BatchMode key auth — the same hardening
+ * the browser driver and `agents ssh` use), and the large exe rides a binary
+ * scp transfer. Throws with the remote stderr on any failure.
+ */
+
 export async function setupRemoteHelper(name: string): Promise<{ target: string; taskName: string }> {
   const { target } = await resolveRemoteDevice(name);
 
@@ -264,14 +322,24 @@ export async function setupRemoteHelper(name: string): Promise<{ target: string;
     throw new Error(`Windows helper exe not built. Run: bash scripts/build-win.sh`);
   }
 
-  // Push: base64 the exe locally, stream it over ssh stdin to the decoder.
-  const b64 = fs.readFileSync(exe).toString('base64');
-  const push = sshExec(target, encodePowerShell(buildPushScript()), {
-    input: b64,
-    timeoutMs: 600_000, // ~156MB over the wire — allow up to 10 minutes
-  });
+  const prep = sshExec(target, encodePowerShell(buildPushScript()), { timeoutMs: 60_000 });
+  if (prep.code !== 0) {
+    throw new Error(`preparing helper exe path on '${name}' failed (exit ${prep.code ?? 'null'}): ${prep.stderr.trim() || prep.stdout.trim()}`);
+  }
+  const remotePath = prep.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+  if (!remotePath) {
+    throw new Error(`preparing helper exe path on '${name}' did not return a destination path`);
+  }
+
+  const push = await copyFileOverScp(target, remotePath, exe);
   if (push.code !== 0) {
-    throw new Error(`pushing helper exe to '${name}' failed (exit ${push.code ?? 'null'}): ${push.stderr.trim() || push.stdout.trim()}`);
+    throw new Error(`pushing helper exe to '${name}' failed (exit ${push.code ?? 'null'}): ${push.stderr.trim()}`);
+  }
+
+  const expectedBytes = fs.statSync(exe).size;
+  const verify = sshExec(target, encodePowerShell(buildVerifyPushScript(remotePath, expectedBytes)), { timeoutMs: 60_000 });
+  if (verify.code !== 0) {
+    throw new Error(`verifying helper exe on '${name}' failed (exit ${verify.code ?? 'null'}): ${verify.stderr.trim() || verify.stdout.trim()}`);
   }
 
   // Register + start the LOGON task.

@@ -13,9 +13,11 @@ import {
   summarizeHook,
   summarizeMcp,
   hookManifestByScript,
+  wrapJoined,
 } from './inspect.js';
 import type { ManifestHook } from '../lib/types.js';
 import { getUserAgentsDir, getSystemAgentsDir } from '../lib/state.js';
+import { stringWidth } from '../lib/session/width.js';
 
 const tempDirs: string[] = [];
 
@@ -171,6 +173,24 @@ describe('formatBytes', () => {
     expect(formatBytes(1024)).toBe('1.0 KB');
     expect(formatBytes(86 * 1024)).toBe('86 KB');
     expect(formatBytes(3.1 * 1024 * 1024)).toBe('3.1 MB');
+  });
+});
+
+describe('wrapJoined', () => {
+  it('wraps separator-joined values with a hanging indent', () => {
+    const lines = wrapJoined('  versions  ', ['claude 1.0.0', 'codex 2.0.0', 'kimi 3.0.0'], ' · ', 34);
+    expect(lines).toEqual([
+      '  versions  claude 1.0.0',
+      '            codex 2.0.0',
+      '            kimi 3.0.0',
+    ]);
+    expect(lines.every((line) => stringWidth(line) <= 34)).toBe(true);
+  });
+
+  it('keeps a wide row on one line', () => {
+    expect(wrapJoined('  run       ', ['claude:balanced', 'codex:pinned'], ' · ', 80)).toEqual([
+      '  run       claude:balanced · codex:pinned',
+    ]);
   });
 });
 

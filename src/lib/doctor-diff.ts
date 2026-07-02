@@ -46,6 +46,8 @@ import { pluginInstallDir, repairableManifestFields } from './plugin-marketplace
 import { markdownToToml } from './convert.js';
 import { resolveImports, supportsRulesImports } from './rules/compile.js';
 import { listCommandsInVersionHome, getVersionCommandsDir } from './commands.js';
+import { shouldInstallCommandAsSkill, commandSkillMatches, commandSkillName } from './command-skills.js';
+import { supports } from './capabilities.js';
 import { listSkillsInVersionHome, getVersionSkillsDir } from './skills.js';
 import { listHooksInVersionHome, getVersionHooksDir, listHookEntriesFromDir } from './hooks.js';
 
@@ -162,6 +164,14 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
   const isToml = agentConfig.format === 'toml';
   const ext = isToml ? '.toml' : '.md';
   const homeDir = getVersionCommandsDir(agent, version);
+  // Command-as-skill agents (kimi, codex>=0.117, grok) install every command as a
+  // SKILL wrapper at <agentDir>/skills/<cmd>/SKILL.md, not a native command file.
+  // The compare must follow that or every command false-reports as drifted.
+  const asSkill = shouldInstallCommandAsSkill(agent, version);
+  // Agents that hold commands neither natively nor as skills (e.g. goose) must not
+  // report source commands as "missing" — they structurally can't take them.
+  if (!asSkill && !supports(agent, 'commands', version).ok) return [];
+  const agentDir = path.join(getVersionHomePath(agent, version), agentConfigDirName(agent));
   const installed = new Set(listCommandsInVersionHome(agent, version));
   const layerBases = buildLayerBases(cwd, 'commands', { excludeProject });
 
@@ -183,11 +193,24 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
 
   for (const [name, src] of sourceByName) {
     seen.add(name);
-    const homePath = path.join(homeDir, `${name}${ext}`);
     if (!installed.has(name)) {
       rows.push({ kind: 'commands', name, status: 'missing', source: src.layer, sourcePath: src.path });
       continue;
     }
+    if (asSkill) {
+      // Compare against the installed command-skill wrapper, not a native path.
+      const matches = commandSkillMatches(agentDir, name, src.path);
+      rows.push({
+        kind: 'commands',
+        name,
+        status: matches ? 'ok' : 'diff',
+        source: src.layer,
+        sourcePath: src.path,
+        homePath: path.join(agentDir, 'skills', commandSkillName(name), 'SKILL.md'),
+      });
+      continue;
+    }
+    const homePath = path.join(homeDir, `${name}${ext}`);
     const installedContent = readSafe(homePath);
     const sourceContent = readSafe(src.path);
     if (installedContent == null || sourceContent == null) {
@@ -208,7 +231,10 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
 
   for (const name of installed) {
     if (seen.has(name)) continue;
-    rows.push({ kind: 'commands', name, status: 'extra', homePath: path.join(homeDir, `${name}${ext}`) });
+    const extraHome = asSkill
+      ? path.join(agentDir, 'skills', commandSkillName(name), 'SKILL.md')
+      : path.join(homeDir, `${name}${ext}`);
+    rows.push({ kind: 'commands', name, status: 'extra', homePath: extraHome });
   }
 
   return rows.sort((a, b) => a.name.localeCompare(b.name));

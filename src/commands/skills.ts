@@ -44,7 +44,6 @@ import {
 import {
   listInstalledVersions,
   getGlobalDefault,
-  resolveVersionAlias,
   syncResourcesToVersion,
   promptAgentVersionSelection,
   getVersionHomePath,
@@ -60,6 +59,7 @@ import {
   resolveAgentTargetsAutoInstalling,
   promptRemovalTargets,
   type RemovalTarget,
+  resolveListFilterOrExit,
 } from './utils.js';
 import {
   showResourceList,
@@ -118,7 +118,7 @@ When to use:
           process.exit(1);
         }
         filterAgent = resolved;
-        filterVersion = resolveVersionAlias(resolved, parts[1]);
+        filterVersion = resolveListFilterOrExit(resolved, parts[1]);
       }
 
       const rows = await buildSkillRows({ filterAgent, filterVersion });

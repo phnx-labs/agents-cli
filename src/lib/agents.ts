@@ -2,7 +2,7 @@
  * Core agent configuration and detection module.
  *
  * Defines the canonical registry of all supported AI coding agents (Claude, Codex,
- * Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Roo, Grok) with their
+ * Gemini, Cursor, OpenCode, OpenClaw, Copilot, Amp, Kiro, Goose, Grok) with their
  * CLI commands, config paths, capability flags, and MCP integration points.
  *
  * Provides functions for detecting installed CLIs, resolving version-managed binaries,
@@ -10,6 +10,7 @@
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -271,6 +272,16 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     nativeAgentsSkillsDir: true,
+    // Google retired the Gemini CLI (announced at Google I/O 2026, May 19); the `gemini`
+    // command stopped serving free/Pro/Ultra requests on June 18, 2026. Antigravity CLI
+    // (`agy`) is the official successor. See warnAgentDeprecated() for the surfaced warning.
+    deprecated: {
+      by: 'Google',
+      date: 'June 18, 2026',
+      reason: 'The Gemini CLI was retired for free, Pro, and Ultra tiers and no longer serves requests (announced at Google I/O 2026 on May 19).',
+      replacement: 'antigravity',
+      url: 'https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/',
+    },
     // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
     capabilities: { hooks: { since: '0.26.0' }, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'GEMINI.md' }, workflows: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
   },
@@ -339,11 +350,16 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.copilot', 'skills'),
     hooksDir: 'hooks',
+    // Copilot reads a plugin's manifest from the plugin ROOT (plugin.json),
+    // not `.claude-plugin/plugin.json`. Mirror it there. Verified against the
+    // GitHub Copilot CLI (1.0.56): `copilot plugin install` produces an
+    // installed plugin dir whose manifest sits at the root.
+    pluginManifestDir: '.',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'auto', 'skip'] },
+    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'auto', 'skip'] },
   },
   amp: {
     id: 'amp',
@@ -397,24 +413,6 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
     capabilities: { hooks: false, mcp: true, allowlist: false, skills: false, commands: false, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit'] },
-  },
-  roo: {
-    id: 'roo',
-    name: 'Roo Code',
-    color: 'cyanBright',
-    cliCommand: 'roo',
-    npmPackage: '',
-    installScript: 'curl -fsSL https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/apps/cli/install.sh | sh',
-    configDir: path.join(HOME, '.roo'),
-    commandsDir: path.join(HOME, '.roo', 'commands'),
-    commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.roo', 'skills'),
-    hooksDir: 'hooks',
-    instructionsFile: 'AGENTS.md',
-    format: 'markdown',
-    variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -521,11 +519,26 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
   // Install: `curl -fsSL https://app.factory.ai/cli | sh` (no npm package).
   // Binary is NOT in node_modules/.bin — the shim resolves the fixed install
   // path ~/.local/bin/droid directly (see the droid branch in shims.ts).
-  // Config: `~/.factory/` (settings.json, mcp.json, droids/, commands/).
-  // Memory: native AGENTS.md. Subagents = custom droids (top-level .md files
-  // in ~/.factory/droids/). Config isolation rides the ~/.factory symlink
-  // switch (no FACTORY_HOME env var exists). Headless: `droid exec "<prompt>"`
-  // with --auto low|medium|high, -o stream-json, -m <model>, -r <effort>.
+  // Config: `~/.factory/` (settings.json, mcp.json, droids/, commands/, hooks/,
+  // plugins/). Memory: native AGENTS.md. Subagents = custom droids (top-level
+  // .md files in ~/.factory/droids/). Config isolation rides the ~/.factory
+  // symlink switch (no FACTORY_HOME env var exists). Headless:
+  // `droid exec "<prompt>"` with --auto low|medium|high, -o stream-json,
+  // -m <model>, -r <effort>.
+  //
+  // Hooks: Claude-shaped. settings.json carries a top-level `hooks` object keyed
+  // by event (PreToolUse, PostToolUse, UserPromptSubmit, SessionStart,
+  // SessionEnd, Stop, SubagentStop, Notification, PreCompact), each an array of
+  // `{ matcher?, hooks: [{ type: "command", command, timeout? }] }` matcher
+  // groups — verified against the droid binary's zod schema. So the Claude
+  // registrar is reused verbatim, just targeting `.factory/settings.json`.
+  //
+  // Plugins: native `droid plugin` command group + ~/.factory/plugins/ with the
+  // same marketplace layout Claude uses (known_marketplaces.json +
+  // marketplaces/<name>/plugins/<plugin>/). Droid's plugin manifest dir is
+  // `.factory-plugin/` (it also reads `.claude-plugin/` for compatibility) — set
+  // pluginManifestDir so syncPluginToVersion mirrors the manifest into it, the
+  // same pattern codex uses with `.codex-plugin`.
   droid: {
     id: 'droid',
     name: 'Droid',
@@ -539,20 +552,21 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsSubdir: 'commands',
     skillsDir: '', // no skills concept
     hooksDir: 'hooks',
+    pluginManifestDir: '.factory-plugin',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
+    supportsHooks: true,
     // Factory Droid Computers (cloud VMs) reached via `droid computer ssh` +
     // remote headless `droid exec`.
     cloudProvider: 'factory',
     capabilities: {
-      hooks: false,
+      hooks: true,
       mcp: true,
       allowlist: false,
       skills: false,
       commands: true,
-      plugins: false,
+      plugins: true,
       subagents: true,
       rules: { file: 'AGENTS.md' },
       workflows: false,
@@ -869,6 +883,80 @@ function resolveAccountCredentialPath(base: string, ...segments: string[]): stri
   return null;
 }
 
+/**
+ * Factory Droid stores its OAuth credential encrypted at ~/.factory/auth.v2.file
+ * (AES-256-GCM, format `ivB64:tagB64:ctB64`) with the 32-byte key base64-stored
+ * in ~/.factory/auth.v2.key. On the keyfile-v2 source there is no OS-keychain /
+ * device binding — the key is on disk — so we can decrypt locally with no
+ * network call. The decrypted JSON credential's `access_token` is a WorkOS JWT
+ * carrying an `email` claim (plus org_id / role). We decode the claim WITHOUT
+ * verifying `exp`: the email is stable identity for display, not an
+ * authorization decision, so an expired token still yields the right address.
+ * Every failure (missing key file — e.g. a keyring-v2/legacy login with no
+ * on-disk key, a bad GCM tag, malformed JSON, or no email claim) returns null so
+ * the caller falls back to the file-presence signed-in signal. Never throws.
+ */
+function decryptDroidCredential(
+  base: string
+): { email: string | null; orgId: string | null; role: string | null } | null {
+  const filePath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
+  const keyPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.key');
+  if (!filePath || !keyPath) return null;
+  try {
+    const blob = fs.readFileSync(filePath, 'utf-8').trim();
+    const key = Buffer.from(fs.readFileSync(keyPath, 'utf-8').trim(), 'base64');
+    if (key.length !== 32) return null;
+    const [ivB64, tagB64, ctB64] = blob.split(':');
+    if (!ivB64 || !tagB64 || !ctB64) return null;
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
+    decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
+    const plaintext = Buffer.concat([
+      decipher.update(Buffer.from(ctB64, 'base64')),
+      decipher.final(),
+    ]).toString('utf-8');
+    const cred = JSON.parse(plaintext);
+    const claims = typeof cred?.access_token === 'string' ? decodeJwtPayload(cred.access_token) : null;
+    if (!claims) return null;
+    return {
+      email: typeof claims.email === 'string' ? claims.email : null,
+      orgId: normalizeIdentityPart(claims.org_id ?? cred.active_organization_id),
+      role: typeof claims.role === 'string' ? claims.role : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+let cachedAgyKeychainSignedIn: boolean | undefined;
+
+/**
+ * Antigravity (`agy`, a Codeium/Windsurf-based CLI) stores its OAuth token in
+ * the macOS keychain — service `gemini`, account `antigravity` — NOT a file.
+ * The file path (`antigravity-oauth-token`) only exists on Linux, where the Go
+ * keyring falls back to disk. Probe the keychain for existence (metadata only;
+ * `-w` omitted so it never prompts). Cached per process — the keychain is
+ * account-global, so one probe covers every installed version. Returns false on
+ * non-macOS (the file path handles those).
+ */
+async function antigravityKeychainSignedIn(): Promise<boolean> {
+  if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
+  // Test isolation: the real macOS keychain can't be sandboxed per-test, so
+  // allow suites asserting "signed out" to opt out of the probe (same spirit as
+  // AGENTS_REAL_HOME). Not cached, so tests can toggle it.
+  if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return false;
+  if (process.platform !== 'darwin') {
+    cachedAgyKeychainSignedIn = false;
+    return false;
+  }
+  try {
+    await execFileAsync('security', ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'], { timeout: 3000 });
+    cachedAgyKeychainSignedIn = true;
+  } catch {
+    cachedAgyKeychainSignedIn = false;
+  }
+  return cachedAgyKeychainSignedIn;
+}
+
 export async function getAccountInfo(
   agentId: AgentId,
   home?: string
@@ -1014,30 +1102,49 @@ export async function getAccountInfo(
         return { ...empty, email, signedIn: !!email, lastActive };
       }
       case 'grok': {
-        // Grok stores auth in ~/.grok/auth.json
+        // Grok stores auth in ~/.grok/auth.json as a map keyed by
+        // "<oidc_issuer>::<client_id>" -> { email, user_id, refresh_token,
+        // create_time, expires_at, team_id, ... }. (Older builds wrote a flat
+        // object with a top-level email.) The old code only read a TOP-LEVEL
+        // `email`, so the current nested format always looked signed-out even
+        // when logged in. Read the newest account record: a refresh token means
+        // signed in, and we surface the email/ids like claude/codex.
+        const authPath = resolveAccountCredentialPath(base, '.grok', 'auth.json');
+        if (!authPath) return { ...empty, lastActive };
         try {
-          const authPath = path.join(base, '.grok', 'auth.json');
-          if (fs.existsSync(authPath)) {
-            const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
-            const email = data.email || data.user?.email || data.account?.email || null;
-            return { ...empty, email, signedIn: !!email, lastActive };
+          const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
+          const records = (data && typeof data === 'object' ? [data, ...Object.values(data)] : [])
+            .filter((r): r is Record<string, any> => !!r && typeof r === 'object');
+          const account = records
+            .filter(r => typeof r.refresh_token === 'string' || typeof r.email === 'string')
+            .sort((a, b) => String(b.create_time || '').localeCompare(String(a.create_time || '')))[0];
+          if (account) {
+            const email = typeof account.email === 'string' ? account.email : null;
+            const accountId = normalizeIdentityPart(account.user_id ?? account.principal_id);
+            const organizationId = normalizeIdentityPart(account.team_id);
+            const accountKey = buildIdentityKey(agentId, [['user', accountId], ['org', organizationId]]);
+            return { ...empty, email, accountId, organizationId, accountKey, signedIn: true, lastActive };
           }
         } catch {}
         return { ...empty, lastActive };
       }
       case 'antigravity': {
-        // Antigravity (`agy`) stores a Google OAuth token at
-        // ~/.gemini/antigravity-cli/antigravity-oauth-token. It's a consumer
-        // OAuth grant (access + refresh token, no id_token), so there's no email
-        // claim to read locally — presence of a refresh token is the only
-        // signed-in signal we can derive without a network call.
+        // Antigravity (`agy`) stores a consumer Google OAuth grant (access +
+        // refresh token, no id_token) — presence of a refresh token is the only
+        // signed-in signal we can derive without a network call. Storage is
+        // platform-split: on Linux it's a file at
+        // ~/.gemini/antigravity-cli/antigravity-oauth-token; on macOS the Go
+        // keyring puts it in the keychain (service 'gemini', account
+        // 'antigravity'), so no file exists — check both.
         const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
-        if (!tokenPath) return { ...empty, lastActive };
-        const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
-        const hasToken =
-          typeof data?.token?.refresh_token === 'string' && !!data.token.refresh_token;
-        if (!hasToken) return { ...empty, lastActive };
-        return { ...empty, signedIn: true, lastActive };
+        if (tokenPath) {
+          const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
+          if (typeof data?.token?.refresh_token === 'string' && data.token.refresh_token) {
+            return { ...empty, signedIn: true, lastActive };
+          }
+        }
+        if (await antigravityKeychainSignedIn()) return { ...empty, signedIn: true, lastActive };
+        return { ...empty, lastActive };
       }
       case 'kimi': {
         // Kimi Code stores OAuth credentials at
@@ -1055,12 +1162,29 @@ export async function getAccountInfo(
         return { ...empty, signedIn: true, accountId: userId, accountKey, lastActive };
       }
       case 'droid': {
-        // Factory Droid stores auth at ~/.factory/auth.v2.file (+ auth.v2.key,
-        // an encrypted blob). No email/JWT is readable locally, so presence of
-        // the auth file is the only signed-in signal we can derive without a
-        // network call — same pattern as antigravity/kimi. `.factory` is the
-        // config dir on every platform (macOS/Linux ~/.factory, Windows
-        // %USERPROFILE%\.factory), so path.join keeps this cross-platform.
+        // Factory Droid stores auth at ~/.factory/auth.v2.file (AES-256-GCM,
+        // decrypted with the on-disk ~/.factory/auth.v2.key). We decrypt locally
+        // — no network — and surface the email/org/role from the WorkOS
+        // access-token JWT, same as claude/codex/grok. If the credential can't be
+        // decrypted (a keyring-v2/legacy login with no on-disk key, or a decrypt
+        // failure) we fall back to the file-presence signed-in signal so the row
+        // still reads as logged in — the conservative floor antigravity/kimi use.
+        // `.factory` is the config dir on every platform (macOS/Linux
+        // ~/.factory, Windows %USERPROFILE%\.factory).
+        const decoded = decryptDroidCredential(base);
+        if (decoded?.email) {
+          const organizationId = decoded.orgId;
+          const accountKey = buildIdentityKey(agentId, [['org', organizationId]]);
+          return {
+            ...empty,
+            email: decoded.email,
+            organizationId,
+            accountId: organizationId,
+            accountKey,
+            signedIn: true,
+            lastActive,
+          };
+        }
         const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
         if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
@@ -1686,8 +1810,6 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
       return path.join(home, '.kiro', 'settings', 'mcp.json');
     case 'goose':
       return path.join(home, '.config', 'goose', 'config.yaml');
-    case 'roo':
-      return path.join(home, '.roo', 'mcp.json');
     case 'antigravity':
       return path.join(home, '.gemini', 'antigravity-cli', 'mcp_config.json');
     case 'grok':
@@ -1725,8 +1847,6 @@ function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()):
       return path.join(cwd, '.kiro', 'settings', 'mcp.json');
     case 'goose':
       return path.join(cwd, '.goose', 'config.yaml');
-    case 'roo':
-      return path.join(cwd, '.roo', 'mcp.json');
     case 'antigravity':
       return path.join(cwd, '.gemini', 'antigravity-cli', 'mcp_config.json');
     case 'grok':
@@ -1878,9 +1998,6 @@ export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   'kiro-cli': 'kiro',
   goose: 'goose',
   'block-goose': 'goose',
-  roo: 'roo',
-  'roo-code': 'roo',
-  roocode: 'roo',
   antigravity: 'antigravity',
   'google-antigravity': 'antigravity',
   agy: 'antigravity',
@@ -1920,6 +2037,38 @@ export function resolveAgentName(input: string): AgentId | null {
 /** Check whether the input string matches any known agent name or alias. */
 export function isAgentName(input: string): boolean {
   return resolveAgentName(input) !== null;
+}
+
+/**
+ * Build the deprecation notice lines for an agent, or null if it isn't
+ * deprecated. Split from the printer so tests can assert the content without
+ * capturing stdout. Lines are plain (uncolored) text.
+ */
+export function deprecationNotice(agent: AgentId): string[] | null {
+  const dep = AGENTS[agent].deprecated;
+  if (!dep) return null;
+  const name = AGENTS[agent].name;
+  const lines = [
+    `Warning: ${name} was deprecated by ${dep.by} (${dep.date}).`,
+    `  ${dep.reason}`,
+  ];
+  if (dep.replacement) {
+    const rep = AGENTS[dep.replacement];
+    lines.push(`  Consider using ${rep.name} instead:  agents add ${rep.id}`);
+  }
+  if (dep.url) lines.push(`  ${dep.url}`);
+  return lines;
+}
+
+/**
+ * Print a deprecation warning (yellow) if the agent's registry entry carries a
+ * `deprecated` marker; no-op otherwise. Call from any user entry point that
+ * acts on a chosen agent — install (`agents add`) and `agents teams add`.
+ */
+export function warnAgentDeprecated(agent: AgentId): void {
+  const lines = deprecationNotice(agent);
+  if (!lines) return;
+  for (const line of lines) console.log(chalk.yellow(line));
 }
 
 /** Format an error message for an unrecognized agent name, listing valid options. */

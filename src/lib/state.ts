@@ -104,6 +104,7 @@ const RUNS_DIR = path.join(HISTORY_DIR, 'runs');
 const TEAMS_AGENTS_DIR = path.join(HISTORY_DIR, 'teams', 'agents');
 const BACKUPS_DIR = path.join(HISTORY_DIR, 'backups');
 const TRASH_DIR = path.join(HISTORY_DIR, 'trash');
+const MAILBOX_DIR = path.join(HISTORY_DIR, 'mailbox');
 
 // Cache bucket (regenerable).
 const SHIMS_DIR = path.join(CACHE_DIR, 'shims');
@@ -359,6 +360,9 @@ export function getProjectRoutinesDir(cwd: string = process.cwd()): string | nul
 /** Path to routine execution logs (~/.agents/.history/runs/). */
 export function getRunsDir(): string { return RUNS_DIR; }
 
+/** Root for per-agent mailboxes (~/.agents/.history/mailbox/). */
+export function getMailboxRootDir(): string { return MAILBOX_DIR; }
+
 /** Path to installed agent CLI binaries (~/.agents/.history/versions/). */
 export function getVersionsDir(): string { return VERSIONS_DIR; }
 
@@ -421,6 +425,9 @@ export function getDevicesRegistryPath(): string { return path.join(HISTORY_DIR,
 
 /** Path to the device ignore-list — tailscale node names the user dismissed, so auto-discovery never re-suggests them. Per-machine, same dir as the registry. */
 export function getDevicesIgnoredPath(): string { return path.join(HISTORY_DIR, 'devices', 'ignored.json'); }
+
+/** Dir of "pending device" sentinels (~/.agents/.cache/state/devices-pending/) — one empty-ish file per newly-discovered, not-yet-approved tailnet node. Written by the daemon probe, read by the menu-bar helper (mirrors the attention sentinel dir). */
+export function getDevicesPendingDir(): string { return path.join(RUNTIME_STATE_DIR, 'devices-pending'); }
 
 /** Path to cloud dispatch cache (~/.agents/.cache/cloud/). */
 export function getCloudDir(): string { return CLOUD_DIR; }

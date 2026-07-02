@@ -21,6 +21,26 @@ import {
   type InstalledAgentTargetResult,
   type VersionSelectionResult,
 } from '../lib/versions.js';
+import { resolveListFilter, AgentSpecError } from '../lib/agent-spec/index.js';
+
+/**
+ * Resolve a read/list command's `@version` filter through the agent-spec engine,
+ * exiting cleanly on a bad spec. Drop-in for the old
+ * `resolveVersionAlias(agent, parts[1])`:
+ *   undefined → show all · @default/@pinned → the default version ·
+ *   @latest/@oldest/@x.y.z → concrete.
+ */
+export function resolveListFilterOrExit(agent: AgentId, qualifier: string | undefined | null): string | undefined {
+  try {
+    return resolveListFilter(agent, qualifier);
+  } catch (e) {
+    if (e instanceof AgentSpecError) {
+      console.error(chalk.red(e.message));
+      process.exit(1);
+    }
+    throw e;
+  }
+}
 
 /**
  * Check if an error is from user cancelling a prompt (Ctrl+C)

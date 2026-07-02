@@ -10,6 +10,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { parseDroid, detectAgent, parseSession } from '../parse.js';
 
+const TESTDATA = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'testdata');
+
 function writeTmp(content: string): string {
   const dir = path.join(os.tmpdir(), `droid-parse-${Date.now()}-${Math.random()}`, '.factory', 'sessions', 'proj');
   fs.mkdirSync(dir, { recursive: true });
@@ -87,6 +89,42 @@ describe('parseDroid', () => {
     try {
       const events = parseDroid(p);
       expect(events.find((e) => e.type === 'error')).toMatchObject({ type: 'error', tool: 'Bash', content: 'boom' });
+    } finally {
+      fs.rmSync(path.dirname(p), { recursive: true, force: true });
+    }
+  });
+});
+
+describe('parseDroid Execute and Create tools', () => {
+  test('Execute tool_use sets command from fixture', () => {
+    // Uses synthetic fixture: testdata/droid-execute-create.jsonl
+    // Routes through a tmp .factory path so detectAgent works correctly.
+    const fixtureContent = fs.readFileSync(path.join(TESTDATA, 'droid-execute-create.jsonl'), 'utf-8');
+    const dir = path.join(os.tmpdir(), `droid-exec-${Date.now()}`, '.factory', 'sessions', 'proj');
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, 'sess.jsonl');
+    fs.writeFileSync(p, fixtureContent);
+    try {
+      const events = parseDroid(p);
+      const execEvent = events.find((e) => e.type === 'tool_use' && e.tool === 'Execute');
+      expect(execEvent).toBeDefined();
+      expect(execEvent).toMatchObject({ type: 'tool_use', tool: 'Execute', command: 'ls -la' });
+    } finally {
+      fs.rmSync(path.dirname(p), { recursive: true, force: true });
+    }
+  });
+
+  test('Create tool_use sets path from file_path field', () => {
+    const fixtureContent = fs.readFileSync(path.join(TESTDATA, 'droid-execute-create.jsonl'), 'utf-8');
+    const dir = path.join(os.tmpdir(), `droid-create-${Date.now()}`, '.factory', 'sessions', 'proj');
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, 'sess.jsonl');
+    fs.writeFileSync(p, fixtureContent);
+    try {
+      const events = parseDroid(p);
+      const createEvent = events.find((e) => e.type === 'tool_use' && e.tool === 'Create');
+      expect(createEvent).toBeDefined();
+      expect(createEvent).toMatchObject({ type: 'tool_use', tool: 'Create', path: '/work/hello.ts' });
     } finally {
       fs.rmSync(path.dirname(p), { recursive: true, force: true });
     }

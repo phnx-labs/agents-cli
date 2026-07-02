@@ -21,12 +21,13 @@
  *   `agents-cli.bundles.<name>` and `agents-cli.secrets.<bundle>.<key>`.
  */
 
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { KeychainBackend } from './index.js';
+import { encodePwshBase64 } from '../pwsh.js';
 
 // ---------- file store location ----------
 
@@ -44,7 +45,38 @@ function ensureFileDir(): void {
 
 // ---------- passphrase ----------
 
+/**
+ * Windows has no `/dev/tty` and no POSIX `stty`, so the interactive prompt runs
+ * through PowerShell's `Read-Host -AsSecureString` (which never echoes). The
+ * secure string is marshaled back out and written to stdout, which we capture.
+ * If PowerShell cannot run at all, fail with an actionable error rather than
+ * letting `fs.openSync('/dev/tty')` throw a raw ENOENT. Reached only on the rare
+ * interactive-Windows file-fallback path — the headless service-account case
+ * (no TTY) auto-provisions a machine-local key and never gets here.
+ */
+function readPassphraseFromTtyWindows(): string {
+  const script = `
+$ErrorActionPreference = 'Stop'
+$sec = Read-Host -AsSecureString -Prompt 'Enter AGENTS_SECRETS_PASSPHRASE'
+$ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+try { [Console]::Out.Write([Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)) }
+finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
+`;
+  // Not -NonInteractive: that flag would suppress the Read-Host prompt itself.
+  const res = spawnSync('powershell.exe', ['-NoProfile', '-EncodedCommand', encodePwshBase64(script)], {
+    stdio: ['inherit', 'pipe', 'inherit'],
+  });
+  if (res.error || res.status !== 0) {
+    throw new Error(
+      'Could not prompt for a passphrase on Windows. Set AGENTS_SECRETS_PASSPHRASE ' +
+      'to decrypt the file-backed secret store.'
+    );
+  }
+  return (res.stdout?.toString() ?? '').replace(/\r?\n$/, '');
+}
+
 function readPassphraseFromTty(): string {
+  if (process.platform === 'win32') return readPassphraseFromTtyWindows();
   const fd = fs.openSync('/dev/tty', 'r+');
   let echoDisabled = false;
   try {

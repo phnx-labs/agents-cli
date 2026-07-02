@@ -7,6 +7,7 @@
  * rules, hooks, and promptcuts synced to that version.
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -42,7 +43,6 @@ import {
   getVersionHomePath,
   getVersionDir,
   resolveVersion,
-  resolveVersionAlias,
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
@@ -52,6 +52,7 @@ import {
   syncResourcesToVersion,
   removeVersion,
   printTrashFooter,
+  reconcileStaleLatestForAgent,
 } from '../lib/versions.js';
 import {
   getShimsDir,
@@ -60,6 +61,7 @@ import {
   removeShim,
 } from '../lib/shims.js';
 import { getAgentResources, listResources } from '../lib/resources.js';
+import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins.js';
@@ -73,10 +75,27 @@ import { listProfiles, profileSummary, type ProfileSummary } from '../lib/profil
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 
 // Shown in the email column for agents that are signed in but expose no email
-// address locally (Antigravity, Kimi store an opaque OAuth/JWT credential).
+// address locally (Antigravity stores an opaque OAuth grant with no identity).
 const SIGNED_IN_LABEL = 'signed in';
+
+/**
+ * Text for the account (email) column. Prefers the real email; otherwise, for a
+ * signed-in agent whose credential carries no email but does carry an opaque
+ * account id (Kimi's user_id), show `id:<user_id>` so distinct accounts read
+ * distinctly instead of a generic "signed in". Falls back to "signed in" when we
+ * have neither (Antigravity), and empty when signed out.
+ */
+function accountColumnLabel(
+  info?: Pick<AccountInfo, 'email' | 'accountId' | 'signedIn'> | null
+): string {
+  if (!info) return '';
+  if (info.email) return info.email;
+  if (info.signedIn) return info.accountId ? `id:${info.accountId}` : SIGNED_IN_LABEL;
+  return '';
+}
 
 /**
  * Group profile summaries by their host harness, optionally filtered to a
@@ -102,6 +121,7 @@ function profileKindAndModel(model: string, planWidth: number): string {
 }
 
 function termLink(text: string, filePath: string): string {
+  if (!process.stdout.isTTY) return text;
   const url = `file://${filePath}`;
   return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
@@ -206,11 +226,17 @@ function shouldRenderSection(key: SectionKey, filter: ViewSectionFilter | undefi
 }
 
 /** Trim a description to a column-friendly snippet. Strips newlines, collapses whitespace. */
-function summarizeDescription(desc: string | undefined, maxLen = 80): string {
+export function summarizeDescription(desc: string | undefined, maxLen = 80): string {
   if (!desc) return '';
   const cleaned = desc.replace(/\s+/g, ' ').trim();
-  if (cleaned.length <= maxLen) return cleaned;
-  return cleaned.slice(0, maxLen - 1).trimEnd() + '…';
+  return truncateToWidth(cleaned, maxLen);
+}
+
+export function descriptionForPrefix(desc: string | undefined, prefix: string): string {
+  if (!desc) return '';
+  const visiblePrefix = prefix.replace(/\x1b]8;;[^\x1b]*(?:\x1b\\|\x07)/g, '');
+  const budget = Math.max(1, terminalWidth() - stringWidth(visiblePrefix));
+  return summarizeDescription(desc, budget);
 }
 
 function getProfileSummaries(filterAgentId?: AgentId): ProfileSummary[] {
@@ -281,8 +307,10 @@ function renderHostClisSection(cwd: string): void {
       const status = installed ? chalk.green('installed') : chalk.red('missing  ');
       const linkedName = termLink(manifest.name.padEnd(nameWidth), linkTarget(manifest.path));
       const tag = hostCliSourceTag(manifest.source);
-      const desc = manifest.description ? chalk.gray(`  ${summarizeDescription(manifest.description, 60)}`) : '';
-      console.log(`  ${status}  ${chalk.cyan(linkedName)} ${tag}${desc}`);
+      const prefix = `  ${status}  ${chalk.cyan(linkedName)} ${tag}`;
+      const descSnippet = descriptionForPrefix(manifest.description, `${prefix}  `);
+      const desc = descSnippet ? chalk.gray(`  ${descSnippet}`) : '';
+      console.log(prefix + desc);
     }
     if (anyMissing) {
       console.log(chalk.gray('  Install missing with `agents cli install`'));
@@ -393,7 +421,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
     if (!canon) return info;
     return {
       ...info,
-      plan: canon.plan,
+      // Prefer a plan the live usage fetch surfaced (Kimi reports membership
+      // tier in /usages; its local auth file has none) and fall back to the
+      // account-derived plan (Claude's billingType).
+      plan: usageByKey.get(key)?.snapshot?.plan ?? canon.plan,
       // Throttle state comes from the live usage windows, not the pay-as-you-go
       // overage flag that AccountInfo.usageStatus used to carry. A maxed window
       // means rate-limited; no snapshot means no badge. See
@@ -438,8 +469,8 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         maxVerLabel = Math.max(maxVerLabel, label.length);
         const rawInfo = infoMap.get(`${agentId}:${v}`);
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
-        if (info?.email) maxEmail = Math.max(maxEmail, info.email.length);
-        else if (info?.signedIn) maxEmail = Math.max(maxEmail, SIGNED_IN_LABEL.length);
+        const accountLabel = accountColumnLabel(info);
+        if (accountLabel) maxEmail = Math.max(maxEmail, accountLabel.length);
         if (info?.plan) maxPlanWidth = Math.max(maxPlanWidth, info.plan.length);
       }
       // Profile rows share these columns with version rows so they line up.
@@ -515,9 +546,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
           parts.push(chalk.gray('(not signed in — run ' + agent.cliCommand + ' to log in)'));
         } else {
           if (hasEmail || hasUsage || hasActive || signedIn) {
-            // Signed-in agents without a local email (Antigravity, Kimi) show a
-            // "signed in" placeholder so they read as logged in, not blank.
-            const display = vInfo?.email || (signedIn ? SIGNED_IN_LABEL : '');
+            // Signed-in agents without a local email show their account id
+            // (Kimi's user_id) or a "signed in" placeholder (Antigravity) so they
+            // read as logged in, not blank.
+            const display = accountColumnLabel(vInfo);
             const emailCol = display.padEnd(maxEmail);
             parts.push(display ? chalk.cyan(emailCol) : ' '.repeat(maxEmail));
           }
@@ -606,7 +638,7 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null);
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
-        const gDisplay = gInfo?.email || (gInfo?.signedIn ? SIGNED_IN_LABEL : '');
+        const gDisplay = accountColumnLabel(gInfo);
         parts.push(gDisplay ? chalk.cyan(gDisplay) : '');
       }
       if (gUsageStr || gActiveStr) parts.push(gUsageStr);
@@ -786,58 +818,10 @@ async function showAgentResources(
   }
   const home = getVersionHomePath(agentId, version);
 
-  // Get git sync status if ~/.agents/ is a git repo
-  const userAgentsDir = getUserAgentsDir();
-  const hasGitRepo = isGitRepo(userAgentsDir);
-  const commandsSync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'commands') : null;
-  const skillsSync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'skills') : null;
-  const hooksSync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'hooks') : null;
-  const memorySync = hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'rules') : null;
-
-  // Helper to determine sync state for a resource
-  const getSyncState = (
-    resourceName: string,
-    resourceType: 'commands' | 'skills' | 'hooks' | 'memory',
-    syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>
-  ): SyncState | undefined => {
-    if (!syncStatus) return undefined;
-
-    let relativePath: string;
-    if (resourceType === 'commands') {
-      relativePath = `commands/${resourceName}.md`;
-    } else if (resourceType === 'skills') {
-      relativePath = `skills/${resourceName}`;
-    } else if (resourceType === 'hooks') {
-      relativePath = `hooks/${resourceName}`;
-    } else {
-      // Rules files: map agent-specific name (CLAUDE.md) back to canonical (AGENTS.md)
-      const centralName = getCentralRulesFileName(agentId);
-      relativePath = `rules/${centralName}`;
-    }
-
-    const matchesPath = (f: string) => f === relativePath || f.startsWith(relativePath + '/');
-
-    const isNew = syncStatus.new.some(matchesPath);
-    const isStaged = syncStatus.staged.some(matchesPath);
-    const isModified = syncStatus.modified.some(matchesPath);
-    const isDeleted = syncStatus.deleted.some(matchesPath);
-    const isSynced = syncStatus.synced.some(matchesPath);
-
-    if (isNew || isStaged) {
-      return 'new';
-    }
-    if (isModified) {
-      return 'modified';
-    }
-    if (isDeleted) {
-      return 'deleted';
-    }
-    if (isSynced) {
-      return 'synced';
-    }
-    // Not in any array = local-only (untracked with no files)
-    return 'new';
-  };
+  // Git sync status if ~/.agents/ is a git repo (shared loader — see
+  // loadResourceSyncData / resolveResourceSyncState, reused by --json --resources).
+  const { hasGitRepo, commands: commandsSync, skills: skillsSync, hooks: hooksSync, memory: memorySync } =
+    await loadResourceSyncData();
 
   // Collect resources for the specific version
   interface SkillError {
@@ -872,23 +856,23 @@ async function showAgentResources(
     version,
     commands: resources.commands.map(r => ({
       ...r,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'commands', commandsSync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'commands', commandsSync),
     })),
     skills: resources.skills.map(r => ({
       ...r,
       // ruleCount of 0 is noise — every skill has 0 unless it ships subrules, which is rare.
       ruleCount: r.ruleCount && r.ruleCount > 0 ? r.ruleCount : undefined,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'skills', skillsSync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'skills', skillsSync),
     })),
     skillErrors: resources.skillErrors,
     mcp: resources.mcp.map(r => ({ name: r.name, scope: r.scope, syncState: r.scope === 'project' ? undefined : 'synced' as SyncState })),
     memory: resources.memory.map(r => ({
       ...r,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'memory', memorySync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'memory', memorySync),
     })),
     hooks: resources.hooks.map(r => ({
       ...r,
-      syncState: r.scope === 'project' ? undefined : getSyncState(r.name, 'hooks', hooksSync),
+      syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'hooks', hooksSync),
     })),
     workflows: resources.workflows.map(r => ({ name: r.name, path: r.path, scope: r.scope })),
   };
@@ -927,9 +911,10 @@ async function showAgentResources(
         : chalk.gray('[system]');
       display += ` ${sourceTag}`;
       const syncStr = r.syncState ? chalk.gray(` [${r.syncState}]`) : '';
-      const descSnippet = summarizeDescription(r.description);
+      const prefix = `    ${display}${syncStr}`;
+      const descSnippet = descriptionForPrefix(r.description, `${prefix}  `);
       const descStr = descSnippet ? chalk.gray(`  ${descSnippet}`) : '';
-      console.log(`    ${display}${syncStr}${descStr}`);
+      console.log(prefix + descStr);
     }
   }
 
@@ -961,13 +946,10 @@ async function showAgentResources(
       cliVersion: version,
       info: accountInfo,
     });
-    const emailStr = accountInfo.email
-      ? chalk.cyan(`  ${accountInfo.email}`)
-      : accountInfo.signedIn
-        ? chalk.cyan(`  ${SIGNED_IN_LABEL}`)
-        : '';
+    const accountLabel = accountColumnLabel(accountInfo);
+    const emailStr = accountLabel ? chalk.cyan(`  ${accountLabel}`) : '';
     const status = chalk.green(version);
-    const usageStr = formatUsageSummary(accountInfo.plan, null);
+    const usageStr = formatUsageSummary(usageInfo.snapshot?.plan ?? accountInfo.plan, null);
     const usagePart = usageStr ? `  ${usageStr}` : '';
     console.log(`  ${colorAgent(agentId)(AGENTS[agentId].name.padEnd(14))} ${status}${emailStr}${usagePart}`);
 
@@ -1113,6 +1095,9 @@ export interface ViewJsonVersion {
   isDefault: boolean;
   signedIn: boolean;
   email: string | null;
+  // Opaque account identifier when the credential exposes one but no email
+  // (Kimi's user_id). Optional for backward compatibility with older consumers.
+  accountId?: string | null;
   plan: string | null;
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
   // Optional so existing TypeScript consumers compiled against the prior
@@ -1126,6 +1111,9 @@ export interface ViewJsonVersion {
   }>;
   lastActive: string | null;
   path: string;
+  /** Present only when --resources / --detailed (or --json with a section
+   *  flag) is passed: this version's resource inventory with git sync-state. */
+  resources?: VersionResourcesJson;
 }
 
 /** Machine-readable entry for one agent's installed versions. */
@@ -1135,14 +1123,194 @@ export interface ViewJsonAgent {
   profiles: ProfileSummary[];
 }
 
+/** Resource sections that --resources can include in --json output. */
+export type ResourceSection = 'commands' | 'skills' | 'mcp' | 'memory' | 'hooks' | 'workflows' | 'plugins';
+
+const ALL_RESOURCE_SECTIONS: ResourceSection[] = ['commands', 'skills', 'mcp', 'memory', 'hooks', 'workflows', 'plugins'];
+
+/** One resource entry in `--json --resources` output. */
+export interface ResourceItemJson {
+  name: string;
+  scope?: 'user' | 'project';
+  /** Git sync-state vs ~/.agents. Omitted for project-scoped resources or when
+   *  ~/.agents isn't a git repo. When queried via --host it reflects the
+   *  remote's ~/.agents — i.e. per-host resource drift. */
+  syncState?: SyncState;
+  description?: string;
+  /** Skills only, when > 0. */
+  ruleCount?: number;
+}
+
+/** Per-version resource inventory; one key per requested section. */
+export interface VersionResourcesJson {
+  commands?: ResourceItemJson[];
+  skills?: ResourceItemJson[];
+  mcp?: ResourceItemJson[];
+  memory?: ResourceItemJson[];
+  hooks?: ResourceItemJson[];
+  workflows?: ResourceItemJson[];
+  plugins?: ResourceItemJson[];
+}
+
+type ResourceSyncType = 'commands' | 'skills' | 'hooks' | 'memory';
+
+/** Git sync-state for the four tracked resource kinds, loaded once from ~/.agents. */
+interface ResourceSyncData {
+  hasGitRepo: boolean;
+  commands: Awaited<ReturnType<typeof getGitSyncStatus>>;
+  skills: Awaited<ReturnType<typeof getGitSyncStatus>>;
+  hooks: Awaited<ReturnType<typeof getGitSyncStatus>>;
+  memory: Awaited<ReturnType<typeof getGitSyncStatus>>;
+}
+
+/** Load git sync-state for the tracked resource kinds. Shared by the human
+ *  detail view (showAgentResources) and the `--json --resources` path. */
+async function loadResourceSyncData(): Promise<ResourceSyncData> {
+  const userAgentsDir = getUserAgentsDir();
+  const hasGitRepo = isGitRepo(userAgentsDir);
+  return {
+    hasGitRepo,
+    commands: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'commands') : null,
+    skills: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'skills') : null,
+    hooks: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'hooks') : null,
+    memory: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'rules') : null,
+  };
+}
+
+/** Resolve one resource's git sync-state. Extracted from showAgentResources so
+ *  the human view and the JSON path derive drift identically. */
+function resolveResourceSyncState(
+  agentId: AgentId,
+  resourceName: string,
+  resourceType: ResourceSyncType,
+  syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>,
+): SyncState | undefined {
+  if (!syncStatus) return undefined;
+
+  let relativePath: string;
+  if (resourceType === 'commands') {
+    relativePath = `commands/${resourceName}.md`;
+  } else if (resourceType === 'skills') {
+    relativePath = `skills/${resourceName}`;
+  } else if (resourceType === 'hooks') {
+    relativePath = `hooks/${resourceName}`;
+  } else {
+    // Rules files: map agent-specific name (CLAUDE.md) back to canonical (AGENTS.md)
+    const centralName = getCentralRulesFileName(agentId);
+    relativePath = `rules/${centralName}`;
+  }
+
+  const matchesPath = (f: string) => f === relativePath || f.startsWith(relativePath + '/');
+
+  if (syncStatus.new.some(matchesPath) || syncStatus.staged.some(matchesPath)) return 'new';
+  if (syncStatus.modified.some(matchesPath)) return 'modified';
+  if (syncStatus.deleted.some(matchesPath)) return 'deleted';
+  if (syncStatus.synced.some(matchesPath)) return 'synced';
+  // Not in any array = local-only (untracked with no files)
+  return 'new';
+}
+
+/** Collect one version's resources for `--json`, limited to `sections`. Scans
+ *  the version's `home`, so per-version differences are reported accurately. */
+function collectVersionResources(
+  agentId: AgentId,
+  home: string,
+  cwd: string,
+  cliInstalled: boolean,
+  sections: Set<ResourceSection>,
+  sync: ResourceSyncData,
+): VersionResourcesJson {
+  const res = getAgentResources(agentId, { cwd, scope: 'all', cliInstalled, home });
+  const out: VersionResourcesJson = {};
+
+  const withSync = (
+    r: { name: string; scope: 'user' | 'project'; description?: string },
+    type: ResourceSyncType,
+    syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>,
+  ): ResourceItemJson => {
+    const item: ResourceItemJson = { name: r.name, scope: r.scope };
+    if (r.scope !== 'project') {
+      const s = resolveResourceSyncState(agentId, r.name, type, syncStatus);
+      if (s) item.syncState = s;
+    }
+    if (r.description) item.description = r.description;
+    return item;
+  };
+
+  if (sections.has('commands')) out.commands = res.commands.map((r) => withSync(r, 'commands', sync.commands));
+  if (sections.has('skills')) {
+    out.skills = res.skills.map((r) => {
+      const item = withSync(r, 'skills', sync.skills);
+      // ruleCount of 0 is noise — every skill has 0 unless it ships subrules.
+      if (r.ruleCount && r.ruleCount > 0) item.ruleCount = r.ruleCount;
+      return item;
+    });
+  }
+  if (sections.has('mcp')) {
+    out.mcp = res.mcp.map((r) => {
+      const item: ResourceItemJson = { name: r.name, scope: r.scope };
+      if (r.scope !== 'project') item.syncState = 'synced';
+      return item;
+    });
+  }
+  if (sections.has('memory')) out.memory = res.memory.map((r) => withSync(r, 'memory', sync.memory));
+  if (sections.has('hooks')) out.hooks = res.hooks.map((r) => withSync(r, 'hooks', sync.hooks));
+  if (sections.has('workflows')) out.workflows = res.workflows.map((r) => ({ name: r.name, scope: r.scope }));
+  if (sections.has('plugins')) {
+    out.plugins = discoverPlugins()
+      .filter((p) => pluginSupportsAgent(p, agentId))
+      .map((p) => ({ name: p.name }));
+  }
+  return out;
+}
+
+/** Build the set of resource sections to include in `--json` from the
+ *  `--resources` / `--detailed` flags, plus (in --json mode) the per-section
+ *  boolean filters (`--skills` etc.) that plain `--json` historically ignored. */
+export function parseResourceSections(
+  options: { resources?: string | boolean; detailed?: boolean } & ViewSectionFilter,
+  jsonMode: boolean,
+): Set<ResourceSection> {
+  const set = new Set<ResourceSection>();
+  const addAll = () => ALL_RESOURCE_SECTIONS.forEach((s) => set.add(s));
+
+  if (options.detailed) addAll();
+
+  const rv = options.resources;
+  if (rv !== undefined) {
+    if (rv === true || String(rv).trim() === '' || String(rv).toLowerCase() === 'all') {
+      addAll();
+    } else {
+      for (const raw of String(rv).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)) {
+        const section = raw === 'rules' ? 'memory' : raw; // --rules is the memory file
+        if ((ALL_RESOURCE_SECTIONS as string[]).includes(section)) set.add(section as ResourceSection);
+      }
+    }
+  }
+
+  if (jsonMode) {
+    const flagToSection: Array<[keyof ViewSectionFilter, ResourceSection]> = [
+      ['commands', 'commands'], ['skills', 'skills'], ['mcp', 'mcp'],
+      ['workflows', 'workflows'], ['plugins', 'plugins'], ['hooks', 'hooks'], ['rules', 'memory'],
+    ];
+    for (const [flag, section] of flagToSection) if (options[flag]) set.add(section);
+  }
+
+  return set;
+}
+
 /**
  * Collect structured info for one or more agents without rendering to the
  * terminal. Used by `--json` output and any programmatic consumer (e.g. the
  * agents-cli extension's "resume current session in best available version"
  * command).
  */
-async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent[]> {
+async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set<ResourceSection>): Promise<ViewJsonAgent[]> {
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
+  const wantResources = !!resourceSections && resourceSections.size > 0;
+  // Only pay for the git-status + resource scans when resources were requested.
+  const resourceSync = wantResources ? await loadResourceSyncData() : null;
+  const cliStates = wantResources ? await getAllCliStates() : null;
   const infoFetches: Promise<{ agentId: AgentId; version: string; home: string; info: AccountInfo }>[] = [];
   for (const agentId of agentsToShow) {
     for (const ver of listInstalledVersions(agentId)) {
@@ -1170,7 +1338,10 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
     if (!canon) return info;
     return {
       ...info,
-      plan: canon.plan,
+      // Prefer a plan the live usage fetch surfaced (Kimi reports membership
+      // tier in /usages; its local auth file has none) and fall back to the
+      // account-derived plan (Claude's billingType).
+      plan: usageByKey.get(key)?.snapshot?.plan ?? canon.plan,
       // Throttle state comes from the live usage windows, not the pay-as-you-go
       // overage flag that AccountInfo.usageStatus used to carry. A maxed window
       // means rate-limited; no snapshot means no badge. See
@@ -1181,7 +1352,7 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
   };
 
   const byAgent = new Map<AgentId, ViewJsonVersion[]>();
-  for (const { agentId, version, info: rawInfo } of infoResults) {
+  for (const { agentId, version, home, info: rawInfo } of infoResults) {
     const info = mergeCanonical(rawInfo);
     const globalDefault = getGlobalDefault(agentId);
     const usageKey = getUsageLookupKey(info);
@@ -1193,6 +1364,7 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
       isDefault: version === globalDefault,
       signedIn: info.signedIn,
       email: info.email,
+      accountId: info.accountId,
       plan: info.plan,
       usageStatus: info.usageStatus,
       overageCredits: info.overageCredits,
@@ -1206,6 +1378,17 @@ async function collectAgentsJson(filterAgentId?: AgentId): Promise<ViewJsonAgent
       lastActive: info.lastActive ? info.lastActive.toISOString() : null,
       path: getVersionDir(agentId, version),
     };
+
+    if (wantResources && resourceSync) {
+      entry.resources = collectVersionResources(
+        agentId,
+        home,
+        process.cwd(),
+        cliStates?.[agentId]?.installed ?? false,
+        resourceSections!,
+        resourceSync,
+      );
+    }
 
     const existing = byAgent.get(agentId);
     if (existing) existing.push(entry);
@@ -1463,9 +1646,14 @@ export async function viewAction(
     prune?: boolean;
     yes?: boolean;
     dryRun?: boolean;
+    resources?: string | boolean;
+    detailed?: boolean;
   } & ViewSectionFilter,
 ): Promise<void> {
-  const json = options?.json === true;
+  // --resources / --detailed imply --json (they only shape structured output).
+  const explicitResources = options?.detailed === true || options?.resources !== undefined;
+  const json = options?.json === true || explicitResources;
+  const resourceSections = parseResourceSections(options ?? {}, json);
   const prune = options?.prune === true;
   const yes = options?.yes === true;
   const dryRun = options?.dryRun === true;
@@ -1482,13 +1670,24 @@ export async function viewAction(
   };
   const filterIsSet = SECTION_KEYS.some((k) => filter[k]);
 
+  // RUSH-1320: fold any stale literal `latest` version-home into its concrete
+  // version before rendering, so it stops appearing as a bogus "version" next
+  // to the real ones. Best-effort — must never break `agents view`. Scoped to
+  // the queried agent when one is given (cheap no-op for agents with no
+  // `latest` dir, i.e. almost all of them).
+  {
+    const target = agentArg ? resolveAgentName(agentArg.split('@')[0]) : null;
+    const toReconcile = agentArg ? (target ? [target] : []) : ALL_AGENT_IDS;
+    await Promise.all(toReconcile.map((a) => reconcileStaleLatestForAgent(a).catch(() => {})));
+  }
+
   if (!agentArg) {
     if (prune) {
       await pruneDuplicates(undefined, yes, dryRun);
       return;
     }
     if (json) {
-      const data = await collectAgentsJson();
+      const data = await collectAgentsJson(undefined, resourceSections);
       console.log(JSON.stringify(data, null, 2));
       return;
     }
@@ -1510,12 +1709,23 @@ export async function viewAction(
     console.log(chalk.red(formatAgentError(agentName)));
     process.exit(1);
   }
-  // Keep 'default'/'pinned' as-is since showAgentResources handles 'default';
-  // resolveVersionAlias returns undefined for both (they're synonyms), which
-  // would otherwise skip the detailed view.
-  const requestedVersion = (parts[1] === 'default' || parts[1] === 'pinned')
-    ? 'default'
-    : (resolveVersionAlias(agentId, parts[1]) ?? null);
+  // Resolve the @version filter through the agent-spec engine:
+  //   bare/@any → null (show all versions), @default/@pinned → 'default'
+  //   (showAgentResources handles it), @latest/@oldest/@x.y.z → concrete.
+  let requestedVersion: string | null;
+  try {
+    requestedVersion = resolveVersionFilter(agentId, parts[1]).version;
+  } catch (e) {
+    if (e instanceof AgentSpecError) {
+      if (json) {
+        console.log(JSON.stringify({ error: e.message }));
+      } else {
+        console.log(chalk.red(e.message));
+      }
+      process.exit(1);
+    }
+    throw e;
+  }
 
   if (prune) {
     if (requestedVersion) {
@@ -1528,9 +1738,9 @@ export async function viewAction(
   }
 
   if (json) {
-    // --json ignores the @version suffix (detailed resource view is not yet
-    // exposed as structured data). Emit the version list for the agent.
-    const data = await collectAgentsJson(agentId);
+    // --json ignores the @version suffix, but --resources/--detailed (or a
+    // section flag) now attach each version's resource inventory + sync-state.
+    const data = await collectAgentsJson(agentId, resourceSections);
     console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [], profiles: [] }, null, 2));
     return;
   }
@@ -1550,10 +1760,11 @@ export async function viewAction(
 
 /** Register the `agents view` command. */
 export function registerViewCommand(program: Command): void {
-  program
-    .command('view [agent]')
+  addHostOption(program.command('view [agent]'))
     .description('Show what agent CLIs are installed and which versions you have. Inspect resources when you pass agent@version.')
     .option('--json', 'Emit machine-readable JSON (version list, usage, signed-in status).')
+    .option('--resources [sections]', 'In --json mode, include each version\'s resources: "all" (default) or a comma list (skills,plugins,mcp,commands,workflows,memory,hooks). Implies --json.')
+    .option('--detailed', 'Include all resources in --json output (alias for --resources all). Implies --json.')
     .option('--prune', 'Remove older installed versions that share an account with a newer installed version. Skips the global default.')
     .option('--dry-run', 'With --prune, show duplicate versions without deleting')
     .option('-y, --yes', 'Skip the prune confirmation prompt.')
@@ -1580,6 +1791,11 @@ Examples:
 
   # Machine-readable output (used by tools that pick a version programmatically)
   agents view claude --json
+
+  # One call: full inventory + what's synced on a host (installed agents,
+  # versions, accounts, usage, and per-version resource sync-state)
+  agents view claude --host yosemite-s0 --json --resources all
+  agents view claude --json --resources skills,plugins   # just those sections
 
   # Prune older versions that duplicate an account already used by a newer version
   agents view --prune --dry-run
@@ -1614,6 +1830,8 @@ Output:
         prune?: boolean;
         yes?: boolean;
         dryRun?: boolean;
+        resources?: string | boolean;
+        detailed?: boolean;
       } & ViewSectionFilter,
     ) => viewAction(agentArg, options));
 }

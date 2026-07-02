@@ -7,6 +7,7 @@
  * switching, resource sync prompts, and project-level version pinning.
  */
 import type { Command } from 'commander';
+import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import ora from 'ora';
 import * as fs from 'fs';
@@ -19,6 +20,7 @@ import {
   getAccountEmail,
   getAccountInfo,
   agentLabel,
+  warnAgentDeprecated,
 } from '../lib/agents.js';
 import type { AccountInfo } from '../lib/agents.js';
 import type { UsageSnapshot } from '../lib/usage.js';
@@ -356,6 +358,8 @@ export function registerVersionsCommands(program: Command): void {
 
         const { agent, version } = parsed;
         const agentConfig = AGENTS[agent];
+
+        warnAgentDeprecated(agent);
 
         if (!agentConfig.npmPackage && !agentConfig.installScript) {
           console.log(chalk.yellow(`${agentLabel(agentConfig.id)} has no npm package. Install manually.`));
@@ -869,8 +873,7 @@ export function registerVersionsCommands(program: Command): void {
     });
 
   // Deprecated: use `agents view` instead
-  program
-    .command('list [agent]')
+  addHostOption(program.command('list [agent]'))
     .description('List installed agent CLI versions')
     .action(async (agentArg?: string) => {
       console.log(chalk.red('Deprecated: "agents list" is now "agents view"\n'));

@@ -97,6 +97,7 @@ import {
   loadTrash,
   loadRestore,
   loadDoctor,
+  loadStatus,
   loadProfiles,
   loadSecrets,
   loadWallet,
@@ -116,6 +117,8 @@ import {
   loadBrowser,
   loadComputer,
   loadHosts,
+  loadLogs,
+  loadEvents,
   loadSsh,
   loadPull,
   loadPush,
@@ -124,8 +127,10 @@ import {
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
+import { renderWhatsNew } from './lib/whats-new.js';
 import type { AgentId } from './lib/types.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
+import { emit, redactArgs } from './lib/events.js';
 
 // Transparent shim delegate: the generated Windows `.cmd` shims invoke
 // `agents __shim <agent>[@version] <raw args>`. Intercept here, before commander
@@ -150,6 +155,57 @@ program
   .version(VERSION)
   .helpOption('-h, --help', 'Show help')
   .addHelpCommand(false);
+
+// ─── Audit backbone ────────────────────────────────────────────────────────────
+// One choke point logs every `agents <module> <cmd>` invocation to the structured
+// event log — so team create/disband, agent run, secrets access, and everything
+// else is captured generically (with SSH/remote-user attribution added in emit()),
+// no per-command wiring. `agents events` reads it back. Attached to the root
+// program, so it's inherited by every subcommand regardless of lazy registration.
+
+/** Command path from the acting command up to (but excluding) the `agents` root. */
+function auditCommandPath(cmd: Command): string[] {
+  const parts: string[] = [];
+  let c: Command | null | undefined = cmd;
+  while (c && c.name() && c.name() !== 'agents') {
+    parts.unshift(c.name());
+    c = c.parent;
+  }
+  return parts;
+}
+
+const auditStarts = new WeakMap<Command, number>();
+
+program.hook('preAction', (_thisCommand, actionCommand) => {
+  try {
+    const parts = auditCommandPath(actionCommand);
+    if (parts.length === 0) return;
+    auditStarts.set(actionCommand, Date.now());
+    emit('command.start', {
+      module: parts[0],
+      command: parts.join(' '),
+      args: redactArgs(actionCommand.args),
+      cwd: process.cwd(),
+    });
+  } catch {
+    // Audit logging must never break command dispatch.
+  }
+});
+
+program.hook('postAction', (_thisCommand, actionCommand) => {
+  try {
+    const parts = auditCommandPath(actionCommand);
+    if (parts.length === 0) return;
+    const started = auditStarts.get(actionCommand);
+    emit('command.end', {
+      module: parts[0],
+      command: parts.join(' '),
+      ...(started !== undefined ? { durationMs: Date.now() - started } : {}),
+    });
+  } catch {
+    // Best-effort completion record; the start line is the durable audit fact.
+  }
+});
 
 // Custom help for the main program only
 const originalHelpInformation = program.helpInformation.bind(program);
@@ -197,6 +253,7 @@ Run and dispatch:
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
+  logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network
   pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
 
@@ -251,45 +308,14 @@ async function showWhatsNew(fromVersion: string, toVersion: string): Promise<voi
     const response = await fetch(`https://unpkg.com/@phnx-labs/agents-cli@${toVersion}/CHANGELOG.md`);
     if (!response.ok) return;
 
-    const changelog = await response.text();
-    const lines = changelog.split('\n');
-
-    const relevantChanges: string[] = [];
-    let inRelevantSection = false;
-    let currentVersion = '';
-
-    for (const line of lines) {
-      const versionMatch = line.match(/^## (\d+\.\d+\.\d+)/);
-      if (versionMatch) {
-        currentVersion = versionMatch[1];
-        // Only the range the user actually moved through: (fromVersion, toVersion].
-        // Bounding the top end matters when upgrading to a specific older
-        // version, and guards against a changelog that lists unreleased entries.
-        const inRange =
-          compareVersions(currentVersion, fromVersion) > 0 &&
-          compareVersions(currentVersion, toVersion) <= 0;
-        inRelevantSection = inRange;
-        if (inRelevantSection) {
-          relevantChanges.push('');
-          relevantChanges.push(chalk.bold(`v${currentVersion}`));
-        }
-        continue;
-      }
-
-      if (inRelevantSection && line.trim()) {
-        if (line.startsWith('**') && line.endsWith('**')) {
-          relevantChanges.push(chalk.cyan(line.replace(/\*\*/g, '')));
-        } else if (line.startsWith('- ')) {
-          relevantChanges.push(chalk.gray(`  ${line}`));
-        }
-      }
-    }
+    const relevantChanges = renderWhatsNew(await response.text(), fromVersion, toVersion);
 
     if (relevantChanges.length > 0) {
       console.log(chalk.bold("\nWhat's new:\n"));
       for (const line of relevantChanges) {
         console.log(line);
       }
+      console.log(chalk.gray('\nFull notes: https://github.com/phnx-labs/agents-cli/blob/main/CHANGELOG.md'));
       console.log();
     }
   } catch {
@@ -890,6 +916,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadTrash);
   await reg(loadRestore);
   await reg(loadDoctor);
+  await reg(loadStatus);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
   await reg(loadSecrets);
@@ -910,6 +937,8 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadBrowser);
   await reg(loadComputer);
   await reg(loadHosts);
+  await reg(loadLogs);
+  await reg(loadEvents);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
@@ -980,6 +1009,19 @@ const helpOrVersionRequested = passedArgs.some(
   (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
 );
 
+// `--host` passthrough: run this invocation on a remote machine over SSH instead
+// of locally. Handled before any local command registration / update check /
+// background sync — a remote run needs none of that. Only the allowlisted
+// read-only + config + teams commands route here; `run`/`sessions` are absent
+// from the table and fall through to their own richer `--host` handling below.
+// `--help`/`--version` stay local (docs must work without a reachable host).
+if (requestedCommand !== undefined && !helpOrVersionRequested) {
+  const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
+  if (await maybeRunOnHost(requestedCommand, passedArgs)) {
+    process.exit(process.exitCode ?? 0);
+  }
+}
+
 // Register only the command(s) this invocation actually uses. Lazy commands
 // (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
@@ -1018,7 +1060,8 @@ if (!helpOrVersionRequested) {
   // fire-and-forget the next background sync. System repo gets a real fast-forward
   // pull (read-only locally, safe). User repo and extras get fetch-only + a
   // status marker that we'll print on the *next* invocation.
-  const { spawnDetachedSync } = await import('./lib/auto-pull.js');
+  const { spawnDetachedSync, printPendingUpdateNotices } = await import('./lib/auto-pull.js');
+  printPendingUpdateNotices();
   spawnDetachedSync();
 }
 

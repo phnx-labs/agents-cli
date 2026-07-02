@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+## 1.20.35
+
+**CI: build node-pty's native binary on macOS/Windows so the release matrix is green cross-platform**
+
+- The cross-platform matrix (`ci.yml`, runs only on `release/**` + `v*`) installed deps with `bun install --ignore-scripts`, so `pty.node` from `@homebridge/node-pty-prebuilt-multiarch` was never fetched/built. That package ships prebuilt binaries only for Linux; macOS/Windows obtain `pty.node` via its own install script (prebuild-install download, else a node-gyp compile). With that script skipped the native module was absent, so the daemon-liveness integration test added in #568 — which spawns the real daemon (it loads node-pty) and asserts the browser IPC socket stays up — crashed on macOS/Windows while passing on Linux, and had been red on every release since. The matrix runs only on release branches, so it never surfaced on normal PRs (bun does not run that install script even without `--ignore-scripts` in bun 1.3.x). CI now runs a dedicated step that invokes the package's own install script (`npm run install`), which prefers a prebuilt download and falls back to a node-gyp compile, so it self-heals across platforms and node ABIs. Production (`npm install`) already built the native module, so end users were unaffected. A second macOS/Windows-only failure in the same #568 daemon-liveness test was also fixed: the test rooted its fake `HOME` under `os.tmpdir()`, which on macOS is the long `/var/folders/…/T/…`, pushing the daemon's AF_UNIX socket path to ~116 bytes — past macOS's 104-byte `sun_path` limit — so `bind()` failed with `EADDRINUSE`. The test now roots `HOME` at a short base on POSIX (Windows uses length-unlimited named pipes); real users with a normal `HOME` were never affected. Source: `.github/workflows/ci.yml`, `src/lib/daemon.test.ts`.
+
+**`agents logs`: a top-level, unified run-log viewer (#575)**
+
+- Viewing a dispatched run's output used to be nested and undiscoverable — only `agents hosts logs <id>` and `agents daemon logs` existed, and `agents hosts` wasn't even in `--help`. `agents logs [id]` is now a discoverable top-level command that resolves a run across **two substrates** — host-dispatch task stdout (`agents run --host`) and the local session index — and shows or (`-f`) follows it. `[id]`/`--session` load directly (host task tried first, then session); with no id, `--host`/`--agent`/`--version` filter a merged candidate list (one match shows, several open a fuzzy picker, non-TTY prints the list). Additive: `agents hosts logs` and `agents sessions tail` are unchanged and share the same helpers. Source: `src/commands/logs.ts`, `src/lib/hosts/logs.ts`.
+
+**Host-follow log tailer: no self-corruption on localhost, byte-accurate offsets (#586, #589)**
+
+- Following a run dispatched to **localhost** tripled the on-disk log and triple-printed the output, because the local mirror file and the remote log were the same file and the tailer appended its own reads back into it; it now detects that aliasing by file identity (`dev:ino`) and echoes only. Separately, the offset tracker advanced by a re-encoded string length, so a multibyte UTF-8 char split at a poll boundary drifted the offset and corrupted the stream on non-ASCII output; the tail is now byte-exact (raw `Buffer` via `sshExecRaw`). Source: `src/lib/hosts/progress.ts`, `src/lib/ssh-exec.ts`.
+
+**`agents upgrade`: the "What's new" changelog is now a compact heading list (#562)**
+
+- The post-upgrade changelog dumped every heading *and* every verbose sub-bullet for each version in the range — a screenful across a multi-version jump. It now prints one bullet per feature/fix heading and links to the full CHANGELOG for the details. The parser was extracted to a pure, unit-tested `renderWhatsNew` so it can be exercised without the CLI's import-time side effects. Source: `src/lib/whats-new.ts`, `src/index.ts`.
+
+**`agents sessions --active`: a per-pid registry de-collapses co-located agents (#546)**
+
+- On a host with no terminal extension (bare SSH/tmux — e.g. any Linux box), `--active` could only map a discovered agent process to a session by guessing the newest `.jsonl` in its cwd, so several agents in the same repo collapsed onto one session row (observed live: a single id listed 28 times), and `/restore` couldn't tell them apart. `agents run` now records each launch to `~/.agents/.cache/terminals/by-pid/<pid>.json` (`{agent, cwd, tmuxPane, sessionId, startedAtMs}`) — the headless equivalent of the terminal extension's `live-terminals.json` — so `--active` and `/restore` attribute each co-located agent correctly. Source: `src/lib/session/pid-registry.ts`, `src/lib/session/active.ts`, `src/lib/exec.ts`.
+
+## 1.20.34
+
+**Test suite runs remotely on a crabbox VM (#525, #540)**
+
+- `scripts/release.sh`'s test gate now runs `bun install && bun run build && bun run test` on a leased crabbox VM via `scripts/sandbox.sh` instead of freezing the local machine, matching CI's Build→Test order (crabbox's sync honors `.gitignore`, so the gitignored `dist/` is built on the box). A new `bun run test:remote` offloads the suite the same way for local dev. Publishing still happens locally — only the signed macOS keychain helper can be produced and notarized here, and crabbox boxes are Linux. Source: `scripts/sandbox.sh`, `scripts/release.sh`, `package.json`.
+- `scripts/sandbox.sh` box acquisition is now robust: secrets load via `agents secrets export --plaintext` (the bare form now hard-errors), a missing `.crabbox.yaml` no longer aborts the script under `set -e`, and the agents-cli/claude install is gated to PR mode so test-mode runs match GitHub CI. Box selection gates on `crabbox status … ready=true` — skipping failed-bootstrap duds (which still report `status=running`) and warming a fresh box if none are ready — keyed on the stable `profile` label rather than an ephemeral slug. A dedicated `agents-cli` crabbox profile (`.crabbox.yaml`) isolates this repo's warm pool. Source: `scripts/sandbox.sh`, `.crabbox.yaml`.
+
+## 1.20.31
+
+**`agents sessions <id>`: a catch-up digest for switching between many agents (#502)**
+
+- Opening a single session now leads with its auto-inferred title (user `/rename` > Claude `ai-title` > first-prompt topic) and PR / worktree / ticket badges, then a **Changes** section that groups touched files by directory and tags each as created / modified / deleted (with a `+N ~N -N` summary) instead of the old flat "Modified" list, a **Tools** histogram (per-tool call counts), and a **Tests** verdict parsed from the last `vitest` / `jest` / `pytest` / `go test` / `cargo test` / `tsc` run. The same signals are folded into the interactive picker preview.
+- `agents sessions --active` now collapses the many subagent/fork PIDs of one session into a single row with a `×N` count instead of printing dozens of identical lines. Source: `src/lib/session/digest.ts`, `src/lib/session/render.ts`, `src/lib/session/active.ts`, `src/commands/sessions.ts`, `src/commands/sessions-picker.ts`.
+
+## 1.20.30
+
+**`agents sessions` live state engine: waiting / PR / worktree / ticket detection + reliable preview (#494)**
+
+- `agents sessions --active` infers real activity from each transcript's tail — **working** / **waiting** / **idle** — rather than the old mtime-only running/idle guess, using structural signals (Claude `ExitPlanMode` / `AskUserQuestion`) plus a question + mtime heuristic for Codex. It detects and badges a PR opened during the session (`gh pr create` + the resulting pull URL), a git worktree (`.agents/worktrees/<slug>/`), and a Linear/Jira ticket (from the prompt or branch), and shows the latest turn as the preview instead of the first prompt.
+- `--waiting` filters `--active` to only sessions blocked on your input and exits non-zero (a scriptable gate); `--tree` groups the listing by directory, dropping the id/version columns while keeping the short-id handle.
+- The preview line is now width-correct: measurement is ANSI- and wide-char-aware and reads `$COLUMNS` first, so it no longer wraps or drifts under tmux or over `--host` SSH (the remote is handed the caller's width). Session index schema v7 persists the PR / worktree / ticket signals so historical listings carry them too. Source: `src/lib/session/state.ts`, `src/lib/session/tail.ts`, `src/lib/session/width.ts`, `src/lib/session/{discover,db,active}.ts`, `src/commands/sessions.ts`.
+
 **`agents sessions --host <machine>`: query a remote machine's sessions live over SSH**
 
 - `agents sessions "<query>" --host <alias|user@host>` runs the same session query on a remote machine's own index over SSH and streams the result back — repeat `--host` (or pass several) to fan out across machines. SSH access is the only auth; there's no daemon or shared store. Targets are validated against a strict allowlist (`SSH_TARGET_RE`) to block flag-smuggling, and the forwarded invocation is double-quoted (`shellQuote`) so a query like `$(whoami)` survives as a literal string on both shell layers. Source: `src/lib/session/remote.ts`, `src/commands/sessions.ts`, `docs/05-sessions.md`.

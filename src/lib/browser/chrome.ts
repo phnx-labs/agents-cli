@@ -57,6 +57,7 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
     edge: [
       `${WIN_PROGRAMFILES}\\Microsoft\\Edge\\Application\\msedge.exe`,
       `${WIN_PROGRAMFILES_X86}\\Microsoft\\Edge\\Application\\msedge.exe`,
+      `${WIN_LOCALAPPDATA}\\Microsoft\\Edge\\Application\\msedge.exe`,
     ],
     custom: [],
   },
@@ -317,6 +318,23 @@ export async function attachToChrome(port: number): Promise<string> {
 }
 
 export function killChrome(pid: number): void {
+  if (process.platform === 'win32') {
+    // On Windows `process.kill(pid, 'SIGINT')` maps to TerminateProcess — a
+    // hard kill that skips Chromium's on-exit profile flush (leaving a dirty
+    // "Chrome didn't shut down correctly" state). Ask taskkill for a graceful
+    // stop first (no /F → posts WM_CLOSE), and only force-kill the tree if that
+    // fails or the process is still around.
+    try {
+      execFileSync('taskkill', ['/pid', String(pid)], { stdio: 'ignore' });
+    } catch {
+      try {
+        execFileSync('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+      } catch {
+        // Process already dead
+      }
+    }
+    return;
+  }
   try {
     process.kill(pid, 'SIGINT');
   } catch {

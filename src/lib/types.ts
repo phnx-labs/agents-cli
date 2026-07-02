@@ -9,7 +9,7 @@
 import type { CloudProviderId } from './cloud/types.js';
 
 /** Unique identifier for a supported AI coding agent. */
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'roo' | 'antigravity' | 'grok' | 'kimi' | 'droid';
+export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid';
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
@@ -97,6 +97,13 @@ export interface AgentConfig {
    */
   nativeCommandRuntime?: boolean;
   hooksDir: string;
+  /**
+   * Directory (relative to a plugin's install dir) the agent reads its plugin
+   * manifest from, when it differs from the canonical `.claude-plugin/`. Codex
+   * uses `.codex-plugin`, Droid `.factory-plugin`. Set to `.` when the agent
+   * reads the manifest from the plugin ROOT (Copilot). syncPluginToVersion
+   * mirrors `.claude-plugin/plugin.json` into this dir.
+   */
   pluginManifestDir?: string;
   instructionsFile: string;
   format: 'markdown' | 'toml';
@@ -110,6 +117,25 @@ export interface AgentConfig {
    * cloud and falls back to the configured default.
    */
   cloudProvider?: CloudProviderId;
+  /**
+   * Set when the upstream vendor has retired this agent's CLI. Presence marks
+   * the agent deprecated (it is never blocked from use); `warnAgentDeprecated`
+   * surfaces this in yellow whenever a user installs the agent or adds it to a
+   * team. Point `replacement` at the successor agent so the warning can suggest
+   * a migration path.
+   */
+  deprecated?: {
+    /** Vendor that retired it, e.g. "Google". */
+    by: string;
+    /** Human date it stopped working / was retired, e.g. "June 18, 2026". */
+    date: string;
+    /** One-line explanation shown under the warning header. */
+    reason: string;
+    /** Successor agent id to suggest instead (e.g. 'antigravity'). */
+    replacement?: AgentId;
+    /** Announcement URL for the deprecation. */
+    url?: string;
+  };
   capabilities: {
     hooks: Capability;
     mcp: Capability;

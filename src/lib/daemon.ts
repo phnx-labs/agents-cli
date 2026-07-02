@@ -288,6 +288,34 @@ export async function runDaemon(): Promise<void> {
   const healInterval = setInterval(() => { void runHealCheck(); }, 6 * 60 * 60_000);
   const healKickoff = setTimeout(() => { void runHealCheck(); }, 30_000);
 
+  // Device probe: refresh registered devices' reachability and detect newly
+  // appeared tailnet nodes, dropping a sentinel per pending device so the
+  // menu-bar helper can surface "NEW DEVICES → Register / Ignore". Refresh mode
+  // never auto-registers a newcomer. Soft + overlap-guarded like session sync;
+  // a machine without tailscale is a clean no-op. ~every 3 min.
+  let probingDevices = false;
+  const runDeviceProbe = async () => {
+    if (probingDevices) return;
+    probingDevices = true;
+    try {
+      const { runDeviceSync } = await import('./devices/sync.js');
+      const { reconcilePendingSentinels } = await import('./devices/pending.js');
+      const dev = await runDeviceSync({ soft: true, mode: 'refresh' });
+      if (dev.ok) {
+        reconcilePendingSentinels(dev.pending);
+        if (dev.pending.length) {
+          log('INFO', `devices: ${dev.pending.length} new pending (${dev.pending.map((p) => p.name).join(', ')})`);
+        }
+      }
+    } catch (err) {
+      log('ERROR', `device probe failed: ${(err as Error).message}`);
+    } finally {
+      probingDevices = false;
+    }
+  };
+  const deviceProbeInterval = setInterval(() => { void runDeviceProbe(); }, 3 * 60_000);
+  const deviceProbeKickoff = setTimeout(() => { void runDeviceProbe(); }, 15_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     scheduler.reloadAll();
@@ -306,6 +334,8 @@ export async function runDaemon(): Promise<void> {
     clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
+    clearInterval(deviceProbeInterval);
+    clearTimeout(deviceProbeKickoff);
     removeDaemonPid();
     process.exit(0);
   };
@@ -517,21 +547,59 @@ export function buildDetachedDaemonEnv(baseEnv: NodeJS.ProcessEnv = process.env)
   return env;
 }
 
-function startDetached(): { pid: number; method: string } {
-  const agentsBin = getAgentsBinPath();
-  const logPath = getLogPath();
+/**
+ * Resolve how to launch the daemon: `node <entry> daemon _run`, matching the
+ * exact form that works under a direct `daemon _run`.
+ *
+ * We spawn the Node runtime (`process.execPath`) with the CLI entry as an
+ * argument rather than executing the entry path directly. Executing the `.js`
+ * path relies on its shebang on POSIX, and on Windows CreateProcess can't run a
+ * `.js`/shim directly at all — it gets launched through a transient
+ * console-owning wrapper (cmd.exe / the npm shim). When that wrapper exits it
+ * closes its console, and the detached daemon sharing that console receives a
+ * console-close event that trips its shutdown handler — the daemon comes up,
+ * binds the browser IPC socket, then tears itself down ~36ms later (#556).
+ * Going through `process.execPath` means a real PE/binary is spawned with
+ * `detached: true` and no console, so nothing signals the daemon after launch.
+ *
+ * When the entry isn't a JS file (e.g. a native launcher resolved via
+ * `which agents`), run it directly — it owns its own runtime resolution.
+ */
+export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { command: string; args: string[] } {
+  if (/\.(c|m)?js$/.test(agentsBin)) {
+    return { command: process.execPath, args: [agentsBin, 'daemon', '_run'] };
+  }
+  return { command: agentsBin, args: ['daemon', '_run'] };
+}
+
+interface StartDetachedOptions {
+  /** CLI entry to launch (defaults to the running binary). Injectable for tests. */
+  agentsBin?: string;
+  /** Log file the daemon's stdio is redirected to (defaults to the daemon log). */
+  logPath?: string;
+  /** Environment for the child (defaults to the OAuth-augmented detached env). */
+  env?: NodeJS.ProcessEnv;
+}
+
+export function startDetached(opts: StartDetachedOptions = {}): { pid: number | null; method: string } {
+  const agentsBin = opts.agentsBin ?? getAgentsBinPath();
+  const logPath = opts.logPath ?? getLogPath();
   const logFd = fs.openSync(logPath, 'a');
 
-  const child = spawn(agentsBin, ['daemon', '_run'], {
+  const { command, args } = getDaemonLaunch(agentsBin);
+  const child = spawn(command, args, {
     stdio: ['ignore', logFd, logFd],
     detached: true,
-    env: buildDetachedDaemonEnv(),
+    // No console window on Windows — a hidden, consoleless process can't be
+    // torn down by a console-close event when its launcher exits (#556).
+    windowsHide: true,
+    env: opts.env ?? buildDetachedDaemonEnv(),
   });
 
   child.unref();
   fs.closeSync(logFd);
 
-  return { pid: child.pid || null, method: 'detached' } as { pid: number; method: string };
+  return { pid: child.pid || null, method: 'detached' };
 }
 
 function waitForPid(timeoutMs: number): number | null {

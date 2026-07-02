@@ -12,6 +12,7 @@ import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.j
 import { linkPath, relativeToCwd } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
+import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
 
 /**
  * SessionMeta originates in discover.ts (gitBranch, cwd, label, etc. read from
@@ -202,8 +203,8 @@ interface TodoItem {
 function formatCompactPreview(events: ReturnType<typeof parseSession>, session: SessionMeta): string {
   let firstUser = '';
   let lastAssistant = '';
-  const filesModified = new Set<string>();
   const filesRead = new Set<string>();
+  const toolCounts: Record<string, number> = {};
   let toolCalls = 0;
   let planFile = '';
   let latestTodos: TodoItem[] | null = null;
@@ -221,9 +222,7 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
     } else if (event.type === 'tool_use' && !event._local) {
       const tool = event.tool || '';
       const p = event.path || event.args?.file_path || event.args?.path || '';
-      if (['Write', 'Edit', 'write_file', 'edit_file', 'create_file', 'replace', 'patch'].includes(tool) && p) {
-        filesModified.add(p);
-      } else if (['Read', 'read_file', 'view_file', 'cat_file', 'get_file'].includes(tool) && p) {
+      if (['Read', 'read_file', 'view_file', 'cat_file', 'get_file'].includes(tool) && p) {
         filesRead.add(p);
       }
       if (!planFile && p && /\/plans\/[^/]+\.md$/.test(p)) {
@@ -232,9 +231,14 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
       if (tool === 'TodoWrite' && Array.isArray(event.args?.todos)) {
         latestTodos = event.args.todos as TodoItem[];
       }
+      if (tool) toolCounts[tool] = (toolCounts[tool] ?? 0) + 1;
       toolCalls++;
     }
   }
+
+  // Digest signals folded into the preview: change lifecycle, tool mix, tests.
+  const changes = classifyFileChanges(events);
+  const chg = changeCounts(changes);
 
   const lines: string[] = [];
   const termWidth = process.stdout.columns || 80;
@@ -247,11 +251,36 @@ function formatCompactPreview(events: ReturnType<typeof parseSession>, session: 
   }
 
   const activity: string[] = [];
-  if (filesModified.size) activity.push(`${filesModified.size} modified`);
-  if (filesRead.size) activity.push(`${filesRead.size} read`);
-  if (toolCalls) activity.push(`${toolCalls} tool${toolCalls === 1 ? '' : 's'}`);
+  const changed = chg.created + chg.modified + chg.deleted;
+  if (changed) {
+    const parts = [
+      chg.created ? chalk.green(`+${chg.created}`) : '',
+      chg.modified ? chalk.yellow(`~${chg.modified}`) : '',
+      chg.deleted ? chalk.red(`−${chg.deleted}`) : '',
+    ].filter(Boolean).join(' ');
+    activity.push(`${parts} ${chalk.gray('changed')}`);
+  }
+  if (filesRead.size) activity.push(chalk.gray(`${filesRead.size} read`));
+  if (toolCalls) activity.push(chalk.gray(`${toolCalls} tool${toolCalls === 1 ? '' : 's'}`));
   if (activity.length) {
-    lines.push(chalk.cyan('Activity: ') + chalk.gray(activity.join(' · ')));
+    lines.push(chalk.cyan('Changes:  ') + activity.join(chalk.gray(' · ')));
+  }
+
+  // Tool mix (top 4) — what kind of work this was.
+  const hist = toolHistogram(toolCounts, 4);
+  if (hist.length) {
+    lines.push(chalk.cyan('Tools:    ') + chalk.gray(hist.map(h => `${h.tool} ${h.count}`).join(' · ')));
+  }
+
+  // Last test/build verdict.
+  const test = detectTestResult(events);
+  if (test?.ok) {
+    const bits = [
+      test.passed !== undefined ? chalk.green(`${test.passed} pass`) : '',
+      test.failed ? chalk.red(`${test.failed} fail`) : '',
+    ].filter(Boolean).join(chalk.gray(' · '));
+    const mark = test.failed ? chalk.red('✗') : chalk.green('✓');
+    lines.push(chalk.cyan('Tests:    ') + `${mark} ${test.runner}${bits ? ' ' + bits : ''}`);
   }
 
   if (planFile) {

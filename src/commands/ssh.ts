@@ -18,6 +18,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { machineId } from '../lib/session/sync/config.js';
 import {
   addIgnored,
   getDevice,
@@ -36,6 +37,7 @@ import {
   tailscaleStatusJson,
 } from '../lib/devices/tailscale.js';
 import { planDeviceReconciliation, runDeviceSync } from '../lib/devices/sync.js';
+import { clearPendingSentinel } from '../lib/devices/pending.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { hostNameFor, renderSshConfig } from '../lib/devices/ssh-config.js';
 import {
@@ -52,8 +54,9 @@ function parseTarget(target: string): { host: string; user?: string } {
   return { user: target.slice(0, at), host: target.slice(at + 1) };
 }
 
-/** One-line summary of a device for `list`. */
-function deviceSummary(d: DeviceProfile): string {
+/** One-line summary of a device for `list`. `isSelf` marks the machine this
+ * command is running on so it stands out from the rest of the tailnet. */
+function deviceSummary(d: DeviceProfile, isSelf = false): string {
   const addr = hostNameFor(d) ?? chalk.gray('no address');
   const online = d.tailscale
     ? d.tailscale.online
@@ -61,7 +64,10 @@ function deviceSummary(d: DeviceProfile): string {
       : chalk.gray('offline')
     : chalk.gray('unknown');
   const reach = d.tailscale?.online && !d.tailscale.direct ? chalk.yellow(' (relayed)') : '';
-  return `  ${chalk.bold(d.name.padEnd(16))} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}`;
+  const marker = isSelf ? chalk.cyan('▸ ') : '  ';
+  const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
+  const here = isSelf ? chalk.cyan('  ← this machine') : '';
+  return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}`;
 }
 
 /** Resolve a device or exit with a clear error. */
@@ -175,12 +181,34 @@ Typical workflow:
     });
 
   devicesCmd
+    .command('register <name>')
+    .description('Register a discovered (pending) node by name — used by the menu-bar "NEW DEVICES → Register" action.')
+    .action(async (name: string) => {
+      try {
+        const nodes = parseTailscaleStatus(tailscaleStatusJson());
+        const node = nodes.find((n) => n.name === name);
+        if (!node) {
+          console.error(chalk.red(`'${name}' is not a current tailscale node. See 'agents devices sync'.`));
+          process.exit(1);
+        }
+        await removeIgnored(name); // a re-registered node is no longer dismissed
+        const d = await upsertDevice(name, nodeToDeviceInput(node));
+        clearPendingSentinel(name); // drop the notification immediately
+        console.log(chalk.green(`Registered '${name}'`) + chalk.gray(` (${d.platform})`));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+
+  devicesCmd
     .command('ignore <name>')
     .description('Dismiss a node from auto-discovery so it is never re-suggested (and remove it from the registry if present).')
     .action(async (name: string) => {
       try {
         await removeDevice(name);
         await addIgnored(name);
+        clearPendingSentinel(name); // drop the notification immediately
         console.log(chalk.green(`Ignored '${name}'`) + chalk.gray(" — it won't be suggested again. Undo with `agents devices unignore`."));
       } catch (err: any) {
         console.error(chalk.red(err.message));
@@ -216,8 +244,9 @@ Typical workflow:
         console.log(chalk.gray("No devices. Run 'agents devices sync' or 'agents devices add <name> <user@host>'."));
         return;
       }
+      const self = machineId();
       console.log(chalk.bold(`Devices (${names.length})`));
-      for (const name of names) console.log(deviceSummary(reg[name]));
+      for (const name of names) console.log(deviceSummary(reg[name], name === self));
     });
 
   devicesCmd

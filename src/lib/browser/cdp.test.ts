@@ -76,6 +76,14 @@ describe('verifyBrowserIdentity', () => {
     expect(() => verifyBrowserIdentity('microsoft-edge', 'edge', 9222)).not.toThrow();
   });
 
+  it('accepts "edg" for edge (Windows Edge reports "Edg/<version>" in /json/version)', () => {
+    // normalizeBrowserName('Edg/120.0.0.0') === 'edg' — the real identity a
+    // WMI-launched Windows Edge serves. Regression test for #580: this used to
+    // throw a false "identity mismatch" that blocked all Windows Edge browser-use.
+    expect(normalizeBrowserName('Edg/120.0.0.0')).toBe('edg');
+    expect(() => verifyBrowserIdentity('edg', 'edge', 9222)).not.toThrow();
+  });
+
   it('accepts brave-browser for brave', () => {
     expect(() => verifyBrowserIdentity('brave-browser', 'brave', 9222)).not.toThrow();
   });

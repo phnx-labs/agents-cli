@@ -9,6 +9,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -43,7 +44,6 @@ import {
   getVersionHomePath,
   promptAgentVersionSelection,
   resolveAgentVersionTargets,
-  resolveVersionAlias,
 } from '../lib/versions.js';
 import { recordVersionResources } from '../lib/state.js';
 import {
@@ -53,6 +53,7 @@ import {
   printWithPager,
   requireInteractiveSelection,
   resolveAgentTargetsAutoInstalling,
+  resolveListFilterOrExit,
 } from './utils.js';
 
 export function shouldRefuseBroadPermissions(
@@ -179,7 +180,7 @@ When to use:
           console.log(chalk.red(formatAgentError(agentName, capableAgents('allowlist'))));
           process.exit(1);
         }
-        const requestedVersion = resolveVersionAlias(agentId, parts[1]) ?? null;
+        const requestedVersion = resolveListFilterOrExit(agentId, parts[1]) ?? null;
 
         if (!isCapable(agentId, 'allowlist')) {
           console.log(chalk.yellow(`${AGENTS[agentId].name} does not support fine-grained permissions`));
@@ -259,9 +260,15 @@ When to use:
         }
 
         console.log(chalk.bold('Installed Permission Sets:\n'));
+        const permCols = terminalWidth();
         for (const perm of sets) {
-          const desc = perm.set.description ? ` - ${chalk.gray(perm.set.description)}` : '';
-          console.log(`  ${chalk.cyan(perm.name)}${desc}`);
+          const prefix = `  ${chalk.cyan(perm.name)}`;
+          // Cap the description to the line so a prose-paragraph set (400+ chars) can't smear.
+          const budget = permCols - stringWidth(prefix) - 3;
+          const desc = perm.set.description && budget > 3
+            ? ` - ${chalk.gray(truncateToWidth(perm.set.description, budget))}`
+            : '';
+          console.log(`${prefix}${desc}`);
           console.log(`    ${chalk.gray(`${perm.set.allow.length} allow, ${perm.set.deny?.length || 0} deny rules`)}`);
         }
       }
