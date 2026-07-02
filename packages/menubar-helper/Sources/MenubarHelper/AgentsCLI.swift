@@ -68,6 +68,29 @@ enum AgentsCLI {
         return try? JSONDecoder().decode(DoctorOverview.self, from: data)
     }
 
+    // RUSH-1415: is global auto-nudge on? The Swift menu-bar toggle drives this
+    // sentinel via watchdogSetEnabled; the tick reads it back to decide whether
+    // to inject or stay detect-only.
+    static func watchdogStatus() -> WatchdogStatus? {
+        guard let data = capture(argv(["watchdog", "status", "--json"])) else { return nil }
+        return try? JSONDecoder().decode(WatchdogStatus.self, from: data)
+    }
+
+    // RUSH-1415: run one watchdog tick. `nudge` actually injects "Continue." into
+    // stalled+addressable splits; without it the tick is detect-only (for the
+    // badge). The CLI's own cooldown ledger prevents re-nudging the same split, so
+    // this is safe to call on every 10s menu-bar poll.
+    static func watchdogTick(nudge: Bool) -> WatchdogTick? {
+        var a = ["watchdog", "--json"]
+        if nudge { a.append("--nudge") }
+        guard let data = capture(argv(a)) else { return nil }
+        return try? JSONDecoder().decode(WatchdogTick.self, from: data)
+    }
+
+    static func watchdogSetEnabled(_ on: Bool) {
+        runDetached(argv(["watchdog", on ? "enable" : "disable"]))
+    }
+
     // MARK: Actions
     // New interactive session: open a Terminal window running `agents run <agent>`.
     // A status-bar click can't host a TUI, so hand off to the user's terminal.

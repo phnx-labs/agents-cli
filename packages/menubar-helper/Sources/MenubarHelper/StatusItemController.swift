@@ -38,6 +38,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var doctorInFlight = false
     private var doctorFetchedAt: Date?
 
+    // RUSH-1415: watchdog auto-nudge. Each tick runs `agents watchdog`; when the
+    // toggle (watchdogEnabled) is on it injects "Continue." into stalled splits.
+    private var cachedWatchdog: WatchdogTick?
+    private var watchdogEnabled = false
+    private var watchdogInFlight = false
+    private var watchdogFetchedAt: Date?
+
     func install() {
         if let button = statusItem.button {
             button.image = Icon.make()
@@ -77,6 +84,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshRoutines()
         refreshRecentSessions()
         refreshDoctorOverview()
+        refreshWatchdog()
     }
 
     private func loadDumpCaches() {
@@ -142,6 +150,26 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    // RUSH-1415: run one watchdog tick each poll. Reads the enable sentinel first,
+    // then ticks with nudge=enabled so auto-nudge fires only when the toggle is on
+    // (detect-only otherwise). No time-throttle: nudging must be timely, and the
+    // CLI's cooldown ledger already prevents re-nudging the same split.
+    private func refreshWatchdog() {
+        if watchdogInFlight { return }
+        watchdogInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let enabled = AgentsCLI.watchdogStatus()?.enabled ?? false
+            let tick = AgentsCLI.watchdogTick(nudge: enabled)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.watchdogEnabled = enabled
+                self.cachedWatchdog = tick
+                self.watchdogFetchedAt = Date()
+                self.watchdogInFlight = false
+            }
+        }
+    }
+
     private func refreshBadge() {
         guard let button = statusItem.button else { return }
         let attention = badgeSessions.filter { $0.status == .attention }.count
@@ -183,6 +211,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshRoutines()
         refreshRecentSessions()
         refreshDoctorOverview()
+        refreshWatchdog()
     }
 
     private func rebuild(_ menu: NSMenu, sessions: [Session], browserTasks: [BrowserTask],
@@ -218,6 +247,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         addRoutinesRow(menu, routines: routines)
         addSetup(menu, doctor: doctor)
+        addWatchdog(menu)
 
         menu.addItem(.separator())
         addFooter(menu, daemonPid: daemonPid)
@@ -399,6 +429,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(item)
     }
 
+    // RUSH-1415: a checkable row that toggles global auto-nudge. Checked = the tick
+    // injects "Continue." into stalled+addressable splits; unchecked = detect-only.
+    private func addWatchdog(_ menu: NSMenu) {
+        let toggle = NSMenuItem(title: "\(pad("Auto-nudge"))\(watchdogSummary())",
+                                action: #selector(onToggleWatchdog), keyEquivalent: "")
+        toggle.target = self
+        toggle.state = watchdogEnabled ? .on : .off
+        menu.addItem(toggle)
+    }
+
+    private func watchdogSummary() -> String {
+        guard let c = cachedWatchdog?.counts, c.stalled > 0 else {
+            return watchdogEnabled ? "on" : "off"
+        }
+        let action = watchdogEnabled ? "\(c.nudged) nudged" : "detect-only"
+        return "\(c.stalled) stalled · \(action)"
+    }
+
     private func addFooter(_ menu: NSMenu, daemonPid: Int?) {
         if daemonPid != nil {
             let stop = NSMenuItem(title: "Stop scheduler", action: #selector(onStopScheduler), keyEquivalent: "")
@@ -572,6 +620,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: Actions
     @objc private func onNewSession(_ s: NSMenuItem) {
         if let a = s.representedObject as? String { AgentsCLI.newSession(agent: a) }
+    }
+    // RUSH-1415: flip global auto-nudge. Optimistically update local state so the
+    // checkmark reflects immediately; the next tick re-reads the sentinel as truth.
+    @objc private func onToggleWatchdog() {
+        watchdogEnabled.toggle()
+        AgentsCLI.watchdogSetEnabled(watchdogEnabled)
     }
     @objc private func onRoutineRun(_ s: NSMenuItem) { withName(s, AgentsCLI.routineRun) }
     @objc private func onRoutinePause(_ s: NSMenuItem) { withName(s, AgentsCLI.routinePause) }

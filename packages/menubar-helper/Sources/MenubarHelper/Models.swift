@@ -62,6 +62,27 @@ struct DoctorSync: Decodable {
     let status: String
 }
 
+// `agents watchdog --json` tick result (RUSH-1415). The menu-bar reads the
+// convenience counts; `didNudge` reflects whether this tick was allowed to inject.
+struct WatchdogTick: Decodable {
+    let didNudge: Bool
+    let counts: WatchdogCounts
+}
+
+struct WatchdogCounts: Decodable {
+    let total: Int
+    let stalled: Int
+    let nudged: Int
+    let unaddressable: Int
+    let skipped: Int
+}
+
+// `agents watchdog status --json` — is global auto-nudge on?
+struct WatchdogStatus: Decodable {
+    let enabled: Bool
+    let stateDir: String?
+}
+
 struct DoctorOrphan: Decodable {
     let agent: String
     let version: String?

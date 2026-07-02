@@ -226,8 +226,18 @@ export function registerWatchdogCommand(program: Command): void {
 
   cmd.command('status')
     .description('Show whether global auto-nudge is on and where state is written.')
-    .action(() => {
+    .option('--json', 'Emit status as JSON (for the menu-bar / scripts)')
+    .action((_opts, command) => {
+      // The parent `watchdog` command also declares --json and greedily parses it
+      // before dispatching here, so `watchdog status --json` lands the flag on the
+      // parent, not this subcommand. optsWithGlobals() merges both levels, so we
+      // read it correctly regardless of which command commander bound it to.
+      const json = command.optsWithGlobals().json === true;
       const on = isGloballyEnabled();
+      if (json) {
+        console.log(JSON.stringify({ enabled: on, stateDir: stateDir() }));
+        return;
+      }
       console.log(`global auto-nudge: ${on ? chalk.green('ON') : chalk.dim('off')}`);
       console.log(`state dir: ${chalk.dim(stateDir())}`);
     });
