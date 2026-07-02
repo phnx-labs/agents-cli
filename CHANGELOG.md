@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**CI: audit-event tests are green on Windows; the release re-gates on the windows-latest matrix legs (RUSH-1412)**
+
+- The cross-platform matrix (`ci.yml`, runs only on `release/**` + `v*`) had both `build (windows-latest, …)` legs red: `tests/events-audit.test.ts` and `tests/teams-events.test.ts` spawn the CLI with a redirected `HOME` and then read the audit trail under it, but the events writer rooted its log dir at a bare `os.homedir()` (`src/lib/events.ts:24`). On Windows `os.homedir()` resolves from `USERPROFILE` and ignores a `HOME` override, so every `command.start`/`command.end` record was silently written to the real profile instead of the test's temp home — the events array came back empty and the log file `ENOENT`'d (macOS/Ubuntu were green because `os.homedir()` honors `$HOME` on POSIX). The writer now roots its log dir through `state.getLogsDir()`, the single canonical home anchor (`process.env.HOME ?? os.homedir()`), which honors an explicit `HOME` on every platform and still resolves to `USERPROFILE` in production on Windows (where `HOME` is unset), so real users are unaffected. One `events-audit` case also reconstructed its log filename from a UTC `toISOString()` while the writer names files from the local date, so it `ENOENT`'d whenever a runner's local and UTC dates straddled midnight; it now globs the log dir like the other assertions. `scripts/release.sh` restores both `build (windows-latest, 22|24)` entries to `EXPECTED_CHECKS`, so Windows is a release gate again. Source: `src/lib/events.ts`, `tests/events-audit.test.ts`, `scripts/release.sh`.
+
 ## 1.20.35
 
 **CI: build node-pty's native binary on macOS/Windows so the release matrix is green cross-platform**
