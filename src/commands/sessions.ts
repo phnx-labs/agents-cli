@@ -1128,7 +1128,39 @@ function renderTopicCell(
   return out + padding;
 }
 
-export function formatPickerLabel(s: SessionMeta, query: string): string {
+/** Column-visibility flags for the picker row, computed once over the whole pool. */
+export interface PickerColumns {
+  /** Render the machine column (only when the pool spans more than one machine). */
+  showMachine?: boolean;
+  /** Map a full machine id to its compact display form (shared prefix stripped). */
+  machineLabel?: (m: string) => string;
+  /** Render the ticket/PR column (only when at least one row carries a ref). */
+  showTicket?: boolean;
+}
+
+const PICKER_MACHINE_W = 11;
+
+/**
+ * Compact display form for machine ids: strip the longest shared dash-delimited
+ * prefix so "yosemite-s0"/"yosemite-s1" read as "s0"/"s1" while unrelated ids
+ * ("zion", "mac-mini") stay whole. Stripping a *common* prefix can't collide,
+ * and at least one segment is always kept.
+ */
+export function machineLabeler(machines: string[]): (m: string) => string {
+  const uniq = [...new Set(machines.filter(Boolean))];
+  if (uniq.length < 2) return (m) => m;
+  const parts = uniq.map((m) => m.split('-'));
+  const min = Math.min(...parts.map((p) => p.length));
+  let shared = 0;
+  while (shared < min - 1 && parts.every((p) => p[shared] === parts[0][shared])) shared++;
+  if (shared === 0) return (m) => m;
+  return (m) => {
+    const p = m.split('-');
+    return p.length > shared ? p.slice(shared).join('-') : m;
+  };
+}
+
+export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(s.agent);
   const when = formatRelativeTime(s.timestamp);
   const project = s.project || '-';
@@ -1136,15 +1168,55 @@ export function formatPickerLabel(s: SessionMeta, query: string): string {
   const label = (s as any).label;
   const topic = tag ? `${tag}${s.topic ?? ''}` : s.topic;
   const versionStr = s.version || '-';
+  const wt = s.worktreeSlug ? chalk.magenta(`wt:${s.worktreeSlug}`) : '';
+
+  const machineCell = cols.showMachine
+    ? chalk.gray(padRight(truncate((cols.machineLabel?.(s.machine ?? '') ?? s.machine ?? '') || '-', PICKER_MACHINE_W - 1), PICKER_MACHINE_W))
+    : '';
+
+  const TICKET_W = 10;
+  const ticketCell = cols.showTicket
+    ? chalk.blue(padRight(truncate(ticketLabel(s) || '-', TICKET_W), TICKET_W + 1))
+    : '';
+
+  // The picker prepends a 2-cell cursor ('> '/'  '); reserve it, plus the
+  // conditional columns, so the topic shrinks to fit and rows never wrap.
+  const CURSOR_W = 2;
+  const machineW = cols.showMachine ? PICKER_MACHINE_W : 0;
+  const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
+  const wtW = wt ? stringWidth(wt) + 1 : 0;
+  const topicW = Math.max(
+    16,
+    terminalWidth() - CURSOR_W - (10 + 9 + 8 + 16) - machineW - ticketW - wtW - stringWidth(when) - 1,
+  );
 
   return (
     chalk.white(padRight(s.shortId, 10)) +
     agentColor(padRight(truncate(s.agent, 8), 9)) +
     chalk.yellow(padRight(truncate(versionStr, 7), 8)) +
+    machineCell +
     chalk.cyan(padRight(truncate(project, 14), 16)) +
-    renderTopicCell(label, topic, query, 48, 50) +
+    renderTopicCell(label, topic, query, topicW, topicW) +
+    ticketCell +
+    (wt ? wt + ' ' : '') +
     chalk.gray(when)
   );
+}
+
+/** Hints rotated above the picker so the flags/features stay discoverable. */
+const PICKER_TIPS: string[] = [
+  'Tip: narrow with -a/--agent (e.g. -a codex), or --project <name> for another folder.',
+  "Tip: --all searches every directory; -H/--host <machine> folds in another box's sessions.",
+  'Tip: just type to fuzzy-search prompts and responses; press space to preview a session.',
+  'Tip: --since 2d / --until <date> bound the time window; pass a session id to open it directly.',
+];
+
+/**
+ * Pick a hint to show above the picker. Deterministic (keys off the pool size)
+ * so it stays fixed across the picker's re-renders within a single run.
+ */
+export function formatPickerTip(sessions: SessionMeta[]): string {
+  return chalk.gray(PICKER_TIPS[sessions.length % PICKER_TIPS.length]);
 }
 
 export async function pickSessionInteractive(
@@ -1156,9 +1228,19 @@ export async function pickSessionInteractive(
   if (hiddenCount > 0) {
     console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
   }
+  // Machine column only earns its width when the listing actually spans boxes;
+  // the ticket column only when some row carries a PR/ticket ref. Both computed
+  // once over the whole pool so every row aligns.
+  const machines = sessions.map((s) => s.machine).filter((m): m is string => !!m);
+  const cols: PickerColumns = {
+    showMachine: new Set(machines).size > 1,
+    machineLabel: machineLabeler(machines),
+    showTicket: sessions.some((s) => ticketLabel(s) !== ''),
+  };
   try {
     return await sessionPicker({
       message,
+      subtitle: formatPickerTip(sessions),
       sessions,
       filter: (query: string) => {
         // No query: show the full pool (picker viewport still paginates via pageSize).
@@ -1166,7 +1248,7 @@ export async function pickSessionInteractive(
         if (!query.trim()) return sessions;
         return filterSessionsByQuery(sessions, query);
       },
-      labelFor: (s: SessionMeta, query: string) => formatPickerLabel(s, query),
+      labelFor: (s: SessionMeta, query: string) => formatPickerLabel(s, query, cols),
       pageSize: PICKER_RECENT_COUNT,
       initialSearch,
     });
