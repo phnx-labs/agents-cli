@@ -179,6 +179,30 @@ export async function loadDevices(): Promise<DeviceRegistry> {
   }
 }
 
+/**
+ * Synchronous {@link loadDevices} for callers already on a sync path (e.g. the
+ * `agents sessions --host` fan-out builds its ssh command strings synchronously
+ * and only needs the target's platform to pick POSIX vs PowerShell). Same
+ * missing-file/corruption contract as {@link loadDevices}.
+ */
+export function loadDevicesSync(): DeviceRegistry {
+  const p = registryPath();
+  let raw: string;
+  try {
+    raw = fsSync.readFileSync(p, 'utf-8');
+  } catch (err: any) {
+    if (err && err.code === 'ENOENT') return {};
+    throw err;
+  }
+  try {
+    return JSON.parse(raw) as DeviceRegistry;
+  } catch (err: any) {
+    throw new Error(
+      `Device registry corrupted at ${p}: ${err?.message ?? err}. Inspect and restore from backup.`,
+    );
+  }
+}
+
 async function saveDevices(reg: DeviceRegistry): Promise<void> {
   await atomicWriteJson(registryPath(), reg);
 }

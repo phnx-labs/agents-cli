@@ -60,9 +60,99 @@ export const HOST_ROUTING_SPECS: StripSpec[] = [
  * are quoted for the inner login shell, then the whole `agents …` invocation is
  * quoted again so it survives `bash -lc <...>` — `bash -lc` so the remote login
  * PATH resolves `agents`. An optional `cd` runs first for `--remote-cwd`.
+ *
+ * `os` selects the remote shell dialect: a Windows target gets a PowerShell
+ * invocation instead (ssh lands in cmd.exe/PowerShell there, where `bash -lc`
+ * does not exist). Anything else — including an unknown/absent OS — keeps the
+ * POSIX form, so linux/macos are byte-for-byte unchanged.
  */
-export function buildRemoteAgentsInvocation(forwardedArgs: string[], remoteCwd?: string): string {
+export function buildRemoteAgentsInvocation(forwardedArgs: string[], remoteCwd?: string, os?: string): string {
+  if (remoteShellFor(os) === 'powershell') {
+    return buildWindowsAgentsCommand({ args: forwardedArgs, cwd: remoteCwd });
+  }
   const inner = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
   const withCwd = remoteCwd ? `cd ${shellQuote(remoteCwd)} && ${inner}` : inner;
   return `bash -lc ${shellQuote(withCwd)}`;
+}
+
+/** The two remote shell dialects we build commands for. */
+export type RemoteShell = 'posix' | 'powershell';
+
+/**
+ * Pick the remote shell dialect from a recorded OS/platform string. A Windows
+ * host (device-registry `platform: 'windows'`, or an enrolled `HostEntry.os`
+ * that reads `windows`/`Windows`/`win32`/…) speaks PowerShell; everything else,
+ * including `undefined`/unknown, defaults to POSIX so linux/macos never regress.
+ */
+export function remoteShellFor(os: string | undefined): RemoteShell {
+  return /^win/i.test((os ?? '').trim()) ? 'powershell' : 'posix';
+}
+
+/**
+ * PowerShell single-quoted literal: wrap in `'…'` and double any embedded `'`.
+ * Single-quoted PS strings are fully literal (no `$var`, no backtick escapes),
+ * so this neutralises every metacharacter the same way POSIX `shellQuote` does.
+ */
+export function powershellQuote(s: string): string {
+  return "'" + s.replace(/'/g, "''") + "'";
+}
+
+/**
+ * Encode a PowerShell script for `powershell -EncodedCommand`: base64 of its
+ * UTF-16LE bytes. The payload is a bare base64 word (no spaces or shell
+ * metacharacters), so it survives being handed to ssh as a single argument and
+ * re-parsed by the remote's cmd.exe/PowerShell with zero quoting hazards —
+ * the robust way to ship a complex command to a Windows box over SSH.
+ */
+export function encodePowershell(script: string): string {
+  return Buffer.from(script, 'utf16le').toString('base64');
+}
+
+/** Inverse of {@link encodePowershell} — decode an `-EncodedCommand` payload
+ * back to its script. Used by tests to assert on the built command. */
+export function decodePowershell(encoded: string): string {
+  return Buffer.from(encoded, 'base64').toString('utf16le');
+}
+
+/** A single `agents …` invocation to run on a Windows remote. */
+export interface WindowsAgentsCommand {
+  /** `agents` argv (command name NOT included; `agents` is prepended). */
+  args: string[];
+  /** Env vars scoped to this invocation (POSIX `VAR=val` ↔ PS `$env:VAR=…`). */
+  env?: Record<string, string>;
+  /** Directory to enter before running (`--remote-cwd`). */
+  cwd?: string;
+  /**
+   * Append `exit $LASTEXITCODE` so a native `agents` exit code propagates out
+   * through `powershell.exe` (which otherwise exits 0 regardless). Default true;
+   * pass false for probes whose reachability keys off a sentinel, not the code.
+   */
+  propagateExit?: boolean;
+}
+
+/**
+ * The PowerShell script (pre-encoding) that {@link buildWindowsAgentsCommand}
+ * runs. Exposed so tests can decode the `-EncodedCommand` payload and compare
+ * against the exact script, without needing PowerShell on the test host.
+ *
+ * `& agents …` invokes the CLI from the machine PATH (Windows has no login
+ * shell, so there is no `bash -lc` equivalent — the shim is simply on PATH).
+ */
+export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
+  const { args, env, cwd, propagateExit = true } = cmd;
+  const parts: string[] = [];
+  if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
+  if (cwd) parts.push(`Set-Location -LiteralPath ${powershellQuote(cwd)}`);
+  parts.push(`& ${['agents', ...args].map(powershellQuote).join(' ')}`);
+  if (propagateExit) parts.push('exit $LASTEXITCODE');
+  return parts.join('; ');
+}
+
+/**
+ * Build the `ssh <target> <cmd>` string for one `agents …` invocation on a
+ * Windows remote: a `powershell -NoProfile -EncodedCommand <base64>` call. The
+ * Windows counterpart of `bash -lc '<...>'`, shared by every `--host` site.
+ */
+export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
+  return `powershell -NoProfile -EncodedCommand ${encodePowershell(windowsAgentsScript(cmd))}`;
 }

@@ -3,9 +3,22 @@ import { spawnSync } from 'child_process';
 import {
   stripRoutingFlags,
   buildRemoteAgentsInvocation,
+  buildWindowsAgentsCommand,
+  remoteShellFor,
+  powershellQuote,
+  decodePowershell,
   HOST_ROUTING_SPECS,
   type StripSpec,
 } from './remote-cmd.js';
+
+/** Decode the PowerShell script a Windows `--host` invocation ships, by pulling
+ * the base64 payload off `powershell -NoProfile -EncodedCommand <b64>` and
+ * reversing the UTF-16LE encoding — the exact bytes the remote PowerShell runs. */
+function decodeWindows(cmd: string): string {
+  const m = cmd.match(/^powershell -NoProfile -EncodedCommand (\S+)$/);
+  expect(m, `not an encoded PowerShell command: ${cmd}`).not.toBeNull();
+  return decodePowershell(m![1]);
+}
 
 const SPECS: StripSpec[] = [...HOST_ROUTING_SPECS, { long: 'no-tty', takesValue: false }];
 
@@ -88,5 +101,80 @@ describe('buildRemoteAgentsInvocation (two-layer quoting is injection-safe)', ()
   it('prefixes a cd for --remote-cwd without leaking it into argv', () => {
     // The shim's cwd change is observable only via the cd prefix; argv stays clean.
     expect(decodeRemoteArgv(['view'], '/tmp')).toEqual(['view']);
+  });
+});
+
+describe('remoteShellFor', () => {
+  it('maps Windows platform/OS strings to PowerShell', () => {
+    for (const os of ['windows', 'Windows', 'win32', 'WIN32']) {
+      expect(remoteShellFor(os)).toBe('powershell');
+    }
+  });
+
+  it('defaults every non-Windows / unknown / absent OS to POSIX', () => {
+    for (const os of ['linux', 'Linux', 'darwin', 'macos', 'Darwin', 'unknown', '', undefined]) {
+      expect(remoteShellFor(os as string | undefined)).toBe('posix');
+    }
+  });
+});
+
+describe('powershellQuote', () => {
+  it('wraps in single quotes and doubles embedded single quotes', () => {
+    expect(powershellQuote('agents')).toBe("'agents'");
+    expect(powershellQuote("it's")).toBe("'it''s'");
+    // `$()`, `;`, and spaces are all literal inside a single-quoted PS string.
+    expect(powershellQuote('$(whoami); rm')).toBe("'$(whoami); rm'");
+  });
+});
+
+describe('buildRemoteAgentsInvocation — POSIX targets stay byte-identical', () => {
+  it('produces the same bash -lc string for undefined and non-Windows OS', () => {
+    const base = buildRemoteAgentsInvocation(['view', 'claude']);
+    expect(base).toBe("bash -lc 'agents view claude'");
+    expect(buildRemoteAgentsInvocation(['view', 'claude'], undefined, 'linux')).toBe(base);
+    expect(buildRemoteAgentsInvocation(['view', 'claude'], undefined, 'darwin')).toBe(base);
+    expect(buildRemoteAgentsInvocation(['view', 'claude'], undefined, 'macos')).toBe(base);
+  });
+
+  it('keeps the cd prefix for --remote-cwd on POSIX unchanged', () => {
+    expect(buildRemoteAgentsInvocation(['view'], '/srv/app')).toBe("bash -lc 'cd /srv/app && agents view'");
+  });
+
+  it('still round-trips through a real bash login shell (no OS = POSIX)', () => {
+    expect(decodeRemoteArgv(['view', 'claude'])).toEqual(['view', 'claude']);
+  });
+});
+
+describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () => {
+  it('emits powershell -EncodedCommand instead of bash -lc', () => {
+    const cmd = buildRemoteAgentsInvocation(['view', 'claude'], undefined, 'windows');
+    expect(cmd.startsWith('powershell -NoProfile -EncodedCommand ')).toBe(true);
+    expect(cmd).not.toContain('bash -lc');
+    expect(decodeWindows(cmd)).toBe("& 'agents' 'view' 'claude'; exit $LASTEXITCODE");
+  });
+
+  it('prefixes Set-Location for --remote-cwd', () => {
+    const cmd = buildRemoteAgentsInvocation(['view'], 'C:\\srv\\app', 'windows');
+    expect(decodeWindows(cmd)).toBe("Set-Location -LiteralPath 'C:\\srv\\app'; & 'agents' 'view'; exit $LASTEXITCODE");
+  });
+
+  it('neutralizes injection — metacharacters are literal inside single quotes', () => {
+    const cmd = buildRemoteAgentsInvocation(['view', '$(whoami); rm -rf /', '--json'], undefined, 'windows');
+    expect(decodeWindows(cmd)).toBe("& 'agents' 'view' '$(whoami); rm -rf /' '--json'; exit $LASTEXITCODE");
+  });
+
+  it('carries env vars as $env: assignments (buildWindowsAgentsCommand)', () => {
+    const cmd = buildWindowsAgentsCommand({
+      args: ['sessions', '--active', '--json'],
+      env: { AGENTS_SESSIONS_LOCAL: '1', COLUMNS: '120' },
+    });
+    expect(decodeWindows(cmd)).toBe(
+      "$env:AGENTS_SESSIONS_LOCAL = '1'; $env:COLUMNS = '120'; & 'agents' 'sessions' '--active' '--json'; exit $LASTEXITCODE",
+    );
+  });
+
+  it('can drop the exit-code propagation for sentinel-based probes', () => {
+    const cmd = buildWindowsAgentsCommand({ args: ['--version'], propagateExit: false });
+    expect(decodeWindows(cmd)).toBe("& 'agents' '--version'");
   });
 });
