@@ -847,3 +847,87 @@ describe('registerHooksToSettings - Claude', () => {
     expect(resolvedCommand(settings.hooks.UserPromptSubmit[0].hooks[0].command)).toBe(toPosix(scriptPath));
   });
 });
+
+describe('registerHooksToSettings - Droid', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeDroidVersionHome(): string {
+    const home = path.join(tmpDir, 'droid-home');
+    fs.mkdirSync(path.join(home, '.factory'), { recursive: true });
+    return home;
+  }
+
+  function readDroidSettings(home: string): Record<string, any> {
+    return JSON.parse(
+      fs.readFileSync(path.join(home, '.factory', 'settings.json'), 'utf-8')
+    );
+  }
+
+  it('writes Claude-shaped matcher groups into .factory/settings.json', () => {
+    const versionHome = makeDroidVersionHome();
+    const scriptPath = makeScript('pre-tool.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      'pre-tool': { script: 'pre-tool.sh', events: ['PreToolUse'], matcher: 'Bash', timeout: 45 },
+    };
+
+    const result = registerHooksToSettings('droid', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('pre-tool -> PreToolUse');
+
+    const settings = readDroidSettings(versionHome);
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+    expect(settings.hooks.PreToolUse[0].matcher).toBe('Bash');
+    expect(settings.hooks.PreToolUse[0].hooks).toHaveLength(1);
+    expect(settings.hooks.PreToolUse[0].hooks[0].type).toBe('command');
+    expect(settings.hooks.PreToolUse[0].hooks[0].timeout).toBe(45);
+    expect(resolvedCommand(settings.hooks.PreToolUse[0].hooks[0].command)).toBe(toPosix(scriptPath));
+  });
+
+  it('registers the events droid supports natively (SessionStart, UserPromptSubmit, Stop)', () => {
+    const versionHome = makeDroidVersionHome();
+    makeScript('start.sh');
+    makeScript('prompt.sh');
+    makeScript('stop.sh');
+
+    const manifest: Record<string, ManifestHook> = {
+      start: { script: 'start.sh', events: ['SessionStart'] },
+      prompt: { script: 'prompt.sh', events: ['UserPromptSubmit'] },
+      stop: { script: 'stop.sh', events: ['Stop'] },
+    };
+
+    const result = registerHooksToSettings('droid', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+
+    const settings = readDroidSettings(versionHome);
+    expect(settings.hooks.SessionStart).toHaveLength(1);
+    expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(settings.hooks.Stop).toHaveLength(1);
+  });
+
+  it('preserves pre-existing non-hooks settings.json content', () => {
+    const versionHome = makeDroidVersionHome();
+    const settingsPath = path.join(versionHome, '.factory', 'settings.json');
+    fs.writeFileSync(settingsPath, JSON.stringify({ logoAnimation: 'off' }, null, 2));
+
+    makeScript('pre-tool.sh');
+    const manifest: Record<string, ManifestHook> = {
+      'pre-tool': { script: 'pre-tool.sh', events: ['PreToolUse'] },
+    };
+
+    const result = registerHooksToSettings('droid', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+
+    const settings = readDroidSettings(versionHome);
+    expect(settings.logoAnimation).toBe('off');
+    expect(settings.hooks.PreToolUse).toHaveLength(1);
+  });
+});

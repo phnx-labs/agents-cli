@@ -39,7 +39,7 @@ describe('damerauLevenshtein', () => {
 });
 
 describe('fuzzyMatch', () => {
-  const agents = ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'copilot', 'amp', 'kiro', 'goose', 'roo', 'antigravity', 'grok'];
+  const agents = ['claude', 'codex', 'gemini', 'cursor', 'opencode', 'openclaw', 'copilot', 'amp', 'kiro', 'goose', 'antigravity', 'grok'];
 
   it('returns null for exact matches (fuzzy is for non-exact)', () => {
     expect(fuzzyMatch('claude', agents, FUZZY_PRESETS.agents)).toBeNull();

@@ -43,6 +43,8 @@ const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
 const getClaudeUsageCachePath = () => path.join(getCacheDir(), 'claude-usage.json');
 const CACHED_CLAUDE_USAGE_SOURCE_LABEL = 'last seen live account data';
 
+const KIMI_USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
+
 const COMPACT_BAR_LEN = 5;
 const USAGE_BAR_LEN = 10;
 const FULL = '\u2588';
@@ -67,6 +69,11 @@ export interface UsageSnapshot {
   sourceLabel: string;
   capturedAt: Date | null;
   windows: UsageWindow[];
+  // Subscription tier, when the usage source also reports it in the same
+  // response (Kimi's /usages returns membership.level). Account-level plan
+  // otherwise comes from the local auth file via AccountInfo.plan; this field
+  // lets a network usage fetch surface a plan the local credential can't.
+  plan?: string | null;
 }
 
 /** Usage data plus any error encountered while fetching. */
@@ -163,6 +170,7 @@ interface CachedUsageWindow {
 interface CachedUsageSnapshot {
   capturedAt: string | null;
   windows: CachedUsageWindow[];
+  plan?: string | null;
 }
 
 /** Parsed rate-limit data extracted from a Codex session file. */
@@ -178,6 +186,8 @@ export async function getUsageInfo(agentId: AgentId, options?: UsageOptions): Pr
       return getClaudeUsageInfo(options);
     case 'codex':
       return getCodexUsageInfo(options);
+    case 'kimi':
+      return getKimiUsageInfo(options);
     default:
       return { snapshot: null, error: null };
   }
@@ -269,8 +279,14 @@ const inFlightRefreshes = new Map<string, Promise<void>>();
 export async function getUsageInfoForIdentity(input: UsageIdentityInput): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
 
-  // Non-Claude or no identity: legacy path, blocking fetch.
-  if (input.agentId !== 'claude' || !usageKey) {
+  // Agents whose usage comes from a live network call (Claude, Kimi) go through
+  // the stale-while-revalidate cache below so `agents run`/`agents view` stay off
+  // the network on the hot path. Everything else (Codex reads local session
+  // logs) takes the legacy blocking path. The on-disk cache is shared and keyed
+  // by usageKey, which is namespaced per agent (`claude:org=…`, `kimi:user=…`),
+  // so one cache file holds every account without collision.
+  const usesNetworkUsage = input.agentId === 'claude' || input.agentId === 'kimi';
+  if (!usesNetworkUsage || !usageKey) {
     return getUsageInfo(input.agentId, {
       home: input.home,
       cliVersion: input.cliVersion,
@@ -541,6 +557,186 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   } catch {
     return { snapshot: null, error: 'Usage data unavailable right now.' };
   }
+}
+
+/** Raw quota bucket from the Kimi /usages response (numbers arrive as strings). */
+interface KimiUsageQuota {
+  limit?: string | number | null;
+  used?: string | number | null;
+  remaining?: string | number | null;
+  resetTime?: string | null;
+}
+
+/** Response shape from the Kimi Code /usages endpoint (subset we render). */
+export interface KimiUsagesResponse {
+  user?: { userId?: string | null; membership?: { level?: string | null } | null } | null;
+  usage?: KimiUsageQuota | null;
+  limits?: Array<{
+    window?: { duration?: number | null; timeUnit?: string | null } | null;
+    detail?: KimiUsageQuota | null;
+  } | null> | null;
+  subType?: string | null;
+}
+
+/**
+ * Resolve Kimi's OAuth credential file. Sign-in is account-global but each
+ * installed version has an isolated home; the file physically lives only in the
+ * home the user logged in under. Check the per-version home first, then the
+ * active location under the real HOME — mirrors resolveAccountCredentialPath in
+ * agents.ts so every version reflects the true account state.
+ */
+function resolveKimiCredentialPath(home?: string): string | null {
+  const rel = ['.kimi-code', 'credentials', 'kimi-code.json'];
+  const perVersion = path.join(home || os.homedir(), ...rel);
+  try { if (fs.existsSync(perVersion)) return perVersion; } catch { /* unreadable */ }
+  const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...rel);
+  if (active !== perVersion) {
+    try { if (fs.existsSync(active)) return active; } catch { /* unreadable */ }
+  }
+  return null;
+}
+
+/**
+ * Fetch Kimi usage via the Kimi Code /usages API. Kimi's JWT has no email
+ * claim, so the account row can't show an address — but /usages returns quota
+ * windows and the membership tier, which is what we render.
+ *
+ * Deliberately NO token refresh: `agents view` is a read/inspect command and
+ * must not rotate the user's Kimi OAuth credential (rewriting the file,
+ * invalidating the old refresh token, racing a concurrently-running kimi CLI).
+ * The kimi CLI refreshes on its own launch; if the stored token is expired we
+ * skip the live fetch and let the SWR cache serve the last-seen snapshot.
+ */
+async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
+  try {
+    const credPath = resolveKimiCredentialPath(options?.home);
+    if (!credPath) return { snapshot: null, error: null };
+
+    const cred = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+    const accessToken = cred?.access_token;
+    if (typeof accessToken !== 'string' || !accessToken) {
+      return { snapshot: null, error: null };
+    }
+
+    const expiresAt = typeof cred?.expires_at === 'number' ? cred.expires_at : null;
+    if (expiresAt !== null && Date.now() / 1000 >= expiresAt) {
+      return { snapshot: null, error: null };
+    }
+
+    const response = await fetch(KIMI_USAGES_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    // 401/403/404 => expired token or no Kimi For Coding subscription; render
+    // nothing rather than a misleading empty bar.
+    if (!response.ok) {
+      return { snapshot: null, error: null };
+    }
+
+    const data = await response.json() as KimiUsagesResponse;
+    const windows = normalizeKimiWindows(data);
+    if (windows.length === 0) {
+      return { snapshot: null, error: null };
+    }
+
+    return {
+      snapshot: {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(),
+        windows,
+        plan: formatKimiPlan(data),
+      },
+      error: null,
+    };
+  } catch {
+    return { snapshot: null, error: null };
+  }
+}
+
+/** Normalize the Kimi /usages payload into the common UsageWindow shape. */
+export function normalizeKimiWindows(data: KimiUsagesResponse): UsageWindow[] {
+  const windows: UsageWindow[] = [];
+
+  // Per-window rate limit (e.g. a 300-minute bucket) -> "session".
+  const shortLimit = Array.isArray(data.limits)
+    ? data.limits.find((entry) => entry?.detail)
+    : null;
+  const session = normalizeKimiWindow(
+    shortLimit?.detail,
+    'session',
+    'Current session',
+    'S',
+    kimiWindowMinutes(shortLimit?.window)
+  );
+  if (session) windows.push(session);
+
+  // Rolling account quota -> "week".
+  const period = normalizeKimiWindow(data.usage, 'week', 'Current period', 'W', null);
+  if (period) windows.push(period);
+
+  return windows;
+}
+
+/** Normalize a single Kimi quota bucket (used/limit strings) into a UsageWindow. */
+function normalizeKimiWindow(
+  quota: KimiUsageQuota | null | undefined,
+  key: UsageWindowKey,
+  label: string,
+  shortLabel: string,
+  windowMinutes: number | null
+): UsageWindow | null {
+  const limit = kimiNumber(quota?.limit);
+  const used = kimiNumber(quota?.used);
+  if (limit === null || used === null || limit <= 0) return null;
+
+  const usedPercent = normalizePercent((used / limit) * 100);
+  if (usedPercent === null) return null;
+
+  return {
+    key,
+    label,
+    shortLabel,
+    usedPercent,
+    resetsAt: parseDateValue(quota?.resetTime),
+    windowMinutes: windowMinutes ?? inferWindowMinutes(key),
+  };
+}
+
+/** Parse a numeric field that Kimi serializes as a string (e.g. "100"). */
+function kimiNumber(value: string | number | null | undefined): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) {
+    return Number(value);
+  }
+  return null;
+}
+
+/** Convert a Kimi limit window (duration + timeUnit enum) to minutes. */
+function kimiWindowMinutes(
+  window: { duration?: number | null; timeUnit?: string | null } | null | undefined
+): number | null {
+  const duration = typeof window?.duration === 'number' ? window.duration : null;
+  if (duration === null || duration <= 0) return null;
+  switch (window?.timeUnit) {
+    case 'TIME_UNIT_HOUR': return duration * 60;
+    case 'TIME_UNIT_SECOND': return duration / 60;
+    default: return duration; // TIME_UNIT_MINUTE or unknown -> minutes
+  }
+}
+
+/** Derive a display plan label from Kimi's membership tier or subscription type. */
+export function formatKimiPlan(data: KimiUsagesResponse): string | null {
+  const level = data.user?.membership?.level;
+  const raw = (typeof level === 'string' && level) || (typeof data.subType === 'string' && data.subType) || '';
+  const tail = raw.split('_').pop() || ''; // LEVEL_INTERMEDIATE -> INTERMEDIATE
+  if (!tail) return null;
+  return tail.charAt(0).toUpperCase() + tail.slice(1).toLowerCase();
 }
 
 /** Collect Codex JSONL session files sorted newest-first. */
@@ -824,6 +1020,7 @@ function writeClaudeUsageCacheFile(
 function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnapshot {
   return {
     capturedAt: snapshot.capturedAt?.toISOString() || null,
+    plan: snapshot.plan ?? null,
     windows: snapshot.windows.map((window) => ({
       key: window.key,
       label: window.label,
@@ -866,6 +1063,7 @@ function deserializeClaudeUsageSnapshot(
     sourceLabel: CACHED_CLAUDE_USAGE_SOURCE_LABEL,
     capturedAt,
     windows,
+    plan: snapshot.plan ?? null,
   };
 }
 

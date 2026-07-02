@@ -27,6 +27,7 @@ import {
   getKeychainToken,
   getKeychainTokens,
   hasKeychainToken,
+  isKeychainBackendOverridden,
   keychainUsesFileFallback,
   listKeychainItems,
   parseBundleValue,
@@ -39,7 +40,8 @@ import {
 import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
-import { agentGetSync, agentAutoLoadSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
+import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
+import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
 export type SecretsBackend = 'keychain' | 'file';
@@ -486,12 +488,40 @@ export function listBundles(): SecretsBundle[] {
       .map((s) => s.slice(BUNDLE_META_PREFIX.length))
       .filter((n) => BUNDLE_NAME_PATTERN.test(n));
     if (keychainNames.length > 0) {
-      const fetched = getKeychainTokens(keychainNames.map(bundleMetaItem));
-      for (const name of keychainNames) {
-        const json = fetched.get(bundleMetaItem(name));
-        if (json === undefined) continue;
-        const bundle = parseBundleMeta(name, json, 'keychain');
-        if (bundle) out.push(bundle);
+      // Daily-policy fast-path (macOS). Bundle metadata items are biometry-gated,
+      // so the getKeychainTokens batch below pops Touch ID on every `secrets
+      // list` — the broker/`daily` mechanism only ever covered value reads, not
+      // this listing. Serve a broker-cached metadata snapshot when one is held,
+      // so only the first list per ~24h prompts. The cache key is a hash of the
+      // current keychain name-set (enumerated silently above): add / remove /
+      // rename a bundle and the key changes, so the stale snapshot is never
+      // served — no active invalidation needed. Values are never cached here;
+      // this is metadata only.
+      const useAgent =
+        process.env.AGENTS_SECRETS_NO_AGENT !== '1' &&
+        !isKeychainBackendOverridden() &&
+        secretsAgentAutoEnabled();
+      const nameSetHash = createHash('sha256')
+        .update([...keychainNames].sort().join('\n'))
+        .digest('hex')
+        .slice(0, 32);
+      const cached = useAgent ? agentGetMetaSync(nameSetHash) : null;
+      if (cached) {
+        for (const bundle of cached) out.push(bundle);
+      } else {
+        const fetched = getKeychainTokens(keychainNames.map(bundleMetaItem));
+        const keychainBundles: SecretsBundle[] = [];
+        for (const name of keychainNames) {
+          const json = fetched.get(bundleMetaItem(name));
+          if (json === undefined) continue;
+          const bundle = parseBundleMeta(name, json, 'keychain');
+          if (bundle) keychainBundles.push(bundle);
+        }
+        for (const bundle of keychainBundles) out.push(bundle);
+        // Populate the broker for the rest of the daily window (fire-and-forget).
+        if (useAgent && keychainBundles.length > 0) {
+          agentAutoLoadMetaSync(nameSetHash, keychainBundles, DEFAULT_TTL_MS);
+        }
       }
     }
   }

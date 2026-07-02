@@ -9,6 +9,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import { checkbox, confirm } from '@inquirer/prompts';
 import { assertValidSshTarget } from '../lib/ssh-exec.js';
 import { getProvider, listAllHosts, resolveHost } from '../lib/hosts/registry.js';
@@ -20,9 +21,9 @@ import {
   bootstrapAgentsCli,
   localCliVersion,
 } from '../lib/hosts/ready.js';
-import { listTasks, loadTask, localLogPath } from '../lib/hosts/tasks.js';
-import { followHostTask } from '../lib/hosts/progress.js';
-import * as fs from 'fs';
+import { listTasks } from '../lib/hosts/tasks.js';
+import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
+import { showHostTaskLog } from '../lib/hosts/logs.js';
 
 interface AddOptions { cap?: string[]; os?: string; enroll?: boolean; }
 
@@ -33,9 +34,16 @@ function parseTarget(target: string): { address: string; user?: string } {
   return { user: target.slice(0, at), address: target.slice(at + 1) };
 }
 
-/** Bootstrap/verify agents-cli on a freshly-enrolled host (best-effort, prompts). */
-async function maybeBootstrap(target: string, hostName: string): Promise<void> {
-  const probe = probeHost(target);
+/**
+ * Bootstrap/verify agents-cli on a freshly-enrolled host (best-effort, prompts).
+ * Callers that just probed the host pass the result through to avoid a second,
+ * redundant `uname` round-trip; otherwise we probe here.
+ */
+async function maybeBootstrap(
+  target: string,
+  hostName: string,
+  probe: { reachable: boolean; os?: string } = probeHost(target),
+): Promise<void> {
   if (!probe.reachable) {
     console.log(chalk.yellow(`  Not reachable over SSH yet — skipping bootstrap. Fix key auth, then: agents hosts check ${hostName}`));
     return;
@@ -86,7 +94,7 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
       const probe = probeHost(c);
       await registerHost({ name: c, provider: 'local', source, ...(source === 'inline' ? { address: c } : {}), os: probe.os, caps: opts.cap });
       console.log(chalk.green(`Enrolled ${c}`) + chalk.gray(` (${source}${probe.os ? `, ${probe.os}` : ''})`));
-      if (opts.enroll !== false) await maybeBootstrap(c, c);
+      if (opts.enroll !== false) await maybeBootstrap(c, c, probe);
     }
     return;
   }
@@ -117,7 +125,7 @@ async function doAdd(name: string | undefined, target: string | undefined, opts:
   if (!spec.os && probe.os) spec.os = probe.os;
   await registerHost(spec);
   console.log(chalk.green(`Enrolled ${name}`) + chalk.gray(` (${spec.source}${spec.os ? `, ${spec.os}` : ''}${spec.caps?.length ? `, caps: ${spec.caps.join(',')}` : ''})`));
-  if (opts.enroll !== false) await maybeBootstrap(sshTarget, name);
+  if (opts.enroll !== false) await maybeBootstrap(sshTarget, name, probe);
 }
 
 async function doList(json: boolean): Promise<void> {
@@ -133,8 +141,11 @@ async function doList(json: boolean): Promise<void> {
   console.log(chalk.bold('NAME').padEnd(20) + chalk.bold('SOURCE').padEnd(13) + chalk.bold('TARGET').padEnd(28) + chalk.bold('CAPS'));
   for (const h of hosts) {
     const tgt = h.source === 'ssh-config' ? chalk.gray('(ssh-config)') : `${h.user ? h.user + '@' : ''}${h.address ?? ''}`;
+    // Cap TARGET at its column so a long user@host can't shove CAPS out of alignment.
+    const tgtW = stringWidth(tgt);
+    const tgtCol = tgtW > 28 ? truncateToWidth(tgt, 28) : tgt + ' '.repeat(28 - tgtW);
     const mark = h.enrolled ? '' : chalk.gray(' ·available');
-    console.log(h.name.padEnd(20) + h.source.padEnd(13) + tgt.padEnd(28) + (h.caps?.join(',') ?? '') + mark);
+    console.log(h.name.padEnd(20) + h.source.padEnd(13) + tgtCol + (h.caps?.join(',') ?? '') + mark);
   }
 }
 
@@ -169,7 +180,10 @@ async function doRemove(name: string): Promise<void> {
 }
 
 async function doPs(json: boolean): Promise<void> {
-  const tasks = listTasks();
+  // Heal any 'running' record whose local follower died (dropped connection,
+  // laptop sleep) against the remote `.exit` before listing, so `ps` never shows
+  // a finished run stuck at 'running'.
+  const tasks = reconcileRunningTasks(listTasks());
   if (json) {
     console.log(JSON.stringify(tasks, null, 2));
     return;
@@ -178,30 +192,24 @@ async function doPs(json: boolean): Promise<void> {
     console.log(chalk.gray('No host tasks yet. Dispatch one: agents run <agent> "<task>" --host <name>'));
     return;
   }
+  const cols = terminalWidth();
   console.log(chalk.bold('ID').padEnd(11) + chalk.bold('HOST').padEnd(16) + chalk.bold('AGENT').padEnd(10) + chalk.bold('STATUS').padEnd(11) + chalk.bold('PROMPT'));
   for (const t of tasks) {
     const status = t.status === 'completed' ? chalk.green(t.status) : t.status === 'failed' ? chalk.red(t.status) : chalk.yellow(t.status);
-    console.log(t.id.padEnd(11) + t.host.padEnd(16) + t.agent.padEnd(10) + status.padEnd(11) + t.prompt.slice(0, 50));
+    // Prompt fills the remaining width instead of a fixed 50-char byte slice (98-char rows).
+    const promptCol = truncateToWidth(t.prompt, Math.max(12, cols - (11 + 16 + 10 + 11)));
+    console.log(t.id.padEnd(11) + t.host.padEnd(16) + t.agent.padEnd(10) + status.padEnd(11) + promptCol);
   }
 }
 
 async function doLogs(id: string, follow: boolean): Promise<void> {
-  const task = loadTask(id);
-  if (!task) {
+  const res = await showHostTaskLog(id, follow);
+  if (!res.found) {
     console.log(chalk.red(`Unknown task "${id}".`));
     process.exitCode = 1;
     return;
   }
-  if (follow && task.status === 'running') {
-    const code = await followHostTask(task.target, { remoteLog: task.remoteLog, remoteExit: task.remoteExit, taskId: id, echo: true });
-    process.exitCode = code === -1 ? 1 : code;
-    return;
-  }
-  try {
-    process.stdout.write(fs.readFileSync(localLogPath(id), 'utf-8'));
-  } catch {
-    console.log(chalk.gray('(no local log captured for this task)'));
-  }
+  if (res.exitCode !== undefined) process.exitCode = res.exitCode;
 }
 
 /** Register the `agents hosts` command tree. */

@@ -51,6 +51,58 @@ User runs: claude --help
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Agent-Spec Resolution
+
+The shim above resolves a version from config for a *bare* `claude` launch. Every
+CLI subcommand that takes an `<agent>[@<qualifier>]` argument — `view`, `inspect`,
+`sync`, `run`, and the `*list*` commands — resolves that spec through one engine,
+[`src/lib/agent-spec/`](../src/lib/agent-spec/). The core is **pure**: it takes a
+`VersionProvider` instead of touching the filesystem (so it is unit-tested with
+in-memory fixtures), and `provider.ts` binds the real one. Entry points:
+`resolveAgentTargets` (multi), `resolveSingleAgentTarget` (exactly one),
+`resolveVersionFilter` / `resolveListFilter` (read/list filters).
+
+### Qualifier vocabulary
+
+| Spec | Resolves to |
+|------|-------------|
+| `claude` (bare) | project pin (`agents.yaml`) → global default → the sole installed version. If more than one is installed with no default, state-changing commands error ("specify one"); `run`/`exec` pick the newest with a note. |
+| `claude@2.1.187` | that exact version (must be installed) |
+| `claude@latest` | newest **installed** version |
+| `claude@oldest` | oldest installed version |
+| `claude@pinned` / `claude@default` | the configured global default (synonyms) |
+| `claude@all` | every installed version (multi-target; rejected where exactly one is required) |
+| `claude@all,codex@latest` | comma-separated multi-spec |
+
+Each resolved target carries a `source` provenance tag (`project-pin`,
+`global-default`, `sole-installed`, `newest-installed`, `alias-latest`/`-oldest`,
+`explicit`, `none`). Exact versions are validated against `VERSION_RE` before any
+filesystem or exec use.
+
+### Two meanings of `latest`
+
+- **Install** — `agents add claude@latest` → the newest version published on
+  **npm** (`getLatestNpmVersion`, network).
+- **Resolve** — `agents view/run/sync claude@latest` → the newest **installed**
+  version (no network).
+
+The engine's domain is installed versions only.
+
+### Non-semver versions
+
+Ordering is by `compareVersions` (numeric per `.`-segment), so date-style schemes
+like OpenClaw's `yyyy.m.d` sort correctly. A trailing `-N` rebuild suffix
+(`2026.2.19-2`) breaks same-day ties — a higher `-N` is newer. This is
+deliberately **not** full semver: OpenClaw's `-N` means *newer*, the opposite of a
+semver pre-release, so a semver comparator would invert it. Suffix-free versions
+are unaffected.
+
+### `@default` in read/list commands
+
+For the read/list commands (`skills list`, `hooks list`, `rules list`, …) a bare
+spec shows **all** installed versions; `@default` / `@pinned` scopes to the
+**configured default version** (matching `view`).
+
 ## Installation Flow
 
 ```

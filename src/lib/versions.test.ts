@@ -548,7 +548,7 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
   // scoping to one repo returns only that layer's resources. Guards against
   // layer-misattribution — the bug where `--repo system` would sweep in (or
   // drop) the wrong repo's skills.
-  function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] } {
+  function runBuildScoped(home: string, repo: string): { skills?: string[]; memory?: string[] | 'all' } {
     const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
     const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
     const child = spawnSync(process.execPath, [tsxBin, '-e', `
@@ -583,12 +583,14 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
     expect(sel.skills).toEqual(['user-only']);
   });
 
-  it('skips the memory file through a real sync — leaves merged rules untouched', () => {
+  it('recompiles a STALE memory file through a real repo-scoped sync (RUSH-1354)', () => {
     const home = makeTempHome();
-    // Same fixture the "writes missing grok AGENTS.md" test uses to PROVE the
-    // memory file IS written for a partial selection. Under a repo scope the
-    // memory:[] sentinel must make syncResourcesToVersion skip it entirely —
-    // so this is a real negative control, not a check of the returned object.
+    // The composed rules-memory file is a merge of ALL layers, so a repo-scoped
+    // sync must still recompile it — otherwise a rules change followed by a
+    // repo-scoped `agents sync <agent> <repo>` silently strands the file at its
+    // old content. Same rules fixture the "writes missing grok AGENTS.md" test
+    // uses; here we PRE-SEED a stale AGENTS.md and prove the scoped sync
+    // overwrites it with the freshly composed content.
     const rulesDir = path.join(home, '.agents', '.system', 'rules');
     fs.mkdirSync(path.join(rulesDir, 'subrules'), { recursive: true });
     fs.writeFileSync(
@@ -596,18 +598,28 @@ describe('buildRepoScopedSelection — agents sync <agent> --repo <name>', () =>
       'presets:\n  default:\n    subrules:\n      - core\n',
       'utf-8'
     );
-    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'scoped memory body\n', 'utf-8');
+    fs.writeFileSync(path.join(rulesDir, 'subrules', 'core.md'), 'fresh scoped memory body\n', 'utf-8');
 
-    // The empty-array sentinel is what the skipMemory gate keys on.
-    expect(runBuildScoped(home, 'system').memory).toEqual([]);
+    // Pre-seed a stale memory file in the version home — this is what a prior
+    // sync left behind before the rules changed.
+    const agentDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.grok');
+    const agentsPath = path.join(agentDir, 'AGENTS.md');
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.writeFileSync(agentsPath, 'STALE memory body — must be overwritten\n', 'utf-8');
+
+    // The scoped selection now recomposes memory from all layers (memory:'all',
+    // not the old []-skip sentinel).
+    expect(runBuildScoped(home, 'system').memory).toEqual('all');
 
     const result = runVersionSync(
       home,
       "syncResourcesToVersion('grok', '0.2.33', buildRepoScopedSelection('system', home), { cwd: home })"
     ) as { memory: string[] };
 
-    const agentsPath = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.33', 'home', '.grok', 'AGENTS.md');
-    expect(result.memory).toEqual([]);
-    expect(fs.existsSync(agentsPath)).toBe(false);
+    expect(result.memory).toContain('AGENTS.md');
+    expect(fs.existsSync(agentsPath)).toBe(true);
+    const written = fs.readFileSync(agentsPath, 'utf-8');
+    expect(written).toContain('fresh scoped memory body');
+    expect(written).not.toContain('STALE memory body');
   });
 });

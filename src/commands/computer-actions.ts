@@ -8,18 +8,134 @@
 // space and never hand-manage pids.
 
 import { Command } from 'commander';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   openComputerClient,
   describeTransport,
+  resolvePolicyPath,
   type ComputerClient,
   type RPCResponse,
 } from '../lib/computer-rpc.js';
+import {
+  COMPUTER_INPUT_GATED_VERBS,
+  formatComputerPermissionGrantHint,
+} from '../lib/permissions.js';
 
 export interface AppInfo {
   pid: number;
   name: string;
   bundle_id: string;
   active: boolean;
+}
+
+type ComputerInputVerb = typeof COMPUTER_INPUT_GATED_VERBS[number];
+
+interface TargetAdmission {
+  sessionId: string;
+  selector: string;
+  gateClass: 'input';
+  pid: number;
+  bundle_id: string;
+  name: string;
+  admittedAtMs: number;
+  admittedByVerb: ComputerInputVerb;
+}
+
+interface AdmissionCacheFile {
+  admissions?: TargetAdmission[];
+}
+
+function isComputerInputVerb(verb: string | undefined): verb is ComputerInputVerb {
+  return typeof verb === 'string' && (COMPUTER_INPUT_GATED_VERBS as readonly string[]).includes(verb);
+}
+
+function computerSessionId(env: NodeJS.ProcessEnv = process.env): string | null {
+  return env.CODEX_THREAD_ID
+    || env.CLAUDE_CODE_SESSION_ID
+    || env.CLAUDE_SESSION_ID
+    || env.AGENTS_SESSION_ID
+    || env.AGENTS_RUN_ID
+    || null;
+}
+
+function admissionCachePath(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.AGENTS_COMPUTER_ADMISSION_CACHE) return env.AGENTS_COMPUTER_ADMISSION_CACHE;
+  return path.join(path.dirname(resolvePolicyPath()), 'computer-target-admissions.json');
+}
+
+function targetSelector(opts: { bundle?: string }): string {
+  return opts.bundle ? `bundle:${opts.bundle}` : 'frontmost';
+}
+
+function readAdmissionCache(filePath: string): TargetAdmission[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as AdmissionCacheFile;
+    return Array.isArray(parsed.admissions) ? parsed.admissions.filter(isAdmission) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isAdmission(v: unknown): v is TargetAdmission {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Record<string, unknown>;
+  return r.sessionId !== undefined
+    && typeof r.sessionId === 'string'
+    && typeof r.selector === 'string'
+    && r.gateClass === 'input'
+    && typeof r.pid === 'number'
+    && typeof r.bundle_id === 'string'
+    && typeof r.name === 'string'
+    && typeof r.admittedAtMs === 'number'
+    && isComputerInputVerb(r.admittedByVerb as string | undefined);
+}
+
+function rememberAdmission(app: AppInfo, opts: {
+  selector: string;
+  verb: ComputerInputVerb;
+  env?: NodeJS.ProcessEnv;
+  nowMs?: number;
+}): void {
+  const sessionId = computerSessionId(opts.env);
+  if (!sessionId) return;
+
+  const filePath = admissionCachePath(opts.env);
+  const admissions = readAdmissionCache(filePath);
+  const next: TargetAdmission = {
+    sessionId,
+    selector: opts.selector,
+    gateClass: 'input',
+    pid: app.pid,
+    bundle_id: app.bundle_id,
+    name: app.name,
+    admittedAtMs: opts.nowMs ?? Date.now(),
+    admittedByVerb: opts.verb,
+  };
+  const filtered = admissions.filter((a) =>
+    !(a.sessionId === sessionId && a.selector === opts.selector && a.gateClass === 'input')
+  );
+  filtered.push(next);
+
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify({ admissions: filtered }, null, 2), { mode: 0o600 });
+  } catch {
+    // Cache persistence is best-effort; the daemon remains the final gate.
+  }
+}
+
+function findAdmission(opts: {
+  selector: string;
+  env?: NodeJS.ProcessEnv;
+}): TargetAdmission | null {
+  const sessionId = computerSessionId(opts.env);
+  if (!sessionId) return null;
+  const admissions = readAdmissionCache(admissionCachePath(opts.env));
+  const matches = admissions
+    .filter((a) => a.sessionId === sessionId && a.selector === opts.selector && a.gateClass === 'input')
+    .sort((a, b) => b.admittedAtMs - a.admittedAtMs);
+  return matches[0] ?? null;
 }
 
 // Pure target picker — exercised by unit tests. Precedence: explicit --pid,
@@ -42,7 +158,7 @@ export function pickTarget(
     if (!app) {
       return {
         ok: false,
-        error: `bundle not in allow list (or not running): ${opts.bundle}\nadd Computer(${opts.bundle}) to a permissions group, then \`agents computer reload\``,
+        error: `bundle not in allow list (or not running): ${opts.bundle}\n${formatComputerPermissionGrantHint(opts.bundle)}`,
       };
     }
     return { ok: true, app };
@@ -51,7 +167,7 @@ export function pickTarget(
   if (!active) {
     return {
       ok: false,
-      error: 'no active app found in allow list\nadd Computer(<bundle-id>) to a permissions group, then `agents computer reload`',
+      error: `no active app found in allow list\n${formatComputerPermissionGrantHint()}`,
     };
   }
   return { ok: true, app: active };
@@ -172,19 +288,44 @@ export function unwrap(r: RPCResponse): Record<string, unknown> {
   return r.result ?? {};
 }
 
-// Resolve the target pid via list_apps + pickTarget, printing a precise error
-// and exiting when no target matches.
-async function resolveTargetPid(client: ComputerClient, opts: { pid?: number; bundle?: string }): Promise<number> {
+export async function resolveTargetPidDecision(
+  client: ComputerClient,
+  opts: { pid?: number; bundle?: string },
+  gate?: { verb?: string; env?: NodeJS.ProcessEnv; nowMs?: number },
+): Promise<{ ok: true; pid: number; source: 'pid' | 'list_apps' | 'session_admission' } | { ok: false; error: string }> {
   // A directly-supplied pid skips the list_apps roundtrip — the daemon gates.
-  if (opts.pid != null) return opts.pid;
+  if (opts.pid != null) return { ok: true, pid: opts.pid, source: 'pid' };
   const apps = unwrap(await client.call('list_apps'));
   const list = (apps.apps as AppInfo[]) || [];
   const picked = pickTarget(list, opts);
+  const verb = gate?.verb;
+  const selector = targetSelector(opts);
+  if (picked.ok && isComputerInputVerb(verb)) {
+    rememberAdmission(picked.app, { selector, verb, env: gate?.env, nowMs: gate?.nowMs });
+  }
   if (!picked.ok) {
-    console.error(picked.error);
+    if (isComputerInputVerb(verb)) {
+      const admitted = findAdmission({ selector, env: gate?.env });
+      if (admitted) return { ok: true, pid: admitted.pid, source: 'session_admission' };
+    }
+    return { ok: false, error: picked.error };
+  }
+  return { ok: true, pid: picked.app.pid, source: 'list_apps' };
+}
+
+// Resolve the target pid via list_apps + pickTarget, printing a precise error
+// and exiting when no target matches.
+async function resolveTargetPid(
+  client: ComputerClient,
+  opts: { pid?: number; bundle?: string },
+  gate?: { verb?: string },
+): Promise<number> {
+  const resolved = await resolveTargetPidDecision(client, opts, gate);
+  if (!resolved.ok) {
+    console.error(resolved.error);
     process.exit(1);
   }
-  return picked.app.pid;
+  return resolved.pid;
 }
 
 // --raise flag: app-level focus_window before the main action so coordinate
@@ -253,7 +394,7 @@ export function registerActionCommands(program: Command): void {
       .option('--json', 'Emit compact JSON (default: pretty)'),
   ).action(async (opts: TargetOpts & { depth?: number }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'describe' });
       const params: Record<string, unknown> = { pid };
       if (opts.depth != null) params.max_depth = opts.depth;
       const res = unwrap(await client.call('describe', params));
@@ -275,7 +416,7 @@ export function registerActionCommands(program: Command): void {
     ),
   ).action(async (opts: ElemOpts & { count?: number; background?: boolean; raise?: boolean }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'click' });
       const spec = buildElementOrCoords(opts);
       if (!spec.ok) {
         console.error(spec.error);
@@ -300,7 +441,7 @@ export function registerActionCommands(program: Command): void {
     ),
   ).action(async (opts: ElemOpts) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'right-click' });
       const spec = buildElementOrCoords(opts);
       if (!spec.ok) {
         console.error(spec.error);
@@ -324,7 +465,7 @@ export function registerActionCommands(program: Command): void {
     ),
   ).action(async (opts: ElemOpts & { text: string; commit?: boolean; allowSecureField?: boolean }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'type' });
       const spec = buildElementOrCoords(opts);
       if (!spec.ok) {
         console.error(spec.error);
@@ -351,7 +492,7 @@ export function registerActionCommands(program: Command): void {
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { text: string; commit?: boolean; raise?: boolean; requireFrontmost?: boolean; charDelay?: number }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'type-text' });
       await raiseIfRequested(client, pid, opts.raise);
       const params: Record<string, unknown> = { pid, text: opts.text };
       if (opts.commit) params.commit = true;
@@ -375,7 +516,7 @@ export function registerActionCommands(program: Command): void {
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { keys: string; raise?: boolean; requireFrontmost?: boolean }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'key' });
       await raiseIfRequested(client, pid, opts.raise);
       const params: Record<string, unknown> = { pid, keys: opts.keys };
       if (opts.requireFrontmost) params.require_frontmost = true;
@@ -407,7 +548,7 @@ export function registerActionCommands(program: Command): void {
       process.exit(1);
     }
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'drag' });
       await raiseIfRequested(client, pid, opts.raise);
       const params: Record<string, unknown> = {
         pid,
@@ -434,7 +575,7 @@ export function registerActionCommands(program: Command): void {
     ),
   ).action(async (opts: ElemOpts & { dy?: number; dx?: number; raise?: boolean }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'scroll' });
       await raiseIfRequested(client, pid, opts.raise);
       const params: Record<string, unknown> = { pid };
       if (opts.id) params.element_id = opts.id;
@@ -457,7 +598,7 @@ export function registerActionCommands(program: Command): void {
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { id: string; action: string }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'ax-action' });
       const res = unwrap(await client.call('ax_action', { pid, element_id: opts.id, action: opts.action }));
       emit(res, Boolean(opts.json), () => `performed ${opts.action}`);
     });
@@ -472,7 +613,7 @@ export function registerActionCommands(program: Command): void {
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { id: string }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'focus' });
       const res = unwrap(await client.call('set_focus', { pid, element_id: opts.id }));
       emit(res, Boolean(opts.json), () => `focused ${opts.id}`);
     });
@@ -491,7 +632,7 @@ export function registerActionCommands(program: Command): void {
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { windowId?: number; title?: string }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'raise' });
       const res = unwrap(await client.call('focus_window', { pid, ...buildRaiseParams(opts) }));
       emit(res, Boolean(opts.json), () => {
         const scope = res.raised_window ? `window ${res.title ?? res.window_id ?? ''}`.trim() : 'app';
@@ -522,7 +663,7 @@ export function registerActionCommands(program: Command): void {
     await withClient(async (client) => {
       const params: Record<string, unknown> = { ...spec.params };
       // duration-only waits don't need a target pid
-      if (params.duration_ms == null) params.pid = await resolveTargetPid(client, opts);
+      if (params.duration_ms == null) params.pid = await resolveTargetPid(client, opts, { verb: 'wait' });
       const res = unwrap(await client.call('wait', params));
       emit(res, Boolean(opts.json), () =>
         res.satisfied ? `satisfied (${res.waited_ms}ms)` : `timed out (${res.waited_ms}ms)`,
@@ -540,7 +681,7 @@ export function registerActionCommands(program: Command): void {
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { id?: string; maxChars?: number }) => {
     await withClient(async (client) => {
-      const pid = await resolveTargetPid(client, opts);
+      const pid = await resolveTargetPid(client, opts, { verb: 'get-text' });
       const params: Record<string, unknown> = { pid };
       if (opts.id) params.element_id = opts.id;
       if (opts.maxChars != null) params.max_chars = opts.maxChars;

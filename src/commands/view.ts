@@ -75,10 +75,27 @@ import { listProfiles, profileSummary, type ProfileSummary } from '../lib/profil
 import { loadManifest, isStale } from '../lib/staleness/index.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 
 // Shown in the email column for agents that are signed in but expose no email
-// address locally (Antigravity, Kimi store an opaque OAuth/JWT credential).
+// address locally (Antigravity stores an opaque OAuth grant with no identity).
 const SIGNED_IN_LABEL = 'signed in';
+
+/**
+ * Text for the account (email) column. Prefers the real email; otherwise, for a
+ * signed-in agent whose credential carries no email but does carry an opaque
+ * account id (Kimi's user_id), show `id:<user_id>` so distinct accounts read
+ * distinctly instead of a generic "signed in". Falls back to "signed in" when we
+ * have neither (Antigravity), and empty when signed out.
+ */
+function accountColumnLabel(
+  info?: Pick<AccountInfo, 'email' | 'accountId' | 'signedIn'> | null
+): string {
+  if (!info) return '';
+  if (info.email) return info.email;
+  if (info.signedIn) return info.accountId ? `id:${info.accountId}` : SIGNED_IN_LABEL;
+  return '';
+}
 
 /**
  * Group profile summaries by their host harness, optionally filtered to a
@@ -104,6 +121,7 @@ function profileKindAndModel(model: string, planWidth: number): string {
 }
 
 function termLink(text: string, filePath: string): string {
+  if (!process.stdout.isTTY) return text;
   const url = `file://${filePath}`;
   return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }
@@ -208,11 +226,17 @@ function shouldRenderSection(key: SectionKey, filter: ViewSectionFilter | undefi
 }
 
 /** Trim a description to a column-friendly snippet. Strips newlines, collapses whitespace. */
-function summarizeDescription(desc: string | undefined, maxLen = 80): string {
+export function summarizeDescription(desc: string | undefined, maxLen = 80): string {
   if (!desc) return '';
   const cleaned = desc.replace(/\s+/g, ' ').trim();
-  if (cleaned.length <= maxLen) return cleaned;
-  return cleaned.slice(0, maxLen - 1).trimEnd() + '…';
+  return truncateToWidth(cleaned, maxLen);
+}
+
+export function descriptionForPrefix(desc: string | undefined, prefix: string): string {
+  if (!desc) return '';
+  const visiblePrefix = prefix.replace(/\x1b]8;;[^\x1b]*(?:\x1b\\|\x07)/g, '');
+  const budget = Math.max(1, terminalWidth() - stringWidth(visiblePrefix));
+  return summarizeDescription(desc, budget);
 }
 
 function getProfileSummaries(filterAgentId?: AgentId): ProfileSummary[] {
@@ -283,8 +307,10 @@ function renderHostClisSection(cwd: string): void {
       const status = installed ? chalk.green('installed') : chalk.red('missing  ');
       const linkedName = termLink(manifest.name.padEnd(nameWidth), linkTarget(manifest.path));
       const tag = hostCliSourceTag(manifest.source);
-      const desc = manifest.description ? chalk.gray(`  ${summarizeDescription(manifest.description, 60)}`) : '';
-      console.log(`  ${status}  ${chalk.cyan(linkedName)} ${tag}${desc}`);
+      const prefix = `  ${status}  ${chalk.cyan(linkedName)} ${tag}`;
+      const descSnippet = descriptionForPrefix(manifest.description, `${prefix}  `);
+      const desc = descSnippet ? chalk.gray(`  ${descSnippet}`) : '';
+      console.log(prefix + desc);
     }
     if (anyMissing) {
       console.log(chalk.gray('  Install missing with `agents cli install`'));
@@ -395,7 +421,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
     if (!canon) return info;
     return {
       ...info,
-      plan: canon.plan,
+      // Prefer a plan the live usage fetch surfaced (Kimi reports membership
+      // tier in /usages; its local auth file has none) and fall back to the
+      // account-derived plan (Claude's billingType).
+      plan: usageByKey.get(key)?.snapshot?.plan ?? canon.plan,
       // Throttle state comes from the live usage windows, not the pay-as-you-go
       // overage flag that AccountInfo.usageStatus used to carry. A maxed window
       // means rate-limited; no snapshot means no badge. See
@@ -440,8 +469,8 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
         maxVerLabel = Math.max(maxVerLabel, label.length);
         const rawInfo = infoMap.get(`${agentId}:${v}`);
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
-        if (info?.email) maxEmail = Math.max(maxEmail, info.email.length);
-        else if (info?.signedIn) maxEmail = Math.max(maxEmail, SIGNED_IN_LABEL.length);
+        const accountLabel = accountColumnLabel(info);
+        if (accountLabel) maxEmail = Math.max(maxEmail, accountLabel.length);
         if (info?.plan) maxPlanWidth = Math.max(maxPlanWidth, info.plan.length);
       }
       // Profile rows share these columns with version rows so they line up.
@@ -517,9 +546,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
           parts.push(chalk.gray('(not signed in — run ' + agent.cliCommand + ' to log in)'));
         } else {
           if (hasEmail || hasUsage || hasActive || signedIn) {
-            // Signed-in agents without a local email (Antigravity, Kimi) show a
-            // "signed in" placeholder so they read as logged in, not blank.
-            const display = vInfo?.email || (signedIn ? SIGNED_IN_LABEL : '');
+            // Signed-in agents without a local email show their account id
+            // (Kimi's user_id) or a "signed in" placeholder (Antigravity) so they
+            // read as logged in, not blank.
+            const display = accountColumnLabel(vInfo);
             const emailCol = display.padEnd(maxEmail);
             parts.push(display ? chalk.cyan(emailCol) : ' '.repeat(maxEmail));
           }
@@ -608,7 +638,7 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null);
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
-        const gDisplay = gInfo?.email || (gInfo?.signedIn ? SIGNED_IN_LABEL : '');
+        const gDisplay = accountColumnLabel(gInfo);
         parts.push(gDisplay ? chalk.cyan(gDisplay) : '');
       }
       if (gUsageStr || gActiveStr) parts.push(gUsageStr);
@@ -881,9 +911,10 @@ async function showAgentResources(
         : chalk.gray('[system]');
       display += ` ${sourceTag}`;
       const syncStr = r.syncState ? chalk.gray(` [${r.syncState}]`) : '';
-      const descSnippet = summarizeDescription(r.description);
+      const prefix = `    ${display}${syncStr}`;
+      const descSnippet = descriptionForPrefix(r.description, `${prefix}  `);
       const descStr = descSnippet ? chalk.gray(`  ${descSnippet}`) : '';
-      console.log(`    ${display}${syncStr}${descStr}`);
+      console.log(prefix + descStr);
     }
   }
 
@@ -915,13 +946,10 @@ async function showAgentResources(
       cliVersion: version,
       info: accountInfo,
     });
-    const emailStr = accountInfo.email
-      ? chalk.cyan(`  ${accountInfo.email}`)
-      : accountInfo.signedIn
-        ? chalk.cyan(`  ${SIGNED_IN_LABEL}`)
-        : '';
+    const accountLabel = accountColumnLabel(accountInfo);
+    const emailStr = accountLabel ? chalk.cyan(`  ${accountLabel}`) : '';
     const status = chalk.green(version);
-    const usageStr = formatUsageSummary(accountInfo.plan, null);
+    const usageStr = formatUsageSummary(usageInfo.snapshot?.plan ?? accountInfo.plan, null);
     const usagePart = usageStr ? `  ${usageStr}` : '';
     console.log(`  ${colorAgent(agentId)(AGENTS[agentId].name.padEnd(14))} ${status}${emailStr}${usagePart}`);
 
@@ -1067,6 +1095,9 @@ export interface ViewJsonVersion {
   isDefault: boolean;
   signedIn: boolean;
   email: string | null;
+  // Opaque account identifier when the credential exposes one but no email
+  // (Kimi's user_id). Optional for backward compatibility with older consumers.
+  accountId?: string | null;
   plan: string | null;
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
   // Optional so existing TypeScript consumers compiled against the prior
@@ -1307,7 +1338,10 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
     if (!canon) return info;
     return {
       ...info,
-      plan: canon.plan,
+      // Prefer a plan the live usage fetch surfaced (Kimi reports membership
+      // tier in /usages; its local auth file has none) and fall back to the
+      // account-derived plan (Claude's billingType).
+      plan: usageByKey.get(key)?.snapshot?.plan ?? canon.plan,
       // Throttle state comes from the live usage windows, not the pay-as-you-go
       // overage flag that AccountInfo.usageStatus used to carry. A maxed window
       // means rate-limited; no snapshot means no badge. See
@@ -1330,6 +1364,7 @@ async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set
       isDefault: version === globalDefault,
       signedIn: info.signedIn,
       email: info.email,
+      accountId: info.accountId,
       plan: info.plan,
       usageStatus: info.usageStatus,
       overageCredits: info.overageCredits,

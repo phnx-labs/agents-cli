@@ -17,6 +17,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
+import { writePidSessionEntry } from './session/pid-registry.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -474,15 +475,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
       edit: [],
     },
   },
-  roo: {
-    base: ['roo'],
-    promptFlag: 'positional',
-    modeFlags: {
-      plan: ['--mode', 'architect'],
-      edit: ['--mode', 'code'],
-    },
-    modelFlag: '--model',
-  },
   // TODO: --output-format json is documented but currently broken upstream
   // ("flags provided but not defined: -output-format"). Track resolution at
   // https://github.com/google-antigravity/antigravity-cli/issues/7 before
@@ -778,6 +770,30 @@ export async function execAgent(options: ExecOptions): Promise<number> {
 }
 
 /**
+ * Resolve how to spawn a shim target for a platform. Pure — testable on any host.
+ *
+ * POSIX always execs the binary directly (no shell). On Windows a bare
+ * (non-absolute) name or a `.cmd` companion goes through the shell so cmd.exe
+ * resolves it via PATHEXT — the common, `.cmd`-present path; an absolute `.cmd`
+ * or extensionless path is exec'd through the shell / directly. npm always ships
+ * a `<cmd>.cmd` companion on Windows, so the runnable target `execShimPassthrough`
+ * hands us is the `.cmd` (never a bare `.ps1`).
+ */
+export function resolveShimSpawn(
+  platform: NodeJS.Platform,
+  binary: string,
+  extraArgs: string[],
+): { command: string; args: string[]; shell: boolean } {
+  if (platform === 'win32') {
+    // Use win32 path semantics regardless of the host running this (the platform
+    // is the parameter, not process.platform) so `C:\...` reads as absolute.
+    const useShell = !path.win32.isAbsolute(binary) || binary.endsWith('.cmd');
+    return { command: binary, args: extraArgs, shell: useShell };
+  }
+  return { command: binary, args: extraArgs, shell: false };
+}
+
+/**
  * Transparent passthrough exec for generated shims — the node-side delegate that
  * Windows `.cmd` shims call. Resolves the active version (explicit pin, else
  * project/default) and execs the real binary with the user's RAW args and the
@@ -809,10 +825,10 @@ export async function execShimPassthrough(
   // mode/effort are required by ExecOptions but unused by buildExecEnv (which only
   // derives the per-version config-dir env); pass the agent's default to satisfy the type.
   const env = buildExecEnv({ agent, version, cwd, mode: defaultModeFor(agent), effort: 'auto' });
-  const useShell = process.platform === 'win32' && (!path.isAbsolute(binary) || binary.endsWith('.cmd'));
+  const { command, args, shell } = resolveShimSpawn(process.platform, binary, [...launchArgs, ...rawArgs]);
 
   return new Promise((resolve) => {
-    const child = spawn(binary, [...launchArgs, ...rawArgs], { cwd, stdio: 'inherit', env, shell: useShell });
+    const child = spawn(command, args, { cwd, stdio: 'inherit', env, shell });
     child.on('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
     child.on('error', (err) => {
       process.stderr.write(`agents: failed to launch ${agent}: ${err.message}\n`);
@@ -838,6 +854,15 @@ interface SpawnResult {
  * unbuffered.
  */
 async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
+  // Assign a known session id up front for agents that accept one, so the
+  // launcher can record an EXACT pid -> session mapping (see pid-registry) —
+  // otherwise the headless `ag sessions --active` path can only guess
+  // "newest .jsonl in the cwd" and collapses co-located agents onto one row.
+  // Claude: `--session-id <uuid>` CREATES the session with that id (wired in
+  // buildExecCommand). Skip on resume — the id is the one being resumed.
+  if (options.agent === 'claude' && !options.resume && !options.sessionId) {
+    options = { ...options, sessionId: randomUUID() };
+  }
   const cmd = buildExecCommand(options);
   const [executable, ...args] = cmd;
 
@@ -892,6 +917,19 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       stdio,
       env: buildExecEnv(options),
       shell: useShell,
+    });
+
+    // Record this launch so `ag sessions --active` can map the pid to its exact
+    // session (sessionId is set for Claude above) instead of guessing the newest
+    // .jsonl in the cwd — the collapse that made co-located agents indistinguishable.
+    // Best-effort: pruned when the pid dies; a failed write just degrades to the heuristic.
+    writePidSessionEntry({
+      pid: child.pid ?? 0,
+      agent: options.agent,
+      sessionId: options.sessionId,
+      cwd: options.cwd || process.cwd(),
+      tmuxPane: process.env.TMUX_PANE,
+      startedAtMs: Date.now(),
     });
 
     // Mark startup time (time from function call to process spawn)

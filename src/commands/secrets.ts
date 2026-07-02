@@ -8,9 +8,9 @@
 
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
+import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
-import { spawnSync } from 'child_process';
-import { SSH_TARGET_RE, assertValidSshTarget, type SshExecResult } from '../lib/ssh-exec.js';
+import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
 import {
   parseHostsOption,
   remoteResolveEnv,
@@ -320,8 +320,11 @@ function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
   return exp ? chalk.green(`daily · ${compactRemaining(exp)} left`) : chalk.gray('daily');
 }
 
+/** Below this width the fixed date columns no longer fit; `list` uses cards. */
+const SECRETS_WIDE = 96;
+
 /** Format a single bundle as a table row for the `secrets list` output. */
-function renderBundleRow(b: SecretsBundle, held?: Map<string, number>): string {
+function renderBundleRow(b: SecretsBundle, held?: Map<string, number>, cols = terminalWidth()): string {
   const entries = describeBundle(b);
   const keys = entries.length;
   const expiringCount = countExpiringSoon(b.meta);
@@ -347,9 +350,25 @@ function renderBundleRow(b: SecretsBundle, held?: Map<string, number>): string {
     `${padVisible(used, 7)}`;
   // Mark file-backed bundles so `list` distinguishes them from keychain ones.
   const tag = b.backend === 'file' ? chalk.magenta('[file] ') : '';
-  const desc = b.description ? chalk.gray(safePrint(b.description)) : '';
+  // Cap the free-form description to whatever space is left on the line so a long
+  // description can't push the row to 200+ chars and wrap into a smear.
+  const budget = cols - stringWidth(head) - 1 - stringWidth(tag);
+  const desc = b.description && budget > 3
+    ? chalk.gray(truncateToWidth(safePrint(b.description), budget))
+    : '';
   const trailer = `${tag}${desc}`.trimEnd();
   return trailer ? `${head} ${trailer}` : head.trimEnd();
+}
+
+/** Narrow-terminal card: name + compact meta on one line, description below. */
+function renderBundleCard(b: SecretsBundle, held: Map<string, number> | undefined, cols: number): string {
+  const keys = describeBundle(b).length;
+  const used = b.last_used ? relativeAge(b.last_used) : (b.created_at ? 'never' : '?');
+  const tag = b.backend === 'file' ? chalk.magenta(' [file]') : '';
+  const meta = chalk.gray(`${keys} key${keys === 1 ? '' : 's'} · `) + renderPolicyCol(b, held) + chalk.gray(` · used ${used}`);
+  const line1 = `${chalk.cyan(b.name)}  ${meta}${tag}`;
+  if (!b.description) return line1;
+  return `${line1}\n    ${chalk.gray(truncateToWidth(safePrint(b.description), cols - 4))}`;
 }
 
 /** Colorize a variable source kind (literal, keychain, env, file, exec). */
@@ -569,11 +588,18 @@ export function registerSecretsCommands(program: Command): void {
           /* broker not running — render policy without the countdown */
         }
       }
-      console.log(chalk.bold(
-        `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'POLICY'.padEnd(18)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
-      ));
-      for (const b of bundles) {
-        console.log(renderBundleRow(b, held));
+      const cols = terminalWidth();
+      if (cols >= SECRETS_WIDE) {
+        console.log(chalk.bold(
+          `${'NAME'.padEnd(20)} ${'KEYS'.padEnd(5)} ${'POLICY'.padEnd(18)} ${'EXPIRING'.padEnd(9)} ${'CREATED'.padEnd(9)} ${'UPDATED'.padEnd(9)} ${'USED'.padEnd(7)} DESCRIPTION`,
+        ));
+        for (const b of bundles) {
+          console.log(renderBundleRow(b, held, cols));
+        }
+      } else {
+        for (const b of bundles) {
+          console.log(renderBundleCard(b, held, cols));
+        }
       }
     });
 
@@ -1277,20 +1303,18 @@ Examples:
           const remoteCmd = `bash -lc ${shellQuote(remoteAgents)}`;
           let failures = 0;
           for (const host of hosts) {
-            const res = spawnSync('ssh', ['-o', 'BatchMode=yes', host, remoteCmd], {
-              input,
-              stdio: ['pipe', 'pipe', 'pipe'],
-              encoding: 'utf-8',
-            });
-            if (res.error) {
+            // Routed through the shared ssh engine: full hardened options
+            // (BatchMode, ConnectTimeout, keepalive) + control-socket reuse.
+            const res = sshExec(host, remoteCmd, { input });
+            if (res.code === null) {
               failures++;
-              console.error(chalk.red(`${host}: ${res.error.message}`));
+              console.error(chalk.red(`${host}: ${res.stderr.trim() || (res.timedOut ? 'ssh timed out' : 'ssh failed')}`));
               continue;
             }
-            if (res.status !== 0) {
+            if (res.code !== 0) {
               failures++;
               const msg = (res.stderr || res.stdout || '').trim();
-              console.error(chalk.red(`${host}: remote import failed (exit ${res.status ?? 'signal'})${msg ? `: ${msg}` : ''}`));
+              console.error(chalk.red(`${host}: remote import failed (exit ${res.code})${msg ? `: ${msg}` : ''}`));
               continue;
             }
             const remoteMsg = (res.stdout || '').trim().split('\n').map((l) => l.trim()).filter(Boolean).pop();
@@ -1379,8 +1403,18 @@ Examples:
           secretEnv = readAndResolveBundleEnv(bundleName, { caller: `command ${cmd}` }).env;
         }
         const { spawn } = await import('child_process');
-        const proc = spawn(cmd, args, {
+        // On Windows, spawn without a shell ENOENTs for `.cmd`/`.bat` launchers
+        // (npm, yarn, most JS CLIs) and shell built-ins, so we set shell:true.
+        // With shell:true Node hands cmd.exe a single command line with NO quoting
+        // of its own, so args containing spaces or cmd metacharacters must be
+        // quoted here (quoteWin32ExecArg) or they'd be split. See that helper for
+        // the cmd.exe %VAR%/!VAR! expansion caveat.
+        const useShell = process.platform === 'win32';
+        const spawnCmd = useShell ? quoteWin32ExecArg(cmd) : cmd;
+        const spawnArgs = useShell ? args.map(quoteWin32ExecArg) : args;
+        const proc = spawn(spawnCmd, spawnArgs, {
           stdio: 'inherit',
+          shell: useShell,
           env: { ...process.env, ...secretEnv },
         });
         proc.on('close', (code) => process.exit(code ?? 0));
@@ -1677,6 +1711,48 @@ function humanRemaining(expiresAt: number): string {
   if (hours < 24) return `locks in ${hours} hour${hours === 1 ? '' : 's'}`;
   const days = Math.round(hours / 24);
   return `locks in ${days} day${days === 1 ? '' : 's'}`;
+}
+
+/**
+ * Quote one argument for a Windows `cmd.exe` command line, as built by Node's
+ * `spawn(..., { shell: true })` on win32 (`agents secrets exec`). cmd.exe does
+ * NO quoting of its own, so an unquoted arg with a space is split into several
+ * args, and a cmd metacharacter (`&|<>()^`) would be interpreted by the shell.
+ * We wrap any arg with whitespace, a quote, or a metacharacter in double quotes
+ * and escape embedded quotes / trailing backslashes per the CommandLineToArgvW
+ * rules, so the *child's* argv parse reconstructs the original argument.
+ *
+ * CAVEAT: cmd.exe expands `%VAR%` (always) and `!VAR!` (under delayed expansion)
+ * BEFORE argv parsing, and double-quoting does NOT suppress `%`/`!` (the
+ * "BatBadBut" / CVE-2024-1874 class). We deliberately do not escape `%`/`!`:
+ * `agents secrets exec` runs a caller-supplied command against a bundle the
+ * caller owns, so caller-controlled `%`/`!` is not a privilege boundary. If that
+ * ever changes (exec'ing an untrusted command line), route through a shell that
+ * disables expansion rather than relying on this quoter. An empty arg becomes
+ * `""`. Exported for tests. No-ops on non-Windows (the caller only invokes it
+ * under `process.platform === 'win32'`).
+ */
+export function quoteWin32ExecArg(arg: string): string {
+  if (arg.length > 0 && !/[\s"&|<>()^]/.test(arg)) return arg;
+  let result = '"';
+  let backslashes = 0;
+  for (const ch of arg) {
+    if (ch === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (ch === '"') {
+      // Double the run of backslashes, then escape this quote.
+      result += '\\'.repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+      continue;
+    }
+    result += '\\'.repeat(backslashes) + ch;
+    backslashes = 0;
+  }
+  // Trailing backslashes precede the closing quote → must be doubled.
+  result += '\\'.repeat(backslashes * 2) + '"';
+  return result;
 }
 
 /**

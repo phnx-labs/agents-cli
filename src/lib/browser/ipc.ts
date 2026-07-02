@@ -44,8 +44,12 @@ function getIpcEndpoint(): string {
   return ipcEndpoint(getSocketPath());
 }
 
-/** Can we open a connection to the daemon right now? Used on Windows where a
- * named pipe can't be probed with fs.existsSync. Resolves false on any error. */
+/** Can we open a connection to the daemon right now? Resolves false on any
+ * error. This is the authoritative liveness check on every platform: a live
+ * daemon accepts the connection, while a stale POSIX socket file left behind by
+ * a crashed daemon (or one that "appears and is immediately destroyed", #556)
+ * rejects with ECONNREFUSED and is correctly reported as not reachable —
+ * something fs.existsSync can't distinguish. */
 function probeDaemon(endpoint: string, timeoutMs = 500): Promise<boolean> {
   return new Promise((resolve) => {
     const sock = net.createConnection(endpoint);
@@ -57,16 +61,17 @@ function probeDaemon(endpoint: string, timeoutMs = 500): Promise<boolean> {
   });
 }
 
-/** Is the daemon reachable? existsSync probe on POSIX, connect probe on Windows. */
-async function isDaemonReachable(): Promise<boolean> {
-  if (IS_WINDOWS) return probeDaemon(getIpcEndpoint());
-  return fs.existsSync(getSocketPath());
+/** Is the daemon reachable? A real connect probe on every platform — a socket
+ * file existing on disk is not proof a daemon is listening on it. */
+export async function isDaemonReachable(): Promise<boolean> {
+  return probeDaemon(getIpcEndpoint());
 }
 
-async function waitForSocket(socketPath: string, timeoutMs: number): Promise<void> {
+async function waitForSocket(_socketPath: string, timeoutMs: number): Promise<void> {
+  const endpoint = getIpcEndpoint();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (IS_WINDOWS ? await probeDaemon(getIpcEndpoint()) : fs.existsSync(socketPath)) return;
+    if (await probeDaemon(endpoint)) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('Timeout waiting for browser daemon socket');

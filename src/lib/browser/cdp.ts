@@ -278,7 +278,11 @@ export function verifyBrowserIdentity(
     // to a Comet instance doesn't trip a false "identity mismatch".
     comet: ['comet', 'chrome'],
     brave: ['brave', 'brave-browser', 'chrome'],
-    edge: ['edge', 'microsoft-edge', 'msedge', 'chrome'],
+    // Windows/Chromium Edge reports its /json/version "Browser" field as
+    // "Edg/<version>" (the `Edg` token, not `Edge`), which normalizeBrowserName
+    // reduces to "edg". Accept it so attaching to a real Edge doesn't trip a
+    // false identity mismatch (the profile enum only allows "edge").
+    edge: ['edge', 'edg', 'microsoft-edge', 'msedge', 'chrome'],
   };
 
   const accepted = matches[expected] || [expected];

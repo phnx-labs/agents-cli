@@ -230,6 +230,34 @@ Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `age
 
 ---
 
+## Run on your own machines
+
+Dispatch any read-only or config command -- and `agents run` itself -- to another machine over SSH. No daemon.
+
+```bash
+# Enroll a machine (from ~/.ssh/config, or inline with user@address)
+agents hosts add gpu-box
+agents hosts check gpu-box              # reachable? which agents-cli version?
+
+# Run there instead of locally
+agents run claude --host gpu-box "profile this build"   # follows live by default
+agents logs --host gpu-box              # pick a dispatched run and view its log
+agents logs <id> -f                     # re-attach to a running one and follow
+agents view claude --host gpu-box       # inspect the remote install
+agents sync --host gpu-box              # make the remote machine current
+
+# Your Tailscale fleet, auto-discovered
+agents devices sync                     # ingest `tailscale status`
+agents ssh mac-mini                     # hardened SSH: fails fast if offline,
+                                        # PowerShell on Windows, password-from-Keychain
+```
+
+**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH. See [docs/00-concepts.md](docs/00-concepts.md#devices--hosts).
+
+Every `--host` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/09-ssh-transport.md](docs/09-ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
+
+---
+
 ## Teams
 
 ```bash

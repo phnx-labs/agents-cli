@@ -41,6 +41,20 @@ const PROTOCOL_VERSION = 1;
 /** Default lifetime of an unlocked bundle when `--ttl` is not given. */
 export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
+/**
+ * Reserved store-key prefix for the `secrets list` metadata snapshot cache.
+ * The broker holds the resolved bundle-metadata array (names/policy/timestamps,
+ * NO resolved secret values beyond the literals already in metadata) keyed by a
+ * hash of the current keychain bundle name-set, so the second and later
+ * `secrets list` within the daily window read metadata without a Touch ID
+ * prompt. Keyed by the name-set hash so adding/removing/renaming a bundle
+ * changes the key and misses the cache automatically — no active invalidation.
+ * The '!' sentinel can never collide with a real bundle name
+ * (BUNDLE_NAME_PATTERN requires an alphanumeric first char) and is safe as
+ * spawnSync argv (unlike a NUL byte); `status` hides these entries.
+ */
+export const META_CACHE_PREFIX = '!meta:';
+
 /** After the store goes empty (all bundles locked or expired) for this long,
  * the broker exits so no idle process lingers holding a socket. */
 const IDLE_EXIT_MS = 5 * 60 * 1000; // 5m
@@ -262,6 +276,19 @@ export type Response =
  * unit-testable with a controlled `now`, without a socket or a spawned process.
  * Mutates `store` in place; returns the wire response.
  */
+/**
+ * Count of real unlocked bundles in the store, excluding the internal
+ * `secrets list` metadata cache. Used to decide broker "warmth" for self-heal
+ * and idle-exit: a metadata-only store must read as empty so a disposable list
+ * cache never blocks an upgrade restart (#435) or an idle one-off broker from
+ * exiting. Pure + exported for unit testing.
+ */
+export function realBundleCount(store: Map<string, StoredBundle>): number {
+  let n = 0;
+  for (const name of store.keys()) if (!name.startsWith(META_CACHE_PREFIX)) n++;
+  return n;
+}
+
 export function handleAgentRequest(
   store: Map<string, StoredBundle>,
   req: Request,
@@ -297,6 +324,7 @@ export function handleAgentRequest(
       const entries: AgentStatusEntry[] = [];
       for (const [name, e] of store) {
         if (now >= e.expiresAt) continue;
+        if (name.startsWith(META_CACHE_PREFIX)) continue; // internal list cache, not a user bundle
         entries.push({ name, expiresAt: e.expiresAt, keyCount: Object.keys(e.env).length });
       }
       return { ok: true, cmd: 'status', entries };
@@ -347,20 +375,26 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   // this value for the process lifetime; getCliVersionFresh re-reads on disk.
   const runningVersion = getCliVersion();
 
+  // "Warmth" for self-heal / idle-exit counts only real unlocked bundles, NOT
+  // the internal `secrets list` metadata cache (#524). Otherwise a 24h-TTL list
+  // cache would keep the store non-empty and (a) block the persistent broker
+  // from self-healing onto a freshly-installed version for up to a day (#435's
+  // gate is size===0), and (b) stop a one-off broker from ever idle-exiting. The
+  // metadata cache is a disposable list snapshot — wiping it on upgrade/idle
+  // costs at most one extra prompt on the next `secrets list`.
   const sweep = () => {
     const now = Date.now();
     for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
-    // Self-heal onto a newer in-place install — but ONLY while the store is
-    // empty, so we never wipe live unlocks and force a re-prompt (#435). The
-    // `store.size === 0` short-circuit also keeps getCliVersionFresh (a disk
-    // read) off the hot path. A pending upgrade is adopted at the next idle
-    // sweep instead of immediately.
-    if (store.size === 0 &&
-        shouldSelfHealForUpgrade(persistent, store.size, runningVersion, getCliVersionFresh())) {
+    const live = realBundleCount(store);
+    // Self-heal onto a newer in-place install — but ONLY while no real unlocks
+    // are held, so we never wipe live unlocks and force a re-prompt (#435). A
+    // metadata-only store still self-heals (the list cache is disposable).
+    if (live === 0 &&
+        shouldSelfHealForUpgrade(persistent, live, runningVersion, getCliVersionFresh())) {
       shutdown(0); // KeepAlive relaunches on the new code
       return;
     }
-    if (store.size === 0) {
+    if (live === 0) {
       if (!persistent && now - emptySince >= IDLE_EXIT_MS) shutdown(0);
     } else {
       emptySince = now;
@@ -369,7 +403,7 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
 
   const handle = (req: Request): Response => {
     const resp = handleAgentRequest(store, req);
-    if (store.size > 0) emptySince = Date.now();
+    if (realBundleCount(store) > 0) emptySince = Date.now();
     return resp;
   };
 
@@ -529,6 +563,43 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
   }
 }
 
+// Key inside the cached entry's env that holds the JSON metadata snapshot.
+const META_SNAPSHOT_KEY = '__snapshot__';
+
+/**
+ * Read the cached `secrets list` metadata snapshot for the given keychain
+ * name-set hash, or null on miss / no broker / off-darwin. Reuses the value
+ * fast-path socket read (agentGetSync) — no prompt, no wire change. The hash is
+ * the cache key: a changed name-set (bundle added/removed/renamed) yields a
+ * different key and therefore a clean miss, so the stale set is never served.
+ */
+export function agentGetMetaSync(nameSetHash: string): SecretsBundle[] | null {
+  if (!onDarwin()) return null;
+  const hit = agentGetSync(META_CACHE_PREFIX + nameSetHash);
+  const raw = hit?.env?.[META_SNAPSHOT_KEY];
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SecretsBundle[]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fire-and-forget: populate the broker with a freshly-read metadata snapshot so
+ * the next `secrets list` within the daily window renders without a prompt.
+ * Stored as an ordinary entry (placeholder bundle, snapshot in env) under the
+ * reserved META_CACHE_PREFIX key; the snapshot travels over stdin to the
+ * detached worker (never argv/disk), same as value caching. macOS only.
+ */
+export function agentAutoLoadMetaSync(nameSetHash: string, bundles: SecretsBundle[], ttlMs: number): void {
+  if (!onDarwin()) return;
+  const key = META_CACHE_PREFIX + nameSetHash;
+  const placeholder: SecretsBundle = { name: key, vars: {} };
+  agentAutoLoadSync(key, placeholder, { [META_SNAPSHOT_KEY]: JSON.stringify(bundles) }, ttlMs);
+}
+
 /** True unless `secrets.agent.auto` is explicitly disabled in agents.yaml. The
  * broker is the mechanism that delivers the `daily` default policy (one Touch ID
  * per ~24h), so auto-caching is ON by default; opt out with
@@ -613,10 +684,15 @@ export async function agentLock(name?: string): Promise<number> {
   return r?.ok === true && r.cmd === 'lock' ? r.wiped : 0;
 }
 
-/** List currently-unlocked bundles, or [] when no broker is running. */
+/** List currently-unlocked bundles, or [] when no broker is running. The
+ * internal `secrets list` metadata-cache entry is filtered out here as well as
+ * server-side: during a rollout a NEW client can talk to an OLD broker that
+ * predates the server-side exclusion, so this keeps the internal entry from
+ * surfacing in `agents secrets status` in that skew window. */
 export async function agentStatus(): Promise<AgentStatusEntry[]> {
   const r = await request({ cmd: 'status' });
-  return r?.ok === true && r.cmd === 'status' ? r.entries : [];
+  const entries = r?.ok === true && r.cmd === 'status' ? r.entries : [];
+  return entries.filter((e) => !e.name.startsWith(META_CACHE_PREFIX));
 }
 
 /** Ping result: whether a broker is reachable + speaking our protocol, and the

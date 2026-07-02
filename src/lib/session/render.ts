@@ -618,7 +618,7 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
 
       if (['Read', 'read_file', 'view_file', 'cat_file', 'get_file'].includes(tool)) {
         if (p) filesReadAbs.add(p);
-      } else if (['Write', 'Edit', 'write_file', 'edit_file', 'create_file', 'replace', 'patch'].includes(tool)) {
+      } else if (['Write', 'Edit', 'Create', 'write_file', 'edit_file', 'create_file', 'replace', 'patch'].includes(tool)) {
         if (p) {
           if (p.includes('.claude/plans/') && p.endsWith('.md')) {
             planFilePath = p;

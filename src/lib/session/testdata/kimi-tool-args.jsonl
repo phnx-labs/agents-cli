@@ -1,0 +1,3 @@
+{"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"tool_bash_001","toolCallId":"tool_bash_001","name":"Bash","args":{"command":"ls -la /tmp","cwd":"/tmp"}},"time":1750723200000}
+{"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"tool_read_002","toolCallId":"tool_read_002","name":"Read","args":{"path":"/tmp/testfile.txt"}},"time":1750723200001}
+{"type":"context.append_loop_event","event":{"type":"tool.call","uuid":"tool_skill_003","toolCallId":"tool_skill_003","name":"Skill","args":{"skill":"browser","args":"open https://example.com"}},"time":1750723200002}

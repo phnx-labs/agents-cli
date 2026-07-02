@@ -1,7 +1,7 @@
 /**
  * Centralized event logging for agents-cli.
  *
- * Structured JSONL logs at ~/.agents/logs/events-YYYY-MM-DD.jsonl
+ * Structured JSONL logs at ~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl
  * with automatic daily rotation and rich metadata for debugging/auditing.
  *
  * Features:
@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { createHash } from 'node:crypto';
+import { parseSshConnection } from './session/provenance.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,7 @@ export type EventType =
   | 'teams.add'
   | 'teams.start'
   | 'teams.complete'
+  | 'teams.disband'
   // Hooks
   | 'hook.fire'
   | 'hook.complete'
@@ -106,6 +108,11 @@ export interface EventMeta {
   pid: number;
   ppid: number;
   event: EventType;
+  // Audit attribution — who ran this and from where. Answers "was this agent
+  // started on the host by a remote user?" for every event, not just runs.
+  osUser: string;
+  transport: 'local' | 'ssh';
+  sshClientIp?: string;
 }
 
 export interface EventPayload {
@@ -116,6 +123,9 @@ export interface EventPayload {
 
   // Context
   cwd?: string;
+  /** Top-level command group, e.g. 'teams', 'secrets' — the audit filter key. */
+  module?: string;
+  /** Full command path, e.g. 'teams create', 'secrets get'. */
   command?: string;
   args?: string[];
 
@@ -247,6 +257,37 @@ function truncatePayload(payload: EventPayload, maxLength: number = DEFAULT_TRUN
   return result;
 }
 
+// ─── Audit attribution ────────────────────────────────────────────────────────
+
+interface AuditOrigin {
+  osUser: string;
+  transport: 'local' | 'ssh';
+  sshClientIp?: string;
+}
+
+/**
+ * Who is running this process and from where. Derived once per process from the
+ * OS user and $SSH_CONNECTION (via the same parser the sessions layer uses), then
+ * cached — provenance can't change mid-process, so every emit() pays for it once.
+ */
+let _origin: AuditOrigin | undefined;
+function auditOrigin(): AuditOrigin {
+  if (_origin) return _origin;
+  let osUser = 'unknown';
+  try {
+    osUser = os.userInfo().username;
+  } catch {
+    // Container/edge cases where the uid has no passwd entry.
+  }
+  const ssh = process.env.SSH_CONNECTION ? parseSshConnection(process.env.SSH_CONNECTION) : undefined;
+  _origin = {
+    osUser,
+    transport: ssh ? 'ssh' : 'local',
+    ...(ssh ? { sshClientIp: ssh.clientIp } : {}),
+  };
+  return _origin;
+}
+
 // ─── Core API ─────────────────────────────────────────────────────────────────
 
 /**
@@ -271,23 +312,34 @@ export function emit(event: EventType, payload: EventPayload = {}): void {
       pid: process.pid,
       ppid: process.ppid,
       event,
+      ...auditOrigin(),
       ...truncatePayload(payload),
     };
 
     const line = JSON.stringify(record) + '\n';
     const logPath = getLogFilePath();
+    const isNew = !fs.existsSync(logPath);
     fs.appendFileSync(logPath, line, { mode: FILE_MODE });
 
-    // Ensure file permissions (appendFileSync doesn't respect mode on existing files)
-    try {
-      fs.chmodSync(logPath, FILE_MODE);
-    } catch {
-      // May fail if not owner
+    // appendFileSync's mode only applies when it CREATES the file, so we chmod
+    // to guarantee 0600 — but only on first write to a given path this process.
+    // command.start/end fire on every invocation; chmod-per-append would double
+    // the syscalls on the hot path for no gain (perms don't drift mid-run).
+    if (isNew || logPath !== _chmoddedPath) {
+      _chmoddedPath = logPath;
+      try {
+        fs.chmodSync(logPath, FILE_MODE);
+      } catch {
+        // May fail if not owner
+      }
     }
   } catch {
     // Silent failure - logging should never break the CLI
   }
 }
+
+/** Last log path this process chmod'd — avoids a redundant chmod per append. */
+let _chmoddedPath: string | undefined;
 
 /**
  * Convenience wrapper for timed operations.
@@ -566,9 +618,10 @@ export function query(options: {
   eventTypes?: EventType[];
   agent?: string;
   command?: string;
+  module?: string;
   limit?: number;
 }): EventRecord[] {
-  const { startDate, endDate = new Date(), eventTypes, agent, command, limit } = options;
+  const { startDate, endDate = new Date(), eventTypes, agent, command, module, limit } = options;
   const results: EventRecord[] = [];
 
   if (!fs.existsSync(LOGS_DIR)) return results;
@@ -578,6 +631,19 @@ export function query(options: {
     .sort()
     .reverse();
 
+  // Coarse file skip works on whole days, so floor the bounds to midnight —
+  // otherwise a sub-day window (`--since 2h` at 15:00 → startDate 13:00) would
+  // drop *today's* file, whose date stamps to 00:00. Precise filtering below is
+  // per-record on `ts`.
+  const startDay = startDate
+    ? new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
+    : undefined;
+  const endDay = endDate
+    ? new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate())
+    : undefined;
+  const startMs = startDate?.getTime();
+  const endMs = endDate?.getTime();
+
   for (const file of files) {
     const match = file.match(/^events-(\d{4})-(\d{2})-(\d{2})\.jsonl$/);
     if (!match) continue;
@@ -585,8 +651,8 @@ export function query(options: {
     const [, yyyy, mm, dd] = match;
     const fileDate = new Date(parseInt(yyyy), parseInt(mm) - 1, parseInt(dd));
 
-    if (startDate && fileDate < startDate) continue;
-    if (endDate && fileDate > endDate) continue;
+    if (startDay && fileDate < startDay) continue;
+    if (endDay && fileDate > endDay) continue;
 
     const content = fs.readFileSync(path.join(LOGS_DIR, file), 'utf-8');
     const lines = content.trim().split('\n').filter(Boolean);
@@ -595,9 +661,19 @@ export function query(options: {
       try {
         const record = JSON.parse(line) as EventRecord;
 
+        // Precise per-record window — the file skip above is day-granular only.
+        const recMs = Date.parse(record.ts);
+        if (startMs !== undefined && !isNaN(recMs) && recMs < startMs) continue;
+        if (endMs !== undefined && !isNaN(recMs) && recMs > endMs) continue;
+
         if (eventTypes && !eventTypes.includes(record.event)) continue;
         if (agent && record.agent !== agent) continue;
-        if (command && record.command !== command) continue;
+        // `--command` matches by path prefix on a word boundary, so a coarse
+        // "teams" catches "teams create"/"teams remove" while an exact
+        // "teams create" stays exact.
+        if (command && record.command !== command &&
+            !(typeof record.command === 'string' && record.command.startsWith(command + ' '))) continue;
+        if (module && record.module !== module) continue;
 
         results.push(record);
 

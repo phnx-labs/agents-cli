@@ -46,6 +46,7 @@ import { PLUGIN_GROUP_COLORS } from './plugins.js';
 import { countSessionsInScope } from '../lib/session/discover.js';
 import type { SessionAgentId } from '../lib/session/types.js';
 import { damerauLevenshtein } from '../lib/fuzzy.js';
+import { terminalWidth, truncateToWidth, stringWidth, stripAnsi } from '../lib/session/width.js';
 
 /** Resource kinds the inspect command can drill into. */
 const DRILLABLE_KINDS = [
@@ -88,6 +89,44 @@ const SINGULAR_DRILL_ALIASES: Record<string, DrillableKind> = {
 const CAPABILITY_NAMES: readonly CapabilityName[] = [
   'hooks', 'mcp', 'skills', 'commands', 'subagents', 'plugins', 'workflows', 'rules', 'allowlist',
 ];
+
+/** Wrap a separator-joined value list under `prefix`, preserving a hanging indent. */
+export function wrapJoined(prefix: string, items: string[], sep: string, width: number): string[] {
+  if (items.length === 0) return [];
+  const continuation = ' '.repeat(stringWidth(prefix));
+  const fitItem = (item: string, linePrefix: string): string => {
+    const room = Math.max(1, width - stringWidth(linePrefix));
+    return stringWidth(item) > room ? truncateToWidth(item, room) : item;
+  };
+
+  const lines: string[] = [];
+  let linePrefix = prefix;
+  let line = prefix;
+  let hasItem = false;
+  for (const raw of items) {
+    const item = fitItem(raw, linePrefix);
+    const candidate = hasItem ? `${line}${sep}${item}` : `${line}${item}`;
+    if (hasItem && stringWidth(candidate) > width) {
+      lines.push(line);
+      linePrefix = continuation;
+      line = continuation + fitItem(raw, linePrefix);
+      hasItem = true;
+    } else {
+      line = candidate;
+      hasItem = true;
+    }
+  }
+  if (hasItem) lines.push(line);
+  return lines;
+}
+
+function printWrappedJoined(prefix: string, items: string[], sep: string): void {
+  for (const line of wrapJoined(prefix, items, sep, terminalWidth())) console.log(line);
+}
+
+function truncateValueForPrefix(prefix: string, value: string): string {
+  return truncateToWidth(stripAnsi(value), Math.max(1, terminalWidth() - stringWidth(prefix)));
+}
 
 interface ResourceItem {
   name: string;
@@ -493,7 +532,10 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
     console.log(`  ${'git'.padEnd(10)} ${git.branch}${dirty}${url}`);
     if (git.lastCommit) {
       const rel = git.lastCommit.relative ? `  ${chalk.gray(`(${git.lastCommit.relative})`)}` : '';
-      sub('last', `${chalk.cyan(git.lastCommit.sha)}  ${truncate(git.lastCommit.subject, 60)}${rel}`);
+      const prefix = `  ${''.padEnd(10)} ${chalk.gray('last'.padEnd(8))} `;
+      const sha = chalk.cyan(git.lastCommit.sha);
+      const subjectWidth = Math.max(8, terminalWidth() - stringWidth(prefix) - stringWidth(sha) - 2 - stringWidth(rel));
+      console.log(`${prefix}${sha}  ${truncateToWidth(git.lastCommit.subject, subjectWidth)}${rel}`);
     }
     if (git.ahead !== null && git.behind !== null && (git.ahead > 0 || git.behind > 0)) {
       sub('sync', `ahead ${git.ahead} ${chalk.gray('·')} behind ${git.behind}`);
@@ -509,10 +551,12 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
     console.log(`  ${'manifests'.padEnd(10)} ${manifests.join(', ')}`);
     if (manifest) {
       if (manifest.versions.length > 0) {
-        sub('versions', manifest.versions.map(v => `${v.agent} ${chalk.cyan(v.version)}`).join(chalk.gray(' · ')));
+        const prefix = `  ${''.padEnd(10)} ${chalk.gray('versions'.padEnd(8))} `;
+        printWrappedJoined(prefix, manifest.versions.map(v => `${v.agent} ${chalk.cyan(v.version)}`), chalk.gray(' · '));
       }
       if (manifest.strategies.length > 0) {
-        sub('run', manifest.strategies.map(s => `${s.agent}:${s.strategy}`).join(chalk.gray(' · ')));
+        const prefix = `  ${''.padEnd(10)} ${chalk.gray('run'.padEnd(8))} `;
+        printWrappedJoined(prefix, manifest.strategies.map(s => `${s.agent}:${s.strategy}`), chalk.gray(' · '));
       }
     }
   }
@@ -638,7 +682,10 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
     ['alias', aliasPath],
     ['strategy', strategy],
   ];
-  for (const [k, v] of rows) console.log(`  ${k.padEnd(10)} ${v}`);
+  for (const [k, v] of rows) {
+    const prefix = `  ${k.padEnd(10)} `;
+    console.log(prefix + truncateValueForPrefix(prefix, v));
+  }
 
   console.log('\n' + chalk.bold('Capabilities'));
   for (const cap of CAPABILITY_NAMES) {
@@ -699,7 +746,8 @@ function renderItemList(header: string, jsonHead: Record<string, unknown>, kind:
     const tag = chalk.gray(`[${item.source}]`.padEnd(10));
     console.log(`  ${tag} ${termLink(chalk.cyan(item.name), item.linkTarget)}`);
     if (item.description) {
-      console.log(`             ${chalk.gray(truncate(item.description, 90))}`);
+      const prefix = '             ';
+      console.log(prefix + chalk.gray(truncateToWidth(item.description, Math.max(1, terminalWidth() - stringWidth(prefix)))));
     }
     if (item.groups) printGroupRows(item.groups);
   }
@@ -1279,7 +1327,7 @@ function readFirstProseLine(p: string): string {
 // ─── OSC-8 + path helpers ────────────────────────────────────────────────────
 
 function termLink(text: string, filePath: string): string {
-  if (!filePath) return text;
+  if (!filePath || !process.stdout.isTTY) return text;
   const url = `file://${filePath}`;
   return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
 }

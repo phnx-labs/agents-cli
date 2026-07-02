@@ -1,0 +1,94 @@
+#!/usr/bin/env node
+/**
+ * A/B benchmark for the shared SSH engine, against a real enrolled host.
+ *
+ *   bun run build            # build dist/ first
+ *   node scripts/bench-ssh.mjs <host>
+ *
+ * Measures the three tangible laptop-side costs the engine targets. Each number
+ * is wall-clock on the machine you run it from — the thing that matters when the
+ * fleet is driven from a small laptop:
+ *
+ *   P3  repeated `--host` calls: fresh handshake each vs reused control socket
+ *   P2  readiness: old 3 round-trips vs new 1 compound readyProbe
+ *   P1  follow loop: old 2 un-muxed calls/cycle vs new 1 muxed combined call
+ *
+ * Requires a live host reachable over passwordless ssh (needs a real network
+ * round-trip to be meaningful — a Tailscale-relayed peer shows the win most
+ * clearly since each avoided handshake is expensive). Not a CI benchmark.
+ */
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { execSync } from 'child_process';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const dist = join(here, '..', 'dist');
+const { sshExec } = await import(join(dist, 'lib', 'ssh-exec.js'));
+const { readyProbe } = await import(join(dist, 'lib', 'hosts', 'ready.js'));
+
+const HOST = process.argv[2];
+if (!HOST) {
+  console.error('usage: node scripts/bench-ssh.mjs <host>   (run `bun run build` first)');
+  process.exit(2);
+}
+
+const ms = (t0) => Number(process.hrtime.bigint() - t0) / 1e6;
+const clearSockets = () => { try { execSync('rm -f ~/.agents/.cache/ssh/cm-*', { shell: '/bin/bash' }); } catch { /* none */ } };
+const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+
+function timeLoop(label, n, fn) {
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < n; i++) fn(i);
+  const total = ms(t0);
+  console.log(`  ${label.padEnd(34)} ${total.toFixed(0).padStart(6)}ms total  ${(total / n).toFixed(0).padStart(5)}ms/call`);
+  return total;
+}
+
+console.log(`\nHost: ${HOST}   (wall-clock on this laptop)\n`);
+
+// P3: repeated same-host calls, handshake amortization.
+console.log('P3  repeated `--host` calls (10x trivial remote `true`)');
+const N = 10;
+clearSockets();
+const off = timeLoop('multiplex OFF (fresh handshake)', N, () => sshExec(HOST, 'true', { multiplex: false }));
+clearSockets();
+const on = timeLoop('multiplex ON  (reused socket)', N, () => sshExec(HOST, 'true', { multiplex: true }));
+console.log(`  => ${(off / on).toFixed(1)}x faster, ${(off - on).toFixed(0)}ms saved over ${N} calls\n`);
+
+// P2: readiness, old 3 round-trips (1 muxed + 2 un-muxed, as the old code did) vs new 1.
+console.log('P2  readiness check (median of 5)');
+const oldReady = [], newReady = [];
+for (let r = 0; r < 5; r++) {
+  clearSockets();
+  let t0 = process.hrtime.bigint();
+  sshExec(HOST, 'true', { multiplex: true });
+  sshExec(HOST, 'bash -lc "agents --version 2>/dev/null"', { multiplex: false });
+  sshExec(HOST, 'bash -lc "agents view 2>/dev/null || agents list 2>/dev/null"', { multiplex: false });
+  oldReady.push(ms(t0));
+  clearSockets();
+  t0 = process.hrtime.bigint();
+  readyProbe(HOST);
+  newReady.push(ms(t0));
+}
+console.log(`  old (3 round-trips)   ${median(oldReady).toFixed(0).padStart(6)}ms`);
+console.log(`  new (1 readyProbe)    ${median(newReady).toFixed(0).padStart(6)}ms`);
+console.log(`  => ${(median(oldReady) / median(newReady)).toFixed(1)}x faster, ${(median(oldReady) - median(newReady)).toFixed(0)}ms saved per dispatch\n`);
+
+// P1: follow loop, per-cycle cost + process spawns.
+console.log('P1  follow loop, cost of 20 poll cycles');
+const CYCLES = 20;
+const log = '$HOME/.agents/.cache/hosts/benchfollow.log';
+const exit = '$HOME/.agents/.cache/hosts/benchfollow.exit';
+execSync(`ssh ${HOST} ${JSON.stringify('mkdir -p ~/.agents/.cache/hosts; printf "x\\n" > ~/.agents/.cache/hosts/benchfollow.log; rm -f ~/.agents/.cache/hosts/benchfollow.exit')}`, { stdio: 'ignore' });
+clearSockets();
+const oldFollow = timeLoop('OLD 2 un-muxed calls/cycle', CYCLES, () => {
+  sshExec(HOST, `tail -c +1 ${log} 2>/dev/null`, { multiplex: false });
+  sshExec(HOST, `cat ${exit} 2>/dev/null`, { multiplex: false });
+});
+clearSockets();
+const newFollow = timeLoop('NEW 1 muxed combined call/cycle', CYCLES, () => {
+  sshExec(HOST, `tail -c +1 ${log} 2>/dev/null; printf '\\n@@M@@\\n'; cat ${exit} 2>/dev/null`, { multiplex: true });
+});
+execSync(`ssh ${HOST} 'rm -f ~/.agents/.cache/hosts/benchfollow.*'`, { stdio: 'ignore' });
+console.log(`  ssh process spawns:   OLD ${CYCLES * 2}   NEW ${CYCLES}   (50% fewer)`);
+console.log(`  => ${(oldFollow / newFollow).toFixed(1)}x faster wall-clock over ${CYCLES} cycles\n`);

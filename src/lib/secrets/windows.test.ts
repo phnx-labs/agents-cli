@@ -217,4 +217,19 @@ describe.skipIf(process.platform !== 'win32')('real Windows Credential Manager',
       expect(windowsBackend.has(item)).toBe(false);
     }
   });
+
+  it('round-trips a multiline value (PEM/SSH key) — CredMan stores raw bytes', async () => {
+    const cp = await vi.importActual<typeof import('child_process')>('child_process');
+    spawnSyncMock.mockImplementation((...a: any[]) => (cp.spawnSync as any)(...a));
+    _resetForTest({ forceAvailable: true });
+
+    const item = `agents-cli.secrets.wintest.ml.${Date.now()}`;
+    const value = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\nAAAA==\n-----END OPENSSH PRIVATE KEY-----\n';
+    try {
+      windowsBackend.set(item, value);
+      expect(windowsBackend.get(item)).toBe(value);
+    } finally {
+      expect(windowsBackend.delete(item)).toBe(true);
+    }
+  });
 });

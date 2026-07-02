@@ -108,7 +108,7 @@ export function isSyncConfigured(now: number = Date.now()): boolean {
   }
 }
 
-// machineId() now lives in the dependency-free leaf ../../machine-id.ts so
-// low-level modules (state.ts) can use it without an import cycle. Re-exported
-// here for existing importers.
-export { machineId } from '../../machine-id.js';
+// machineId() and normalizeHost() now live in the dependency-free leaf
+// ../../machine-id.ts so low-level modules (state.ts) can use them without an
+// import cycle. Re-exported here for existing importers.
+export { machineId, normalizeHost } from '../../machine-id.js';

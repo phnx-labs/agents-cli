@@ -27,6 +27,7 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 import chalk from 'chalk';
 import { getCacheDir } from '../state.js';
+import { SSH_OPTS, controlOpts } from '../ssh-exec.js';
 import { formatRelativeTime } from './relative-time.js';
 import { terminalWidth } from './width.js';
 
@@ -100,11 +101,6 @@ export function buildRemoteCommand(forwardedArgs: string[], columns?: number): s
   return `bash -lc ${shellQuote(withCols)}`;
 }
 
-const SSH_OPTS = [
-  '-o', 'BatchMode=yes',
-  '-o', 'StrictHostKeyChecking=accept-new',
-  '-o', 'ConnectTimeout=10',
-];
 
 /** The four outcomes of one `ssh <host> agents sessions …` invocation. */
 export type SshOutcome = 'ok' | 'unreachable' | 'query-failed' | 'spawn-error';
@@ -197,7 +193,7 @@ export function runRemoteSessions(hosts: string[], argv: string[] = process.argv
 
   for (const host of hosts) {
     if (multi) process.stdout.write(chalk.cyan(`\n── ${host} ──\n`));
-    const res = spawnSync('ssh', [...SSH_OPTS, host, remoteCmd], {
+    const res = spawnSync('ssh', [...SSH_OPTS, ...controlOpts(), host, remoteCmd], {
       encoding: 'utf8',
       maxBuffer: 64 * 1024 * 1024,
     });

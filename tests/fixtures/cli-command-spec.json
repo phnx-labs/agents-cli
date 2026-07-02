@@ -207,23 +207,6 @@
     "registry_divergence": "agents-cli registry has commandsSubdir='commands' for kiro; per docs Kiro uses skills/ only — no commands/ directory."
   },
 
-  "roo": {
-    "supported": true,
-    "docs": {
-      "url": "https://docs.roocode.com/features/slash-commands",
-      "quote_path": "Commands are markdown files stored in .roo/commands/ directories",
-      "quote_priority": "project > global > built-in"
-    },
-    "formats": [
-      {
-        "kind": "markdown-flat",
-        "path_template": "{HOME}/.roo/commands/{name}.md",
-        "frontmatter": { "required": [], "optional": ["description","argument-hint","mode"] },
-        "name_from": "filename-lowercase-dashes"
-      }
-    ]
-  },
-
   "antigravity": {
     "supported": true,
     "docs": {

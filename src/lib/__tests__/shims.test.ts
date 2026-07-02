@@ -95,8 +95,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 19 (droid binary resolution branch in dispatcher)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(19);
+  it('is 21 (kimi via generic branch + grok anti-loop guard in dispatcher)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(21);
   });
 });
 
@@ -135,6 +135,17 @@ describe('generateShimScript — config-dir env vars', () => {
     expect(script).toContain('"$VERSION_DIR/home/.kimi-code"');
   });
 
+  // Regression (re-exec loop): the dispatcher must resolve kimi through the
+  // generic node_modules/.bin branch, never the old ~/.kimi-code/bin path whose
+  // `command -v kimi` fallback resolves to this dispatcher itself (the shims dir
+  // sits ahead of ~/.local/bin on PATH) and re-execs forever.
+  it('resolves kimi from node_modules/.bin in the dispatcher, without a command -v loop', () => {
+    const script = generateShimScript('kimi');
+    expect(script).toContain('"$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"');
+    expect(script).not.toContain('BINARY=$(command -v kimi');
+    expect(script).not.toContain('KIMI_BINARY="$HOME/.kimi-code/bin/kimi"');
+  });
+
   it('does not export a managed config-dir var for other agents', () => {
     const script = generateShimScript('opencode');
     expect(script).not.toContain('export CLAUDE_CONFIG_DIR=');
@@ -145,7 +156,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(8);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(10);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
@@ -172,6 +183,22 @@ describe('generateVersionedAliasScript', () => {
     expect(script).toContain('export GROK_HOME=');
   });
 
+  // Regression (re-exec loop): when ~/.grok/downloads is empty, the grok
+  // fallback runs `command -v grok`, which resolves to this alias's sibling
+  // dispatcher shim (shims dir ahead of ~/.local/bin on PATH). Without a guard
+  // it exec-loops forever. The guard must null out any shims-dir match.
+  it('guards grok command -v fallback against the shims dir (alias)', () => {
+    const script = generateVersionedAliasScript('grok', '0.2.33');
+    expect(script).toContain('command -v grok');
+    expect(script).toContain('"$HOME/.agents/.cache/shims/"*) BINARY="" ;;');
+  });
+
+  it('guards grok command -v fallback against the shims dir (dispatcher)', () => {
+    const script = generateShimScript('grok');
+    expect(script).toContain('command -v grok');
+    expect(script).toContain('"$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;');
+  });
+
   it('resolves grok for the pinned version', () => {
     const script = generateVersionedAliasScript('grok', '0.1.218');
     expect(script).toContain('$HOME/.grok/downloads');
@@ -179,10 +206,17 @@ describe('generateVersionedAliasScript', () => {
     expect(script).not.toContain('node_modules/.bin');
   });
 
-  it('resolves kimi from ~/.kimi-code/bin, not node_modules', () => {
+  // Regression (re-exec loop): kimi npm-installs @moonshot-ai/kimi-code, so its
+  // binary is at node_modules/.bin/kimi — NOT ~/.kimi-code/bin (that path only
+  // exists for a curl install, and even then installVersion symlinks it into
+  // node_modules/.bin). The old ~/.kimi-code/bin special-case fell back to
+  // `command -v kimi`, which resolves to the sibling dispatcher shim and
+  // re-execs forever. Resolve via node_modules; keep KIMI_CODE_HOME isolation.
+  it('resolves kimi from node_modules/.bin, not ~/.kimi-code/bin', () => {
     const script = generateVersionedAliasScript('kimi', '0.12.1');
-    expect(script).toContain('KIMI_BINARY="$HOME/.kimi-code/bin/kimi"');
-    expect(script).not.toContain('node_modules/.bin/kimi');
+    expect(script).toContain('node_modules/.bin/kimi');
+    expect(script).not.toContain('KIMI_BINARY="$HOME/.kimi-code/bin/kimi"');
+    expect(script).not.toContain('BINARY=$(command -v kimi');
     expect(script).toContain('export KIMI_CODE_HOME=');
   });
 
@@ -392,9 +426,20 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
     fs.writeFileSync(shimPath, `#!/bin/bash\n# ${marker}\nexec true\n`, { mode: 0o755 });
   }
 
+  // The file createShim actually writes on this platform: `<cmd>.cmd` on Windows,
+  // the bare script on POSIX. Fixtures must land here — since #543, shimExists /
+  // readShimSchemaVersion key off the on-disk filename (onDiskShimFile), while
+  // getShimPath returns the logical (extensionless) launch path that isn't a real
+  // file on Windows. Writing the fixture to getShimPath left Windows looking for a
+  // `.cmd` that never existed, so ensureShimCurrent always returned 'created'.
+  function onDiskShimPath(mod: typeof import('../shims.js'), agent: 'claude'): string {
+    const logical = mod.getShimPath(agent);
+    return path.join(path.dirname(logical), mod.onDiskShimFile(path.basename(logical), process.platform));
+  }
+
   it('does NOT downgrade a shim stamped by a newer install', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShimPath(mod, 'claude');
     const newer = mod.SHIM_SCHEMA_VERSION + 1;
     writeShim(shimPath, `agents-shim-version: ${newer}`);
     const before = fs.readFileSync(shimPath, 'utf8');
@@ -405,7 +450,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
 
   it('regenerates a shim from an older install (upgrade)', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShimPath(mod, 'claude');
     writeShim(shimPath, 'agents-shim-version: 1');
 
     expect(mod.ensureShimCurrent('claude')).toBe('updated');
@@ -416,7 +461,7 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
 
   it('regenerates an unversioned (pre-marker) shim', async () => {
     const mod = await import('../shims.js');
-    const shimPath = mod.getShimPath('claude');
+    const shimPath = onDiskShimPath(mod, 'claude');
     writeShim(shimPath, 'no marker here');
 
     expect(mod.ensureShimCurrent('claude')).toBe('updated');

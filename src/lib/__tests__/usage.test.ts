@@ -15,6 +15,9 @@ import {
   readClaudeUsageCache,
   isClaudeUsageOrgMatch,
   writeClaudeUsageCache,
+  normalizeKimiWindows,
+  formatKimiPlan,
+  type KimiUsagesResponse,
   type UsageSnapshot,
   type UsageWindow,
 } from '../usage.js';
@@ -380,5 +383,49 @@ describe('Claude usage cache', () => {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('normalizeKimiWindows', () => {
+  // A real /usages response body captured live from api.kimi.com. Numbers arrive
+  // as strings; the short limit is a 300-minute bucket, and `usage` is the
+  // rolling account quota.
+  const payload: KimiUsagesResponse = {
+    user: { userId: 'd483kfq783mkn8of1gtg', membership: { level: 'LEVEL_INTERMEDIATE' } },
+    usage: { limit: '100', used: '1', remaining: '99', resetTime: '2026-07-06T03:47:50.921944Z' },
+    limits: [
+      {
+        window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' },
+        detail: { limit: '100', used: '4', remaining: '96', resetTime: '2026-07-01T13:47:50.921944Z' },
+      },
+    ],
+    subType: 'TYPE_PURCHASE',
+  };
+
+  it('maps the 300-minute limit to a session bar and the rolling quota to a week bar', () => {
+    const windows = normalizeKimiWindows(payload);
+    expect(windows.map((w) => w.shortLabel)).toEqual(['S', 'W']);
+    const session = windows.find((w) => w.key === 'session')!;
+    const week = windows.find((w) => w.key === 'week')!;
+    // used/limit as a percentage: 4/100 and 1/100.
+    expect(session.usedPercent).toBe(4);
+    expect(week.usedPercent).toBe(1);
+    // 300-minute window (TIME_UNIT_MINUTE) carries through as-is.
+    expect(session.windowMinutes).toBe(300);
+    expect(session.resetsAt?.toISOString()).toBe('2026-07-01T13:47:50.921Z');
+  });
+
+  it('drops a bucket with a zero or missing limit rather than dividing by zero', () => {
+    const windows = normalizeKimiWindows({
+      usage: { limit: '0', used: '5' },
+      limits: [{ detail: { used: '4' } }], // no limit
+    });
+    expect(windows).toEqual([]);
+  });
+
+  it('derives the plan label from the membership tier, falling back to subType', () => {
+    expect(formatKimiPlan(payload)).toBe('Intermediate');
+    expect(formatKimiPlan({ subType: 'TYPE_PURCHASE' })).toBe('Purchase');
+    expect(formatKimiPlan({})).toBeNull();
   });
 });

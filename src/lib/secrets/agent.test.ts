@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, realBundleCount, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -103,6 +103,46 @@ describe('handleAgentRequest', () => {
       // fresh on-disk read and restarts the broker on mismatch.
       expect(typeof r.cliVersion).toBe('string');
     }
+  });
+});
+
+describe('secrets list metadata cache (broker-held snapshot)', () => {
+  const metaKey = `${META_CACHE_PREFIX}abc123`;
+
+  it('round-trips a metadata snapshot through the same load/get transport', () => {
+    const store = freshStore();
+    const snapshot = JSON.stringify([{ name: 'prod', vars: {} }, { name: 'stage', vars: {} }]);
+    handleAgentRequest(store, loadReq(metaKey, { __snapshot__: snapshot }, 60_000), 0);
+    const r = handleAgentRequest(store, { cmd: 'get', name: metaKey }, 1_000);
+    expect(r).toMatchObject({ hit: true, env: { __snapshot__: snapshot } });
+  });
+
+  it('hides the internal metadata-cache entry from status (not a user bundle)', () => {
+    const store = freshStore();
+    handleAgentRequest(store, loadReq('prod', { K: 'v' }, 60_000), 0);
+    handleAgentRequest(store, loadReq(metaKey, { __snapshot__: '[]' }, 60_000), 0);
+    const r = handleAgentRequest(store, { cmd: 'status' }, 1_000);
+    if (r.ok && r.cmd === 'status') {
+      expect(r.entries.map((e) => e.name)).toEqual(['prod']); // metaKey excluded
+    }
+  });
+
+  it('lock-all still wipes the metadata cache (screen-lock drops it too)', () => {
+    const store = freshStore();
+    handleAgentRequest(store, loadReq(metaKey, { __snapshot__: '[]' }, 60_000), 0);
+    handleAgentRequest(store, { cmd: 'lock' }, 0);
+    expect(handleAgentRequest(store, { cmd: 'get', name: metaKey }, 0)).toMatchObject({ hit: false });
+  });
+
+  it('realBundleCount excludes the metadata cache so it cannot pin the broker on old code (#435)', () => {
+    const store = freshStore();
+    // A metadata-only store must read as empty for self-heal / idle-exit.
+    handleAgentRequest(store, loadReq(metaKey, { __snapshot__: '[]' }, 60_000), 0);
+    expect(store.size).toBe(1);
+    expect(realBundleCount(store)).toBe(0);
+    // A real unlock counts; the meta entry still does not.
+    handleAgentRequest(store, loadReq('prod', { K: 'v' }, 60_000), 0);
+    expect(realBundleCount(store)).toBe(1);
   });
 });
 

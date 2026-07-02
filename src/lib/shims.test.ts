@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateShimScript, hasAliasShadowingShim, SHIM_SCHEMA_VERSION } from './shims.js';
+import { generateShimScript, hasAliasShadowingShim, shimTargetsFor, onDiskShimFile, SHIM_SCHEMA_VERSION } from './shims.js';
 import { getProjectVersion } from './versions.js';
 
 const tempDirs: string[] = [];
@@ -259,5 +259,39 @@ describe('hasAliasShadowingShim', () => {
   it('returns false when the rc file mentions a different command', () => {
     const home = makeFakeHome(`alias claude='claude --foo'\n`);
     expect(hasAliasShadowingShim('codex', { homeDir: home })).toBe(false);
+  });
+});
+
+describe('shimTargetsFor (drop the vestigial bash shim on Windows)', () => {
+  it('POSIX writes only the extensionless bash shim', () => {
+    expect(shimTargetsFor('linux')).toEqual({ bash: true, cmd: false });
+    expect(shimTargetsFor('darwin')).toEqual({ bash: true, cmd: false });
+  });
+
+  it('win32 writes only the .cmd companion — the bash file is never executed there', () => {
+    expect(shimTargetsFor('win32')).toEqual({ bash: false, cmd: true });
+  });
+});
+
+describe('onDiskShimFile (exists/remove must match what createShim writes)', () => {
+  // Regression guard: createShim writes only `<cmd>.cmd` on Windows, so
+  // shimExists/removeShim/readShimSchemaVersion must stat the SAME file. Deriving
+  // this from shimTargetsFor makes the two sides impossible to drift apart — the
+  // bug where the write side skipped the bare file but the check side still
+  // looked for it (orphaned .cmd on remove, regenerate-every-launch).
+  it('returns the .cmd companion on Windows', () => {
+    expect(onDiskShimFile('claude', 'win32')).toBe('claude.cmd');
+  });
+
+  it('returns the bare script on POSIX', () => {
+    expect(onDiskShimFile('claude', 'linux')).toBe('claude');
+    expect(onDiskShimFile('codex', 'darwin')).toBe('codex');
+  });
+
+  it('agrees with shimTargetsFor for every platform', () => {
+    for (const platform of ['win32', 'linux', 'darwin'] as const) {
+      const expectsCmd = shimTargetsFor(platform).cmd;
+      expect(onDiskShimFile('claude', platform).endsWith('.cmd')).toBe(expectsCmd);
+    }
   });
 });

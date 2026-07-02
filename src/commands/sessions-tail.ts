@@ -16,6 +16,11 @@ import { setHelpSections } from '../lib/help.js';
 
 const TAIL_SUPPORTED: SessionAgentId[] = ['claude', 'codex'];
 
+/** Whether a session's transcript can be live-tailed (append-only JSONL agents). */
+export function isTailable(agent: SessionAgentId): boolean {
+  return TAIL_SUPPORTED.includes(agent);
+}
+
 export interface TailFileOptions {
   /** If true, emit every line from byte 0 first, then follow. Default false (EOF). */
   fromStart?: boolean;
@@ -191,6 +196,17 @@ async function runTail(sessionId: string | undefined, options: TailOptions): Pro
     session = resolved;
   }
 
+  await streamSessionTail(session, { fromStart: options.fromStart });
+}
+
+/**
+ * Live-tail one already-resolved session's transcript to stdout until Ctrl+C.
+ * Shared by `agents sessions tail` and `agents logs -f`.
+ */
+export async function streamSessionTail(
+  session: SessionMeta,
+  options: { fromStart?: boolean } = {},
+): Promise<void> {
   const filePath = session.filePath.split('#')[0];
 
   if (process.stderr.isTTY) {

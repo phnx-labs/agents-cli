@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
+import { EventEmitter } from 'node:events';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
 import * as profiles from './profiles.js';
@@ -353,5 +354,169 @@ describe('pickWindowTarget', () => {
     ];
     const hit = pickWindowTarget(invisibleMatches, 'url:canva.com');
     expect(hit?.targetId).toBe('BG1');
+  });
+});
+
+// -----------------------------------------------------------------------------
+// recordStop ffmpeg-exit handling (#560)
+//
+// Before the fix, recordStop's 5s wait only RESOLVED the promise — it never
+// killed a hung ffmpeg and never inspected the exit code, so a failed encode
+// (bad codec, missing encoder, corrupt output) reported success with a
+// silently-empty .webm. We inject a fake ffmpeg + recording state straight into
+// the private `recordings` map so the finalize path runs without spawning real
+// ffmpeg or CDP.
+// -----------------------------------------------------------------------------
+function fakeFfmpeg() {
+  const child = new EventEmitter() as EventEmitter & {
+    stdin: { end: () => void };
+    kill: (sig?: string) => void;
+  };
+  child.stdin = { end: () => {} };
+  child.kill = () => {};
+  return child;
+}
+
+function injectRecording(
+  svc: InstanceType<typeof BrowserService>,
+  taskId: string,
+  overrides: {
+    outputPath?: string;
+    ffmpeg?: ReturnType<typeof fakeFfmpeg>;
+    ffmpegStderr?: () => string;
+  } = {}
+): ReturnType<typeof fakeFfmpeg> {
+  const ffmpeg = overrides.ffmpeg ?? fakeFfmpeg();
+  const durationTimer = setTimeout(() => {}, 1_000_000);
+  const sizeCheckInterval = setInterval(() => {}, 1_000_000);
+  (svc as unknown as { recordings: Map<string, unknown> }).recordings.set(taskId, {
+    outputPath: overrides.outputPath ?? path.join(tmpdir(), 'rec-missing.webm'),
+    startedAt: Date.now() - 1000,
+    fps: 5,
+    maxBytes: 25 * 1024 * 1024,
+    durationMs: 60_000,
+    ffmpeg,
+    ffmpegStderr: overrides.ffmpegStderr ?? (() => ''),
+    sessionId: 'sess-1',
+    conn: { cdp: { off: () => {}, send: async () => {} } },
+    frameHandler: () => {},
+    durationTimer,
+    sizeCheckInterval,
+  });
+  return ffmpeg;
+}
+
+describe('recordStop ffmpeg exit handling (#560)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('surfaces a non-zero ffmpeg exit as failure (not silent success)', async () => {
+    const svc = new BrowserService();
+    const ffmpeg = fakeFfmpeg();
+    // Closing stdin makes a broken ffmpeg flush and exit non-zero.
+    ffmpeg.stdin.end = () => setImmediate(() => ffmpeg.emit('exit', 1));
+    injectRecording(svc, 'task-fail', {
+      ffmpeg,
+      ffmpegStderr: () => '[libvpx-vp9] failed to encode frame',
+    });
+
+    await expect(svc.recordStop('task-fail')).rejects.toThrow(/exited abnormally \(code 1\)/);
+  });
+
+  it('includes ffmpeg stderr in the failure so the encode error is diagnosable', async () => {
+    const svc = new BrowserService();
+    const ffmpeg = fakeFfmpeg();
+    ffmpeg.stdin.end = () => setImmediate(() => ffmpeg.emit('exit', 234));
+    injectRecording(svc, 'task-diag', {
+      ffmpeg,
+      ffmpegStderr: () => 'Unknown encoder libvpx-vp9',
+    });
+
+    await expect(svc.recordStop('task-diag')).rejects.toThrow(/Unknown encoder libvpx-vp9/);
+  });
+
+  it('drops the recording from the map even when finalize fails', async () => {
+    const svc = new BrowserService();
+    const ffmpeg = fakeFfmpeg();
+    ffmpeg.stdin.end = () => setImmediate(() => ffmpeg.emit('exit', 1));
+    injectRecording(svc, 'task-clean', { ffmpeg });
+
+    await expect(svc.recordStop('task-clean')).rejects.toThrow();
+    const recordings = (svc as unknown as { recordings: Map<string, unknown> }).recordings;
+    expect(recordings.has('task-clean')).toBe(false);
+  });
+
+  it('kills a hung ffmpeg on the 5s timeout and reports failure', async () => {
+    vi.useFakeTimers();
+    const svc = new BrowserService();
+    const kill = vi.fn();
+    const ffmpeg = fakeFfmpeg();
+    ffmpeg.kill = kill;
+    ffmpeg.stdin.end = () => {}; // never emits 'exit' — ffmpeg is hung
+    injectRecording(svc, 'task-hang', { ffmpeg });
+
+    const p = svc.recordStop('task-hang');
+    const assertion = expect(p).rejects.toThrow(/did not exit within 5s/);
+    await vi.advanceTimersByTimeAsync(5000);
+    await assertion;
+    expect(kill).toHaveBeenCalledWith('SIGKILL');
+  });
+
+  it('returns success with a real byte count on a clean (exit 0) finalize', async () => {
+    const svc = new BrowserService();
+    const outputPath = path.join(tmpdir(), `rec-ok-${process.pid}-${Date.now()}.webm`);
+    fs.writeFileSync(outputPath, Buffer.alloc(2048, 7));
+    try {
+      const ffmpeg = fakeFfmpeg();
+      ffmpeg.stdin.end = () => setImmediate(() => ffmpeg.emit('exit', 0));
+      injectRecording(svc, 'task-ok', { ffmpeg, outputPath });
+
+      const res = await svc.recordStop('task-ok');
+      expect(res.path).toBe(outputPath);
+      expect(res.bytes).toBe(2048);
+      expect(res.reason).toBe('manual');
+    } finally {
+      fs.rmSync(outputPath, { force: true });
+    }
+  });
+});
+
+describe('BrowserService.stopProfile — composite-key cleanup (#559)', () => {
+  it('cleans up a connection stored under the composite `<profile>@<endpoint>` when called with the bare profile name', async () => {
+    writeProfile('winmini', ['ssh://muqsit@win-mini?port=9222&os=windows'], 'edge');
+    const service = new BrowserService();
+
+    const cleanup = vi.fn();
+    const fakeConn = {
+      cdp: { close: vi.fn() },
+      pid: 2_000_000_000, // non-existent → killChrome's process.kill throws ESRCH (caught)
+      cleanup,
+      tasks: new Map(),
+      sessionCache: new Map(),
+    };
+    // start() keys the map on the composite, not the bare name.
+    const conns = (service as unknown as { connections: Map<string, unknown> }).connections;
+    conns.set('winmini@win-mini', fakeConn);
+
+    await service.stopProfile('winmini');
+
+    // Before the fix, get('winmini') missed the composite key and cleanup never ran.
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(fakeConn.cdp.close).toHaveBeenCalledTimes(1);
+    expect(conns.has('winmini@win-mini')).toBe(false);
+  });
+
+  it('does not touch a different profile that happens to share a name prefix', async () => {
+    const service = new BrowserService();
+    const conns = (service as unknown as { connections: Map<string, unknown> }).connections;
+    const otherCleanup = vi.fn();
+    conns.set('winmini2@ep', { cdp: { close: vi.fn() }, pid: 2_000_000_000, cleanup: otherCleanup, tasks: new Map() });
+
+    await service.stopProfile('winmini');
+
+    // "winmini2@ep" must NOT match the "winmini" stop (prefix must be `winmini@`).
+    expect(otherCleanup).not.toHaveBeenCalled();
+    expect(conns.has('winmini2@ep')).toBe(true);
   });
 });

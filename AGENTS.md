@@ -65,11 +65,11 @@ See [`docs/00-concepts.md`](docs/00-concepts.md) for the full mental model and r
 
 ## Supported harnesses
 
-15 harnesses ship support today. The full id list is `AgentId` ([`src/lib/types.ts:10`](src/lib/types.ts)); per-harness config + capabilities live in the `AGENTS` registry ([`src/lib/agents.ts:215-550`](src/lib/agents.ts)) and are gated through `supports()` ([`src/lib/capabilities.ts`](src/lib/capabilities.ts)).
+14 harnesses ship support today. The full id list is `AgentId` ([`src/lib/types.ts:10`](src/lib/types.ts)); per-harness config + capabilities live in the `AGENTS` registry ([`src/lib/agents.ts:215-550`](src/lib/agents.ts)) and are gated through `supports()` ([`src/lib/capabilities.ts`](src/lib/capabilities.ts)).
 
 ### Prioritized (first-class) harnesses
 
-These six are the support-priority set — new features and parity work target them first. When a feature can't reach all 15 at once, it must reach these:
+These six are the support-priority set — new features and parity work target them first. When a feature can't reach all 14 at once, it must reach these:
 
 **Claude Code** (`claude`) · **Codex CLI** (`codex`) · **Kimi CLI** (`kimi`) · **Antigravity CLI** (`antigravity`) · **Grok CLI** (`grok`) · **OpenCode** (`opencode`)
 
@@ -88,16 +88,15 @@ Not every harness supports every capability — the registry decides per harness
 | Gemini † | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·skip |
 | Cursor | `cursor` | — | ✓ | — | ✓ | ✓ | — | — | — | edit·skip |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — | plan·edit·skip |
-| Copilot | `copilot` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit·auto·skip |
+| Copilot | `copilot` | — | ✓ | — | ✓ | ✓ | ✓ | — | — | plan·edit·auto·skip |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
 | Kiro | `kiro` | — | ✓ | — | ✓ | ✓ | — | — | — | edit |
 | Goose | `goose` | — | ✓ | — | — | — | — | — | — | edit |
-| Roo Code | `roo` | — | ✓ | — | ✓ | ✓ | — | — | — | plan·edit |
-| Droid | `droid` | — | ✓ | — | — | ✓ | — | ✓ | — | plan·edit·auto·skip |
+| Droid | `droid` | ✓ | ✓ | — | — | ✓ | ✓ | ✓ | — | plan·edit·auto·skip |
 
 ✓ = supported · — = not supported · version cell = supported only within that range (e.g. `≥0.116` needs version `>= 0.116.0`; `<0.117` only below `0.117.0`). Out-of-range cells are **skipped silently** — `supports()` returns false and the resource is never written.
 
-- `rules` (the memory file) is supported by **all 15** — each writes its own file (see config matrix below). `workflows` is **Claude-only**. `mcp` is universal.
+- `rules` (the memory file) is supported by **all 14** — each writes its own file (see config matrix below). `workflows` is **Claude-only**. `mcp` is universal.
 - `allowlist` (granular per-tool permission rules) is limited to `claude`, `antigravity`, `grok`, `kimi`.
 - `subagents` is limited to `claude`, `openclaw`, `droid`.
 - **† Gemini (`gemini`) is deprecated by Google.** The Gemini CLI was retired for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); **Antigravity CLI (`antigravity`) is the official successor.** agents-cli still manages existing installs but warns on `agents add gemini` / `agents teams add … gemini` (`warnAgentDeprecated` in [`src/lib/agents.ts`](src/lib/agents.ts); marker on the `gemini` registry entry).
@@ -112,7 +111,7 @@ Not every harness supports every capability — the registry decides per harness
 | Cursor | `commands/` (md) | `.cursorrules` |
 | OpenCode | `commands/` (md) | `OPENCODE.md` |
 | Grok | skills + `.grok/` (hooks, plugins, agents, `config.toml`) | `AGENTS.md` + `~/.grok/memory/` |
-| Droid | `commands/` (md) + `.factory/` (`mcp.json`, `droids/`) | `AGENTS.md` (native) |
+| Droid | `commands/` (md) + `.factory/` (`settings.json` hooks, `mcp.json`, `droids/`, `plugins/`) | `AGENTS.md` (native) |
 
 ## Source layout
 
@@ -131,6 +130,7 @@ src/
     hooks/match.ts     # `matches:` predicate evaluator
     migrate.ts         # One-shot idempotent migrations
     session/           # Discovery, parsing, rendering (Claude / Codex / Gemini / OpenCode)
+    terminal/          # Terminal launch engine — tab/split surfaces in iTerm/Ghostty/tmux, local or --host (docs/terminal-engine.md)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
     teams/             # `agents teams` orchestration
     profiles.ts        # Host CLI + endpoint + model bundles
@@ -142,7 +142,7 @@ src/
 bun install && bun run build && bun test
 ```
 
-Tests are `*.test.ts` next to source; integration in `tests/`. CI runs Node 22 + 24 on every PR ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+Tests are `*.test.ts` next to source; integration in `tests/`. Every PR to `main` runs the real suite cheaply on Linux — `test` ([`tests.yml`](.github/workflows/tests.yml)) plus `gitleaks` ([`secret-scan.yml`](.github/workflows/secret-scan.yml)); those two are the required checks. The full cross-platform matrix (ubuntu + macOS + Windows × Node 22/24, [`ci.yml`](.github/workflows/ci.yml)) is cost-gated to `release/**` branches and `v*` tags (plus manual dispatch), so it runs before a release, not on every PR.
 
 **Local dev build:** `scripts/install.sh --skip-tests` builds the working tree and installs at `$HOME/.local/agents-cli-dev/`, symlinked into `$HOME/.local/bin/agents`. The npm-installed global is never touched. Version stamps as `0.0.0-dev.<sha>[-dirty]` so `agents --version` disambiguates which build is on PATH.
 

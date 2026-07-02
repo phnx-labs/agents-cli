@@ -160,22 +160,33 @@ func migrateInline(service: String, account: String, value: String) {
         writeStderr("migrate-inline: could not encode value for \(service)")
         return
     }
-    // Drop the legacy file-based copy so the next read resolves cleanly from the
-    // data-protection keychain instead of re-triggering this fallback.
-    let delStatus = SecItemDelete(fileBase(service: service, account: account) as CFDictionary)
-    if delStatus != errSecSuccess && delStatus != errSecItemNotFound {
-        writeStderr("migrate-inline: legacy delete failed for \(service) (OSStatus \(delStatus))")
-        return
-    }
-    // Defensive: clear any partial data-protection copy so SecItemAdd cannot
-    // fail with errSecDuplicateItem.
+    // We ONLY add the data-protection copy here; we never delete the legacy copy
+    // inline. Two hard-won reasons:
+    //
+    //  1. Deleting the legacy item AFTER adding the DP copy destroys the DP copy.
+    //     SecItemDelete(fileBase) is not reliably scoped to the file-based
+    //     keychain on macOS 26 — with a DP item of the same service+account
+    //     present, the unscoped delete matches and removes it too, so the DP add
+    //     never survives (and the delete returns errSecSuccess, so it's silent).
+    //  2. Deleting the legacy item BEFORE the add risks data loss: a failing
+    //     SecItemAdd would leave the value in neither keychain.
+    //
+    // Adding only is safe and sufficient: readItem queries the DP keychain first,
+    // so once the DP copy exists every future read resolves there and the second
+    // auth sheet stops — the lingering legacy copy is never read. Purging that
+    // harmless legacy copy is the job of `agents secrets migrate-acl`, which
+    // clears both keychains BEFORE its add (the safe order) after an encrypted
+    // backup. Clear any stale DP copy first so the add can't hit
+    // errSecDuplicateItem; that delete IS scoped (dpBase carries the DP flag).
     SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
     var addAttrs = dpBase(service: service, account: account)
     addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()
     addAttrs[kSecValueData] = valueData
     let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
     if addStatus != errSecSuccess {
-        writeStderr("migrate-inline: re-add failed for \(service) (OSStatus \(addStatus))")
+        // Legacy copy is untouched, so the value is never lost; the next read
+        // falls back to the legacy sheet again and retries the migration.
+        writeStderr("migrate-inline: DP add failed for \(service) (OSStatus \(addStatus)); legacy copy left intact")
     }
 }
 
@@ -190,7 +201,7 @@ func dieIfCancelled(_ status: OSStatus) {
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    die(2, "Usage: agents-keychain <get|get-batch|set|delete|has|list|migrate-acl> ...")
+    die(2, "Usage: agents-keychain <get|get-batch|set|delete|has|list|list-legacy|migrate-acl> ...")
 }
 
 let cmd = args[1]
@@ -246,6 +257,43 @@ case "list":
         guard let svce = item[kSecAttrService as String] as? String, svce.hasPrefix(prefix) else { continue }
         guard let acct = item[kSecAttrAccount as String] as? String, acct == user else { continue }
         if seen.insert(svce).inserted {
+            print(svce)
+        }
+    }
+
+case "list-legacy":
+    // list-legacy <prefix> — enumerate ONLY the legacy file-based-keychain items
+    // whose service starts with <prefix> (the migration candidates), never the
+    // data-protection keychain. Attributes only, UIFail — never decrypts, never
+    // prompts. Items written by the modern `set` live in the DP keychain and are
+    // intentionally excluded: they carry the biometry ACL already and need no
+    // migration. `agents secrets migrate-acl` uses this to rewrite only the
+    // stragglers instead of every item (which would be a Touch ID storm).
+    guard args.count == 3 else { die(2, "Usage: agents-keychain list-legacy <prefix>") }
+    let legacyPrefix = args[2]
+    guard !legacyPrefix.isEmpty else { die(2, "list-legacy requires non-empty prefix") }
+    let legacyUser = ProcessInfo.processInfo.environment["USER"] ?? NSUserName()
+    // No kSecUseDataProtectionKeychain → this queries the file-based keychain
+    // only, which is exactly where pre-migration (trusted-app-ACL) items live.
+    let legacyFileQuery: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecMatchLimit: kSecMatchLimitAll,
+        kSecReturnAttributes: kCFBooleanTrue!,
+        kSecUseAuthenticationUI: kSecUseAuthenticationUIFail,
+    ]
+    var legacyResult: AnyObject?
+    let legacyStatus = SecItemCopyMatching(legacyFileQuery as CFDictionary, &legacyResult)
+    var legacyItems: [[String: Any]] = []
+    if legacyStatus == errSecSuccess {
+        legacyItems = (legacyResult as? [[String: Any]]) ?? []
+    } else if legacyStatus != errSecItemNotFound {
+        die(2, "Failed to enumerate legacy keychain (OSStatus \(legacyStatus))")
+    }
+    var legacySeen = Set<String>()
+    for item in legacyItems {
+        guard let svce = item[kSecAttrService as String] as? String, svce.hasPrefix(legacyPrefix) else { continue }
+        guard let acct = item[kSecAttrAccount as String] as? String, acct == legacyUser else { continue }
+        if legacySeen.insert(svce).inserted {
             print(svce)
         }
     }

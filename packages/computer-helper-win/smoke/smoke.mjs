@@ -67,6 +67,12 @@ class Client {
   }
 }
 
+// A UIA document read can carry a trailing newline the caller never typed;
+// strip a single trailing CR/LF so a fidelity compare is against the typed text.
+function normalizeDoc(s) {
+  return s.replace(/\r?\n$/, '');
+}
+
 function findByRole(node, roles, out = []) {
   if (!node || typeof node !== 'object') return out;
   if (node.id && roles.includes(node.role)) out.push(node);
@@ -166,6 +172,72 @@ async function main() {
     }
     if (!matched) fail(`get_text roundtrip mismatch after retries: got ${JSON.stringify(lastText)}`);
     ok(`get_text roundtrip matched`);
+
+    // 5b. byte-for-byte type_text fidelity (regression for #554). The bug typed
+    // "reliability probe 12345" and Notepad showed "reliability 55555555555" —
+    // letters dropped, the tail collapsed onto the final digit. Type a mixed
+    // string of letters, digits, spaces AND SendKeys metacharacters (+^%~(){},
+    // which SendInput-UNICODE must deliver literally, with no operator escaping),
+    // then assert the read-back equals it EXACTLY. Clear the field first so the
+    // comparison is against the fidelity string alone.
+    const FIDELITY = 'Fidelity probe 12345 +^%~(){}';
+    await c.call('key', { keys: 'ctrl+a' });
+    await c.call('key', { keys: 'delete' });
+    // Confirm the clear landed before typing, so leftover text can't mask a drop.
+    for (let i = 0; i < 20; i++) {
+      const g = await c.call('get_text', { pid, element_id: elId });
+      if (normalizeDoc(String(g.text ?? '')) === '') break;
+      await sleep(100);
+    }
+    await c.call('type_text', { text: FIDELITY });
+    ok(`type_text fidelity "${FIDELITY}"`);
+    let fidelityText = '';
+    let fidelityMatched = false;
+    for (let i = 0; i < 40; i++) {
+      const got = await c.call('get_text', { pid, element_id: elId });
+      fidelityText = normalizeDoc(String(got.text ?? ''));
+      if (fidelityText === FIDELITY) { fidelityMatched = true; break; }
+      // Once the length settles but the content differs, it will never converge —
+      // stop early and report the corruption rather than burning all retries.
+      if (fidelityText.length >= FIDELITY.length && fidelityText !== FIDELITY) break;
+      await sleep(150);
+    }
+    if (!fidelityMatched) {
+      fail(`type_text fidelity mismatch (#554):\n    expected: ${JSON.stringify(FIDELITY)}\n    got:      ${JSON.stringify(fidelityText)}`);
+    }
+    ok('type_text fidelity byte-for-byte');
+
+    // 5c. symbol-run fidelity (regression for #581). A contiguous run of shifted
+    // symbols INTERMITTENTLY collapsed onto the LAST char of the run because every
+    // KEYEVENTF_UNICODE event carries the same virtual key (VK_PACKET) and a busy
+    // receiver coalesced the queued run — "Fidelity probe 12345 +^%(){}=" landed
+    // as "...========", "(){}[]<>" as "(>>>>>>>". Type the full shifted-symbol set
+    // (letters/digits prefix + a long symbol run) and assert byte-for-byte, LOOPED
+    // to catch the intermittency.
+    const SYMBOLS = 'sym 007 +^%&*(){}[]<>=~!@#';
+    for (let round = 0; round < 4; round++) {
+      await c.call('key', { keys: 'ctrl+a' });
+      await c.call('key', { keys: 'delete' });
+      // NB: don't get_text the now-empty document here — get_text throws
+      // "Start or end specified is past the end of the text range" on an empty
+      // UIA text range (separate get_text-on-empty bug, tracked separately).
+      // A brief settle is enough before typing the next round.
+      await sleep(200);
+      await c.call('type_text', { text: SYMBOLS });
+      let symText = '';
+      let symMatched = false;
+      for (let i = 0; i < 40; i++) {
+        const got = await c.call('get_text', { pid, element_id: elId });
+        symText = normalizeDoc(String(got.text ?? ''));
+        if (symText === SYMBOLS) { symMatched = true; break; }
+        if (symText.length >= SYMBOLS.length && symText !== SYMBOLS) break;
+        await sleep(150);
+      }
+      if (!symMatched) {
+        fail(`type_text symbol-run mismatch (#581) round ${round + 1}:\n    expected: ${JSON.stringify(SYMBOLS)}\n    got:      ${JSON.stringify(symText)}`);
+      }
+    }
+    ok('type_text symbol-run byte-for-byte (x4)');
 
     // 6. screenshot
     const shot = await c.call('screenshot');

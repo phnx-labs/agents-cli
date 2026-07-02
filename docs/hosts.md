@@ -1,7 +1,13 @@
-# Hosts — dispatch agents to your own machines (design)
+# Hosts — dispatch agents to your own machines
 
-> **Status:** Design / RFC. No implementation yet. This document is for review
-> before any code lands.
+> **Status:** Implemented. `agents hosts` and the `-H, --host` flag ship today —
+> on the read-only/config commands (`view`, `inspect`, `usage`, `cost`, `doctor`,
+> `list`, `sync`), on `agents run`, and across the `agents teams` lifecycle. This
+> document is the design rationale; see
+> [00-concepts.md](00-concepts.md#devices--hosts) for the concept overview and how
+> hosts relate to the Tailscale-backed `agents devices` registry, and
+> [09-ssh-transport.md](09-ssh-transport.md) for the shared, multiplexed SSH
+> transport every `--host` command rides.
 
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
 *your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed
@@ -187,7 +193,7 @@ is a fast-follow `HostProvider`, opt-in when logged in — not a v1 dependency.
 ## Architecture
 
 ```
-agents run <agent> "<task>" --on <host>
+agents run <agent> "<task>" --host <host>
   │
   ├─ resolveHost(name)         registry lookup in agents.yaml → {address,user,caps} [Phase 1]
   │
@@ -203,9 +209,17 @@ agents run <agent> "<task>" --on <host>
   │     durable log. Offset-tracked reads (like session/active.ts), parsed
   │     by the existing per-agent parsers (session/parse.ts).
   │
-  └─ track in the cloud store (a `host` provider) so                       [Phase 1.5]
-        agents cloud list / status / logs see host runs
+  └─ track in a local host-task store (src/lib/hosts/tasks.ts) so          [shipped]
+        agents hosts ps / agents hosts logs <id> — and the top-level
+        agents logs [id] [-f] — list and follow host runs
 ```
+
+> Shipped surface: dispatch is `agents run <agent> "<task>" --host <name>` (follows
+> live by default; `--no-follow` detaches). Track with `agents hosts ps`; view or
+> `-f` follow a run's log with `agents hosts logs <id>` or the unified
+> `agents logs [id]` (which also resolves session transcripts). Host runs are
+> tracked in a **local** task store, not `agents cloud` (a separate subsystem for
+> Rush/Codex/Factory backends).
 
 ### Host sources — owned (registered) + leased on demand (crabbox)
 
