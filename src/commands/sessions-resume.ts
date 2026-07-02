@@ -32,6 +32,7 @@ import {
   type Backend,
   type SurfaceItem,
   type EngineContext,
+  type Packing,
 } from '../lib/terminal/index.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
@@ -88,6 +89,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
     notes: `
       - space toggles a session, enter confirms; tab toggles the preview pane.
       - Layout: two-per-tab by default (session 1 → new tab, session 2 → split beside it, …). --tabs disables splitting.
+      - VSCodium defaults to one editor tab per session (matches swarm-ext's native agent-terminal UX); the others default to two-per-tab.
       - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.
       - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --host too).
       - --host <alias> resumes on a remote machine over the same SSH transport as 'sessions --host' (defaults to tmux).
@@ -191,8 +193,11 @@ async function sessionsResumeAction(query: string | undefined, options: ResumeOp
     return;
   }
 
-  // 5b. Fan out through the engine (two-per-tab by default).
-  const packing = options.tabs ? 'tabs' : 'two-per-tab';
+  // 5b. Fan out through the engine. Split-packing (two-per-tab) suits the
+  // terminal apps; the VSCodium backend defaults to one editor tab per session,
+  // matching swarm-ext's native agent-terminal UX. --tabs forces tabs anywhere.
+  const packing: Packing =
+    options.tabs || backend === 'vscodium-agent' ? 'tabs' : 'two-per-tab';
   const where = options.host ? `${backend} on ${options.host}` : backend;
   console.log(chalk.gray(`Opening ${items.length} session${items.length === 1 ? '' : 's'} in ${where} (${packing})…`));
 

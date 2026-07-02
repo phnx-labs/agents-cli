@@ -167,6 +167,10 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
 - **No `zsh -ilc` wrap** — the command runs in an editor terminal that is already
   an interactive login shell (see [above](#interactive-login-shell)).
 
+**Layout:** VSCodium defaults to **one editor tab per session** (matching swarm-ext's
+native agent-terminal UX — full-width tabs, not split panes); the two-per-tab split
+packing is for the terminal-app backends. `--tabs` forces tabs on any backend.
+
 Auto-detection is intentionally *not* wired for this backend: a VS Code integrated
 terminal reports `TERM_PROGRAM=vscode` for all three products, so the engine can't
 tell which one to target. Select it explicitly with `--vscodium` (defaults to
