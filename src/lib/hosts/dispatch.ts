@@ -14,7 +14,7 @@ import { sshExec, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { sshTargetFor } from './types.js';
 import { ensureHostReady } from './ready.js';
-import { remoteShellFor, encodePowershell, powershellQuote } from './remote-cmd.js';
+import { remoteShellFor } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
@@ -44,51 +44,38 @@ interface LaunchOptions {
 }
 
 /**
- * Windows counterpart of the POSIX `nohup bash -lc` launch line. ssh lands in
- * cmd.exe/PowerShell on Windows, so we detach via `Start-Process -WindowStyle
- * Hidden` instead of nohup, redirect all streams to the log with `*>`, and drop
- * the exit code into the sibling `.exit` file — the same log+exit contract the
- * POSIX path writes. Both the inner (detached) and outer scripts are shipped as
- * `-EncodedCommand` payloads so they survive cmd.exe re-parsing. `$HOME`-rooted
- * paths stay double-quoted so PowerShell expands them; user args/cwd are
- * single-quoted literals.
- */
-function windowsDetachedLaunch(args: string[], remoteLog: string, remoteExit: string, remoteCwd?: string): string {
-  const inner: string[] = [];
-  if (remoteCwd) inner.push(`Set-Location -LiteralPath ${powershellQuote(remoteCwd)}`);
-  inner.push(`& ${['agents', ...args].map(powershellQuote).join(' ')} *> "${remoteLog}"`);
-  inner.push(`Set-Content -LiteralPath "${remoteExit}" -Value $LASTEXITCODE`);
-  const innerEnc = encodePowershell(inner.join('; '));
-  const outer = [
-    `New-Item -ItemType Directory -Force -Path "${REMOTE_DIR}" | Out-Null`,
-    `$p = Start-Process -FilePath 'powershell' -ArgumentList @('-NoProfile','-EncodedCommand','${innerEnc}') -WindowStyle Hidden -PassThru`,
-    `$p.Id`,
-  ].join('; ');
-  return `powershell -NoProfile -EncodedCommand ${encodePowershell(outer)}`;
-}
-
-/**
  * The launch + task-record + optional follow core. Both `dispatchToHost` (run)
  * and `dispatchAgentsCommand` (teams) build their `forwardedArgs` and call here,
  * so the nohup/exit-file/offset-tail machinery lives in exactly one place.
+ *
+ * Windows remotes are refused up front: the detached launch is only half the
+ * contract — the follow/reconcile layer (`progress.ts`/`reconcile.ts`) offset-
+ * tails the log with POSIX `tail -c`/`printf`/`cat`/`stat`, which do not exist
+ * in cmd.exe/PowerShell. Shipping the launch alone would leave `run --host
+ * <windows>` dispatching but hanging on follow forever, so we fail fast with an
+ * actionable message instead. Read-only `--host` commands (view/sessions/…) run
+ * a single round-trip with no follow protocol and DO work against Windows.
  */
 async function launchDetached(host: Host, target: string, opts: LaunchOptions): Promise<DispatchResult> {
+  if (remoteShellFor(resolveRemoteOsSync(host.name)) === 'powershell') {
+    throw new Error(
+      `Detached dispatch to Windows host "${host.name}" is not supported yet — the run ` +
+        `follow/reconcile layer is POSIX-only (offset-tails the remote log with tail/cat/stat). ` +
+        `Read-only --host commands (view, sessions, usage, cost, doctor, list, teams) do work ` +
+        `against Windows.`,
+    );
+  }
   const id = randomUUID().slice(0, 8);
   const remoteLog = `${REMOTE_DIR}/${id}.log`;
   const remoteExit = `${REMOTE_DIR}/${id}.exit`;
 
-  // Pick the remote shell: POSIX `nohup bash -lc` vs Windows Start-Process.
-  let launch: string;
-  if (remoteShellFor(resolveRemoteOsSync(host.name)) === 'powershell') {
-    launch = windowsDetachedLaunch(opts.forwardedArgs, remoteLog, remoteExit, opts.remoteCwd);
-  } else {
-    // Inner command run under a login shell so PATH resolves `agents`.
-    const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
-    const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
-    const inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
-    // Outer: ensure dir, launch detached under bash -lc, print the PID.
-    launch = `mkdir -p ${REMOTE_DIR}; nohup bash -lc ${shellQuote(inner)} >/dev/null 2>&1 & echo $!`;
-  }
+  // Inner command run under a login shell so PATH resolves `agents`.
+  const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
+  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
+
+  // Outer: ensure dir, launch detached under bash -lc, print the PID.
+  const launch = `mkdir -p ${REMOTE_DIR}; nohup bash -lc ${shellQuote(inner)} >/dev/null 2>&1 & echo $!`;
   const res = sshExec(target, launch, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0) {
     throw new Error(`Failed to launch on "${host.name}": ${(res.stderr || res.stdout).trim() || 'ssh error'}`);
