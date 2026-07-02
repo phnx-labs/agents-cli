@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn } from './exec.js';
+import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv } from './exec.js';
 import type { ExecOptions } from './exec.js';
+import { mailboxDir } from './mailbox.js';
 
 /** Minimal ExecOptions with required fields, overridable per test. */
 function execOpts(over: Partial<ExecOptions> & { agent: ExecOptions['agent'] }): ExecOptions {
@@ -11,6 +12,29 @@ function execOpts(over: Partial<ExecOptions> & { agent: ExecOptions['agent'] }):
 function idx(cmd: string[], tok: string): number {
   return cmd.indexOf(tok);
 }
+
+describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () => {
+  it('points the agent at its own box, keyed by sessionId', () => {
+    const sid = '96aa7271-0c8f-4ed7-8811-1ad1d305e46e';
+    const env = buildExecEnv(execOpts({ agent: 'claude', sessionId: sid }));
+    expect(env.AGENTS_MAILBOX_DIR).toBe(mailboxDir(sid));
+  });
+
+  it('sets nothing when there is no session id (nothing to key a box on)', () => {
+    const env = buildExecEnv(execOpts({ agent: 'claude' }));
+    expect(env.AGENTS_MAILBOX_DIR).toBeUndefined();
+  });
+
+  it('lets a caller override the box via options.env (how the loop pins the run-level box)', () => {
+    const runBox = mailboxDir('loop-1782947000000-abc123');
+    const env = buildExecEnv(execOpts({
+      agent: 'claude',
+      sessionId: 'per-iteration-uuid-aaaa',
+      env: { AGENTS_MAILBOX_DIR: runBox },
+    }));
+    expect(env.AGENTS_MAILBOX_DIR).toBe(runBox);
+  });
+});
 
 describe('nativeResume (Tier-1 capability derives from the command template)', () => {
   it('claude and codex resume natively', () => {

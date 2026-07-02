@@ -18,6 +18,7 @@ import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from '.
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
 import { writePidSessionEntry } from './session/pid-registry.js';
+import { mailboxDir, isValidMailboxId } from './mailbox.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -307,6 +308,15 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     delete result.CODEX_HOME;
     delete result.COPILOT_HOME;
     delete result.KIMI_CODE_HOME;
+  }
+
+  // Point the agent at its own mailbox so the PreToolUse `mailbox-inject` hook
+  // knows which box to drain and inject mid-run. Keyed by the session id — the
+  // same id the writer resolves via mailboxIdForActiveSession(). A loop run
+  // overrides this to its run-level box via options.env (spread below), so all
+  // iterations share one inbox.
+  if (options.sessionId && isValidMailboxId(options.sessionId)) {
+    result.AGENTS_MAILBOX_DIR = mailboxDir(options.sessionId);
   }
 
   return {

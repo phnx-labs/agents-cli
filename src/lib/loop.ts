@@ -29,6 +29,7 @@ import { buildExecCommand, buildExecEnv } from './exec.js';
 import { extractUsageEvents } from './budget/enforce.js';
 import { parseTimeout } from './routines.js';
 import { writeCheckpoint, type Checkpoint } from './checkpoint.js';
+import { mailboxDir } from './mailbox.js';
 
 /** Loop block config (docs/07-entrypoints-and-loops.md → "The loop block"). */
 export interface LoopConfig {
@@ -306,6 +307,10 @@ export async function runLoop(
     );
   }
 
+  // Surface the run-level mailbox id (otherwise undiscoverable — runId is not in
+  // the session registry) so an operator can message the loop mid-flight.
+  process.stderr.write(`[loop] mailbox: agents message ${ctx.runId} "<text>"\n`);
+
   let tokens = ctx.startTokens ?? 0;
   let lastSignal: LoopSignal | undefined;
 
@@ -379,6 +384,10 @@ export async function runLoop(
           AGENTS_RUN_DIR: ctx.runDir,
           AGENTS_LOOP_SIGNAL: loopSignalPath(ctx.runDir),
           AGENTS_LOOP_ITERATION: String(iteration),
+          // Every iteration is a fresh session, so key the mailbox by the stable
+          // run id — one box for the whole loop. Overrides the per-iteration
+          // AGENTS_MAILBOX_DIR that buildExecEnv would derive from sessionId.
+          AGENTS_MAILBOX_DIR: mailboxDir(ctx.runId),
         },
       };
 
