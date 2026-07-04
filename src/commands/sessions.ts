@@ -10,7 +10,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -18,7 +18,7 @@ import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
 import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
-import { looksLikePath, toComparablePath, homeDir } from '../lib/platform/index.js';
+import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
@@ -1302,28 +1302,52 @@ export async function resumeSessionInPlace(session: SessionMeta): Promise<void> 
 
   console.log(chalk.gray(`Resuming: ${resume.join(' ')} (cwd: ${cwd})`));
 
-  await new Promise<void>((resolve) => {
-    const child = spawn(resume[0], resume.slice(1), {
-      cwd,
-      stdio: 'inherit',
-      shell: false,
-    });
+  // Resolve the (possibly version-pinned) launcher up front. On Windows the
+  // agent shim is a `.cmd`/`.ps1` and, under the shell needed to run it (see
+  // spawnResumeCommand), a missing command exits non-zero rather than emitting
+  // an ENOENT `error` event — so detect a removed version here instead of
+  // relying on that event, keeping the /continue fallback working on every OS.
+  if (!findExecutable(resume[0]) && session.version) {
+    const fallback = buildFallbackCommand(session);
+    if (fallback) {
+      console.log(chalk.gray(
+        `Version ${session.version} is not installed. Falling back to current version via /continue...`
+      ));
+      await spawnResumeCommand(fallback, cwd);
+      return;
+    }
+  }
+
+  await spawnResumeCommand(resume, cwd);
+}
+
+/**
+ * Spawn a resume command as a foreground takeover (inherited stdio), resolving
+ * when it exits. On Windows the agent launcher is a `.cmd`/PATHEXT shim that
+ * `spawn` can't exec directly — a bare-name `shell:false` spawn throws
+ * `EFTYPE`/`ENOENT` there — so we go through the shell via `needsWindowsShell`.
+ * The spawn is guarded because such a failure can be thrown synchronously;
+ * without the guard it would surface under an unrelated "Failed to discover
+ * sessions" catch upstream instead of a truthful launch error.
+ */
+function spawnResumeCommand(cmd: string[], cwd: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(cmd[0], cmd.slice(1), {
+        cwd,
+        stdio: 'inherit',
+        shell: needsWindowsShell(cmd[0]),
+      });
+    } catch (err: any) {
+      console.error(chalk.red(`Failed to launch ${cmd[0]}: ${err.message}`));
+      resolve();
+      return;
+    }
     child.on('error', (err: any) => {
-      if (err.code === 'ENOENT' && session.version) {
-        const fallback = buildFallbackCommand(session);
-        if (fallback) {
-          console.log(chalk.gray(
-            `Version ${session.version} is not installed. Falling back to current version via /continue...`
-          ));
-          const fb = spawn(fallback[0], fallback.slice(1), { cwd, stdio: 'inherit', shell: false });
-          fb.on('error', (e: any) => { console.error(chalk.red(`Failed: ${e.message}`)); resolve(); });
-          fb.on('close', () => resolve());
-          return;
-        }
-      }
-      console.error(chalk.red(`Failed to launch ${resume[0]}: ${err.message}`));
+      console.error(chalk.red(`Failed to launch ${cmd[0]}: ${err.message}`));
       if (err.code === 'ENOENT') {
-        console.error(chalk.gray(`Make sure '${resume[0]}' is on your PATH.`));
+        console.error(chalk.gray(`Make sure '${cmd[0]}' is on your PATH.`));
       }
       resolve();
     });

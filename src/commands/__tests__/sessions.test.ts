@@ -7,6 +7,7 @@ import { spawnSync } from 'child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { buildResumeCommand } from '../sessions.js';
+import { needsWindowsShell } from '../../lib/platform/index.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
 const repoRoot = process.cwd();
@@ -887,5 +888,23 @@ describe('buildResumeCommand version-pinned resume', () => {
   it('returns null for agents without resume support', () => {
     expect(buildResumeCommand(baseSession({ agent: 'gemini', version: '1.0.0' }))).toBeNull();
     expect(buildResumeCommand(baseSession({ agent: 'openclaw', version: '1.0.0' }))).toBeNull();
+  });
+
+  // Regression: resumeSessionInPlace must spawn the resume launcher through the
+  // shell on Windows. The launcher is a bare command / `.cmd` shim
+  // (`claude@2.1.138`, `codex`), which `spawn` can't exec directly on win32 —
+  // a `shell:false` spawn there threw `EFTYPE` and surfaced as a misleading
+  // "Failed to discover sessions" error. Off Windows it must stay a direct exec.
+  it('resume launcher requires a shell on win32 and not on posix', () => {
+    for (const session of [
+      baseSession({ version: '2.1.138' }),                       // claude@2.1.138
+      baseSession({ version: undefined }),                       // bare claude
+      baseSession({ agent: 'codex', version: '0.116.0' }),       // codex@0.116.0
+      baseSession({ agent: 'opencode', version: '0.5.0' }),      // opencode
+    ]) {
+      const launcher = buildResumeCommand(session)![0];
+      expect(needsWindowsShell(launcher, 'win32')).toBe(true);
+      expect(needsWindowsShell(launcher, 'linux')).toBe(false);
+    }
   });
 });
