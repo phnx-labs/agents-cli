@@ -1,0 +1,32 @@
+name: Tests (Windows)
+
+# Companion shim for tests-windows.yml. GitHub leaves a required status check
+# stuck "Expected" (blocking the merge forever) when its workflow never
+# triggers because of an `on.paths` filter. This workflow carries the inverse
+# filter (`paths-ignore` with the identical list) and reports a passing
+# `test-windows` context for PRs that touch none of the separator-prone paths,
+# so `test-windows` can be a required check without deadlocking those PRs.
+# Keep this list byte-identical to the `paths` list in tests-windows.yml.
+
+on:
+  pull_request:
+    branches: ['main', 'release/**']
+    paths-ignore:
+      - 'src/lib/hooks.ts'
+      - 'src/lib/hooks/**'
+      - 'src/lib/platform/**'
+      - 'src/lib/shims*.ts'
+      - 'hooks/**'
+      - '.github/workflows/tests-windows.yml'
+
+concurrency:
+  group: tests-windows-noop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - run: echo "No separator-prone paths changed; Windows suite not required for this PR."

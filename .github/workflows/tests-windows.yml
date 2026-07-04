@@ -9,7 +9,11 @@ name: Tests (Windows)
 #
 # This is NOT the required `test` context (that stays Linux in tests.yml and is
 # matched by scripts/release.sh EXPECTED_CHECKS -- don't reuse that job name).
-# Add `test-windows` to branch protection to make it blocking.
+# Add `test-windows` to branch protection to make it blocking. That is safe
+# only because tests-windows-noop.yml reports the same `test-windows` context
+# on PRs whose changes all fall outside the paths below -- a path-filtered
+# workflow that never triggers would otherwise leave a required check stuck
+# "Expected" and block the merge. Keep the two path lists identical.
 #
 # Tool versions are NOT pinned here -- setup-bun reads them from package.json.
 
@@ -20,7 +24,6 @@ on:
       - 'src/lib/hooks.ts'
       - 'src/lib/hooks/**'
       - 'src/lib/platform/**'
-      - 'src/lib/shims.ts'
       - 'src/lib/shims*.ts'
       - 'hooks/**'
       - '.github/workflows/tests-windows.yml'
