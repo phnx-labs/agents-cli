@@ -114,9 +114,10 @@ export function generateHookShim(args: {
 }
 
 /**
- * Render the bash shim. Bash 3.2-compatible (macOS default). Uses python3 for
- * monotonic-ish nanosecond timing — already a hard dependency of other hooks
- * in this repo (04-capture-session-start-metadata.sh does the same).
+ * Render the bash shim. Bash 3.2-compatible (macOS default). Uses Python for
+ * hashing + monotonic-ish nanosecond timing + portable mtime, resolved at
+ * runtime (python3, then python) so a Windows Microsoft Store `python3` alias
+ * stub — which exits non-zero without running — doesn't silently break caching.
  */
 function renderShim(
   name: string,
@@ -149,12 +150,25 @@ KEY_MODE=${q(key)}
 
 mkdir -p "$CACHE_DIR" "$LOGS_DIR"
 
+# Resolve a real Python. On Windows, bare python3 is often a Microsoft Store
+# app-execution alias stub that prints to stderr and exits non-zero (0 bytes on
+# stdout) -- command -v finds it but it cannot run, which silently empties the
+# hash + mtime primitives below and makes EVERY call a cache miss (the hook
+# re-runs every time). Probe by executing, not by lookup, and fall back to python.
+PY=""
+for _cand in python3 python; do
+  if command -v "$_cand" >/dev/null 2>&1 && "$_cand" -c 'import sys' >/dev/null 2>&1; then
+    PY="$_cand"; break
+  fi
+done
+[ -z "$PY" ] && PY=python3
+
 # Read stdin once (Claude/Codex/Gemini pass JSON on stdin to every hook).
 STDIN_PAYLOAD="$(cat || true)"
 
 # Portable sha1 — \`shasum\` is Perl, missing on minimal Linux images;
 # \`sha1sum\` is coreutils, missing on macOS. Truncate to 12 hex chars.
-sha1_12() { python3 -c 'import hashlib,sys; print(hashlib.sha1(sys.stdin.read().encode()).hexdigest()[:12])'; }
+sha1_12() { "$PY" -c 'import hashlib,sys; print(hashlib.sha1(sys.stdin.read().encode()).hexdigest()[:12])'; }
 
 # Derive cache key suffix from KEY_MODE. All untrusted inputs (cwd, session_id,
 # project path) are hashed before going into the filename so a malicious stdin
@@ -162,14 +176,14 @@ sha1_12() { python3 -c 'import hashlib,sys; print(hashlib.sha1(sys.stdin.read().
 cache_suffix=""
 case "$KEY_MODE" in
   per-cwd)
-    cwd_val="$(printf '%s' "$STDIN_PAYLOAD" | python3 -c 'import json,sys
+    cwd_val="$(printf '%s' "$STDIN_PAYLOAD" | "$PY" -c 'import json,sys
 try: print(json.load(sys.stdin).get("cwd","") or "")
 except Exception: pass' 2>/dev/null || true)"
     [ -z "$cwd_val" ] && cwd_val="$PWD"
     cache_suffix=".$(printf '%s' "$cwd_val" | sha1_12)"
     ;;
   per-session)
-    sid_val="$(printf '%s' "$STDIN_PAYLOAD" | python3 -c 'import json,sys
+    sid_val="$(printf '%s' "$STDIN_PAYLOAD" | "$PY" -c 'import json,sys
 try: print(json.load(sys.stdin).get("session_id","") or "")
 except Exception: pass' 2>/dev/null || true)"
     # Hash + fall back to a sentinel so missing-session doesn't silently
@@ -189,7 +203,7 @@ esac
 CACHE_FILE="$CACHE_DIR/$HOOK_NAME$cache_suffix.out"
 
 # Monotonic-ish nanosecond timer (macOS \`date\` has no %N).
-now_ns() { python3 -c 'import time; print(int(time.time()*1e9))'; }
+now_ns() { "$PY" -c 'import time; print(int(time.time()*1e9))'; }
 START_NS=$(now_ns)
 
 CACHE_STATUS=miss
@@ -197,10 +211,10 @@ CACHE_AGE=-1
 EXIT=0
 
 if [ -f "$CACHE_FILE" ]; then
-  # python3 is already a hard dep (used for now_ns) and gives portable mtime
+  # $PY is already resolved (used for now_ns) and gives portable mtime
   # without the macOS-vs-Linux \`stat\` flag divergence (-f %m vs -c %Y) that
   # blew up under \`set -u\` when the wrong flag produced literal "%m".
-  mtime=$(python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$CACHE_FILE" 2>/dev/null)
+  mtime=$("$PY" -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$CACHE_FILE" 2>/dev/null)
   mtime=\${mtime:-0}
   now_s=$(date +%s)
   CACHE_AGE=$((now_s - mtime))
