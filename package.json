@@ -46,6 +46,7 @@
   "scripts": {
     "build": "tsc && rm -rf 'dist/lib/secrets/AgentsKeychain.app' 'dist/lib/secrets/Agents CLI.app' 'dist/lib/menubar/MenubarHelper.app' && ([ \"$(uname)\" = \"Darwin\" ] && cp -R 'bin/Agents CLI.app' 'dist/lib/secrets/Agents CLI.app' || true) && ([ \"$(uname)\" = \"Darwin\" ] && [ -d 'bin/MenubarHelper.app' ] && mkdir -p 'dist/lib/menubar' && cp -R 'bin/MenubarHelper.app' 'dist/lib/menubar/MenubarHelper.app' || true)",
     "build:bin": "scripts/build-bin.sh",
+    "prepare": "npm run build",
     "prepack": "scripts/verify-keychain-helper.sh && scripts/verify-menubar-helper.sh",
     "postinstall": "node scripts/postinstall.js",
     "dev": "tsx src/index.ts",
