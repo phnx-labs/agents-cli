@@ -1,0 +1,44 @@
+name: Tests (Windows)
+
+# Path-filtered Windows gate. The required `test` job in tests.yml runs on
+# ubuntu-latest, where path.sep is '/', so a Windows-only separator bug (e.g.
+# hook commands stored as "C:\...\x.sh" that bash strips to garbage) is
+# invisible there and could only surface at release on ci.yml's cost-gated
+# matrix. This job runs the suite on windows-latest, but only when the
+# separator-prone code changes, so most PRs skip it and CI cost stays low.
+#
+# This is NOT the required `test` context (that stays Linux in tests.yml and is
+# matched by scripts/release.sh EXPECTED_CHECKS -- don't reuse that job name).
+# Add `test-windows` to branch protection to make it blocking.
+#
+# Tool versions are NOT pinned here -- setup-bun reads them from package.json.
+
+on:
+  pull_request:
+    branches: ['main', 'release/**']
+    paths:
+      - 'src/lib/hooks.ts'
+      - 'src/lib/hooks/**'
+      - 'src/lib/platform/**'
+      - 'src/lib/shims.ts'
+      - 'src/lib/shims*.ts'
+      - 'hooks/**'
+      - '.github/workflows/tests-windows.yml'
+
+concurrency:
+  group: tests-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test
