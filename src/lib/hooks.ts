@@ -71,11 +71,19 @@ function getManagedHookPrefixes(): string[] {
  * absolute Windows paths break in bash because backslashes are stripped as
  * escape characters, whereas ~/... paths expand correctly via the ~/.claude
  * symlink/junction on both platforms.
+ *
+ * `home` and `sep` are injectable so the Windows behavior (backslash sep,
+ * drive-letter home) is unit-testable on a POSIX CI host — pass sep='\\' to
+ * simulate Windows. With the defaults this is byte-identical to reading
+ * os.homedir()/path.sep at the call site.
  */
-function toPortableCommand(absPath: string): string {
-  const home = os.homedir();
-  const normalized = absPath.split(path.sep).join('/');
-  const homeNorm = home.split(path.sep).join('/');
+export function toPortableCommand(
+  absPath: string,
+  home: string = os.homedir(),
+  sep: string = path.sep
+): string {
+  const normalized = absPath.split(sep).join('/');
+  const homeNorm = home.split(sep).join('/');
   if (normalized.startsWith(homeNorm + '/')) {
     return '~/' + normalized.slice(homeNorm.length + 1);
   }

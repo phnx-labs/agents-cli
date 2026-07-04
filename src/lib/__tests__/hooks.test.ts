@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash } from '../hooks.js';
+import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand } from '../hooks.js';
 import * as TOML from 'smol-toml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
 import { compareVersions } from '../versions.js';
@@ -929,5 +929,46 @@ describe('registerHooksToSettings - Droid', () => {
     const settings = readDroidSettings(versionHome);
     expect(settings.logoAnimation).toBe('off');
     expect(settings.hooks.PreToolUse).toHaveLength(1);
+  });
+});
+
+// Regression for the Windows hook-path bug: hook commands stored as absolute
+// Windows paths with backslashes ("C:\\Users\\...\\06-attention-sentinel.sh")
+// break at exec time because Claude runs hooks via bash, which strips the
+// backslashes -> "No such file or directory". The registrar must store the
+// portable "~/..." form. `sep` is injected so the Windows case is exercised on
+// a POSIX CI host (where path.sep is '/'), which is the only way the required
+// Linux `test` gate can catch a Windows-only path regression.
+describe('toPortableCommand — portable hook commands (Windows path regression)', () => {
+  const WIN_SEP = '\\';
+  const winHome = 'C:\\Users\\me';
+  const winHook =
+    'C:\\Users\\me\\.agents\\.history\\versions\\claude\\2.1.201\\home\\.claude\\hooks\\06-attention-sentinel.sh';
+
+  it('folds a Windows abs path under HOME to ~/ with forward slashes', () => {
+    const out = toPortableCommand(winHook, winHome, WIN_SEP);
+    expect(out).toBe(
+      '~/.agents/.history/versions/claude/2.1.201/home/.claude/hooks/06-attention-sentinel.sh'
+    );
+  });
+
+  it('never emits a backslash or drive-letter for a Windows path under HOME', () => {
+    const out = toPortableCommand(winHook, winHome, WIN_SEP);
+    expect(out).not.toContain('\\');
+    expect(out).not.toMatch(/^[a-zA-Z]:/);
+    expect(out.startsWith('~/')).toBe(true);
+  });
+
+  it('forward-slashes a Windows path OUTSIDE HOME (no verbatim backslashes)', () => {
+    const out = toPortableCommand('D:\\tools\\hooks\\g.sh', winHome, WIN_SEP);
+    // Not under HOME, so no ~/ fold — but it must still be backslash-free so
+    // bash does not mangle it.
+    expect(out).toBe('D:/tools/hooks/g.sh');
+    expect(out).not.toContain('\\');
+  });
+
+  it('folds a POSIX abs path under HOME to ~/ (macOS/Linux behavior unchanged)', () => {
+    const out = toPortableCommand('/home/me/.agents/hooks/g.sh', '/home/me', '/');
+    expect(out).toBe('~/.agents/hooks/g.sh');
   });
 });
