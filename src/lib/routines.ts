@@ -15,6 +15,7 @@ import { getRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } fr
 import { safeJoin } from './paths.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
+import type { LoopConfig } from './loop.js';
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -45,6 +46,8 @@ export interface JobConfig {
   runOnce?: boolean;
   // RFC3339 timestamp; routine auto-disables at the next fire on/after this time.
   endAt?: string;
+  /** When set, executeJob runs this job through the loop driver instead of once. */
+  loop?: LoopConfig;
 }
 
 /** Metadata for a single job execution, persisted as JSON in the run directory. */
