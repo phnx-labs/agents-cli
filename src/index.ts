@@ -106,6 +106,7 @@ import {
   loadMenubar,
   loadBeta,
   loadSync,
+  loadLock,
   loadRefreshRules,
   loadDrive,
   loadFactory,
@@ -273,6 +274,7 @@ Config sync:
   pull                            Clone or pull the system repo at ~/.agents/.system/
   repo init --path <dir>          Scaffold your own editable repo from a template
   repo add <path|gh:user/repo>    Merge an extra repo after the system repo
+  lock [--frozen]                 Write/verify agents.lock (SHA-256 of resolved resources); --frozen fails on drift
 
 Beta features:
   beta                            Enable preview features (factory, drive, and more)
@@ -929,6 +931,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadMenubar);
   await reg(loadBeta);
   await reg(loadSync);
+  await reg(loadLock);
   await reg(loadRefreshRules);
   await reg(loadDrive);
   await reg(loadFactory);

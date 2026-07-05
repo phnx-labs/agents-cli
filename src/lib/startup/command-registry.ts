@@ -64,6 +64,7 @@ export const loadHelper: ModuleLoader = async () => (await import('../../command
 export const loadMenubar: ModuleLoader = async () => (await import('../../commands/menubar.js')).registerMenubarCommands;
 export const loadBeta: ModuleLoader = async () => (await import('../../commands/beta.js')).registerBetaCommands;
 export const loadSync: ModuleLoader = async () => (await import('../../commands/sync.js')).registerSyncCommand;
+export const loadLock: ModuleLoader = async () => (await import('../../commands/lock.js')).registerLockCommand;
 export const loadRefreshRules: ModuleLoader = async () => (await import('../../commands/refresh-rules.js')).registerRefreshRulesCommand;
 export const loadDrive: ModuleLoader = async () => (await import('../../commands/drive.js')).registerDriveCommands;
 export const loadFactory: ModuleLoader = async () => (await import('../../commands/factory.js')).registerFactoryCommands;
@@ -155,6 +156,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   menubar: [loadMenubar],
   beta: [loadBeta],
   sync: [loadSync],
+  lock: [loadLock],
   'refresh-rules': [loadRefreshRules],
   drive: [loadDrive],
   factory: [loadFactory],
