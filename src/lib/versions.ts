@@ -1229,7 +1229,7 @@ export async function installVersion(
     }
 
     onProgress?.(`Installing ${packageSpec}...`);
-    const { stdout } = await execFileAsync('npm', ['install', packageSpec], { cwd: versionDir, shell: winShell });
+    const { stdout } = await execFileAsync('npm', ['install', packageSpec, '--ignore-scripts'], { cwd: versionDir, shell: winShell });
 
     // Determine the actual installed version
     let installedVersion = version;
