@@ -96,24 +96,57 @@ func fileBase(service: String, account: String) -> [CFString: Any] {
     ]
 }
 
+// Base attributes for a DATA-PROTECTION query that does NOT pin the access
+// group. Identical to dpBase() minus kSecAttrAccessGroup, so it spans EVERY
+// group the entitlement covers (2HTP252L87.*).
+//
+// Why this exists (issue: orphaned access groups): helpers before the group
+// pin (#279, v1.20.27) wrote without kSecAttrAccessGroup, and macOS filed those
+// items under the implicit default group — the literal wildcard string
+// "2HTP252L87.*", NOT the concrete kAccessGroup. dpBase() queries only the
+// concrete group, so those pre-pin items are invisible ("missing") even though
+// they are intact and the wildcard entitlement authorizes reading them. This
+// un-pinned base is used only for READS (a group-agnostic fallback + the orphan
+// re-home sweep); WRITES always use dpBase() so new items land deterministically
+// in the concrete group.
+func dpBaseUnpinned(service: String, account: String) -> [CFString: Any] {
+    return [
+        kSecClass: kSecClassGenericPassword,
+        kSecAttrService: service as CFString,
+        kSecAttrAccount: account as CFString,
+        kSecUseDataProtectionKeychain: kCFBooleanTrue!,
+        kSecAttrSynchronizable: kCFBooleanFalse!,
+    ]
+}
+
+// Outcome of a protected read. `needsMigration` is set when the value came only
+// from the legacy file-based keychain (caller re-writes via migrateInline).
+// `orphanRef` is set when the value came from a data-protection item under a
+// NON-pinned access group (a pre-#279 orphan) — the caller re-homes it into the
+// concrete group and deletes that exact persistent ref via rehomeOrphan.
+struct ReadOutcome {
+    let value: String?
+    let status: OSStatus
+    let needsMigration: Bool
+    let orphanRef: Data?
+}
+
 // Read one item's value, decrypting through the shared auth context.
 //
 // Lookup order:
-//   1. The DATA-PROTECTION keychain, where `set` now writes. For modern
-//      biometry-protected items the first read pops Touch ID and later reads
-//      reuse the assertion via the shared LAContext.
-//   2. On a clean miss, the LEGACY file-based login keychain ONCE. Items written
-//      by a pre-migration helper still live there; reading one may pop the
-//      legacy "enter password" sheet for a trusted-app ACL, which
-//      kSecUseAuthenticationUIAllow makes explicit and intentional. The caller
-//      (get / get-batch) then re-writes the value into the data-protection
-//      keychain via migrateInline, so the next read resolves at step 1 and this
-//      fallback never fires again for that item.
-//
-// Returns the decoded value, the raw OSStatus (so callers can distinguish
-// missing/cancelled), and a needsMigration flag — true when the value was found
-// only in the legacy file-based keychain and must be migrated forward.
-func readItem(service: String, account: String) -> (value: String?, status: OSStatus, needsMigration: Bool) {
+//   1. The DATA-PROTECTION keychain, pinned to the concrete access group, where
+//      `set` now writes. For modern biometry-protected items the first read pops
+//      Touch ID and later reads reuse the assertion via the shared LAContext.
+//   2. On a clean miss, the DATA-PROTECTION keychain UN-pinned (spans every
+//      2HTP252L87.* group). This surfaces pre-#279 "orphaned" items filed under
+//      the implicit default group. A hit here is necessarily an orphan (step 1
+//      already proved no concrete-group copy exists), so we return its
+//      persistent ref for the caller to re-home.
+//   3. On a further miss, the LEGACY file-based login keychain ONCE. Items
+//      written by a pre-migration helper still live there; reading one may pop
+//      the legacy "enter password" sheet for a trusted-app ACL, which
+//      kSecUseAuthenticationUIAllow makes explicit and intentional.
+func readItem(service: String, account: String) -> ReadOutcome {
     var dpQuery = dpBase(service: service, account: account)
     dpQuery[kSecReturnData] = kCFBooleanTrue!
     dpQuery[kSecMatchLimit] = kSecMatchLimitOne
@@ -125,11 +158,36 @@ func readItem(service: String, account: String) -> (value: String?, status: OSSt
     if dpStatus == errSecSuccess,
        let data = dpResult as? Data,
        let value = String(data: data, encoding: .utf8) {
-        return (value, dpStatus, false)
+        return ReadOutcome(value: value, status: dpStatus, needsMigration: false, orphanRef: nil)
     }
-    // Only a clean "not found" justifies the legacy fallback. errSecAuthFailed,
+    // Only a clean "not found" justifies the fallbacks. errSecAuthFailed,
     // user-cancel, interaction-not-allowed, etc. are surfaced to the caller as-is.
-    guard dpStatus == errSecItemNotFound else { return (nil, dpStatus, false) }
+    guard dpStatus == errSecItemNotFound else {
+        return ReadOutcome(value: nil, status: dpStatus, needsMigration: false, orphanRef: nil)
+    }
+
+    // Step 2 — un-pinned DP pass. Request the persistent ref alongside the data
+    // so the caller can delete this exact orphan (never the re-homed copy). With
+    // two kSecReturn* keys the result is a dictionary.
+    var orphanQuery = dpBaseUnpinned(service: service, account: account)
+    orphanQuery[kSecReturnData] = kCFBooleanTrue!
+    orphanQuery[kSecReturnPersistentRef] = kCFBooleanTrue!
+    orphanQuery[kSecMatchLimit] = kSecMatchLimitOne
+    orphanQuery[kSecUseAuthenticationContext] = authContext
+    orphanQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
+    orphanQuery[kSecUseOperationPrompt] = "Unlock agents-cli secrets" as CFString
+    var orphanResult: AnyObject?
+    let orphanStatus = SecItemCopyMatching(orphanQuery as CFDictionary, &orphanResult)
+    if orphanStatus == errSecSuccess,
+       let dict = orphanResult as? [CFString: Any],
+       let data = dict[kSecValueData] as? Data,
+       let value = String(data: data, encoding: .utf8) {
+        let ref = dict[kSecValuePersistentRef] as? Data
+        return ReadOutcome(value: value, status: orphanStatus, needsMigration: false, orphanRef: ref)
+    }
+    guard orphanStatus == errSecItemNotFound else {
+        return ReadOutcome(value: nil, status: orphanStatus, needsMigration: false, orphanRef: nil)
+    }
 
     var fileQuery = fileBase(service: service, account: account)
     fileQuery[kSecReturnData] = kCFBooleanTrue!
@@ -142,11 +200,11 @@ func readItem(service: String, account: String) -> (value: String?, status: OSSt
     guard fileStatus == errSecSuccess,
           let data = fileResult as? Data,
           let value = String(data: data, encoding: .utf8) else {
-        // Nothing in either keychain — report the data-protection miss so the
+        // Nothing in any keychain — report the data-protection miss so the
         // caller treats it as "not found" rather than a legacy read error.
-        return (nil, dpStatus, false)
+        return ReadOutcome(value: nil, status: dpStatus, needsMigration: false, orphanRef: nil)
     }
-    return (value, fileStatus, true)
+    return ReadOutcome(value: value, status: fileStatus, needsMigration: true, orphanRef: nil)
 }
 
 // Migrate a value found in the legacy file-based keychain forward into the
@@ -190,6 +248,35 @@ func migrateInline(service: String, account: String, value: String) {
     }
 }
 
+// Re-home a data-protection item that lives under a NON-pinned access group (a
+// pre-#279 orphan) into the concrete kAccessGroup. Add-before-delete: the pinned
+// copy is written first, so a failed add leaves the orphan intact and the value
+// is never lost. The orphan is then deleted by its exact persistent ref, so the
+// delete can never match the freshly-added pinned copy (same service+account,
+// different group). Best-effort — logs to stderr, never fails the parent read.
+func rehomeOrphan(service: String, account: String, value: String, orphanRef: Data) {
+    guard let valueData = value.data(using: .utf8) else {
+        writeStderr("rehome: could not encode value for \(service)")
+        return
+    }
+    // Clear any stale pinned copy (scoped to the concrete group) so the add can't
+    // hit errSecDuplicateItem, then add the pinned copy with the biometry ACL.
+    SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
+    var addAttrs = dpBase(service: service, account: account)
+    addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()
+    addAttrs[kSecValueData] = valueData
+    let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
+    guard addStatus == errSecSuccess else {
+        writeStderr("rehome: DP add failed for \(service) (OSStatus \(addStatus)); orphan left intact")
+        return
+    }
+    // Delete the orphan by persistent ref — exact item, group-agnostic.
+    let delStatus = SecItemDelete([kSecValuePersistentRef: orphanRef] as CFDictionary)
+    if delStatus != errSecSuccess && delStatus != errSecItemNotFound {
+        writeStderr("rehome: orphan delete failed for \(service) (OSStatus \(delStatus)); pinned copy is in place")
+    }
+}
+
 // Translate a Touch ID cancellation into the contract's exit code (4). Any
 // other failure to authenticate is also a cancellation from the caller's
 // point of view — the value cannot be produced.
@@ -201,7 +288,7 @@ func dieIfCancelled(_ status: OSStatus) {
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    die(2, "Usage: agents-keychain <get|get-batch|set|delete|has|list|list-legacy|migrate-acl> ...")
+    die(2, "Usage: agents-keychain <get|get-batch|set|delete|has|list|list-legacy|list-orphans|migrate-acl|migrate-orphans> ...")
 }
 
 let cmd = args[1]
@@ -231,12 +318,15 @@ case "list":
         kSecReturnAttributes: kCFBooleanTrue!,
         kSecUseAuthenticationUI: kSecUseAuthenticationUIFail,
     ]
+    // DP pass is UN-pinned (no kSecAttrAccessGroup): it spans the concrete group
+    // AND any pre-#279 orphan group, so bundles whose metadata is orphaned still
+    // appear in `secrets list` instead of vanishing. Attributes-only, so it never
+    // decrypts or prompts regardless of group.
     let dpQuery: [CFString: Any] = [
         kSecClass: kSecClassGenericPassword,
         kSecMatchLimit: kSecMatchLimitAll,
         kSecReturnAttributes: kCFBooleanTrue!,
         kSecUseDataProtectionKeychain: kCFBooleanTrue!,
-        kSecAttrAccessGroup: kAccessGroup as CFString,
         kSecAttrSynchronizable: kCFBooleanFalse!,
     ]
     var items: [[String: Any]] = []
@@ -317,7 +407,12 @@ case "has":
     var dpQuery = dpBase(service: service, account: account)
     dpQuery[kSecMatchLimit] = kSecMatchLimitOne
     dpQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIFail
-    for query in [fileQuery, dpQuery] {
+    // Third pass: un-pinned DP query so a pre-#279 orphan (filed under a
+    // non-concrete access group) still reports as present instead of "missing".
+    var orphanQuery = dpBaseUnpinned(service: service, account: account)
+    orphanQuery[kSecMatchLimit] = kSecMatchLimitOne
+    orphanQuery[kSecUseAuthenticationUI] = kSecUseAuthenticationUIFail
+    for query in [fileQuery, dpQuery, orphanQuery] {
         var ignored: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &ignored)
         if status == errSecSuccess || status == errSecInteractionNotAllowed { exit(0) }
@@ -332,19 +427,23 @@ case "get":
     // Touch ID. Exit 1 if missing, exit 4 if the user cancels.
     guard args.count == 4 else { die(2, "Usage: agents-keychain get <service> <account>") }
     let (service, account) = (args[2], args[3])
-    let (value, status, needsMigration) = readItem(service: service, account: account)
-    if status == errSecItemNotFound { exit(1) }
-    dieIfCancelled(status)
-    guard let value = value else {
-        if status == errSecSuccess { exit(1) }
-        die(2, "Failed to read keychain item (OSStatus \(status))")
+    let outcome = readItem(service: service, account: account)
+    if outcome.status == errSecItemNotFound { exit(1) }
+    dieIfCancelled(outcome.status)
+    guard let value = outcome.value else {
+        if outcome.status == errSecSuccess { exit(1) }
+        die(2, "Failed to read keychain item (OSStatus \(outcome.status))")
     }
     // Only JIT-migrate items in our own namespace. Items from other apps
     // (e.g. Anthropic's Claude Code-credentials-*) have ACLs designed by
     // their writer; rewriting them with our biometry ACL would break the
     // writer's expected access path on the next write.
-    if needsMigration && service.hasPrefix("agents-cli.") {
-        migrateInline(service: service, account: account, value: value)
+    if service.hasPrefix("agents-cli.") {
+        if outcome.needsMigration {
+            migrateInline(service: service, account: account, value: value)
+        } else if let ref = outcome.orphanRef {
+            rehomeOrphan(service: service, account: account, value: value, orphanRef: ref)
+        }
     }
     print(value, terminator: "")
 
@@ -363,11 +462,15 @@ case "get-batch":
     let account = args[2]
     let services = Array(args[3...])
     for service in services {
-        let (value, status, needsMigration) = readItem(service: service, account: account)
-        dieIfCancelled(status)
-        if let value = value {
-            if needsMigration && service.hasPrefix("agents-cli.") {
-                migrateInline(service: service, account: account, value: value)
+        let outcome = readItem(service: service, account: account)
+        dieIfCancelled(outcome.status)
+        if let value = outcome.value {
+            if service.hasPrefix("agents-cli.") {
+                if outcome.needsMigration {
+                    migrateInline(service: service, account: account, value: value)
+                } else if let ref = outcome.orphanRef {
+                    rehomeOrphan(service: service, account: account, value: value, orphanRef: ref)
+                }
             }
             print("V \(service)")
             print(value)
@@ -392,7 +495,9 @@ case "set":
     while value.hasSuffix("\n") || value.hasSuffix("\r") { value = String(value.dropLast()) }
     guard let valueData = value.data(using: .utf8) else { die(2, "Failed to encode value") }
 
-    SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
+    // Delete across ALL access groups (un-pinned), not just the concrete one, so
+    // a rotate can't leave a pre-#279 orphan shadowing the freshly-written copy.
+    SecItemDelete(dpBaseUnpinned(service: service, account: account) as CFDictionary)
     SecItemDelete(fileBase(service: service, account: account) as CFDictionary)
 
     var addAttrs = dpBase(service: service, account: account)
@@ -409,7 +514,9 @@ case "delete":
     // held a copy, else 1.
     guard args.count == 4 else { die(2, "Usage: agents-keychain delete <service> <account>") }
     let (service, account) = (args[2], args[3])
-    let dpStatus = SecItemDelete(dpBase(service: service, account: account) as CFDictionary)
+    // Un-pinned DP delete removes the concrete-group copy AND any pre-#279 orphan
+    // under a non-concrete group, so a deleted secret leaves nothing behind.
+    let dpStatus = SecItemDelete(dpBaseUnpinned(service: service, account: account) as CFDictionary)
     let fileStatus = SecItemDelete(fileBase(service: service, account: account) as CFDictionary)
     exit((dpStatus == errSecSuccess || fileStatus == errSecSuccess) ? 0 : 1)
 
@@ -442,6 +549,114 @@ case "migrate-acl":
     addAttrs[kSecValueData] = valueData
     let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
     guard addStatus == errSecSuccess else { die(2, "Failed to rewrite item with biometry ACL (OSStatus \(addStatus))") }
+
+case "list-orphans":
+    // list-orphans <prefix> <account> — enumerate data-protection items whose
+    // service starts with <prefix> for <account> that live under a NON-concrete
+    // access group (pre-#279 orphans filed under the implicit default group).
+    // Attributes only — never decrypts, never prompts. Prints one orphaned
+    // service per line; used by `migrate-acl` for its prompt-free dry-run report.
+    guard args.count == 4 else { die(2, "Usage: agents-keychain list-orphans <prefix> <account>") }
+    let (prefix, account) = (args[2], args[3])
+    guard !prefix.isEmpty else { die(2, "list-orphans requires non-empty prefix") }
+    let enumQuery: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecMatchLimit: kSecMatchLimitAll,
+        kSecReturnAttributes: kCFBooleanTrue!,
+        kSecUseDataProtectionKeychain: kCFBooleanTrue!,
+        kSecAttrSynchronizable: kCFBooleanFalse!,
+    ]
+    var enumResult: AnyObject?
+    let enumStatus = SecItemCopyMatching(enumQuery as CFDictionary, &enumResult)
+    // A locked keybag reports errSecInteractionNotAllowed wholesale — treat as
+    // "cannot enumerate right now", not an error (the sweep runs interactively).
+    if enumStatus == errSecItemNotFound || enumStatus == errSecInteractionNotAllowed { exit(0) }
+    guard enumStatus == errSecSuccess else { die(2, "Failed to enumerate keychain (OSStatus \(enumStatus))") }
+    var listSeen = Set<String>()
+    for item in (enumResult as? [[String: Any]]) ?? [] {
+        guard let svce = item[kSecAttrService as String] as? String, svce.hasPrefix(prefix) else { continue }
+        guard let acct = item[kSecAttrAccount as String] as? String, acct == account else { continue }
+        let group = item[kSecAttrAccessGroup as String] as? String ?? ""
+        guard group != kAccessGroup else { continue }
+        if listSeen.insert(svce).inserted { print(svce) }
+    }
+
+case "migrate-orphans":
+    // migrate-orphans <prefix> <account> — re-home every pre-#279 orphan (a
+    // data-protection item under a non-concrete access group) matching
+    // <prefix>+<account> into the concrete kAccessGroup. Reads each value by its
+    // exact persistent ref behind the shared LAContext (one Touch ID for the
+    // whole batch), adds the pinned copy (add-before-delete: a failed add leaves
+    // the orphan intact), then deletes the orphan by persistent ref. Prints one
+    // line per item:
+    //   OK <service>               re-homed
+    //   WARN <service> <detail>    pinned copy written but orphan not removed
+    //   FAIL <service> <detail>    could not re-home (orphan left intact)
+    // Exit 4 if the user cancels Touch ID; items processed before the cancel are
+    // already committed, and re-running continues where it left off (idempotent).
+    guard args.count == 4 else { die(2, "Usage: agents-keychain migrate-orphans <prefix> <account>") }
+    let (prefix, account) = (args[2], args[3])
+    guard !prefix.isEmpty else { die(2, "migrate-orphans requires non-empty prefix") }
+    let enumQuery: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecMatchLimit: kSecMatchLimitAll,
+        kSecReturnAttributes: kCFBooleanTrue!,
+        kSecReturnPersistentRef: kCFBooleanTrue!,
+        kSecUseDataProtectionKeychain: kCFBooleanTrue!,
+        kSecAttrSynchronizable: kCFBooleanFalse!,
+    ]
+    var enumResult: AnyObject?
+    let enumStatus = SecItemCopyMatching(enumQuery as CFDictionary, &enumResult)
+    if enumStatus == errSecItemNotFound { exit(0) }
+    guard enumStatus == errSecSuccess else { die(2, "Failed to enumerate keychain (OSStatus \(enumStatus))") }
+    struct Orphan { let service: String; let ref: Data; let group: String }
+    var orphans: [Orphan] = []
+    var seenRefs = Set<Data>()
+    for item in (enumResult as? [[String: Any]]) ?? [] {
+        guard let svce = item[kSecAttrService as String] as? String, svce.hasPrefix(prefix) else { continue }
+        guard let acct = item[kSecAttrAccount as String] as? String, acct == account else { continue }
+        let group = item[kSecAttrAccessGroup as String] as? String ?? ""
+        guard group != kAccessGroup else { continue }
+        guard let ref = item[kSecValuePersistentRef as String] as? Data else { continue }
+        if seenRefs.insert(ref).inserted { orphans.append(Orphan(service: svce, ref: ref, group: group)) }
+    }
+    if orphans.isEmpty { exit(0) }
+    for o in orphans {
+        // Read the orphan by its exact persistent ref — group-agnostic, and it
+        // pops Touch ID (reused across the batch via the shared auth context).
+        let readQuery: [CFString: Any] = [
+            kSecValuePersistentRef: o.ref,
+            kSecReturnData: kCFBooleanTrue!,
+            kSecUseAuthenticationContext: authContext,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUIAllow,
+            kSecUseOperationPrompt: "Migrate agents-cli secrets to the current keychain group" as CFString,
+        ]
+        var readResult: AnyObject?
+        let rStatus = SecItemCopyMatching(readQuery as CFDictionary, &readResult)
+        dieIfCancelled(rStatus)
+        guard rStatus == errSecSuccess, let data = readResult as? Data else {
+            print("FAIL \(o.service) read=\(rStatus)")
+            continue
+        }
+        // Add the pinned copy (clear any stale concrete-group copy first so the
+        // add can't hit errSecDuplicateItem).
+        SecItemDelete(dpBase(service: o.service, account: account) as CFDictionary)
+        var addAttrs = dpBase(service: o.service, account: account)
+        addAttrs[kSecAttrAccessControl] = buildBiometryAccessControl()
+        addAttrs[kSecValueData] = data
+        let addStatus = SecItemAdd(addAttrs as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            print("FAIL \(o.service) add=\(addStatus)")
+            continue
+        }
+        // Delete the orphan by persistent ref — exact, never the pinned copy.
+        let delStatus = SecItemDelete([kSecValuePersistentRef: o.ref] as CFDictionary)
+        if delStatus == errSecSuccess || delStatus == errSecItemNotFound {
+            print("OK \(o.service)")
+        } else {
+            print("WARN \(o.service) orphan-delete=\(delStatus) (pinned copy in place)")
+        }
+    }
 
 case "watch-lock":
     // watch-lock — long-running. Emit a line to stdout whenever the screen

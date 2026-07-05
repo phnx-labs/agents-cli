@@ -75,25 +75,51 @@ export function foldLegacySystemRepo(): void {
   } catch { /* best-effort */ }
 }
 
+/** True when `relPath` is a file tracked by a git repo rooted at `repoDir`. */
+function isTrackedInGitRepo(repoDir: string, relPath: string): boolean {
+  try {
+    execSync(`git ls-files --error-unmatch -- ${relPath}`, { cwd: repoDir, stdio: 'ignore' });
+    return true;
+  } catch {
+    // Not a git repo, or the file is untracked — either way, not tracked.
+    return false;
+  }
+}
+
 /**
- * Move ~/.agents-system/agents.yaml -> ~/.agents/agents.yaml.
- * No-op if user file already exists or system file absent.
- * (This is also handled inline in state.ts readMeta, but is exposed here
- *  for explicit migration calls from postinstall / CLI entry points.)
+ * Migrate a legacy single-repo agents.yaml into ~/.agents/agents.yaml.
+ *
+ * The post-fold system dir (~/.agents/.system) is a pull-only mirror of the
+ * npm-shipped defaults. Its agents.yaml is a TRACKED file that readMeta() reads
+ * in place as the defaults base (see SYSTEM_META_FILE in state.ts). Deleting or
+ * moving a tracked file out of the mirror dirties its working tree, which
+ * permanently wedges `agents setup`, `agents sync`, and background auto-pull
+ * ("Working tree has uncommitted changes.") because the mirror sync refuses a
+ * dirty tree. So when agents.yaml is tracked there, treat the mirror as strictly
+ * read-only and leave the file alone.
+ *
+ * Only an UNTRACKED agents.yaml is residue from the pre-split single-repo layout
+ * (or a legacy ~/.agents-system fold) and is safe to move/drop.
+ *
+ * Params default to the real on-disk locations; they are injectable so tests can
+ * drive a fixture tree without touching the user's ~/.agents.
  */
-function migrateAgentsYaml(): void {
-  const src = path.join(SYSTEM_DIR, 'agents.yaml');
-  const dest = path.join(USER_DIR, 'agents.yaml');
+export function migrateAgentsYaml(systemDir: string = SYSTEM_DIR, userDir: string = USER_DIR): void {
+  const src = path.join(systemDir, 'agents.yaml');
+  const dest = path.join(userDir, 'agents.yaml');
   if (!fs.existsSync(src)) return;
+
+  // Tracked in the system mirror → npm-shipped defaults; never mutate. readMeta()
+  // already surfaces it in place, so no user-dir copy is needed either.
+  if (isTrackedInGitRepo(systemDir, 'agents.yaml')) return;
+
   if (fs.existsSync(dest)) {
-    // User copy is authoritative — drop the stale system leftover. The system
-    // repo (npm-shipped) does not track agents.yaml; any copy here is residue
-    // from the pre-split layout.
+    // User copy is authoritative — drop the untracked stale system leftover.
     try { fs.unlinkSync(src); } catch { /* best-effort */ }
     return;
   }
   try {
-    fs.mkdirSync(USER_DIR, { recursive: true, mode: 0o700 });
+    fs.mkdirSync(userDir, { recursive: true, mode: 0o700 });
     fs.renameSync(src, dest);
     console.error('Migrated agents.yaml to ~/.agents/');
   } catch { /* best-effort */ }

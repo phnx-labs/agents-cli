@@ -23,6 +23,12 @@ import {
   buildDetachedDaemonEnv,
   getDaemonLaunch,
   startDetached,
+  writeOwnerOnlyServiceManifest,
+  ensureDaemonStarted,
+  isDaemonRunning,
+  readDaemonPid,
+  writeDaemonPid,
+  removeDaemonPid,
 } from './daemon.js';
 import { ipcEndpoint } from './platform/index.js';
 import {
@@ -107,6 +113,39 @@ describe('readDaemonClaudeOAuthToken', () => {
   it('treats an empty/whitespace-only token as absent', () => {
     seedKeychainBacked('   ');
     expect(readDaemonClaudeOAuthToken()).toBeNull();
+  });
+});
+
+describe('writeOwnerOnlyServiceManifest', () => {
+  it('creates the file with mode 0600 immediately (no world-readable TOCTOU window)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-manifest-'));
+    const manifestPath = path.join(tmpDir, 'com.agents.daemon.plist');
+    writeOwnerOnlyServiceManifest(manifestPath, generateLaunchdPlist());
+    expect(fs.existsSync(manifestPath)).toBe(true);
+    // NTFS has no POSIX mode bits — the 0o600 lockdown is a no-op on Windows.
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(manifestPath).mode & 0o777).toBe(0o600);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('re-locks a pre-existing world-readable manifest to 0600 on overwrite', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-manifest-'));
+    const manifestPath = path.join(tmpDir, 'com.agents.daemon.plist');
+    // Simulate a stale manifest left world-readable by an older install.
+    fs.writeFileSync(manifestPath, 'stale', { mode: 0o644 });
+    if (process.platform !== 'win32') {
+      fs.chmodSync(manifestPath, 0o644);
+      expect(fs.statSync(manifestPath).mode & 0o777).toBe(0o644);
+    }
+    writeOwnerOnlyServiceManifest(manifestPath, generateLaunchdPlist());
+    expect(fs.readFileSync(manifestPath, 'utf-8')).not.toBe('stale');
+    // writeFileSync's mode is a no-op when overwriting an existing file, so the
+    // unlink-before-create is what forces this back to 0600.
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(manifestPath).mode & 0o777).toBe(0o600);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
 
@@ -274,4 +313,118 @@ describe('startDetached (integration: daemon stays alive)', () => {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   }, 30_000);
+});
+
+// #414: enforce a single daemon instance and never report a null PID.
+//  - A second concurrent `daemon _run` must exit without clobbering the live
+//    daemon's pid file (else two schedulers double-fire every routine).
+//  - A start that produced no OS pid must fail loudly, never surface null.
+describe('daemon single-instance (#414)', () => {
+  it('startDetached fails loudly instead of returning a null PID when the binary is unspawnable', () => {
+    // A non-JS entry is spawned directly (getDaemonLaunch), so a missing binary
+    // makes spawn() yield an undefined pid — the exact `child.pid || null`
+    // footgun. Pre-fix this returned { pid: null }; now it throws.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-null-'));
+    const logPath = path.join(tmpDir, 'stdio.log');
+    expect(() =>
+      startDetached({ agentsBin: '/nonexistent/agents-cli-does-not-exist', logPath }),
+    ).toThrow(/no PID/i);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses a second concurrent daemon: it exits without clobbering the live pid file', async () => {
+    // CI builds before tests; self-heal for a bare `vitest` run.
+    if (!fs.existsSync(DIST_ENTRY)) {
+      execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+    }
+
+    // Short POSIX base keeps the daemon's AF_UNIX browser socket under the
+    // 104-byte sun_path cap (see the integration test above for the rationale).
+    const tmpRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+    const tmpHome = fs.mkdtempSync(path.join(tmpRoot, 'agd-si-'));
+    // Satisfy the setup gate (`ensureInitialized`): ~/.agents/.system must be a repo.
+    const systemDir = path.join(tmpHome, '.agents', '.system');
+    fs.mkdirSync(systemDir, { recursive: true });
+    execFileSync('git', ['init', '-q', systemDir]);
+
+    const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+    const childEnv = { ...process.env, HOME: tmpHome };
+    delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const readPid = () => (fs.existsSync(pidFile) ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) : null);
+    const waitFor = async (cond: () => boolean, timeoutMs: number) => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (cond()) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return cond();
+    };
+
+    let pidA: number | null = null;
+    let pidB: number | null = null;
+    try {
+      // Daemon A comes up and records itself as the pid-file owner.
+      pidA = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'a.log'), env: childEnv }).pid!;
+      expect(pidA).toBeTruthy();
+      expect(await waitFor(() => readPid() === pidA, 20_000)).toBe(true);
+
+      // Daemon B — a second concurrent `daemon _run` — must detect A and exit.
+      pidB = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'b.log'), env: childEnv }).pid!;
+      expect(pidB).toBeTruthy();
+      expect(pidB).not.toBe(pidA);
+
+      // B exits on its own (claimDaemonInstance() returned false → process.exit(0)).
+      expect(await waitFor(() => !alive(pidB!), 20_000)).toBe(true);
+
+      // A never lost ownership of the pid file and is still running.
+      expect(readPid()).toBe(pidA);
+      expect(alive(pidA)).toBe(true);
+    } finally {
+      for (const p of [pidA, pidB]) { try { if (p) process.kill(p, 'SIGKILL'); } catch { /* already gone */ } }
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+/**
+ * #415: the daemon must be always-on for any background need, not only after
+ * `routines add`. `ensureDaemonStarted` is the shared side-effect entrypoint the
+ * secrets-unlock path (src/commands/secrets.ts) now calls after bringing up the
+ * standalone secrets broker. It must reuse the single `startDaemon` entrypoint,
+ * so the #414 single-instance guard makes a second unlock a no-op rather than a
+ * relaunch. We seed the pid file with our own (guaranteed-alive) pid so
+ * startDaemon takes its already-running branch and never spawns a real daemon.
+ */
+describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
+  let priorPid: number | null = null;
+
+  beforeEach(() => { priorPid = readDaemonPid(); });
+  afterEach(() => {
+    // Leave any real daemon on this machine exactly as we found it.
+    if (priorPid === null) removeDaemonPid();
+    else writeDaemonPid(priorPid);
+  });
+
+  it('is an idempotent no-op when a daemon is already running', () => {
+    writeDaemonPid(process.pid);
+    expect(isDaemonRunning()).toBe(true);
+
+    // First unlock brings the daemon "up" — but it's already running, so this
+    // reports the existing owner without spawning a second process.
+    const first = ensureDaemonStarted();
+    expect(first).not.toBeNull();
+    expect(first!.method).toBe('already-running');
+    expect(first!.pid).toBe(process.pid);
+
+    // A second unlock (or any later background trigger) is a steady-state
+    // no-op, never a relaunch — the always-on guarantee, not a restart loop.
+    const second = ensureDaemonStarted();
+    expect(second!.method).toBe('already-running');
+    expect(second!.pid).toBe(process.pid);
+
+    // The pid file still points at the single owning process throughout.
+    expect(readDaemonPid()).toBe(process.pid);
+  });
 });

@@ -97,6 +97,7 @@ import {
   loadTrash,
   loadRestore,
   loadDoctor,
+  loadCheck,
   loadStatus,
   loadProfiles,
   loadSecrets,
@@ -264,6 +265,7 @@ Credentials and profiles:
 
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence
+  check                           CI drift gate: exit non-zero when resources are out of sync
   usage [agent]                   Show rate-limit and quota usage per agent
 
 Config sync:
@@ -917,6 +919,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadTrash);
   await reg(loadRestore);
   await reg(loadDoctor);
+  await reg(loadCheck);
   await reg(loadStatus);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
@@ -1161,6 +1164,16 @@ if (process.platform === 'darwin' && process.env.AGENTS_SKIP_MIGRATION !== '1') 
   } catch { /* never block CLI startup on the menu bar */ }
 }
 
+// Bare invocation prints the root help. Commander only auto-displays help on
+// an empty parse when subcommands are registered, and the lazy-startup path
+// registers none for a bare call — without this branch, `agents` exits
+// silently. Runs after first-run setup and migrations so those still fire;
+// exits 0 to match `agents --help` (and the pre-fix exit code).
+if (passedArgs.length === 0) {
+  program.outputHelp();
+  process.exit(0);
+}
+
 try {
   await maybeBootstrapShimIntegration(requestedCommand, helpOrVersionRequested);
   await program.parseAsync();
@@ -1178,6 +1191,14 @@ try {
       err.message.startsWith('IPC error:') &&
       (err.message.includes('ECONNREFUSED') || err.message.includes('ENOENT'));
     if (isBrowserDaemonNotRunning || isBrowserCdpUnreachable || isBrowserIpcDown) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    // A --host targeting a password-auth device throws this from resolveHost.
+    // It carries an actionable message (switch to key auth / enroll as a host);
+    // handling it here covers every resolveHost caller (run, hosts check/rm,
+    // secrets --host) at the source instead of a catch at each call site.
+    if (err.name === 'DeviceOffloadUnsupportedError') {
       console.error(err.message);
       process.exit(1);
     }

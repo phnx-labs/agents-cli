@@ -52,6 +52,7 @@ interface ExecCommandActionOptions {
   // Host dispatch: run on a registered agent host instead of locally.
   // `--host` is canonical; `--on`/`--computer` are hidden aliases.
   host?: string;
+  device?: string;
   on?: string;
   computer?: string;
   remoteCwd?: string;
@@ -59,6 +60,8 @@ interface ExecCommandActionOptions {
   any?: boolean;
   lease?: string | boolean; // --lease [backend]: true when bare, backend string when given
   keepBox?: boolean; // --keep-box: don't tear down the leased box after the run
+  secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
+  allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -184,6 +187,11 @@ export function registerRunCommand(program: Command): void {
       '--no-auto-secrets',
       'Skip auto-injection of secrets declared by a workflow\'s frontmatter `secrets:` field. Has no effect on bare-agent runs.',
     )
+    .option(
+      '--secrets-keys <keys>',
+      'Inject only this comma-separated subset of keys from --secrets bundles (e.g. KEY1,KEY2). Missing keys are an error. Applies to all --secrets bundles on this run.',
+    )
+    .option('--allow-expired', 'Inject secrets even if their expiry date has passed (overrides the pre-run expiry abort).')
     .option('--cwd <dir>', 'Working directory for the agent (defaults to current directory)')
     .option(
       '--add-dir <dir>',
@@ -246,7 +254,11 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--host <name>',
-      'Offload this run onto a registered agent host over SSH instead of running locally. See `agents hosts`.',
+      'Offload this run onto another machine over SSH instead of running locally — a device, a registered agent host, or user@host. See `agents devices` / `agents hosts`.',
+    )
+    .option(
+      '--device <name>',
+      'Alias of --host: offload this run onto a registered device (from `agents devices`).',
     )
     .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -372,10 +384,10 @@ export function registerRunCommand(program: Command): void {
 
       // --host/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.
-      const hostGiven = [options.host, options.on, options.computer].filter((v): v is string => !!v);
+      const hostGiven = [options.host, options.device, options.on, options.computer].filter((v): v is string => !!v);
       if (hostGiven.length > 0) {
         if (new Set(hostGiven).size > 1) {
-          console.error(chalk.red('Conflicting --host/--on/--computer values — pass just one.'));
+          console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
           process.exit(1);
         }
         const hostName = hostGiven[0];
@@ -386,6 +398,9 @@ export function registerRunCommand(program: Command): void {
         const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
         const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
         const { registerHostSession } = await import('../lib/hosts/session-index.js');
+        // A password-auth device throws DeviceOffloadUnsupportedError here; it's
+        // printed cleanly by the top-level catch in index.ts (covers every
+        // resolveHost caller), so it never falls through to capability routing.
         let host = await resolveHost(hostName);
         if (!host) {
           // Not a host name — try capability routing (e.g. --host gpu). A
@@ -528,12 +543,12 @@ export function registerRunCommand(program: Command): void {
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, defaultModeFor, headlessPlanStallCommand, nativeResume, resolveInteractive },
         { ALL_AGENT_IDS },
         { profileExists, resolveProfileForRun },
-        { readAndResolveBundleEnv, describeBundle },
+        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
-        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents },
+        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
         { supports },
@@ -559,10 +574,15 @@ export function registerRunCommand(program: Command): void {
       let version: string | undefined = rawVersion || undefined;
       let profileEnv: Record<string, string> | undefined;
       let fromProfile = false;
+      let profileFallbackModel: { envKey: string; model: string } | undefined;
       let workflowModel: string | undefined;
       // WORKFLOW.md capability scoping, translated to Claude headless flags below.
       let workflowToolsRestrict: string[] | undefined;
       let workflowMcpConfigPath: string | undefined;
+      // Full paths of workflow subagent files THIS run copied into the shared
+      // per-agent agents dir. Torn down after the run to restore the shared dir
+      // (issue #401), mirroring cleanupWorkflowMcpConfig for the mcp-config.
+      const workflowSubagentTargets: string[] = [];
       // WORKFLOW.md `loop:` block (issue #332). When a workflow declares it,
       // `agents run <workflow>` honors the loop without a --loop flag.
       let workflowLoop: import('../lib/workflows.js').LoopConfigRaw | undefined;
@@ -580,6 +600,7 @@ export function registerRunCommand(program: Command): void {
           agent = resolved.agent;
           if (!version) version = resolved.version;
           profileEnv = resolved.env;
+          profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
           process.stderr.write(chalk.gray(`Resolved profile '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
         } catch (err) {
@@ -622,6 +643,15 @@ export function registerRunCommand(program: Command): void {
           const allFiles = fs.readdirSync(subagentsDir).filter(f => f.endsWith('.md'));
           const { allowedStems, missing } = resolveAllowedSubagents(allFiles, allowedAgents);
           const allowStemSet = new Set(allowedStems);
+          // Fail-closed prune (issue #401, follow-up to #324). A prior
+          // unrestricted run may have left workflow subagent files that THIS
+          // scoped run does not permit; they linger in the shared dir and stay
+          // dispatchable. Remove those no-longer-permitted workflow-managed
+          // files BEFORE writing the allowed set — never a user's own subagent.
+          const pruned = pruneStaleWorkflowSubagents(claudeAgentsDir, allFiles, allowedStems);
+          if (pruned.length > 0) {
+            process.stderr.write(chalk.gray(`[workflow] pruned ${pruned.length} stale workflow subagent(s) from shared dir: ${pruned.join(', ')}\n`));
+          }
           let copied = 0;
           let skipped = 0;
           for (const file of allFiles) {
@@ -630,7 +660,9 @@ export function registerRunCommand(program: Command): void {
               skipped++;
               continue;
             }
-            fs.copyFileSync(path.join(subagentsDir, file), path.join(claudeAgentsDir, file));
+            const dest = path.join(claudeAgentsDir, file);
+            fs.copyFileSync(path.join(subagentsDir, file), dest);
+            workflowSubagentTargets.push(dest);
             copied++;
           }
           if (allowedAgents !== undefined) {
@@ -996,11 +1028,24 @@ export function registerRunCommand(program: Command): void {
       // Resolve --secrets bundles in flag order. Later bundles override earlier
       // ones. Any resolution failure (missing keychain item, blocked exec ref)
       // aborts before spawn so the agent never sees a partial env.
+      const secretsKeysSubset = options.secretsKeys
+        ? options.secretsKeys.split(',').map((k: string) => k.trim()).filter(Boolean)
+        : undefined;
       let secretsEnv: Record<string, string> = {};
       for (const bundleRef of options.secrets) {
         try {
           const { bundle: bundleName, host } = splitBundleRef(bundleRef);
           if (host) {
+            // Least-privilege flags (--secrets-keys / --allow-expired) do not
+            // yet cross the SSH resolver — silently applying them would inject
+            // the full remote env or an expired key. Fail loud so the user
+            // can drop the flag or resolve locally instead.
+            assertRemoteBundleFlagsUnsupported(
+              bundleName,
+              host,
+              { keys: secretsKeysSubset, allowExpired: options.allowExpired },
+              { keysFlag: '--secrets-keys', allowExpiredFlag: '--allow-expired' },
+            );
             // Remote bundle (`bundle@host`): resolve over SSH and inject
             // ephemerally — values never touch this machine's keychain or disk.
             const target = await resolveSshTarget(host);
@@ -1008,7 +1053,11 @@ export function registerRunCommand(program: Command): void {
             console.log(chalk.gray(`[secrets] Resolved ${bundleName}@${host}: ${Object.keys(bundleEnv).length} keys (remote, ephemeral)`));
             secretsEnv = { ...secretsEnv, ...bundleEnv };
           } else {
-            const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, { caller: `agent ${agent}` });
+            const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, {
+              caller: `agent ${agent}`,
+              keys: secretsKeysSubset,
+              allowExpired: options.allowExpired,
+            });
             const entries = describeBundle(bundle);
             const counts: Record<string, number> = {};
             for (const e of entries) {
@@ -1106,6 +1155,19 @@ export function registerRunCommand(program: Command): void {
           }
           fallback.push({ agent: fbAgent, version: resolveVersionAlias(fbAgent, fbVersion || undefined) });
         }
+      }
+
+      // Profile-declared same-host model swap (issue #325). Inserted BEFORE any
+      // user --fallback entries so a rate limit first tries the cheaper/backup
+      // model on the same provider (auth + base URL preserved via envOverride);
+      // only if THAT still rate-limits do we cascade to a different agent CLI.
+      // Requires a prompt for the same reason --fallback does — headless-only.
+      if (fromProfile && profileFallbackModel && prompt !== undefined && !options.interactive) {
+        fallback.unshift({
+          agent,
+          version,
+          envOverride: { [profileFallbackModel.envKey]: profileFallbackModel.model },
+        });
       }
 
       if (options.acp) {
@@ -1212,6 +1274,20 @@ export function registerRunCommand(program: Command): void {
         }
       };
 
+      // Restore the shared per-agent agents dir after the run (issue #401):
+      // remove the workflow subagent files THIS run copied in, so a scoped
+      // workflow never leaves definitions behind for the next, unrelated run to
+      // inherit. Mirrors cleanupWorkflowMcpConfig — tear down only what we made.
+      const cleanupWorkflowSubagents = () => {
+        for (const target of workflowSubagentTargets) {
+          try {
+            fs.rmSync(target, { force: true });
+          } catch {
+            // best-effort: nothing actionable if the file is already gone.
+          }
+        }
+      };
+
       // Loop dispatch (issue #332). Active when --loop is passed OR a workflow
       // declares a `loop:` block. The loop path runs AFTER the #346 pre-flight
       // gate above (which fired once) — the loop's token budget is an ADDITIONAL
@@ -1250,10 +1326,12 @@ export function registerRunCommand(program: Command): void {
             version,
           });
           cleanupWorkflowMcpConfig();
+          cleanupWorkflowSubagents();
           process.stderr.write(chalk.gray(`[loop] stopped: ${result.stoppedBy} after ${result.iterations} iteration(s), ${result.tokens} tokens (checkpoint: ${path.join(runDir, 'checkpoint.json')})\n`));
           process.exit(loopExitCode(result.stoppedBy));
         } catch (err) {
           cleanupWorkflowMcpConfig();
+          cleanupWorkflowSubagents();
           console.error(chalk.red(`Loop failed for ${agent}: ${(err as Error).message}`));
           process.exit(1);
         }
@@ -1268,9 +1346,11 @@ export function registerRunCommand(program: Command): void {
           exitCode = await execAgent(execOptions);
         }
         cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
         process.exit(exitCode);
       } catch (err) {
         cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
         console.error(chalk.red(`Failed to execute ${agent}: ${(err as Error).message}`));
         process.exit(1);
       }

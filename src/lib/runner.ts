@@ -24,6 +24,8 @@ import { prepareJobHome, buildSpawnEnv } from './sandbox.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { createTimer, maybeRotate, redactPrompt } from './events.js';
 import { normalizeMode } from './exec.js';
+import type { ExecOptions, ExecEffort } from './exec.js';
+import type { LoopDeps } from './loop.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -177,8 +179,16 @@ function generateRunId(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
-/** Execute a job synchronously (waits for completion or timeout before resolving). */
-export async function executeJob(config: JobConfig): Promise<RunResult> {
+/**
+ * Execute a job synchronously (waits for completion or timeout before resolving).
+ *
+ * When `config.loop` is set the job is routed through the loop driver (`runLoop`
+ * from loop.ts) instead of a single spawn — same driver as `agents run --loop` and
+ * workflow `loop:` blocks (issue #400). The optional `deps` parameter provides
+ * injectable seams (runIteration, sleep, writeCheckpoint) used by tests; production
+ * callers omit it and get the defaults.
+ */
+export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<RunResult> {
   maybeRotate();
   const timer = createTimer('agent.run', {
     agent: config.agent,
@@ -190,7 +200,6 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
   });
 
   const resolvedPrompt = resolveJobPrompt(config);
-  const cmd = buildJobCommand(config, resolvedPrompt);
 
   const useSandbox = config.sandbox !== false;
   const overlayHome = useSandbox ? prepareJobHome(config) : undefined;
@@ -198,9 +207,6 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
   const runId = generateRunId();
   const runDir = getRunDir(config.name, runId);
   fs.mkdirSync(runDir, { recursive: true });
-
-  const stdoutPath = path.join(runDir, 'stdout.log');
-  const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
 
   let spawnEnv = useSandbox ? buildSpawnEnv(overlayHome!) : { ...process.env } as Record<string, string>;
   if (config.timezone) {
@@ -225,6 +231,44 @@ export async function executeJob(config: JobConfig): Promise<RunResult> {
   writeRunMeta(meta);
 
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
+
+  // Loop path: delegate to runLoop (same driver as `agents run --loop` / workflow loop:).
+  if (config.loop) {
+    const execOptions: ExecOptions = {
+      agent: effectiveAgent,
+      version: config.version,
+      prompt: resolvedPrompt,
+      mode: normalizeMode(config.mode),
+      effort: config.effort as ExecEffort,
+      env: spawnEnv as Record<string, string>,
+      json: true,
+      headless: true,
+      ...(config.config?.model ? { model: config.config.model as string } : {}),
+      ...(config.allow?.dirs ? {
+        addDirs: config.allow.dirs
+          .filter((d) => !d.startsWith('-'))
+          .map((d) => d.replace(/^~/, os.homedir())),
+      } : {}),
+    };
+    const { runLoop } = await import('./loop.js');
+    const loopResult = await runLoop(execOptions, config.loop, {
+      runId,
+      runDir,
+      agent: effectiveAgent,
+      version: config.version,
+    }, deps);
+    meta.status = loopResult.stoppedBy === 'error' ? 'failed' : 'completed';
+    meta.completedAt = new Date().toISOString();
+    meta.exitCode = loopResult.stoppedBy === 'error' ? 1 : 0;
+    writeRunMeta(meta);
+    timer.end({ status: meta.status, exitCode: meta.exitCode ?? undefined, runId });
+    return { meta, reportPath: null };
+  }
+
+  // Single-shot path (no loop): build the command, open a log file, and spawn once.
+  const cmd = buildJobCommand(config, resolvedPrompt);
+  const stdoutPath = path.join(runDir, 'stdout.log');
+  const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
 
   return new Promise<RunResult>((resolve) => {
     const child = spawn(cmd[0], cmd.slice(1), {

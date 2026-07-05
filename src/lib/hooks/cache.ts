@@ -65,9 +65,39 @@ export function parseDuration(d: number | string | undefined): number | null {
   return value;
 }
 
+/**
+ * Reject hook names that could escape the shims directory when interpolated
+ * into a filename. Mirrors the containment gate on hook script resolution in
+ * hooks.ts (`resolveContainedHookPath`).
+ */
+export function isValidHookShimName(name: string): boolean {
+  return (
+    !!name &&
+    name !== '.' &&
+    name !== '..' &&
+    !name.startsWith('-') &&
+    !/[\/\\\x00]/.test(name) &&
+    name.length <= 255
+  );
+}
+
+/** Resolve shimsDir + `${name}.sh` and assert the result stays inside shimsDir. */
+function resolveContainedHookShimPath(shimsDir: string, name: string): string {
+  if (!isValidHookShimName(name)) {
+    throw new Error(`Invalid hook shim name: ${name}`);
+  }
+  const resolvedRoot = path.resolve(shimsDir);
+  const candidate = path.join(shimsDir, `${name}.sh`);
+  const resolved = path.resolve(candidate);
+  if (!resolved.startsWith(resolvedRoot + path.sep)) {
+    throw new Error(`Invalid hook shim name: ${name}`);
+  }
+  return resolved;
+}
+
 /** Absolute path of the generated shim for a hook name. */
 export function getHookShimPath(name: string): string {
-  return path.join(getHookShimsDir(), `${name}.sh`);
+  return resolveContainedHookShimPath(getHookShimsDir(), name);
 }
 
 /**
@@ -96,7 +126,7 @@ export function generateHookShim(args: {
   const shimsDir = args.paths?.shimsDir ?? getHookShimsDir();
   const cacheDir = args.paths?.cacheDir ?? getHookCacheDir();
   const logsDir = args.paths?.logsDir ?? getLogsDir();
-  const shimPath = path.join(shimsDir, `${args.name}.sh`);
+  const shimPath = resolveContainedHookShimPath(shimsDir, args.name);
   const content = renderShim(args.name, args.scriptPath, args.cache, { cacheDir, logsDir });
   fs.mkdirSync(shimsDir, { recursive: true });
 
@@ -262,8 +292,9 @@ exit "$EXIT"
  * hook is renamed/deleted or has its `cache:` field removed.
  */
 export function removeHookShim(name: string, shimsDir?: string): void {
+  if (!isValidHookShimName(name)) return;
   const dir = shimsDir ?? getHookShimsDir();
-  const shimPath = path.join(dir, `${name}.sh`);
+  const shimPath = resolveContainedHookShimPath(dir, name);
   if (fs.existsSync(shimPath)) {
     try { fs.unlinkSync(shimPath); } catch { /* best effort */ }
   }

@@ -14,6 +14,7 @@ import * as os from 'os';
 let TEST_ROOT: string;
 let SYSTEM_DIR: string;
 let USER_DIR: string;
+let ENABLED_EXTRAS: Array<{ alias: string; dir: string; url: string }>;
 
 vi.mock('../state.js', () => ({
   get getAgentsDir() { return () => SYSTEM_DIR; },
@@ -23,7 +24,7 @@ vi.mock('../state.js', () => ({
   get getSystemHooksDir() { return () => path.join(SYSTEM_DIR, 'hooks'); },
   get getUserHooksDir() { return () => path.join(USER_DIR, 'hooks'); },
   get getProjectAgentsDir() { return () => null; },
-  get getEnabledExtraRepos() { return () => []; },
+  get getEnabledExtraRepos() { return () => ENABLED_EXTRAS; },
 }));
 
 vi.mock('../agents.js', () => ({
@@ -52,6 +53,7 @@ describe('parseHookManifest layering', () => {
     USER_DIR = path.join(TEST_ROOT, '.agents');
     fs.mkdirSync(SYSTEM_DIR, { recursive: true });
     fs.mkdirSync(USER_DIR, { recursive: true });
+    ENABLED_EXTRAS = [];
   });
 
   afterEach(() => {
@@ -155,5 +157,91 @@ describe('parseHookManifest layering', () => {
     const out = parseHookManifest();
     expect(out['shared'].script).toBe('user.sh');
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  // Regression for #602: an enabled extra repo declaring a hook (with its
+  // event, e.g. SessionStart) must surface in parseHookManifest so the event
+  // actually registers. Before the fix parseHookManifest read only the system
+  // and user agents.yaml, so extra-repo hook scripts resolved but their events
+  // never wired.
+  it('includes hook events declared in an enabled extra repo (#602)', () => {
+    const extraDir = path.join(TEST_ROOT, 'extra-work');
+    fs.mkdirSync(extraDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(extraDir, 'agents.yaml'),
+      'hooks:\n  work-session:\n    script: session-start.sh\n    events: [SessionStart]\n    timeout: 7\n',
+      'utf-8'
+    );
+    ENABLED_EXTRAS = [{ alias: 'work', dir: extraDir, url: 'gh:me/.agents-work' }];
+
+    const out = parseHookManifest();
+    expect(out['work-session']).toBeDefined();
+    expect(out['work-session'].script).toBe('session-start.sh');
+    expect(out['work-session'].events).toEqual(['SessionStart']);
+    expect(out['work-session'].timeout).toBe(7);
+  });
+
+  it('extra-repo hooks sit above system but below user in precedence (#602)', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const extraDir = path.join(TEST_ROOT, 'extra-work');
+    fs.mkdirSync(extraDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(SYSTEM_DIR, 'agents.yaml'),
+      'hooks:\n  shared:\n    script: system.sh\n    events: [Stop]\n',
+      'utf-8'
+    );
+    fs.writeFileSync(
+      path.join(extraDir, 'agents.yaml'),
+      'hooks:\n  shared:\n    script: extra.sh\n    events: [Stop]\n',
+      'utf-8'
+    );
+    ENABLED_EXTRAS = [{ alias: 'work', dir: extraDir, url: 'gh:me/.agents-work' }];
+
+    // Extra beats system.
+    expect(parseHookManifest()['shared'].script).toBe('extra.sh');
+
+    // User beats extra.
+    fs.writeFileSync(
+      path.join(USER_DIR, 'agents.yaml'),
+      'hooks:\n  shared:\n    override: true\n    script: user.sh\n    events: [Stop]\n',
+      'utf-8'
+    );
+    expect(parseHookManifest()['shared'].script).toBe('user.sh');
+  });
+
+  it('earlier extra repo wins over a later one on name collision (#602)', () => {
+    const workDir = path.join(TEST_ROOT, 'extra-work');
+    const teamDir = path.join(TEST_ROOT, 'extra-team');
+    fs.mkdirSync(workDir, { recursive: true });
+    fs.mkdirSync(teamDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(workDir, 'agents.yaml'),
+      'hooks:\n  shared:\n    script: from-work.sh\n    events: [SessionStart]\n',
+      'utf-8'
+    );
+    fs.writeFileSync(
+      path.join(teamDir, 'agents.yaml'),
+      'hooks:\n  shared:\n    script: from-team.sh\n    events: [SessionStart]\n',
+      'utf-8'
+    );
+    ENABLED_EXTRAS = [
+      { alias: 'work', dir: workDir, url: 'gh:me/.agents-work' },
+      { alias: 'team', dir: teamDir, url: 'gh:team/.agents' },
+    ];
+
+    expect(parseHookManifest()['shared'].script).toBe('from-work.sh');
+  });
+
+  it('enabled: false on an extra-repo hook strips it (#602)', () => {
+    const extraDir = path.join(TEST_ROOT, 'extra-work');
+    fs.mkdirSync(extraDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(extraDir, 'agents.yaml'),
+      'hooks:\n  work-session:\n    enabled: false\n    script: session-start.sh\n    events: [SessionStart]\n',
+      'utf-8'
+    );
+    ENABLED_EXTRAS = [{ alias: 'work', dir: extraDir, url: 'gh:me/.agents-work' }];
+
+    expect(parseHookManifest()).not.toHaveProperty('work-session');
   });
 });

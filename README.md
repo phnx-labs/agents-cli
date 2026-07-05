@@ -192,7 +192,7 @@ Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` wit
 
 ## Run open models through Claude Code (experimental)
 
-> **Note:** Profiles are experimental. Enable with `agents beta profiles enable`.
+> **Note:** Profiles are experimental, but available by default — no enable step needed.
 
 ```bash
 # Kimi K2.5 responding inside Claude Code's UI, tools, and skills.
@@ -785,7 +785,7 @@ No — it's a SQLite + FTS5 full-text index. Fast, flexible, and robust. Agents 
 
 ### How do I use custom or local models?
 
-Profiles (experimental — enable with `agents beta profiles enable`). Works with LiteLLM Proxy, Ollama, or any OpenAI-compatible endpoint. Drop a YAML in `~/.agents/profiles/` pointing to your endpoint.
+Profiles (experimental — available by default). Works with LiteLLM Proxy, Ollama, or any OpenAI-compatible endpoint. Drop a YAML in `~/.agents/profiles/` pointing to your endpoint.
 
 ### Can I add support for a new agent?
 

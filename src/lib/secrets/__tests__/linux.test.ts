@@ -238,16 +238,19 @@ describe('headless auto-provisioned passphrase (no env, locked keyring)', () => 
     delete process.env.AGENTS_SECRETS_PASSPHRASE;
     Object.defineProperty(process.stdin, 'isTTY', { value: prevTty, configurable: true });
     _resetForTest();
+    const keyDir = path.resolve(tmpDir, '..', `${path.basename(tmpDir)}-key`);
+    fs.rmSync(keyDir, { recursive: true, force: true });
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('set/get works without env or keyring, and writes a 0600 .passphrase', () => {
+  it('set/get works without env or keyring, and writes a 0600 passphrase outside the store', () => {
     // Previously this threw "no AGENTS_SECRETS_PASSPHRASE is set".
     linuxBackend.set('agents-cli.secrets.work.API_KEY', 'sk-headless-123');
     expect(linuxBackend.get('agents-cli.secrets.work.API_KEY')).toBe('sk-headless-123');
 
-    const passFp = path.join(tmpDir, '.passphrase');
+    const passFp = path.join(path.resolve(tmpDir, '..', `${path.basename(tmpDir)}-key`), 'passphrase');
     expect(fs.existsSync(passFp)).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.passphrase'))).toBe(false);
     // NTFS has no POSIX mode bits — the 0o600 lockdown is a no-op on Windows.
     if (process.platform !== 'win32') expect(fs.statSync(passFp).mode & 0o777).toBe(0o600);
     // The on-disk item is ciphertext, not the plaintext value.
@@ -255,15 +258,16 @@ describe('headless auto-provisioned passphrase (no env, locked keyring)', () => 
     expect(enc).not.toContain('sk-headless-123');
   });
 
-  it('the .passphrase file is stable across processes (decrypts later)', () => {
+  it('the machine passphrase is stable across processes (decrypts later)', () => {
     linuxBackend.set('agents-cli.secrets.work.API_KEY', 'persisted');
-    const provisioned = fs.readFileSync(path.join(tmpDir, '.passphrase'), 'utf8');
+    const keyDir = path.resolve(tmpDir, '..', `${path.basename(tmpDir)}-key`);
+    const provisioned = fs.readFileSync(path.join(keyDir, 'passphrase'), 'utf8');
 
     // Fresh process: clear in-memory cache, keep the same store dir.
     _resetForTest({ fileDir: tmpDir, forceFileFallback: true });
     expect(linuxBackend.get('agents-cli.secrets.work.API_KEY')).toBe('persisted');
     // Same passphrase reused, not regenerated.
-    expect(fs.readFileSync(path.join(tmpDir, '.passphrase'), 'utf8')).toBe(provisioned);
+    expect(fs.readFileSync(path.join(keyDir, 'passphrase'), 'utf8')).toBe(provisioned);
   });
 
   it('.passphrase is not surfaced as a secret item', () => {

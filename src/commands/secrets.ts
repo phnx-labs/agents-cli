@@ -11,6 +11,8 @@ import chalk from 'chalk';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
 import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
+import { quoteWin32ExecArg, composeWin32CommandLine } from '../lib/platform/index.js';
+import { ensureDaemonStarted } from '../lib/daemon.js';
 import {
   parseHostsOption,
   remoteResolveEnv,
@@ -33,6 +35,7 @@ import {
   readBundle,
   renameBundle,
   rotateBundleSecret,
+  sanitizeProcessEnv,
   validateBundleName,
   validateEnvKey,
   validateExpiresFutureDated,
@@ -197,6 +200,21 @@ function readStdinSync(): string {
 // SSH target validation is defined canonically in src/lib/ssh-exec.ts and
 // re-exported here for back-compat with existing importers of these symbols.
 export { SSH_TARGET_RE, assertValidSshTarget };
+
+/**
+ * Build the child environment for `agents secrets exec`. Strips
+ * loader/interpreter hijack vars (matching agent spawns in exec.ts) and never
+ * forwards AGENTS_SECRETS_PASSPHRASE — the master decryption key must not reach
+ * the executed command.
+ */
+export function buildSecretsExecEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  secretEnv: Record<string, string>,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...sanitizeProcessEnv(parentEnv), ...secretEnv };
+  delete env.AGENTS_SECRETS_PASSPHRASE;
+  return env;
+}
 
 /** POSIX single-quote a string for safe interpolation into a remote shell command. */
 function shellQuote(s: string): string {
@@ -1387,35 +1405,56 @@ Examples:
     .command('exec <bundle> [command...]')
     .description('Run a command with the bundle\'s secrets injected into the environment (use --host to resolve the bundle from a remote machine, ephemerally)')
     .option('--host <target>', 'Resolve <bundle> on a remote host over SSH and inject it (ephemeral — never stored on this machine)')
+    .option('--keys <keys>', 'Inject only this comma-separated subset of keys (e.g. KEY1,KEY2). Missing keys are an error.')
+    .option('--allow-expired', 'Inject keys even if their expiry date has passed (overrides the pre-run expiry abort).')
     .allowUnknownOption()
-    .action(async (bundleName: string, commandParts: string[], execOpts: { host?: string }) => {
+    .action(async (bundleName: string, commandParts: string[], execOpts: { host?: string; keys?: string; allowExpired?: boolean }) => {
       try {
         if (commandParts.length === 0) {
           console.error(chalk.red('Usage: agents secrets exec <bundle> -- <command...>'));
           process.exit(1);
         }
         const [cmd, ...args] = commandParts;
+        const keysSubset = execOpts.keys
+          ? execOpts.keys.split(',').map((k) => k.trim()).filter(Boolean)
+          : undefined;
         let secretEnv: Record<string, string>;
         if (execOpts.host) {
+          // Least-privilege flags do not yet cross the SSH resolver —
+          // silently applying them would inject the full remote env or an
+          // expired key. Fail loud so the user can drop the flag or run
+          // locally instead.
+          const { assertRemoteBundleFlagsUnsupported } = await import('../lib/secrets/bundles.js');
+          assertRemoteBundleFlagsUnsupported(
+            bundleName,
+            execOpts.host,
+            { keys: keysSubset, allowExpired: execOpts.allowExpired },
+            { keysFlag: '--keys', allowExpiredFlag: '--allow-expired' },
+          );
           secretEnv = await remoteResolveEnv(await resolveSshTarget(execOpts.host), bundleName);
         } else {
           const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
-          secretEnv = readAndResolveBundleEnv(bundleName, { caller: `command ${cmd}` }).env;
+          secretEnv = readAndResolveBundleEnv(bundleName, {
+            caller: `command ${cmd}`,
+            keys: keysSubset,
+            allowExpired: execOpts.allowExpired,
+          }).env;
         }
         const { spawn } = await import('child_process');
         // On Windows, spawn without a shell ENOENTs for `.cmd`/`.bat` launchers
         // (npm, yarn, most JS CLIs) and shell built-ins, so we set shell:true.
         // With shell:true Node hands cmd.exe a single command line with NO quoting
-        // of its own, so args containing spaces or cmd metacharacters must be
-        // quoted here (quoteWin32ExecArg) or they'd be split. See that helper for
+        // of its own. Compose that line ourselves (composeWin32CommandLine quotes
+        // every token) and pass an EMPTY args array so Node never concatenates the
+        // user-supplied args unescaped (DEP0190 + injection). See that helper for
         // the cmd.exe %VAR%/!VAR! expansion caveat.
         const useShell = process.platform === 'win32';
-        const spawnCmd = useShell ? quoteWin32ExecArg(cmd) : cmd;
-        const spawnArgs = useShell ? args.map(quoteWin32ExecArg) : args;
+        const spawnCmd = useShell ? composeWin32CommandLine(cmd, args) : cmd;
+        const spawnArgs = useShell ? [] : args;
         const proc = spawn(spawnCmd, spawnArgs, {
           stdio: 'inherit',
           shell: useShell,
-          env: { ...process.env, ...secretEnv },
+          env: buildSecretsExecEnv(process.env, secretEnv),
         });
         proc.on('close', (code) => process.exit(code ?? 0));
         proc.on('error', (err) => {
@@ -1540,6 +1579,12 @@ Examples:
         console.error(chalk.red('Could not start the secrets-agent.'));
         process.exit(1);
       }
+      // #415: the daemon should be always-on for any background need, not only
+      // after `routines add`. A user who only ever unlocks secrets still gets
+      // the daemon installed + running here. `ensureAgentRunning` above only
+      // brings up the standalone secrets broker, not the daemon. Idempotent
+      // (single-instance start lock, #414) and best-effort — never blocks unlock.
+      ensureDaemonStarted();
       let loaded = 0;
       for (const name of targets) {
         try {
@@ -1713,47 +1758,9 @@ function humanRemaining(expiresAt: number): string {
   return `locks in ${days} day${days === 1 ? '' : 's'}`;
 }
 
-/**
- * Quote one argument for a Windows `cmd.exe` command line, as built by Node's
- * `spawn(..., { shell: true })` on win32 (`agents secrets exec`). cmd.exe does
- * NO quoting of its own, so an unquoted arg with a space is split into several
- * args, and a cmd metacharacter (`&|<>()^`) would be interpreted by the shell.
- * We wrap any arg with whitespace, a quote, or a metacharacter in double quotes
- * and escape embedded quotes / trailing backslashes per the CommandLineToArgvW
- * rules, so the *child's* argv parse reconstructs the original argument.
- *
- * CAVEAT: cmd.exe expands `%VAR%` (always) and `!VAR!` (under delayed expansion)
- * BEFORE argv parsing, and double-quoting does NOT suppress `%`/`!` (the
- * "BatBadBut" / CVE-2024-1874 class). We deliberately do not escape `%`/`!`:
- * `agents secrets exec` runs a caller-supplied command against a bundle the
- * caller owns, so caller-controlled `%`/`!` is not a privilege boundary. If that
- * ever changes (exec'ing an untrusted command line), route through a shell that
- * disables expansion rather than relying on this quoter. An empty arg becomes
- * `""`. Exported for tests. No-ops on non-Windows (the caller only invokes it
- * under `process.platform === 'win32'`).
- */
-export function quoteWin32ExecArg(arg: string): string {
-  if (arg.length > 0 && !/[\s"&|<>()^]/.test(arg)) return arg;
-  let result = '"';
-  let backslashes = 0;
-  for (const ch of arg) {
-    if (ch === '\\') {
-      backslashes += 1;
-      continue;
-    }
-    if (ch === '"') {
-      // Double the run of backslashes, then escape this quote.
-      result += '\\'.repeat(backslashes * 2 + 1) + '"';
-      backslashes = 0;
-      continue;
-    }
-    result += '\\'.repeat(backslashes) + ch;
-    backslashes = 0;
-  }
-  // Trailing backslashes precede the closing quote → must be doubled.
-  result += '\\'.repeat(backslashes * 2) + '"';
-  return result;
-}
+// `quoteWin32ExecArg` now lives in lib/platform/exec.ts (shared with the agent
+// run/shim spawn paths); re-exported here for the colocated secrets tests.
+export { quoteWin32ExecArg };
 
 /**
  * Copy text to the system clipboard, cross-platform.

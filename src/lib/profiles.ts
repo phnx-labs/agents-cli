@@ -29,6 +29,14 @@ export interface Profile {
   description?: string;
   preset?: string;
   provider?: string;
+  /**
+   * Optional secondary model retried on the same host when the primary model
+   * env value hits a rate limit. Reuses the `--fallback` cascade in
+   * `runWithFallback` (src/lib/exec.ts) — the swap is expressed as an
+   * envOverride on a same-agent FallbackEntry, so only the model env var
+   * changes; auth, base URL, and every other profile env value are preserved.
+   */
+  fallback_model?: string;
 }
 
 /**
@@ -155,14 +163,24 @@ const MODEL_ENV_KEYS = [
 
 /** Return the configured model env value for display. */
 export function profileModelLabel(profile: Profile): string {
+  const key = profileModelEnvKey(profile);
+  return key ? profile.env[key] : '-';
+}
+
+/**
+ * Return the env var key that carries this profile's model (e.g.
+ * `ANTHROPIC_MODEL`), or null when the profile has no recognizable model env.
+ * `fallback_model` swaps THIS key so provider selection, auth, and base URL
+ * are all preserved on retry.
+ */
+export function profileModelEnvKey(profile: Profile): string | null {
   for (const key of MODEL_ENV_KEYS) {
-    const value = profile.env[key];
-    if (value) return value;
+    if (profile.env[key]) return key;
   }
   for (const [key, value] of Object.entries(profile.env)) {
-    if ((key === 'MODEL' || key.endsWith('_MODEL')) && value) return value;
+    if ((key === 'MODEL' || key.endsWith('_MODEL')) && value) return key;
   }
-  return '-';
+  return null;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -285,6 +303,13 @@ export interface ResolvedProfileRun {
   version?: string;
   env: Record<string, string>;
   profileName: string;
+  /**
+   * Same-host model swap for the `--fallback` cascade. Present only when the
+   * profile declares `fallback_model` AND the profile has an identifiable
+   * model env key to swap. `envKey` names the var (e.g. `ANTHROPIC_MODEL`),
+   * `model` is the value to write on the retry attempt.
+   */
+  fallbackModel?: { envKey: string; model: string };
 }
 
 /**
@@ -294,12 +319,19 @@ export interface ResolvedProfileRun {
  */
 export function resolveProfileForRun(name: string): ResolvedProfileRun {
   const profile = readProfile(name);
-  return {
+  const resolved: ResolvedProfileRun = {
     agent: profile.host.agent,
     version: profile.host.version,
     env: resolveProfileEnv(profile),
     profileName: profile.name,
   };
+  if (profile.fallback_model) {
+    const envKey = profileModelEnvKey(profile);
+    if (envKey) {
+      resolved.fallbackModel = { envKey, model: profile.fallback_model };
+    }
+  }
+  return resolved;
 }
 
 /**

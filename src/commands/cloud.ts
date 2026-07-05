@@ -8,12 +8,40 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
+import * as path from 'path';
 import ora from 'ora';
 import { resolveProvider, getAllProviders, getDefaultProviderId } from '../lib/cloud/registry.js';
 import { insertTask, updateTaskStatus, getTaskById, listTasks as listStoredTasks, listActiveTasks } from '../lib/cloud/store.js';
 import { renderStream } from '../lib/cloud/stream.js';
-import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions } from '../lib/cloud/types.js';
-import { MissingTargetError } from '../lib/cloud/types.js';
+import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions, ImageAttachment, SkillRef } from '../lib/cloud/types.js';
+import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
+
+/** Map a supported image file extension to its wire mimeType. Rejects anything else. */
+function imageMimeFromPath(file: string): ImageAttachment['mimeType'] {
+  const ext = path.extname(file).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  die(`Unsupported image type ${JSON.stringify(ext || file)}. Use .png, .jpg/.jpeg, or .webp.`);
+}
+
+/** Read one image file into a base64 ImageAttachment, dying with a clear error if it's missing. */
+function readImageAttachment(file: string): ImageAttachment {
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    die(`Image not found: ${file}`);
+  }
+  const mimeType = imageMimeFromPath(file);
+  return { data: fs.readFileSync(file).toString('base64'), mimeType };
+}
+
+/** Parse a `--skill <id>` value (`id` or `id@version`) into a SkillRef. */
+function parseSkillRef(raw: string): SkillRef {
+  const at = raw.lastIndexOf('@');
+  if (at > 0) {
+    return { id: raw.slice(0, at), version: raw.slice(at + 1) };
+  }
+  return { id: raw };
+}
 
 /** Print an error message to stderr and exit. */
 function die(msg: string, code = 1): never {
@@ -173,6 +201,24 @@ Examples:
     .option('--autonomy <level>', 'Factory/Droid autonomy: low, medium, high (default high)')
     .option('--mode <mode>', 'Execution mode (e.g., plan, edit, full)')
     .option(
+      '--image <path>',
+      `Attach an image (.png/.jpg/.webp) for vision dispatch. Repeatable, up to ${MAX_IMAGES_PER_DISPATCH} (Rush Cloud only).`,
+      (value: string, previous: string[] | undefined) => {
+        const acc = Array.isArray(previous) ? previous : [];
+        acc.push(value);
+        return acc;
+      },
+    )
+    .option(
+      '--skill <id>',
+      'Ride-along skill by id (or id@version). Repeatable (Rush Cloud only).',
+      (value: string, previous: string[] | undefined) => {
+        const acc = Array.isArray(previous) ? previous : [];
+        acc.push(value);
+        return acc;
+      },
+    )
+    .option(
       '-b, --balanced',
       'Shortcut for --strategy balanced. Route the factory run across all healthy accounts.',
     )
@@ -253,6 +299,24 @@ Examples:
       }
       if (options.uploadAccountTokens) dispatchOptions.providerOptions!.uploadAccountTokens = true;
 
+      // Vision attachments + ride-along skills. Only wire them when the resolved
+      // provider advertises support — otherwise fail loud rather than silently
+      // drop the flags the user passed.
+      const imagePaths = Array.isArray(options.image) ? (options.image as string[]) : [];
+      const skillIds = Array.isArray(options.skill) ? (options.skill as string[]) : [];
+      const caps = provider.capabilities();
+      if (imagePaths.length > 0) {
+        if (!caps.images) die(`${provider.name} does not support image attachments.`);
+        if (imagePaths.length > MAX_IMAGES_PER_DISPATCH) {
+          die(`Too many images: ${imagePaths.length}. Max is ${MAX_IMAGES_PER_DISPATCH} per dispatch.`);
+        }
+        dispatchOptions.images = imagePaths.map(readImageAttachment);
+      }
+      if (skillIds.length > 0) {
+        if (!caps.skills) die(`${provider.name} does not support ride-along skills.`);
+        dispatchOptions.skills = skillIds.map(parseSkillRef);
+      }
+
       // Dispatch. On a missing pre-provisioned target (Codex env / Factory
       // computer), offer an interactive picker instead of a raw error.
       const dispatchOnce = async () => {
@@ -298,11 +362,31 @@ Examples:
       if (options.follow === false) return;
 
       try {
-        const result = await renderStream(provider.stream(task.id), { json });
+        // Live budget kill-switch (issue #399). Reuses makeLiveSpendWatcher to
+        // feed the provider's `usage` events into a shared watcher; on a cap
+        // breach we call provider.cancel(task.id) mid-stream. Dormant (returns
+        // null) when no caps are configured, so the raw stream flows unchanged.
+        const { wrapStreamWithBudgetGate } = await import('../lib/budget/live-cloud.js');
+        const gated = wrapStreamWithBudgetGate({
+          provider,
+          taskId: task.id,
+          project: task.repo ?? task.repos?.[0] ?? process.cwd(),
+          agent: task.agent ?? 'cloud',
+          cwd: process.cwd(),
+        });
+        const eventSource = gated ? gated.wrap(provider.stream(task.id)) : provider.stream(task.id);
+        const result = await renderStream(eventSource, { json });
         updateTaskStatus(task.id, result.status as CloudTaskStatus, {
           summary: result.summary,
           prUrl: result.prUrl,
         });
+        if (gated?.gate.breached()) {
+          const b = gated.gate.breach();
+          process.stderr.write(
+            `[budget] cap ${b?.cap} exceeded — cancelled cloud task ${task.id}\n`,
+          );
+          process.exitCode = 7; // Mirrors BUDGET_KILL_EXIT_CODE for CI/headless.
+        }
       } catch (err) {
         // Stream disconnect is OK — task keeps running
         process.stderr.write(chalk.dim(`\nStream disconnected. Task ${task.id} continues running.\n`));
@@ -452,11 +536,25 @@ Examples:
       const provider = resolveProvider(task.provider);
 
       try {
-        const result = await renderStream(provider.stream(id), { json });
+        // Live budget kill-switch (issue #399) — wrap the stream so a cap
+        // breach mid-stream cancels the task server-side. Dormant when no caps.
+        const { wrapStreamWithBudgetGate } = await import('../lib/budget/live-cloud.js');
+        const gated = wrapStreamWithBudgetGate({
+          provider,
+          taskId: id,
+          project: task.repo ?? task.repos?.[0] ?? process.cwd(),
+          agent: task.agent ?? 'cloud',
+          cwd: process.cwd(),
+        });
+        const eventSource = gated ? gated.wrap(provider.stream(id)) : provider.stream(id);
+        const result = await renderStream(eventSource, { json });
         updateTaskStatus(id, result.status as CloudTaskStatus, {
           summary: result.summary,
           prUrl: result.prUrl,
         });
+        if (gated?.gate.breached()) {
+          process.exitCode = 7;
+        }
       } catch (err) {
         process.stderr.write(chalk.dim(`\nStream ended. ${(err as Error).message}\n`));
       }

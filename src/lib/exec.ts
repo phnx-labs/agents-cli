@@ -19,6 +19,7 @@ import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
 import { writePidSessionEntry } from './session/pid-registry.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
+import { composeWin32CommandLine } from './platform/index.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -258,6 +259,14 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       : (resolvedVersion && isVersionInstalled('claude', resolvedVersion) ? resolvedVersion : null);
     if (version) {
       result.CLAUDE_CONFIG_DIR = path.join(getVersionHomePath('claude', version), '.claude');
+      // A managed pin lives in a per-version dir; Claude Code's own background
+      // auto-updater would rewrite that pinned binary in place (and has left it
+      // half-swapped and broken). Disable it so a pin stays a pin. Honor an
+      // explicit user value — from process.env (already in result) or from
+      // options.env (spread over result below).
+      if (result.DISABLE_AUTOUPDATER === undefined) {
+        result.DISABLE_AUTOUPDATER = '1';
+      }
     }
     delete result.CODEX_HOME;
     delete result.COPILOT_HOME;
@@ -798,7 +807,14 @@ export function resolveShimSpawn(
     // Use win32 path semantics regardless of the host running this (the platform
     // is the parameter, not process.platform) so `C:\...` reads as absolute.
     const useShell = !path.win32.isAbsolute(binary) || binary.endsWith('.cmd');
-    return { command: binary, args: extraArgs, shell: useShell };
+    if (useShell) {
+      // DEP0190-safe: hand cmd.exe ONE fully-quoted command line with an EMPTY
+      // args array, so Node never concatenates `extraArgs` (which carry the
+      // user's raw prompt/flags) into the shell line unescaped — that concat is
+      // both the deprecation and a command-injection surface.
+      return { command: composeWin32CommandLine(binary, extraArgs), args: [], shell: true };
+    }
+    return { command: binary, args: extraArgs, shell: false };
   }
   return { command: binary, args: extraArgs, shell: false };
 }
@@ -918,11 +934,17 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       : ['inherit', tapStdout ? 'pipe' : 'inherit', 'pipe'];
 
     // On Windows, .cmd batch wrappers (npm-installed CLIs) require shell:true
-    // whether addressed by name or absolute path.
+    // whether addressed by name or absolute path. On that shell path, compose a
+    // single fully-quoted command line and pass an EMPTY args array (see
+    // composeWin32CommandLine) so Node never concatenates the args array — which
+    // carries the user's prompt — into the cmd.exe line unescaped (DEP0190 +
+    // command injection).
     const useShell = process.platform === 'win32' && (
       !path.isAbsolute(executable) || executable.endsWith('.cmd')
     );
-    const child = spawn(executable, args, {
+    const spawnCommand = useShell ? composeWin32CommandLine(executable, args) : executable;
+    const spawnArgs = useShell ? [] : args;
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd || process.cwd(),
       stdio,
       env: buildExecEnv(options),
@@ -1120,6 +1142,12 @@ export interface FallbackEntry {
   agent: AgentId;
   /** Optional pinned version (e.g. '0.116.0'). When set, takes precedence over the active default. */
   version?: string;
+  /**
+   * Env vars merged over options.env for THIS attempt only. Used by profiles
+   * with `fallback_model` to swap the model env key (e.g. ANTHROPIC_MODEL) on
+   * a same-agent retry without touching auth or base URL.
+   */
+  envOverride?: Record<string, string>;
 }
 
 /** ExecOptions extended with a fallback chain for rate-limit cascading. */
@@ -1209,10 +1237,15 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
   }
 
   for (let i = 0; i < chain.length; i++) {
-    const { agent, version } = chain[i];
+    const { agent, version, envOverride } = chain[i];
     const pinnedSessionId = agent === 'claude' ? randomUUID() : undefined;
 
-    const prompt = prevAgent
+    // Same-host retry (same agent+version as previous entry — used by profile
+    // `fallback_model` swaps) keeps the original prompt: the model changed,
+    // not the CLI, so a `/continue` handoff prompt would be misleading.
+    const prev = i > 0 ? chain[i - 1] : undefined;
+    const sameHostRetry = !!prev && prev.agent === agent && prev.version === version;
+    const prompt = prevAgent && !sameHostRetry
       ? buildFallbackPrompt(prevAgent, prevSessionId, agent, options.prompt)
       : options.prompt;
 
@@ -1221,13 +1254,19 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
       agent,
       version,
       prompt,
+      env: envOverride ? { ...(options.env ?? {}), ...envOverride } : options.env,
       sessionId: pinnedSessionId ?? (i === 0 ? options.sessionId : undefined),
     };
 
     const label = version ? `${agent}@${version}` : agent;
+    const modelSwapNote = sameHostRetry && envOverride
+      ? ` (retry with ${Object.entries(envOverride).map(([k, v]) => `${k}=${v}`).join(', ')})`
+      : '';
     const banner = i === 0
       ? `[agents] running ${label}`
-      : `[agents] fallback → ${label}`;
+      : sameHostRetry
+        ? `[agents] retry → ${label}${modelSwapNote}`
+        : `[agents] fallback → ${label}`;
     process.stderr.write(`${banner}${pinnedSessionId ? ` (session ${pinnedSessionId.slice(0, 8)})` : ''}\n`);
 
     let result: SpawnResult;
@@ -1252,7 +1291,9 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
 
     const next = chain[i + 1];
     const nextLabel = next.version ? `${next.agent}@${next.version}` : next.agent;
-    process.stderr.write(`[agents] ${label} hit rate limit. Handing off to ${nextLabel}...\n`);
+    const nextSameHost = next.agent === agent && next.version === version;
+    const handoffVerb = nextSameHost ? 'Retrying on same host' : 'Handing off';
+    process.stderr.write(`[agents] ${label} hit rate limit. ${handoffVerb} to ${nextLabel}...\n`);
     prevAgent = agent;
     prevSessionId = pinnedSessionId;
   }

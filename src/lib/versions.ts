@@ -40,7 +40,7 @@ import { importInstallScriptBinary } from './import.js';
 import { IS_WINDOWS } from './platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from './subagents.js';
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
-import { parseHookManifest, registerHooksToSettings } from './hooks.js';
+import { parseHookManifest, registerHooksToSettings, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills } from './plugins.js';
 import { composeRulesFromState } from './rules/compose.js';
@@ -922,11 +922,60 @@ export function getVersionHomePath(agent: AgentId, version: string): string {
 }
 
 /**
+ * Resolve the REAL launch binary for an npm-package agent version: the file the
+ * installed package's `bin` entry points to — e.g.
+ * node_modules/@anthropic-ai/claude-code/bin/claude.exe on Windows. This is the
+ * executable that the node_modules/.bin/<cli>.cmd wrapper ultimately execs (and
+ * what `agents run` spawns), NOT the wrapper itself.
+ *
+ * The distinction is load-bearing: npm leaves the tiny node_modules/.bin/<cli>
+ * and <cli>.cmd wrappers in place even after a vendor auto-updater destroys the
+ * multi-hundred-MB real binary the wrapper points at. Keying "installed" on the
+ * wrapper (getBinaryPath) — or on the version dir — therefore reports a gutted
+ * install as healthy, and `agents run` then dies at spawn with
+ * "'...claude.exe' is not recognized".
+ *
+ * Returns null for agents without an npm package (grok/droid/installScript,
+ * whose getBinaryPath already resolves the real per-host binary) or when the
+ * installed package.json can't be read/parsed — callers fall back to the
+ * generic getBinaryPath check in those cases.
+ */
+function getPackageBinaryPath(agent: AgentId, version: string): string | null {
+  const agentConfig = AGENTS[agent];
+  if (!agentConfig.npmPackage) return null;
+  const pkgRoot = path.join(getVersionDir(agent, version), 'node_modules', agentConfig.npmPackage);
+  let bin: unknown;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf-8'));
+    bin = pkg.bin;
+  } catch {
+    return null;
+  }
+  let rel: string | undefined;
+  if (typeof bin === 'string') {
+    rel = bin;
+  } else if (bin && typeof bin === 'object') {
+    const map = bin as Record<string, string>;
+    // Prefer the entry named after our launch command; else the first bin.
+    rel = map[agentConfig.cliCommand] ?? Object.values(map)[0];
+  }
+  if (!rel || typeof rel !== 'string') return null;
+  return path.join(pkgRoot, rel);
+}
+
+/**
  * Check if a specific version is installed.
+ *
+ * Probes the actual launch binary (the same executable the shims run), not just
+ * the version dir or the node_modules/.bin/<cli> wrapper. For npm agents that
+ * means statting the package's real `bin` target (getPackageBinaryPath), so a
+ * present-but-gutted install (vendor auto-updater destroyed the binary) reports
+ * as NOT installed and `agents add` re-runs its install step to repair it.
  */
 export function isVersionInstalled(agent: AgentId, version: string): boolean {
-  const binaryPath = getBinaryPath(agent, version);
-  return fs.existsSync(binaryPath);
+  const packageBinary = getPackageBinaryPath(agent, version);
+  if (packageBinary !== null) return fs.existsSync(packageBinary);
+  return fs.existsSync(getBinaryPath(agent, version));
 }
 
 /**
@@ -1022,8 +1071,10 @@ export function listInstalledVersions(agent: AgentId): string[] {
 
   for (const entry of entries) {
     if (entry.isDirectory()) {
-      const binaryPath = getBinaryPath(agent, entry.name);
-      if (fs.existsSync(binaryPath)) {
+      // Probe the real launch binary (isVersionInstalled), not just the
+      // node_modules/.bin wrapper — a gutted install must not count as healthy
+      // in the balanced account/version picker.
+      if (isVersionInstalled(agent, entry.name)) {
         versions.push(entry.name);
       }
     }
@@ -1053,7 +1104,7 @@ export function listInstalledVersionDirs(agent: AgentId): Array<{ version: strin
     if (!entry.isDirectory()) continue;
     out.push({
       version: entry.name,
-      hasBinary: fs.existsSync(getBinaryPath(agent, entry.name)),
+      hasBinary: isVersionInstalled(agent, entry.name),
     });
   }
   return out.sort((a, b) => compareVersions(a.version, b.version));
@@ -1229,7 +1280,7 @@ export async function installVersion(
     }
 
     onProgress?.(`Installing ${packageSpec}...`);
-    const { stdout } = await execFileAsync('npm', ['install', packageSpec], { cwd: versionDir, shell: winShell });
+    const { stdout } = await execFileAsync('npm', ['install', packageSpec, '--ignore-scripts'], { cwd: versionDir, shell: winShell });
 
     // Determine the actual installed version
     let installedVersion = version;
@@ -1433,16 +1484,19 @@ export function removeVersion(agent: AgentId, version: string): boolean {
   // Remove versioned alias (e.g., claude@2.0.65)
   removeVersionedAlias(agent, version);
 
-  // Clear default if it was the removed version - user must explicitly pick a new one
+  // If the removed version was the global default, keep launchers working:
+  // reassign the default to the newest remaining version, or clear it outright
+  // only when nothing is left. Leaving a dangling default pointer here is what
+  // broke every launcher after removing the pinned default.
   if (getGlobalDefault(agent) === version) {
-    const meta = readMeta();
-    if (meta.agents?.[agent]) {
-      delete meta.agents[agent];
-      writeMeta(meta);
-    }
     const remaining = listInstalledVersions(agent);
     if (remaining.length > 0) {
-      console.log(chalk.yellow(`Default version removed. Run: agents use ${agent}@<version> to set a new default`));
+      const newestRemaining = remaining[remaining.length - 1];
+      setGlobalDefault(agent, newestRemaining);
+      console.log(chalk.yellow(`Default ${agent} was ${version} (removed); reassigned to ${newestRemaining}. Change it with: agents use ${agent}@<version>`));
+    } else {
+      setGlobalDefault(agent, undefined);
+      console.log(chalk.yellow(`Removed the last installed ${agent} version and cleared its default. Reinstall with: agents add ${agent}, then set one with: agents use ${agent}@<version>`));
     }
   }
 
@@ -1454,6 +1508,19 @@ export function removeVersion(agent: AgentId, version: string): boolean {
       fs.unlinkSync(configPath);
     } catch {
       // Ignore if already gone
+    }
+  }
+
+  // Clear dead per-version hook entries the removed version left behind in the
+  // remaining versions' settings. Their command paths point under the now-gone
+  // version home, so they error on every tool call until the next sync. Scoped
+  // to the Claude-family settings.json format (claude + droid) — the surface
+  // where per-version guard hooks accumulate; other agents self-heal on sync.
+  if (agent === 'claude' || agent === 'droid') {
+    const configDir = agentConfigDirName(agent);
+    for (const remaining of listInstalledVersions(agent)) {
+      const settingsPath = path.join(getVersionHomePath(agent, remaining), configDir, 'settings.json');
+      pruneVersionHomeHookEntriesFromSettings(settingsPath, agent, version);
     }
   }
 

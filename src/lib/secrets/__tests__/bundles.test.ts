@@ -147,3 +147,96 @@ describe('describeBundle + resolveBundleEnv', () => {
     expect(items.find((i) => i.key === 'B')?.item).toBe('agents-cli.secrets.unit.KEY_B');
   });
 });
+
+describe('resolveBundleEnv -- keys subset injection', () => {
+  function b(vars: Record<string, any>, extra: Partial<SecretsBundle> = {}): SecretsBundle {
+    return { name: 'sub', vars, ...extra };
+  }
+
+  it('injects only the requested keys', () => {
+    const bundle = b({ A: 'alpha', B: 'beta', C: 'gamma' });
+    const env = resolveBundleEnv(bundle, { keys: ['A', 'C'] });
+    expect(env).toEqual({ A: 'alpha', C: 'gamma' });
+    expect(env).not.toHaveProperty('B');
+  });
+
+  it('injects all keys when keys option is absent', () => {
+    const bundle = b({ X: 'x', Y: 'y' });
+    expect(resolveBundleEnv(bundle)).toEqual({ X: 'x', Y: 'y' });
+  });
+
+  it('throws a clear error when a requested key is absent from the bundle', () => {
+    const bundle = b({ REAL: 'value' });
+    expect(() => resolveBundleEnv(bundle, { keys: ['REAL', 'MISSING'] }))
+      .toThrow(/does not contain key\(s\): MISSING/);
+  });
+
+  it('includes the available keys in the missing-key error', () => {
+    const bundle = b({ FOO: 'f', BAR: 'b' });
+    expect(() => resolveBundleEnv(bundle, { keys: ['NOPE'] }))
+      .toThrow(/Available: /);
+  });
+
+  it('treats an empty keys array as inject-all (no keys requested = all)', () => {
+    const bundle = b({ P: 'p', Q: 'q' });
+    expect(resolveBundleEnv(bundle, { keys: [] })).toEqual({ P: 'p', Q: 'q' });
+  });
+});
+
+describe('resolveBundleEnv -- expiry pre-run abort', () => {
+  function b(vars: Record<string, any>, extra: Partial<SecretsBundle> = {}): SecretsBundle {
+    return { name: 'exp', vars, ...extra };
+  }
+
+  const yesterday = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+  it('aborts when a selected key is expired', () => {
+    const bundle = b(
+      { SECRET: 'val' },
+      { meta: { SECRET: { expires: yesterday } } },
+    );
+    expect(() => resolveBundleEnv(bundle)).toThrow(/expired on/);
+  });
+
+  it('includes the key name in the expiry error', () => {
+    const bundle = b(
+      { MY_KEY: 'v' },
+      { meta: { MY_KEY: { expires: yesterday } } },
+    );
+    expect(() => resolveBundleEnv(bundle)).toThrow(/MY_KEY/);
+  });
+
+  it('does not abort when the key is not yet expired', () => {
+    const bundle = b(
+      { FRESH: 'value' },
+      { meta: { FRESH: { expires: tomorrow } } },
+    );
+    expect(resolveBundleEnv(bundle)).toEqual({ FRESH: 'value' });
+  });
+
+  it('does not abort when allowExpired is true', () => {
+    const bundle = b(
+      { STALE: 'val' },
+      { meta: { STALE: { expires: yesterday } } },
+    );
+    expect(resolveBundleEnv(bundle, { allowExpired: true })).toEqual({ STALE: 'val' });
+  });
+
+  it('only checks expiry on selected keys (not excluded ones)', () => {
+    const bundle = b(
+      { WANTED: 'w', OLD: 'o' },
+      { meta: { OLD: { expires: yesterday } } },
+    );
+    // Requesting only WANTED; OLD is expired but excluded — no abort.
+    expect(resolveBundleEnv(bundle, { keys: ['WANTED'] })).toEqual({ WANTED: 'w' });
+  });
+
+  it('aborts if a requested key is expired even with other healthy keys', () => {
+    const bundle = b(
+      { FRESH: 'f', STALE: 's' },
+      { meta: { STALE: { expires: yesterday } } },
+    );
+    expect(() => resolveBundleEnv(bundle, { keys: ['FRESH', 'STALE'] })).toThrow(/expired on/);
+  });
+});

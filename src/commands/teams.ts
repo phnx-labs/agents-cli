@@ -1379,10 +1379,25 @@ export function registerTeamsCommands(program: Command): void {
       const maxWaves = Math.max(1, Number.parseInt(opts.maxWaves, 10) || 1000);
       const json = isJsonMode(opts);
 
+      // Live budget kill-switch (issue #399). Dormant when no caps set — the
+      // factory dropping this in returns null and runSupervisor short-circuits.
+      const { createTeamBudgetWatcher } = await import('../lib/budget/live-team.js');
+      const budgetWatcher = createTeamBudgetWatcher({
+        manager: mgr,
+        team,
+        cwd: process.cwd(),
+        onBreach: (b) => {
+          process.stderr.write(
+            `[budget] cap ${b.cap} exceeded ($${b.spend.toFixed(2)} > $${b.limit.toFixed(2)}) — stopping team ${team}\n`,
+          );
+        },
+      });
+
       const result = await runSupervisor(mgr, {
         team,
         intervalMs,
         maxWaves,
+        budgetWatcher,
         onWave: (s) => {
           const ts = s.timestamp.slice(11, 19);
           if (json) {
@@ -1408,6 +1423,14 @@ export function registerTeamsCommands(program: Command): void {
         console.error(chalk.yellow(`Hit --max-waves=${maxWaves}; stopping. Re-run to continue.`));
       } else if (result.stoppedBy === 'signal') {
         console.error(chalk.yellow(`Stopped by signal after ${result.waves} waves.`));
+      } else if (result.stoppedBy === 'budget') {
+        const b = result.budgetBreach;
+        console.error(chalk.red(
+          `Budget kill-switch tripped after ${result.waves} waves` +
+            (b ? ` (cap ${b.cap}: $${b.spend.toFixed(2)} > $${b.limit.toFixed(2)})` : '') +
+            `.`,
+        ));
+        process.exitCode = 7; // Mirrors BUDGET_KILL_EXIT_CODE for CI/headless.
       }
     });
 

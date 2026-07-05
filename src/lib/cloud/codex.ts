@@ -117,6 +117,10 @@ export class CodexCloudProvider implements CloudProvider {
       cancel: false,
       message: false,
       multiRepo: false,
+      // `codex cloud exec --env <id> <prompt>` is the only dispatch surface the
+      // codex CLI exposes — it has no flag to attach images or ride-along skills,
+      // and the env bundles its own context at creation time. Both stay false
+      // until the upstream CLI grows an attachment surface.
       skills: false,
       images: false,
     };

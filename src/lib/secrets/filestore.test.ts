@@ -26,70 +26,96 @@ vi.mock('child_process', async () => {
 import { fileStore, getPassphrase, _resetFileStoreForTest } from './filestore.js';
 
 describe('filestore passphrase policy (allowAutoProvision)', () => {
-  let tmpDir: string;
+  let tmpRoot: string;
+  let storeDir: string;
+  let keyDir: string;
   let prevTty: boolean | undefined;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-filestore-'));
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-filestore-'));
+    storeDir = path.join(tmpRoot, 'store');
+    keyDir = path.join(tmpRoot, 'key');
     delete process.env.AGENTS_SECRETS_PASSPHRASE;
     // Force the headless branch deterministically regardless of how the runner
     // was launched (a real TTY would otherwise hit the interactive prompt).
     prevTty = process.stdin.isTTY;
     Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
-    _resetFileStoreForTest({ fileDir: tmpDir });
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
   });
 
   afterEach(() => {
     delete process.env.AGENTS_SECRETS_PASSPHRASE;
     Object.defineProperty(process.stdin, 'isTTY', { value: prevTty, configurable: true });
     _resetFileStoreForTest();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('with allowAutoProvision:false and no passphrase, getPassphrase throws (no .passphrase written)', () => {
+  it('with allowAutoProvision:false and no passphrase, getPassphrase throws (no passphrase written)', () => {
     expect(() => getPassphrase({ allowAutoProvision: false })).toThrow(/AGENTS_SECRETS_PASSPHRASE/);
-    expect(fs.existsSync(path.join(tmpDir, '.passphrase'))).toBe(false);
+    expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(false);
+    expect(fs.existsSync(path.join(storeDir, '.passphrase'))).toBe(false);
   });
 
   it('with allowAutoProvision:false, fileStore.set refuses and writes nothing to disk', () => {
     expect(() => fileStore.set('agents-cli.secrets.b.K', 'v', { allowAutoProvision: false }))
       .toThrow(/AGENTS_SECRETS_PASSPHRASE/);
     // No ciphertext, no provisioned key — the box holds nothing decryptable.
-    expect(fs.readdirSync(tmpDir)).toEqual([]);
+    const storeEntries = fs.existsSync(storeDir) ? fs.readdirSync(storeDir) : [];
+    expect(storeEntries.filter((e) => e.endsWith('.enc'))).toEqual([]);
+    expect(storeEntries).not.toContain('.passphrase');
+    expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(false);
   });
 
   it('with an explicit AGENTS_SECRETS_PASSPHRASE, set/get round-trips with auto-provision OFF', () => {
     process.env.AGENTS_SECRETS_PASSPHRASE = 'per-run-key';
-    _resetFileStoreForTest({ fileDir: tmpDir });
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
     const opts = { allowAutoProvision: false } as const;
     fileStore.set('agents-cli.secrets.b.K', 'sealed', opts);
     expect(fileStore.get('agents-cli.secrets.b.K', opts)).toBe('sealed');
     // Encrypted on disk; the machine key was never provisioned.
-    expect(fs.existsSync(path.join(tmpDir, '.passphrase'))).toBe(false);
-    const enc = fs.readFileSync(path.join(tmpDir, 'agents-cli.secrets.b.K.enc'), 'utf8');
+    expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(false);
+    expect(fs.existsSync(path.join(storeDir, '.passphrase'))).toBe(false);
+    const enc = fs.readFileSync(path.join(storeDir, 'agents-cli.secrets.b.K.enc'), 'utf8');
     expect(enc).not.toContain('sealed');
   });
 
   it('with the wrong passphrase, get fails the auth tag with a clear message (auto-provision OFF)', () => {
     process.env.AGENTS_SECRETS_PASSPHRASE = 'right';
-    _resetFileStoreForTest({ fileDir: tmpDir });
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
     fileStore.set('agents-cli.secrets.b.K', 'sealed', { allowAutoProvision: false });
     process.env.AGENTS_SECRETS_PASSPHRASE = 'wrong';
-    _resetFileStoreForTest({ fileDir: tmpDir });
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
     expect(() => fileStore.get('agents-cli.secrets.b.K', { allowAutoProvision: false }))
       .toThrow(/decrypt|passphrase/i);
+  });
+
+  it('auto-provisions the passphrase outside the encrypted store dir (#479)', () => {
+    fileStore.set('agents-cli.secrets.b.K', 'sealed');
+    const storeEntries = fs.readdirSync(storeDir);
+    expect(storeEntries).toContain('agents-cli.secrets.b.K.enc');
+    expect(storeEntries).not.toContain('.passphrase');
+    expect(storeEntries).not.toContain('passphrase');
+    expect(fs.existsSync(path.join(keyDir, 'passphrase'))).toBe(true);
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(path.join(keyDir, 'passphrase')).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(keyDir).mode & 0o777).toBe(0o700);
+    }
   });
 });
 
 // Windows has no /dev/tty; the interactive prompt must route through PowerShell
 // Read-Host instead of crashing with a raw ENOENT on fs.openSync('/dev/tty').
 describe('filestore win32 interactive passphrase branch', () => {
-  let tmpDir: string;
+  let tmpRoot: string;
+  let storeDir: string;
+  let keyDir: string;
   let prevTty: boolean | undefined;
   let prevPlatform: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-filestore-win-'));
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-filestore-win-'));
+    storeDir = path.join(tmpRoot, 'store');
+    keyDir = path.join(tmpRoot, 'key');
     delete process.env.AGENTS_SECRETS_PASSPHRASE;
     // Interactive (isTTY) + win32 so getPassphrase reaches the TTY prompt.
     prevTty = process.stdin.isTTY;
@@ -97,7 +123,7 @@ describe('filestore win32 interactive passphrase branch', () => {
     prevPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     spawnSyncMock.mockReset();
-    _resetFileStoreForTest({ fileDir: tmpDir });
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
   });
 
   afterEach(() => {
@@ -106,7 +132,7 @@ describe('filestore win32 interactive passphrase branch', () => {
     if (prevPlatform) Object.defineProperty(process, 'platform', prevPlatform);
     spawnSyncMock.mockReset();
     _resetFileStoreForTest();
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
   it('reads the passphrase via PowerShell Read-Host, not /dev/tty', () => {
@@ -119,7 +145,7 @@ describe('filestore win32 interactive passphrase branch', () => {
     });
     // Round-trips a value using the prompted passphrase (proves it flows through).
     fileStore.set('agents-cli.secrets.b.K', 'sealed');
-    _resetFileStoreForTest({ fileDir: tmpDir });
+    _resetFileStoreForTest({ fileDir: storeDir, passphraseDir: keyDir });
     spawnSyncMock.mockImplementation(() => ({
       status: 0, stdout: Buffer.from('typed-pass\n'), stderr: Buffer.from(''),
     }));

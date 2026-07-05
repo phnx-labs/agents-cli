@@ -74,12 +74,26 @@ export function parseMcpServerConfig(filePath: string): McpYamlConfig | null {
   return validateMcpYamlConfig(parsed);
 }
 
+/**
+ * Validate an MCP server name. Rejects names that could be misinterpreted as
+ * command-line options or that contain characters unsafe for argv/identifier use.
+ */
+export function validateMcpServerName(name: string): void {
+  if (name.startsWith('-')) {
+    throw new Error(`Invalid MCP server name '${name}': names cannot start with '-'`);
+  }
+  if (/[\s\0-\x1f\x7f]/.test(name)) {
+    throw new Error(`Invalid MCP server name '${name}': names cannot contain whitespace or control characters`);
+  }
+}
+
 function validateMcpYamlConfig(parsed: unknown): McpYamlConfig | null {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return null;
   }
   const config = parsed as Record<string, unknown>;
   if (typeof config.name !== 'string' || config.name.length === 0) return null;
+  validateMcpServerName(config.name);
   if (config.transport !== 'stdio' && config.transport !== 'http') return null;
 
   const result: McpYamlConfig = {
@@ -250,12 +264,12 @@ function installMcpViaClaude(binaryPath: string, server: InstalledMcpServer, ver
       }
     }
 
-    // claude mcp add --scope user --transport stdio <name> [--env K=V]... -- <cmd> [args...]
+    // claude mcp add --scope user --transport stdio [--env K=V]... -- <name> <cmd> [args...]
     const args = [
       'mcp', 'add', '--scope', 'user', '--transport', 'stdio',
-      server.name,
       ...envArgs,
       '--',
+      server.name,
       server.config.command!,
       ...(server.config.args || [])
     ];
@@ -267,8 +281,8 @@ function installMcpViaClaude(binaryPath: string, server: InstalledMcpServer, ver
       shell: needsWindowsShell(binaryPath),
     });
   } else {
-    // claude mcp add --scope user --transport http <name> <url>
-    execFileSync(binaryPath, ['mcp', 'add', '--scope', 'user', '--transport', 'http', server.name, server.config.url!], {
+    // claude mcp add --scope user --transport http -- <name> <url>
+    execFileSync(binaryPath, ['mcp', 'add', '--scope', 'user', '--transport', 'http', '--', server.name, server.config.url!], {
       stdio: 'pipe',
       timeout: 30000,
       env: execEnv,
@@ -283,10 +297,11 @@ function installMcpViaClaude(binaryPath: string, server: InstalledMcpServer, ver
  */
 function installMcpViaCodex(binaryPath: string, server: InstalledMcpServer, versionHome: string): void {
   if (server.config.transport === 'stdio') {
-    // codex mcp add <name> -- <cmd> [args...]
+    // codex mcp add -- <name> <cmd> [args...]
     const args = [
-      'mcp', 'add', server.name,
+      'mcp', 'add',
       '--',
+      server.name,
       server.config.command!,
       ...(server.config.args || [])
     ];
@@ -337,11 +352,12 @@ function registerMcpCommand(
   options: { home?: string; binary?: string } = {}
 ): { success: boolean; error?: string } {
   try {
+    validateMcpServerName(name);
     const bin = options.binary || AGENTS[agentId].cliCommand;
     const commandArgs = [commandSpec.command, ...commandSpec.args];
     const args = agentId === 'claude'
-      ? ['mcp', 'add', '--transport', transport, '--scope', scope, name, '--', ...commandArgs]
-      : ['mcp', 'add', name, '--', ...commandArgs];
+      ? ['mcp', 'add', '--transport', transport, '--scope', scope, '--', name, ...commandArgs]
+      : ['mcp', 'add', '--', name, ...commandArgs];
     const env = options.home ? { ...process.env, HOME: options.home } : process.env;
     execFileSync(bin, args, { stdio: 'pipe', timeout: 30000, env, shell: needsWindowsShell(bin) });
     return { success: true };
@@ -598,6 +614,7 @@ export function installMcpServers(
  * Write an MCP server config to ~/.agents/mcp/.
  */
 export function writeMcpServerConfig(config: McpYamlConfig): string {
+  validateMcpServerName(config.name);
   const mcpDir = getUserMcpDir();
   fs.mkdirSync(mcpDir, { recursive: true });
 

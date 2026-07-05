@@ -35,9 +35,6 @@ import {
   parseAgentSpec,
 } from '../lib/versions.js';
 import { loadManifest, isStale } from '../lib/staleness/index.js';
-import { diffVersionCommands, iterCommandsCapableVersions } from '../lib/commands.js';
-import { diffVersionSkills, iterSkillsCapableVersions } from '../lib/skills.js';
-import { iterHooksCapableVersions, listUnmanagedHooksInVersionHome } from '../lib/hooks.js';
 import {
   diffVersionResources,
   DOCTOR_ALL_KINDS,
@@ -45,6 +42,7 @@ import {
   type ResourceDiff,
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
+import { checkSyncStatus, countOrphans, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
@@ -65,47 +63,7 @@ interface DoctorOptions {
   fix?: boolean;
 }
 
-interface SyncStatusRow {
-  agent: AgentId;
-  version: string;
-  status: 'fresh' | 'stale' | 'never-synced';
-  isDefault: boolean;
-  /** For stale rows: prioritized lines naming exactly what diverged (plugins first). */
-  divergence?: string[];
-}
-
-interface OrphanRow {
-  agent: AgentId;
-  version: string;
-  commands: number;
-  skills: number;
-  hooks: number;
-}
-
 // ─── overview mode (no target) ────────────────────────────────────────────────
-
-// Lines naming exactly what's out of sync for a version, plugins prioritized:
-// each divergent plugin gets its own line with specifics (stale mirror version,
-// invalid manifest, or the bundled skills/commands missing from the mirror —
-// the system-repo plugin content that matters most). Other kinds collapse to
-// compact counts so the readout stays scannable.
-function divergenceLines(report: VersionResourceReport): string[] {
-  const lines: string[] = [];
-  for (const p of report.kinds.plugins) {
-    if (p.status === 'missing') lines.push(`plugin ${p.name} — not installed`);
-    else if (p.status === 'diff') lines.push(`plugin ${p.name} — ${p.detail ?? 'mirror drifted'}`);
-  }
-  for (const kind of ['commands', 'skills', 'hooks', 'rules', 'mcp', 'permissions', 'subagents'] as const) {
-    const rows = report.kinds[kind];
-    const miss = rows.filter((r) => r.status === 'missing').length;
-    const dif = rows.filter((r) => r.status === 'diff').length;
-    const bits: string[] = [];
-    if (miss) bits.push(`${miss} missing`);
-    if (dif) bits.push(`${dif} drifted`);
-    if (bits.length) lines.push(`${kind.padEnd(11)} ${bits.join(' · ')}`);
-  }
-  return lines;
-}
 
 function collapseWhitespace(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
@@ -139,66 +97,6 @@ export function wrapLine(prefix: string, text: string, width = terminalWidth()):
 
 function printWrappedLine(prefix: string, text: string): void {
   for (const line of wrapLine(prefix, text)) console.log(chalk.gray(line));
-}
-
-function checkSyncStatus(cwd: string): SyncStatusRow[] {
-  const rows: SyncStatusRow[] = [];
-  // Every installed version, not just the default — a stale NON-default version
-  // (e.g. one you launched from yesterday) is exactly the rot that silently
-  // serves outdated/invalid resources and that `--fix` now heals. Hiding it here
-  // is why that class of bug went unnoticed.
-  for (const agent of ALL_AGENT_IDS) {
-    const def = getGlobalDefault(agent);
-    for (const version of listInstalledVersions(agent)) {
-      const manifest = loadManifest(agent, version);
-      const status: SyncStatusRow['status'] = !manifest
-        ? 'never-synced'
-        : isStale(manifest, agent, version, cwd) ? 'stale' : 'fresh';
-      const row: SyncStatusRow = { agent, version, status, isDefault: version === def };
-      if (status === 'stale') {
-        // Resolve the specifics against non-project layers (the global home is
-        // never reconciled against per-cwd project resources).
-        const report = diffVersionResources(agent, version, { cwd, excludeProject: true });
-        const lines = divergenceLines(report);
-        if (lines.length) row.divergence = lines;
-      }
-      rows.push(row);
-    }
-  }
-  return rows;
-}
-
-function countOrphans(): OrphanRow[] {
-  const byKey = new Map<string, OrphanRow>();
-
-  const ensure = (agent: AgentId, version: string): OrphanRow => {
-    const key = `${agent}@${version}`;
-    let row = byKey.get(key);
-    if (!row) {
-      row = { agent, version, commands: 0, skills: 0, hooks: 0 };
-      byKey.set(key, row);
-    }
-    return row;
-  };
-
-  for (const { agent, version } of iterCommandsCapableVersions()) {
-    const diff = diffVersionCommands(agent, version);
-    if (diff.orphans.length > 0) ensure(agent, version).commands = diff.orphans.length;
-  }
-  for (const { agent, version } of iterSkillsCapableVersions()) {
-    const diff = diffVersionSkills(agent, version);
-    if (diff.orphans.length > 0) ensure(agent, version).skills = diff.orphans.length;
-  }
-  // Orphan hooks are scripts in the version home that no agents.yaml/hooks.yaml
-  // entry registers — so the registrar never wires them to an event and they
-  // never fire. (Distinct from the source-diff `diffVersionHooks().orphans`,
-  // which false-flags valid system-sourced registered hooks.)
-  for (const { agent, version } of iterHooksCapableVersions()) {
-    const dead = listUnmanagedHooksInVersionHome(agent, version);
-    if (dead.length > 0) ensure(agent, version).hooks = dead.length;
-  }
-
-  return Array.from(byKey.values()).filter((r) => r.commands + r.skills + r.hooks > 0);
 }
 
 function renderOverviewText(

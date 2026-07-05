@@ -36,6 +36,39 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
   });
 });
 
+describe('buildExecEnv — Claude Code auto-updater suppression for pinned managed installs', () => {
+  it('injects DISABLE_AUTOUPDATER=1 for a managed (pinned) claude version', () => {
+    // Pinned per-version installs must never self-mutate: Claude Code's own
+    // background auto-updater would rewrite the pinned binary in place.
+    const env = buildExecEnv(execOpts({ agent: 'claude', version: '2.1.196' }));
+    expect(env.DISABLE_AUTOUPDATER).toBe('1');
+  });
+
+  it('does not clobber a DISABLE_AUTOUPDATER already in the environment (the guard)', () => {
+    const prev = process.env.DISABLE_AUTOUPDATER;
+    process.env.DISABLE_AUTOUPDATER = '0';
+    try {
+      const env = buildExecEnv(execOpts({ agent: 'claude', version: '2.1.196' }));
+      expect(env.DISABLE_AUTOUPDATER).toBe('0');
+    } finally {
+      if (prev === undefined) delete process.env.DISABLE_AUTOUPDATER;
+      else process.env.DISABLE_AUTOUPDATER = prev;
+    }
+  });
+
+  it('lets a caller override the value via options.env', () => {
+    const env = buildExecEnv(execOpts({
+      agent: 'claude', version: '2.1.196', env: { DISABLE_AUTOUPDATER: '0' },
+    }));
+    expect(env.DISABLE_AUTOUPDATER).toBe('0');
+  });
+
+  it('leaves codex untouched — no DISABLE_AUTOUPDATER injected', () => {
+    const env = buildExecEnv(execOpts({ agent: 'codex', version: '0.20.0' }));
+    expect(env.DISABLE_AUTOUPDATER).toBeUndefined();
+  });
+});
+
 describe('nativeResume (Tier-1 capability derives from the command template)', () => {
   it('claude and codex resume natively', () => {
     expect(nativeResume('claude')).toBe(true);
@@ -143,16 +176,28 @@ describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
     expect(r).toEqual({ command: '/home/u/.agents/.../claude', args: ['--help'], shell: false });
   });
 
-  it('win32 keeps the common .cmd-present path on the shell (unchanged)', () => {
+  it('win32 .cmd path goes through the shell as ONE composed line with empty args (DEP0190-safe)', () => {
     const r = resolveShimSpawn('win32', 'C:\\bin\\claude.cmd', ['run']);
-    expect(r.command).toBe('C:\\bin\\claude.cmd');
-    expect(r.args).toEqual(['run']);
+    // No unescaped args array left for Node to concatenate: the command is the
+    // whole quoted line and args is empty.
+    expect(r.command).toBe('C:\\bin\\claude.cmd run');
+    expect(r.args).toEqual([]);
     expect(r.shell).toBe(true);
   });
 
   it('win32 sends a bare (non-absolute) name to the shell for PATHEXT resolution', () => {
     const r = resolveShimSpawn('win32', 'claude', []);
     expect(r.command).toBe('claude');
+    expect(r.args).toEqual([]);
+    expect(r.shell).toBe(true);
+  });
+
+  it('win32 quotes prompt args with spaces/metachars into the composed line', () => {
+    // The injection/splitting surface: a multi-word prompt and cmd metacharacters
+    // must survive as ONE argument to the child, not be split or interpreted.
+    const r = resolveShimSpawn('win32', 'C:\\bin\\claude.cmd', ['-p', 'review my code & ship']);
+    expect(r.command).toBe('C:\\bin\\claude.cmd -p "review my code & ship"');
+    expect(r.args).toEqual([]);
     expect(r.shell).toBe(true);
   });
 });

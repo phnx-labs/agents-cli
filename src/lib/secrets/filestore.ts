@@ -32,6 +32,7 @@ import { encodePwshBase64 } from '../pwsh.js';
 // ---------- file store location ----------
 
 let fileDirOverride: string | null = null;
+let passphraseDirOverride: string | null = null;
 let cachedPassphrase: string | null = null;
 let warnedAutoPassphrase = false;
 
@@ -107,29 +108,43 @@ function readPassphraseFromTty(): string {
   }
 }
 
-/** Path of the auto-provisioned machine-local passphrase. Lives alongside the
- *  encrypted items but is never itself an item (no `.enc` suffix, so it's
- *  excluded from list/has/get and from fileFallbackPreviouslyActivated). */
+/**
+ * Directory for the auto-provisioned machine-local passphrase. Kept outside
+ * `fileDir()` so a scan of the encrypted store never co-locates key + ciphertext.
+ */
+function passphraseDir(): string {
+  return passphraseDirOverride ?? path.join(os.homedir(), '.agents', '.secrets-key');
+}
+
+function ensurePassphraseDir(): void {
+  fs.mkdirSync(passphraseDir(), { recursive: true, mode: 0o700 });
+}
+
+/** Path of the auto-provisioned machine-local passphrase (not an `.enc` item). */
 function passphraseFilePath(): string {
+  return path.join(passphraseDir(), 'passphrase');
+}
+
+/** Legacy co-located path — read-only for machines provisioned before #479. */
+function legacyPassphraseFilePath(): string {
   return path.join(fileDir(), '.passphrase');
 }
 
 /** True if a machine-local passphrase has already been provisioned. */
 export function machinePassphraseExists(): boolean {
-  try {
-    return fs.readFileSync(passphraseFilePath(), 'utf8').trim().length > 0;
-  } catch {
-    return false;
-  }
+  return readMachinePassphrase() !== null;
 }
 
 function readMachinePassphrase(): string | null {
-  try {
-    const p = fs.readFileSync(passphraseFilePath(), 'utf8').trim();
-    return p.length > 0 ? p : null;
-  } catch {
-    return null;
+  for (const fp of [passphraseFilePath(), legacyPassphraseFilePath()]) {
+    try {
+      const p = fs.readFileSync(fp, 'utf8').trim();
+      if (p.length > 0) return p;
+    } catch {
+      // try next location
+    }
   }
+  return null;
 }
 
 /**
@@ -148,7 +163,7 @@ function provisionMachinePassphrase(): string {
   const existing = readMachinePassphrase();
   if (existing) return existing;
 
-  ensureFileDir();
+  ensurePassphraseDir();
   const generated = randomBytes(32).toString('base64');
   const fp = passphraseFilePath();
   try {
@@ -341,12 +356,26 @@ export const fileBackend: KeychainBackend = {
   list: fileList,
 };
 
+/** Resolved passphrase directory (exported for integration tests). */
+export function resolvePassphraseDir(): string {
+  return passphraseDir();
+}
+
 /** Test-only: reset module state (file dir + cached passphrase). */
 export function _resetFileStoreForTest(opts: {
   fileDir?: string | null;
+  passphraseDir?: string | null;
   passphrase?: string | null;
 } = {}): void {
   fileDirOverride = opts.fileDir ?? null;
+  if (opts.passphraseDir !== undefined) {
+    passphraseDirOverride = opts.passphraseDir;
+  } else if (opts.fileDir) {
+    // Hermetic sibling when only the store dir is overridden (linux.test.ts).
+    passphraseDirOverride = path.resolve(opts.fileDir, '..', `${path.basename(opts.fileDir)}-key`);
+  } else {
+    passphraseDirOverride = null;
+  }
   cachedPassphrase = opts.passphrase ?? null;
   warnedAutoPassphrase = false;
 }

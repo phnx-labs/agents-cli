@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { accountTokensFingerprint, buildDispatchBody, hasRushUploadConsent } from './rush.js';
+import { accountTokensFingerprint, buildDispatchBody, hasRushUploadConsent, RushCloudProvider } from './rush.js';
+import { MAX_IMAGES_PER_DISPATCH } from './types.js';
+import type { ImageAttachment, SkillRef } from './types.js';
 
 const ORIGINAL_UPLOAD_ENV = process.env.AGENTS_RUSH_UPLOAD_TOKENS;
 let tmpDir: string;
@@ -149,6 +151,82 @@ describe('buildDispatchBody', () => {
       resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
     });
     expect(body.strategy).toBeUndefined();
+  });
+
+  it('includes skills[] verbatim when supplied', () => {
+    const skills: SkillRef[] = [{ id: 'linear' }, { id: 'browser', version: '2.0.0' }];
+    const body = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+      skills,
+    });
+    expect(body.skills).toEqual(skills);
+  });
+
+  it('omits skills when not supplied or empty', () => {
+    const none = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+    });
+    expect(none.skills).toBeUndefined();
+    const empty = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+      skills: [],
+    });
+    expect(empty.skills).toBeUndefined();
+  });
+
+  it('includes images[] when supplied', () => {
+    const images: ImageAttachment[] = [
+      { data: 'aGVsbG8=', mimeType: 'image/png' },
+      { data: 'd29ybGQ=', mimeType: 'image/jpeg' },
+    ];
+    const body = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+      images,
+    });
+    expect(body.images).toEqual(images);
+  });
+
+  it('caps images at MAX_IMAGES_PER_DISPATCH, dropping the overflow', () => {
+    const images: ImageAttachment[] = Array.from(
+      { length: MAX_IMAGES_PER_DISPATCH + 3 },
+      (_, i) => ({ data: `img${i}`, mimeType: 'image/png' as const }),
+    );
+    const body = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+      images,
+    });
+    expect(Array.isArray(body.images)).toBe(true);
+    expect((body.images as ImageAttachment[]).length).toBe(MAX_IMAGES_PER_DISPATCH);
+    // The kept slice is the first MAX_IMAGES_PER_DISPATCH, in order.
+    expect((body.images as ImageAttachment[])[0].data).toBe('img0');
+    expect((body.images as ImageAttachment[])[MAX_IMAGES_PER_DISPATCH - 1].data).toBe(
+      `img${MAX_IMAGES_PER_DISPATCH - 1}`,
+    );
+  });
+
+  it('omits images when not supplied or empty', () => {
+    const none = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+    });
+    expect(none.images).toBeUndefined();
+    const empty = buildDispatchBody({
+      prompt: 'x',
+      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
+      images: [],
+    });
+    expect(empty.images).toBeUndefined();
+  });
+
+  it('advertises skills + images support in capabilities', () => {
+    const caps = new RushCloudProvider().capabilities();
+    expect(caps.skills).toBe(true);
+    expect(caps.images).toBe(true);
   });
 
   it('balanced strategy coexists with no account_manifest', () => {

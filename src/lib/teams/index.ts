@@ -65,6 +65,12 @@ export { extractFileOpsFromBash } from './file_ops.js';
 export { debug } from './debug.js';
 
 export {
+  runForEach,
+  type RunForEachOptions,
+  type RunForEachResult,
+} from './forEach.js';
+
+export {
   createWorktree,
   removeWorktree,
   isGitRepo,

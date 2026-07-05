@@ -21,13 +21,14 @@ import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
-import { gatherRemoteActive } from '../lib/session/remote-active.js';
+import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
+import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
-import { runRemoteSessions } from '../lib/session/remote.js';
+import { runRemoteSessions, buildForwardedArgs } from '../lib/session/remote.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -70,12 +71,15 @@ interface SessionsOptions extends SessionFilterOptions {
   host?: string[];
   /** Group the listing by directory and drop the id/version columns. */
   tree?: boolean;
+  /** Force the plain flat table instead of the grouped default overview. */
+  flat?: boolean;
   /** With --active: show only sessions waiting on user input; exit 1 if any. */
   waiting?: boolean;
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
    * `--no-live` sets this false. Commander's `--no-` convention. */
   live?: boolean;
-  /** With --active: force local-only, skip cross-machine SSH fan-out. */
+  /** Force local-only: skip the cross-machine SSH fan-out (both the default
+   * listing and --active). */
   local?: boolean;
 }
 
@@ -147,6 +151,12 @@ function createScanProgressTracker(
 
 const PICKER_RECENT_COUNT = 15;
 const PICKER_POOL_LIMIT = 200;
+// The grouped default view ("overview"): fetch a generous recency-ordered pool
+// for accurate per-project totals, show each project's most-recent rows grouped
+// by project, newest-active project first.
+const OVERVIEW_ROWS_PER_PROJECT = 5; // recent rows shown per project before "· N more"
+const OVERVIEW_POOL_LIMIT = 1000; // fetch cap — accurate per-project totals up to this
+const OVERVIEW_MAX_PROJECTS = 12; // project groups shown before "+N more projects"
 
 /**
  * Resolve a path-like query to an absolute directory path.
@@ -519,6 +529,38 @@ export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession
   return out;
 }
 
+/**
+ * Order a merged listing so the local machine's sessions come first, then each
+ * remote machine as a contiguous block (more sessions first, then name), with
+ * every machine keeping its incoming order (timestamp) within the block. Also
+ * dedupes: a session present both locally (a synced mirror copy) and via live
+ * fan-out collapses to one, keyed by machine + session id. Rows are keyed by
+ * `machine` (discover tags local rows with the local id; fan-out tags remote
+ * rows with the peer id) falling back to `localMachine` when untagged. Pure —
+ * `localMachine` is injected so the ordering is testable without os.hostname().
+ */
+export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): SessionMeta[] {
+  const byMachine = new Map<string, SessionMeta[]>();
+  const seen = new Set<string>();
+  for (const s of sessions) {
+    const machine = s.machine || localMachine;
+    if (s.id) {
+      const dedupeKey = `${machine}:${s.id}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+    }
+    (byMachine.get(machine) ?? byMachine.set(machine, []).get(machine)!).push(s);
+  }
+  const keys = Array.from(byMachine.keys()).sort((a, b) => {
+    if (a === localMachine) return -1;
+    if (b === localMachine) return 1;
+    const ac = byMachine.get(a)!.length, bc = byMachine.get(b)!.length;
+    if (ac !== bc) return bc - ac;
+    return a.localeCompare(b);
+  });
+  return keys.flatMap((k) => byMachine.get(k)!);
+}
+
 /** Print one machine's workspace tree, indented under its machine header. */
 function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string): void {
   let first = true;
@@ -711,8 +753,18 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // Interactive picker loads a deep pool but shows only recent sessions
   // until the user starts typing. Non-interactive/JSON uses the explicit limit.
   const isInteractive = !options.json && isInteractiveTerminal();
-  const limit = parseInt(options.limit || (isInteractive ? String(PICKER_POOL_LIMIT) : '50'), 10);
-  const since = options.since ?? (isInteractive && !options.all ? '30d' : undefined);
+  // The grouped project overview is the default for a bare interactive listing:
+  // no query, no path drill-in, not explicitly --flat/--tree. It drops the silent
+  // cwd-scope + 50-cap + 30-day window that hide most of a large index.
+  const wantsOverview = isInteractive && !searchQuery && !pathFilter && !options.flat && !options.tree;
+  const limit = wantsOverview
+    ? OVERVIEW_POOL_LIMIT
+    : parseInt(options.limit || (isInteractive ? String(PICKER_POOL_LIMIT) : '50'), 10);
+  // Overview: recency order across the whole index, no default window; an explicit
+  // --since still narrows. Non-overview keeps the prior interactive-30d default.
+  const since = wantsOverview
+    ? options.since
+    : (options.since ?? (isInteractive && !options.all ? '30d' : undefined));
   const spinner = options.json ? null : ora().start();
   const tracker = createScanProgressTracker(LOAD_VERBS, 'sessions', spinner);
 
@@ -728,7 +780,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     const scope: DiscoverOptions = {
       agent,
       version,
-      all: pathFilter ? undefined : options.all,
+      all: pathFilter ? undefined : (wantsOverview ? true : options.all),
       cwd: process.cwd(),
       cwdPrefix: pathFilter,
       project: options.project,
@@ -778,11 +830,39 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     if (options.json) {
       const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
       const serializable = filtered.map(s => {
-        const { _matchedTerms, _bm25Score, ...rest } = s;
+        const { _matchedTerms, _bm25Score, _remote, ...rest } = s;
         return rest;
       });
       process.stdout.write(JSON.stringify(serializable, null, 2) + '\n');
       return;
+    }
+
+    // Cross-machine fan-out: unless --local (or we ARE a peer answering a
+    // parent's sweep), fold in other online machines' sessions live over SSH so
+    // the list spans the fleet without any sync — each remote row carries the
+    // machine it came from, and the picker/table label + group by it. Only the
+    // interactive picker and the printed table get this; --json and single-id
+    // resolution above stay local (a peer answers for itself; scripts get a
+    // deterministic local slice). Best-effort: a fan-out failure leaves the
+    // local list intact rather than erroring the whole command.
+    const forceLocal = options.local === true || process.env[NO_FANOUT_ENV] === '1';
+    if (!forceLocal) {
+      // Pass the hosts set so a variadic `--host a b` never leaks a host as a
+      // query (defensive: the --host-without-active early return above already
+      // means we only get here in auto-discovery mode, with no --host in argv).
+      const forwarded = buildForwardedArgs(process.argv, new Set(options.host ?? []));
+      if (!forwarded.includes('--json')) forwarded.push('--json');
+      const fanSpinner = isInteractiveTerminal() ? ora('Reaching other machines...').start() : null;
+      try {
+        const { sessions: remoteSessions } = await gatherRemoteList(forwarded, options.host);
+        if (remoteSessions.length > 0) {
+          sessions = mergeLocalFirst([...sessions, ...remoteSessions], machineId());
+        }
+      } catch {
+        // fan-out is an enrichment, never a hard dependency
+      } finally {
+        fanSpinner?.stop();
+      }
     }
 
     if (sessions.length === 0) {
@@ -797,9 +877,20 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       return;
     }
 
-    // --tree is a printed grouped listing, not an interactive pick — render it
-    // directly even in a TTY.
-    if (isInteractiveTerminal() && !options.tree) {
+    // The grouped project overview is the bare interactive default: a scannable
+    // dashboard of the whole fleet grouped by project, newest-active first.
+    // Interact/resume via `agents sessions <project>` or `agents sessions resume`.
+    if (wantsOverview) {
+      const liveIndex = await maybeLiveIndex(options);
+      // Per-project row cap is fixed (--limit carries a default of 50 and drives
+      // the fetch pool, not the display); `--all` expands every group instead.
+      printSessionOverview(sessions, hiddenCount, liveIndex, { perProjectCap: OVERVIEW_ROWS_PER_PROJECT, expand: !!options.all });
+      return;
+    }
+
+    // --tree / --flat are printed listings, not an interactive pick — render them
+    // directly even in a TTY. A search query keeps the interactive picker.
+    if (isInteractiveTerminal() && !options.tree && !options.flat) {
       const message = pathFilter
         ? `Search sessions (${path.basename(pathFilter)}):`
         : formatSearchMessage(options);
@@ -811,7 +902,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       return;
     }
 
-    // Non-interactive fallback (piped output)
+    // Non-interactive fallback (piped output) or --flat/--tree.
     const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
     const liveIndex = await maybeLiveIndex(options);
     printSessionTable(filtered, hiddenCount, options.tree === true, liveIndex);
@@ -849,7 +940,7 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
  * (tracker/PR ref, pulled out of the badge blob so refs align) is only rendered
  * when `showTicket` — otherwise a listing with no refs would waste a column of
  * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
-function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false): string {
+function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.timestamp);
   const project = session.project || '-';
@@ -861,19 +952,29 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
   const doing = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
   const wt = session.worktreeSlug ? chalk.magenta(`wt:${session.worktreeSlug}`) : '';
 
+  // The machine column only earns its width when the listing spans more than one
+  // box (i.e. the cross-machine fan-out folded remotes in) — same rule and
+  // pool-derived width as the picker.
+  const machineColW = cols.machineWidth ?? PICKER_MACHINE_W;
+  const machineCell = cols.showMachine
+    ? chalk.gray(padToWidth(truncateToWidth((cols.machineLabel?.(session.machine ?? '') ?? session.machine ?? '') || '-', machineColW - 1), machineColW))
+    : '';
+
   const TICKET_W = 10;
   const ticketCell = showTicket
     ? chalk.blue(padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1))
     : '';
   const glyphW = glyph ? 2 : 0;
+  const machineW = cols.showMachine ? machineColW : 0;
   const ticketW = showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
-  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - ticketW - wtW - stringWidth(when) - 1);
+  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - machineW - ticketW - wtW - stringWidth(when) - 1);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
+    machineCell +
     chalk.cyan(padToWidth(truncateToWidth(project, 14), 16)) +
     (glyph ? glyph + ' ' : '') +
     renderTopicCell(label, doing, '', topicW, topicW) +
@@ -926,6 +1027,94 @@ async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, Act
   }
 }
 
+/**
+ * Group key for the overview: prefer the indexed project name; else fold the cwd
+ * to its repo — a worktree (`.../<repo>/.agents/worktrees/<slug>`) folds to the
+ * repo, and a monorepo subdir falls back to its leaf dir basename. Pure.
+ */
+export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>): string {
+  if (s.project && s.project.trim()) return s.project.trim();
+  const cwd = (s.cwd ?? '').replace(/\/+$/, '');
+  if (!cwd) return '(no project)';
+  const wt = cwd.match(/\/([^/]+)\/\.agents\/worktrees\//);
+  if (wt) return wt[1];
+  const parts = cwd.split('/');
+  return parts[parts.length - 1] || cwd;
+}
+
+export interface OverviewGroup {
+  key: string;
+  total: number; // total sessions for this project in the fetched pool
+  shown: SessionMeta[]; // the recent slice that fell within the display budget
+  more: number; // total - shown.length
+  maxTs: string; // most-recent timestamp in the group
+}
+
+/**
+ * Turn a recency-descending pool into project groups: each group shows its
+ * `perProjectCap` most-recent sessions (the rest become `· N more`), and groups
+ * are ordered by their most-recent session so the newest-active project leads.
+ * `perProjectCap = Infinity` expands every group. Pure — unit-tested.
+ */
+export function buildOverviewGroups(
+  pool: SessionMeta[],
+  perProjectCap: number,
+): { groups: OverviewGroup[]; projectCount: number } {
+  const byKey = new Map<string, SessionMeta[]>();
+  for (const s of pool) {
+    const k = overviewProjectKey(s);
+    (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(s);
+  }
+  const cap = Math.max(1, perProjectCap);
+  const groups: OverviewGroup[] = [];
+  for (const [key, rows] of byKey) {
+    const shown = rows.slice(0, cap); // rows are recency-desc (pool was sorted)
+    groups.push({ key, total: rows.length, shown, more: rows.length - shown.length, maxTs: rows[0].timestamp });
+  }
+  groups.sort((a, b) => (a.maxTs < b.maxTs ? 1 : a.maxTs > b.maxTs ? -1 : a.key.localeCompare(b.key)));
+  return { groups, projectCount: byKey.size };
+}
+
+/**
+ * The grouped project overview — the bare interactive default. Shows the latest
+ * sessions grouped under their project, newest-active project first, with a
+ * `· N more` per project and a `+N more projects` when the list is capped.
+ */
+function printSessionOverview(
+  pool: SessionMeta[],
+  hiddenCount: number,
+  liveIndex: Map<string, ActiveSession> | undefined,
+  opts: { perProjectCap: number; expand: boolean },
+): void {
+  const { groups } = buildOverviewGroups(pool, opts.expand ? Infinity : opts.perProjectCap);
+  const shownGroups = opts.expand ? groups : groups.slice(0, OVERVIEW_MAX_PROJECTS);
+  const hiddenProjects = groups.length - shownGroups.length;
+
+  const total = pool.length;
+  const projWord = groups.length === 1 ? 'project' : 'projects';
+  console.log(chalk.gray(`${total} session${total === 1 ? '' : 's'} · ${groups.length} ${projWord} · recent activity\n`));
+
+  let first = true;
+  for (const g of shownGroups) {
+    if (!first) console.log();
+    first = false;
+    const { glyph } = liveGlyphAndPreview(liveIndex?.get(g.shown[0].id));
+    const head =
+      `${chalk.cyan('▸')} ${chalk.cyan.bold(g.key)}  ${chalk.gray(String(g.total))}` +
+      `${glyph ? '  ' + glyph : ''} ${chalk.gray(formatRelativeTime(g.maxTs))}`;
+    console.log(head);
+    for (const s of g.shown) console.log(treeSessionRow(s, liveIndex?.get(s.id)));
+    if (g.more > 0) console.log('  ' + chalk.gray(`· ${g.more} more`));
+  }
+
+  console.log();
+  const parts = [chalk.gray('newest first')];
+  if (hiddenProjects > 0) parts.push(chalk.gray(`+${hiddenProjects} more project${hiddenProjects === 1 ? '' : 's'} · agents sessions --all`));
+  parts.push(chalk.gray('agents sessions <project> to drill in · --flat for the plain list'));
+  console.log(parts.join(chalk.gray('  ·  ')));
+  if (hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
+}
+
 function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
   if (tree) {
     // Group by directory; drop the id/version columns from view. The short id
@@ -954,9 +1143,11 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
   }
 
   // Only show the ticket column when at least one row carries a ref — otherwise
-  // it's a column of dashes that steals width from every topic.
+  // it's a column of dashes that steals width from every topic. The machine
+  // column (and its compact labels) is computed the same way the picker does it.
   const showTicket = sessions.some((s) => ticketLabel(s) !== '');
-  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket));
+  const cols = pickerColumnsFor(sessions);
+  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols));
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
   console.log(chalk.gray(`\n${countLine}`));
@@ -1134,6 +1325,9 @@ export interface PickerColumns {
   showMachine?: boolean;
   /** Map a full machine id to its compact display form (shared prefix stripped). */
   machineLabel?: (m: string) => string;
+  /** Total width of the machine column, sized to the widest compacted hostname
+   * in the pool (capped). Falls back to PICKER_MACHINE_W when absent. */
+  machineWidth?: number;
   /** Render the ticket/PR column (only when at least one row carries a ref). */
   showTicket?: boolean;
   /**
@@ -1144,7 +1338,20 @@ export interface PickerColumns {
   gutter?: number;
 }
 
+/** Fallback machine-column width when a pool-derived width isn't supplied.
+ * `pickerColumnsFor` normally computes `machineWidth` sized to the actual
+ * hostnames, floored/capped by these bounds so common ids like `yosemite-s0`
+ * (11) fit whole while a pathological hostname can't devour the topic column. */
 const PICKER_MACHINE_W = 11;
+const PICKER_MACHINE_MIN = 8;
+const PICKER_MACHINE_MAX = 18;
+
+/** Column width that shows every compacted hostname in `machines` whole (one
+ * trailing space for separation), bounded by MIN/MAX. */
+function machineColumnWidth(machines: string[], label: (m: string) => string): number {
+  const widest = machines.reduce((w, m) => Math.max(w, stringWidth(label(m))), 0);
+  return Math.min(PICKER_MACHINE_MAX, Math.max(PICKER_MACHINE_MIN, widest + 1));
+}
 
 /**
  * Compact display form for machine ids: strip the longest shared dash-delimited
@@ -1173,9 +1380,12 @@ export function machineLabeler(machines: string[]): (m: string) => string {
  */
 export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
   const machines = sessions.map((s) => s.machine).filter((m): m is string => !!m);
+  const distinct = [...new Set(machines)];
+  const machineLabel = machineLabeler(machines);
   return {
-    showMachine: new Set(machines).size > 1,
-    machineLabel: machineLabeler(machines),
+    showMachine: distinct.length > 1,
+    machineLabel,
+    machineWidth: machineColumnWidth(distinct, machineLabel),
     showTicket: sessions.some((s) => ticketLabel(s) !== ''),
   };
 }
@@ -1190,8 +1400,9 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
   const versionStr = s.version || '-';
   const wt = s.worktreeSlug ? chalk.magenta(`wt:${s.worktreeSlug}`) : '';
 
+  const machineW = cols.machineWidth ?? PICKER_MACHINE_W;
   const machineCell = cols.showMachine
-    ? chalk.gray(padRight(truncate((cols.machineLabel?.(s.machine ?? '') ?? s.machine ?? '') || '-', PICKER_MACHINE_W - 1), PICKER_MACHINE_W))
+    ? chalk.gray(padRight(truncate((cols.machineLabel?.(s.machine ?? '') ?? s.machine ?? '') || '-', machineW - 1), machineW))
     : '';
 
   const TICKET_W = 10;
@@ -1203,12 +1414,12 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
   // reserve it, plus the conditional columns, so the topic shrinks to fit and
   // rows never wrap.
   const gutter = cols.gutter ?? 2;
-  const machineW = cols.showMachine ? PICKER_MACHINE_W : 0;
+  const machineColW = cols.showMachine ? machineW : 0;
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const topicW = Math.max(
     16,
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineW - ticketW - wtW - stringWidth(when) - 1,
+    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - ticketW - wtW - stringWidth(when) - 1,
   );
 
   return (
@@ -1271,7 +1482,40 @@ export async function pickSessionInteractive(
   }
 }
 
+/**
+ * The machine a picked session lives on when its transcript is on that peer's
+ * disk (folded in over the live fan-out), else undefined. Keys off `_remote`,
+ * NOT `machine !== local`: a synced mirror is machine-tagged too, but its file
+ * is a local mirror path, so it must be read/resumed locally like any other.
+ */
+function remoteMachineOf(session: SessionMeta): string | undefined {
+  return session._remote ? session.machine : undefined;
+}
+
+/** True when the peer wasn't a dialable device; prints one clear line so a
+ * remote pick never dead-ends silently. */
+function warnNoPeerTarget(machine: string, session: SessionMeta): void {
+  console.log(chalk.yellow(`Session ${session.shortId} lives on ${machine}, which isn't a reachable device right now.`));
+  console.log(chalk.gray(`Register/wake it (ag devices), or run there: agents ssh ${machine}`));
+}
+
 async function handlePickedSession(picked: PickedSession): Promise<void> {
+  // A session on another machine is read/resumed ON that machine over SSH — its
+  // transcript and agent binary live there. Both actions execute on the peer
+  // (not a local `--host` hop, which would discover locally and dead-end for a
+  // session that exists only on the peer).
+  const remote = remoteMachineOf(picked.session);
+  if (remote) {
+    if (picked.action === 'view') {
+      const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], remote);
+      if (rc === 'no-target') warnNoPeerTarget(remote, picked.session);
+    } else {
+      console.log(chalk.gray(`Resuming ${picked.session.shortId} on ${remote} over SSH...`));
+      const rc = await runOnPeer(['sessions', 'resume', picked.session.shortId], remote, { tty: true });
+      if (rc === 'no-target') warnNoPeerTarget(remote, picked.session);
+    }
+    return;
+  }
   if (picked.action === 'view') {
     await renderSession(picked.session, 'summary', {});
     return;
@@ -1792,9 +2036,10 @@ export function registerSessionsCommands(program: Command): void {
     .option('--artifacts', 'List all files written or edited during a session')
     .option('--artifact <name>', 'Read a specific artifact by filename or path (outputs to stdout)')
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
-    .option('--local', 'With --active: only this machine — skip the cross-machine SSH fan-out')
+    .option('--local', 'Only this machine — skip the cross-machine SSH fan-out (default listing and --active)')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
+    .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)');
@@ -1813,6 +2058,10 @@ export function registerSessionsCommands(program: Command): void {
       # Show only what's running right now (terminals, teams, cloud, headless)
       agents sessions --active
 
+      # The interactive list folds in other online machines automatically,
+      # labelled by host with this machine first. Stay local with --local:
+      agents sessions --local
+
       # Search across every directory, not just this project
       agents sessions "topic" --all
 
@@ -1826,6 +2075,7 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions --all "deploy script" --host box-a --host box-b
     `,
     notes: `
+      - The interactive listing folds in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; --json and single-id lookups stay local.
       - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --include and --exclude are mutually exclusive.
       - --first and --last are mutually exclusive.

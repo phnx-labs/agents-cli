@@ -18,8 +18,10 @@ import type {
   CloudEvent,
   DispatchOptions,
   ProviderCapabilities,
+  ImageAttachment,
+  SkillRef,
 } from './types.js';
-import { resolveDispatchRepos } from './types.js';
+import { resolveDispatchRepos, MAX_IMAGES_PER_DISPATCH } from './types.js';
 import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../versions.js';
 import { getAccountInfo } from '../agents.js';
@@ -337,6 +339,17 @@ export function buildDispatchBody(input: {
   resolvedRepos: Array<{ installation_id: number; repo_owner: string; repo_name: string }>;
   accountManifest?: AccountManifest | null;
   accountTokens?: AccountTokenEntry[] | null;
+  /**
+   * Skill ride-alongs so the cloud pod isn't context-blind. Forwarded verbatim
+   * as `skills` so the Factory Floor can mount them by id/version before the
+   * agent runs. Omitted when empty.
+   */
+  skills?: SkillRef[] | null;
+  /**
+   * Base64 image attachments for vision dispatch. Sliced to
+   * MAX_IMAGES_PER_DISPATCH — extras are dropped, never sent. Omitted when empty.
+   */
+  images?: ImageAttachment[] | null;
 }): Record<string, unknown> {
   if (input.resolvedRepos.length === 0) {
     throw new Error('buildDispatchBody: resolvedRepos must have at least one entry');
@@ -359,6 +372,12 @@ export function buildDispatchBody(input: {
   }
   if (input.accountTokens && input.accountTokens.length > 0) {
     body.account_tokens = input.accountTokens;
+  }
+  if (input.skills && input.skills.length > 0) {
+    body.skills = input.skills;
+  }
+  if (input.images && input.images.length > 0) {
+    body.images = input.images.slice(0, MAX_IMAGES_PER_DISPATCH);
   }
   return body;
 }
@@ -423,8 +442,8 @@ export class RushCloudProvider implements CloudProvider {
       cancel: true,
       message: true,
       multiRepo: true,
-      skills: false,
-      images: false,
+      skills: true,
+      images: true,
     };
   }
 
@@ -486,6 +505,8 @@ export class RushCloudProvider implements CloudProvider {
       resolvedRepos,
       accountManifest,
       strategy,
+      skills: options.skills,
+      images: options.images,
     });
 
     let res = await api('POST', '/api/v1/cloud-runs', token, body);
@@ -537,6 +558,8 @@ export class RushCloudProvider implements CloudProvider {
           resolvedRepos,
           accountManifest,
           accountTokens,
+          skills: options.skills,
+          images: options.images,
         });
         res = await api('POST', '/api/v1/cloud-runs', token, retryBody);
 

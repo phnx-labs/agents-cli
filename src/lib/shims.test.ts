@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateShimScript, hasAliasShadowingShim, shimTargetsFor, onDiskShimFile, SHIM_SCHEMA_VERSION } from './shims.js';
+import { generateShimScript, generateVersionedAliasScript, hasAliasShadowingShim, shimTargetsFor, onDiskShimFile, SHIM_SCHEMA_VERSION } from './shims.js';
 import { getProjectVersion } from './versions.js';
 
 const tempDirs: string[] = [];
@@ -41,6 +41,33 @@ describe('generateShimScript', () => {
   it('does not include .oauth_token fallback for codex shim', () => {
     const script = generateShimScript('codex');
     expect(script).not.toContain('.oauth_token');
+  });
+
+  it('disables the Claude Code auto-updater in the claude shim, honoring an explicit value', () => {
+    // Pinned per-version installs must not self-mutate. The `:-1` default lets a
+    // user-set DISABLE_AUTOUPDATER win while defaulting to disabled otherwise.
+    const script = generateShimScript('claude');
+    expect(script).toContain('export DISABLE_AUTOUPDATER="${DISABLE_AUTOUPDATER:-1}"');
+  });
+
+  it('does not touch DISABLE_AUTOUPDATER for the codex shim (codex path unchanged)', () => {
+    const script = generateShimScript('codex');
+    expect(script).not.toContain('DISABLE_AUTOUPDATER');
+    // codex keeps its own suppression flag, injected at exec.
+    expect(script).toContain('-c check_for_update_on_startup=false');
+  });
+});
+
+describe('generateVersionedAliasScript', () => {
+  it('disables the Claude Code auto-updater in a claude@version alias, honoring an explicit value', () => {
+    const script = generateVersionedAliasScript('claude', '2.1.196');
+    expect(script).toContain('export DISABLE_AUTOUPDATER="${DISABLE_AUTOUPDATER:-1}"');
+  });
+
+  it('does not touch DISABLE_AUTOUPDATER for a codex@version alias (codex path unchanged)', () => {
+    const script = generateVersionedAliasScript('codex', '0.20.0');
+    expect(script).not.toContain('DISABLE_AUTOUPDATER');
+    expect(script).toContain('-c check_for_update_on_startup=false');
   });
 
   it('execs normally for a valid project agents.yaml version', () => {

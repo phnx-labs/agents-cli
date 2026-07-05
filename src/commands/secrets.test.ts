@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertValidSshTarget, bundleEnvToDotenv, quoteWin32ExecArg } from './secrets.js';
+import { assertValidSshTarget, buildSecretsExecEnv, bundleEnvToDotenv, quoteWin32ExecArg } from './secrets.js';
 import { parseDotenv } from '../lib/secrets/bundles.js';
 
 describe('assertValidSshTarget', () => {
@@ -47,6 +47,37 @@ describe('bundleEnvToDotenv', () => {
   it('rejects multi-line values instead of silently corrupting them', () => {
     expect(() => bundleEnvToDotenv({ KEY: 'line1\nline2' })).toThrow(/multi-line/);
     expect(() => bundleEnvToDotenv({ KEY: 'has\rcarriage' })).toThrow(/multi-line/);
+  });
+});
+
+describe('buildSecretsExecEnv', () => {
+  it('strips AGENTS_SECRETS_PASSPHRASE and loader-hijack vars from the child env', () => {
+    const parent = {
+      PATH: '/usr/bin',
+      HOME: '/home/user',
+      AGENTS_SECRETS_PASSPHRASE: 'master-key',
+      LD_PRELOAD: '/evil.so',
+      NODE_OPTIONS: '--require /evil',
+      DYLD_INSERT_LIBRARIES: '/evil.dylib',
+    };
+    const secretEnv = { API_KEY: 'sk-live', AGENTS_SECRETS_PASSPHRASE: 'bundle-leak' };
+    const child = buildSecretsExecEnv(parent, secretEnv);
+    expect(child.API_KEY).toBe('sk-live');
+    expect(child.PATH).toBe('/usr/bin');
+    expect(child.HOME).toBe('/home/user');
+    expect(child.AGENTS_SECRETS_PASSPHRASE).toBeUndefined();
+    expect(child.LD_PRELOAD).toBeUndefined();
+    expect(child.NODE_OPTIONS).toBeUndefined();
+    expect(child.DYLD_INSERT_LIBRARIES).toBeUndefined();
+  });
+
+  it('bundle vars override sanitized parent vars but not the stripped master key', () => {
+    const child = buildSecretsExecEnv(
+      { PATH: '/old', AGENTS_SECRETS_PASSPHRASE: 'parent' },
+      { PATH: '/new/from-bundle' },
+    );
+    expect(child.PATH).toBe('/new/from-bundle');
+    expect(child.AGENTS_SECRETS_PASSPHRASE).toBeUndefined();
   });
 });
 

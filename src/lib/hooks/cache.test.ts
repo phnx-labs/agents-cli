@@ -2,7 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { generateHookShim, getHookShimPath, parseCacheConfig, parseDuration, removeHookShim } from './cache.js';
+import {
+  generateHookShim,
+  getHookShimPath,
+  isValidHookShimName,
+  parseCacheConfig,
+  parseDuration,
+  removeHookShim,
+} from './cache.js';
 import { toPosix } from '../platform/index.js';
 
 describe('parseDuration', () => {
@@ -144,6 +151,35 @@ describe('generateHookShim', () => {
     // value — what matters is that production callers (who don't pass `paths`)
     // get a consistent location.
     expect(toPosix(getHookShimPath('foo'))).toMatch(/\.cache\/shims\/hooks\/foo\.sh$/);
+  });
+
+  it('rejects hook names that would escape the shims directory', () => {
+    const escapeTarget = path.join(tmpHome, 'outside-pwned.sh');
+    const cache = { ttl: 30, key: 'global' as const, prefetch: 'none' as const };
+    const args = {
+      scriptPath: '/x/y.sh',
+      cache,
+      paths: testPaths,
+    };
+
+    for (const badName of ['../evil', '../../tmp/pwned', 'foo/bar', 'a\\b', '-dash', '', '.', '..']) {
+      expect(isValidHookShimName(badName)).toBe(false);
+      expect(() => getHookShimPath(badName)).toThrow(/Invalid hook shim name/);
+      expect(() => generateHookShim({ ...args, name: badName })).toThrow(/Invalid hook shim name/);
+    }
+
+    expect(fs.existsSync(escapeTarget)).toBe(false);
+    expect(fs.existsSync(testPaths.shimsDir)).toBe(false);
+  });
+
+  it('removeHookShim no-ops on invalid names instead of deleting outside the shims dir', () => {
+    const outside = path.join(tmpHome, 'victim.sh');
+    fs.writeFileSync(outside, '#!/bin/sh\necho pwned\n', { mode: 0o755 });
+
+    removeHookShim('../victim', testPaths.shimsDir);
+    removeHookShim('../../tmp/pwned', testPaths.shimsDir);
+
+    expect(fs.existsSync(outside)).toBe(true);
   });
 
   it('removeHookShim deletes the file if it exists', () => {

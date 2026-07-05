@@ -673,3 +673,170 @@ describe('unionResourceSelections + mergeRepoScopedSelections — interactive mu
     expect(out.memory).toEqual([]); // neither user nor system → skip sentinel
   });
 });
+
+// ── isVersionInstalled / listInstalledVersions probe the real launch binary ──
+//
+// Regression for the "gutted install" bug: a vendor auto-updater destroyed the
+// real per-version claude binary (node_modules/@anthropic-ai/claude-code/bin/
+// claude.exe) while leaving the version dir, its package.json, and the tiny
+// node_modules/.bin/claude(+.cmd) wrappers in place. The old check keyed
+// "installed" on the wrapper, so `agents add` skipped repair and the picker
+// counted the dead install healthy — `agents run` then died at spawn.
+
+function versionDir(home: string, agent: string, version: string): string {
+  return path.join(home, '.agents', '.history', 'versions', agent, version);
+}
+
+// The name of the real launch binary the package's `bin` entry points at. We
+// don't use ".exe" so the fixture is platform-neutral — getPackageBinaryPath
+// reads whatever the installed package.json declares, which is exactly the
+// point of the fix.
+const CLAUDE_BIN_REL = 'bin/claude-launcher';
+
+/**
+ * Build a claude version dir. Always writes the version-dir marker package.json
+ * and the node_modules/.bin/claude(+.cmd) wrappers npm leaves behind. When
+ * `realBinary` is true, also writes the package's actual launch binary — omit
+ * it to reproduce a gutted install.
+ */
+function makeClaudeVersion(home: string, version: string, opts: { realBinary: boolean }): void {
+  const dir = versionDir(home, 'claude', version);
+  const pkgRoot = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+  fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+  fs.mkdirSync(path.join(pkgRoot, 'bin'), { recursive: true });
+
+  // Version-dir marker (present even on a gutted install).
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `agents-claude-${version}`, private: true }), 'utf-8');
+  // Installed package's package.json — declares the real launch binary.
+  fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ name: '@anthropic-ai/claude-code', version, bin: { claude: CLAUDE_BIN_REL } }), 'utf-8');
+  // The node_modules/.bin wrappers npm always leaves behind (getBinaryPath's target).
+  fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\nexit 0\n', 'utf-8');
+  fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude.cmd'), '@echo off\r\n', 'utf-8');
+
+  if (opts.realBinary) {
+    fs.writeFileSync(path.join(pkgRoot, CLAUDE_BIN_REL), 'REAL BINARY', 'utf-8');
+  }
+}
+
+function runNamedExport(home: string, importName: string, callExpr: string): unknown {
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    import { ${importName} } from ${JSON.stringify(moduleUrl)};
+    const home = ${JSON.stringify(home)};
+    console.log(JSON.stringify(${callExpr}));
+  `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+  expect(child.status, child.stderr).toBe(0);
+  return JSON.parse(child.stdout.trim());
+}
+
+describe('isVersionInstalled — probes the real launch binary', () => {
+  it('reports a healthy install (package bin present) as installed', () => {
+    const home = makeTempHome();
+    makeClaudeVersion(home, '2.1.196', { realBinary: true });
+    expect(runNamedExport(home, 'isVersionInstalled', "isVersionInstalled('claude', '2.1.196')")).toBe(true);
+  });
+
+  it('reports a gutted install (real bin destroyed, wrappers + package.json left behind) as NOT installed', () => {
+    const home = makeTempHome();
+    makeClaudeVersion(home, '2.1.196', { realBinary: false });
+    // The node_modules/.bin/claude wrapper still exists — the old dir/wrapper
+    // check would call this installed. The launch binary is gone, so it isn't.
+    expect(fs.existsSync(path.join(versionDir(home, 'claude', '2.1.196'), 'node_modules', '.bin', 'claude'))).toBe(true);
+    expect(runNamedExport(home, 'isVersionInstalled', "isVersionInstalled('claude', '2.1.196')")).toBe(false);
+  });
+
+  it('reports a dir-only install (package.json marker, no node_modules) as NOT installed', () => {
+    const home = makeTempHome();
+    const dir = versionDir(home, 'claude', '2.1.196');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'agents-claude-2.1.196' }), 'utf-8');
+    expect(runNamedExport(home, 'isVersionInstalled', "isVersionInstalled('claude', '2.1.196')")).toBe(false);
+  });
+});
+
+describe('the add fast-path gate flips a gutted install to the repair branch', () => {
+  it('a gutted dir is NOT alreadyInstalled, so `agents add` proceeds to installVersion', () => {
+    // `agents add` computes `alreadyInstalled = isVersionInstalled(agent, version)`
+    // and only skips install when it is true (src/commands/versions.ts). A gutted
+    // dir must return false so add re-runs its install step to repair it rather
+    // than printing "already installed".
+    const home = makeTempHome();
+    makeClaudeVersion(home, '2.1.196', { realBinary: false });
+    const alreadyInstalled = runNamedExport(home, 'isVersionInstalled', "isVersionInstalled('claude', '2.1.196')");
+    expect(alreadyInstalled).toBe(false);
+  });
+});
+
+describe('listInstalledVersions — excludes gutted installs from the picker', () => {
+  it('returns only versions whose real launch binary exists', () => {
+    const home = makeTempHome();
+    makeClaudeVersion(home, '2.1.195', { realBinary: true });
+    makeClaudeVersion(home, '2.1.196', { realBinary: false }); // gutted
+    const versions = runNamedExport(home, 'listInstalledVersions', "listInstalledVersions('claude')");
+    expect(versions).toEqual(['2.1.195']);
+  });
+});
+
+// Regression (RUSH-1420): removing the version that is the current global
+// default must never leave a dangling default pointer — every launcher shim
+// resolves the default, so a stale pointer breaks `agents run` and the default
+// shim outright ("no installed default for claude"). The fix reassigns the
+// default to the newest remaining install, or clears it cleanly when the last
+// version goes.
+describe('removeVersion — default reassignment when removing the pinned default', () => {
+  // Lay down a claude version on disk the way listInstalledVersions expects:
+  // a real binary file at <versionDir>/node_modules/.bin/claude.
+  function installClaudeVersion(home: string, version: string): void {
+    const binDir = path.join(home, '.agents', '.history', 'versions', 'claude', version, 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\n', 'utf-8');
+  }
+
+  // One subprocess so the module-level HOME + version caches stay consistent:
+  // set the default, remove a version, then read back the resolved default.
+  function runRemoveScenario(home: string, defaultVersion: string, versionToRemove: string): { removed: boolean; defaultAfter: string | null } {
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+      import { setGlobalDefault, getGlobalDefault, removeVersion } from ${JSON.stringify(moduleUrl)};
+      setGlobalDefault('claude', ${JSON.stringify(defaultVersion)});
+      const removed = removeVersion('claude', ${JSON.stringify(versionToRemove)});
+      // removeVersion prints a human notice to stdout; tag the machine-readable
+      // result so the parent can pick it out of the surrounding output.
+      console.log('__RESULT__' + JSON.stringify({ removed, defaultAfter: getGlobalDefault('claude') }));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    expect(child.status, child.stderr).toBe(0);
+    const line = child.stdout.split('\n').find((l) => l.startsWith('__RESULT__'));
+    expect(line, child.stdout).toBeTruthy();
+    return JSON.parse(line!.slice('__RESULT__'.length));
+  }
+
+  it('reassigns the default to the newest remaining version when siblings exist', () => {
+    const home = makeTempHome();
+    installClaudeVersion(home, '2.1.185');
+    installClaudeVersion(home, '2.1.196');
+    installClaudeVersion(home, '2.1.201');
+
+    // 2.1.196 is the default and gets removed; 2.1.185 + 2.1.201 remain.
+    const { removed, defaultAfter } = runRemoveScenario(home, '2.1.196', '2.1.196');
+
+    expect(removed).toBe(true);
+    // Newest remaining is 2.1.201 — not the newest overall (which was removed).
+    expect(defaultAfter).toBe('2.1.201');
+    // The removed version's binary is gone (soft-deleted to trash).
+    expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.196', 'node_modules', '.bin', 'claude'))).toBe(false);
+  });
+
+  it('clears the default without a dangling pointer when the last version is removed', () => {
+    const home = makeTempHome();
+    installClaudeVersion(home, '2.1.196');
+
+    const { removed, defaultAfter } = runRemoveScenario(home, '2.1.196', '2.1.196');
+
+    expect(removed).toBe(true);
+    // No versions remain → default cleared cleanly, not left pointing at a ghost.
+    expect(defaultAfter).toBe(null);
+  });
+});
+
