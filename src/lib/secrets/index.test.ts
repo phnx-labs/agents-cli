@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { assertValueStorable } from './index.js';
+import { assertValueStorable, parseOrphanMigrationOutput } from './index.js';
 
 describe('assertValueStorable', () => {
   const multiline = '-----BEGIN KEY-----\nabc\ndef\n-----END KEY-----\n';
@@ -35,5 +35,32 @@ describe('assertValueStorable', () => {
 
   it('linux accepts multiline values (secret-tool / file store are newline-safe)', () => {
     expect(() => assertValueStorable(multiline, 'linux')).not.toThrow();
+  });
+});
+
+describe('parseOrphanMigrationOutput', () => {
+  it('parses OK / WARN / FAIL records and ignores blanks + unknown lines', () => {
+    const out = [
+      'OK agents-cli.secrets.hetzner.com.HCLOUD_TOKEN',
+      '',
+      'WARN agents-cli.secrets.ssh-keys.ED25519_PRIVKEY_B64 orphan-delete=-25300 (pinned copy in place)',
+      'FAIL agents-cli.secrets.attio.com.EMAIL add=-34018',
+      '   ', // whitespace-only
+      'garbage line with no tag',
+    ].join('\n');
+    const results = parseOrphanMigrationOutput(out);
+    expect(results).toHaveLength(3);
+    expect(results[0]).toEqual({ item: 'agents-cli.secrets.hetzner.com.HCLOUD_TOKEN', status: 'ok' });
+    // WARN/FAIL keep only the service in `item`, full text in `detail`.
+    expect(results[1].item).toBe('agents-cli.secrets.ssh-keys.ED25519_PRIVKEY_B64');
+    expect(results[1].status).toBe('warn');
+    expect(results[1].detail).toContain('orphan-delete=-25300');
+    expect(results[2]).toMatchObject({ item: 'agents-cli.secrets.attio.com.EMAIL', status: 'fail' });
+    expect(results[2].detail).toContain('add=-34018');
+  });
+
+  it('returns [] for empty output', () => {
+    expect(parseOrphanMigrationOutput('')).toEqual([]);
+    expect(parseOrphanMigrationOutput('\n\n')).toEqual([]);
   });
 });
