@@ -274,7 +274,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   return new Promise<RunResult>((resolve) => {
     const child = spawn(cmd[0], cmd.slice(1), {
       stdio: ['ignore', stdoutFd, stdoutFd],
-      ...backgroundSpawnOptions(),
+      ...backgroundSpawnOptions({ fdStdio: true }),
       env: spawnEnv,
     });
 
@@ -380,7 +380,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
 
   const child = spawn(cmd[0], cmd.slice(1), {
     stdio: ['ignore', stdoutFd, stdoutFd],
-    ...backgroundSpawnOptions(),
+    ...backgroundSpawnOptions({ fdStdio: true }),
     env: spawnEnv,
   });
 

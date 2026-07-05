@@ -33,20 +33,32 @@ export function killTree(pid: number): void {
  * POSIX: `detached: true` — the child leads its own process group, so it
  * survives the parent and group kills (`kill(-pid)`) still reach it.
  *
- * Windows: `windowsHide: true` and NOT detached. `detached` maps to
- * DETACHED_PROCESS, under which CreateProcess ignores CREATE_NO_WINDOW and the
- * child runs console-less — every console-subsystem descendant (powershell,
- * git, node, a .cmd shim's cmd.exe wrapper) then allocates its own VISIBLE
- * console window, flashing on the user's desktop. CREATE_NO_WINDOW alone gives
- * the child its own hidden console instead: descendants inherit it (no window
- * anywhere down the tree), and a console-close event from the launcher's
- * console can never reach the child (#556), which is all `detached` bought us
- * on Windows.
+ * Windows: the child must not share the launcher's console (a console-close
+ * event when the launcher exits would tear it down, #556) and must not flash
+ * a window. How to get there depends on the child's stdio:
+ *
+ * - All stdio non-inherited ('ignore'/'pipe'): `windowsHide: true`, NOT
+ *   detached. CREATE_NO_WINDOW gives the child its own hidden console that
+ *   every console-subsystem descendant (powershell, git, a .cmd shim's cmd.exe
+ *   wrapper) inherits — no window anywhere down the tree. `detached` would
+ *   defeat it: DETACHED_PROCESS makes CreateProcess ignore CREATE_NO_WINDOW.
+ *
+ * - Any stdio slot redirected to an fd (log files — `fdStdio: true`): libuv
+ *   skips CREATE_NO_WINDOW whenever a stdio fd is inherited, so windowsHide
+ *   cannot engage and a non-detached child would share the launcher's console
+ *   and die with it. Keep DETACHED_PROCESS: the child runs console-less and
+ *   windowless; its console-tool spawns stay invisible because the leaf call
+ *   sites pass their own `windowsHide` with piped stdio.
  */
 export function backgroundSpawnOptions(
-  platform: NodeJS.Platform = process.platform,
+  opts: { fdStdio?: boolean; platform?: NodeJS.Platform } = {},
 ): { detached: boolean; windowsHide: boolean } {
-  if (platform === 'win32') return { detached: false, windowsHide: true };
+  const platform = opts.platform ?? process.platform;
+  if (platform === 'win32') {
+    return opts.fdStdio
+      ? { detached: true, windowsHide: true }
+      : { detached: false, windowsHide: true };
+  }
   return { detached: true, windowsHide: false };
 }
 
