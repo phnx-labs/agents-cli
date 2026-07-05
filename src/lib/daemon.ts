@@ -615,6 +615,24 @@ export function startDaemon(): { pid: number | null; method: string } {
   }
 }
 
+/**
+ * Bring the always-on daemon up as a side effect of a background-adjacent
+ * command (secrets unlock, browser start, ...), not only from `routines add`.
+ *
+ * Delegates to the single `startDaemon` entrypoint, so it honors the
+ * single-instance start lock and is a no-op when a daemon is already running
+ * (returns `already-running`). Best-effort: any failure is swallowed and null
+ * returned, so ensuring the daemon can never break the foreground command that
+ * happened to bring it up. See issue #415.
+ */
+export function ensureDaemonStarted(): { pid: number | null; method: string } | null {
+  try {
+    return startDaemon();
+  } catch {
+    return null;
+  }
+}
+
 function startDaemonLocked(): { pid: number | null; method: string } {
   const platform = os.platform();
 

@@ -24,6 +24,11 @@ import {
   getDaemonLaunch,
   startDetached,
   writeOwnerOnlyServiceManifest,
+  ensureDaemonStarted,
+  isDaemonRunning,
+  readDaemonPid,
+  writeDaemonPid,
+  removeDaemonPid,
 } from './daemon.js';
 import { ipcEndpoint } from './platform/index.js';
 import {
@@ -381,4 +386,45 @@ describe('daemon single-instance (#414)', () => {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+/**
+ * #415: the daemon must be always-on for any background need, not only after
+ * `routines add`. `ensureDaemonStarted` is the shared side-effect entrypoint the
+ * secrets-unlock path (src/commands/secrets.ts) now calls after bringing up the
+ * standalone secrets broker. It must reuse the single `startDaemon` entrypoint,
+ * so the #414 single-instance guard makes a second unlock a no-op rather than a
+ * relaunch. We seed the pid file with our own (guaranteed-alive) pid so
+ * startDaemon takes its already-running branch and never spawns a real daemon.
+ */
+describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
+  let priorPid: number | null = null;
+
+  beforeEach(() => { priorPid = readDaemonPid(); });
+  afterEach(() => {
+    // Leave any real daemon on this machine exactly as we found it.
+    if (priorPid === null) removeDaemonPid();
+    else writeDaemonPid(priorPid);
+  });
+
+  it('is an idempotent no-op when a daemon is already running', () => {
+    writeDaemonPid(process.pid);
+    expect(isDaemonRunning()).toBe(true);
+
+    // First unlock brings the daemon "up" — but it's already running, so this
+    // reports the existing owner without spawning a second process.
+    const first = ensureDaemonStarted();
+    expect(first).not.toBeNull();
+    expect(first!.method).toBe('already-running');
+    expect(first!.pid).toBe(process.pid);
+
+    // A second unlock (or any later background trigger) is a steady-state
+    // no-op, never a relaunch — the always-on guarantee, not a restart loop.
+    const second = ensureDaemonStarted();
+    expect(second!.method).toBe('already-running');
+    expect(second!.pid).toBe(process.pid);
+
+    // The pid file still points at the single owning process throughout.
+    expect(readDaemonPid()).toBe(process.pid);
+  });
 });

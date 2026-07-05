@@ -12,6 +12,7 @@ import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/widt
 import * as fs from 'fs';
 import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
 import { quoteWin32ExecArg, composeWin32CommandLine } from '../lib/platform/index.js';
+import { ensureDaemonStarted } from '../lib/daemon.js';
 import {
   parseHostsOption,
   remoteResolveEnv,
@@ -1578,6 +1579,12 @@ Examples:
         console.error(chalk.red('Could not start the secrets-agent.'));
         process.exit(1);
       }
+      // #415: the daemon should be always-on for any background need, not only
+      // after `routines add`. A user who only ever unlocks secrets still gets
+      // the daemon installed + running here. `ensureAgentRunning` above only
+      // brings up the standalone secrets broker, not the daemon. Idempotent
+      // (single-instance start lock, #414) and best-effort — never blocks unlock.
+      ensureDaemonStarted();
       let loaded = 0;
       for (const name of targets) {
         try {

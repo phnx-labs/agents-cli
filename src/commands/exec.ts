@@ -18,6 +18,7 @@ import { AGENTS } from '../lib/agents.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { randomUUID } from 'crypto';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -396,6 +397,7 @@ export function registerRunCommand(program: Command): void {
         }
         const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
         const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
+        const { registerHostSession } = await import('../lib/hosts/session-index.js');
         // A password-auth device throws DeviceOffloadUnsupportedError here; it's
         // printed cleanly by the top-level catch in index.ts (covers every
         // resolveHost caller), so it never falls through to capability routing.
@@ -419,14 +421,31 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         try {
-          const { exitCode } = await dispatchToHost(host, {
-            agent: agentSpec.split('@')[0],
+          const runAgent = agentSpec.split('@')[0];
+          // `--resume [id]`: commander yields the string id, or `true` when the
+          // flag is passed bare. A bare resume needs the interactive picker,
+          // which can't run over a detached remote dispatch — only forward a
+          // concrete id.
+          const resumeId = typeof options.resume === 'string' ? options.resume : undefined;
+          // Mirror the local path (lib/exec.ts): only Claude accepts a forced
+          // `--session-id`. Generating it here lets us register the run in the
+          // local index and makes it resumable by that id. On resume the remote
+          // session keeps its existing id — don't mint a new one.
+          const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
+          const { task, exitCode } = await dispatchToHost(host, {
+            agent: runAgent,
             prompt,
             mode: options.mode,
             model: options.model,
             remoteCwd: options.remoteCwd,
+            sessionId: hostSessionId,
+            resume: resumeId,
             follow: options.follow !== false,
           });
+          // Register the dispatched run in the LOCAL session index so it shows
+          // up in `agents sessions` and resolves by id, even though its
+          // transcript lives on the host. No-op when no session id was captured.
+          registerHostSession(task, { cwd: process.cwd(), prompt });
           if (options.follow === false) {
             console.log(chalk.green(`Dispatched to ${host.name}.`) + chalk.gray(' Track: agents hosts ps · Follow: agents hosts logs <id> -f'));
             process.exit(0);
@@ -526,7 +545,7 @@ export function registerRunCommand(program: Command): void {
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
@@ -889,6 +908,10 @@ export function registerRunCommand(program: Command): void {
 
       const configuredStrategy = getConfiguredRunStrategy(agent, cwd);
       const explicitStrategy = options.strategy ? normalizeRunStrategy(options.strategy) : null;
+      // Captured from resolveRunVersion below so mid-run rate-limit failover can
+      // synthesize a same-agent fallback chain from the other healthy accounts
+      // (issue #348). Stays null unless a non-pinned strategy actually rotated.
+      let rotationResult: import('../lib/rotate.js').RotateResult | null = null;
       if (options.strategy && !explicitStrategy) {
         console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
         process.exit(1);
@@ -913,6 +936,7 @@ export function registerRunCommand(program: Command): void {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
             if (resolved.version) {
               version = resolved.version;
+              rotationResult = resolved.rotation;
               if (resolved.rotation && !options.quiet) {
                 const banner = formatRotationBanner(resolved.rotation, strategy);
                 process.stderr.write(chalk.gray(banner + '\n'));
@@ -1149,6 +1173,41 @@ export function registerRunCommand(program: Command): void {
           version,
           envOverride: { [profileFallbackModel.envKey]: profileFallbackModel.model },
         });
+      }
+
+      // Mid-run rate-limit failover (issue #348). When a pre-flight rotation
+      // picked an account and there are OTHER healthy accounts for the same
+      // agent, synthesize a same-agent fallback chain from them so a 429 mid-run
+      // re-dispatches on the next healthy account via the SAME runWithFallback
+      // path (continuing the session via /continue). Because this injects into
+      // the same `fallback` array `--fallback` uses, it must only arm for run
+      // shapes that accept a fallback chain — shouldArmRotationFailover excludes
+      // acp/loop/resume-checkpoint (which reject a non-empty fallback below),
+      // interactive/no-prompt runs, and runs that already have an explicit or
+      // profile fallback. Pinned/single-account runs stay unchanged because
+      // rotationResult is null or rotationFailoverChain returns []. version is
+      // set here because rotationResult is only populated when resolveRunVersion
+      // picked one.
+      if (
+        shouldArmRotationFailover({
+          hasRotation: !!rotationResult,
+          hasVersion: !!version,
+          hasPrompt: prompt !== undefined,
+          explicitFallback: fallback.length > 0,
+          interactive: !!options.interactive,
+          acp: !!options.acp,
+          loop: !!options.loop,
+          resumeCheckpoint: !!options.resumeCheckpoint,
+        })
+      ) {
+        const failover = rotationFailoverChain(rotationResult!, version!);
+        if (failover.length > 0) {
+          fallback.push(...failover);
+          if (!options.quiet) {
+            const accounts = failover.map(f => `${f.agent}@${f.version}`).join(', ');
+            process.stderr.write(chalk.gray(`[agents] rate-limit failover armed: ${accounts}\n`));
+          }
+        }
       }
 
       if (options.acp) {
