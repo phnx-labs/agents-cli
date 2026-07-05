@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
@@ -208,11 +209,25 @@ describe.skipIf(os.platform() === 'win32')('isLauncherScript', () => {
 });
 
 describe('isPortInUse', () => {
+  // The POSIX branch shells out to lsof; on a machine without it the probe
+  // degrades to "assume free" by design, so the positive assertion below can
+  // only hold where lsof exists. Windows uses netstat, which always ships.
+  const lsofAvailable =
+    process.platform === 'win32' ||
+    (() => {
+      try {
+        execFileSync('which', ['lsof'], { stdio: 'ignore' });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+
   // Real socket, real probe (lsof on POSIX, netstat on Windows) — no mocks.
   // Guards the Windows regression where the port scan shelled out to lsof
   // (absent there), every port scanned as "free", and findFreeProfilePort
   // handed out a port an already-running browser was listening on.
-  it('detects a genuinely bound TCP port and its release', async () => {
+  it.skipIf(!lsofAvailable)('detects a genuinely bound TCP port and its release', async () => {
     const server = net.createServer();
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
