@@ -32,6 +32,8 @@ import {
   hasKeychainToken,
   listKeychainItems,
   listLegacyKeychainItems,
+  listOrphanedKeychainItems,
+  migrateOrphanedKeychainItems,
   setKeychainToken,
 } from '../lib/secrets/index.js';
 import { getBackupsDir } from '../lib/state.js';
@@ -121,7 +123,7 @@ function migrateOne(record: MigrationRecord): MigrationResult {
 export function registerSecretsMigrateAclCommand(secrets: Command): void {
   secrets
     .command('migrate-acl')
-    .description('Refresh existing keychain ACLs to use the signed Agents CLI helper. Dry-run by default.')
+    .description('Refresh legacy keychain ACLs and re-home items stranded in a stale access group. Dry-run by default.')
     .option('--commit', 'Perform writes (default is dry-run reporting only)')
     .option('--prefix <p>', `Restrict to items beginning with PREFIX (default ${ITEM_PREFIX})`, ITEM_PREFIX)
     .option('--all', 'Rewrite EVERY matching item, not just legacy stragglers (slower; a Touch ID prompt per item)')
@@ -137,86 +139,137 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
             `--prefix must start with '${ITEM_PREFIX}' to avoid touching unrelated Keychain items (got '${prefix}').`,
           );
         }
-        // Default: migrate ONLY legacy stragglers (items still in the file-based
-        // keychain) — modern DP items need no rewrite and touching them is a
-        // Touch ID prompt per item for nothing. `--all` forces the old full
-        // rewrite. Either way this is one command over every matching item — no
-        // one-by-one invocation.
+        // Two independent classes of work under one command:
+        //   (a) Legacy ACL stragglers — items still in the file-based keychain
+        //       with a pre-migration trusted-app ACL. Rewritten value-by-value.
+        //   (b) Orphaned access groups — data-protection items filed under a
+        //       pre-#279 non-concrete group, invisible to the pinned queries.
+        //       Re-homed by the helper behind a single Touch ID.
+        // Default: only legacy stragglers for (a); `--all` forces a full rewrite.
         const names = opts.all ? listKeychainItems(prefix) : listLegacyKeychainItems(prefix);
         const items = names.map((item) => {
           const localExists = hasKeychainToken(item);
           return { item, sync: !localExists };
         });
-        if (items.length === 0) {
+        const orphans = listOrphanedKeychainItems(prefix);
+
+        if (items.length === 0 && orphans.length === 0) {
           console.log(
             opts.all
               ? chalk.gray(`No keychain items with prefix '${prefix}'.`)
-              : chalk.green(`Nothing to migrate — all items under '${prefix}' already use the modern ACL.`),
+              : chalk.green(`Nothing to migrate — all items under '${prefix}' use the modern ACL and access group.`),
           );
           return;
         }
+
         const label = opts.all ? 'item' : 'legacy item';
-        console.log(chalk.bold(`Found ${items.length} ${label}(s) under '${prefix}' to migrate.`));
+        if (items.length > 0) {
+          console.log(chalk.bold(`Found ${items.length} ${label}(s) under '${prefix}' with an outdated ACL.`));
+        }
+        if (orphans.length > 0) {
+          console.log(chalk.bold(`Found ${orphans.length} orphaned item(s) under '${prefix}' in a stale access group.`));
+        }
+
         if (!opts.commit) {
           for (const { item, sync } of items) {
             console.log(`  ${chalk.cyan(item)} ${chalk.gray(sync ? '(synced)' : '(local)')}`);
+          }
+          for (const item of orphans) {
+            console.log(`  ${chalk.cyan(item)} ${chalk.yellow('(orphaned access group)')}`);
           }
           console.log();
           console.log(chalk.gray('Dry-run — pass --commit to perform the migration.'));
           return;
         }
-        // Commit phase. Snapshot every value first (one batched read behind a
-        // single helper process, so DP items share one auth context), encrypt,
-        // then mutate.
-        const fetched = getKeychainTokens(items.map((i) => i.item));
-        const records: MigrationRecord[] = [];
-        for (const { item, sync } of items) {
-          const value = fetched.get(item);
-          if (value === undefined) {
-            console.error(chalk.red(`Skipping '${item}': read failed or item absent.`));
-            continue;
+
+        // ---- Commit phase ----
+        let okCount = 0;
+        let failCount = 0;
+
+        // (a) Legacy ACL rewrite. Snapshot every value first (one batched read
+        // behind a single helper process), encrypt, then delete + re-add.
+        if (items.length > 0) {
+          const fetched = getKeychainTokens(items.map((i) => i.item));
+          const records: MigrationRecord[] = [];
+          for (const { item, sync } of items) {
+            const value = fetched.get(item);
+            if (value === undefined) {
+              console.error(chalk.red(`Skipping '${item}': read failed or item absent.`));
+              continue;
+            }
+            records.push({ item, sync, value });
           }
-          records.push({ item, sync, value });
-        }
-        if (records.length === 0) {
-          console.error(chalk.red('No items could be read. Aborting before any writes.'));
-          process.exit(1);
-        }
-        const passphrase = opts.passphraseEnv
-          ? (() => {
-              const v = process.env[opts.passphraseEnv!];
-              if (!v) throw new Error(`Env var '${opts.passphraseEnv}' not set.`);
-              if (v.length < MIN_PASSPHRASE_LEN) throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`);
-              return v;
-            })()
-          : await promptPassphrase();
-        const backupPath = writeEncryptedBackup(records, passphrase);
-        // Compute a quick fingerprint so the user can sanity-check recovery without
-        // decrypting. Hash of (count, sorted item names).
-        const fingerprint = crypto
-          .createHash('sha256')
-          .update(records.length + '\n' + records.map((r) => r.item).sort().join('\n'))
-          .digest('hex')
-          .slice(0, 12);
-        console.log(chalk.green(`Encrypted backup written to ${backupPath} (sha256-12: ${fingerprint}).`));
-        const results: MigrationResult[] = [];
-        for (const record of records) {
-          const r = migrateOne(record);
-          results.push(r);
-          if (r.status === 'ok') {
-            console.log(`  ${chalk.green('ok')}     ${record.item}`);
-          } else {
-            console.log(`  ${chalk.red(r.status)} ${record.item} ${chalk.gray(r.detail ?? '')}`);
+          if (records.length === 0) {
+            console.error(chalk.red('No legacy items could be read. Aborting before any writes.'));
+            process.exit(1);
+          }
+          const passphrase = opts.passphraseEnv
+            ? (() => {
+                const v = process.env[opts.passphraseEnv!];
+                if (!v) throw new Error(`Env var '${opts.passphraseEnv}' not set.`);
+                if (v.length < MIN_PASSPHRASE_LEN) throw new Error(`Passphrase must be at least ${MIN_PASSPHRASE_LEN} characters.`);
+                return v;
+              })()
+            : await promptPassphrase();
+          const backupPath = writeEncryptedBackup(records, passphrase);
+          // Quick fingerprint so the user can sanity-check recovery without decrypting.
+          const fingerprint = crypto
+            .createHash('sha256')
+            .update(records.length + '\n' + records.map((r) => r.item).sort().join('\n'))
+            .digest('hex')
+            .slice(0, 12);
+          console.log(chalk.green(`Encrypted backup written to ${backupPath} (sha256-12: ${fingerprint}).`));
+          const results: MigrationResult[] = [];
+          for (const record of records) {
+            const r = migrateOne(record);
+            results.push(r);
+            if (r.status === 'ok') {
+              console.log(`  ${chalk.green('ok')}     ${record.item}`);
+            } else {
+              console.log(`  ${chalk.red(r.status)} ${record.item} ${chalk.gray(r.detail ?? '')}`);
+            }
+          }
+          const ok = results.filter((r) => r.status === 'ok').length;
+          okCount += ok;
+          failCount += results.length - ok;
+          if (results.length - ok > 0) {
+            console.error(chalk.gray(`Restore from ${backupPath} using the backup passphrase if needed.`));
           }
         }
-        const okCount = results.filter((r) => r.status === 'ok').length;
-        const failCount = results.length - okCount;
+
+        // (b) Orphan re-home — one helper call, one Touch ID for the batch. The
+        // helper adds the pinned copy before deleting the orphan, so no pre-write
+        // backup is needed (a failed add leaves the orphan intact and readable).
+        if (orphans.length > 0) {
+          console.log(chalk.bold(`Re-homing ${orphans.length} orphaned item(s) into the current access group (one Touch ID)…`));
+          const results = migrateOrphanedKeychainItems(prefix);
+          const healed = new Set<string>();
+          for (const r of results) {
+            healed.add(r.item);
+            if (r.status === 'ok') {
+              okCount += 1;
+              console.log(`  ${chalk.green('ok')}     ${r.item}`);
+            } else {
+              failCount += 1;
+              console.log(`  ${chalk.red(r.status)} ${r.item} ${chalk.gray(r.detail ?? '')}`);
+            }
+          }
+          // Any orphan we listed but the helper couldn't reach (e.g. under a
+          // different signing team) — surface it, never drop it silently.
+          for (const item of orphans) {
+            if (!healed.has(item)) {
+              failCount += 1;
+              console.log(`  ${chalk.red('fail')} ${item} ${chalk.gray('unreachable (different signing team?)')}`);
+            }
+          }
+        }
+
+        const total = okCount + failCount;
         console.log();
         if (failCount === 0) {
-          console.log(chalk.green(`Migrated ${okCount}/${results.length} item(s).`));
+          console.log(chalk.green(`Migrated ${okCount}/${total} item(s).`));
         } else {
-          console.error(chalk.yellow(`Migrated ${okCount}/${results.length} item(s); ${failCount} failed.`));
-          console.error(chalk.gray(`Restore from ${backupPath} using the backup passphrase if needed.`));
+          console.error(chalk.yellow(`Migrated ${okCount}/${total} item(s); ${failCount} failed.`));
           process.exit(1);
         }
       } catch (err) {
