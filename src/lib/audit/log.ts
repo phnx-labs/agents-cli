@@ -9,9 +9,16 @@
  * chain from that point forward — `verifyAuditChain()` reports the first index
  * that fails to reproduce.
  *
- * Storage is append-only JSONL under the user repo (`~/.agents/audit/log.jsonl`),
- * one record per line. The write path is deliberately cheap and non-fatal: a
- * logging failure must never crash a run (see `recordDispatchedRun`).
+ * Storage is append-only JSONL under the durable-runtime bucket
+ * (`~/.agents/.history/audit/log.jsonl`), one record per line. `.history/` is
+ * machine-local, gitignored, and NEVER synced by `agents repo push/pull` — so
+ * the `repo` field (a git remote url that can embed an access token) never
+ * lands in a version-controlled DotAgents repo, and a cross-machine pull can't
+ * splice a foreign chain into this one. The write path is deliberately cheap
+ * and non-fatal: a logging failure must never crash a run (see
+ * `recordDispatchedRun`). Concurrent writers (parallel teams/routines dispatch)
+ * are serialized by an advisory lock file so the chain never forks — see
+ * `appendAuditRecord`.
  *
  * Governance context: this is the evidence trail an operator needs to answer
  * "which agent, at which version, ran against which repo, and did it succeed?"
@@ -23,7 +30,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { sha256 } from '../staleness/fingerprint.js';
-import { getUserAgentsDir } from '../state.js';
+import { getHistoryDir } from '../state.js';
+import { ensureLockTarget, withFileLock } from '../fs-atomic.js';
 
 /** First record's `prevHash` — a fixed anchor so the chain has a root. */
 export const GENESIS_HASH = 'GENESIS';
@@ -47,9 +55,15 @@ export interface AuditRecord {
 /** The caller-supplied fields — the chain fields (`prevHash`/`hash`) are computed here. */
 export type AuditEntry = Omit<AuditRecord, 'prevHash' | 'hash'>;
 
-/** Absolute path to the append-only audit log. */
+/**
+ * Absolute path to the append-only audit log. Lives under `.history/` — the
+ * durable-but-machine-local runtime bucket that is gitignored and never synced
+ * by `agents repo push/pull`. Keeping it here (not under a top-level, tracked
+ * `~/.agents/` path) means the token-bearing `repo` field can never leak into a
+ * version-controlled DotAgents repo, and no cross-machine pull can fork the chain.
+ */
 export function getAuditLogPath(): string {
-  return path.join(getUserAgentsDir(), 'audit', 'log.jsonl');
+  return path.join(getHistoryDir(), 'audit', 'log.jsonl');
 }
 
 /**
@@ -93,16 +107,25 @@ function readRecords(logPath: string): AuditRecord[] {
  * record's `hash` (or `GENESIS_HASH` for the first), computes the sealing
  * hash, and writes a single JSONL line. Synchronous so the record is durable
  * before the caller proceeds.
+ *
+ * Read-last-hash + append run under the canonical advisory file lock
+ * (`withFileLock`, backed by proper-lockfile). Without it, two concurrent
+ * writers — the norm under parallel teams/routines dispatch — both read the
+ * same last hash and both write `prevHash=H`, forking the chain into a false
+ * "tampered" verdict. The lock forces a total order so every record links off
+ * the genuinely-previous one. `ensureLockTarget` creates the file first because
+ * proper-lockfile locks an existing path.
  */
 export function appendAuditRecord(entry: AuditEntry, logPath: string = getAuditLogPath()): AuditRecord {
-  const existing = readRecords(logPath);
-  const prevHash = existing.length ? existing[existing.length - 1].hash : GENESIS_HASH;
-  const unsealed: Omit<AuditRecord, 'hash'> = { ...entry, prevHash };
-  const record: AuditRecord = { ...unsealed, hash: hashRecord(unsealed) };
-
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  fs.appendFileSync(logPath, JSON.stringify(record) + '\n');
-  return record;
+  ensureLockTarget(logPath);
+  return withFileLock(logPath, () => {
+    const existing = readRecords(logPath);
+    const prevHash = existing.length ? existing[existing.length - 1].hash : GENESIS_HASH;
+    const unsealed: Omit<AuditRecord, 'hash'> = { ...entry, prevHash };
+    const record: AuditRecord = { ...unsealed, hash: hashRecord(unsealed) };
+    fs.appendFileSync(logPath, JSON.stringify(record) + '\n');
+    return record;
+  });
 }
 
 /**

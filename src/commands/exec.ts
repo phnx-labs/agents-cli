@@ -537,7 +537,18 @@ export function registerRunCommand(program: Command): void {
           sessionId: cp.sessionId,
         });
         process.stderr.write(chalk.gray(`[loop] stopped: ${result.stoppedBy} after ${result.iterations} iteration(s), ${result.tokens} tokens\n`));
-        process.exit(loopExitCode(result.stoppedBy));
+        // Governance chokepoint (#347): --resume-checkpoint short-circuits normal
+        // dispatch and exits here — record its one audit entry with the agent,
+        // version, and cwd reconstructed from the checkpoint.
+        const resumeExit = loopExitCode(result.stoppedBy);
+        recordDispatchedRun({
+          agent: cp.agent,
+          version: cp.version ?? 'unknown',
+          mode: resumeExec.mode ?? 'auto',
+          cwd: resumeExec.cwd ?? process.cwd(),
+          exitCode: resumeExit,
+        });
+        process.exit(resumeExit);
       }
 
       const [
@@ -1234,6 +1245,9 @@ export function registerRunCommand(program: Command): void {
             mode,
             json: options.json ?? false,
           });
+          // Governance chokepoint (#347): the --acp path exits here, bypassing
+          // the normal finalize below — record its one audit entry.
+          recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode });
           process.exit(exitCode);
         } catch (err) {
           console.error(chalk.red(`ACP run failed for ${agent}: ${(err as Error).message}`));
@@ -1369,7 +1383,11 @@ export function registerRunCommand(program: Command): void {
           cleanupWorkflowMcpConfig();
           cleanupWorkflowSubagents();
           process.stderr.write(chalk.gray(`[loop] stopped: ${result.stoppedBy} after ${result.iterations} iteration(s), ${result.tokens} tokens (checkpoint: ${path.join(runDir, 'checkpoint.json')})\n`));
-          process.exit(loopExitCode(result.stoppedBy));
+          // Governance chokepoint (#347): the --loop path exits here, bypassing
+          // the normal finalize below — record its one audit entry.
+          const loopExit = loopExitCode(result.stoppedBy);
+          recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode: loopExit });
+          process.exit(loopExit);
         } catch (err) {
           cleanupWorkflowMcpConfig();
           cleanupWorkflowSubagents();
@@ -1380,9 +1398,16 @@ export function registerRunCommand(program: Command): void {
 
       try {
         let exitCode: number;
+        let ranAgent = agent;
+        let ranVersion = defaultVersion;
         if (fallback.length > 0) {
           // fallback requires a prompt — enforced above, narrow the type here.
-          exitCode = await runWithFallback({ ...execOptions, prompt: prompt!, fallback });
+          // The sink reports which chain entry actually executed (may differ from
+          // the primary after a rate-limit handoff) so the audit record is honest.
+          const sink: { agent?: AgentId; version?: string } = {};
+          exitCode = await runWithFallback({ ...execOptions, prompt: prompt!, fallback, dispatchSink: sink });
+          ranAgent = sink.agent ?? agent;
+          ranVersion = sink.version ?? defaultVersion;
         } else {
           exitCode = await execAgent(execOptions);
         }
@@ -1390,7 +1415,7 @@ export function registerRunCommand(program: Command): void {
         cleanupWorkflowSubagents();
         // Governance chokepoint (#347): every dispatched run finalizes here.
         // ONE tamper-evident audit record per run — non-fatal by contract.
-        recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode });
+        recordDispatchedRun({ agent: ranAgent, version: ranVersion ?? 'unknown', mode, cwd, exitCode });
         process.exit(exitCode);
       } catch (err) {
         cleanupWorkflowMcpConfig();

@@ -1156,6 +1156,14 @@ export interface FallbackOptions extends ExecOptions {
   fallback: FallbackEntry[];
   /** Fallback requires a prompt -- chain handoff doesn't apply to interactive sessions. */
   prompt: string;
+  /**
+   * Optional out-param the caller reads AFTER the call to learn which chain
+   * entry actually executed — updated to each entry as it is attempted, so on
+   * return it holds the agent+version whose exit code is returned. Lets the
+   * audit log record the fallback that really ran, not always the primary
+   * (issue #347).
+   */
+  dispatchSink?: { agent?: AgentId; version?: string };
 }
 
 /**
@@ -1238,6 +1246,9 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
 
   for (let i = 0; i < chain.length; i++) {
     const { agent, version, envOverride } = chain[i];
+    // Record the entry we're about to attempt so the caller (audit log) sees the
+    // agent+version that actually ran, even after a rate-limit handoff.
+    if (options.dispatchSink) { options.dispatchSink.agent = agent; options.dispatchSink.version = version; }
     const pinnedSessionId = agent === 'claude' ? randomUUID() : undefined;
 
     // Same-host retry (same agent+version as previous entry — used by profile
