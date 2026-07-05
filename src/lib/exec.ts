@@ -259,6 +259,14 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       : (resolvedVersion && isVersionInstalled('claude', resolvedVersion) ? resolvedVersion : null);
     if (version) {
       result.CLAUDE_CONFIG_DIR = path.join(getVersionHomePath('claude', version), '.claude');
+      // A managed pin lives in a per-version dir; Claude Code's own background
+      // auto-updater would rewrite that pinned binary in place (and has left it
+      // half-swapped and broken). Disable it so a pin stays a pin. Honor an
+      // explicit user value — from process.env (already in result) or from
+      // options.env (spread over result below).
+      if (result.DISABLE_AUTOUPDATER === undefined) {
+        result.DISABLE_AUTOUPDATER = '1';
+      }
     }
     delete result.CODEX_HOME;
     delete result.COPILOT_HOME;

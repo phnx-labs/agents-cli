@@ -36,6 +36,39 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
   });
 });
 
+describe('buildExecEnv — Claude Code auto-updater suppression for pinned managed installs', () => {
+  it('injects DISABLE_AUTOUPDATER=1 for a managed (pinned) claude version', () => {
+    // Pinned per-version installs must never self-mutate: Claude Code's own
+    // background auto-updater would rewrite the pinned binary in place.
+    const env = buildExecEnv(execOpts({ agent: 'claude', version: '2.1.196' }));
+    expect(env.DISABLE_AUTOUPDATER).toBe('1');
+  });
+
+  it('does not clobber a DISABLE_AUTOUPDATER already in the environment (the guard)', () => {
+    const prev = process.env.DISABLE_AUTOUPDATER;
+    process.env.DISABLE_AUTOUPDATER = '0';
+    try {
+      const env = buildExecEnv(execOpts({ agent: 'claude', version: '2.1.196' }));
+      expect(env.DISABLE_AUTOUPDATER).toBe('0');
+    } finally {
+      if (prev === undefined) delete process.env.DISABLE_AUTOUPDATER;
+      else process.env.DISABLE_AUTOUPDATER = prev;
+    }
+  });
+
+  it('lets a caller override the value via options.env', () => {
+    const env = buildExecEnv(execOpts({
+      agent: 'claude', version: '2.1.196', env: { DISABLE_AUTOUPDATER: '0' },
+    }));
+    expect(env.DISABLE_AUTOUPDATER).toBe('0');
+  });
+
+  it('leaves codex untouched — no DISABLE_AUTOUPDATER injected', () => {
+    const env = buildExecEnv(execOpts({ agent: 'codex', version: '0.20.0' }));
+    expect(env.DISABLE_AUTOUPDATER).toBeUndefined();
+  });
+});
+
 describe('nativeResume (Tier-1 capability derives from the command template)', () => {
   it('claude and codex resume natively', () => {
     expect(nativeResume('claude')).toBe(true);

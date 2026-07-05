@@ -237,7 +237,10 @@ async function promptConflictStrategy(
 //        re-exec-looped through `command -v kimi` (the dispatcher itself).
 // v21 — guard grok's `command -v grok` fallback against resolving to our own
 //        shims dir (same infinite re-exec loop), mirroring droid.
-export const SHIM_SCHEMA_VERSION = 21;
+// v22 — export DISABLE_AUTOUPDATER=1 for claude shims so a pinned per-version
+//        install can't self-mutate: Claude Code's background auto-updater would
+//        otherwise rewrite the pinned binary in place. Explicit user value wins.
+export const SHIM_SCHEMA_VERSION = 22;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -269,6 +272,10 @@ export function generateShimScript(agent: AgentId): string {
 # selected version's config directory so switching versions also switches the
 # live Claude account.
 export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/${configDirName}"
+# Managed installs are pinned in a per-version dir; Claude Code's background
+# auto-updater would rewrite the pinned binary in place. Disable it so a pin
+# stays a pin. An explicit user value always wins.
+export DISABLE_AUTOUPDATER="\${DISABLE_AUTOUPDATER:-1}"
 # On Linux sandboxes (no keychain), fall back to a per-version token file.
 # The env var always wins if already set; no-op on macOS.
 if [ "\$(uname -s)" = "Linux" ] && [ -z "\${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -f "\$CLAUDE_CONFIG_DIR/.oauth_token" ]; then
@@ -683,8 +690,11 @@ export function removeShim(agent: AgentId): boolean {
  *        generic node_modules/.bin branch.
  *  v10 — guard grok's `command -v grok` fallback against resolving to our own
  *        shims dir (same infinite re-exec loop), mirroring droid.
+ *  v11 — export DISABLE_AUTOUPDATER=1 for claude aliases so a pinned per-version
+ *        install can't self-mutate via Claude Code's background auto-updater.
+ *        Explicit user value wins.
  */
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 10;
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 11;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -716,6 +726,10 @@ export function generateVersionedAliasScript(agent: AgentId, version: string): s
 # Claude stores OAuth credentials in the macOS keychain. Scope them to this
 # version's config directory so direct aliases also switch the live account.
 export CLAUDE_CONFIG_DIR="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
+# Managed installs are pinned in a per-version dir; Claude Code's background
+# auto-updater would rewrite the pinned binary in place. Disable it so a pin
+# stays a pin. An explicit user value always wins.
+export DISABLE_AUTOUPDATER="\${DISABLE_AUTOUPDATER:-1}"
 `
     : agent === 'codex'
       ? `
