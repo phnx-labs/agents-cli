@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { writePidSessionEntry, readPidSessionEntry, prunePidSessionRegistry } from './pid-registry.js';
+import { writePidSessionEntry, readPidSessionEntry, prunePidSessionRegistry, extractSessionIdArg } from './pid-registry.js';
 
 // A pid far above any real process on this box, so the test never clobbers a
 // live `ag run` entry and never collides with a real process's registry file.
@@ -50,5 +50,24 @@ describe('pid session registry', () => {
     const got = readPidSessionEntry(FAKE_PID);
     expect(got?.agent).toBe('grok');
     expect(got?.sessionId).toBeUndefined();
+  });
+});
+
+describe('extractSessionIdArg', () => {
+  const UUID = 'e6666574-191b-4afd-ad21-e7a09fd7b026';
+
+  it('finds --session-id <uuid> and --session-id=<uuid>', () => {
+    expect(extractSessionIdArg(['--permission-mode', 'x', '--session-id', UUID])).toBe(UUID);
+    expect(extractSessionIdArg([`--session-id=${UUID}`])).toBe(UUID);
+  });
+
+  it('rejects non-uuid values so a flag typo never fabricates an identity', () => {
+    expect(extractSessionIdArg(['--session-id', 'not-a-uuid'])).toBeUndefined();
+    expect(extractSessionIdArg(['--session-id'])).toBeUndefined();
+    expect(extractSessionIdArg([])).toBeUndefined();
+  });
+
+  it('does not match the flag as a prompt substring (only whole args)', () => {
+    expect(extractSessionIdArg(['-p', `run with --session-id ${UUID} please`])).toBeUndefined();
   });
 });

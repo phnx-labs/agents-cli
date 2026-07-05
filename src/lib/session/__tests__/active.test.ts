@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseWin32ProcessCsv, foldSubordinateAgents, type AgentCandidate } from '../active.js';
+import { parseWin32ProcessCsv, foldSubordinateAgents, readAncestorSessionEntry, type AgentCandidate } from '../active.js';
+import type { PidSessionEntry } from '../pid-registry.js';
 
 describe('parseWin32ProcessCsv', () => {
   const csv = [
@@ -35,7 +36,8 @@ describe('parseWin32ProcessCsv', () => {
 });
 
 describe('foldSubordinateAgents', () => {
-  const noRegistry = () => false;
+  const noRegistry = () => undefined;
+  const entryFor = (pid: number, agent = 'claude'): PidSessionEntry => ({ pid, agent, startedAtMs: 1 });
 
   it('folds same-kind descendants onto the topmost root, transitively', () => {
     // 100 -> 200 -> 300, plus an unrelated 900. Intermediate non-agent pids
@@ -59,10 +61,35 @@ describe('foldSubordinateAgents', () => {
       { pid: 300, kind: 'claude' },
     ];
     const ppid = new Map([[100, 1], [200, 100], [300, 200]]);
-    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 200);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 200 ? entryFor(200) : undefined);
     expect(kept.map(c => c.pid)).toEqual([100, 200]);
     expect(foldedByRoot.get(200)).toBe(1);
     expect(foldedByRoot.has(100)).toBe(false);
+  });
+
+  it('keeps a descendant whose registry entry sits on a wrapper below the fold target', () => {
+    // Session claude(100) runs a shell that launches a NEW claude via the shim:
+    // claude(100) <- ... <- wrapper cmd.exe(250, registry entry) <- claude(300).
+    const candidates: AgentCandidate[] = [
+      { pid: 100, kind: 'claude' },
+      { pid: 300, kind: 'claude' },
+    ];
+    const ppid = new Map([[100, 1], [250, 100], [300, 250]]);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 250 ? entryFor(250) : undefined);
+    expect(kept.map(c => c.pid)).toEqual([100, 300]);
+    expect(foldedByRoot.size).toBe(0);
+  });
+
+  it('ignores a wrapper entry of a different agent kind', () => {
+    // claude(300) fork under claude(100), with an unrelated codex wrapper entry between.
+    const candidates: AgentCandidate[] = [
+      { pid: 100, kind: 'claude' },
+      { pid: 300, kind: 'claude' },
+    ];
+    const ppid = new Map([[100, 1], [250, 100], [300, 250]]);
+    const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, p => p === 250 ? entryFor(250, 'codex') : undefined);
+    expect(kept.map(c => c.pid)).toEqual([100]);
+    expect(foldedByRoot.get(100)).toBe(1);
   });
 
   it('does not fold across agent kinds', () => {
@@ -74,6 +101,32 @@ describe('foldSubordinateAgents', () => {
     const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppid, noRegistry);
     expect(kept.map(c => c.pid)).toEqual([100, 200]);
     expect(foldedByRoot.size).toBe(0);
+  });
+
+  it('finds a wrapper entry one or more ancestors up (Windows cmd.exe shim path)', () => {
+    // claude.exe(300) <- cmd.exe(200) <- node shim(100, registry entry).
+    const ppid = new Map([[300, 200], [200, 100], [100, 1]]);
+    const entries = new Map<number, PidSessionEntry>([
+      [100, { pid: 100, agent: 'claude', sessionId: 'uuid-1', cwd: 'C:\\repo', startedAtMs: 1 }],
+    ]);
+    const got = readAncestorSessionEntry(300, ppid, 'claude', p => entries.get(p));
+    expect(got?.sessionId).toBe('uuid-1');
+    expect(got?.cwd).toBe('C:\\repo');
+  });
+
+  it('does not hand a wrapper entry to a different agent kind', () => {
+    // codex(300) spawned from inside a claude session whose wrapper is 200.
+    const ppid = new Map([[300, 200], [200, 1]]);
+    const entries = new Map<number, PidSessionEntry>([
+      [200, { pid: 200, agent: 'claude', cwd: 'C:\\repo', startedAtMs: 1 }],
+    ]);
+    expect(readAncestorSessionEntry(300, ppid, 'codex', p => entries.get(p))).toBeUndefined();
+    expect(readAncestorSessionEntry(300, ppid, 'claude', p => entries.get(p))).toBeDefined();
+  });
+
+  it('returns undefined with no entries and survives ppid cycles', () => {
+    const ppid = new Map([[300, 200], [200, 300]]);
+    expect(readAncestorSessionEntry(300, ppid, 'claude', () => undefined)).toBeUndefined();
   });
 
   it('survives a ppid cycle without dropping rows', () => {

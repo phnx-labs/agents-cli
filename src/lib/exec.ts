@@ -17,7 +17,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
-import { writePidSessionEntry } from './session/pid-registry.js';
+import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
 
@@ -856,6 +856,21 @@ export async function execShimPassthrough(
 
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, stdio: 'inherit', env, shell });
+    // Record the launch so `ag sessions --active` can attribute the agent
+    // process to its cwd (and exact session when the caller passed
+    // --session-id). Vital on Windows, where there is no lsof to recover a
+    // foreign process's cwd. On the shell path this pid is the cmd.exe
+    // wrapper, not the agent binary — the active scan resolves that by
+    // walking the candidate's ancestors (readAncestorSessionEntry).
+    if (child.pid) {
+      writePidSessionEntry({
+        pid: child.pid,
+        agent,
+        sessionId: extractSessionIdArg(rawArgs),
+        cwd,
+        startedAtMs: Date.now(),
+      });
+    }
     child.on('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
     child.on('error', (err) => {
       process.stderr.write(`agents: failed to launch ${agent}: ${err.message}\n`);

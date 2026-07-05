@@ -36,6 +36,28 @@ export interface PidSessionEntry {
   startedAtMs: number;
 }
 
+/**
+ * Pull an explicit `--session-id <uuid>` (or `--session-id=<uuid>`) out of a
+ * raw agent arg vector. The transparent shim forwards args untouched, but when
+ * a launcher (Claude Code background jobs, IDE harnesses) already names the
+ * session, recording it gives the same exact pid -> session mapping `ag run`
+ * gets from generating the id itself.
+ */
+const SESSION_ID_VALUE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function extractSessionIdArg(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--session-id') {
+      const v = args[i + 1];
+      if (v && SESSION_ID_VALUE_RE.test(v)) return v;
+    } else if (a.startsWith('--session-id=')) {
+      const v = a.slice('--session-id='.length);
+      if (SESSION_ID_VALUE_RE.test(v)) return v;
+    }
+  }
+  return undefined;
+}
+
 function pidRegistryDir(): string {
   return path.join(getTerminalsDir(), 'by-pid');
 }

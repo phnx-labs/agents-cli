@@ -24,7 +24,7 @@ import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
-import { readPidSessionEntry, prunePidSessionRegistry } from './pid-registry.js';
+import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
 import { buildClaudeLabelMap } from './discover.js';
 import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
@@ -625,21 +625,47 @@ const UI_HOSTS = new Set<string>([
 export interface AgentCandidate { pid: number; kind: string; }
 
 /**
+ * Find the launch registry entry recorded by a WRAPPER of this process. The
+ * shim delegate records the pid it spawned, but on Windows the `.cmd` shell
+ * path makes that a cmd.exe intermediary whose child is the real agent binary
+ * — so the agent pid itself has no entry and the wrapper one ancestor up does.
+ * The nearest entry wins, and only if its agent matches the candidate's kind:
+ * a claude session shelling out to codex must not hand codex its identity.
+ */
+export function readAncestorSessionEntry(
+  pid: number,
+  ppidMap: Map<number, number>,
+  kind: string,
+  readEntry: (pid: number) => PidSessionEntry | undefined = readPidSessionEntry,
+): PidSessionEntry | undefined {
+  let cur = ppidMap.get(pid);
+  const seen = new Set<number>();
+  while (cur && cur > 1 && !seen.has(cur)) {
+    const entry = readEntry(cur);
+    if (entry) return entry.agent === kind ? entry : undefined;
+    seen.add(cur);
+    cur = ppidMap.get(cur);
+  }
+  return undefined;
+}
+
+/**
  * Collapse agent processes spawned by another live agent process of the same
  * kind onto their nearest kept ancestor. Claude runs subagents, forks, and
  * even its bundled ripgrep as child `claude` processes — on POSIX those
  * children resolve to the parent's cwd and collapse in dedupeBySession, but
  * where no cwd can be recovered (Windows has no lsof) every fork would print
- * as its own headless row. Two exceptions keep their own row: a pid with its
- * own registry entry (a distinct session launched by `ag run` from inside an
- * agent), and a child of a *different* agent kind (claude shelling out to
- * codex is a real second session, not a fork).
+ * as its own headless row. Two exceptions keep their own row: a candidate with
+ * its own registry entry — on its pid OR on a wrapper ancestor strictly below
+ * the pid it would fold into (the shim's entry lands on the cmd.exe
+ * intermediary on Windows) — and a child of a *different* agent kind (claude
+ * shelling out to codex is a real second session, not a fork).
  * Returns the kept roots plus, per root pid, how many descendants folded in.
  */
 export function foldSubordinateAgents(
   candidates: AgentCandidate[],
   ppidMap: Map<number, number>,
-  hasOwnSession: (pid: number) => boolean,
+  readEntry: (pid: number) => PidSessionEntry | undefined,
 ): { kept: AgentCandidate[]; foldedByRoot: Map<number, number> } {
   const kindByPid = new Map(candidates.map(c => [c.pid, c.kind]));
 
@@ -654,9 +680,25 @@ export function foldSubordinateAgents(
     return undefined;
   };
 
+  // Own launch identity: a matching-kind registry entry on the candidate or on
+  // any wrapper between it and the pid it would fold into (exclusive). Entries
+  // above the fold target belong to that ancestor's session, not this one.
+  const hasOwnSession = (c: AgentCandidate, stopPid: number): boolean => {
+    if (readEntry(c.pid)?.agent === c.kind) return true;
+    let cur = ppidMap.get(c.pid);
+    const seen = new Set<number>();
+    while (cur && cur > 1 && cur !== stopPid && !seen.has(cur)) {
+      if (readEntry(cur)?.agent === c.kind) return true;
+      seen.add(cur);
+      cur = ppidMap.get(cur);
+    }
+    return false;
+  };
+
   const keptPids = new Set<number>();
   for (const c of candidates) {
-    if (hasOwnSession(c.pid) || nearestSameKindAncestor(c.pid, c.kind) === undefined) {
+    const foldTarget = nearestSameKindAncestor(c.pid, c.kind);
+    if (foldTarget === undefined || hasOwnSession(c, foldTarget)) {
       keptPids.add(c.pid);
     }
   }
@@ -707,10 +749,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   // Forks/subagents of a live agent process collapse onto their root before
   // the cwd probes — fewer spawns, and one session stays one row even when
   // cwd-based dedupe is unavailable (Windows).
-  const { kept, foldedByRoot } = foldSubordinateAgents(
-    candidates, ppidMap,
-    p => readPidSessionEntry(p) !== undefined,
-  );
+  const { kept, foldedByRoot } = foldSubordinateAgents(candidates, ppidMap, readPidSessionEntry);
 
   // Bounded + staggered lsof probes: same cwds, but a trickle of spawns instead
   // of one simultaneous system-wide burst that behavioral EDR flags as recon.
@@ -719,11 +758,12 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   const out: ActiveSession[] = [];
   for (let i = 0; i < kept.length; i++) {
     const { pid, kind } = kept[i];
-    // The per-pid registry (written by `ag run`) gives the EXACT session id this
-    // pid was launched with — so N agents in one cwd resolve to N distinct
-    // sessions instead of all collapsing onto the newest .jsonl. Absent (agent
-    // not launched via `ag run`, or one that takes no session id) → heuristic.
-    const entry = readPidSessionEntry(pid);
+    // The per-pid registry (written by `ag run` and the shim delegate) gives
+    // the EXACT session id this pid was launched with — so N agents in one cwd
+    // resolve to N distinct sessions instead of all collapsing onto the newest
+    // .jsonl. The shim's entry may sit on a wrapper ancestor (Windows .cmd
+    // path). Absent entirely (direct launch outside agents-cli) → heuristic.
+    const entry = readPidSessionEntry(pid) ?? readAncestorSessionEntry(pid, ppidMap, kind);
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;
     const sessionFile = findSessionFileForKind(kind, cwd, entry?.sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
