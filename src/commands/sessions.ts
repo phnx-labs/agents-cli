@@ -1357,7 +1357,7 @@ function remoteMachineOf(session: SessionMeta): string | undefined {
  * remote pick never dead-ends silently. */
 function warnNoPeerTarget(machine: string, session: SessionMeta): void {
   console.log(chalk.yellow(`Session ${session.shortId} lives on ${machine}, which isn't a reachable device right now.`));
-  console.log(chalk.gray(`Register/​wake it (ag devices), or run there: agents ssh ${machine}`));
+  console.log(chalk.gray(`Register/wake it (ag devices), or run there: agents ssh ${machine}`));
 }
 
 async function handlePickedSession(picked: PickedSession): Promise<void> {

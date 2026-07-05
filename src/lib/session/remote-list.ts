@@ -195,6 +195,7 @@ export async function resolvePeerTarget(machine: string): Promise<{ target: stri
 export async function runOnPeer(args: string[], machine: string, opts: { tty?: boolean } = {}): Promise<'ok' | 'no-target'> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return 'no-target';
+  assertValidSshTarget(peer.target); // registry-sourced, but validate like the fan-out does
 
   const cols = terminalWidth();
   const remoteCmd = remoteShellFor(peer.os) === 'powershell'
@@ -207,9 +208,13 @@ export async function runOnPeer(args: string[], machine: string, opts: { tty?: b
 
   return new Promise((resolve) => {
     const child = spawn('ssh', sshArgs, { stdio: 'inherit' });
-    // ssh prints its own connection errors to the inherited stderr; either way
-    // we return once it exits so the picker flow completes.
-    child.on('error', () => resolve('ok'));
+    // ssh prints its own connection errors to the inherited stderr; a spawn
+    // failure (e.g. ssh not on PATH) has no such output, so name it. Either way
+    // we resolve once it settles so the picker flow completes.
+    child.on('error', (err: any) => {
+      process.stderr.write(chalk.red(`Failed to reach ${machine}: ${err?.message ?? 'ssh failed to launch'}\n`));
+      resolve('ok');
+    });
     child.on('close', () => resolve('ok'));
   });
 }
