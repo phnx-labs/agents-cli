@@ -51,6 +51,7 @@ interface ExecCommandActionOptions {
   // Host dispatch: run on a registered agent host instead of locally.
   // `--host` is canonical; `--on`/`--computer` are hidden aliases.
   host?: string;
+  device?: string;
   on?: string;
   computer?: string;
   remoteCwd?: string;
@@ -245,7 +246,11 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--host <name>',
-      'Offload this run onto a registered agent host over SSH instead of running locally. See `agents hosts`.',
+      'Offload this run onto another machine over SSH instead of running locally — a device, a registered agent host, or user@host. See `agents devices` / `agents hosts`.',
+    )
+    .option(
+      '--device <name>',
+      'Alias of --host: offload this run onto a registered device (from `agents devices`).',
     )
     .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
@@ -371,10 +376,10 @@ export function registerRunCommand(program: Command): void {
 
       // --host/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.
-      const hostGiven = [options.host, options.on, options.computer].filter((v): v is string => !!v);
+      const hostGiven = [options.host, options.device, options.on, options.computer].filter((v): v is string => !!v);
       if (hostGiven.length > 0) {
         if (new Set(hostGiven).size > 1) {
-          console.error(chalk.red('Conflicting --host/--on/--computer values — pass just one.'));
+          console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
           process.exit(1);
         }
         const hostName = hostGiven[0];
@@ -382,9 +387,18 @@ export function registerRunCommand(program: Command): void {
           console.error(chalk.red('A prompt is required for host runs: agents run <agent> "<task>" --host <name>'));
           process.exit(1);
         }
-        const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
+        const { resolveHost, resolveHostByCap, DeviceOffloadUnsupportedError } = await import('../lib/hosts/registry.js');
         const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
-        let host = await resolveHost(hostName);
+        let host = await resolveHost(hostName).catch((e) => {
+          // A password-auth device can't offload over BatchMode ssh — surface the
+          // actionable message instead of a stack trace, and don't fall through to
+          // capability routing (the name did resolve, it just can't be used).
+          if (e instanceof DeviceOffloadUnsupportedError) {
+            console.error(chalk.red(e.message));
+            process.exit(1);
+          }
+          throw e;
+        });
         if (!host) {
           // Not a host name — try capability routing (e.g. --host gpu). A
           // "Multiple hosts tagged…" error is actionable and must surface;

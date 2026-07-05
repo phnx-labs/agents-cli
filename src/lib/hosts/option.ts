@@ -17,7 +17,7 @@ export function addHostOption(cmd: Command): Command {
   return cmd
     .option(
       '-H, --host <name>',
-      'Run this command on a registered host (or user@host) over SSH instead of locally. See `agents hosts`.',
+      'Run this command on another machine over SSH instead of locally — a device, a registered host, or user@host. See `agents devices` / `agents hosts`.',
     )
     .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
     .option('--no-tty', 'Force non-interactive output for --host runs even from a terminal.')
