@@ -22,7 +22,7 @@ import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecut
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
-import { gatherRemoteList } from '../lib/session/remote-list.js';
+import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
@@ -812,7 +812,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     if (options.json) {
       const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
       const serializable = filtered.map(s => {
-        const { _matchedTerms, _bm25Score, ...rest } = s;
+        const { _matchedTerms, _bm25Score, _remote, ...rest } = s;
         return rest;
       });
       process.stdout.write(JSON.stringify(serializable, null, 2) + '\n');
@@ -829,7 +829,10 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     // local list intact rather than erroring the whole command.
     const forceLocal = options.local === true || process.env[NO_FANOUT_ENV] === '1';
     if (!forceLocal) {
-      const forwarded = buildForwardedArgs(process.argv);
+      // Pass the hosts set so a variadic `--host a b` never leaks a host as a
+      // query (defensive: the --host-without-active early return above already
+      // means we only get here in auto-discovery mode, with no --host in argv).
+      const forwarded = buildForwardedArgs(process.argv, new Set(options.host ?? []));
       if (!forwarded.includes('--json')) forwarded.push('--json');
       const fanSpinner = isInteractiveTerminal() ? ora('Reaching other machines...').start() : null;
       try {
@@ -1341,41 +1344,36 @@ export async function pickSessionInteractive(
 }
 
 /**
- * The machine a picked session lives on, or undefined when it is local. A
- * session tagged with a machine other than this one came in over the
- * cross-machine fan-out: its `filePath` points at the peer's disk, so reading
- * or resuming it has to hop back over SSH rather than touch the local FS.
+ * The machine a picked session lives on when its transcript is on that peer's
+ * disk (folded in over the live fan-out), else undefined. Keys off `_remote`,
+ * NOT `machine !== local`: a synced mirror is machine-tagged too, but its file
+ * is a local mirror path, so it must be read/resumed locally like any other.
  */
 function remoteMachineOf(session: SessionMeta): string | undefined {
-  return session.machine && session.machine !== machineId() ? session.machine : undefined;
+  return session._remote ? session.machine : undefined;
 }
 
-/** Re-run this CLI against a peer's own index over SSH (`--host <machine>`),
- * inheriting stdio so its picker/markdown renders straight to this terminal. */
-function runOnRemote(args: string[], machine: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const child = spawn('agents', ['sessions', ...args, '--host', machine], {
-      stdio: 'inherit',
-      shell: needsWindowsShell('agents'),
-    });
-    child.on('error', (err: any) => {
-      console.error(chalk.red(`Failed to reach ${machine}: ${err.message}`));
-      resolve();
-    });
-    child.on('close', () => resolve());
-  });
+/** True when the peer wasn't a dialable device; prints one clear line so a
+ * remote pick never dead-ends silently. */
+function warnNoPeerTarget(machine: string, session: SessionMeta): void {
+  console.log(chalk.yellow(`Session ${session.shortId} lives on ${machine}, which isn't a reachable device right now.`));
+  console.log(chalk.gray(`Register/​wake it (ag devices), or run there: agents ssh ${machine}`));
 }
 
 async function handlePickedSession(picked: PickedSession): Promise<void> {
-  // A session on another machine is resumed/viewed on that machine over SSH —
-  // its transcript and agent binary live there, not here.
+  // A session on another machine is read/resumed ON that machine over SSH — its
+  // transcript and agent binary live there. Both actions execute on the peer
+  // (not a local `--host` hop, which would discover locally and dead-end for a
+  // session that exists only on the peer).
   const remote = remoteMachineOf(picked.session);
   if (remote) {
     if (picked.action === 'view') {
-      await runOnRemote([picked.session.shortId, '--markdown'], remote);
+      const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], remote);
+      if (rc === 'no-target') warnNoPeerTarget(remote, picked.session);
     } else {
-      console.log(chalk.gray(`Resuming on ${remote} over SSH...`));
-      await runOnRemote(['resume', picked.session.shortId], remote);
+      console.log(chalk.gray(`Resuming ${picked.session.shortId} on ${remote} over SSH...`));
+      const rc = await runOnPeer(['sessions', 'resume', picked.session.shortId], remote, { tty: true });
+      if (rc === 'no-target') warnNoPeerTarget(remote, picked.session);
     }
     return;
   }

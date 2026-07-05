@@ -93,6 +93,15 @@ export interface SessionMeta {
    * undefined for sessions obtained outside that path.
    */
   machine?: string;
+  /**
+   * True only for rows pulled from another machine over the live cross-machine
+   * fan-out (`remote-list.ts`) — their transcript is on that peer's disk, so
+   * reading/resuming has to hop back over SSH. Distinct from `machine`, which is
+   * also set on locally-readable synced mirrors: a mirror is machine-tagged but
+   * its `filePath` is a local path, so it must NOT be treated as remote. Set by
+   * `parseRemoteList`; transient (never persisted, stripped from --json).
+   */
+  _remote?: boolean;
   /** Terms that matched the current search query */
   _matchedTerms?: string[];
   /** BM25 relevance score from the most recent content-index search */

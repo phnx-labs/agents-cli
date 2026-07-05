@@ -21,6 +21,14 @@ describe('parseRemoteList', () => {
     expect(out[0].id).toBe('a');
   });
 
+  it('marks every parsed row _remote so it routes read/resume back over SSH', () => {
+    const stdout = JSON.stringify([
+      { id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z', filePath: '/peer/a.jsonl' },
+    ]);
+    const out = parseRemoteList(stdout, 'zion');
+    expect(out[0]._remote).toBe(true);
+  });
+
   it('overrides any machine tag the peer set on its own rows', () => {
     // The peer's discover tags rows with ITS local id; we must relabel to the
     // machine we dialed, else two peers that both call themselves "local" collide.

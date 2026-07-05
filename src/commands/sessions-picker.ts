@@ -13,13 +13,13 @@ import { linkPath, relativeToCwd } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
-import { machineId } from '../lib/session/sync/config.js';
-
-/** A session whose transcript lives on another machine (folded in over the
+/** A session whose transcript lives on another machine (folded in over the live
  * cross-machine fan-out): its `filePath` is on that peer's disk, so the preview
- * can't parse it locally — it shows metadata + a "resume there" note instead. */
+ * can't parse it locally — it shows metadata + a "resume there" note instead.
+ * Keys off `_remote`, not the machine tag, so locally-readable synced mirrors
+ * still parse their file normally. */
 function remoteMachineOf(session: SessionMeta): string | undefined {
-  return session.machine && session.machine !== machineId() ? session.machine : undefined;
+  return session._remote ? session.machine : undefined;
 }
 
 /**

@@ -22,6 +22,7 @@ import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.j
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import { NO_FANOUT_ENV } from './remote-active.js';
+import { terminalWidth } from './width.js';
 import type { SessionMeta } from './types.js';
 
 /** Per-host SSH budget. Slightly above SSH_OPTS' ConnectTimeout=10 so a
@@ -67,7 +68,9 @@ export function parseRemoteList(stdout: string, machine: string): SessionMeta[] 
   const out: SessionMeta[] = [];
   for (const x of parsed) {
     if (x && typeof x === 'object' && !Array.isArray(x)) {
-      out.push({ ...(x as SessionMeta), machine });
+      // `_remote` marks these as living on the peer's disk (not a local mirror),
+      // so the picker routes read/resume back over SSH instead of the local FS.
+      out.push({ ...(x as SessionMeta), machine, _remote: true });
     }
   }
   return out;
@@ -156,4 +159,57 @@ export async function gatherRemoteList(forwardedArgs: string[], hosts?: string[]
 
   const results = await Promise.all(targets.map((t) => fetchByTarget(t.target, t.machine, t.name, forwardedArgs, t.os)));
   return { sessions: results.flat(), deviceCount: targets.length };
+}
+
+/** Resolve a peer's SSH target (and OS) from the device registry by its
+ * normalized machine id — the same id the fan-out tags rows with. Returns
+ * undefined when no registered device with an address matches. */
+export async function resolvePeerTarget(machine: string): Promise<{ target: string; os?: string } | undefined> {
+  let reg: Record<string, DeviceProfile>;
+  try {
+    reg = await loadDevices();
+  } catch {
+    return undefined;
+  }
+  for (const d of Object.values(reg)) {
+    if (normalizeHost(d.name) !== machine) continue;
+    try {
+      return { target: sshTargetFor(d), os: d.platform };
+    } catch {
+      return undefined; // matched the machine, but it has no address to dial
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Run `agents <args>` ON a peer over SSH, attached to this terminal (inherited
+ * stdio). `args` is the full arg vector after the binary — callers pass e.g.
+ * `['sessions', id, '--markdown']` or `['sessions', 'resume', id]`. Used when a
+ * picked session lives on another machine: its transcript and agent binary are
+ * there, so both reading (no TTY) and resuming (TTY) must execute on the peer —
+ * not via a local `--host` hop, which would discover locally and dead-end for a
+ * session that exists only on the peer. Resolves 'no-target' when the machine
+ * isn't a dialable registered device; the caller surfaces a clear message.
+ */
+export async function runOnPeer(args: string[], machine: string, opts: { tty?: boolean } = {}): Promise<'ok' | 'no-target'> {
+  const peer = await resolvePeerTarget(machine);
+  if (!peer) return 'no-target';
+
+  const cols = terminalWidth();
+  const remoteCmd = remoteShellFor(peer.os) === 'powershell'
+    ? buildWindowsAgentsCommand({ args, env: cols > 0 ? { COLUMNS: String(cols) } : undefined })
+    : `bash -lc ${shellQuote((cols > 0 ? [`COLUMNS=${cols}`] : []).concat(['agents', ...args].map(shellQuote)).join(' '))}`;
+
+  const sshArgs = [...SSH_OPTS, ...controlOpts()];
+  if (opts.tty) sshArgs.push('-tt'); // force a PTY so the resumed agent is interactive
+  sshArgs.push(peer.target, remoteCmd);
+
+  return new Promise((resolve) => {
+    const child = spawn('ssh', sshArgs, { stdio: 'inherit' });
+    // ssh prints its own connection errors to the inherited stderr; either way
+    // we return once it exits so the picker flow completes.
+    child.on('error', () => resolve('ok'));
+    child.on('close', () => resolve('ok'));
+  });
 }
