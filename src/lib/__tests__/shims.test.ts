@@ -156,7 +156,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(11);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(12);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
@@ -471,5 +471,110 @@ describe('ensureShimCurrent — upgrade-only / newest-wins', () => {
     const mod = await import('../shims.js');
     mod.createShim('claude');
     expect(mod.ensureShimCurrent('claude')).toBe('current');
+  });
+});
+
+// Regression (#windows-alias-shadow): a bash alias written next to the
+// versioned `.cmd` hijacks Windows name resolution — the dotted version suffix
+// makes cmd.exe/PowerShell read `claude@2.1.201` as a complete filename with
+// extension `.201`, the exact match wins over PATHEXT probing, and the shell
+// ShellExecutes the bash script to the `.sh` editor association. `agents
+// sessions` resume then "succeeds" (rc=0) while the editor, not Claude, opens.
+describe('versioned alias — platform on-disk artifacts', () => {
+  let home: string;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-alias-artifacts-'));
+    process.env.HOME = home;
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    vi.resetModules();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const onWindows = process.platform === 'win32';
+
+  it('materializes only the platform target', async () => {
+    const mod = await import('../shims.js');
+    const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
+
+    mod.createVersionedAlias('claude', '2.1.201');
+
+    if (onWindows) {
+      expect(fs.existsSync(aliasPath)).toBe(false);
+      const cmd = fs.readFileSync(aliasPath + '.cmd', 'utf8');
+      expect(cmd).toContain(`agents-versioned-alias-version: ${mod.VERSIONED_ALIAS_SCHEMA_VERSION}`);
+    } else {
+      expect(fs.existsSync(aliasPath)).toBe(true);
+      expect(fs.existsSync(aliasPath + '.cmd')).toBe(false);
+      expect(fs.readFileSync(aliasPath, 'utf8')).toContain(
+        `agents-versioned-alias-version: ${mod.VERSIONED_ALIAS_SCHEMA_VERSION}`,
+      );
+    }
+    expect(mod.versionedAliasExists('claude', '2.1.201')).toBe(true);
+  });
+
+  it('deletes a legacy bash alias that would shadow the .cmd on Windows', async () => {
+    const mod = await import('../shims.js');
+    const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
+    fs.mkdirSync(path.dirname(aliasPath), { recursive: true });
+    fs.writeFileSync(aliasPath, '#!/bin/bash\n# agents-versioned-alias-version: 10\nexec true\n', { mode: 0o755 });
+
+    mod.createVersionedAlias('claude', '2.1.201');
+
+    if (onWindows) {
+      expect(fs.existsSync(aliasPath)).toBe(false);
+      expect(fs.existsSync(aliasPath + '.cmd')).toBe(true);
+    } else {
+      // POSIX overwrites the script in place — the bash alias IS the artifact.
+      expect(fs.readFileSync(aliasPath, 'utf8')).toContain(
+        `agents-versioned-alias-version: ${mod.VERSIONED_ALIAS_SCHEMA_VERSION}`,
+      );
+    }
+  });
+
+  it('ensureVersionedAliasCurrent round-trips created -> current', async () => {
+    const mod = await import('../shims.js');
+    expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('created');
+    expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('current');
+  });
+
+  it.runIf(onWindows)('ensureVersionedAliasCurrent clears a shadowing bash alias even when the .cmd is current', async () => {
+    const mod = await import('../shims.js');
+    const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
+    mod.createVersionedAlias('claude', '2.1.201');
+    expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('current');
+
+    // An older agents-cli sharing the shims dir re-created the bash alias.
+    fs.writeFileSync(aliasPath, '#!/bin/bash\nexec true\n', { mode: 0o755 });
+
+    expect(mod.ensureVersionedAliasCurrent('claude', '2.1.201')).toBe('updated');
+    expect(fs.existsSync(aliasPath)).toBe(false);
+    expect(fs.existsSync(aliasPath + '.cmd')).toBe(true);
+  });
+
+  it('removeVersionedAlias removes every companion on disk', async () => {
+    const mod = await import('../shims.js');
+    const aliasPath = mod.getVersionedAliasPath('claude', '2.1.201');
+    mod.createVersionedAlias('claude', '2.1.201');
+    // Legacy leftover from a pre-v12 Windows install alongside the .cmd.
+    if (onWindows) fs.writeFileSync(aliasPath, '#!/bin/bash\nexec true\n', { mode: 0o755 });
+
+    expect(mod.removeVersionedAlias('claude', '2.1.201')).toBe(true);
+    expect(fs.existsSync(aliasPath)).toBe(false);
+    expect(fs.existsSync(aliasPath + '.cmd')).toBe(false);
+    expect(mod.versionedAliasExists('claude', '2.1.201')).toBe(false);
+    expect(mod.removeVersionedAlias('claude', '2.1.201')).toBe(false);
+  });
+
+  it('versionedAliasOnDiskFile picks the runnable filename per platform', async () => {
+    const mod = await import('../shims.js');
+    expect(mod.versionedAliasOnDiskFile('claude', '2.1.201', 'win32')).toBe('claude@2.1.201.cmd');
+    expect(mod.versionedAliasOnDiskFile('claude', '2.1.201', 'linux')).toBe('claude@2.1.201');
+    expect(mod.versionedAliasOnDiskFile('codex', '0.125.0', 'darwin')).toBe('codex@0.125.0');
   });
 });

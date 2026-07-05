@@ -595,11 +595,12 @@ export function buildExecCommand(options: ExecOptions): string[] {
   // on Linux installs where the shims dir isn't on PATH, spawning the bare
   // versioned name fails with ENOENT even though `agents view` shows the agent.
   //
-  // On Windows the shims dir holds a `.cmd` companion next to the bash alias
-  // (see createVersionedAlias); prefer it so spawn() can launch it (the bash
-  // script is not directly executable by cmd.exe). When no shim exists on disk
-  // we fall back to the bare versioned name, which spawnAgent() resolves via
-  // PATH (+ PATHEXT/shell on Windows).
+  // On Windows the alias is materialized as a `.cmd` only (see
+  // createVersionedAlias — a bash alias next to it would shadow the `.cmd` in
+  // cmd.exe/PowerShell name resolution); the extensionless existsSync branch
+  // below still matches a legacy install's bash alias. When no shim exists on
+  // disk we fall back to the bare versioned name, which spawnAgent() resolves
+  // via PATH (+ PATHEXT/shell on Windows).
   if (options.version && cmd.length > 0) {
     const versionedName = `${cmd[0]}@${options.version}`;
     const absPath = path.join(getShimsDir(), versionedName);
