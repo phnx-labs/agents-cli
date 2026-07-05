@@ -331,7 +331,7 @@ export async function ensureRemoteBrowser(
         'BatchMode=yes',
         remoteCmd,
       ],
-      { stdio: ['ignore', 'ignore', 'pipe'] }
+      { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }
     );
 
     let stderr = '';
@@ -410,6 +410,7 @@ function runSSHCommand(user: string, host: string, cmd: string): Promise<void> {
   return new Promise((resolve) => {
     const child = spawn('ssh', [`${user}@${host}`, '-o', 'BatchMode=yes', cmd], {
       stdio: 'ignore',
+      windowsHide: true,
     });
     child.on('close', () => resolve());
     child.on('error', () => resolve());

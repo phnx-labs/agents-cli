@@ -128,6 +128,7 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
     encoding: 'utf-8',
     timeout: opts.timeoutMs,
     stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
   });
   const timedOut = !!(res.error && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT');
   return {
@@ -161,6 +162,7 @@ export function sshExecRaw(target: string, remoteCmd: string, opts: SshExecOptio
     // No `encoding` → spawnSync returns Buffers.
     timeout: opts.timeoutMs,
     stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
   });
   const timedOut = !!(res.error && (res.error as NodeJS.ErrnoException).code === 'ETIMEDOUT');
   return {

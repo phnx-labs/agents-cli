@@ -329,10 +329,10 @@ export function killChrome(pid: number): void {
     // stop first (no /F → posts WM_CLOSE), and only force-kill the tree if that
     // fails or the process is still around.
     try {
-      execFileSync('taskkill', ['/pid', String(pid)], { stdio: 'ignore' });
+      execFileSync('taskkill', ['/pid', String(pid)], { stdio: 'ignore', windowsHide: true });
     } catch {
       try {
-        execFileSync('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+        execFileSync('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
       } catch {
         // Process already dead
       }
@@ -393,6 +393,7 @@ function isPortInUse(port: number): boolean {
       const out = execFileSync('netstat', ['-ano', '-p', 'TCP'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       });
       // Lines look like: "  TCP    0.0.0.0:9200    0.0.0.0:0    LISTENING    1234"
       return out.split('\n').some((line) => {
@@ -441,6 +442,7 @@ export function getPortOccupant(port: number): PortOccupant | null {
       const out = execFileSync('netstat', ['-ano', '-p', 'TCP'], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       });
       let pid = 0;
       for (const line of out.split('\n')) {
@@ -457,6 +459,7 @@ export function getPortOccupant(port: number): PortOccupant | null {
         const tl = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], {
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'ignore'],
+          windowsHide: true,
         });
         const m = tl.match(/^"([^"]+)"/);
         if (m) command = m[1];

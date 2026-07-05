@@ -966,7 +966,7 @@ export class BrowserService {
         '-y',
         outputPath,
       ],
-      { stdio: ['pipe', 'ignore', 'pipe'] }
+      { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true }
     );
     // Wait for the spawn to confirm (or fail) before we wire CDP frames into a
     // dead pipe. ENOENT from a missing ffmpeg surfaces here as a real error

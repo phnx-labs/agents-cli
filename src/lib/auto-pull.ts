@@ -15,6 +15,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import { getFetchCacheDir } from './state.js';
+import { backgroundSpawnOptions } from './platform/process.js';
 
 /** Where lock files and per-repo status markers live. */
 function fetchStateDir(): string {
@@ -52,7 +53,7 @@ export function spawnDetachedSync(): void {
 
   try {
     const child = spawn(process.execPath, [workerPath], {
-      detached: true,
+      ...backgroundSpawnOptions(),
       stdio: 'ignore',
       env: process.env,
     });

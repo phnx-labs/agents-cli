@@ -118,6 +118,7 @@ function runPowerShell(script: string, extraEnv?: Record<string, string>): strin
     encoding: 'utf-8',
     env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
 }
 
@@ -175,6 +176,7 @@ export function getEffectiveExecutionPolicy(): string | null {
     const out = execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', 'Get-ExecutionPolicy'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     }).trim();
     return out || null;
   } catch {

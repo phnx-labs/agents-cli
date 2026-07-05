@@ -313,6 +313,7 @@ function liveProcessCommand(pid: number): string | null {
       const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], {
         encoding: 'utf-8',
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       }).trim();
       // Rows look like: "node.exe","1234","Console","1","12,345 K"
       // A no-match prints an "INFO: No tasks..." line that won't match the regex.

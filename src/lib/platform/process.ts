@@ -17,13 +17,37 @@ export function killTree(pid: number): void {
   if (!pid || pid <= 0) return;
   if (process.platform === 'win32') {
     try {
-      execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore' });
+      execFileSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true });
     } catch { /* already gone, or no such pid */ }
   } else {
     try {
       process.kill(pid, 'SIGKILL');
     } catch { /* already gone */ }
   }
+}
+
+/**
+ * Spawn options for a long-lived background child (daemon, detached worker,
+ * sidecar server, fire-and-forget job).
+ *
+ * POSIX: `detached: true` — the child leads its own process group, so it
+ * survives the parent and group kills (`kill(-pid)`) still reach it.
+ *
+ * Windows: `windowsHide: true` and NOT detached. `detached` maps to
+ * DETACHED_PROCESS, under which CreateProcess ignores CREATE_NO_WINDOW and the
+ * child runs console-less — every console-subsystem descendant (powershell,
+ * git, node, a .cmd shim's cmd.exe wrapper) then allocates its own VISIBLE
+ * console window, flashing on the user's desktop. CREATE_NO_WINDOW alone gives
+ * the child its own hidden console instead: descendants inherit it (no window
+ * anywhere down the tree), and a console-close event from the launcher's
+ * console can never reach the child (#556), which is all `detached` bought us
+ * on Windows.
+ */
+export function backgroundSpawnOptions(
+  platform: NodeJS.Platform = process.platform,
+): { detached: boolean; windowsHide: boolean } {
+  if (platform === 'win32') return { detached: false, windowsHide: true };
+  return { detached: true, windowsHide: false };
 }
 
 /**

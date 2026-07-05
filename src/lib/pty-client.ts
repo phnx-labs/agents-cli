@@ -11,6 +11,7 @@ import { spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import * as path from 'path';
 import { getSocketPath, getPtyPidPath, getPtyLogPath, isPtyServerRunning } from './pty-server.js';
+import { backgroundSpawnOptions } from './platform/process.js';
 
 const CONNECT_TIMEOUT_MS = 5000;
 const RESPONSE_TIMEOUT_MS = 30000;
@@ -51,7 +52,7 @@ async function ensureServer(): Promise<void> {
 
   const child = spawn(bin, args, {
     stdio: ['ignore', logFd, logFd],
-    detached: true,
+    ...backgroundSpawnOptions(),
   });
   child.unref();
   fs.closeSync(logFd);

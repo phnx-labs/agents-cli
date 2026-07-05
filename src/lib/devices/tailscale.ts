@@ -148,7 +148,7 @@ export function nodeToDeviceInput(node: TailscaleNode): DeviceInput {
  * error when the binary is missing or the daemon is not reachable.
  */
 export function tailscaleStatusJson(): string {
-  const res = spawnSync('tailscale', ['status', '--json'], { encoding: 'utf-8' });
+  const res = spawnSync('tailscale', ['status', '--json'], { encoding: 'utf-8', windowsHide: true });
   if (res.error && (res.error as NodeJS.ErrnoException).code === 'ENOENT') {
     throw new Error('tailscale not found on PATH. Install Tailscale, or add devices manually with `agents devices add`.');
   }

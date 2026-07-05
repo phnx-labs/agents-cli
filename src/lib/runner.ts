@@ -26,6 +26,7 @@ import { createTimer, maybeRotate, redactPrompt } from './events.js';
 import { normalizeMode } from './exec.js';
 import type { ExecOptions, ExecEffort } from './exec.js';
 import type { LoopDeps } from './loop.js';
+import { backgroundSpawnOptions } from './platform/process.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -273,7 +274,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   return new Promise<RunResult>((resolve) => {
     const child = spawn(cmd[0], cmd.slice(1), {
       stdio: ['ignore', stdoutFd, stdoutFd],
-      detached: true,
+      ...backgroundSpawnOptions(),
       env: spawnEnv,
     });
 
@@ -379,7 +380,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
 
   const child = spawn(cmd[0], cmd.slice(1), {
     stdio: ['ignore', stdoutFd, stdoutFd],
-    detached: true,
+    ...backgroundSpawnOptions(),
     env: spawnEnv,
   });
 

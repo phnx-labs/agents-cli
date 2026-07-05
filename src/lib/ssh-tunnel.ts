@@ -24,6 +24,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { randomBytes } from 'crypto';
 import { sshExec, SSH_OPTS } from './ssh-exec.js';
+import { backgroundSpawnOptions } from './platform/process.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
 import { getDevice, type DeviceProfile } from './devices/registry.js';
 import { sshTargetFor } from './devices/connect.js';
@@ -86,7 +87,7 @@ export function startSSHTunnel(
 
     const tunnel = spawn('ssh', args, {
       stdio: opts.detached ? 'ignore' : ['ignore', 'ignore', 'pipe'],
-      detached: Boolean(opts.detached),
+      ...(opts.detached ? backgroundSpawnOptions() : { detached: false, windowsHide: true }),
     });
 
     let stderr = '';

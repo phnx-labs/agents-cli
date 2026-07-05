@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getDaemonDir as getDaemonDirRoot } from './state.js';
-import { isAlive, killTree } from './platform/index.js';
+import { isAlive, killTree, backgroundSpawnOptions } from './platform/index.js';
 import { listJobs as listAllJobs } from './routines.js';
 import { JobScheduler } from './scheduler.js';
 import { executeJobDetached, monitorRunningJobs } from './runner.js';
@@ -748,12 +748,12 @@ export function startDetached(opts: StartDetachedOptions = {}): { pid: number | 
   const logFd = fs.openSync(logPath, 'a');
 
   const { command, args } = getDaemonLaunch(agentsBin);
+  // windowsHide (own hidden console, inherited by every console descendant —
+  // no window can flash, and no launcher console-close event can tear the
+  // daemon down, #556) on Windows; detached (own process group) on POSIX.
   const child = spawn(command, args, {
     stdio: ['ignore', logFd, logFd],
-    detached: true,
-    // No console window on Windows — a hidden, consoleless process can't be
-    // torn down by a console-close event when its launcher exits (#556).
-    windowsHide: true,
+    ...backgroundSpawnOptions(),
     env: opts.env ?? buildDetachedDaemonEnv(),
   });
 
