@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { isAlive, killTree, backgroundSpawnOptions } from './process.js';
 
 describe('isAlive', () => {
@@ -44,12 +47,72 @@ describe('backgroundSpawnOptions', () => {
     // CreateProcess ignores CREATE_NO_WINDOW under DETACHED_PROCESS, and a
     // console-less child makes every console descendant flash a visible
     // window — so on Windows the two options must never be combined.
-    expect(backgroundSpawnOptions('win32')).toEqual({ detached: false, windowsHide: true });
+    expect(backgroundSpawnOptions({ platform: 'win32' })).toEqual({ detached: false, windowsHide: true });
+  });
+
+  it('detaches on win32 when stdio is fd-redirected (windowsHide cannot engage)', () => {
+    // libuv skips CREATE_NO_WINDOW when any stdio fd is inherited (log-file
+    // redirection), so a non-detached child would share the launcher's console
+    // and die with it on console-close (#556). It must detach instead.
+    expect(backgroundSpawnOptions({ fdStdio: true, platform: 'win32' })).toEqual({
+      detached: true,
+      windowsHide: true,
+    });
   });
 
   it('detaches into its own process group on POSIX', () => {
-    expect(backgroundSpawnOptions('darwin')).toEqual({ detached: true, windowsHide: false });
-    expect(backgroundSpawnOptions('linux')).toEqual({ detached: true, windowsHide: false });
+    expect(backgroundSpawnOptions({ platform: 'darwin' })).toEqual({ detached: true, windowsHide: false });
+    expect(backgroundSpawnOptions({ fdStdio: true, platform: 'linux' })).toEqual({ detached: true, windowsHide: false });
+  });
+
+  it('an fd-redirected background child survives its launcher console closing (#556 regression)', async () => {
+    // Reproduces the daemon-start death: a launcher owning its own console
+    // (hidden via CREATE_NO_WINDOW) spawns a log-fd-redirected child and exits.
+    // If the child shared the launcher's console (the broken non-detached
+    // variant — windowsHide is inert under fd stdio), the console-close event
+    // kills it. With fdStdio options it must still be alive afterwards.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bg-spawn-'));
+    const logPath = path.join(dir, 'child.log');
+    const pidPath = path.join(dir, 'child.pid');
+    const launcherPath = path.join(dir, 'launcher.cjs');
+    fs.writeFileSync(
+      launcherPath,
+      `const { spawn } = require('child_process');
+const fs = require('fs');
+const opts = JSON.parse(process.argv[2]);
+const fd = fs.openSync(${JSON.stringify(logPath)}, 'a');
+const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+  stdio: ['ignore', fd, fd],
+  ...opts,
+});
+child.unref();
+fs.writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));
+`,
+    );
+
+    const launcher = spawn(
+      process.execPath,
+      [launcherPath, JSON.stringify(backgroundSpawnOptions({ fdStdio: true }))],
+      // 'ignore' stdio so windowsHide engages: the launcher owns a console of
+      // its own that closes when it exits — the daemon-start scenario.
+      { stdio: 'ignore', ...backgroundSpawnOptions() },
+    );
+    const launcherExited = new Promise((r) => launcher.on('exit', r));
+
+    let childPid = 0;
+    for (let i = 0; i < 100 && !childPid; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      try { childPid = parseInt(fs.readFileSync(pidPath, 'utf-8'), 10); } catch { /* not yet */ }
+    }
+    expect(childPid).toBeGreaterThan(0);
+    await launcherExited;
+
+    // Give a console-close event time to be delivered and act.
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(isAlive(childPid)).toBe(true);
+
+    killTree(childPid);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   it('a child spawned with the current-platform options outlives its parent and stays killable', async () => {

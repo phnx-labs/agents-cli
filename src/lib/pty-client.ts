@@ -52,7 +52,7 @@ async function ensureServer(): Promise<void> {
 
   const child = spawn(bin, args, {
     stdio: ['ignore', logFd, logFd],
-    ...backgroundSpawnOptions(),
+    ...backgroundSpawnOptions({ fdStdio: true }),
   });
   child.unref();
   fs.closeSync(logFd);

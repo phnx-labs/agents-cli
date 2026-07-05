@@ -748,12 +748,13 @@ export function startDetached(opts: StartDetachedOptions = {}): { pid: number | 
   const logFd = fs.openSync(logPath, 'a');
 
   const { command, args } = getDaemonLaunch(agentsBin);
-  // windowsHide (own hidden console, inherited by every console descendant —
-  // no window can flash, and no launcher console-close event can tear the
-  // daemon down, #556) on Windows; detached (own process group) on POSIX.
+  // fdStdio: the log-file fds make windowsHide inert (libuv skips
+  // CREATE_NO_WINDOW when a stdio fd is inherited), so on Windows the daemon
+  // must DETACH to own no console — otherwise it shares the launcher's console
+  // and a console-close event tears it down when the launcher exits (#556).
   const child = spawn(command, args, {
     stdio: ['ignore', logFd, logFd],
-    ...backgroundSpawnOptions(),
+    ...backgroundSpawnOptions({ fdStdio: true }),
     env: opts.env ?? buildDetachedDaemonEnv(),
   });
 
