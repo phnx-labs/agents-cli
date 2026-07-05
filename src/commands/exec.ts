@@ -163,6 +163,116 @@ export function loopExitCode(stoppedBy: import('../lib/loop.js').LoopStoppedBy):
   }
 }
 
+/**
+ * Drive a workflow's declarative `for_each:` fan-out end-to-end (issue #343).
+ *
+ * Runs the producer, expands one stage teammate per produced item (respecting
+ * `max_items` / `DEFAULT_FOR_EACH_CAP`, surfacing any truncation — never a
+ * silent cap), stages them into a fresh team via the existing `runForEach`
+ * bridge, then drives the teams supervisor until the DAG drains. When a verify
+ * panel is declared, tallies each item's `keep_if` gate from the skeptics'
+ * terminal status and logs which items survived.
+ *
+ * Reuses the teams substrate wholesale — no new orchestration engine. Returns
+ * the process exit code (0 on drain, 1 on producer failure / non-drain).
+ */
+export async function runWorkflowForEach(
+  spec: import('../lib/workflows.js').ForEachSpec,
+  opts: { workflowName: string; cwd: string; effort?: ExecEffort },
+): Promise<number> {
+  const [{ produceItems, runForEach, tallyForEach }, { expandForEach, DEFAULT_FOR_EACH_CAP }, { AgentManager }, { createTeam }, { runSupervisor }, { ALL_AGENT_IDS }] = await Promise.all([
+    import('../lib/teams/forEach.js'),
+    import('../lib/workflows.js'),
+    import('../lib/teams/agents.js'),
+    import('../lib/teams/registry.js'),
+    import('../lib/teams/supervisor.js'),
+    import('../lib/agents.js'),
+  ]);
+
+  // The teams substrate spawns teammates as a real harness. When `agent:` names
+  // a known harness id, honor it; otherwise fall back to claude (the workflow
+  // harness) so a subagent-style name in `agent:` still runs.
+  const isHarness = (a: string): boolean => (ALL_AGENT_IDS as readonly string[]).includes(a);
+  const runSpec: import('../lib/workflows.js').ForEachSpec = {
+    ...spec,
+    agent: isHarness(spec.agent) ? spec.agent : 'claude',
+    ...(spec.verify
+      ? { verify: { ...spec.verify, agent: isHarness(spec.verify.agent) ? spec.verify.agent : 'claude' } }
+      : {}),
+  };
+  if (runSpec.agent !== spec.agent) {
+    process.stderr.write(chalk.gray(`[for_each] '${spec.agent}' is not a harness id — staging stage teammates as claude\n`));
+  }
+
+  // 1. Producer: run the shell command (or resolve itemsRef) into the item list.
+  let items: string[];
+  try {
+    items = await produceItems(runSpec, { cwd: opts.cwd });
+  } catch (err) {
+    console.error(chalk.red(`[for_each] producer failed: ${(err as Error).message}`));
+    return 1;
+  }
+  if (items.length === 0) {
+    process.stderr.write(chalk.yellow('[for_each] producer emitted no items — nothing to fan out.\n'));
+    return 0;
+  }
+
+  // 2. Cap accounting (surfaced, never silent — acceptance criterion in #343).
+  const cap = runSpec.max_items ?? DEFAULT_FOR_EACH_CAP;
+  const { truncated } = expandForEach(runSpec, items);
+  if (truncated > 0) {
+    process.stderr.write(chalk.yellow(
+      `[for_each] producer emitted ${items.length} items; capping at ${cap} (${truncated} dropped). Raise \`max_items\` to fan out more.\n`,
+    ));
+  }
+  process.stderr.write(chalk.gray(`[for_each] ${Math.min(items.length, cap)} stage teammate(s) from ${items.length} produced item(s)\n`));
+
+  // 3. Stage the expanded teammates into a fresh team via the existing bridge.
+  const team = `foreach-${opts.workflowName.replace(/[^a-zA-Z0-9_-]/g, '-')}-${Date.now().toString(36)}`;
+  await createTeam(team, { description: `for_each fan-out from workflow '${opts.workflowName}'` });
+  const mgr = new AgentManager();
+  const { teammates } = await runForEach(mgr, team, runSpec, items, {
+    cwd: opts.cwd,
+    effort: opts.effort,
+    concurrency: runSpec.concurrency,
+  });
+
+  // 4. Drive the supervisor until the DAG drains (the same loop `teams start
+  // --watch` uses; it absorbs the staged teammates via rescanFromDisk).
+  const result = await runSupervisor(mgr, {
+    team,
+    onWave: (s) => {
+      const ts = s.timestamp.slice(11, 19);
+      process.stderr.write(
+        `[${ts}] [for_each] wave ${s.wave}  launched=${s.launched.length}  running=${s.running}  pending=${s.pending}  done=${s.completed}  failed=${s.failed}\n`,
+      );
+    },
+  });
+
+  // 5. keep_if tally: a skeptic that COMPLETED is a keep vote; a failed skeptic
+  // votes to drop. Gate each item and report which survived.
+  if (runSpec.verify) {
+    const loaded = await mgr.listByTask(team);
+    const statusByName = new Map(loaded.map((a) => [a.name, a.status]));
+    const verdicts = tallyForEach(teammates, (v) => statusByName.get(v.name) === 'completed');
+    const kept = verdicts.filter((v) => v.kept);
+    process.stderr.write(chalk.gray(
+      `[for_each] keep_if=${runSpec.verify.keep_if}: kept ${kept.length}/${verdicts.length} item(s)\n`,
+    ));
+    for (const v of verdicts) {
+      const tag = v.kept ? chalk.green('keep') : chalk.red('drop');
+      process.stderr.write(chalk.gray(`  [${tag}] ${v.item} (${v.votes.filter(Boolean).length}/${v.votes.length} votes)\n`));
+    }
+  }
+
+  if (result.stoppedBy === 'drained') {
+    process.stderr.write(chalk.green(`[for_each] drained in ${Math.floor(result.elapsed_ms / 1000)}s (${result.waves} waves). Team: ${team}\n`));
+    return 0;
+  }
+  process.stderr.write(chalk.yellow(`[for_each] stopped by ${result.stoppedBy} after ${result.waves} waves. Team: ${team}\n`));
+  return 1;
+}
+
 /** Register the `agents run <agent> [prompt]` command. */
 export function registerRunCommand(program: Command): void {
   const runCmd = program
@@ -586,6 +696,11 @@ export function registerRunCommand(program: Command): void {
       // WORKFLOW.md `loop:` block (issue #332). When a workflow declares it,
       // `agents run <workflow>` honors the loop without a --loop flag.
       let workflowLoop: import('../lib/workflows.js').LoopConfigRaw | undefined;
+      // WORKFLOW.md `for_each:` block (issue #343). When a workflow declares it,
+      // `agents run <workflow>` runs the producer, expands one stage teammate per
+      // produced item, and drives the teams supervisor to drain — no `teams`
+      // subcommands needed.
+      let workflowForEach: import('../lib/workflows.js').ForEachSpec | undefined;
       const cwd = options.cwd ?? process.cwd();
 
       if (isValidAgent(rawAgent)) {
@@ -620,6 +735,7 @@ export function registerRunCommand(program: Command): void {
           workflowModel = workflowFrontmatter.model.trim();
         }
         workflowLoop = workflowFrontmatter?.loop;
+        workflowForEach = workflowFrontmatter?.forEach;
 
         const resolvedVersion = resolveVersionAlias('claude', version);
         const versionHome = getVersionHomePath('claude', resolvedVersion ?? getGlobalDefault('claude') ?? '');
@@ -1327,6 +1443,23 @@ export function registerRunCommand(program: Command): void {
           }
         }
       };
+
+      // for_each dispatch (issue #343). A workflow that declares `for_each:` is a
+      // declarative dynamic fan-out, not a single-agent run: execute the producer,
+      // expand one stage teammate per produced item (+ optional verify panel),
+      // stage them into a team, then drive the supervisor until the DAG drains.
+      // This is mutually exclusive with the single-agent loop/fallback paths — the
+      // fan-out IS the run.
+      if (workflowForEach) {
+        cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
+        const exitCode = await runWorkflowForEach(workflowForEach, {
+          workflowName: rawAgent,
+          cwd,
+          effort: options.effort,
+        });
+        process.exit(exitCode);
+      }
 
       // Loop dispatch (issue #332). Active when --loop is passed OR a workflow
       // declares a `loop:` block. The loop path runs AFTER the #346 pre-flight

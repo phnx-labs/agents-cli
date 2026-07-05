@@ -31,6 +31,12 @@ import {
   type ForEachSpec,
   type ForEachTeammate,
 } from '../../workflows.js';
+import {
+  parseProducedItems,
+  produceItems,
+  evaluateKeepIf,
+  tallyForEach,
+} from '../forEach.js';
 
 describe('parseForEachBlock — defensive coercion (issue #343)', () => {
   it('parses a well-formed for_each block with a verify panel', () => {
@@ -171,6 +177,145 @@ describe('expandForEach — one stage per produced item + verify (issue #343)', 
     expect(capped.usedCount).toBe(4);
     expect(capped.producedCount).toBe(DEFAULT_FOR_EACH_CAP + 25);
     expect(capped.truncated).toBe(DEFAULT_FOR_EACH_CAP + 21);
+  });
+});
+
+describe('parseProducedItems — JSON array OR newline-delimited (issue #343)', () => {
+  it('parses a JSON array of strings', () => {
+    expect(parseProducedItems('["a","b","c"]')).toEqual(['a', 'b', 'c']);
+  });
+  it('parses newline-delimited output, trimming and dropping blanks', () => {
+    expect(parseProducedItems('a\nb\n\n  c  \n')).toEqual(['a', 'b', 'c']);
+  });
+  it('coerces non-string JSON array elements to trimmed strings', () => {
+    expect(parseProducedItems('[1, 2, "x", null, "  y  "]')).toEqual(['1', '2', 'x', 'y']);
+  });
+  it('returns [] for empty output or an empty JSON array', () => {
+    expect(parseProducedItems('')).toEqual([]);
+    expect(parseProducedItems('   \n  ')).toEqual([]);
+    expect(parseProducedItems('[]')).toEqual([]);
+  });
+  it('falls back to a single line when a JSON-looking line does not parse', () => {
+    expect(parseProducedItems('[not json')).toEqual(['[not json']);
+  });
+});
+
+describe('produceItems — real producer command executes and parses (issue #343)', () => {
+  it('runs a JSON-array producer and expands to one stage teammate per item', async () => {
+    const spec: ForEachSpec = {
+      produce: `printf '["a","b","c"]'`,
+      agent: 'claude',
+      prompt: 'do {{item}}',
+    };
+    const items = await produceItems(spec);
+    expect(items).toEqual(['a', 'b', 'c']);
+
+    const { teammates } = expandForEach(spec, items);
+    const stages = teammates.filter((t) => t.role === 'stage');
+    expect(stages).toHaveLength(3);
+    expect(stages.map((t) => t.item)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('runs a newline-delimited producer and expands to one stage teammate per item', async () => {
+    const spec: ForEachSpec = {
+      produce: `printf 'a\\nb\\nc\\n'`,
+      agent: 'claude',
+      prompt: 'do {{item}}',
+    };
+    const items = await produceItems(spec);
+    expect(items).toEqual(['a', 'b', 'c']);
+
+    const { teammates } = expandForEach(spec, items);
+    expect(teammates.filter((t) => t.role === 'stage')).toHaveLength(3);
+  });
+
+  it('resolves an itemsRef via the supplied resolver, skipping the producer', async () => {
+    const spec: ForEachSpec = {
+      itemsRef: '${endpoints}',
+      produce: `printf 'SHOULD-NOT-RUN'`,
+      agent: 'claude',
+      prompt: 'do {{item}}',
+    };
+    const items = await produceItems(spec, {
+      resolveItemsRef: (ref) => (ref === '${endpoints}' ? ['x', 'y'] : undefined),
+    });
+    expect(items).toEqual(['x', 'y']);
+  });
+
+  it('throws when neither a producer nor a resolvable itemsRef is available', async () => {
+    await expect(produceItems({ itemsRef: '${missing}', agent: 'a', prompt: 'p' }, {}))
+      .rejects.toThrow(/could not be resolved/);
+  });
+
+  it('applies max_items truncation to a real producer list and surfaces the drop count', async () => {
+    // Producer emits 5 items; max_items caps the fan-out at 2.
+    const spec: ForEachSpec = {
+      produce: `printf '["a","b","c","d","e"]'`,
+      agent: 'claude',
+      prompt: 'do {{item}}',
+      max_items: 2,
+    };
+    const items = await produceItems(spec);
+    expect(items).toHaveLength(5);
+
+    const { teammates, producedCount, usedCount, truncated } = expandForEach(spec, items);
+    expect(producedCount).toBe(5);
+    expect(usedCount).toBe(2);
+    expect(truncated).toBe(3); // surfaced so the CLI can log "3 dropped"
+    expect(teammates.filter((t) => t.role === 'stage')).toHaveLength(2);
+    expect(teammates.filter((t) => t.role === 'stage').map((t) => t.item)).toEqual(['a', 'b']);
+  });
+});
+
+describe('evaluateKeepIf — vote tally gate (issue #343)', () => {
+  it('all: every vote must be keep', () => {
+    expect(evaluateKeepIf([true, true, true], 'all')).toBe(true);
+    expect(evaluateKeepIf([true, false, true], 'all')).toBe(false);
+  });
+  it('any: at least one keep vote', () => {
+    expect(evaluateKeepIf([false, false, true], 'any')).toBe(true);
+    expect(evaluateKeepIf([false, false, false], 'any')).toBe(false);
+  });
+  it('majority: strictly more than half (a tie does not pass)', () => {
+    expect(evaluateKeepIf([true, true, false], 'majority')).toBe(true); // 2/3
+    expect(evaluateKeepIf([true, false, false], 'majority')).toBe(false); // 1/3
+    expect(evaluateKeepIf([true, false], 'majority')).toBe(false); // 1/2 tie
+    expect(evaluateKeepIf([true, true], 'majority')).toBe(true); // 2/2
+  });
+  it('an empty panel drops the item (nothing affirms it)', () => {
+    expect(evaluateKeepIf([], 'any')).toBe(false);
+    expect(evaluateKeepIf([], 'all')).toBe(false);
+    expect(evaluateKeepIf([], 'majority')).toBe(false);
+  });
+});
+
+describe('tallyForEach — per-item gate over expanded teammates (issue #343)', () => {
+  const spec: ForEachSpec = {
+    agent: 'claude',
+    name: 'audit',
+    prompt: 'audit {{item}}',
+    verify: { agent: 'skeptic', votes: 3, keep_if: 'majority' },
+  };
+
+  it('keeps the item whose panel reaches the keep_if gate, drops the other', () => {
+    const items = ['keepme', 'dropme'];
+    const { teammates } = expandForEach(spec, items);
+    // keepme's skeptics all vote keep; dropme's none do.
+    const verdicts = tallyForEach(teammates, (v) => v.item === 'keepme');
+    const byItem = new Map(verdicts.map((v) => [v.item, v]));
+    expect(byItem.get('keepme')!.kept).toBe(true);
+    expect(byItem.get('keepme')!.votes).toEqual([true, true, true]);
+    expect(byItem.get('dropme')!.kept).toBe(false);
+    expect(byItem.get('dropme')!.votes).toEqual([false, false, false]);
+  });
+
+  it('keeps an item unconditionally when it has no verify panel', () => {
+    const bare: ForEachSpec = { agent: 'claude', prompt: 'do {{item}}' };
+    const { teammates } = expandForEach(bare, ['a']);
+    const verdicts = tallyForEach(teammates, () => false);
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0].kept).toBe(true);
+    expect(verdicts[0].votes).toEqual([]);
   });
 });
 
