@@ -864,6 +864,21 @@ export function parseHookManifest(opts: { warn?: boolean } = {}): Record<string,
     } catch { /* skip unreadable manifest */ }
   }
 
+  // Extra-repo layer: hooks: section of each enabled extra repo's agents.yaml.
+  // Sits above system but below user, mirroring resolveHookScriptPath's
+  // first-found order (user > extra > system). Without this layer the script
+  // path of an extra-repo hook resolves but its events never register (#602).
+  // Earlier extras win over later ones, so iterate in reverse: the last write
+  // for a given name comes from the earliest-registered repo.
+  for (const { dir } of [...getEnabledExtraRepos()].reverse()) {
+    const extraMetaPath = path.join(dir, 'agents.yaml');
+    if (!fs.existsSync(extraMetaPath)) continue;
+    try {
+      const meta = yaml.parse(fs.readFileSync(extraMetaPath, 'utf-8')) as { hooks?: Record<string, ManifestHook> } | null;
+      if (meta?.hooks) for (const [name, def] of Object.entries(meta.hooks)) merged[name] = def;
+    } catch { /* skip unreadable extra-repo manifest */ }
+  }
+
   // User layer: hooks: section of agents.yaml.
   const userMetaPath = path.join(getUserAgentsDir(), 'agents.yaml');
   if (fs.existsSync(userMetaPath)) {
