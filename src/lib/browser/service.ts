@@ -34,7 +34,7 @@ import {
   type BrowserProfile,
   type HistoricalTask,
 } from './types.js';
-import { getRefs, resolveRefToCoords, type RefOpts, type RefNode } from './refs.js';
+import { getRefs, resolveRefToCoords, describeRefs, healRef, type RefOpts, type RefNode } from './refs.js';
 import { clickAtCoords, hoverAtCoords, scrollAtCoords, typeText, pressKey, focusNode } from './input.js';
 import { typeEditorText } from './editor.js';
 import {
@@ -289,6 +289,14 @@ type TargetInfo = {
   url?: string;
   title?: string;
 };
+
+/** Describes a ref that was re-resolved from a drifted integer via its cached descriptor. */
+export interface HealInfo {
+  from: number;
+  to: number;
+  role: string;
+  name: string;
+}
 
 export class BrowserService {
   private static readonly SOURCE_PREFIX: Record<string, string> = {
@@ -1131,8 +1139,6 @@ export class BrowserService {
     return { recording: true, path: rec.outputPath, elapsedMs: Date.now() - rec.startedAt };
   }
 
-  private refsCache = new Map<string, { refs: string; nodeMap: Map<number, RefNode>; ts: number }>();
-
   async refs(
     taskId: string,
     tabHint?: string,
@@ -1146,10 +1152,21 @@ export class BrowserService {
     if (!target) throw new Error(`Tab ${shortId} not found`);
 
     const sessionId = await this.getSessionId(conn, target.targetId);
-    return getRefs(conn.cdp, sessionId, opts);
+    const result = await getRefs(conn.cdp, sessionId, opts);
+    // Snapshot the stable descriptors so a later click can self-heal a drifted
+    // ref. Persist to tasks.json — the cache must survive a daemon restart.
+    this.cacheRefDescriptors(task, shortId, result.nodeMap);
+    await this.saveTaskState(task.profile, conn.tasks);
+    return result;
   }
 
-  async click(taskId: string, ref: number, tabHint?: string): Promise<void> {
+  /** Record the last ref descriptors for a tab into persisted task state. */
+  private cacheRefDescriptors(task: Task, shortId: string, nodeMap: Map<number, RefNode>): void {
+    if (!task.refDescriptors) task.refDescriptors = {};
+    task.refDescriptors[shortId] = describeRefs(nodeMap);
+  }
+
+  async click(taskId: string, ref: number, tabHint?: string): Promise<{ healed?: HealInfo }> {
     const { conn, task } = await this.findTask(taskId);
     const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
     const cdpTargetId = this.getCdpTargetId(task, shortId);
@@ -1158,7 +1175,68 @@ export class BrowserService {
 
     const sessionId = await this.getSessionId(conn, target.targetId);
     const { nodeMap } = await getRefs(conn.cdp, sessionId, { interactive: false, limit: 1000 });
-    const { x, y } = await resolveRefToCoords(conn.cdp, sessionId, nodeMap, ref);
+
+    // Self-healing: the integer ref is positional and drifts on re-render (or
+    // simply because `refs` numbers interactive-only nodes while this rebuild
+    // counts all of them). If we have a cached descriptor for this ref and the
+    // fresh node at that position no longer matches it, re-resolve by (role,
+    // name) BEFORE clicking the wrong element.
+    const cached = task.refDescriptors?.[shortId]?.find((d) => d.ref === ref);
+    let targetRef = ref;
+    let healed: HealInfo | undefined;
+
+    if (cached) {
+      const fresh = nodeMap.get(ref);
+      const stillMatches =
+        fresh !== undefined &&
+        fresh.role === cached.role &&
+        fresh.name === cached.name &&
+        fresh.backendNodeId !== undefined;
+      if (!stillMatches) {
+        const newRef = healRef(cached, nodeMap);
+        if (newRef === null) {
+          throw new Error(
+            `Ref ${ref} (${cached.role} "${cached.name}") could not be re-resolved: ` +
+              `no matching element on the current page. Re-run 'browser refs', or ` +
+              `click by position with 'browser click --at X,Y'.`
+          );
+        }
+        if (newRef !== ref) {
+          healed = { from: ref, to: newRef, role: cached.role, name: cached.name };
+          targetRef = newRef;
+          console.error(
+            `[browser] self-healed ref ${ref} -> ${newRef} (${cached.role} "${cached.name}") — ` +
+              `cached descriptor re-matched after the ref drifted`
+          );
+        }
+      }
+    }
+
+    const { x, y } = await resolveRefToCoords(conn.cdp, sessionId, nodeMap, targetRef);
+    await clickAtCoords(conn.cdp, sessionId, x, y);
+
+    // Refresh the cache from this rebuild so the next click heals against a
+    // like-for-like snapshot.
+    this.cacheRefDescriptors(task, shortId, nodeMap);
+    await this.saveTaskState(task.profile, conn.tasks);
+
+    return healed ? { healed } : {};
+  }
+
+  /**
+   * Click raw viewport coordinates, bypassing ref resolution entirely. Backs
+   * `browser click --at X,Y` — the escape hatch when the accessibility tree
+   * exposes no usable ref (canvas apps, custom-drawn UI) and the caller has
+   * located the target from a screenshot.
+   */
+  async clickAt(taskId: string, x: number, y: number, tabHint?: string): Promise<void> {
+    const { conn, task } = await this.findTask(taskId);
+    const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
+    const cdpTargetId = this.getCdpTargetId(task, shortId);
+    const target = await this.getTarget(conn, cdpTargetId);
+    if (!target) throw new Error(`Tab ${shortId} not found`);
+
+    const sessionId = await this.getSessionId(conn, target.targetId);
     await clickAtCoords(conn.cdp, sessionId, x, y);
   }
 

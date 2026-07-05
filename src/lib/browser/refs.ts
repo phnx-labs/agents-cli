@@ -24,6 +24,64 @@ export interface RefNode {
   editor?: string;
 }
 
+/**
+ * Stable, navigation-surviving identity for a ref. Unlike {@link RefNode}, this
+ * carries no `backendNodeId` (which goes stale the moment the DOM re-renders) —
+ * only the accessible descriptor a fresh `getRefs` can be re-matched against.
+ * Cached in per-task state so a later `click <ref>` can self-heal when the
+ * integer ref has drifted (see {@link healRef}).
+ */
+export interface RefDescriptor {
+  ref: number;
+  role: string;
+  name: string;
+  attrs: string[];
+  /**
+   * Best-effort CSS selector captured via DOM. Reserved for future
+   * selector-based healing; matching today is role+name only.
+   */
+  selector?: string;
+}
+
+/** Snapshot the stable descriptor for every ref in a freshly-built node map. */
+export function describeRefs(nodeMap: Map<number, RefNode>): RefDescriptor[] {
+  return Array.from(nodeMap.values()).map((n) => ({
+    ref: n.ref,
+    role: n.role,
+    name: n.name,
+    attrs: n.attrs.slice(),
+  }));
+}
+
+/**
+ * Re-resolve a stale ref against a freshly-built node map by matching the
+ * cached (role, name) descriptor. Pure — no CDP, no DOM.
+ *
+ * The integer ref assigned by {@link getRefs} is positional: it shifts whenever
+ * the accessibility tree changes (navigation, re-render, or even a different
+ * `interactive` filter). The descriptor's (role, name) pair is the stable
+ * identity, so we scan the fresh map for the node that still carries it.
+ *
+ * Returns the new integer ref, or `null` when no node with the same role+name
+ * exists in the fresh map (unhealable — the element is genuinely gone).
+ */
+export function healRef(
+  descriptor: Pick<RefDescriptor, 'role' | 'name'>,
+  freshNodeMap: Map<number, RefNode>
+): number | null {
+  const { role, name } = descriptor;
+  // Prefer a match that still has a DOM backing (resolvable to coordinates);
+  // fall back to a role+name match without one so we never fail a heal that a
+  // strict variant would have found.
+  let fallback: number | null = null;
+  for (const node of freshNodeMap.values()) {
+    if (node.role !== role || node.name !== name) continue;
+    if (node.backendNodeId !== undefined) return node.ref;
+    if (fallback === null) fallback = node.ref;
+  }
+  return fallback;
+}
+
 const EDITOR_DETECT_FN = `(function() {
   let el = this;
   for (let i = 0; i < 5; i++) {

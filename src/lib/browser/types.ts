@@ -73,6 +73,12 @@ export interface Task {
   currentTabId?: string; // shortId of current tab
   createdAt: number;
   pid: number;
+  /**
+   * Per-tab snapshot of the last ref descriptors captured for that tab
+   * (shortId -> descriptors). Persisted to tasks.json so a later `click <ref>`
+   * can self-heal a drifted ref by matching (role,name). See RefDescriptor.
+   */
+  refDescriptors?: Record<string, import('./refs.js').RefDescriptor[]>;
 }
 
 export interface TabInfo {
@@ -158,6 +164,9 @@ export interface IPCRequest {
   expr?: string;
   path?: string;
   ref?: number;
+  // Coordinate click (`browser click --at X,Y`): bypasses ref resolution.
+  atX?: number;
+  atY?: number;
   text?: string;
   key?: string;
   scrollX?: number;
@@ -237,6 +246,8 @@ export interface IPCResponse {
   height?: number;
   refs?: string;
   nodes?: RefNodeJson[];
+  /** Human-readable note surfaced to the CLI (e.g. a self-heal notice on click). */
+  message?: string;
   port?: number;
   pid?: number;
   // Recording
