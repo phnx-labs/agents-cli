@@ -45,6 +45,21 @@ import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 
+/**
+ * Human label for what fires a job: its cron schedule, or its event trigger
+ * for schedule-less (trigger-only) routines.
+ */
+function fireConditionLabel(job: JobConfig): string {
+  if (job.schedule) return humanizeCron(job.schedule, job.timezone);
+  if (job.trigger) {
+    const scope = job.trigger.repo
+      ? ` (${job.trigger.repo}${job.trigger.branch ? `@${job.trigger.branch}` : ''})`
+      : '';
+    return `on ${job.trigger.event}${scope}`;
+  }
+  return '-';
+}
+
 /** Start or reload the background scheduler so newly-added jobs fire on time. */
 function ensureSchedulerRunning(): void {
   if (isDaemonRunning()) {
@@ -108,7 +123,7 @@ async function pickJob(
       message,
       choices: jobs.map((job) => ({
         value: job.name,
-        name: `${job.name} ${chalk.gray(`(${job.workflow ? `wf:${job.workflow}` : job.agent}, ${job.schedule})`)}`,
+        name: `${job.name} ${chalk.gray(`(${job.workflow ? `wf:${job.workflow}` : job.agent}, ${job.schedule ?? fireConditionLabel(job)})`)}`,
       })),
     });
   } catch (err) {
@@ -197,8 +212,9 @@ export function registerRoutinesCommands(program: Command): void {
             agent: job.agent ?? null,
             workflow: job.workflow ?? null,
             repo: job.repo ?? null,
-            schedule: job.schedule,
-            scheduleHuman: humanizeCron(job.schedule, job.timezone),
+            schedule: job.schedule ?? null,
+            scheduleHuman: fireConditionLabel(job),
+            trigger: job.trigger ?? null,
             timezone: job.timezone ?? null,
             enabled: job.enabled,
             overdue: overdueSet.has(job.name),
@@ -239,7 +255,7 @@ export function registerRoutinesCommands(program: Command): void {
       for (const job of jobs) {
         const nextRun = scheduler.getNextRun(job.name);
         const nextStr = humanizeNextRun(nextRun ?? null, now, job.timezone);
-        let schedStr = humanizeCron(job.schedule, job.timezone);
+        let schedStr = fireConditionLabel(job);
         if (job.endAt) {
           const end = new Date(job.endAt);
           const endLabel = Number.isFinite(end.getTime())

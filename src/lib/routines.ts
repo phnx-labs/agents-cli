@@ -24,10 +24,66 @@ export interface JobAllowConfig {
   dirs?: string[];
 }
 
-/** Full configuration for a scheduled routine (persisted as YAML). */
+/** GitHub webhook events a routine can be triggered by. */
+export type GithubTriggerEvent = 'pull_request' | 'push' | 'issue_comment' | 'workflow_run';
+
+/** Canonical set of accepted GitHub trigger events — single source for validation. */
+export const GITHUB_TRIGGER_EVENTS: readonly GithubTriggerEvent[] = [
+  'pull_request',
+  'push',
+  'issue_comment',
+  'workflow_run',
+];
+
+/**
+ * Map a user-facing `--on` alias to a canonical GitHub trigger event.
+ * Accepts the canonical names plus friendly shortcuts (e.g. `pr`, `pr_opened`
+ * → `pull_request`, `comment` → `issue_comment`). Returns null when unknown.
+ */
+export function normalizeTriggerEvent(input: string): GithubTriggerEvent | null {
+  const key = input.trim().toLowerCase();
+  const aliases: Record<string, GithubTriggerEvent> = {
+    pull_request: 'pull_request',
+    pr: 'pull_request',
+    pr_opened: 'pull_request',
+    pull: 'pull_request',
+    push: 'push',
+    issue_comment: 'issue_comment',
+    comment: 'issue_comment',
+    workflow_run: 'workflow_run',
+    workflow: 'workflow_run',
+  };
+  return aliases[key] ?? null;
+}
+
+/**
+ * Event-based fire condition for a routine — an alternative (or complement) to
+ * `schedule`. Currently only `github_event`: an incoming GitHub webhook whose
+ * event (and optional repo/branch) match fires the job through the same
+ * dispatch path a cron fire uses. See `src/lib/triggers/webhook.ts`.
+ */
+export interface JobTrigger {
+  type: 'github_event';
+  event: GithubTriggerEvent;
+  /** `owner/name` — when set, only payloads for this repo match. */
+  repo?: string;
+  /** git branch (ref short name) — when set, only payloads for this branch match. */
+  branch?: string;
+}
+
+/**
+ * Full configuration for a routine (persisted as YAML).
+ *
+ * A job fires on a `schedule` (cron), on a `trigger` (event/webhook), or both.
+ * `schedule` remains a first-class field; trigger-only jobs omit it and are
+ * skipped by the cron scheduler (they fire only via the webhook receiver).
+ */
 export interface JobConfig {
   name: string;
-  schedule: string;
+  /** Cron expression. Optional when `trigger` is set (event-only routine). */
+  schedule?: string;
+  /** Event/webhook fire condition. Optional when `schedule` is set. */
+  trigger?: JobTrigger;
   agent: AgentId;  // required when workflow is absent
   workflow?: string;
   // 'full' is accepted as a permanent silent alias for 'skip' (see normalizeMode).
@@ -188,15 +244,25 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (!config.name || typeof config.name !== 'string') {
     errors.push('name is required');
   }
-  if (!config.schedule || typeof config.schedule !== 'string') {
-    errors.push('schedule (cron expression) is required');
-  } else {
-    // Validate cron expression is parseable
-    try {
-      new Cron(config.schedule);
-    } catch {
-      errors.push(`invalid cron expression: "${config.schedule}"`);
+  const hasSchedule = Boolean(config.schedule && typeof config.schedule === 'string');
+  const hasTrigger = config.trigger !== undefined;
+  if (!hasSchedule && !hasTrigger) {
+    errors.push('schedule (cron expression) or trigger is required');
+  }
+  if (config.schedule !== undefined) {
+    if (typeof config.schedule !== 'string') {
+      errors.push('schedule must be a cron expression string');
+    } else {
+      // Validate cron expression is parseable
+      try {
+        new Cron(config.schedule);
+      } catch {
+        errors.push(`invalid cron expression: "${config.schedule}"`);
+      }
     }
+  }
+  if (config.trigger !== undefined) {
+    errors.push(...validateTrigger(config.trigger));
   }
   const hasAgent = Boolean(config.agent && typeof config.agent === 'string');
   const hasWorkflow = Boolean(config.workflow && typeof config.workflow === 'string');
@@ -231,6 +297,28 @@ export function validateJob(config: Partial<JobConfig>): string[] {
     }
   }
 
+  return errors;
+}
+
+/** Validate a job trigger block, returning a list of human-readable errors. */
+export function validateTrigger(trigger: unknown): string[] {
+  const errors: string[] = [];
+  if (!trigger || typeof trigger !== 'object') {
+    return ['trigger must be an object'];
+  }
+  const t = trigger as Partial<JobTrigger>;
+  if (t.type !== 'github_event') {
+    errors.push("trigger.type must be 'github_event'");
+  }
+  if (!t.event || !GITHUB_TRIGGER_EVENTS.includes(t.event as GithubTriggerEvent)) {
+    errors.push(`trigger.event must be one of: ${GITHUB_TRIGGER_EVENTS.join(', ')}`);
+  }
+  if (t.repo !== undefined && (typeof t.repo !== 'string' || !/^[^/\s]+\/[^/\s]+$/.test(t.repo))) {
+    errors.push('trigger.repo must be in owner/name form');
+  }
+  if (t.branch !== undefined && typeof t.branch !== 'string') {
+    errors.push('trigger.branch must be a string');
+  }
   return errors;
 }
 

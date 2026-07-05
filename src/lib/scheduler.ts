@@ -28,13 +28,17 @@ export class JobScheduler {
   loadAll(): void {
     const configs = listJobs();
     for (const config of configs) {
-      if (config.enabled) {
+      // Trigger-only jobs (no cron schedule) fire via the webhook receiver,
+      // not the cron loop — skip them here.
+      if (config.enabled && config.schedule) {
         this.schedule(config);
       }
     }
   }
 
   schedule(config: JobConfig): void {
+    // A schedule-less (trigger-only) job has nothing to hand to croner.
+    if (!config.schedule) return;
     this.unschedule(config.name);
 
     // catch: true — a throw from one job's callback should not kill the

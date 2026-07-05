@@ -6,6 +6,8 @@
  * the dispatch pipeline.
  */
 
+import type { JobTrigger } from '../routines.js';
+
 /**
  * Identifier for a supported cloud dispatch backend.
  *
@@ -101,6 +103,14 @@ export const MAX_IMAGES_PER_DISPATCH = 5;
 export interface DispatchOptions {
   prompt: string;
   agent?: string;
+  /**
+   * Event/webhook trigger to register with this dispatch. Set by
+   * `agents cloud run --on <event>`: instead of dispatching immediately, the
+   * dispatch is persisted as a trigger-bound routine so the local webhook
+   * receiver can fire it when the event arrives. Remote firing of the trigger
+   * is a follow-up; today the flag parses, validates, and persists.
+   */
+  trigger?: JobTrigger;
   /**
    * Legacy single-repo target. Still honored: if `repos` is empty, this
    * becomes the only repo. Providers that support multi-repo treat

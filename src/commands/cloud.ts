@@ -15,6 +15,8 @@ import { insertTask, updateTaskStatus, getTaskById, listTasks as listStoredTasks
 import { renderStream } from '../lib/cloud/stream.js';
 import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions, ImageAttachment, SkillRef } from '../lib/cloud/types.js';
 import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
+import type { JobConfig, JobTrigger } from '../lib/routines.js';
+import { normalizeTriggerEvent, validateTrigger, writeJob, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
 
 /** Map a supported image file extension to its wire mimeType. Rejects anything else. */
 function imageMimeFromPath(file: string): ImageAttachment['mimeType'] {
@@ -193,6 +195,11 @@ Examples:
       },
     )
     .option('--branch <name>', 'Target git branch')
+    .option(
+      '--on <event>',
+      'Register this run as an event trigger instead of dispatching now: pull_request (pr), push, issue_comment, workflow_run. Persists a trigger-bound routine.',
+    )
+    .option('--name <name>', 'Routine name to register under (with --on). Defaults to a generated name.')
     .option('-p, --prompt <text>', 'Inline prompt (alternative to positional argument)')
     .option('--timeout <duration>', 'Kill after duration (e.g., 30m, 2h)')
     .option('--model <model>', 'Model override')
@@ -298,6 +305,55 @@ Examples:
         dispatchOptions.providerOptions!.strategy = 'balanced';
       }
       if (options.uploadAccountTokens) dispatchOptions.providerOptions!.uploadAccountTokens = true;
+
+      // --on <event>: register this run as an event trigger instead of
+      // dispatching now. We parse + validate the event, attach it to
+      // dispatchOptions.trigger, and persist a trigger-bound routine so the
+      // local webhook receiver can fire it (src/lib/triggers/webhook.ts).
+      // Remote firing of the trigger is a follow-up.
+      if (options.on) {
+        const event = normalizeTriggerEvent(options.on as string);
+        if (!event) {
+          die(`Unknown --on event "${options.on}". Use one of: ${GITHUB_TRIGGER_EVENTS.join(', ')} (aliases: pr, comment, workflow).`);
+        }
+        const trigger: JobTrigger = { type: 'github_event', event: event! };
+        if (repoValues[0]) trigger.repo = repoValues[0];
+        if (options.branch) trigger.branch = options.branch as string;
+
+        const triggerErrors = validateTrigger(trigger);
+        if (triggerErrors.length > 0) die(`Invalid trigger: ${triggerErrors.join(', ')}`);
+
+        dispatchOptions.trigger = trigger;
+
+        const routineName = (options.name as string | undefined)
+          || `cloud-${event}-${(repoValues[0] || 'any').replace(/[^a-z0-9]+/gi, '-')}`.toLowerCase();
+        if (jobExists(routineName)) {
+          die(`A routine named "${routineName}" already exists. Pass --name to register under a different name.`);
+        }
+
+        const routine: JobConfig = {
+          name: routineName,
+          trigger,
+          agent: (options.agent as string as JobConfig['agent']) || 'claude',
+          mode: 'plan',
+          effort: 'auto',
+          timeout: (options.timeout as string) || '10m',
+          enabled: true,
+          prompt,
+        };
+        if (repoValues[0]) routine.repo = repoValues[0];
+        writeJob(routine);
+
+        if (json) {
+          console.log(JSON.stringify({ ok: true, registered: routineName, trigger }, null, 2));
+        } else {
+          console.log(chalk.green(`Registered trigger routine "${routineName}"`));
+          console.log(`  ${chalk.dim('on:')}    ${event}${trigger.repo ? ` (${trigger.repo}${trigger.branch ? `@${trigger.branch}` : ''})` : ''}`);
+          console.log(`  ${chalk.dim('agent:')} ${routine.agent}`);
+          console.log(chalk.dim(`\nFires when a matching GitHub webhook is delivered to the local receiver. Remote firing is a follow-up.`));
+        }
+        return;
+      }
 
       // Vision attachments + ride-along skills. Only wire them when the resolved
       // provider advertises support — otherwise fail loud rather than silently
