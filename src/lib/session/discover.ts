@@ -28,6 +28,7 @@ import { parseAntigravity } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand } from './state.js';
 import { costOfUsage } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
+import { mapBounded } from '../concurrency.js';
 import {
   getDB,
   getScanStampByPath,
@@ -167,22 +168,11 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
 
   if (tryClaimScan(process.pid)) {
     try {
-      await Promise.all(
-        agents.map(agent => {
-          switch (agent) {
-            case 'claude': return scanClaudeIncremental(onProgress);
-            case 'codex': return scanCodexIncremental(onProgress);
-            case 'gemini': return scanGeminiIncremental(onProgress);
-            case 'antigravity': return scanAntigravityIncremental(onProgress);
-            case 'opencode': return scanOpenCodeIncremental();
-            case 'openclaw': return scanOpenClawIncremental();
-            case 'rush': return scanRushIncremental(onProgress);
-            case 'hermes': return scanHermesIncremental(onProgress);
-            case 'kimi': return scanKimiIncremental(onProgress);
-            case 'droid': return scanDroidIncremental(onProgress);
-          }
-        }),
-      );
+      // Bounded + staggered instead of a single Promise.all: scanning every
+      // agent's dotfile dir (~/.claude, ~/.codex, ~/.gemini, …) simultaneously
+      // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
+      // file-enumeration sweep. Same dirs, same results — just not all at once.
+      await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, onProgress));
     } finally {
       releaseScan(process.pid);
     }
@@ -191,6 +181,45 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
   const sessions = querySessions(buildQueryOptions(options, agents, { includeLimit: true }));
   for (const s of sessions) s.machine = machineForSessionFile(s.filePath, s.agent);
   return sessions;
+}
+
+/**
+ * How many agents' dotfile dirs we scan at once, and the minimum spacing between
+ * successive scan starts. A small bound + stagger turns a simultaneous bulk
+ * multi-dotfile sweep (a behavioral-EDR file-enumeration trigger) into a trickle.
+ */
+export const DOTFILE_SCAN_CONCURRENCY = 2;
+const DOTFILE_SCAN_STAGGER_MS = 15;
+
+/** Run each agent's incremental scan, bounded + staggered. Order is irrelevant (each scan writes its own rows). */
+export function scanAgentsBounded<T>(
+  items: readonly T[],
+  run: (item: T) => Promise<void>,
+): Promise<void[]> {
+  return mapBounded(items, run, {
+    concurrency: DOTFILE_SCAN_CONCURRENCY,
+    staggerMs: DOTFILE_SCAN_STAGGER_MS,
+  });
+}
+
+/** Dispatch a single agent's incremental dotfile scan. */
+function dispatchAgentScan(
+  agent: SessionAgentId,
+  onProgress?: (p: ScanProgress) => void,
+): Promise<void> {
+  switch (agent) {
+    case 'claude': return scanClaudeIncremental(onProgress);
+    case 'codex': return scanCodexIncremental(onProgress);
+    case 'gemini': return scanGeminiIncremental(onProgress);
+    case 'antigravity': return scanAntigravityIncremental(onProgress);
+    case 'opencode': return scanOpenCodeIncremental();
+    case 'openclaw': return scanOpenClawIncremental();
+    case 'rush': return scanRushIncremental(onProgress);
+    case 'hermes': return scanHermesIncremental(onProgress);
+    case 'kimi': return scanKimiIncremental(onProgress);
+    case 'droid': return scanDroidIncremental(onProgress);
+    default: return Promise.resolve();
+  }
 }
 
 let _localMachineId: string | undefined;
@@ -634,9 +663,36 @@ async function readClaudeMeta(
 
 let cachedCodexAccount: string | undefined;
 
-/** Extract the Codex account email from the JWT id_token in auth.json. */
+/** Number of times the auth.json JWT was actually base64-decoded. Test seam for the lazy-decode contract. */
+let codexAccountResolveCount = 0;
+
+/**
+ * Base64url-decode a JWT and return its `email` claim, if present. Split out so
+ * the decode is a single, testable step — and so it only runs when someone
+ * actually reads the Codex account (see the lazy resolution below).
+ */
+export function decodeJwtEmail(idToken: string): string | undefined {
+  const parts = idToken.split('.');
+  if (parts.length < 2) return undefined;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+    return typeof payload.email === 'string' ? payload.email : undefined;
+  } catch {
+    return undefined; // malformed JWT
+  }
+}
+
+/**
+ * Extract the Codex account email from the JWT id_token in auth.json.
+ *
+ * Memoized and resolved LAZILY: the credential-harvesting-shaped JWT decode
+ * (base64-decoding ~/.codex/auth.json) only runs when the account is actually
+ * needed to build a session's metadata — never eagerly during the bulk scan.
+ * A scan with no changed Codex files never touches the auth file.
+ */
 function getCodexAccount(): string | undefined {
   if (cachedCodexAccount !== undefined) return cachedCodexAccount || undefined;
+  codexAccountResolveCount++;
 
   const candidates = [path.join(HOME, '.codex', 'auth.json')];
 
@@ -656,20 +712,28 @@ function getCodexAccount(): string | undefined {
       const data = JSON.parse(fs.readFileSync(candidate, 'utf-8'));
       const idToken = data.tokens?.id_token;
       if (idToken) {
-        const parts = idToken.split('.');
-        if (parts.length >= 2) {
-          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
-          if (payload.email) {
-            cachedCodexAccount = payload.email;
-            return payload.email;
-          }
+        const email = decodeJwtEmail(idToken);
+        if (email) {
+          cachedCodexAccount = email;
+          return email;
         }
       }
-    } catch { /* auth file or JWT malformed */ }
+    } catch { /* auth file malformed */ }
   }
 
   cachedCodexAccount = '';
   return undefined;
+}
+
+/** Test seam: how many times getCodexAccount has actually resolved (decoded) since the last reset. */
+export function __codexAccountResolveCountForTest(): number {
+  return codexAccountResolveCount;
+}
+
+/** Test seam: clear the memoized account + resolve counter so laziness can be observed from a clean slate. */
+export function __resetCodexAccountCacheForTest(): void {
+  cachedCodexAccount = undefined;
+  codexAccountResolveCount = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -678,7 +742,9 @@ function getCodexAccount(): string | undefined {
 
 /** Incrementally re-scan changed Codex session files and upsert into the DB. */
 async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
-  const account = getCodexAccount();
+  // Lazy: getCodexAccount (the auth.json JWT decode) is only resolved by
+  // readCodexMeta when a changed session actually needs it — never eagerly here,
+  // so a no-op scan (changed.length === 0) never touches the credential file.
   const currentVersion = await getCurrentAgentVersion('codex');
 
   const filePaths: string[] = [];
@@ -709,7 +775,7 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
   let parsed = 0;
   for (const { filePath, scan } of changed) {
     try {
-      const result = await readCodexMeta(filePath, account, currentVersion);
+      const result = await readCodexMeta(filePath, getCodexAccount, currentVersion);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
         // Prefer the Codex-generated title over the first-prompt fallback.
@@ -769,10 +835,16 @@ function readCodexThreadNames(): Map<string, string> {
   return titles;
 }
 
-/** Stream-parse a single Codex JSONL file to extract session metadata. */
-async function readCodexMeta(
+/**
+ * Stream-parse a single Codex JSONL file to extract session metadata.
+ *
+ * `resolveAccount` is a lazy thunk (not a resolved string): the JWT decode it
+ * performs is deferred until we know this file is a real session worth building
+ * metadata for, and only then — never during the file walk / stat phase.
+ */
+export async function readCodexMeta(
   filePath: string,
-  account?: string,
+  resolveAccount?: () => string | undefined,
   currentVersion?: string,
 ): Promise<{ meta: SessionMeta; content: string } | null> {
   const scan = await scanCodexSession(filePath);
@@ -797,7 +869,7 @@ async function readCodexMeta(
     tokenCount: scan.tokenCount,
     costUsd: scan.costUsd,
     durationMs: scan.durationMs,
-    account,
+    account: resolveAccount?.(),
     prUrl: scan.prUrl,
     prNumber: scan.prNumber,
     worktreeSlug: scan.worktreeSlug,
