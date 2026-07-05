@@ -41,6 +41,8 @@ npm install -g @phnx-labs/agents-cli
 bun install -g @phnx-labs/agents-cli
 ```
 
+Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt).
+
 Source: [github.com/phnx-labs/agents-cli](https://github.com/phnx-labs/agents-cli)
 
 Also available as `ag` -- all commands work with both `agents` and `ag`.
@@ -774,6 +776,8 @@ The installer tries Bun first (faster), falls back to npm. Node 22.5+ required a
 Yes -- `agents run` is non-interactive by default. `--yes` auto-accepts prompts, `--json` for structured output. Pass explicit names and IDs instead of relying on interactive pickers.
 
 The auto-update prompt is suppressed automatically when stdin or stdout isn't a TTY. For headless environments where TTY detection misfires (k8s pods that allocate a PTY for stdout, cloud sandbox factories), set `AGENTS_CLI_DISABLE_AUTO_UPDATE=1` to skip the update check entirely -- no prompt, no network call.
+
+To update on demand instead of waiting for the prompt, run `agents upgrade` (add `-y` to skip the confirmation, or pass a version/dist-tag to install something other than latest).
 
 ### What happens to my config when I switch versions?
 

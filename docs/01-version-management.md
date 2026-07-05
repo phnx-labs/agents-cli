@@ -2,6 +2,10 @@
 
 How agents-cli installs, switches, and isolates multiple versions of agent CLIs.
 
+> This page covers versions of the *agent CLIs* agents-cli manages (Claude Code,
+> Codex, etc.). To update **agents-cli itself**, run `agents upgrade` (see
+> `agents upgrade --help`) -- unrelated to the mechanism below.
+
 ## Architecture
 
 ```
