@@ -376,14 +376,19 @@ function xmlEscape(s: string): string {
 
 /**
  * Write a launchd plist or systemd unit with owner-only permissions atomically.
- * Uses writeFileSync `{ mode: 0o600 }` so there is no TOCTOU window between
- * create and chmod when the manifest embeds long-lived credentials.
+ *
+ * `writeFileSync`'s `mode` is honored only when the file is *created*, so we
+ * unlink any pre-existing manifest first. That guarantees every write is a
+ * fresh 0600 create — closing the TOCTOU window on new files AND re-locking a
+ * stale world-readable manifest left by an older install — since these files
+ * embed long-lived credentials.
  */
 export function writeOwnerOnlyServiceManifest(filePath: string, content: string): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  fs.rmSync(filePath, { force: true });
   fs.writeFileSync(filePath, content, { encoding: 'utf-8', mode: 0o600 });
 }
 

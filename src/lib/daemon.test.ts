@@ -123,6 +123,25 @@ describe('writeOwnerOnlyServiceManifest', () => {
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
+
+  it('re-locks a pre-existing world-readable manifest to 0600 on overwrite', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-manifest-'));
+    const manifestPath = path.join(tmpDir, 'com.agents.daemon.plist');
+    // Simulate a stale manifest left world-readable by an older install.
+    fs.writeFileSync(manifestPath, 'stale', { mode: 0o644 });
+    if (process.platform !== 'win32') {
+      fs.chmodSync(manifestPath, 0o644);
+      expect(fs.statSync(manifestPath).mode & 0o777).toBe(0o644);
+    }
+    writeOwnerOnlyServiceManifest(manifestPath, generateLaunchdPlist());
+    expect(fs.readFileSync(manifestPath, 'utf-8')).not.toBe('stale');
+    // writeFileSync's mode is a no-op when overwriting an existing file, so the
+    // unlink-before-create is what forces this back to 0600.
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(manifestPath).mode & 0o777).toBe(0o600);
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 });
 
 describe('generateLaunchdPlist', () => {
