@@ -23,6 +23,13 @@ class FailingKeychain implements KeychainBackend {
   readonly store = new Map<string, string>();
   /** Item name whose `set` should throw; null = never fail. */
   failOnSet: string | null = null;
+  /**
+   * When non-null, `failOnSet` only throws for a `set` whose value equals this —
+   * letting a test fail the forward write (new value) while the rollback's
+   * restore of the OLD value succeeds. Leave null to fail every set of
+   * `failOnSet`, modelling a keyring that also errors on the reversal write.
+   */
+  failOnSetValue: string | null = null;
 
   has(item: string): boolean {
     return this.store.has(item);
@@ -32,7 +39,11 @@ class FailingKeychain implements KeychainBackend {
     return this.store.get(item)!;
   }
   set(item: string, value: string): void {
-    if (this.failOnSet !== null && item === this.failOnSet) {
+    if (
+      this.failOnSet !== null &&
+      item === this.failOnSet &&
+      (this.failOnSetValue === null || value === this.failOnSetValue)
+    ) {
       throw new Error(`injected write failure for '${item}'`);
     }
     this.store.set(item, value);
@@ -128,9 +139,12 @@ describe('pullBundle restore atomicity', () => {
     kc.store.set(bItem, 'old-b');
     kc.store.set(metaItem, JSON.stringify({ vars: { AKEY: 'keychain:AKEY', BKEY: 'keychain:BKEY' }, sentinel: true }));
 
-    // Make the write of BKEY (the 3rd write) throw, after AKEY was overwritten
-    // and CKEY was freshly created.
+    // Make the forward write of BKEY (its NEW value, the 3rd write) throw, after
+    // AKEY was overwritten and CKEY was freshly created. Scoping the injection to
+    // the new value lets the rollback's restore of BKEY's OLD value succeed, so
+    // this exercises a COMPLETE rollback (the incomplete case is below).
     kc.failOnSet = bItem;
+    kc.failOnSetValue = 'new-b';
 
     prevBackend = setSyncBackend(fixedBackend(envelopeFor(makeSnapshot())));
 
@@ -145,6 +159,41 @@ describe('pullBundle restore atomicity', () => {
     expect(kc.store.has(cItem)).toBe(false);
     // Metadata never advanced — writeBundle is only reached on full success.
     expect(JSON.parse(kc.store.get(metaItem)!).sentinel).toBe(true);
+  });
+
+  it('reports an INCOMPLETE rollback (naming the dirty item) when a reversal write also fails', async () => {
+    const aItem = secretsKeychainItem(NAME, 'AKEY');
+    const bItem = secretsKeychainItem(NAME, 'BKEY');
+    const cItem = secretsKeychainItem(NAME, 'CKEY');
+
+    kc.store.set(aItem, 'old-a');
+    kc.store.set(bItem, 'old-b');
+
+    // The realistic trigger: the same backend that fails the restore write of
+    // BKEY ALSO fails the rollback's attempt to write BKEY back. Leaving
+    // failOnSetValue null makes EVERY set of bItem throw — both the forward
+    // write (new-b) and the reversal restore (old-b).
+    kc.failOnSet = bItem;
+    kc.failOnSetValue = null;
+
+    prevBackend = setSyncBackend(fixedBackend(envelopeFor(makeSnapshot())));
+
+    // The thrown error must NOT claim a clean rollback: it must say the rollback
+    // was INCOMPLETE and name the still-dirty item.
+    const err = await pullBundle(NAME, { passphrase: PASSPHRASE, force: true }).then(
+      () => {
+        throw new Error('expected pullBundle to reject');
+      },
+      (e: Error) => e,
+    );
+    expect(err.message).toMatch(/rollback was INCOMPLETE/i);
+    expect(err.message).toContain(bItem);
+    expect(err.message).not.toMatch(/rolled back to the pre-restore state/);
+
+    // The items whose reversal succeeded were still reverted (best-effort
+    // continuation): AKEY back to its original value, CKEY (never existed) gone.
+    expect(kc.store.get(aItem)).toBe('old-a');
+    expect(kc.store.has(cItem)).toBe(false);
   });
 
   it('commits all secrets and metadata on a fully successful restore', async () => {

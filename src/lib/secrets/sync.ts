@@ -166,17 +166,24 @@ function restoreSnapshot(snap: BundleSnapshot): void {
   }
 
   // Best-effort reversal to the captured pre-restore state. Each item is
-  // restored independently so one failure doesn't abort the rest of the
-  // rollback; the original throw is what surfaces to the caller.
-  const rollback = (): void => {
+  // reverted independently so one failure doesn't abort the rest of the
+  // rollback. Reversal writes hit the SAME backend that just failed the restore
+  // (a locked/erroring keyring is the realistic trigger), so a reversal can
+  // itself throw — those items are collected and returned so the caller can
+  // report an INCOMPLETE rollback instead of falsely claiming a clean one.
+  const rollback = (): string[] => {
+    const stillDirty: string[] = [];
     for (const prior of priors) {
       try {
         if (prior.existed) setKeychainToken(prior.item, prior.value!);
         else deleteKeychainToken(prior.item);
       } catch {
-        // Nothing better to do — keep undoing the remaining items.
+        // Keep undoing the remaining items, but remember this one couldn't be
+        // reverted — it may now hold an orphaned or wrong value.
+        stillDirty.push(prior.item);
       }
     }
+    return stillDirty;
   };
 
   try {
@@ -185,11 +192,7 @@ function restoreSnapshot(snap: BundleSnapshot): void {
       setKeychainToken(item, value);
     }
   } catch (err) {
-    rollback();
-    throw new Error(
-      `Restore of bundle '${bundle.name}' failed while writing secrets; ` +
-      `rolled back to the pre-restore state. (${(err as Error).message})`,
-    );
+    throw new Error(rollbackFailureMessage(bundle.name, 'writing secrets', err as Error, rollback()));
   }
 
   // Commit metadata last. If it fails, undo the secret writes so nothing
@@ -197,12 +200,25 @@ function restoreSnapshot(snap: BundleSnapshot): void {
   try {
     writeBundle(bundle);
   } catch (err) {
-    rollback();
-    throw new Error(
-      `Restore of bundle '${bundle.name}' failed while writing metadata; ` +
-      `rolled back to the pre-restore state. (${(err as Error).message})`,
-    );
+    throw new Error(rollbackFailureMessage(bundle.name, 'writing metadata', err as Error, rollback()));
   }
+}
+
+/**
+ * Build the error thrown when a restore fails. When the rollback reverted every
+ * touched item (`dirty` empty) we truthfully say the keychain is back to the
+ * pre-restore state. When some reversal writes ALSO failed we must NOT claim a
+ * clean rollback — the message names the still-dirty items so the user knows the
+ * keychain is half-restored and which secrets to check.
+ */
+function rollbackFailureMessage(name: string, phase: string, err: Error, dirty: string[]): string {
+  if (dirty.length === 0) {
+    return `Restore of bundle '${name}' failed while ${phase}; ` +
+      `rolled back to the pre-restore state. (${err.message})`;
+  }
+  return `Restore of bundle '${name}' failed while ${phase}, and the rollback was INCOMPLETE — ` +
+    `these keychain items could not be reverted and may hold orphaned or wrong values: ${dirty.join(', ')}. ` +
+    `(original error: ${err.message})`;
 }
 
 /** Options for pushBundle. */
