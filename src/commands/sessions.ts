@@ -77,6 +77,8 @@ interface SessionsOptions extends SessionFilterOptions {
   live?: boolean;
   /** With --active: force local-only, skip cross-machine SSH fan-out. */
   local?: boolean;
+  /** Full-fleet view: every directory, no time window, high row cap. */
+  fleet?: boolean;
 }
 
 interface ClaudeHistoryEntry {
@@ -147,6 +149,34 @@ function createScanProgressTracker(
 
 const PICKER_RECENT_COUNT = 15;
 const PICKER_POOL_LIMIT = 200;
+// Row cap for the full-fleet (`--fleet`) view. Sized for the scale case — 50-100
+// agents live at once, plus their history — where the 50/200-row default hides
+// most of the fleet. An explicit `--limit` still overrides this.
+const FLEET_POOL_LIMIT = 10_000;
+
+/**
+ * Resolve the list-scope knobs (row cap, time window, cwd scope) from the raw
+ * options. Pulled out of `sessionsAction` so the `--fleet` interaction with the
+ * default cwd/30d/limit window is unit-testable in isolation.
+ *
+ * `--fleet` is a one-flag shorthand for "show the whole fleet": it widens the
+ * scope to every directory (`all`), drops the interactive 30-day window, and
+ * lifts the row cap to {@link FLEET_POOL_LIMIT}. Explicit `--limit`/`--since`/
+ * `--all` always win, so every existing invocation behaves exactly as before.
+ */
+export function resolveListScope(
+  options: Pick<SessionsOptions, 'limit' | 'since' | 'all' | 'fleet'>,
+  isInteractive: boolean,
+): { limit: number; since: string | undefined; all: boolean } {
+  const fleet = options.fleet ?? false;
+  const defaultLimit = fleet ? FLEET_POOL_LIMIT : isInteractive ? PICKER_POOL_LIMIT : 50;
+  const limit = parseInt(options.limit || String(defaultLimit), 10);
+  // The 30-day window only ever applied to the interactive, non-`--all` default;
+  // `--fleet` opts out of it the same way `--all` does.
+  const since = options.since ?? (!fleet && isInteractive && !options.all ? '30d' : undefined);
+  const all = !!(options.all || fleet);
+  return { limit, since, all };
+}
 
 /**
  * Resolve a path-like query to an absolute directory path.
@@ -711,8 +741,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // Interactive picker loads a deep pool but shows only recent sessions
   // until the user starts typing. Non-interactive/JSON uses the explicit limit.
   const isInteractive = !options.json && isInteractiveTerminal();
-  const limit = parseInt(options.limit || (isInteractive ? String(PICKER_POOL_LIMIT) : '50'), 10);
-  const since = options.since ?? (isInteractive && !options.all ? '30d' : undefined);
+  const { limit, since, all: scopeAll } = resolveListScope(options, isInteractive);
   const spinner = options.json ? null : ora().start();
   const tracker = createScanProgressTracker(LOAD_VERBS, 'sessions', spinner);
 
@@ -728,7 +757,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     const scope: DiscoverOptions = {
       agent,
       version,
-      all: pathFilter ? undefined : options.all,
+      all: pathFilter ? undefined : scopeAll,
       cwd: process.cwd(),
       cwdPrefix: pathFilter,
       project: options.project,
@@ -1776,6 +1805,7 @@ export function registerSessionsCommands(program: Command): void {
     .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--all', 'Include sessions from every directory (not just current project)')
+    .option('-F, --fleet', 'Show the whole fleet: every directory, no 30-day window, high row cap. For running 50-100 agents at once (shorthand for --all with a raised --limit and no --since)')
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
     .option('--project <name>', 'Filter by project name (searches across all directories)')
     .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
