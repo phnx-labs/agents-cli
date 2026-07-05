@@ -548,6 +548,7 @@ export function registerRunCommand(program: Command): void {
       let version: string | undefined = rawVersion || undefined;
       let profileEnv: Record<string, string> | undefined;
       let fromProfile = false;
+      let profileFallbackModel: { envKey: string; model: string } | undefined;
       let workflowModel: string | undefined;
       // WORKFLOW.md capability scoping, translated to Claude headless flags below.
       let workflowToolsRestrict: string[] | undefined;
@@ -569,6 +570,7 @@ export function registerRunCommand(program: Command): void {
           agent = resolved.agent;
           if (!version) version = resolved.version;
           profileEnv = resolved.env;
+          profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
           process.stderr.write(chalk.gray(`Resolved profile '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
         } catch (err) {
@@ -1095,6 +1097,19 @@ export function registerRunCommand(program: Command): void {
           }
           fallback.push({ agent: fbAgent, version: resolveVersionAlias(fbAgent, fbVersion || undefined) });
         }
+      }
+
+      // Profile-declared same-host model swap (issue #325). Inserted BEFORE any
+      // user --fallback entries so a rate limit first tries the cheaper/backup
+      // model on the same provider (auth + base URL preserved via envOverride);
+      // only if THAT still rate-limits do we cascade to a different agent CLI.
+      // Requires a prompt for the same reason --fallback does — headless-only.
+      if (fromProfile && profileFallbackModel && prompt !== undefined && !options.interactive) {
+        fallback.unshift({
+          agent,
+          version,
+          envOverride: { [profileFallbackModel.envKey]: profileFallbackModel.model },
+        });
       }
 
       if (options.acp) {
