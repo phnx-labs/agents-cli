@@ -40,6 +40,33 @@ export async function hasUncommittedChanges(worktreePath: string): Promise<boole
   }
 }
 
+/** Default cap on diff text so one giant worktree can't blow up the serve dashboard. */
+export const DEFAULT_DIFF_MAX_BYTES = 200_000;
+
+/**
+ * Return the uncommitted working-tree diff for a worktree (staged + unstaged,
+ * relative to HEAD), capped so a huge diff can't overwhelm the read-only serve
+ * dashboard. Read-only: shells out to `git diff HEAD` and never mutates state.
+ * Returns '' when the path isn't a git worktree or has no pending changes.
+ */
+export async function gitDiff(
+  worktreePath: string,
+  maxBytes: number = DEFAULT_DIFF_MAX_BYTES,
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync('git', ['diff', 'HEAD'], {
+      cwd: worktreePath,
+      maxBuffer: Math.max(maxBytes * 4, 1_000_000),
+    });
+    if (stdout.length > maxBytes) {
+      return stdout.slice(0, maxBytes) + `\n… [diff truncated at ${maxBytes} bytes]`;
+    }
+    return stdout;
+  } catch {
+    return '';
+  }
+}
+
 /**
  * Create a new git worktree for a teammate.
  *
