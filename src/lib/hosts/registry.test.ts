@@ -97,5 +97,10 @@ describe('resolveHost — password-auth device', () => {
 
     await expect(resolveHost('win-mini')).rejects.toBeInstanceOf(DeviceOffloadUnsupportedError);
     await expect(resolveHost('win-mini')).rejects.toThrow(/password auth/);
+    // The top-level catch in index.ts prints this cleanly by matching err.name
+    // as a string — lock that contract so a rename can't silently reintroduce
+    // the raw stack trace at hosts/secrets call sites.
+    const err = await resolveHost('win-mini').catch((e) => e as Error);
+    expect(err.name).toBe('DeviceOffloadUnsupportedError');
   });
 });

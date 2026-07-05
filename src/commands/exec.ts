@@ -387,18 +387,12 @@ export function registerRunCommand(program: Command): void {
           console.error(chalk.red('A prompt is required for host runs: agents run <agent> "<task>" --host <name>'));
           process.exit(1);
         }
-        const { resolveHost, resolveHostByCap, DeviceOffloadUnsupportedError } = await import('../lib/hosts/registry.js');
+        const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
         const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
-        let host = await resolveHost(hostName).catch((e) => {
-          // A password-auth device can't offload over BatchMode ssh — surface the
-          // actionable message instead of a stack trace, and don't fall through to
-          // capability routing (the name did resolve, it just can't be used).
-          if (e instanceof DeviceOffloadUnsupportedError) {
-            console.error(chalk.red(e.message));
-            process.exit(1);
-          }
-          throw e;
-        });
+        // A password-auth device throws DeviceOffloadUnsupportedError here; it's
+        // printed cleanly by the top-level catch in index.ts (covers every
+        // resolveHost caller), so it never falls through to capability routing.
+        let host = await resolveHost(hostName);
         if (!host) {
           // Not a host name — try capability routing (e.g. --host gpu). A
           // "Multiple hosts tagged…" error is actionable and must surface;

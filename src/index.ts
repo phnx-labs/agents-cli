@@ -1191,6 +1191,14 @@ try {
       console.error(err.message);
       process.exit(1);
     }
+    // A --host targeting a password-auth device throws this from resolveHost.
+    // It carries an actionable message (switch to key auth / enroll as a host);
+    // handling it here covers every resolveHost caller (run, hosts check/rm,
+    // secrets --host) at the source instead of a catch at each call site.
+    if (err.name === 'DeviceOffloadUnsupportedError') {
+      console.error(err.message);
+      process.exit(1);
+    }
   }
   throw err;
 }
