@@ -40,6 +40,73 @@ export interface LoopConfigRaw {
   interval?: string;
 }
 
+/**
+ * The `verify:` sub-block of a `for_each:` construct (issue #343).
+ *
+ * Each produced item's stage teammate can be gated by a panel of independent
+ * skeptics: `votes` of them run (as teammates that depend on the stage), and
+ * `keep_if` records how their verdicts converge (`majority` / `all` / `any`).
+ * The vote-counting itself is a downstream concern — the declarative layer's
+ * job is to expand the panel; see `expandForEach`.
+ */
+export interface ForEachVerifySpec {
+  /** Subagent / agent id that plays skeptic for each item. */
+  agent: string;
+  /** Prompt template for each skeptic (`{{item}}`, `{{index}}` substituted). */
+  prompt?: string;
+  /** How many independent skeptics run per item (>= 1). */
+  votes: number;
+  /** Convergence rule for keeping a finding. */
+  keep_if: 'majority' | 'all' | 'any';
+}
+
+/**
+ * The `for_each:` block as it appears in WORKFLOW.md frontmatter (issue #343).
+ *
+ * Declarative dynamic fan-out: a producer emits a list at runtime, one stage
+ * teammate runs per produced item (runtime-computed N), optionally followed by
+ * a `verify` panel. This is a thin declarative layer over the existing teams
+ * substrate — each expanded teammate is staged into the supervisor's
+ * mid-flight-add path (`AgentManager.spawn`), NOT a new engine. See
+ * `expandForEach` and `src/lib/teams/forEach.ts`.
+ *
+ * Parsed defensively (mirrors `parseLoopBlock`): a malformed block drops to
+ * undefined rather than passing a bad shape downstream.
+ */
+export interface ForEachSpec {
+  /**
+   * The producer: a shell command or subagent whose stdout is a JSON array (or
+   * newline-delimited list) of items. Alternatively `itemsRef` names a prior
+   * step's output. At least one of the two is expected for a runnable spec.
+   */
+  produce?: string;
+  /** `${step}`-style reference to a prior step's produced list. */
+  itemsRef?: string;
+  /** Subagent / agent id for the per-item stage. */
+  agent: string;
+  /** Base name for the expanded teammates (default `item`). */
+  name?: string;
+  /** Per-item prompt template (`{{item}}`, `{{index}}` substituted). */
+  prompt: string;
+  /** In-flight cap — maps to the supervisor's wave size (>= 1). */
+  concurrency?: number;
+  /**
+   * Hard runaway guard: the producer can emit at most this many items before
+   * the fan-out is truncated. Defaults to `DEFAULT_FOR_EACH_CAP`.
+   */
+  max_items?: number;
+  /** Optional convergence gate run after each item's stage. */
+  verify?: ForEachVerifySpec;
+}
+
+/**
+ * Hard upper bound on items a single `for_each` expands, absent an explicit
+ * `max_items`. A guard against a runaway producer spawning unbounded teammates
+ * (acceptance criterion in issue #343). Anthropic's Dynamic Workflows cap at
+ * 1000; we default lower and let authors raise it deliberately.
+ */
+export const DEFAULT_FOR_EACH_CAP = 256;
+
 /** Parsed WORKFLOW.md frontmatter. */
 export interface WorkflowFrontmatter {
   name: string;
@@ -62,6 +129,12 @@ export interface WorkflowFrontmatter {
    * `--loop` flag. Validated/coerced in parseWorkflowFrontmatter.
    */
   loop?: LoopConfigRaw;
+  /**
+   * Optional declarative dynamic fan-out (issue #343): a producer emits a list
+   * and one stage teammate runs per item, with an optional verify panel.
+   * Validated/coerced in parseWorkflowFrontmatter via `parseForEachBlock`.
+   */
+  forEach?: ForEachSpec;
 }
 
 /** A workflow found during repo discovery. */
@@ -112,6 +185,7 @@ export function parseWorkflowFrontmatter(workflowDir: string): WorkflowFrontmatt
       allowedAgents: asStringArray(parsed.allowedAgents),
       secrets: asStringArray(parsed.secrets),
       loop: parseLoopBlock(parsed.loop),
+      forEach: parseForEachBlock(parsed.for_each),
     };
   } catch {
     return null;
@@ -154,6 +228,200 @@ export function parseLoopBlock(v: unknown): LoopConfigRaw | undefined {
   if (typeof raw.interval === 'string') out.interval = raw.interval;
 
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** A finite positive integer, or undefined. Shared guard for count-like fields. */
+function asPosInt(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && Number.isInteger(v) && v > 0
+    ? v
+    : undefined;
+}
+
+/** A non-empty trimmed string, or undefined. */
+function asNonEmptyString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim().length > 0 ? v : undefined;
+}
+
+/**
+ * Defensively coerce a frontmatter `verify:` sub-block into a ForEachVerifySpec.
+ *
+ * Requires an `agent`; drops the whole block otherwise (a verify panel with no
+ * skeptic is meaningless). `votes` defaults to 1 (a single confirmation) and
+ * `keep_if` to `majority`; both are validated against their allowed shapes.
+ */
+export function parseVerifyBlock(v: unknown): ForEachVerifySpec | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const raw = v as Record<string, unknown>;
+
+  const agent = asNonEmptyString(raw.agent);
+  if (!agent) return undefined;
+
+  const keepIf = raw.keep_if;
+  const out: ForEachVerifySpec = {
+    agent,
+    votes: asPosInt(raw.votes) ?? 1,
+    keep_if:
+      keepIf === 'all' || keepIf === 'any' || keepIf === 'majority'
+        ? keepIf
+        : 'majority',
+  };
+  const prompt = asNonEmptyString(raw.prompt);
+  if (prompt) out.prompt = prompt;
+  return out;
+}
+
+/**
+ * Defensively coerce a frontmatter `for_each:` block into a ForEachSpec (issue
+ * #343). Mirrors `parseLoopBlock`'s discipline: a block missing the two
+ * load-bearing fields (`agent` + `prompt`) drops to undefined rather than
+ * passing a half-formed spec to the expander. Optional numeric/verify fields
+ * are individually validated and dropped when malformed.
+ */
+export function parseForEachBlock(v: unknown): ForEachSpec | undefined {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+  const raw = v as Record<string, unknown>;
+
+  const agent = asNonEmptyString(raw.agent);
+  const prompt = asNonEmptyString(raw.prompt);
+  if (!agent || !prompt) return undefined;
+
+  const out: ForEachSpec = { agent, prompt };
+
+  const produce = asNonEmptyString(raw.produce);
+  if (produce) out.produce = produce;
+  // `for_each: ${step}` references a prior step's list. Accept either the
+  // snake-case `for_each` key or an explicit `items_ref`.
+  const itemsRef = asNonEmptyString(raw.for_each) ?? asNonEmptyString(raw.items_ref);
+  if (itemsRef) out.itemsRef = itemsRef;
+
+  const name = asNonEmptyString(raw.name);
+  if (name) out.name = name;
+
+  const concurrency = asPosInt(raw.concurrency);
+  if (concurrency) out.concurrency = concurrency;
+
+  const maxItems = asPosInt(raw.max_items);
+  if (maxItems) out.max_items = maxItems;
+
+  const verify = parseVerifyBlock(raw.verify);
+  if (verify) out.verify = verify;
+
+  return out;
+}
+
+/** One teammate produced by expanding a `for_each` spec against a produced list. */
+export interface ForEachTeammate {
+  /** `stage` runs the per-item work; `verify` is a skeptic in the panel. */
+  role: 'stage' | 'verify';
+  /** Unique teammate name within the team (used for `--after` linkage). */
+  name: string;
+  /** Subagent / agent id this teammate runs as. */
+  agentType: string;
+  /** Fully-resolved prompt (template variables already substituted). */
+  prompt: string;
+  /** Names of sibling teammates this one waits on (`--after` semantics). */
+  after: string[];
+  /** The produced item this teammate handles. */
+  item: string;
+  /** Zero-based index of the item in the (capped) produced list. */
+  itemIndex: number;
+  /** For `verify` teammates: 1-based vote index and the panel's gate config. */
+  vote?: number;
+  votes?: number;
+  keep_if?: 'majority' | 'all' | 'any';
+}
+
+/** Result of expanding a `for_each` spec: the teammates plus cap accounting. */
+export interface ForEachExpansion {
+  teammates: ForEachTeammate[];
+  /** How many items the producer emitted (pre-cap). */
+  producedCount: number;
+  /** How many items were actually expanded (post-cap). */
+  usedCount: number;
+  /** producedCount - usedCount; > 0 means the runaway guard truncated. */
+  truncated: number;
+  /** The effective per-`for_each` item cap that was applied. */
+  cap: number;
+}
+
+/**
+ * Substitute `{{item}}` / `{{index}}` (and 1-based `{{n}}`) in a prompt
+ * template. Unknown `{{...}}` tokens are left intact so a template can carry
+ * placeholders the caller resolves elsewhere.
+ */
+export function renderForEachTemplate(template: string, item: string, index: number): string {
+  return template
+    .replace(/\{\{\s*item\s*\}\}/g, item)
+    .replace(/\{\{\s*index\s*\}\}/g, String(index))
+    .replace(/\{\{\s*n\s*\}\}/g, String(index + 1));
+}
+
+/**
+ * Expand a `for_each` spec against a producer's output into concrete teammate
+ * descriptors (issue #343) — the heart of the declarative fan-out.
+ *
+ * Pure and deterministic: no I/O, no spawning. `src/lib/teams/forEach.ts`
+ * feeds the result to `AgentManager.spawn`, staging each descriptor into the
+ * supervisor's existing mid-flight-add path — so this reuses the dynamic-DAG
+ * substrate rather than introducing a new engine.
+ *
+ * For N produced items (capped at `spec.max_items` / `DEFAULT_FOR_EACH_CAP`):
+ *   - one `stage` teammate per item, depending on `producerName` if given;
+ *   - when `verify` is set, `votes` `verify` teammates per item, each
+ *     depending on that item's stage teammate.
+ *
+ * Names are unique (`<base>-<n>` and `<base>-<n>-verify-<v>`) so `--after`
+ * linkage and the teams cycle check carry over unchanged.
+ */
+export function expandForEach(
+  spec: ForEachSpec,
+  items: string[],
+  opts: { producerName?: string } = {},
+): ForEachExpansion {
+  const cap = spec.max_items ?? DEFAULT_FOR_EACH_CAP;
+  const producedCount = items.length;
+  const used = items.slice(0, cap);
+  const base = spec.name ?? 'item';
+  const teammates: ForEachTeammate[] = [];
+
+  used.forEach((item, itemIndex) => {
+    const stageName = `${base}-${itemIndex + 1}`;
+    teammates.push({
+      role: 'stage',
+      name: stageName,
+      agentType: spec.agent,
+      prompt: renderForEachTemplate(spec.prompt, item, itemIndex),
+      after: opts.producerName ? [opts.producerName] : [],
+      item,
+      itemIndex,
+    });
+
+    if (spec.verify) {
+      const verifyPrompt = spec.verify.prompt ?? spec.prompt;
+      for (let vote = 1; vote <= spec.verify.votes; vote++) {
+        teammates.push({
+          role: 'verify',
+          name: `${stageName}-verify-${vote}`,
+          agentType: spec.verify.agent,
+          prompt: renderForEachTemplate(verifyPrompt, item, itemIndex),
+          after: [stageName],
+          item,
+          itemIndex,
+          vote,
+          votes: spec.verify.votes,
+          keep_if: spec.verify.keep_if,
+        });
+      }
+    }
+  });
+
+  return {
+    teammates,
+    producedCount,
+    usedCount: used.length,
+    truncated: producedCount - used.length,
+    cap,
+  };
 }
 
 /**
