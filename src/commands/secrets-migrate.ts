@@ -187,7 +187,9 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
         let failCount = 0;
 
         // (a) Legacy ACL rewrite. Snapshot every value first (one batched read
-        // behind a single helper process), encrypt, then delete + re-add.
+        // behind a single helper process), encrypt, then delete + re-add. A total
+        // read failure here counts the legacy items as failed but does NOT abort —
+        // the orphan sweep (b) is independent and must still run.
         if (items.length > 0) {
           const fetched = getKeychainTokens(items.map((i) => i.item));
           const records: MigrationRecord[] = [];
@@ -200,9 +202,9 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
             records.push({ item, sync, value });
           }
           if (records.length === 0) {
-            console.error(chalk.red('No legacy items could be read. Aborting before any writes.'));
-            process.exit(1);
-          }
+            console.error(chalk.red('No legacy items could be read — skipping legacy rewrite.'));
+            failCount += items.length;
+          } else {
           const passphrase = opts.passphraseEnv
             ? (() => {
                 const v = process.env[opts.passphraseEnv!];
@@ -234,6 +236,7 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
           failCount += results.length - ok;
           if (results.length - ok > 0) {
             console.error(chalk.gray(`Restore from ${backupPath} using the backup passphrase if needed.`));
+          }
           }
         }
 

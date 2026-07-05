@@ -474,8 +474,13 @@ export function parseOrphanMigrationOutput(stdout: string): OrphanMigrationResul
     const tag = sep === -1 ? trimmed : trimmed.slice(0, sep);
     const rest = sep === -1 ? '' : trimmed.slice(sep + 1);
     if (tag === 'OK') {
+      // OK carries only the service name (no trailing detail).
       results.push({ item: rest, status: 'ok' });
     } else if (tag === 'WARN' || tag === 'FAIL') {
+      // WARN/FAIL are 'TAG <service> <detail>'. Service names are space-free
+      // (validateBundleName / validateEnvKey), so the first token IS the exact
+      // service — this stays consistent with listOrphanedKeychainItems for the
+      // healed-set reconciliation in migrate-acl.
       const item = rest.split(' ')[0] ?? rest;
       results.push({ item, status: tag === 'WARN' ? 'warn' : 'fail', detail: rest });
     }
