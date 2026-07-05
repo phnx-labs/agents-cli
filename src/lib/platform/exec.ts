@@ -40,3 +40,65 @@ export function findExecutable(name: string, platform: NodeJS.Platform = process
     return null;
   }
 }
+
+/**
+ * Quote one argument for a Windows `cmd.exe` command line, as built by Node's
+ * `spawn(..., { shell: true })` on win32 (the `.cmd` agent shims, `agents secrets
+ * exec`, ...). cmd.exe does NO quoting of its own, so an unquoted arg with a space
+ * is split into several args, and a cmd metacharacter (`&|<>()^`) would be
+ * interpreted by the shell. We wrap any arg with whitespace, a quote, or a
+ * metacharacter in double quotes and escape embedded quotes / trailing
+ * backslashes per the CommandLineToArgvW rules, so the *child's* argv parse
+ * reconstructs the original argument.
+ *
+ * CAVEAT: cmd.exe expands `%VAR%` (always) and `!VAR!` (under delayed expansion)
+ * BEFORE argv parsing, and double-quoting does NOT suppress `%`/`!` (the
+ * "BatBadBut" / CVE-2024-1874 class). We deliberately do not escape `%`/`!`:
+ * the callers here run a command whose `%`/`!`-bearing tokens are the caller's
+ * own (an agent prompt against the caller's shell, a bundle the caller owns), so
+ * caller-controlled `%`/`!` is not a privilege boundary. If that ever changes
+ * (composing an untrusted command line), route through a shell that disables
+ * expansion rather than relying on this quoter. An empty arg becomes `""`.
+ */
+export function quoteWin32ExecArg(arg: string): string {
+  if (arg.length > 0 && !/[\s"&|<>()^]/.test(arg)) return arg;
+  let result = '"';
+  let backslashes = 0;
+  for (const ch of arg) {
+    if (ch === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (ch === '"') {
+      // Double the run of backslashes, then escape this quote.
+      result += '\\'.repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+      continue;
+    }
+    result += '\\'.repeat(backslashes) + ch;
+    backslashes = 0;
+  }
+  // Trailing backslashes precede the closing quote → must be doubled.
+  result += '\\'.repeat(backslashes * 2) + '"';
+  return result;
+}
+
+/**
+ * Compose a DEP0190-safe Windows shell command line from a command and its args.
+ *
+ * Node's `spawn(cmd, args, { shell: true })` on win32 concatenates `cmd` and
+ * every element of `args` into a single cmd.exe line WITHOUT escaping — that is
+ * both Node's DEP0190 deprecation (a future hard error) and a real injection
+ * surface, since user-controlled text (an agent prompt, a secrets-exec command)
+ * flows through `args`. Passing the fully-composed line as the SOLE `command`
+ * with an EMPTY args array sidesteps both: we quote every token with
+ * `quoteWin32ExecArg` so the child's CommandLineToArgvW parse reconstructs the
+ * exact original argv, and Node has no args array left to concatenate.
+ *
+ * Callers spawn the result as `spawn(line, [], { shell: true })`. A simple arg
+ * (no whitespace/quote/metachar) is passed through untouched, so the composed
+ * line is byte-identical to the old unquoted join for the common case.
+ */
+export function composeWin32CommandLine(command: string, args: string[]): string {
+  return [command, ...args].map(quoteWin32ExecArg).join(' ');
+}

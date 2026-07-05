@@ -143,16 +143,28 @@ describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
     expect(r).toEqual({ command: '/home/u/.agents/.../claude', args: ['--help'], shell: false });
   });
 
-  it('win32 keeps the common .cmd-present path on the shell (unchanged)', () => {
+  it('win32 .cmd path goes through the shell as ONE composed line with empty args (DEP0190-safe)', () => {
     const r = resolveShimSpawn('win32', 'C:\\bin\\claude.cmd', ['run']);
-    expect(r.command).toBe('C:\\bin\\claude.cmd');
-    expect(r.args).toEqual(['run']);
+    // No unescaped args array left for Node to concatenate: the command is the
+    // whole quoted line and args is empty.
+    expect(r.command).toBe('C:\\bin\\claude.cmd run');
+    expect(r.args).toEqual([]);
     expect(r.shell).toBe(true);
   });
 
   it('win32 sends a bare (non-absolute) name to the shell for PATHEXT resolution', () => {
     const r = resolveShimSpawn('win32', 'claude', []);
     expect(r.command).toBe('claude');
+    expect(r.args).toEqual([]);
+    expect(r.shell).toBe(true);
+  });
+
+  it('win32 quotes prompt args with spaces/metachars into the composed line', () => {
+    // The injection/splitting surface: a multi-word prompt and cmd metacharacters
+    // must survive as ONE argument to the child, not be split or interpreted.
+    const r = resolveShimSpawn('win32', 'C:\\bin\\claude.cmd', ['-p', 'review my code & ship']);
+    expect(r.command).toBe('C:\\bin\\claude.cmd -p "review my code & ship"');
+    expect(r.args).toEqual([]);
     expect(r.shell).toBe(true);
   });
 });

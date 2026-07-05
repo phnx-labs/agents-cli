@@ -19,6 +19,7 @@ import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
 import { writePidSessionEntry } from './session/pid-registry.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
+import { composeWin32CommandLine } from './platform/index.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -798,7 +799,14 @@ export function resolveShimSpawn(
     // Use win32 path semantics regardless of the host running this (the platform
     // is the parameter, not process.platform) so `C:\...` reads as absolute.
     const useShell = !path.win32.isAbsolute(binary) || binary.endsWith('.cmd');
-    return { command: binary, args: extraArgs, shell: useShell };
+    if (useShell) {
+      // DEP0190-safe: hand cmd.exe ONE fully-quoted command line with an EMPTY
+      // args array, so Node never concatenates `extraArgs` (which carry the
+      // user's raw prompt/flags) into the shell line unescaped — that concat is
+      // both the deprecation and a command-injection surface.
+      return { command: composeWin32CommandLine(binary, extraArgs), args: [], shell: true };
+    }
+    return { command: binary, args: extraArgs, shell: false };
   }
   return { command: binary, args: extraArgs, shell: false };
 }
@@ -918,11 +926,17 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       : ['inherit', tapStdout ? 'pipe' : 'inherit', 'pipe'];
 
     // On Windows, .cmd batch wrappers (npm-installed CLIs) require shell:true
-    // whether addressed by name or absolute path.
+    // whether addressed by name or absolute path. On that shell path, compose a
+    // single fully-quoted command line and pass an EMPTY args array (see
+    // composeWin32CommandLine) so Node never concatenates the args array — which
+    // carries the user's prompt — into the cmd.exe line unescaped (DEP0190 +
+    // command injection).
     const useShell = process.platform === 'win32' && (
       !path.isAbsolute(executable) || executable.endsWith('.cmd')
     );
-    const child = spawn(executable, args, {
+    const spawnCommand = useShell ? composeWin32CommandLine(executable, args) : executable;
+    const spawnArgs = useShell ? [] : args;
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd || process.cwd(),
       stdio,
       env: buildExecEnv(options),

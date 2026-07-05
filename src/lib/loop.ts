@@ -30,6 +30,7 @@ import { extractUsageEvents } from './budget/enforce.js';
 import { parseTimeout } from './routines.js';
 import { writeCheckpoint, type Checkpoint } from './checkpoint.js';
 import { mailboxDir } from './mailbox.js';
+import { composeWin32CommandLine } from './platform/index.js';
 
 /** Loop block config (docs/07-entrypoints-and-loops.md → "The loop block"). */
 export interface LoopConfig {
@@ -215,10 +216,16 @@ export function defaultRunIteration(options: ExecOptions): Promise<IterationResu
   const model = execOptions.model ?? `${execOptions.agent}-default`;
 
   return new Promise((resolve, reject) => {
+    // DEP0190-safe shell spawn: on the win32 shell path compose ONE fully-quoted
+    // command line and pass an EMPTY args array (see composeWin32CommandLine) so
+    // Node never concatenates the args array — which carries the re-injected
+    // prompt — into the cmd.exe line unescaped.
     const useShell = process.platform === 'win32' && (
       !path.isAbsolute(executable) || executable.endsWith('.cmd')
     );
-    const child = spawn(executable, args, {
+    const spawnCommand = useShell ? composeWin32CommandLine(executable, args) : executable;
+    const spawnArgs = useShell ? [] : args;
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd,
       stdio: ['inherit', 'pipe', 'pipe'],
       env,
