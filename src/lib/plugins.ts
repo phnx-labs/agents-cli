@@ -227,18 +227,28 @@ export function loadPluginManifest(pluginRoot: string): PluginManifest | null {
 }
 
 export function validatePluginName(name: string): boolean {
-  return name.length > 0
-    && !/[/\\]/.test(name)
-    && !name.includes('..')
-    && !name.includes('\0');
+  if (!name || name.length === 0 || name === '.' || name === '..') {
+    return false;
+  }
+  const normalized = path.normalize(name);
+  if (normalized === '.' || normalized === '' || normalized === '..') {
+    return false;
+  }
+  if (/[/\\]/.test(name) || name.includes('\0')) {
+    return false;
+  }
+  if (path.basename(normalized) !== name) {
+    return false;
+  }
+  return true;
 }
 
 export function assertPluginTargetContained(targetRoot: string, pluginsDir: string): void {
   const resolvedPluginsDir = path.resolve(pluginsDir);
   const resolvedTargetRoot = path.resolve(targetRoot);
   if (
-    resolvedTargetRoot !== resolvedPluginsDir
-    && !resolvedTargetRoot.startsWith(`${resolvedPluginsDir}${path.sep}`)
+    resolvedTargetRoot === resolvedPluginsDir
+    || !resolvedTargetRoot.startsWith(`${resolvedPluginsDir}${path.sep}`)
   ) {
     throw new Error(`Plugin install target escapes plugins directory: ${targetRoot}`);
   }

@@ -19,6 +19,7 @@ import {
   saveUserConfig,
   checkPluginDependencies,
   validatePluginName,
+  assertPluginTargetContained,
   parseInstallSpec,
   hasPluginExecSurfaces,
   inspectPluginCapabilities,
@@ -687,7 +688,7 @@ describe('installPlugin validation', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it.each(['../etc', 'foo/bar', 'foo\\bar', '..', 'foo\\0bar', 'foo\0bar', ''])(
+  it.each(['../etc', 'foo/bar', 'foo\\bar', '..', 'foo\\0bar', 'foo\0bar', '', '.', 'a/b'])(
     'rejects invalid plugin name %j',
     (name) => {
       expect(validatePluginName(name)).toBe(false);
@@ -696,6 +697,7 @@ describe('installPlugin validation', () => {
 
   it('accepts a simple plugin name', () => {
     expect(validatePluginName('safe-plugin_1.0')).toBe(true);
+    expect(validatePluginName('my-plugin')).toBe(true);
   });
 
   it.each([
@@ -737,6 +739,23 @@ describe('installPlugin validation', () => {
 
     expect(fs.existsSync(path.resolve(pluginsDir, '../../foo'))).toBe(false);
     expect(execFileSyncMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('assertPluginTargetContained', () => {
+  it('throws when target equals the plugins root', () => {
+    expect(() => assertPluginTargetContained('/plugins', '/plugins')).toThrow(/Plugin install target escapes plugins directory/);
+    expect(() => assertPluginTargetContained('/plugins/', '/plugins')).toThrow(/Plugin install target escapes plugins directory/);
+  });
+
+  it('allows strict subdirectories', () => {
+    expect(() => assertPluginTargetContained('/plugins/my-plugin', '/plugins')).not.toThrow();
+    expect(() => assertPluginTargetContained('/plugins/my-plugin/sub', '/plugins')).not.toThrow();
+  });
+
+  it('throws when target escapes the plugins root', () => {
+    expect(() => assertPluginTargetContained('/other', '/plugins')).toThrow(/Plugin install target escapes plugins directory/);
+    expect(() => assertPluginTargetContained('/plugins-other', '/plugins')).toThrow(/Plugin install target escapes plugins directory/);
   });
 });
 
