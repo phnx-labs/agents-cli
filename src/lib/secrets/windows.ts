@@ -70,6 +70,10 @@ export const CRED_MAX_CREDENTIAL_BLOB_SIZE = 2560;
  */
 const PS_SCRIPT = `
 $ErrorActionPreference = 'Stop'
+# Output must not depend on the console codepage: a windowsHide child owns a
+# fresh hidden console whose codepage is the OEM default (cp437), not the
+# terminal's UTF-8 — the Node side always decodes stdout/stderr as UTF-8.
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -195,9 +199,12 @@ try {
             exit 0
         }
         'set' {
-            $value = [Console]::In.ReadToEnd()
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
-            [AgentsCred]::Set($target, $bytes)
+            # Raw bytes, not [Console]::In text — text decoding runs through the
+            # console codepage and corrupts non-ASCII UTF-8 from the Node side.
+            $stdin = [Console]::OpenStandardInput()
+            $ms = New-Object System.IO.MemoryStream
+            $stdin.CopyTo($ms)
+            [AgentsCred]::Set($target, $ms.ToArray())
             exit 0
         }
         'delete' {
@@ -249,6 +256,9 @@ function runCred(
     input: opts.input,
     stdio: ['pipe', 'pipe', 'pipe'],
     maxBuffer: 16 * 1024 * 1024,
+    // Never flash a console window when the caller has no console of its own
+    // (the scheduler daemon resolves bundles through here every sync cycle).
+    windowsHide: true,
   });
   return {
     status: result.status,
@@ -263,6 +273,7 @@ function runCred(
 function powershellAvailable(): boolean {
   const result = spawnSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'], {
     stdio: ['ignore', 'ignore', 'ignore'],
+    windowsHide: true,
   });
   return !result.error && result.status === 0;
 }
