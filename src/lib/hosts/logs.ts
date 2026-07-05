@@ -54,7 +54,7 @@ export async function showHostTaskLog(id: string, follow: boolean): Promise<Host
     if (remote !== null) {
       process.stdout.write(remote);
     } else {
-      console.log(chalk.gray('(no local log captured for this task)'));
+      process.stdout.write(chalk.gray('(no local log captured for this task)\n'));
     }
   }
   return { found: true, exitCode: 0 };
