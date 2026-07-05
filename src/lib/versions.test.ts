@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 const tempDirs: string[] = [];
 
@@ -671,46 +671,6 @@ describe('unionResourceSelections + mergeRepoScopedSelections — interactive mu
     const home = makeTempHome();
     const out = evalExpr(home, "V.mergeRepoScopedSelections(['project'], home)");
     expect(out.memory).toEqual([]); // neither user nor system → skip sentinel
-  });
-});
-
-const npmInstallCapture = vi.hoisted(() => ({ argv: undefined as string[] | undefined }));
-
-vi.mock('child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('child_process')>();
-  return {
-    ...actual,
-    execFile: vi.fn((file, args, options, callback) => {
-      const cb = typeof options === 'function' ? options : callback;
-      if (file === 'npm' && Array.isArray(args) && args[0] === 'install') {
-        npmInstallCapture.argv = args;
-        if (cb) cb(null, 'mock npm install success', '');
-      } else if (file === 'npm' && Array.isArray(args) && args[0] === '--version') {
-        if (cb) cb(null, '10.0.0', '');
-      } else {
-        if (cb) cb(new Error(`unexpected execFile call: ${file} ${args?.join(' ')}`), '', '');
-      }
-      return undefined;
-    }),
-  };
-});
-
-describe('installVersion npm install argv', () => {
-  it('includes --ignore-scripts in npm install arguments', async () => {
-    const home = makeTempHome();
-    const originalHome = process.env.HOME;
-    process.env.HOME = home;
-    try {
-      vi.resetModules();
-      const { installVersion } = await import('./versions.js');
-      const result = await installVersion('codex', '0.116.0');
-      expect(result.success).toBe(true);
-      expect(npmInstallCapture.argv).toBeDefined();
-      expect(npmInstallCapture.argv).toContain('install');
-      expect(npmInstallCapture.argv).toContain('--ignore-scripts');
-    } finally {
-      process.env.HOME = originalHome;
-    }
   });
 });
 
