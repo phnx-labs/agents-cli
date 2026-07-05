@@ -209,4 +209,4 @@ describe('pickerColumnsFor machine column width', () => {
     ]);
     expect(cols.machineWidth).toBe(18); // MAX cap
   });
-})
+});
