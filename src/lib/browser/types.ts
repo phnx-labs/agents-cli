@@ -73,6 +73,15 @@ export interface Task {
   currentTabId?: string; // shortId of current tab
   createdAt: number;
   pid: number;
+  /**
+   * Per-tab snapshot of the last ref listing captured for that tab
+   * (shortId -> {descriptors, opts}). Persisted to tasks.json so a later
+   * `click`/`type <ref>` can self-heal a drifted ref — the cached `opts` let
+   * the action rebuild its node map with the SAME accessibility filter the
+   * listing was numbered against. Owned by `refs()`; actions never overwrite
+   * it. See RefSnapshot / RefDescriptor.
+   */
+  refDescriptors?: Record<string, import('./refs.js').RefSnapshot>;
 }
 
 export interface TabInfo {
@@ -158,6 +167,9 @@ export interface IPCRequest {
   expr?: string;
   path?: string;
   ref?: number;
+  // Coordinate click (`browser click --at X,Y`): bypasses ref resolution.
+  atX?: number;
+  atY?: number;
   text?: string;
   key?: string;
   scrollX?: number;
@@ -237,6 +249,8 @@ export interface IPCResponse {
   height?: number;
   refs?: string;
   nodes?: RefNodeJson[];
+  /** Human-readable note surfaced to the CLI (e.g. a self-heal notice on click). */
+  message?: string;
   port?: number;
   pid?: number;
   // Recording

@@ -36,6 +36,7 @@ import {
   parseAtTime,
 } from '../lib/routines.js';
 import type { JobConfig } from '../lib/routines.js';
+import { fireWebhookJobs, matchJobsToWebhook, type GithubWebhook } from '../lib/triggers/webhook.js';
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';
@@ -44,6 +45,21 @@ import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
+
+/**
+ * Human label for what fires a job: its cron schedule, or its event trigger
+ * for schedule-less (trigger-only) routines.
+ */
+function fireConditionLabel(job: JobConfig): string {
+  if (job.schedule) return humanizeCron(job.schedule, job.timezone);
+  if (job.trigger) {
+    const scope = job.trigger.repo
+      ? ` (${job.trigger.repo}${job.trigger.branch ? `@${job.trigger.branch}` : ''})`
+      : '';
+    return `on ${job.trigger.event}${scope}`;
+  }
+  return '-';
+}
 
 /** Start or reload the background scheduler so newly-added jobs fire on time. */
 function ensureSchedulerRunning(): void {
@@ -108,7 +124,7 @@ async function pickJob(
       message,
       choices: jobs.map((job) => ({
         value: job.name,
-        name: `${job.name} ${chalk.gray(`(${job.workflow ? `wf:${job.workflow}` : job.agent}, ${job.schedule})`)}`,
+        name: `${job.name} ${chalk.gray(`(${job.workflow ? `wf:${job.workflow}` : job.agent}, ${job.schedule ?? fireConditionLabel(job)})`)}`,
       })),
     });
   } catch (err) {
@@ -197,8 +213,9 @@ export function registerRoutinesCommands(program: Command): void {
             agent: job.agent ?? null,
             workflow: job.workflow ?? null,
             repo: job.repo ?? null,
-            schedule: job.schedule,
-            scheduleHuman: humanizeCron(job.schedule, job.timezone),
+            schedule: job.schedule ?? null,
+            scheduleHuman: fireConditionLabel(job),
+            trigger: job.trigger ?? null,
             timezone: job.timezone ?? null,
             enabled: job.enabled,
             overdue: overdueSet.has(job.name),
@@ -239,7 +256,7 @@ export function registerRoutinesCommands(program: Command): void {
       for (const job of jobs) {
         const nextRun = scheduler.getNextRun(job.name);
         const nextStr = humanizeNextRun(nextRun ?? null, now, job.timezone);
-        let schedStr = humanizeCron(job.schedule, job.timezone);
+        let schedStr = fireConditionLabel(job);
         if (job.endAt) {
           const end = new Date(job.endAt);
           const endLabel = Number.isFinite(end.getTime())
@@ -649,6 +666,86 @@ export function registerRoutinesCommands(program: Command): void {
         } catch (err) {
           console.log(`  ${job.name} → ${chalk.red('failed to start')}: ${(err as Error).message}`);
         }
+      }
+      console.log(chalk.gray('\nTrack progress with: agents routines runs <name>'));
+    });
+
+  routinesCmd
+    .command('webhook')
+    .description('Fire trigger-based routines from a single GitHub webhook payload (read from --file or stdin). One-shot: matches and fires, then exits. For a long-running receiver, run this behind your own HTTP forwarder.')
+    .requiredOption('--event <name>', 'GitHub event name, as sent in the X-GitHub-Event header (e.g. pull_request, push, workflow_run)')
+    .option('--file <path>', 'Read the webhook JSON payload from this file instead of stdin')
+    .option('--dry-run', 'Show which routines would fire without firing them')
+    .action(async (options: { event: string; file?: string; dryRun?: boolean }) => {
+      // Load the raw JSON payload: --file wins, else drain stdin.
+      let raw: string;
+      if (options.file) {
+        const resolved = path.resolve(options.file);
+        if (!fs.existsSync(resolved)) {
+          console.log(chalk.red(`File not found: ${resolved}`));
+          process.exit(1);
+        }
+        raw = fs.readFileSync(resolved, 'utf-8');
+      } else {
+        if (process.stdin.isTTY) {
+          console.log(chalk.red('No payload provided. Pass --file <path> or pipe the webhook JSON on stdin.'));
+          process.exit(1);
+        }
+        const chunks: Buffer[] = [];
+        for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+        raw = Buffer.concat(chunks).toString('utf-8');
+      }
+
+      let payload: Record<string, unknown>;
+      try {
+        const parsed = raw.trim() ? JSON.parse(raw) : {};
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('payload must be a JSON object');
+        }
+        payload = parsed as Record<string, unknown>;
+      } catch (err) {
+        console.log(chalk.red(`Invalid webhook payload JSON: ${(err as Error).message}`));
+        process.exit(1);
+      }
+
+      const webhook: GithubWebhook = { event: options.event, payload };
+
+      // Matching is intentionally user-layer only (fireWebhookJobs defaults to
+      // listJobs() with no cwd), mirroring `run`/`catchup`: a webhook must never
+      // fire a cloned project repo's `.agents/routines/*.yml` and run an
+      // attacker-supplied prompt under the user's agent session.
+      if (options.dryRun) {
+        const matched = matchJobsToWebhook(listAllJobs(), webhook);
+        if (matched.length === 0) {
+          console.log(chalk.gray(`No routines match a ${options.event} event for this payload.`));
+          return;
+        }
+        console.log(chalk.bold(`${matched.length} routine(s) would fire on ${options.event}:\n`));
+        for (const job of matched) {
+          console.log(`  ${chalk.cyan(job.name)} — ${fireConditionLabel(job)}`);
+        }
+        console.log(chalk.gray('\n(dry run — no routines triggered)'));
+        return;
+      }
+
+      // Fired jobs run detached via executeJobDetached (the same path cron
+      // uses). Keep the daemon alive so each run's meta.json is finalized.
+      if (!isDaemonRunning()) {
+        const started = startDaemon();
+        if (started.pid) {
+          console.log(chalk.gray(`Started scheduler (PID: ${started.pid}) so webhook runs are monitored.`));
+        }
+      }
+
+      const fired = await fireWebhookJobs(webhook);
+      if (fired.length === 0) {
+        console.log(chalk.gray(`No routines match a ${options.event} event for this payload.`));
+        return;
+      }
+
+      console.log(chalk.bold(`Fired ${fired.length} routine(s) on ${options.event}:\n`));
+      for (const f of fired) {
+        console.log(`  ${chalk.cyan(f.jobName)} → ${chalk.green('started')} (run: ${f.runId})`);
       }
       console.log(chalk.gray('\nTrack progress with: agents routines runs <name>'));
     });

@@ -122,6 +122,7 @@ import {
   loadHosts,
   loadLogs,
   loadEvents,
+  loadAudit,
   loadSsh,
   loadPull,
   loadPush,
@@ -947,6 +948,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadHosts);
   await reg(loadLogs);
   await reg(loadEvents);
+  await reg(loadAudit);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');

@@ -363,10 +363,24 @@ export class BrowserIPCServer {
       }
 
       case 'click': {
-        if (!request.task || request.ref === undefined) {
-          return { ok: false, error: 'Task and ref required' };
+        if (!request.task) {
+          return { ok: false, error: 'Task required' };
         }
-        await this.service.click(request.task, request.ref, request.tabId);
+        // Coordinate click (`--at X,Y`) bypasses ref resolution entirely.
+        if (request.atX !== undefined && request.atY !== undefined) {
+          await this.service.clickAt(request.task, request.atX, request.atY, request.tabId);
+          return { ok: true };
+        }
+        if (request.ref === undefined) {
+          return { ok: false, error: 'Task and ref (or --at X,Y) required' };
+        }
+        const { healed } = await this.service.click(request.task, request.ref, request.tabId);
+        if (healed) {
+          return {
+            ok: true,
+            message: `self-healed ref ${healed.from} -> ${healed.to} (${healed.role} "${healed.name}")`,
+          };
+        }
         return { ok: true };
       }
 

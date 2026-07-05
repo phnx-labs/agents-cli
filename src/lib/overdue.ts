@@ -55,6 +55,8 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
 
   for (const job of listJobs()) {
     if (!job.enabled || job.runOnce) continue;
+    // Trigger-only jobs (no cron schedule) never have an expected fire time.
+    if (!job.schedule) continue;
 
     let expected: Date | null = null;
     try {

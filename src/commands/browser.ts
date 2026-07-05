@@ -1271,6 +1271,19 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
+      // Warn (on stderr, so it never corrupts --json stdout) when the a11y tree
+      // exposed nothing to click — the caller should fall back to a screenshot
+      // plus coordinate click.
+      const count = response.nodes?.length ?? 0;
+      if (count === 0) {
+        const scope = opts.all ? 'elements' : 'interactive elements';
+        console.error(
+          `No ${scope} found. The page may render its UI on a canvas or in a custom widget ` +
+            `the accessibility tree doesn't expose. Take a screenshot ` +
+            `(\`browser screenshot\`) and click by position with \`browser click --at X,Y\`.`
+        );
+      }
+
       if (opts.json) {
         console.log(JSON.stringify(response.nodes ?? [], null, 2));
         return;
@@ -1280,17 +1293,40 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('click <ref>')
-    .description('Click an element by ref')
+    .command('click [ref]')
+    .description('Click an element by ref, or raw coordinates with --at X,Y')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .action(async (ref: string, opts) => {
+    .option('--at <x,y>', 'Click viewport coordinates (e.g. --at 320,540), bypassing ref resolution')
+    .action(async (ref: string | undefined, opts) => {
       const task = resolveTaskName(opts);
+
+      let requestExtra: { ref?: number; atX?: number; atY?: number };
+      if (opts.at !== undefined) {
+        const parts = String(opts.at).split(',').map((s) => Number(s.trim()));
+        if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n))) {
+          console.error(`Invalid --at value "${opts.at}". Expected X,Y (e.g. --at 320,540).`);
+          process.exit(1);
+        }
+        requestExtra = { atX: parts[0], atY: parts[1] };
+      } else if (ref !== undefined) {
+        const parsed = parseInt(ref, 10);
+        if (!Number.isFinite(parsed)) {
+          console.error(`Invalid ref "${ref}". Pass an integer ref or use --at X,Y.`);
+          process.exit(1);
+        }
+        requestExtra = { ref: parsed };
+      } else {
+        console.error('Provide a ref (e.g. `click 5`) or coordinates (`click --at X,Y`).');
+        process.exit(1);
+        return;
+      }
+
       const response = await sendIPCRequest({
         action: 'click',
         task,
         tabId: opts.tab,
-        ref: parseInt(ref, 10),
+        ...requestExtra,
       });
 
       if (!response.ok) {
@@ -1298,7 +1334,7 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      console.log('Clicked');
+      console.log(response.message ? `Clicked (${response.message})` : 'Clicked');
     });
 
   browser

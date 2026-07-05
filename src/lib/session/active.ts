@@ -31,8 +31,18 @@ import { extractSessionTopic } from './prompt.js';
 import { readSessionTail } from './tail.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
+import { mapBounded } from '../concurrency.js';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Per-PID `lsof` probes run bounded and staggered rather than as one parallel
+ * fan-out: a simultaneous system-wide `lsof` burst reads to behavioral EDR
+ * (CrowdStrike Falcon) as lateral-movement recon. Results are identical — the
+ * cwds are just gathered at a bounded spawn rate instead of a single burst.
+ */
+export const LSOF_CONCURRENCY = 4;
+const LSOF_STAGGER_MS = 10;
 
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
@@ -498,6 +508,19 @@ function hasAttributedAncestor(pid: number, ppidMap: Map<number, number>, attrib
 }
 
 /**
+ * Resolve every candidate PID's cwd, bounded and staggered so the probes no
+ * longer fan out as one simultaneous system-wide `lsof` burst (a behavioral-EDR
+ * recon trigger). Order matches the input `pids`. The `probe` seam is injectable
+ * for testing the bound; production always uses the real `lsof`-backed probe.
+ */
+export function resolveCwds(
+  pids: number[],
+  probe: (pid: number) => Promise<string | undefined> = getCwdForPid,
+): Promise<(string | undefined)[]> {
+  return mapBounded(pids, probe, { concurrency: LSOF_CONCURRENCY, staggerMs: LSOF_STAGGER_MS });
+}
+
+/**
  * Resolve a process's current working directory via `lsof`. The `-a` flag
  * ANDs the filters; without it macOS treats `-p` and `-d` as a union and
  * returns the cwd of every process on the system.
@@ -573,8 +596,9 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     candidates.push({ pid, kind });
   }
 
-  // Run lsof probes in parallel so N spawns take one round-trip, not N.
-  const cwds = await Promise.all(candidates.map(c => getCwdForPid(c.pid)));
+  // Bounded + staggered lsof probes: same cwds, but a trickle of spawns instead
+  // of one simultaneous system-wide burst that behavioral EDR flags as recon.
+  const cwds = await resolveCwds(candidates.map(c => c.pid));
 
   const out: ActiveSession[] = [];
   for (let i = 0; i < candidates.length; i++) {

@@ -90,6 +90,7 @@ export const loadTeams: ModuleLoader = async () => (await import('../../commands
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
+export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -184,4 +185,5 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   cloud: [loadCloud],
   message: [loadMessage],
   serve: [loadServe],
+  audit: [loadAudit],
 };
