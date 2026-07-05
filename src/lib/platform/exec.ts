@@ -42,6 +42,19 @@ export function findExecutable(name: string, platform: NodeJS.Platform = process
 }
 
 /**
+ * Absolute path of the POSIX shell for `sh -c <command string>` composition.
+ * `/bin/sh` on POSIX; on Windows there is no /bin/sh, so resolve Git's
+ * `sh.exe`/`bash.exe` from PATH (present wherever Git for Windows is — dev
+ * boxes and the GitHub windows runners alike). Falls back to the bare name so
+ * a missing shell surfaces as a clear spawn ENOENT on `sh` rather than a
+ * misleading one on `/bin/sh`.
+ */
+export function posixShellPath(platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32') return '/bin/sh';
+  return findExecutable('sh', platform) ?? findExecutable('bash', platform) ?? 'sh';
+}
+
+/**
  * Quote one argument for a Windows `cmd.exe` command line, as built by Node's
  * `spawn(..., { shell: true })` on win32 (the `.cmd` agent shims, `agents secrets
  * exec`, ...). cmd.exe does NO quoting of its own, so an unquoted arg with a space

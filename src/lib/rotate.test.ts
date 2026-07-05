@@ -181,6 +181,13 @@ process.exit(0);
     const bin = path.join(binDir, 'amp');
     fs.writeFileSync(bin, script);
     fs.chmodSync(bin, 0o755);
+    if (process.platform === 'win32') {
+      // cmd.exe can't exec a shebang script. spawnAgent goes through the shell
+      // on Windows (needsWindowsShell), which resolves `amp` via PATHEXT — so
+      // the runnable fake must be a `.cmd` that hands the script to node.
+      fs.writeFileSync(path.join(binDir, 'amp.js'), script);
+      fs.writeFileSync(path.join(binDir, 'amp.cmd'), `@node "%~dp0amp.js" %*\r\n`);
+    }
     return { binDir, stateFile };
   }
 

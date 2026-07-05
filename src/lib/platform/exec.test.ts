@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import { whichCommand, findExecutable, needsWindowsShell, quoteWin32ExecArg, composeWin32CommandLine } from './exec.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { whichCommand, findExecutable, needsWindowsShell, posixShellPath, quoteWin32ExecArg, composeWin32CommandLine } from './exec.js';
 
 describe('whichCommand', () => {
   it('is `where` on win32, `which` elsewhere', () => {
@@ -151,5 +153,24 @@ describe('composeWin32CommandLine spawn round-trip (win32)', () => {
     expect(res.status).toBe(0);
     expect(res.error).toBeUndefined();
     expect(JSON.parse(res.stdout)).toEqual(trickyArgs);
+  });
+});
+
+describe('posixShellPath', () => {
+  it('is /bin/sh on POSIX platforms', () => {
+    expect(posixShellPath('linux')).toBe('/bin/sh');
+    expect(posixShellPath('darwin')).toBe('/bin/sh');
+  });
+
+  // Host-gated: resolving sh.exe needs a real Windows PATH with Git for
+  // Windows on it (dev boxes and the windows-latest runners both have it).
+  it.runIf(process.platform === 'win32')('resolves a real sh/bash executable on Windows', () => {
+    const shell = posixShellPath('win32');
+    expect(path.win32.isAbsolute(shell)).toBe(true);
+    expect(fs.existsSync(shell)).toBe(true);
+    // The resolved shell must actually run a POSIX command string.
+    const res = spawnSync(shell, ['-c', "printf 'ok'"], { encoding: 'utf-8' });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toBe('ok');
   });
 });

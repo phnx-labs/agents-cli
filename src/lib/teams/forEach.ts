@@ -15,6 +15,7 @@
  */
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { posixShellPath } from '../platform/exec.js';
 import type { AgentManager, AgentProcess, EffortLevel } from './agents.js';
 import type { AgentType } from './parsers.js';
 import { expandForEach, type ForEachSpec, type ForEachTeammate } from '../workflows.js';
@@ -102,10 +103,11 @@ export async function produceItems(
   }
 
   // The producer is a shell command string (e.g. "rg -l 'x' src/"), so it runs
-  // under /bin/sh -c exactly like a teammate command. maxBuffer is raised well
-  // above the default 1MB so a producer emitting a large list isn't truncated
-  // silently mid-stream.
-  const { stdout } = await execFileAsync('/bin/sh', ['-c', spec.produce], {
+  // under `sh -c` exactly like a teammate command — resolved portably, because
+  // /bin/sh does not exist on Windows (there it's Git's sh.exe from PATH).
+  // maxBuffer is raised well above the default 1MB so a producer emitting a
+  // large list isn't truncated silently mid-stream.
+  const { stdout } = await execFileAsync(posixShellPath(), ['-c', spec.produce], {
     cwd: opts.cwd ?? undefined,
     env: opts.env ?? process.env,
     timeout: opts.timeoutMs ?? 120_000,
