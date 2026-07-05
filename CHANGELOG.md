@@ -58,9 +58,11 @@
 
 - The project relicenses from MIT to Apache-2.0. `LICENSE`, `README`, and `package.json` carry the new license, and the human-facing docs (the `AGENTS.md` brand lines, the `CONTRIBUTING.md` CLA clause, `DESIGN.md`) were aligned so the stated license is consistent everywhere.
 
-**Security: shell-injection hardening (#474, #478)**
+**Security hardening batch (#474–#478)**
 
-- `agents inspect` no longer builds its `git` call as a shell string: a crafted repo path could inject via `$(…)` or other shell syntax through `execSync(\`git -C ${…} ${args}\`)`. It now uses argv-form `execFileSync('git', ['-C', root, …args])`, so the path can never reach a shell. Separately, MCP server management rejects a server name that starts with `-` or contains whitespace/control characters and places every user-controlled positional after `--`, closing an option-injection vector. Source: `src/commands/inspect.ts`, `src/lib/mcp.ts`.
+- **Shell / option injection.** `agents inspect` no longer builds its `git` call as a shell string: a crafted repo path could inject via `$(…)` or other shell syntax through `execSync(\`git -C ${…} ${args}\`)`. It now uses argv-form `execFileSync('git', ['-C', root, …args])`, so the path can never reach a shell (#474). Separately, MCP server management rejects a server name that starts with `-` or contains whitespace/control characters and places every user-controlled positional after `--`, closing an option-injection vector (#478). Source: `src/commands/inspect.ts`, `src/lib/mcp.ts`.
+- **Path-traversal containment.** Plugin resolution rejects a plugin name that resolves to the plugins root itself, so a crafted name can't escape or target the directory root (#475). Hook-shim generation validates the shim name before constructing any path and asserts the resolved shim path stays inside the shims directory — rejecting separators, traversal components (`..`), NUL bytes, and leading dashes (#477). Source: `src/lib/plugins.ts`, `src/lib/hooks.ts`, `src/lib/hooks/cache.ts`.
+- **Supply-chain.** Per-version agent installs now run `npm install --ignore-scripts`, so a dependency's install/postinstall lifecycle script can't execute arbitrary code during an `agents` version install (#476). Source: `src/lib/versions.ts`.
 
 ## 1.20.35
 
