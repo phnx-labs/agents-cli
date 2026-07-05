@@ -118,6 +118,41 @@ function isManagedHookCommand(command: string, prefixes: string[]): boolean {
   }
   return false;
 }
+
+/**
+ * Per-version-home command detection. Sync copies each hook script into the
+ * active version's home and registers the command by that version-scoped path
+ * (`~/.agents/.history/versions/<agent>/<version>/home/…`). Because the path
+ * embeds the version number, a later version's sync appends a fresh set whose
+ * paths never string-match (and thus never prune) the prior version's entries —
+ * so entries for every version installed over time pile up in one settings
+ * file, and once a version is removed its entries become dead hooks that error
+ * on every tool call. `versionHomeIdentity` extracts the `<agent>/<version>` a
+ * command (or home path) belongs to so stale sibling-version entries can be
+ * pruned. Returns null for any path outside a per-version home (system hooks,
+ * the user's own custom hooks) — those are never a prune target.
+ */
+const VERSION_HOME_SEGMENT_RE = /\.history\/versions\/([^/]+)\/([^/]+)\/home(?:\/|$)/;
+function versionHomeIdentity(commandOrPath: string): { agent: string; version: string } | null {
+  const norm = commandOrPath.split(/[\\/]/).join('/');
+  const m = VERSION_HOME_SEGMENT_RE.exec(norm);
+  return m ? { agent: m[1], version: m[2] } : null;
+}
+
+/**
+ * True when `command` points into a DIFFERENT version home of the same agent as
+ * `current` — i.e. a stale entry left behind by an earlier version's sync.
+ * Non-version-home commands (system + user-custom hooks) always return false.
+ */
+function isStaleSiblingVersionCommand(
+  command: string,
+  current: { agent: string; version: string } | null
+): boolean {
+  if (!current) return false;
+  const id = versionHomeIdentity(command);
+  return id !== null && id.agent === current.agent && id.version !== current.version;
+}
+
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './versions.js';
 import type { AgentId, InstalledHook, ManifestHook } from './types.js';
 import { generateHookShim, isValidHookShimName, parseCacheConfig, removeHookShim } from './hooks/cache.js';
@@ -1141,8 +1176,14 @@ function registerHooksForClaude(
     if (resolved) currentManifestPaths.add(resolved);
   }
 
-  // Remove stale entries: any hook command under a managed root that isn't
-  // in the current manifest is a leftover from a renamed/deleted hook script.
+  // Identity of the version home being synced. Used to prune entries that point
+  // at a DIFFERENT version home of the same agent (see isStaleSiblingVersionCommand).
+  const currentVh = versionHomeIdentity(versionHome);
+
+  // Remove stale entries: any hook command under a managed root that isn't in
+  // the current manifest is a leftover from a renamed/deleted hook script; any
+  // command pointing at a sibling version's home is a leftover from that
+  // version's sync (its version-scoped path never matches the current set).
   for (const eventEntries of Object.values(hooks)) {
     if (!Array.isArray(eventEntries)) continue;
     for (const group of eventEntries as Array<{
@@ -1151,7 +1192,9 @@ function registerHooksForClaude(
     }>) {
       if (!group.hooks) continue;
       group.hooks = group.hooks.filter(
-        (h) => !isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)
+        (h) =>
+          (!isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)) &&
+          !isStaleSiblingVersionCommand(h.command, currentVh)
       );
     }
   }
@@ -1217,6 +1260,68 @@ function registerHooksForClaude(
   }
 
   return { registered, errors };
+}
+
+/**
+ * Prune every Claude-family (`settings.json`) hook entry whose command lives
+ * under a removed version's home
+ * (`~/.agents/.history/versions/<agent>/<removedVersion>/home/…`).
+ *
+ * `agents remove <agent>@<version>` soft-deletes the version's files but leaves
+ * the hook entries other version homes registered against it — dead hooks that
+ * error on every tool call ("No such file or directory") until the next sync.
+ * This clears them from a remaining version's settings immediately. Only the
+ * removed version's entries are touched; the current version's entries, system
+ * hooks, and the user's own custom hooks are left intact. Returns the number of
+ * entries removed.
+ */
+export function pruneVersionHomeHookEntriesFromSettings(
+  settingsPath: string,
+  agent: AgentId,
+  removedVersion: string
+): number {
+  if (!fs.existsSync(settingsPath)) return 0;
+
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+  } catch {
+    return 0;
+  }
+  if (!config.hooks || typeof config.hooks !== 'object') return 0;
+  const hooks = config.hooks as Record<string, unknown[]>;
+
+  let removed = 0;
+  for (const eventEntries of Object.values(hooks)) {
+    if (!Array.isArray(eventEntries)) continue;
+    for (const group of eventEntries as Array<{ hooks?: Array<{ command: string }> }>) {
+      if (!group.hooks) continue;
+      const before = group.hooks.length;
+      group.hooks = group.hooks.filter((h) => {
+        const id = versionHomeIdentity(h.command);
+        return !(id !== null && id.agent === agent && id.version === removedVersion);
+      });
+      removed += before - group.hooks.length;
+    }
+  }
+  if (removed === 0) return 0;
+
+  // Drop matcher groups left empty by the prune.
+  for (const [event, eventEntries] of Object.entries(hooks)) {
+    if (!Array.isArray(eventEntries)) continue;
+    hooks[event] = (eventEntries as Array<{ hooks?: unknown[] }>).filter(
+      (g) => g.hooks && g.hooks.length > 0
+    );
+  }
+
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2), 'utf-8');
+  } catch {
+    // Best-effort cleanup: a write failure leaves the dead entry to be pruned
+    // on the next sync (see isStaleSiblingVersionCommand).
+    return 0;
+  }
+  return removed;
 }
 
 function registerHooksForCodex(

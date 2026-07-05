@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand } from '../hooks.js';
+import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks.js';
 import * as TOML from 'smol-toml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
 import { compareVersions } from '../versions.js';
@@ -970,5 +970,163 @@ describe('toPortableCommand — portable hook commands (Windows path regression)
   it('folds a POSIX abs path under HOME to ~/ (macOS/Linux behavior unchanged)', () => {
     const out = toPortableCommand('/home/me/.agents/hooks/g.sh', '/home/me', '/');
     expect(out).toBe('~/.agents/hooks/g.sh');
+  });
+});
+
+// Regression for the per-version hook accumulation bug: because sync registers
+// each guard hook by a version-scoped path
+// (~/.agents/.history/versions/claude/<version>/home/.claude/hooks/git-guard.sh),
+// entries for every version installed over time piled up in one settings.json —
+// string-level dedup can't collapse them (paths differ), and `agents remove`
+// deleted a version's files without ever cleaning its settings entries, leaving
+// dead hooks that error on every tool call.
+describe('per-version hook entry pruning (settings accumulation regression)', () => {
+  // Portable version-home guard-hook command for a given version (the form sync
+  // actually writes — see toPortableCommand).
+  function guardCmd(version: string): string {
+    return `~/.agents/.history/versions/claude/${version}/home/.claude/hooks/git-guard.sh`;
+  }
+  const SYSTEM_HOOK = '~/.agents/.system/hooks/00-agent-verify-work-complete.sh';
+  const CUSTOM_HOOK = '~/dotfiles/hooks/my-personal-guard.sh';
+
+  function preToolUseGroup(commands: string[]) {
+    return {
+      PreToolUse: [
+        {
+          matcher: 'Bash',
+          hooks: commands.map((command) => ({ type: 'command', command, timeout: 600 })),
+        },
+      ],
+    };
+  }
+
+  function collectCommands(settings: Record<string, any>): string[] {
+    const out: string[] = [];
+    for (const groups of Object.values(settings.hooks ?? {})) {
+      for (const group of groups as Array<{ hooks?: Array<{ command: string }> }>) {
+        for (const h of group.hooks ?? []) out.push(h.command);
+      }
+    }
+    return out;
+  }
+
+  describe('sync (registerHooksToSettings)', () => {
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-prune-test-'));
+      agentsDir = path.join(tmpDir, '.agents');
+      fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+    });
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('drops sibling-version entries, keeps the current version + .system + custom hooks', () => {
+      // A version-home-shaped path so registrar knows which version it is syncing.
+      const versionHome = path.join(
+        tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
+      );
+      const settingsPath = path.join(versionHome, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+
+      // Seed: three version homes (two stale, one current) + a system hook + a
+      // user's own custom hook, all in one PreToolUse/Bash matcher group.
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: preToolUseGroup([
+          guardCmd('2.1.186'),   // stale sibling -> prune
+          guardCmd('2.1.191'),   // stale sibling -> prune
+          guardCmd('2.1.201'),   // current version -> keep
+          SYSTEM_HOOK,           // .system path -> keep (never a prune target)
+          CUSTOM_HOOK,           // user's own hook -> keep (never a prune target)
+        ]),
+      }, null, 2));
+
+      makeScript('git-guard.sh');
+      const manifest: Record<string, ManifestHook> = {
+        'git-guard': { script: 'git-guard.sh', events: ['PreToolUse'], matcher: 'Bash' },
+      };
+
+      const result = registerHooksToSettings('claude', versionHome, manifest, agentsDir);
+      expect(result.errors).toHaveLength(0);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      const commands = collectCommands(settings);
+
+      // Both sibling versions gone.
+      expect(commands).not.toContain(guardCmd('2.1.186'));
+      expect(commands).not.toContain(guardCmd('2.1.191'));
+      // Exactly one version-home guard entry survives, and it is the current one.
+      const versionHomeCmds = commands.filter((c) => c.includes('.history/versions/claude/'));
+      expect(versionHomeCmds).toEqual([guardCmd('2.1.201')]);
+      // System + custom hooks untouched.
+      expect(commands).toContain(SYSTEM_HOOK);
+      expect(commands).toContain(CUSTOM_HOOK);
+    });
+  });
+
+  describe('remove (pruneVersionHomeHookEntriesFromSettings)', () => {
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-remove-test-'));
+    });
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('removes only the removed version’s entries, keeping siblings + .system + custom', () => {
+      const settingsPath = path.join(tmpDir, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: preToolUseGroup([
+          guardCmd('2.1.186'),
+          guardCmd('2.1.191'),   // removed version -> prune
+          guardCmd('2.1.201'),
+          SYSTEM_HOOK,
+          CUSTOM_HOOK,
+        ]),
+      }, null, 2));
+
+      const removed = pruneVersionHomeHookEntriesFromSettings(settingsPath, 'claude', '2.1.191');
+      expect(removed).toBe(1);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      const commands = collectCommands(settings);
+      expect(commands).not.toContain(guardCmd('2.1.191'));
+      expect(commands).toContain(guardCmd('2.1.186'));
+      expect(commands).toContain(guardCmd('2.1.201'));
+      expect(commands).toContain(SYSTEM_HOOK);
+      expect(commands).toContain(CUSTOM_HOOK);
+    });
+
+    it('never touches another agent’s version or non-version-home hooks', () => {
+      const settingsPath = path.join(tmpDir, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: preToolUseGroup([
+          // Same version number but a DIFFERENT agent — must not be pruned.
+          '~/.agents/.history/versions/droid/2.1.191/home/.factory/hooks/git-guard.sh',
+          SYSTEM_HOOK,
+          CUSTOM_HOOK,
+        ]),
+      }, null, 2));
+
+      const removed = pruneVersionHomeHookEntriesFromSettings(settingsPath, 'claude', '2.1.191');
+      expect(removed).toBe(0);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      const commands = collectCommands(settings);
+      expect(commands).toHaveLength(3);
+      expect(commands).toContain(SYSTEM_HOOK);
+      expect(commands).toContain(CUSTOM_HOOK);
+    });
+
+    it('collapses a matcher group left empty after the prune', () => {
+      const settingsPath = path.join(tmpDir, 'settings.json');
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: preToolUseGroup([guardCmd('2.1.191')]),
+      }, null, 2));
+
+      const removed = pruneVersionHomeHookEntriesFromSettings(settingsPath, 'claude', '2.1.191');
+      expect(removed).toBe(1);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.hooks.PreToolUse).toEqual([]);
+    });
   });
 });

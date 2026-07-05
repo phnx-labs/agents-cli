@@ -40,7 +40,7 @@ import { importInstallScriptBinary } from './import.js';
 import { IS_WINDOWS } from './platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from './subagents.js';
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
-import { parseHookManifest, registerHooksToSettings } from './hooks.js';
+import { parseHookManifest, registerHooksToSettings, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
 import { supports, explainSkip, capableAgents } from './capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills } from './plugins.js';
 import { composeRulesFromState } from './rules/compose.js';
@@ -1508,6 +1508,19 @@ export function removeVersion(agent: AgentId, version: string): boolean {
       fs.unlinkSync(configPath);
     } catch {
       // Ignore if already gone
+    }
+  }
+
+  // Clear dead per-version hook entries the removed version left behind in the
+  // remaining versions' settings. Their command paths point under the now-gone
+  // version home, so they error on every tool call until the next sync. Scoped
+  // to the Claude-family settings.json format (claude + droid) — the surface
+  // where per-version guard hooks accumulate; other agents self-heal on sync.
+  if (agent === 'claude' || agent === 'droid') {
+    const configDir = agentConfigDirName(agent);
+    for (const remaining of listInstalledVersions(agent)) {
+      const settingsPath = path.join(getVersionHomePath(agent, remaining), configDir, 'settings.json');
+      pruneVersionHomeHookEntriesFromSettings(settingsPath, agent, version);
     }
   }
 
