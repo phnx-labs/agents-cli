@@ -59,6 +59,8 @@ interface ExecCommandActionOptions {
   any?: boolean;
   lease?: string | boolean; // --lease [backend]: true when bare, backend string when given
   keepBox?: boolean; // --keep-box: don't tear down the leased box after the run
+  secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
+  allowExpired?: boolean; // --allow-expired: skip expiry pre-run abort for secrets
 }
 
 /** Type guard that narrows a string to a known AgentId. */
@@ -184,6 +186,11 @@ export function registerRunCommand(program: Command): void {
       '--no-auto-secrets',
       'Skip auto-injection of secrets declared by a workflow\'s frontmatter `secrets:` field. Has no effect on bare-agent runs.',
     )
+    .option(
+      '--secrets-keys <keys>',
+      'Inject only this comma-separated subset of keys from --secrets bundles (e.g. KEY1,KEY2). Missing keys are an error. Applies to all --secrets bundles on this run.',
+    )
+    .option('--allow-expired', 'Inject secrets even if their expiry date has passed (overrides the pre-run expiry abort).')
     .option('--cwd <dir>', 'Working directory for the agent (defaults to current directory)')
     .option(
       '--add-dir <dir>',
@@ -987,6 +994,9 @@ export function registerRunCommand(program: Command): void {
       // Resolve --secrets bundles in flag order. Later bundles override earlier
       // ones. Any resolution failure (missing keychain item, blocked exec ref)
       // aborts before spawn so the agent never sees a partial env.
+      const secretsKeysSubset = options.secretsKeys
+        ? options.secretsKeys.split(',').map((k: string) => k.trim()).filter(Boolean)
+        : undefined;
       let secretsEnv: Record<string, string> = {};
       for (const bundleRef of options.secrets) {
         try {
@@ -999,7 +1009,11 @@ export function registerRunCommand(program: Command): void {
             console.log(chalk.gray(`[secrets] Resolved ${bundleName}@${host}: ${Object.keys(bundleEnv).length} keys (remote, ephemeral)`));
             secretsEnv = { ...secretsEnv, ...bundleEnv };
           } else {
-            const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, { caller: `agent ${agent}` });
+            const { bundle, env: bundleEnv } = readAndResolveBundleEnv(bundleName, {
+              caller: `agent ${agent}`,
+              keys: secretsKeysSubset,
+              allowExpired: options.allowExpired,
+            });
             const entries = describeBundle(bundle);
             const counts: Record<string, number> = {};
             for (const e of entries) {

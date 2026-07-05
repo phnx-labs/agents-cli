@@ -1404,20 +1404,29 @@ Examples:
     .command('exec <bundle> [command...]')
     .description('Run a command with the bundle\'s secrets injected into the environment (use --host to resolve the bundle from a remote machine, ephemerally)')
     .option('--host <target>', 'Resolve <bundle> on a remote host over SSH and inject it (ephemeral — never stored on this machine)')
+    .option('--keys <keys>', 'Inject only this comma-separated subset of keys (e.g. KEY1,KEY2). Missing keys are an error.')
+    .option('--allow-expired', 'Inject keys even if their expiry date has passed (overrides the pre-run expiry abort).')
     .allowUnknownOption()
-    .action(async (bundleName: string, commandParts: string[], execOpts: { host?: string }) => {
+    .action(async (bundleName: string, commandParts: string[], execOpts: { host?: string; keys?: string; allowExpired?: boolean }) => {
       try {
         if (commandParts.length === 0) {
           console.error(chalk.red('Usage: agents secrets exec <bundle> -- <command...>'));
           process.exit(1);
         }
         const [cmd, ...args] = commandParts;
+        const keysSubset = execOpts.keys
+          ? execOpts.keys.split(',').map((k) => k.trim()).filter(Boolean)
+          : undefined;
         let secretEnv: Record<string, string>;
         if (execOpts.host) {
           secretEnv = await remoteResolveEnv(await resolveSshTarget(execOpts.host), bundleName);
         } else {
           const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
-          secretEnv = readAndResolveBundleEnv(bundleName, { caller: `command ${cmd}` }).env;
+          secretEnv = readAndResolveBundleEnv(bundleName, {
+            caller: `command ${cmd}`,
+            keys: keysSubset,
+            allowExpired: execOpts.allowExpired,
+          }).env;
         }
         const { spawn } = await import('child_process');
         // On Windows, spawn without a shell ENOENTs for `.cmd`/`.bat` launchers
