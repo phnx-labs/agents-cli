@@ -4,10 +4,12 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   rotationFailoverChain,
+  shouldArmRotationFailover,
   DEFAULT_ROTATION_FAILOVER_LIMIT,
   pickBalancedCandidate,
   type RotateCandidate,
   type RotateResult,
+  type FailoverArmingContext,
 } from './rotate.js';
 import { runWithFallback } from './exec.js';
 
@@ -89,6 +91,53 @@ describe('rotationFailoverChain (#348 — synthesize a same-agent failover chain
     expect(chain[0].version).not.toBe(result!.picked.version);
     expect(chain.some(e => e.version === '3.0.0')).toBe(false);
     expect(['1.0.0', '2.0.0']).toContain(chain[0].version);
+  });
+});
+
+describe('shouldArmRotationFailover (#348 — arming gate; must not trip --acp/--loop guards)', () => {
+  // The eligible baseline: a real rotation picked a version, there is a prompt,
+  // no explicit/profile fallback, and the run is a plain headless prompt run.
+  const armable: FailoverArmingContext = {
+    hasRotation: true,
+    hasVersion: true,
+    hasPrompt: true,
+    explicitFallback: false,
+    interactive: false,
+    acp: false,
+    loop: false,
+    resumeCheckpoint: false,
+  };
+
+  it('arms for a plain headless rotation run with alternatives', () => {
+    expect(shouldArmRotationFailover(armable)).toBe(true);
+  });
+
+  // The regression this guards: arming injected into `fallback` before the
+  // --acp / --loop guards made those runs hard-exit on a flag never passed.
+  it('does NOT arm for --acp runs (they reject a non-empty fallback array)', () => {
+    expect(shouldArmRotationFailover({ ...armable, acp: true })).toBe(false);
+  });
+
+  it('does NOT arm for --loop runs (they reject a non-empty fallback array)', () => {
+    expect(shouldArmRotationFailover({ ...armable, loop: true })).toBe(false);
+  });
+
+  it('does NOT arm for --resume-checkpoint runs (they take the loop path)', () => {
+    expect(shouldArmRotationFailover({ ...armable, resumeCheckpoint: true })).toBe(false);
+  });
+
+  it('does NOT arm for interactive or no-prompt runs', () => {
+    expect(shouldArmRotationFailover({ ...armable, interactive: true })).toBe(false);
+    expect(shouldArmRotationFailover({ ...armable, hasPrompt: false })).toBe(false);
+  });
+
+  it('does NOT arm when an explicit or profile fallback is already set', () => {
+    expect(shouldArmRotationFailover({ ...armable, explicitFallback: true })).toBe(false);
+  });
+
+  it('does NOT arm for pinned / non-rotation runs (no rotation or no picked version)', () => {
+    expect(shouldArmRotationFailover({ ...armable, hasRotation: false })).toBe(false);
+    expect(shouldArmRotationFailover({ ...armable, hasVersion: false })).toBe(false);
   });
 });
 

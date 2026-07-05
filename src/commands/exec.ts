@@ -526,7 +526,7 @@ export function registerRunCommand(program: Command): void {
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, RUN_STRATEGIES },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
@@ -1156,18 +1156,32 @@ export function registerRunCommand(program: Command): void {
         });
       }
 
-      // Mid-run rate-limit failover (issue #348). When a non-pinned strategy
-      // rotated to an account pre-flight and there are OTHER healthy accounts
-      // for the same agent, synthesize a same-agent fallback chain from them so
-      // a 429 mid-run re-dispatches on the next healthy account via the SAME
-      // runWithFallback path (continuing the session via /continue). Gated on an
-      // actual rotation with alternatives, so single-account and pinned runs are
-      // unchanged; skipped when the user set an explicit --fallback chain (its
-      // entries already define recovery) or for interactive/no-prompt runs (a
-      // live TTY session can't be re-dispatched). version is set here because
-      // rotationResult is only populated when resolveRunVersion picked one.
-      if (rotationResult && fallback.length === 0 && prompt !== undefined && !options.interactive && version) {
-        const failover = rotationFailoverChain(rotationResult, version);
+      // Mid-run rate-limit failover (issue #348). When a pre-flight rotation
+      // picked an account and there are OTHER healthy accounts for the same
+      // agent, synthesize a same-agent fallback chain from them so a 429 mid-run
+      // re-dispatches on the next healthy account via the SAME runWithFallback
+      // path (continuing the session via /continue). Because this injects into
+      // the same `fallback` array `--fallback` uses, it must only arm for run
+      // shapes that accept a fallback chain — shouldArmRotationFailover excludes
+      // acp/loop/resume-checkpoint (which reject a non-empty fallback below),
+      // interactive/no-prompt runs, and runs that already have an explicit or
+      // profile fallback. Pinned/single-account runs stay unchanged because
+      // rotationResult is null or rotationFailoverChain returns []. version is
+      // set here because rotationResult is only populated when resolveRunVersion
+      // picked one.
+      if (
+        shouldArmRotationFailover({
+          hasRotation: !!rotationResult,
+          hasVersion: !!version,
+          hasPrompt: prompt !== undefined,
+          explicitFallback: fallback.length > 0,
+          interactive: !!options.interactive,
+          acp: !!options.acp,
+          loop: !!options.loop,
+          resumeCheckpoint: !!options.resumeCheckpoint,
+        })
+      ) {
+        const failover = rotationFailoverChain(rotationResult!, version!);
         if (failover.length > 0) {
           fallback.push(...failover);
           if (!options.quiet) {

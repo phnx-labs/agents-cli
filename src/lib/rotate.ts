@@ -450,3 +450,46 @@ export function rotationFailoverChain(
   }
   return chain;
 }
+
+/**
+ * Whether a run is eligible to have a mid-run rate-limit failover chain armed
+ * (issue #348). Failover injects synthesized `FallbackEntry`s into the same
+ * `fallback` array that `--fallback` uses — so it must NOT arm for run shapes
+ * that reject a non-empty fallback chain, or the run hard-exits on a flag the
+ * user never passed. Specifically:
+ *
+ * - `acp` and `loop` runs bail with "not compatible with --fallback yet" the
+ *   moment `fallback.length > 0` (src/commands/exec.ts), so arming failover
+ *   would break a previously-working `agents run … --loop` / `--acp`.
+ * - `resumeCheckpoint` runs take the loop path (same guard).
+ * - `interactive` / no-prompt runs can't be re-dispatched headlessly.
+ * - `explicitFallback` (a user `--fallback` chain OR a profile fallback already
+ *   unshifted) defines its own recovery; don't layer rotation failover on top.
+ * - `hasRotation`/`hasVersion` gate on an actual pre-flight rotation having
+ *   picked an account, so pinned and non-rotation runs are untouched.
+ *
+ * Pure so the arming matrix is unit-testable without invoking the run command.
+ */
+export interface FailoverArmingContext {
+  hasRotation: boolean;
+  hasVersion: boolean;
+  hasPrompt: boolean;
+  explicitFallback: boolean;
+  interactive: boolean;
+  acp: boolean;
+  loop: boolean;
+  resumeCheckpoint: boolean;
+}
+
+export function shouldArmRotationFailover(ctx: FailoverArmingContext): boolean {
+  return (
+    ctx.hasRotation &&
+    ctx.hasVersion &&
+    ctx.hasPrompt &&
+    !ctx.explicitFallback &&
+    !ctx.interactive &&
+    !ctx.acp &&
+    !ctx.loop &&
+    !ctx.resumeCheckpoint
+  );
+}
