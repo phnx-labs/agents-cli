@@ -93,11 +93,17 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
     console.log(chalk.gray('Skipping system repo clone (--no-system-repo).'));
     console.log(chalk.gray(`Populate ~/.agents/.system/ yourself before running other commands that depend on it.\n`));
   } else {
-    console.log(chalk.gray(`Cloning the system repo from ${systemRepoSlug(systemRepo)} into ~/.agents/.system/.\n`));
+    console.log(
+      chalk.gray(
+        alreadyConfigured
+          ? `Updating the system repo from ${systemRepoSlug(systemRepo)} in ~/.agents/.system/.\n`
+          : `Cloning the system repo from ${systemRepoSlug(systemRepo)} into ~/.agents/.system/.\n`,
+      ),
+    );
 
     ensureAgentsDir();
 
-    const spinner = ora('Cloning system repo...').start();
+    const spinner = ora(alreadyConfigured ? 'Updating system repo...' : 'Cloning system repo...').start();
 
     if (isGitRepo(agentsDir)) {
       // --force on an existing repo: pull instead of re-clone

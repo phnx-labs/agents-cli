@@ -7,6 +7,7 @@
  */
 import simpleGit, { SimpleGit } from 'simple-git';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { IS_WINDOWS, isWindowsAbsolutePath } from './platform/index.js';
 import { getPackageLocalPath } from './state.js';
@@ -578,6 +579,16 @@ export async function hasLocalChanges(dir: string): Promise<boolean> {
 }
 
 /**
+ * Render an absolute path in ~-relative form with forward slashes, matching the
+ * way the rest of the CLI prints home-anchored paths (e.g. `~/.agents/.system`).
+ */
+export function displayHomePath(dir: string): string {
+  const home = os.homedir();
+  const rel = dir.startsWith(home) ? '~' + dir.slice(home.length) : dir;
+  return rel.replace(/\\/g, '/');
+}
+
+/**
  * Pull changes in an existing repo.
  * Refuses to pull if the working tree is dirty -- user must commit or discard changes first.
  */
@@ -590,7 +601,7 @@ export async function pullRepo(dir: string): Promise<{ success: boolean; commit:
       return {
         success: false,
         commit: '',
-        error: 'Working tree has uncommitted changes. Commit or discard them before pulling.\n\n  cd ~/.agents && git status',
+        error: `Working tree has uncommitted changes. Commit or discard them before pulling.\n\n  cd ${displayHomePath(dir)} && git status`,
       };
     }
 

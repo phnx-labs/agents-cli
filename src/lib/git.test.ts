@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
-import { assertSafeGitTransport, parseSource, syncRepoGit } from './git.js';
+import { assertSafeGitTransport, displayHomePath, parseSource, pullRepo, syncRepoGit } from './git.js';
 
 describe('assertSafeGitTransport', () => {
   const allowed = [
@@ -174,5 +174,43 @@ describe('syncRepoGit', () => {
     await simpleGit().clone(remote, verify);
     expect(fs.existsSync(path.join(verify, 'down.txt'))).toBe(true);
     expect(fs.existsSync(path.join(verify, 'up.txt'))).toBe(true);
+  });
+});
+
+describe('displayHomePath', () => {
+  it('renders a home-anchored path in ~-relative form with forward slashes', () => {
+    const abs = os.homedir() + path.sep + '.agents' + path.sep + '.system';
+    expect(displayHomePath(abs)).toBe('~/.agents/.system');
+  });
+
+  it('leaves a path outside the home directory unchanged (bar slash normalization)', () => {
+    expect(displayHomePath('/opt/other/repo')).toBe('/opt/other/repo');
+    expect(displayHomePath('C:\\some\\win\\path')).toBe('C:/some/win/path');
+  });
+});
+
+describe('pullRepo dirty-tree hint', () => {
+  const tmpDirs: string[] = [];
+
+  afterEach(() => {
+    for (const d of tmpDirs) fs.rmSync(d, { recursive: true, force: true });
+    tmpDirs.length = 0;
+  });
+
+  it('points the remediation hint at the repo that actually failed, not a hardcoded path', async () => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'git-pull-'));
+    tmpDirs.push(repo);
+    await simpleGit(repo).init();
+    fs.writeFileSync(path.join(repo, 'dirty.txt'), 'uncommitted');
+
+    const res = await pullRepo(repo);
+
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('Working tree has uncommitted changes');
+    // The hint must reference this repo's own directory ...
+    expect(res.error).toContain(path.basename(repo));
+    expect(res.error).toContain(`cd ${displayHomePath(repo)} && git status`);
+    // ... not the old hardcoded ~/.agents (which is not even a git repo).
+    expect(res.error).not.toContain('cd ~/.agents ');
   });
 });
