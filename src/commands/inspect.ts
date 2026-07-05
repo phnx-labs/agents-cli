@@ -12,7 +12,7 @@
  * AGENT.md / the file itself) so users can click straight to the source.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { addHostOption } from '../lib/hosts/option.js';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -594,38 +594,37 @@ export interface RepoGitInfo {
 }
 
 export function repoGitInfo(root: string): RepoGitInfo | null {
-  const git = (args: string): string | null => {
+  const git = (args: string[]): string | null => {
     try {
-      return execSync(`git -C ${JSON.stringify(root)} ${args}`, { stdio: ['ignore', 'pipe', 'ignore'] })
-        .toString().trim();
+      return execFileSync('git', ['-C', root, ...args], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
     } catch { return null; }
   };
-  const branch = git('rev-parse --abbrev-ref HEAD');
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (branch === null) return null;
 
-  // Read status WITHOUT trimming — git()'s .trim() would strip the leading
+  // Read status WITHOUT trimming — trimming would strip the leading
   // space of the first porcelain line (`XY path`), corrupting the path slice.
   let statusRaw: string | null;
   try {
-    statusRaw = execSync(`git -C ${JSON.stringify(root)} status --porcelain`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+    statusRaw = execFileSync('git', ['-C', root, 'status', '--porcelain'], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' });
   } catch { statusRaw = null; }
   const dirtyFiles = statusRaw ? statusRaw.split('\n').filter(Boolean).map(l => l.slice(3)) : [];
 
   let lastCommit: RepoGitInfo['lastCommit'] = null;
-  const log = git('log -1 --format=%h%x1f%s%x1f%cr');
+  const log = git(['log', '-1', '--format=%h%x1f%s%x1f%cr']);
   if (log) {
     const [sha, subject, relative] = log.split('\x1f');
     if (sha) lastCommit = { sha, subject: subject ?? '', relative: relative ?? '' };
   }
 
   let ahead: number | null = null, behind: number | null = null;
-  const counts = git("rev-list --left-right --count '@{upstream}...HEAD'");
+  const counts = git(['rev-list', '--left-right', '--count', '@{upstream}...HEAD']);
   if (counts) {
     const [b, a] = counts.split(/\s+/).map(n => parseInt(n, 10));
     if (Number.isFinite(b) && Number.isFinite(a)) { behind = b; ahead = a; }
   }
 
-  return { branch, dirty: dirtyFiles.length, dirtyFiles, url: git('remote get-url origin'), lastCommit, ahead, behind };
+  return { branch, dirty: dirtyFiles.length, dirtyFiles, url: git(['remote', 'get-url', 'origin']), lastCommit, ahead, behind };
 }
 
 // ─── Summary mode ────────────────────────────────────────────────────────────

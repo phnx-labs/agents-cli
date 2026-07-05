@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -263,13 +263,13 @@ describe('repoGitInfo', () => {
   it('reports branch, last commit, and dirty files on a real repo', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-git-'));
     tempDirs.push(dir);
-    const g = (args: string) => execSync(`git -C ${JSON.stringify(dir)} ${args}`, { stdio: ['ignore', 'pipe', 'ignore'] });
-    g('init -q -b main');
-    g('config user.email t@t.t');
-    g('config user.name t');
+    const g = (args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' });
+    g(['init', '-q', '-b', 'main']);
+    g(['config', 'user.email', 't@t.t']);
+    g(['config', 'user.name', 't']);
     fs.writeFileSync(path.join(dir, 'a.txt'), 'one');
-    g('add a.txt');
-    g('commit -q -m "first commit"');
+    g(['add', 'a.txt']);
+    g(['commit', '-q', '-m', 'first commit']);
     fs.writeFileSync(path.join(dir, 'a.txt'), 'two');   // make the tree dirty
 
     const info = repoGitInfo(dir)!;
@@ -278,6 +278,20 @@ describe('repoGitInfo', () => {
     expect(info.lastCommit?.sha).toMatch(/^[0-9a-f]{7,}$/);
     expect(info.dirtyFiles).toContain('a.txt');
     expect(info.dirty).toBe(1);
+  });
+
+  it('treats a repo path with shell metacharacters as a literal argument', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-inject-'));
+    tempDirs.push(base);
+    const sentinel = path.join(base, 'pwned');
+    const maliciousDir = path.join(base, `$(touch ${sentinel})`);
+    fs.mkdirSync(maliciousDir, { recursive: true });
+    expect(fs.existsSync(sentinel)).toBe(false);
+
+    const info = repoGitInfo(maliciousDir);
+
+    expect(fs.existsSync(sentinel)).toBe(false);
+    expect(info).toBeNull();
   });
 
   it('returns null for a non-git directory', () => {
