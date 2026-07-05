@@ -26,11 +26,15 @@ import {
   hydrateRemoteEnvFromState,
 } from '../lib/ssh-tunnel.js';
 import { registerActionCommands, withClient, unwrap, pickTarget, type AppInfo } from './computer-actions.js';
+import { runComputerLoop, type LoopEvent } from '../lib/computer/loop.js';
+import { makeVerbDispatcher } from '../lib/computer/dispatch.js';
+import { makeClaudeResponder, resolveApiKey, DEFAULT_CLAUDE_MODEL, DEFAULT_CLAUDE_BASE_URL } from '../lib/computer/model.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
 const COMPUTER_HELP_GROUPS = [
   { title: 'Installation', names: ['setup'] },
   { title: 'Daemon lifecycle', names: ['start', 'stop', 'reload', 'status'] },
+  { title: 'Autonomous', names: ['run'] },
   { title: 'Observe', names: ['apps', 'describe', 'screenshot', 'get-text'] },
   { title: 'Interact', names: ['launch', 'raise', 'click', 'right-click', 'type', 'type-text', 'key', 'drag', 'scroll', 'ax-action', 'focus', 'wait'] },
 ] as const;
@@ -124,6 +128,7 @@ export function registerComputerSubcommands(program: Command): void {
   registerStopCommand(program);
   registerReloadCommand(program);
   registerStatusCommand(program);
+  registerRunCommand(program);
   registerScreenshotCommand(program);
   registerActionCommands(program);
   registerCommandGroups(program, COMPUTER_HELP_GROUPS);
@@ -182,6 +187,94 @@ function registerStatusCommand(program: Command): void {
         await client.close();
       }
     });
+}
+
+// run — the embedded observe -> act -> verify agent loop. A reasoning model
+// (Claude API by default, or any Anthropic-shaped endpoint via --base-url for
+// Ollama / vLLM / LiteLLM) drives the EXISTING computer verbs as tools over the
+// daemon socket. New subcommand: the explicit verb interface external agents
+// use is unchanged. The loop auto-switches to the screenshot/coordinate path
+// when an app's AX tree comes back opaque (WebView / canvas).
+function registerRunCommand(program: Command): void {
+  program
+    .command('run')
+    .description('Autonomously drive an app from a natural-language task (embedded model loop over the computer verbs)')
+    .requiredOption('--task <s>', 'Natural-language task, e.g. "open Notes and write a haiku"')
+    .option('--bundle <id>', 'Bundle id to focus the loop on (default: frontmost allow-listed app)')
+    .option('--base-url <url>', `Reasoning model base URL — Anthropic wire shape (default: ${DEFAULT_CLAUDE_BASE_URL}; set to a local Ollama/vLLM/LiteLLM endpoint for offline parity)`)
+    .option('--model <id>', `Model id (default: ${DEFAULT_CLAUDE_MODEL})`)
+    .option('--max-steps <n>', 'Max model turns before giving up', (v) => parseInt(v, 10), 12)
+    .option('--max-tokens <n>', 'Max tokens per model turn', (v) => parseInt(v, 10), 1024)
+    .option('--host <device>', 'Drive a remote Windows device (requires `agents computer start --host <device>` first)')
+    .option('--json', 'Emit the final loop result as JSON')
+    .action(async (opts: {
+      task: string;
+      bundle?: string;
+      baseUrl?: string;
+      model?: string;
+      maxSteps: number;
+      maxTokens: number;
+      host?: string;
+      json?: boolean;
+    }) => {
+      const apiKey = resolveApiKey({ apiKey: undefined, baseUrl: opts.baseUrl });
+      // The Claude API needs a key; a local/offline endpoint (non-default base
+      // URL) usually ignores it, so only hard-fail on the default endpoint.
+      if (!apiKey && !opts.baseUrl) {
+        console.error('no API key. Set ANTHROPIC_API_KEY (or AGENTS_COMPUTER_API_KEY), or point --base-url at a local endpoint.');
+        process.exit(1);
+      }
+
+      const responder = makeClaudeResponder({
+        baseUrl: opts.baseUrl,
+        model: opts.model,
+        maxTokens: opts.maxTokens,
+      });
+
+      await withClient(async (client) => {
+        const dispatch = makeVerbDispatcher(client);
+        const targetInput = opts.bundle ? { bundle: opts.bundle } : {};
+
+        const result = await runComputerLoop({
+          task: opts.task,
+          responder: (state) => responder({ ...state, task: describeTaskWithTarget(opts.task, opts.bundle) }),
+          dispatch: (call) => dispatch({ ...call, input: { ...targetInput, ...call.input } }),
+          maxSteps: opts.maxSteps,
+          onEvent: opts.json ? undefined : (e) => printLoopEvent(e),
+        });
+
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        console.log('');
+        if (result.status === 'done') {
+          console.log(`done (${result.turns} turn${result.turns === 1 ? '' : 's'}): ${result.finalText ?? ''}`);
+        } else {
+          console.log(`stopped: hit max-steps (${result.turns} turns) without a completion signal`);
+        }
+      });
+    });
+}
+
+// Fold the target bundle into the task text so the model biases toward it.
+function describeTaskWithTarget(task: string, bundle?: string): string {
+  return bundle ? `${task}\n(Target app bundle id: ${bundle})` : task;
+}
+
+// Human progress line per loop event — verb + a one-line result digest.
+function printLoopEvent(e: LoopEvent): void {
+  if (e.kind === 'turn') {
+    console.log(`--- turn ${e.index + 1} ---`);
+  } else if (e.kind === 'dispatch') {
+    const tag = e.visionFallback ? ' [ax opaque]' : '';
+    const status = e.result.ok ? 'ok' : `error: ${e.result.error ?? 'unknown'}`;
+    console.log(`  ${e.call.name}${tag} -> ${status}`);
+  } else if (e.kind === 'vision_switch') {
+    console.log('  (switching to vision path: screenshot + coordinate clicks)');
+  } else if (e.kind === 'done') {
+    console.log(`  model: ${e.text}`);
+  }
 }
 
 function registerScreenshotCommand(program: Command): void {
