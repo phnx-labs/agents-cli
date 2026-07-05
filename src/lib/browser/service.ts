@@ -846,6 +846,46 @@ export class BrowserService {
     return { path: finalPath, bytes: buffer.length, width: dims.width, height: dims.height };
   }
 
+  /**
+   * Export the current tab as a PDF via CDP `Page.printToPDF`. Reuses the
+   * screenshot session + tab resolution so `--tab`, path sandboxing, and the
+   * auto-path (`sessions/<task>/<ts>.pdf`) all behave identically to
+   * `screenshot`. `printBackground: true` matches Chrome's default print flow
+   * — without it, dark-mode pages render on a blank sheet.
+   */
+  async printToPdf(
+    taskId: string,
+    tabHint?: string,
+    outputPath?: string
+  ): Promise<{ path: string; bytes: number }> {
+    const { conn, task } = await this.findTask(taskId);
+
+    const shortId = tabHint ? await this.resolveTabHint(conn, task, tabHint) : this.resolveCurrentTab(task);
+    const cdpTargetId = this.getCdpTargetId(task, shortId);
+
+    const target = await this.getTarget(conn, cdpTargetId);
+    if (!target) {
+      throw new Error(`Tab ${shortId} not found`);
+    }
+
+    const sessionId = await this.getSessionId(conn, target.targetId);
+
+    const { data } = (await conn.cdp.send(
+      'Page.printToPDF',
+      { printBackground: true, preferCSSPageSize: true },
+      sessionId
+    )) as { data: string };
+    const buffer = Buffer.from(data, 'base64');
+
+    const sessionsDir = path.join(getBrowserRuntimeDir(), 'sessions', task.name);
+    const automaticPath = path.join(sessionsDir, `${Date.now()}.pdf`);
+    const finalPath = resolveScreenshotOutputPath(outputPath, automaticPath);
+    await fs.promises.mkdir(path.dirname(finalPath), { recursive: true });
+    await fs.promises.writeFile(finalPath, buffer);
+
+    return { path: finalPath, bytes: buffer.length };
+  }
+
   // ─── Recording ──────────────────────────────────────────────────────────────
   //
   // CDP `Page.startScreencast` emits a JPEG frame per `everyNthFrame`. We pipe

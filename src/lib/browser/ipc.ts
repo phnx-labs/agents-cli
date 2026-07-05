@@ -334,6 +334,18 @@ export class BrowserIPCServer {
         return { ok: true, path: shot.path, bytes: shot.bytes, width: shot.width, height: shot.height };
       }
 
+      case 'pdf': {
+        if (!request.task) {
+          return { ok: false, error: 'Task required' };
+        }
+        const doc = await this.service.printToPdf(
+          request.task,
+          request.tabId,
+          request.path
+        );
+        return { ok: true, path: doc.path, bytes: doc.bytes };
+      }
+
       case 'refs': {
         if (!request.task) {
           return { ok: false, error: 'Task required' };

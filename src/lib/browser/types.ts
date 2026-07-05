@@ -128,6 +128,7 @@ export type IPCAction =
   | 'tab-list'
   | 'evaluate'
   | 'screenshot'
+  | 'pdf'
   | 'refs'
   | 'click'
   | 'type'

@@ -30,6 +30,8 @@ import {
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { isInteractiveTerminal } from './utils.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
+import { buildHar } from '../lib/browser/har.js';
+import { getCliVersion } from '../lib/version.js';
 
 /**
  * Resolve which browser task a command targets. Order:
@@ -67,7 +69,7 @@ const BROWSER_HELP_GROUPS = [
   },
   {
     title: 'Capture evidence',
-    names: ['console', 'errors', 'requests', 'responsebody', 'record', 'logs'],
+    names: ['console', 'errors', 'requests', 'responsebody', 'record', 'pdf', 'logs'],
   },
 ] as const;
 
@@ -851,6 +853,35 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
+    .command('pdf [output]')
+    .description('Export the current tab as PDF via CDP Page.printToPDF — auto-saved under sessions/<task>/ when [output] is omitted')
+    .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
+    .action(async (output: string | undefined, opts) => {
+      const task = resolveTaskName(opts);
+      const response = await sendIPCRequest({
+        action: 'pdf',
+        task,
+        tabId: opts.tab,
+        path: output,
+      });
+
+      if (!response.ok) {
+        console.error(response.error);
+        process.exit(1);
+      }
+
+      console.log(response.path);
+      const size = humanizeBytes(response.bytes);
+      console.error(`Saved PDF to ${response.path} (${size})`);
+
+      if (!output && response.path) {
+        const dir = path.dirname(response.path);
+        console.error(`Tip: auto-saving to ${dir}. Pass a path argument to choose one.`);
+      }
+    });
+
+  browser
     .command('evaluate')
     .description('Evaluate JavaScript in current tab')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
@@ -1570,13 +1601,18 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('requests')
-    .description('Read captured network requests')
+    .description('Read captured network requests. --format har emits a HAR 1.2 JSON document.')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-f, --filter <text>', 'Filter URLs containing text')
     .option('--clear', 'Clear requests after reading')
+    .option('--format <format>', 'Output format: table (default) or har', 'table')
     .action(async (opts) => {
       const task = resolveTaskName(opts);
+      if (opts.format !== 'table' && opts.format !== 'har') {
+        console.error('--format must be "table" or "har"');
+        process.exit(1);
+      }
       const response = await sendIPCRequest({
         action: 'requests',
         task,
@@ -1590,14 +1626,25 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      if (!response.requests || response.requests.length === 0) {
+      const requests = response.requests ?? [];
+
+      if (opts.format === 'har') {
+        const har = buildHar(requests, {
+          creatorName: 'agents-cli',
+          creatorVersion: getCliVersion(),
+        });
+        console.log(JSON.stringify(har, null, 2));
+        return;
+      }
+
+      if (requests.length === 0) {
         console.log('No requests captured');
         return;
       }
 
       console.log('METHOD'.padEnd(8) + 'STATUS'.padEnd(8) + 'URL');
       console.log('-'.repeat(72));
-      for (const req of response.requests) {
+      for (const req of requests) {
         const status = req.status ? String(req.status) : '...';
         console.log(`${req.method.padEnd(8)}${status.padEnd(8)}${req.url.slice(0, 100)}`);
       }
