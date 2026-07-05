@@ -524,7 +524,7 @@ export function registerRunCommand(program: Command): void {
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, defaultModeFor, headlessPlanStallCommand, nativeResume, resolveInteractive },
         { ALL_AGENT_IDS },
         { profileExists, resolveProfileForRun },
-        { readAndResolveBundleEnv, describeBundle },
+        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
@@ -1002,6 +1002,16 @@ export function registerRunCommand(program: Command): void {
         try {
           const { bundle: bundleName, host } = splitBundleRef(bundleRef);
           if (host) {
+            // Least-privilege flags (--secrets-keys / --allow-expired) do not
+            // yet cross the SSH resolver — silently applying them would inject
+            // the full remote env or an expired key. Fail loud so the user
+            // can drop the flag or resolve locally instead.
+            assertRemoteBundleFlagsUnsupported(
+              bundleName,
+              host,
+              { keys: secretsKeysSubset, allowExpired: options.allowExpired },
+              { keysFlag: '--secrets-keys', allowExpiredFlag: '--allow-expired' },
+            );
             // Remote bundle (`bundle@host`): resolve over SSH and inject
             // ephemerally — values never touch this machine's keychain or disk.
             const target = await resolveSshTarget(host);

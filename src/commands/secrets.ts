@@ -1419,6 +1419,17 @@ Examples:
           : undefined;
         let secretEnv: Record<string, string>;
         if (execOpts.host) {
+          // Least-privilege flags do not yet cross the SSH resolver —
+          // silently applying them would inject the full remote env or an
+          // expired key. Fail loud so the user can drop the flag or run
+          // locally instead.
+          const { assertRemoteBundleFlagsUnsupported } = await import('../lib/secrets/bundles.js');
+          assertRemoteBundleFlagsUnsupported(
+            bundleName,
+            execOpts.host,
+            { keys: keysSubset, allowExpired: execOpts.allowExpired },
+            { keysFlag: '--keys', allowExpiredFlag: '--allow-expired' },
+          );
           secretEnv = await remoteResolveEnv(await resolveSshTarget(execOpts.host), bundleName);
         } else {
           const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');

@@ -650,6 +650,75 @@ function assertNotExpired(bundle: SecretsBundle, selectedKeys: string[], allowEx
   }
 }
 
+/**
+ * Resolve the requested key subset against a bundle's `vars` map. Throws a
+ * fail-loud error listing available keys if any requested key is absent. When
+ * `requested` is undefined or empty, every key in the bundle is selected.
+ */
+function selectRequestedKeys(bundle: SecretsBundle, requested: string[] | undefined): Set<string> {
+  const req = requested?.length ? requested : undefined;
+  if (req) {
+    const missing = req.filter((k) => !(k in bundle.vars));
+    if (missing.length > 0) {
+      const available = Object.keys(bundle.vars).join(', ') || '(none)';
+      throw new Error(
+        `Bundle '${bundle.name}' does not contain key(s): ${missing.join(', ')}. Available: ${available}.`,
+      );
+    }
+  }
+  return new Set(req ?? Object.keys(bundle.vars));
+}
+
+/**
+ * Apply the --keys subset + expiry gate to an already-resolved snapshot from
+ * the secrets-agent fast-path. The agent stores the FULL bundle env, so a
+ * naive fast-path return would silently defeat --keys and inject expired
+ * values. Mirrors the slow-path pre-checks in `resolveBundleEnv` /
+ * `readAndResolveBundleEnv` and returns a new env whose keys match the subset.
+ *
+ * Exported for tests; production callers reach it via the fast-path branch in
+ * `readAndResolveBundleEnv`.
+ */
+export function filterAgentHitBySubsetAndExpiry(
+  hit: { bundle: SecretsBundle; env: Record<string, string> },
+  opts: ResolveBundleOptions,
+): { bundle: SecretsBundle; env: Record<string, string> } {
+  const selectedKeys = selectRequestedKeys(hit.bundle, opts.keys);
+  assertNotExpired(hit.bundle, [...selectedKeys], opts.allowExpired ?? false);
+  // When no subset was requested, return the cached env untouched — same
+  // reference the agent handed back, so no per-call allocation on the hot path.
+  if (!opts.keys?.length) return hit;
+  const env: Record<string, string> = {};
+  for (const key of selectedKeys) {
+    if (key in hit.env) env[key] = hit.env[key];
+  }
+  return { bundle: hit.bundle, env };
+}
+
+/**
+ * Guard for remote-bundle callers (`bundle@host` / `--host`) — the SSH
+ * resolver in `remoteResolveEnv` does not thread --keys or --allow-expired
+ * yet. Silently applying them would inject the full remote env or an expired
+ * value, defeating the least-privilege intent, so we fail loud.
+ *
+ * Exported so `agents run --secrets bundle@host` and `agents secrets exec
+ * --host` share the exact same error text; the tests exercise this helper
+ * directly instead of driving the whole CLI.
+ */
+export function assertRemoteBundleFlagsUnsupported(
+  bundleName: string,
+  host: string,
+  opts: { keys?: string[]; allowExpired?: boolean },
+  flagLabels: { keysFlag: string; allowExpiredFlag: string },
+): void {
+  const hasKeys = Array.isArray(opts.keys) && opts.keys.length > 0;
+  if (!hasKeys && !opts.allowExpired) return;
+  throw new Error(
+    `Bundle '${bundleName}@${host}': ${flagLabels.keysFlag} and ${flagLabels.allowExpiredFlag} are not supported for remote (bundle@host) bundles yet. ` +
+    `Drop the flag or resolve the bundle locally.`,
+  );
+}
+
 // Walk the bundle and produce a flat env map. Every keychain: ref is gathered
 // into a single batch read so macOS shows ONE Touch ID prompt for the whole
 // bundle — including the metadata fetch that already happened in readBundle
@@ -661,17 +730,7 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
   stampLastUsed(bundle);
 
   // Key-subset validation and expiry pre-check.
-  const requestedKeys = _opts.keys?.length ? _opts.keys : undefined;
-  if (requestedKeys) {
-    const missing = requestedKeys.filter((k) => !(k in bundle.vars));
-    if (missing.length > 0) {
-      const available = Object.keys(bundle.vars).join(', ') || '(none)';
-      throw new Error(
-        `Bundle '${bundle.name}' does not contain key(s): ${missing.join(', ')}. Available: ${available}.`,
-      );
-    }
-  }
-  const selectedKeys = new Set(requestedKeys ?? Object.keys(bundle.vars));
+  const selectedKeys = selectRequestedKeys(bundle, _opts.keys);
   assertNotExpired(bundle, [...selectedKeys], _opts.allowExpired ?? false);
 
   type Parsed = { literal: string } | { ref: SecretRef };
@@ -755,15 +814,20 @@ export function readAndResolveBundleEnv(
   if (backend === 'keychain' && !opts.noAgent && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
     const hit = agentGetSync(name);
     if (hit) {
-      stampLastUsed(hit.bundle);
+      // The agent stores the FULL bundle env. Apply the same subset filter and
+      // expiry gate as the slow path — without this, `--secrets-keys X` would
+      // silently inject every key and an expired key would flow through after
+      // the first cache-populating run.
+      const filtered = filterAgentHitBySubsetAndExpiry(hit, opts);
+      stampLastUsed(filtered.bundle);
       emit('secrets.get', {
         bundle: name,
         caller: opts.caller,
         status: 'success',
         source: 'agent',
-        keyCount: Object.keys(hit.env).length,
+        keyCount: Object.keys(filtered.env).length,
       });
-      return hit;
+      return filtered;
     }
   }
 
@@ -826,17 +890,7 @@ export function readAndResolveBundleEnv(
   }
 
   // Key-subset validation and expiry pre-check (mirrors resolveBundleEnv logic).
-  const requestedKeys = opts.keys?.length ? opts.keys : undefined;
-  if (requestedKeys) {
-    const missing = requestedKeys.filter((k) => !(k in bundle.vars));
-    if (missing.length > 0) {
-      const available = Object.keys(bundle.vars).join(', ') || '(none)';
-      throw new Error(
-        `Bundle '${name}' does not contain key(s): ${missing.join(', ')}. Available: ${available}.`,
-      );
-    }
-  }
-  const selectedKeys = new Set(requestedKeys ?? Object.keys(bundle.vars));
+  const selectedKeys = selectRequestedKeys(bundle, opts.keys);
   assertNotExpired(bundle, [...selectedKeys], opts.allowExpired ?? false);
 
   stampLastUsed(bundle);
