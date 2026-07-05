@@ -83,7 +83,7 @@ export async function getProfile(name: string): Promise<BrowserProfile | null> {
  * Re-uses an existing `default` profile as-is (we don't second-guess the user
  * if they've already customized it). On first run we walk the priority list
  * (macOS: chrome > brave > edge > chromium > comet; Linux: chrome > chromium >
- * brave > edge; Windows: edge > chrome > brave) and pin the profile to the
+ * brave > edge; Windows: edge > chrome > brave > comet) and pin the profile to the
  * first match. Throws an actionable error if none of those binaries are
  * installed so the user knows exactly which browsers we'd accept.
  */
