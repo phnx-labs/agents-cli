@@ -231,10 +231,8 @@ async function versionPruneAction(
           moved.push({ agent, version: v });
         }
 
-        if (globalDefault && toRemove.includes(globalDefault)) {
-          setGlobalDefault(agent, undefined);
-          console.log(chalk.yellow(`Default version removed. Run: agents use ${agent}@<version> to set a new default`));
-        }
+        // Default reassignment/clearing is handled at the source in
+        // removeVersion() so it applies to every removal path uniformly.
 
         const remaining = listInstalledVersions(agent);
         if (remaining.length === 0) {

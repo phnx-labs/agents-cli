@@ -1484,16 +1484,19 @@ export function removeVersion(agent: AgentId, version: string): boolean {
   // Remove versioned alias (e.g., claude@2.0.65)
   removeVersionedAlias(agent, version);
 
-  // Clear default if it was the removed version - user must explicitly pick a new one
+  // If the removed version was the global default, keep launchers working:
+  // reassign the default to the newest remaining version, or clear it outright
+  // only when nothing is left. Leaving a dangling default pointer here is what
+  // broke every launcher after removing the pinned default.
   if (getGlobalDefault(agent) === version) {
-    const meta = readMeta();
-    if (meta.agents?.[agent]) {
-      delete meta.agents[agent];
-      writeMeta(meta);
-    }
     const remaining = listInstalledVersions(agent);
     if (remaining.length > 0) {
-      console.log(chalk.yellow(`Default version removed. Run: agents use ${agent}@<version> to set a new default`));
+      const newestRemaining = remaining[remaining.length - 1];
+      setGlobalDefault(agent, newestRemaining);
+      console.log(chalk.yellow(`Default ${agent} was ${version} (removed); reassigned to ${newestRemaining}. Change it with: agents use ${agent}@<version>`));
+    } else {
+      setGlobalDefault(agent, undefined);
+      console.log(chalk.yellow(`Removed the last installed ${agent} version and cleared its default. Reinstall with: agents add ${agent}, then set one with: agents use ${agent}@<version>`));
     }
   }
 

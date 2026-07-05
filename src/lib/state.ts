@@ -659,10 +659,16 @@ function writeMetaUnlocked(meta: Meta): void {
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
+  const devicePath = getDeviceMetaPath();
   if (agents && Object.keys(agents).length > 0) {
-    const devicePath = getDeviceMetaPath();
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify({ agents }));
+  } else if (fs.existsSync(devicePath)) {
+    // Every pin was cleared. Persist the emptied map instead of skipping the
+    // write — otherwise the stale device file survives and overlayMachineLocal
+    // re-applies the removed pin on the next read, leaving a dangling default
+    // (e.g. a launcher pointing at a version that was just uninstalled).
+    writeIfChanged(devicePath, META_HEADER + yaml.stringify({ agents: {} }));
   }
 
   if (versions && Object.keys(versions).length > 0) {

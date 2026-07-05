@@ -778,3 +778,65 @@ describe('listInstalledVersions — excludes gutted installs from the picker', (
   });
 });
 
+// Regression (RUSH-1420): removing the version that is the current global
+// default must never leave a dangling default pointer — every launcher shim
+// resolves the default, so a stale pointer breaks `agents run` and the default
+// shim outright ("no installed default for claude"). The fix reassigns the
+// default to the newest remaining install, or clears it cleanly when the last
+// version goes.
+describe('removeVersion — default reassignment when removing the pinned default', () => {
+  // Lay down a claude version on disk the way listInstalledVersions expects:
+  // a real binary file at <versionDir>/node_modules/.bin/claude.
+  function installClaudeVersion(home: string, version: string): void {
+    const binDir = path.join(home, '.agents', '.history', 'versions', 'claude', version, 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\n', 'utf-8');
+  }
+
+  // One subprocess so the module-level HOME + version caches stay consistent:
+  // set the default, remove a version, then read back the resolved default.
+  function runRemoveScenario(home: string, defaultVersion: string, versionToRemove: string): { removed: boolean; defaultAfter: string | null } {
+    const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(process.execPath, [tsxBin, '-e', `
+      import { setGlobalDefault, getGlobalDefault, removeVersion } from ${JSON.stringify(moduleUrl)};
+      setGlobalDefault('claude', ${JSON.stringify(defaultVersion)});
+      const removed = removeVersion('claude', ${JSON.stringify(versionToRemove)});
+      // removeVersion prints a human notice to stdout; tag the machine-readable
+      // result so the parent can pick it out of the surrounding output.
+      console.log('__RESULT__' + JSON.stringify({ removed, defaultAfter: getGlobalDefault('claude') }));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    expect(child.status, child.stderr).toBe(0);
+    const line = child.stdout.split('\n').find((l) => l.startsWith('__RESULT__'));
+    expect(line, child.stdout).toBeTruthy();
+    return JSON.parse(line!.slice('__RESULT__'.length));
+  }
+
+  it('reassigns the default to the newest remaining version when siblings exist', () => {
+    const home = makeTempHome();
+    installClaudeVersion(home, '2.1.185');
+    installClaudeVersion(home, '2.1.196');
+    installClaudeVersion(home, '2.1.201');
+
+    // 2.1.196 is the default and gets removed; 2.1.185 + 2.1.201 remain.
+    const { removed, defaultAfter } = runRemoveScenario(home, '2.1.196', '2.1.196');
+
+    expect(removed).toBe(true);
+    // Newest remaining is 2.1.201 — not the newest overall (which was removed).
+    expect(defaultAfter).toBe('2.1.201');
+    // The removed version's binary is gone (soft-deleted to trash).
+    expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.196', 'node_modules', '.bin', 'claude'))).toBe(false);
+  });
+
+  it('clears the default without a dangling pointer when the last version is removed', () => {
+    const home = makeTempHome();
+    installClaudeVersion(home, '2.1.196');
+
+    const { removed, defaultAfter } = runRemoveScenario(home, '2.1.196', '2.1.196');
+
+    expect(removed).toBe(true);
+    // No versions remain → default cleared cleanly, not left pointing at a ghost.
+    expect(defaultAfter).toBe(null);
+  });
+});
+
