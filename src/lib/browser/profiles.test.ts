@@ -6,16 +6,13 @@ vi.mock('../state.js', () => ({
   writeMeta: vi.fn(),
 }));
 
-vi.mock('child_process', () => ({
-  execFileSync: vi.fn(),
-}));
-
 vi.mock('./chrome.js', () => ({
   findBrowserPath: vi.fn(() => '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
   findFirstInstalledBrowser: vi.fn(() => ({
     browserType: 'chrome',
     binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   })),
+  isPortInUse: vi.fn(() => false),
 }));
 
 import {
@@ -25,11 +22,10 @@ import {
   createProfile,
   ensureDefaultBrowserProfile,
 } from './profiles.js';
-import { findFirstInstalledBrowser } from './chrome.js';
+import { findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import type { BrowserProfile } from './types.js';
 import type { BrowserProfileConfig } from '../types.js';
 import { readMeta, writeMeta } from '../state.js';
-import { execFileSync } from 'child_process';
 
 function profile(endpoints: string[]): BrowserProfile {
   return { name: 'test', browser: 'chrome', endpoints };
@@ -355,9 +351,7 @@ describe('ensureDefaultBrowserProfile', () => {
     vi.mocked(writeMeta).mockImplementation((meta: any) => {
       store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
     });
-    vi.mocked(execFileSync).mockImplementation(() => {
-      throw new Error('free port');
-    });
+    vi.mocked(isPortInUse).mockReturnValue(false);
 
     const profile = await ensureDefaultBrowserProfile();
 
@@ -410,8 +404,8 @@ describe('findFreeProfilePort', () => {
         'p4': { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9225'] },
       },
     } as any);
-    // All OS ports are free (execFileSync throws = nothing listening)
-    vi.mocked(execFileSync).mockImplementation(() => { throw new Error('no process'); });
+    // All OS ports are free
+    vi.mocked(isPortInUse).mockReturnValue(false);
 
     const port = await findFreeProfilePort();
     expect(port).toBe(9226);
@@ -420,12 +414,9 @@ describe('findFreeProfilePort', () => {
   it('skips OS-in-use ports and returns first OS-free port', async () => {
     // No profiles
     vi.mocked(readMeta).mockReturnValue({ browser: {} } as any);
-    // 9222 is in use on the OS (execFileSync succeeds = something listening)
-    // 9223 is free (execFileSync throws)
-    vi.mocked(execFileSync).mockImplementation((_cmd: any, args: any) => {
-      if (Array.isArray(args) && args.includes(':9222')) return '' as any;
-      throw new Error('no process');
-    });
+    // 9222 is bound on the OS (e.g. the user's own browser running with
+    // --remote-debugging-port=9222); 9223 is free
+    vi.mocked(isPortInUse).mockImplementation((port: number) => port === 9222);
 
     const port = await findFreeProfilePort();
     expect(port).toBe(9223);
@@ -440,7 +431,7 @@ describe('findFreeProfilePort', () => {
         'ssh-remote': { browser: 'comet', endpoints: ['ssh://mac-mini:9222'] },
       },
     } as any);
-    vi.mocked(execFileSync).mockImplementation(() => { throw new Error('no process'); });
+    vi.mocked(isPortInUse).mockReturnValue(false);
 
     const port = await findFreeProfilePort();
     expect(port).toBe(9223);
