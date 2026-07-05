@@ -9,14 +9,26 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { groupSessionsByMachine, dedupeByMachineSession } from '../sessions.js';
+import { groupSessionsByMachine, dedupeByMachineSession, mergeLocalFirst } from '../sessions.js';
 import type { ActiveSession } from '../../lib/session/active.js';
+import type { SessionMeta } from '../../lib/session/types.js';
 
 function mk(overrides: Partial<ActiveSession>): ActiveSession {
   return {
     context: 'terminal',
     kind: 'claude',
     status: 'running',
+    ...overrides,
+  };
+}
+
+function mkMeta(overrides: Partial<SessionMeta>): SessionMeta {
+  return {
+    id: overrides.id ?? 's',
+    shortId: overrides.shortId ?? overrides.id ?? 's',
+    agent: 'claude',
+    timestamp: '2026-07-01T00:00:00Z',
+    filePath: '/x.jsonl',
     ...overrides,
   };
 }
@@ -109,5 +121,62 @@ describe('dedupeByMachineSession', () => {
       mk({ machine: 'zion', sessionId: undefined }),
     ]);
     expect(out).toHaveLength(2);
+  });
+});
+
+describe('mergeLocalFirst', () => {
+  it('puts the local machine block first, then remotes by count desc then name', () => {
+    const merged = mergeLocalFirst(
+      [
+        mkMeta({ id: 'a1', machine: 'alpha' }),
+        mkMeta({ id: 'l1', machine: 'yosemite-s0' }),
+        mkMeta({ id: 'b1', machine: 'beta' }),
+        mkMeta({ id: 'b2', machine: 'beta' }),
+      ],
+      'yosemite-s0',
+    );
+    expect(merged.map((s) => s.machine)).toEqual(['yosemite-s0', 'beta', 'beta', 'alpha']);
+  });
+
+  it('treats an untagged session as local (discover leaves local rows implicit)', () => {
+    const merged = mergeLocalFirst(
+      [mkMeta({ id: 'r1', machine: 'zion' }), mkMeta({ id: 'x1', machine: undefined })],
+      'yosemite-s0',
+    );
+    expect(merged[0].machine).toBeUndefined();
+    expect(merged[1].machine).toBe('zion');
+  });
+
+  it('preserves incoming (timestamp) order within a machine block', () => {
+    const merged = mergeLocalFirst(
+      [
+        mkMeta({ id: 'l-new', machine: 'local' }),
+        mkMeta({ id: 'l-old', machine: 'local' }),
+      ],
+      'local',
+    );
+    expect(merged.map((s) => s.id)).toEqual(['l-new', 'l-old']);
+  });
+
+  it('collapses a session present both locally and via fan-out (same machine + id)', () => {
+    const merged = mergeLocalFirst(
+      [
+        mkMeta({ id: 'dup', machine: 'zion' }),
+        mkMeta({ id: 'dup', machine: 'zion' }),
+      ],
+      'local',
+    );
+    expect(merged).toHaveLength(1);
+  });
+
+  it('keeps identically-numbered sessions that live on different machines', () => {
+    const merged = mergeLocalFirst(
+      [
+        mkMeta({ id: 'same', machine: 'local' }),
+        mkMeta({ id: 'same', machine: 'zion' }),
+      ],
+      'local',
+    );
+    expect(merged).toHaveLength(2);
   });
 });

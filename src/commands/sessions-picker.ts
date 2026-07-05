@@ -13,6 +13,14 @@ import { linkPath, relativeToCwd } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
 import { itemPicker } from '../lib/picker.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
+import { machineId } from '../lib/session/sync/config.js';
+
+/** A session whose transcript lives on another machine (folded in over the
+ * cross-machine fan-out): its `filePath` is on that peer's disk, so the preview
+ * can't parse it locally — it shows metadata + a "resume there" note instead. */
+function remoteMachineOf(session: SessionMeta): string | undefined {
+  return session.machine && session.machine !== machineId() ? session.machine : undefined;
+}
 
 /**
  * SessionMeta originates in discover.ts (gitBranch, cwd, label, etc. read from
@@ -57,8 +65,23 @@ const previewCache = new Map<string, string>();
 
 /** Build a cached multi-line preview string for display in the session picker. */
 export function buildPreview(session: SessionMeta): string {
-  const cached = previewCache.get(session.id);
+  const remote = remoteMachineOf(session);
+  const cacheKey = remote ? `${remote}:${session.id}` : session.id;
+  const cached = previewCache.get(cacheKey);
   if (cached) return cached;
+
+  const safe = sanitizeMeta(session);
+
+  // Remote session: the transcript is on the peer's disk, so there is nothing to
+  // parse here. Show the metadata header (agent, cwd, msgs, tokens — all carried
+  // over in the fan-out) plus where it lives and how to open it.
+  if (remote) {
+    const note = '  ' + chalk.gray(`on `) + chalk.bold.white(remote)
+      + chalk.gray(` — enter to resume there, or space then enter to read it over SSH`);
+    const output = [formatHeader(safe, []), '', note].join('\n');
+    previewCache.set(cacheKey, output);
+    return output;
+  }
 
   let events: SessionEvent[] = [];
   let parseError: string | undefined;
@@ -68,13 +91,12 @@ export function buildPreview(session: SessionMeta): string {
     parseError = sanitizeForTerminal(err?.message ?? String(err));
   }
 
-  const safe = sanitizeMeta(session);
   const header = formatHeader(safe, events);
   const body = parseError
     ? '  ' + chalk.red(`Failed to parse session: ${parseError}`)
     : formatCompactPreview(events, safe);
   const output = [header, '', body].filter(Boolean).join('\n');
-  previewCache.set(session.id, output);
+  previewCache.set(cacheKey, output);
   return output;
 }
 

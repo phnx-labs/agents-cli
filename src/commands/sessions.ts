@@ -21,13 +21,14 @@ import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
-import { gatherRemoteActive } from '../lib/session/remote-active.js';
+import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
+import { gatherRemoteList } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
-import { runRemoteSessions } from '../lib/session/remote.js';
+import { runRemoteSessions, buildForwardedArgs } from '../lib/session/remote.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -75,7 +76,8 @@ interface SessionsOptions extends SessionFilterOptions {
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
    * `--no-live` sets this false. Commander's `--no-` convention. */
   live?: boolean;
-  /** With --active: force local-only, skip cross-machine SSH fan-out. */
+  /** Force local-only: skip the cross-machine SSH fan-out (both the default
+   * listing and --active). */
   local?: boolean;
 }
 
@@ -519,6 +521,38 @@ export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession
   return out;
 }
 
+/**
+ * Order a merged listing so the local machine's sessions come first, then each
+ * remote machine as a contiguous block (more sessions first, then name), with
+ * every machine keeping its incoming order (timestamp) within the block. Also
+ * dedupes: a session present both locally (a synced mirror copy) and via live
+ * fan-out collapses to one, keyed by machine + session id. Rows are keyed by
+ * `machine` (discover tags local rows with the local id; fan-out tags remote
+ * rows with the peer id) falling back to `localMachine` when untagged. Pure —
+ * `localMachine` is injected so the ordering is testable without os.hostname().
+ */
+export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): SessionMeta[] {
+  const byMachine = new Map<string, SessionMeta[]>();
+  const seen = new Set<string>();
+  for (const s of sessions) {
+    const machine = s.machine || localMachine;
+    if (s.id) {
+      const dedupeKey = `${machine}:${s.id}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+    }
+    (byMachine.get(machine) ?? byMachine.set(machine, []).get(machine)!).push(s);
+  }
+  const keys = Array.from(byMachine.keys()).sort((a, b) => {
+    if (a === localMachine) return -1;
+    if (b === localMachine) return 1;
+    const ac = byMachine.get(a)!.length, bc = byMachine.get(b)!.length;
+    if (ac !== bc) return bc - ac;
+    return a.localeCompare(b);
+  });
+  return keys.flatMap((k) => byMachine.get(k)!);
+}
+
 /** Print one machine's workspace tree, indented under its machine header. */
 function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string): void {
   let first = true;
@@ -785,6 +819,31 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       return;
     }
 
+    // Cross-machine fan-out: unless --local (or we ARE a peer answering a
+    // parent's sweep), fold in other online machines' sessions live over SSH so
+    // the list spans the fleet without any sync — each remote row carries the
+    // machine it came from, and the picker/table label + group by it. Only the
+    // interactive picker and the printed table get this; --json and single-id
+    // resolution above stay local (a peer answers for itself; scripts get a
+    // deterministic local slice). Best-effort: a fan-out failure leaves the
+    // local list intact rather than erroring the whole command.
+    const forceLocal = options.local === true || process.env[NO_FANOUT_ENV] === '1';
+    if (!forceLocal) {
+      const forwarded = buildForwardedArgs(process.argv);
+      if (!forwarded.includes('--json')) forwarded.push('--json');
+      const fanSpinner = isInteractiveTerminal() ? ora('Reaching other machines...').start() : null;
+      try {
+        const { sessions: remoteSessions } = await gatherRemoteList(forwarded, options.host);
+        if (remoteSessions.length > 0) {
+          sessions = mergeLocalFirst([...sessions, ...remoteSessions], machineId());
+        }
+      } catch {
+        // fan-out is an enrichment, never a hard dependency
+      } finally {
+        fanSpinner?.stop();
+      }
+    }
+
     if (sessions.length === 0) {
       if (pathFilter) {
         console.log(chalk.gray(`No sessions found for ${pathFilter}.`));
@@ -849,7 +908,7 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
  * (tracker/PR ref, pulled out of the badge blob so refs align) is only rendered
  * when `showTicket` — otherwise a listing with no refs would waste a column of
  * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
-function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false): string {
+function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(session.agent);
   const when = formatRelativeTime(session.timestamp);
   const project = session.project || '-';
@@ -861,19 +920,27 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
   const doing = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
   const wt = session.worktreeSlug ? chalk.magenta(`wt:${session.worktreeSlug}`) : '';
 
+  // The machine column only earns its width when the listing spans more than one
+  // box (i.e. the cross-machine fan-out folded remotes in) — same rule as the picker.
+  const machineCell = cols.showMachine
+    ? chalk.gray(padToWidth(truncateToWidth((cols.machineLabel?.(session.machine ?? '') ?? session.machine ?? '') || '-', PICKER_MACHINE_W - 1), PICKER_MACHINE_W))
+    : '';
+
   const TICKET_W = 10;
   const ticketCell = showTicket
     ? chalk.blue(padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1))
     : '';
   const glyphW = glyph ? 2 : 0;
+  const machineW = cols.showMachine ? PICKER_MACHINE_W : 0;
   const ticketW = showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
-  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - ticketW - wtW - stringWidth(when) - 1);
+  const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - machineW - ticketW - wtW - stringWidth(when) - 1);
 
   return (
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
     agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
+    machineCell +
     chalk.cyan(padToWidth(truncateToWidth(project, 14), 16)) +
     (glyph ? glyph + ' ' : '') +
     renderTopicCell(label, doing, '', topicW, topicW) +
@@ -954,9 +1021,11 @@ function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = fals
   }
 
   // Only show the ticket column when at least one row carries a ref — otherwise
-  // it's a column of dashes that steals width from every topic.
+  // it's a column of dashes that steals width from every topic. The machine
+  // column (and its compact labels) is computed the same way the picker does it.
   const showTicket = sessions.some((s) => ticketLabel(s) !== '');
-  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket));
+  const cols = pickerColumnsFor(sessions);
+  for (const session of sessions) console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols));
 
   const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
   console.log(chalk.gray(`\n${countLine}`));
@@ -1271,7 +1340,45 @@ export async function pickSessionInteractive(
   }
 }
 
+/**
+ * The machine a picked session lives on, or undefined when it is local. A
+ * session tagged with a machine other than this one came in over the
+ * cross-machine fan-out: its `filePath` points at the peer's disk, so reading
+ * or resuming it has to hop back over SSH rather than touch the local FS.
+ */
+function remoteMachineOf(session: SessionMeta): string | undefined {
+  return session.machine && session.machine !== machineId() ? session.machine : undefined;
+}
+
+/** Re-run this CLI against a peer's own index over SSH (`--host <machine>`),
+ * inheriting stdio so its picker/markdown renders straight to this terminal. */
+function runOnRemote(args: string[], machine: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const child = spawn('agents', ['sessions', ...args, '--host', machine], {
+      stdio: 'inherit',
+      shell: needsWindowsShell('agents'),
+    });
+    child.on('error', (err: any) => {
+      console.error(chalk.red(`Failed to reach ${machine}: ${err.message}`));
+      resolve();
+    });
+    child.on('close', () => resolve());
+  });
+}
+
 async function handlePickedSession(picked: PickedSession): Promise<void> {
+  // A session on another machine is resumed/viewed on that machine over SSH —
+  // its transcript and agent binary live there, not here.
+  const remote = remoteMachineOf(picked.session);
+  if (remote) {
+    if (picked.action === 'view') {
+      await runOnRemote([picked.session.shortId, '--markdown'], remote);
+    } else {
+      console.log(chalk.gray(`Resuming on ${remote} over SSH...`));
+      await runOnRemote(['resume', picked.session.shortId], remote);
+    }
+    return;
+  }
   if (picked.action === 'view') {
     await renderSession(picked.session, 'summary', {});
     return;
@@ -1792,7 +1899,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--artifacts', 'List all files written or edited during a session')
     .option('--artifact <name>', 'Read a specific artifact by filename or path (outputs to stdout)')
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
-    .option('--local', 'With --active: only this machine — skip the cross-machine SSH fan-out')
+    .option('--local', 'Only this machine — skip the cross-machine SSH fan-out (default listing and --active)')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
@@ -1813,6 +1920,10 @@ export function registerSessionsCommands(program: Command): void {
       # Show only what's running right now (terminals, teams, cloud, headless)
       agents sessions --active
 
+      # The interactive list folds in other online machines automatically,
+      # labelled by host with this machine first. Stay local with --local:
+      agents sessions --local
+
       # Search across every directory, not just this project
       agents sessions "topic" --all
 
@@ -1826,6 +1937,7 @@ export function registerSessionsCommands(program: Command): void {
       agents sessions --all "deploy script" --host box-a --host box-b
     `,
     notes: `
+      - The interactive listing folds in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; --json and single-id lookups stay local.
       - --host runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --include and --exclude are mutually exclusive.
       - --first and --last are mutually exclusive.
