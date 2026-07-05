@@ -13,6 +13,7 @@
 
 import * as crypto from 'crypto';
 import {
+  deleteKeychainToken,
   getKeychainToken,
   hasKeychainToken,
   secretsKeychainItem,
@@ -123,14 +124,85 @@ function snapshotBundle(name: string): BundleSnapshot {
   return { bundle, secrets };
 }
 
+/** Prior state of one keychain item a restore is about to overwrite. */
+interface PriorItem {
+  item: string;
+  /** Whether the item already existed before the restore touched it. */
+  existed: boolean;
+  /** Its value when it existed (undefined for items that didn't exist). */
+  value?: string;
+}
+
+/**
+ * Materialize a decrypted snapshot locally, atomically.
+ *
+ * A naive "set each secret, then write metadata" is not crash-safe: if one
+ * `setKeychainToken` throws midway, the keychain is left with a half-applied
+ * set — some items carry the pulled values, others the old ones — and the
+ * bundle metadata may never be written, leaving orphaned/wrong items readable.
+ *
+ * So we snapshot the PRIOR value of every item we're about to touch, apply all
+ * writes, and on ANY failure roll back to exactly the pre-restore state
+ * (restore previously-existing items, delete items that didn't exist) before
+ * rethrowing. Metadata is committed only after every secret write succeeds; if
+ * that final write fails, the secret writes are rolled back too. Either the
+ * whole pull lands or the keychain is untouched.
+ */
 function restoreSnapshot(snap: BundleSnapshot): void {
   const bundle = snap.bundle;
   validateBundleName(bundle.name);
-  for (const [shortId, value] of Object.entries(snap.secrets)) {
+
+  // Capture the pre-restore state of every item so a partial failure can be
+  // undone. hasKeychainToken never prompts; getKeychainToken reads the existing
+  // value via the same path the rest of the module uses.
+  const priors: PriorItem[] = [];
+  for (const shortId of Object.keys(snap.secrets)) {
     const item = secretsKeychainItem(bundle.name, shortId);
-    setKeychainToken(item, value);
+    if (hasKeychainToken(item)) {
+      priors.push({ item, existed: true, value: getKeychainToken(item) });
+    } else {
+      priors.push({ item, existed: false });
+    }
   }
-  writeBundle(bundle);
+
+  // Best-effort reversal to the captured pre-restore state. Each item is
+  // restored independently so one failure doesn't abort the rest of the
+  // rollback; the original throw is what surfaces to the caller.
+  const rollback = (): void => {
+    for (const prior of priors) {
+      try {
+        if (prior.existed) setKeychainToken(prior.item, prior.value!);
+        else deleteKeychainToken(prior.item);
+      } catch {
+        // Nothing better to do — keep undoing the remaining items.
+      }
+    }
+  };
+
+  try {
+    for (const [shortId, value] of Object.entries(snap.secrets)) {
+      const item = secretsKeychainItem(bundle.name, shortId);
+      setKeychainToken(item, value);
+    }
+  } catch (err) {
+    rollback();
+    throw new Error(
+      `Restore of bundle '${bundle.name}' failed while writing secrets; ` +
+      `rolled back to the pre-restore state. (${(err as Error).message})`,
+    );
+  }
+
+  // Commit metadata last. If it fails, undo the secret writes so nothing
+  // partial lingers.
+  try {
+    writeBundle(bundle);
+  } catch (err) {
+    rollback();
+    throw new Error(
+      `Restore of bundle '${bundle.name}' failed while writing metadata; ` +
+      `rolled back to the pre-restore state. (${(err as Error).message})`,
+    );
+  }
 }
 
 /** Options for pushBundle. */
