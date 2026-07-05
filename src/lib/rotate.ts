@@ -8,6 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, RunStrategy } from './types.js';
+import type { FallbackEntry } from './exec.js';
 import { getAccountInfo, type AccountInfo } from './agents.js';
 import { readMeta, writeMeta, getHelpersDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from './versions.js';
@@ -403,4 +404,49 @@ export async function resolveRunVersion(agent: AgentId, strategy: RunStrategy, c
   }
 
   return { version: fallback, rotation: null };
+}
+
+/**
+ * Cap on the number of healthy accounts a single run will re-dispatch through
+ * after a mid-run rate limit. Bounds the synthesized chain so a machine signed
+ * into many accounts can't turn one 429 into an unbounded cascade of retries.
+ */
+export const DEFAULT_ROTATION_FAILOVER_LIMIT = 3;
+
+/**
+ * Synthesize a same-agent, cross-account fallback chain from a pre-flight
+ * rotation result (issue #348: mid-run rate-limit failover).
+ *
+ * The account rotation picks ONE version pre-spawn; today a 429 mid-run kills
+ * the run with no recovery. `runWithFallback` + `detectRateLimit` already
+ * re-dispatch to the NEXT chain entry on a rate limit and hand off the session
+ * via `/continue <id>` — but only for explicit `--fallback` chains. This turns
+ * the OTHER healthy rotation candidates (every account except the one already
+ * picked as the primary) into `FallbackEntry`s so that SAME machinery re-runs
+ * the task on the next healthy account of the same agent when the primary 429s.
+ *
+ * Each account is a distinct installed version (its own home/auth), so the
+ * entries are same-agent, different-version — exactly what runWithFallback
+ * spawns and what buildFallbackPrompt continues (claude→claude via `/continue`).
+ * Candidates are consumed in `rotation.healthy` order, which is sorted by
+ * remaining capacity (most headroom first, see compareCandidates), so failover
+ * prefers the freshest account.
+ *
+ * Returns `[]` when there is no rotation (pinned strategy) or the picked account
+ * is the only healthy one — so single-account users and non-rotation runs are
+ * completely unchanged.
+ */
+export function rotationFailoverChain(
+  rotation: RotateResult | null,
+  pickedVersion: string,
+  limit: number = DEFAULT_ROTATION_FAILOVER_LIMIT,
+): FallbackEntry[] {
+  if (!rotation || limit <= 0) return [];
+  const chain: FallbackEntry[] = [];
+  for (const candidate of rotation.healthy) {
+    if (candidate.version === pickedVersion) continue; // the primary account
+    chain.push({ agent: candidate.agent, version: candidate.version });
+    if (chain.length >= limit) break;
+  }
+  return chain;
 }

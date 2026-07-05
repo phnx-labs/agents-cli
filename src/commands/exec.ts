@@ -526,7 +526,7 @@ export function registerRunCommand(program: Command): void {
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
@@ -889,6 +889,10 @@ export function registerRunCommand(program: Command): void {
 
       const configuredStrategy = getConfiguredRunStrategy(agent, cwd);
       const explicitStrategy = options.strategy ? normalizeRunStrategy(options.strategy) : null;
+      // Captured from resolveRunVersion below so mid-run rate-limit failover can
+      // synthesize a same-agent fallback chain from the other healthy accounts
+      // (issue #348). Stays null unless a non-pinned strategy actually rotated.
+      let rotationResult: import('../lib/rotate.js').RotateResult | null = null;
       if (options.strategy && !explicitStrategy) {
         console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
         process.exit(1);
@@ -913,6 +917,7 @@ export function registerRunCommand(program: Command): void {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
             if (resolved.version) {
               version = resolved.version;
+              rotationResult = resolved.rotation;
               if (resolved.rotation && !options.quiet) {
                 const banner = formatRotationBanner(resolved.rotation, strategy);
                 process.stderr.write(chalk.gray(banner + '\n'));
@@ -1149,6 +1154,27 @@ export function registerRunCommand(program: Command): void {
           version,
           envOverride: { [profileFallbackModel.envKey]: profileFallbackModel.model },
         });
+      }
+
+      // Mid-run rate-limit failover (issue #348). When a non-pinned strategy
+      // rotated to an account pre-flight and there are OTHER healthy accounts
+      // for the same agent, synthesize a same-agent fallback chain from them so
+      // a 429 mid-run re-dispatches on the next healthy account via the SAME
+      // runWithFallback path (continuing the session via /continue). Gated on an
+      // actual rotation with alternatives, so single-account and pinned runs are
+      // unchanged; skipped when the user set an explicit --fallback chain (its
+      // entries already define recovery) or for interactive/no-prompt runs (a
+      // live TTY session can't be re-dispatched). version is set here because
+      // rotationResult is only populated when resolveRunVersion picked one.
+      if (rotationResult && fallback.length === 0 && prompt !== undefined && !options.interactive && version) {
+        const failover = rotationFailoverChain(rotationResult, version);
+        if (failover.length > 0) {
+          fallback.push(...failover);
+          if (!options.quiet) {
+            const accounts = failover.map(f => `${f.agent}@${f.version}`).join(', ');
+            process.stderr.write(chalk.gray(`[agents] rate-limit failover armed: ${accounts}\n`));
+          }
+        }
       }
 
       if (options.acp) {
