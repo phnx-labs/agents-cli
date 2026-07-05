@@ -167,8 +167,9 @@ Source: `src/lib/secrets/remote.ts` (transport + resolve), wired into `list` /
 | `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 24h) | `agents secrets unlock prod --ttl 30m` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
-| `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `daily` (default) or `always` | `agents secrets policy signing always` |
+| `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `daily` (default), `always`, or `never` (silent, no biometry ACL — needs `--i-understand`) | `agents secrets policy signing always` |
 | `secrets create <name> --policy always` | Create a bundle that prompts on every read | `agents secrets create signing --policy always` |
+| `secrets create <name> --policy never --i-understand` | Create a silent, unprotected (no biometry ACL) automation-only bundle | `agents secrets create ci-cache --policy never --i-understand` |
 
 See [The secrets-agent](#the-secrets-agent-macos) below for the model and the security trade-off.
 
@@ -389,6 +390,8 @@ What the macOS Keychain ACL actually protects:
 - Keychain items are written with `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` plus an access control of `biometryCurrentSet OR devicePasscode`. Source: `src/lib/secrets/keychain-helper.swift:32-44`.
 - That ACL is **user-presence**, not **code-identity**. The OS does not pin the item to the helper binary's code signature. Any same-user process that calls `SecItemCopyMatching` with the same service+account names and pops Touch ID (or the password sheet) gets the value.
 
+The **`never` prompt-policy drops even the user-presence check.** A `never` bundle is stored *without* the biometry access control (`set-no-acl` in the helper uses a plain `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` and attaches no `kSecAttrAccessControl`), so reads are fully silent — no Touch ID, no broker, no user-presence gate at all. That means **any code running as your user reads it with zero interaction**, which is exactly the on-disk-plaintext-equivalent exposure the biometry ACL otherwise mitigates. Reserve `never` for low-sensitivity, automation-only credentials, and never put a high-value secret (signing keys, long-lived cloud tokens) in a `never` bundle. Creating or switching to `never` requires an explicit confirmation (`--i-understand`, or an interactive "are you sure" prompt) precisely because it is the global downgrade the rest of this model is built to avoid. See [Prompt policy and auto-cache](#prompt-policy-and-auto-cache) for the operational details.
+
 Practical implications:
 
 - A malicious binary running as your user, with you logged in at the keyboard, can read any bundle by popping Touch ID with a prompt that says "Unlock agents-cli secrets". Don't approve Touch ID prompts you didn't initiate.
@@ -430,10 +433,11 @@ Each bundle has a **prompt policy** that controls how often macOS asks for Touch
 
 - **`daily`** (default): ask once, then hold it silently. The **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all — one Touch ID per ~24h. Held from that unlock (not refreshed on use) — re-asks sooner after screen-lock, sleep, logout, or `lock`. Despite the name, it is **not** tied to one calendar day or one login session; it's the rolling ~24h hold.
 - **`always`**: ask every time. Only an explicit `unlock` ever puts it in the agent; every other read pops Touch ID. Opt high-value bundles (signing keys, etc.) into this when you want to confirm every single read.
+- **`never`**: stored **without** the biometry access control — reads are fully silent (no Touch ID, no broker, no user-presence check). This is the least-safe tier and is [documented in the security model](#security-model) as an on-disk-plaintext-equivalent downgrade: any code running as your user reads it with zero interaction. It is marked loudly (`never · NO ACL`, in red) in `agents secrets list` and `view`, and creating or switching to it requires an explicit confirmation — an interactive "are you sure" prompt, or `--i-understand` in a headless shell. Reserve it for low-sensitivity, automation-only credentials. Writing a `never` item needs a signed helper that carries the `set-no-acl` path; an older pinned helper rejects the write loudly rather than silently storing an `always`-style ACL'd item.
 
-Change the **default** for all bundles globally in `agents.yaml` (`secrets.policy: always` to flip it back), or override per bundle with `agents secrets policy <bundle> always`.
+Change the **default** for all bundles globally in `agents.yaml` (`secrets.policy: always` to flip it back), or override per bundle with `agents secrets policy <bundle> always`. `never` is never a *default* — it can only be set explicitly per bundle, behind the confirmation gate.
 
-> Wire-format note: the policy persists under the legacy `tier` key (`session` == `daily`, `biometry` == explicit `always`, absent == inherit the default) so bundles stay readable across mixed CLI versions on synced machines. `--tier`/`agents secrets tier` and the old `biometry`/`session` values still work as aliases.
+> Wire-format note: the policy persists under the legacy `tier` key (`session` == `daily`, `biometry` == explicit `always`, `none` == `never`, absent == inherit the default) so bundles stay readable across mixed CLI versions on synced machines. `--tier`/`agents secrets tier` and the old `biometry`/`session`/`none` values still work as aliases. An older CLI that doesn't know `none` reads it as absent and falls back to its own default — safe, since it also lacks the no-ACL write path.
 
 ```yaml
 # ~/.agents/agents.yaml
@@ -443,7 +447,7 @@ secrets:
     auto: false   # opt OUT of daily-policy self-caching (on by default)
 ```
 
-Auto-cache is **on by default** and only ever applies to `daily`-policy bundles — an `always` bundle is never auto-held. (A third `never` policy — items stored without the biometry ACL for fully silent reads with no agent — is intentionally not offered yet; it needs a separate signed-helper change and is the global downgrade the agent is designed to avoid. Tracked in [issue #421](https://github.com/phnx-labs/agents-cli/issues/421).)
+Auto-cache is **on by default** and only ever applies to `daily`-policy bundles — an `always` bundle is never auto-held, and a `never` bundle needs no agent at all (it is already silent). The `never` policy (items stored without the biometry ACL for fully silent reads with no broker) is the global downgrade the agent is otherwise designed to avoid, so it stays gated behind an explicit confirmation and a signed helper with the `set-no-acl` write path; see the [security model](#security-model). Tracked in [issue #421](https://github.com/phnx-labs/agents-cli/issues/421).
 
 **The trade-off (read this):** while a bundle is unlocked, a same-user process that can reach the socket reads it **silently** — today it would at least have to pop a visible "Unlock agents-cli secrets" prompt you might notice. That is the same trust boundary the keychain already concedes above ("any same-user process can pop the prompt and read"), minus the prompt. Bound it by unlocking only the bundles you need, keeping a short TTL, locking when you step away, and never unlocking high-value bundles you'd rather always confirm.
 

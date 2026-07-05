@@ -54,7 +54,10 @@ interface ItemStore {
   has(item: string): boolean;
   get(item: string): string;
   getBatch(items: string[]): Map<string, string>;
-  set(item: string, value: string): void;
+  /** `opts.noAcl` writes the item WITHOUT the biometry access control (the
+   * `never` prompt-policy). Backends with no ACL concept (file store, test
+   * backend) ignore it. */
+  set(item: string, value: string, opts?: { noAcl?: boolean }): void;
   delete(item: string): boolean;
   list(prefix: string): string[];
 }
@@ -160,13 +163,20 @@ export interface VarMeta {
  * - `always`: asks every time. Never auto-held — only an explicit `agents
  *   secrets unlock` ever holds it; every other read pops Touch ID. Opt a
  *   high-value bundle into this when you want to confirm every single read.
+ * - `never`: stored WITHOUT the biometry access control — reads are fully
+ *   silent (no Touch ID, no broker). The least-safe tier: any code running as
+ *   the user reads it with no user-presence check. Reserved for low-sensitivity,
+ *   automation-only credentials. Writing a `never` item needs the signed helper's
+ *   `set-no-acl` path (see keychain-helper.swift); an older pinned helper rejects
+ *   it loudly rather than silently downgrading to `always`.
  *
  * The default is configurable via `secrets.policy` in agents.yaml. Stored on disk
  * under the legacy `tier` key (`session` == `daily`, `biometry` == explicit
- * `always`, absent == inherit the default) so bundles stay readable across mixed
- * CLI versions on synced machines. The user-facing vocabulary is `policy`/`always`/`daily`.
+ * `always`, `none` == `never`, absent == inherit the default) so bundles stay
+ * readable across mixed CLI versions on synced machines. The user-facing
+ * vocabulary is `policy`/`always`/`daily`/`never`.
  */
-export type SecretsPolicy = 'always' | 'daily';
+export type SecretsPolicy = 'always' | 'daily' | 'never';
 
 /** A named set of environment variable definitions backed by various secret providers. */
 export interface SecretsBundle {
@@ -354,6 +364,7 @@ export function readBundle(name: string): SecretsBundle {
 function parsePolicy(raw: unknown): SecretsPolicy | undefined {
   if (raw === 'daily' || raw === 'session') return 'daily';
   if (raw === 'always' || raw === 'biometry') return 'always';
+  if (raw === 'never' || raw === 'none') return 'never';
   return undefined;
 }
 
@@ -407,9 +418,14 @@ export function writeBundle(bundle: SecretsBundle): void {
     backend: backend === 'file' ? 'file' : undefined,
     // Wire format: persist the policy under the legacy `tier` token so older CLI
     // versions on other synced machines keep reading it — `daily`⇒`session`,
-    // explicit `always`⇒`biometry`. An absent policy omits the token entirely
-    // and resolves to the configured default (`daily`) on read.
-    tier: bundle.policy === 'daily' ? 'session' : bundle.policy === 'always' ? 'biometry' : undefined,
+    // explicit `always`⇒`biometry`, `never`⇒`none`. An absent policy omits the
+    // token entirely and resolves to the configured default (`daily`) on read.
+    // An older CLI that doesn't know `none` reads it as undefined and falls back
+    // to its own default — safe, since it also lacks the no-ACL write path.
+    tier: bundle.policy === 'daily' ? 'session'
+      : bundle.policy === 'always' ? 'biometry'
+      : bundle.policy === 'never' ? 'none'
+      : undefined,
     created_at: bundle.created_at,
     updated_at: bundle.updated_at,
     last_used: bundle.last_used,
@@ -417,7 +433,11 @@ export function writeBundle(bundle: SecretsBundle): void {
     meta,
   };
   const json = JSON.stringify(payload);
-  itemStore(backend).set(bundleMetaItem(bundle.name), json);
+  // A `never` bundle's metadata is stored without the biometry ACL too, so
+  // `view` and the metadata half of a read resolve silently — the whole point
+  // of the tier. On an un-updated pinned helper this write fails loudly (the
+  // no-ACL command is missing) rather than silently landing an ACL'd item.
+  itemStore(backend).set(bundleMetaItem(bundle.name), json, { noAcl: bundle.policy === 'never' });
   emit('secrets.set', { bundle: bundle.name });
 }
 
@@ -1011,7 +1031,7 @@ export function rotateBundleSecret(bundle: SecretsBundle, key: string, opts: Rot
   }
   const shortId = raw.slice('keychain:'.length);
   const item = secretsKeychainItem(bundle.name, shortId);
-  itemStore(bundle.backend ?? 'keychain').set(item, opts.newValue);
+  itemStore(bundle.backend ?? 'keychain').set(item, opts.newValue, { noAcl: bundlePolicy(bundle) === 'never' });
 
   if (opts.clearMeta) {
     if (bundle.meta) delete bundle.meta[key];
@@ -1082,7 +1102,7 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
     const shortId = raw.slice('keychain:'.length);
     const newItem = secretsKeychainItem(newName, shortId);
     const value = store.get(oldItem);
-    store.set(newItem, value);
+    store.set(newItem, value, { noAcl: bundlePolicy(source) === 'never' });
   }
 
   // writeBundle preserves source.created_at, refreshes updated_at, and keeps
@@ -1106,13 +1126,24 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
  * `import` / `remove` / `delete`. Pass the bundle's resolved backend
  * (`bundle.backend ?? 'keychain'`).
  */
-export function bundleItemStore(backend: SecretsBackend | undefined): {
+export function bundleItemStore(
+  backend: SecretsBackend | undefined,
+  opts?: { noAcl?: boolean },
+): {
   set(item: string, value: string): void;
   delete(item: string): boolean;
   get(item: string): string;
   has(item: string): boolean;
 } {
-  return itemStore(backend ?? 'keychain');
+  const store = itemStore(backend ?? 'keychain');
+  // `never`-policy bundles write their per-key values without the biometry ACL
+  // (same rationale as the metadata write in writeBundle). Wrap `set` so every
+  // value the add/import paths write inherits the no-ACL flag; reads, deletes,
+  // and existence checks are ACL-independent and pass through untouched.
+  if (opts?.noAcl) {
+    return { ...store, set: (item, value) => store.set(item, value, { noAcl: true }) };
+  }
+  return store;
 }
 
 // Iterate all keychain-backed keys in a bundle for cleanup on rm/unset.

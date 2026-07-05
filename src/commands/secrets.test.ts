@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { assertValidSshTarget, buildSecretsExecEnv, bundleEnvToDotenv, quoteWin32ExecArg } from './secrets.js';
-import { parseDotenv } from '../lib/secrets/bundles.js';
+import {
+  assertValidSshTarget,
+  assertNeverPolicyAcknowledged,
+  buildSecretsExecEnv,
+  bundleEnvToDotenv,
+  parsePolicyOpt,
+  quoteWin32ExecArg,
+  renderPolicyCol,
+} from './secrets.js';
+import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
 
 describe('assertValidSshTarget', () => {
   it('accepts bare ssh-config aliases and user@host', () => {
@@ -20,6 +28,65 @@ describe('assertValidSshTarget', () => {
     expect(() => assertValidSshTarget('a`id`')).toThrow();
     expect(() => assertValidSshTarget('a@b@c')).toThrow();
     expect(() => assertValidSshTarget('')).toThrow();
+  });
+});
+
+describe('parsePolicyOpt', () => {
+  it('accepts the three policies and their legacy aliases', () => {
+    expect(parsePolicyOpt('always')).toBe('always');
+    expect(parsePolicyOpt('biometry')).toBe('always');
+    expect(parsePolicyOpt('daily')).toBe('daily');
+    expect(parsePolicyOpt('session')).toBe('daily');
+    // The whole point of #421: `never` (and its `none` alias) is now accepted,
+    // not rejected by the old stub.
+    expect(parsePolicyOpt('never')).toBe('never');
+    expect(parsePolicyOpt('none')).toBe('never');
+    expect(parsePolicyOpt('NEVER')).toBe('never');
+  });
+
+  it('throws on an unknown policy', () => {
+    expect(() => parsePolicyOpt('sometimes')).toThrow(/Invalid policy/);
+  });
+});
+
+describe('assertNeverPolicyAcknowledged', () => {
+  it('is a no-op for non-never policies regardless of flags', () => {
+    expect(assertNeverPolicyAcknowledged('always', { interactive: false })).toBe('ok');
+    expect(assertNeverPolicyAcknowledged('daily', { interactive: false })).toBe('ok');
+    expect(assertNeverPolicyAcknowledged(undefined, { interactive: false })).toBe('ok');
+  });
+
+  it('REQUIRES confirmation for never: headless without --i-understand is rejected', () => {
+    // This is the guard — a headless `create --policy never` must not silently
+    // downgrade a bundle's protection.
+    expect(() => assertNeverPolicyAcknowledged('never', { interactive: false }))
+      .toThrow(/Refusing to set the 'never' prompt-policy/);
+  });
+
+  it('accepts never when --i-understand is passed (headless opt-in)', () => {
+    expect(assertNeverPolicyAcknowledged('never', { iUnderstand: true, interactive: false })).toBe('ok');
+  });
+
+  it('defers to an interactive prompt for never in a TTY', () => {
+    expect(assertNeverPolicyAcknowledged('never', { interactive: true })).toBe('prompt');
+  });
+});
+
+describe('renderPolicyCol', () => {
+  const bundle = (policy: SecretsBundle['policy']): SecretsBundle => ({ name: 'b', vars: {}, policy });
+
+  it('marks a never bundle distinctly and loudly', () => {
+    const never = renderPolicyCol(bundle('never'));
+    expect(never).toMatch(/never/);
+    expect(never).toMatch(/NO ACL/i);
+    // Distinct from the other tiers — the marking is not shared.
+    expect(never).not.toBe(renderPolicyCol(bundle('always')));
+    expect(never).not.toBe(renderPolicyCol(bundle('daily')));
+  });
+
+  it('does not label always/daily bundles as never', () => {
+    expect(renderPolicyCol(bundle('always'))).not.toMatch(/never/i);
+    expect(renderPolicyCol(bundle('daily'))).not.toMatch(/never/i);
   });
 });
 

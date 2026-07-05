@@ -124,6 +124,17 @@ describe('writeBundle + readBundle round-trip', () => {
     expect(got.description).toBeUndefined();
     expect(got.vars).toEqual({ A: 'x' });
   });
+
+  it('round-trips each explicit policy, persisting never under the legacy tier=none token', () => {
+    for (const policy of ['always', 'daily', 'never'] as const) {
+      writeBundle({ name: `pol-${policy}`, vars: { A: 'x' }, policy });
+      expect(readBundle(`pol-${policy}`).policy).toBe(policy);
+    }
+    // Wire compat: the on-disk token for `never` is `none`, so an older CLI that
+    // doesn't know `none` reads it as absent (undefined) rather than crashing.
+    const raw = JSON.parse(store.get('agents-cli.bundles.pol-never')!.value) as { tier?: string };
+    expect(raw.tier).toBe('none');
+  });
 });
 
 describe('timestamps', () => {

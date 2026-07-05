@@ -290,8 +290,14 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
   return result;
 }
 
-/** Store or update a secret value in the keychain/keyring. Device-local; biometry-gated on macOS. */
-export function setKeychainToken(item: string, value: string): void {
+/** Store or update a secret value in the keychain/keyring. Device-local;
+ * biometry-gated on macOS. `opts.noAcl` (the `never` prompt-policy) writes our
+ * item WITHOUT the biometry access control so later reads are fully silent — it
+ * routes through the signed helper's `set-no-acl` path. A pinned helper that
+ * predates that path rejects the unknown command (exit 2) and this throws,
+ * rather than silently falling back to an ACL'd `set` (which would behave like
+ * `always`). Ignored by the Linux/Windows/test backends, which have no ACL. */
+export function setKeychainToken(item: string, value: string, opts?: { noAcl?: boolean }): void {
   if (backend) { backend.set(item, value); return; }
   assertSupportedPlatform();
   assertValueStorable(value);
@@ -322,12 +328,24 @@ export function setKeychainToken(item: string, value: string): void {
   }
 
   const bin = getKeychainHelperPath();
-  const result = spawnSync(bin, ['set', item, os.userInfo().username], {
+  // `never` policy → no-ACL write. The `set-no-acl` subcommand exists only in a
+  // re-notarized helper; an older pinned helper dies with "Unknown command:
+  // set-no-acl" (exit 2), surfaced below — never a silent ACL'd downgrade.
+  const helperCmd = opts?.noAcl ? 'set-no-acl' : 'set';
+  const result = spawnSync(bin, [helperCmd, item, os.userInfo().username], {
     input: value,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   if (result.status !== 0) {
     const msg = result.stderr?.toString().trim();
+    if (opts?.noAcl && /unknown command/i.test(msg ?? '')) {
+      throw new Error(
+        `The 'never' prompt-policy needs a Keychain helper with the no-ACL write path, ` +
+        `but the installed helper does not support it. Rebuild + re-notarize the signed ` +
+        `helper (scripts/build-keychain-helper.sh) and re-pin its sha, then retry. ` +
+        `(helper said: ${msg})`,
+      );
+    }
     throw new Error(msg || `Failed to write keychain item '${item}'.`);
   }
 }

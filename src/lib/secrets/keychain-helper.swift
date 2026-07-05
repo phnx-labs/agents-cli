@@ -288,7 +288,7 @@ func dieIfCancelled(_ status: OSStatus) {
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    die(2, "Usage: agents-keychain <get|get-batch|set|delete|has|list|list-legacy|list-orphans|migrate-acl|migrate-orphans> ...")
+    die(2, "Usage: agents-keychain <get|get-batch|set|set-no-acl|delete|has|list|list-legacy|list-orphans|migrate-acl|migrate-orphans> ...")
 }
 
 let cmd = args[1]
@@ -505,6 +505,41 @@ case "set":
     addAttrs[kSecValueData] = valueData
     let status = SecItemAdd(addAttrs as CFDictionary, nil)
     guard status == errSecSuccess else { die(2, "Failed to write keychain item (OSStatus \(status))") }
+
+case "set-no-acl":
+    // set-no-acl <service> <account> — value on stdin. The `never` prompt-policy.
+    // Identical to `set` EXCEPT the item carries NO kSecAttrAccessControl: instead
+    // of the biometry-or-passcode gate we attach a plain kSecAttrAccessible of
+    // kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly. The item still lives in
+    // the data-protection keychain, device-local, pinned to our access group, and
+    // never synchronizable — it is only the user-presence check that is dropped.
+    //
+    // Consequence: reads never evaluate an ACL, so get / get-batch return the
+    // value with no Touch ID and no broker. This is the deliberate downgrade the
+    // `never` tier exists to provide, for low-sensitivity automation-only secrets.
+    // AfterFirstUnlock (not WhenUnlocked) so a headless / screen-locked background
+    // process can still read it, which is the whole point of the tier.
+    //
+    // Same delete-then-add dance as `set`: SecItemUpdate can't add/remove an ACL,
+    // so clear any prior copy (ACL'd or not, across all groups, plus the legacy
+    // keychain) and re-add fresh. Deleting an item never prompts.
+    guard args.count == 4 else { die(2, "Usage: agents-keychain set-no-acl <service> <account>") }
+    let (naService, naAccount) = (args[2], args[3])
+    let naStdin = FileHandle.standardInput.readDataToEndOfFile()
+    guard !naStdin.isEmpty, var naValue = String(data: naStdin, encoding: .utf8) else {
+        die(2, "Failed to read value from stdin")
+    }
+    while naValue.hasSuffix("\n") || naValue.hasSuffix("\r") { naValue = String(naValue.dropLast()) }
+    guard let naValueData = naValue.data(using: .utf8) else { die(2, "Failed to encode value") }
+
+    SecItemDelete(dpBaseUnpinned(service: naService, account: naAccount) as CFDictionary)
+    SecItemDelete(fileBase(service: naService, account: naAccount) as CFDictionary)
+
+    var naAddAttrs = dpBase(service: naService, account: naAccount)
+    naAddAttrs[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+    naAddAttrs[kSecValueData] = naValueData
+    let naStatus = SecItemAdd(naAddAttrs as CFDictionary, nil)
+    guard naStatus == errSecSuccess else { die(2, "Failed to write no-ACL keychain item (OSStatus \(naStatus))") }
 
 case "delete":
     // delete <service> <account> — remove the item from BOTH keychains. New

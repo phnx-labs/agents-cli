@@ -346,7 +346,9 @@ function compactRemaining(expiresAt: number): string {
 /** The POLICY column for `secrets list`: the prompt policy, plus a "Nh left"
  * hint when a `daily` bundle is currently held by the secrets-agent. `held`
  * maps bundle name → expiry epoch-ms (from agentStatus()). */
-function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
+export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
+  // `never` is loud on purpose — it's the only tier with no user-presence gate.
+  if (bundlePolicy(b) === 'never') return chalk.red.bold('never · NO ACL');
   if (bundlePolicy(b) === 'always') return chalk.yellow('always ask');
   const exp = held?.get(b.name);
   return exp ? chalk.green(`daily · ${compactRemaining(exp)} left`) : chalk.gray('daily');
@@ -668,11 +670,15 @@ export function registerSecretsCommands(program: Command): void {
         if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
         if (bundle.allow_exec) console.log(chalk.yellow('allow_exec: true'));
         if (bundle.backend === 'file') console.log(chalk.gray('backend: file (passphrase-encrypted; reads need AGENTS_SECRETS_PASSPHRASE, no Touch ID)'));
-        console.log(
-          bundlePolicy(bundle) === 'daily'
-            ? chalk.gray('policy: daily (ask once, then held ~24h until screen-lock / sleep / logout)')
-            : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
-        );
+        if (bundlePolicy(bundle) === 'never') {
+          console.log(chalk.red.bold('policy: never — NO biometry ACL; reads are silent (no Touch ID, no user-presence check). Automation-only.'));
+        } else {
+          console.log(
+            bundlePolicy(bundle) === 'daily'
+              ? chalk.gray('policy: daily (ask once, then held ~24h until screen-lock / sleep / logout)')
+              : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
+          );
+        }
         if (bundle.created_at) console.log(chalk.gray(`created_at: ${bundle.created_at} (${humanAge(bundle.created_at)})`));
         if (bundle.updated_at) console.log(chalk.gray(`updated_at: ${bundle.updated_at} (${humanAge(bundle.updated_at)})`));
         if (bundle.last_used) console.log(chalk.gray(`last_used:  ${bundle.last_used} (${humanAge(bundle.last_used)})`));
@@ -782,11 +788,12 @@ export function registerSecretsCommands(program: Command): void {
     .description('Create an empty bundle')
     .option('--description <text>', 'Free-form description')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
-    .option('--policy <policy>', 'prompt policy: daily (default, ask once a day) or always (ask every time)')
+    .option('--policy <policy>', 'prompt policy: daily (default, ask once a day), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand)')
     .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
+    .option('--i-understand', 'Confirm creating a "never"-policy bundle (no biometry ACL) without an interactive prompt')
     .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
     .option('--force', 'Overwrite an existing bundle')
-    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; policy?: string; tier?: string; backend?: string; force?: boolean }) => {
+    .action(async (name: string | undefined, opts: { description?: string; allowExec?: boolean; policy?: string; tier?: string; iUnderstand?: boolean; backend?: string; force?: boolean }) => {
       try {
         const resolvedName = name ?? (await promptBundleName());
         validateBundleName(resolvedName);
@@ -799,6 +806,13 @@ export function registerSecretsCommands(program: Command): void {
           console.error(chalk.red(`Bundle '${resolvedName}' already exists. Use --force to overwrite.`));
           process.exit(1);
         }
+        // The `never` tier is the least-safe option — gate it loudly. Throws in a
+        // headless shell without --i-understand; prompts otherwise.
+        const ack = assertNeverPolicyAcknowledged(policy, { iUnderstand: opts.iUnderstand, interactive: isInteractiveTerminal() });
+        if (ack === 'prompt' && !(await confirmNeverPolicyInteractive(resolvedName))) {
+          console.error(chalk.yellow('Aborted.'));
+          return;
+        }
         const bundle: SecretsBundle = {
           name: resolvedName,
           description: opts.description,
@@ -808,11 +822,16 @@ export function registerSecretsCommands(program: Command): void {
           vars: {},
         };
         writeBundle(bundle);
-        const tags = [
-          bundlePolicy(bundle) === 'daily' ? 'policy: daily' : 'policy: always ask',
-          backend === 'file' ? 'backend: file' : null,
-        ].filter(Boolean);
+        const policyTag = bundlePolicy(bundle) === 'daily'
+          ? 'policy: daily'
+          : bundlePolicy(bundle) === 'always'
+            ? 'policy: always ask'
+            : 'policy: never (NO biometry ACL)';
+        const tags = [policyTag, backend === 'file' ? 'backend: file' : null].filter(Boolean);
         console.log(chalk.green(`Bundle '${resolvedName}' created (${tags.join(', ')}).`));
+        if (bundlePolicy(bundle) === 'never') {
+          console.log(chalk.red('Stored without biometry protection — reads are silent. Automation-only; rotate anything sensitive out of it.'));
+        }
         if (backend === 'file') {
           console.log(chalk.gray('File-backed: items are AES-256-GCM encrypted under AGENTS_SECRETS_PASSPHRASE (no Touch ID).'));
         }
@@ -951,7 +970,7 @@ export function registerSecretsCommands(program: Command): void {
           secretValue = await promptForSecret(`Enter value for ${resolvedBundleName}.${resolvedKey}`);
         }
         const item = secretsKeychainItem(resolvedBundleName, resolvedKey);
-        bundleItemStore(bundle.backend).set(item, secretValue);
+        bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' }).set(item, secretValue);
         bundle.vars[resolvedKey] = keychainRef(resolvedKey);
         applyMeta();
         writeBundle(bundle);
@@ -1207,7 +1226,7 @@ Examples:
             vars: {},
           };
         }
-        const store = bundleItemStore(bundle.backend);
+        const store = bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' });
         let added = 0;
         let skipped = 0;
 
@@ -1679,8 +1698,9 @@ Examples:
   cmd
     .command('policy <bundle> [policy]')
     .alias('tier')
-    .description("Show or set a bundle's prompt policy: daily (default, ask once a day) or always (ask every time).")
-    .action((bundleName: string, policyArg: string | undefined) => {
+    .description("Show or set a bundle's prompt policy: daily (default, ask once a day), always (ask every time), or never (silent, NO biometry ACL).")
+    .option('--i-understand', 'Confirm switching to the "never" policy (no biometry ACL) without an interactive prompt')
+    .action(async (bundleName: string, policyArg: string | undefined, opts: { iUnderstand?: boolean }) => {
       try {
         const bundle = readBundle(bundleName);
         if (policyArg === undefined) {
@@ -1688,13 +1708,21 @@ Examples:
           return;
         }
         const next = parsePolicyOpt(policyArg);
+        // Switching to `never` drops the biometry ACL — gate it exactly like create.
+        const ack = assertNeverPolicyAcknowledged(next, { iUnderstand: opts.iUnderstand, interactive: isInteractiveTerminal() });
+        if (ack === 'prompt' && !(await confirmNeverPolicyInteractive(bundle.name))) {
+          console.error(chalk.yellow('Aborted.'));
+          return;
+        }
         bundle.policy = next;
         writeBundle(bundle);
         console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
         if (next === 'daily') {
           console.log(chalk.gray('Held by the secrets-agent for ~24h after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));
-        } else {
+        } else if (next === 'always') {
           console.log(chalk.gray('Asks for Touch ID every time — never auto-held.'));
+        } else {
+          console.log(chalk.red('Stored without biometry protection — reads are silent. Automation-only.'));
         }
       } catch (err) {
         console.error(chalk.red((err as Error).message));
@@ -1747,21 +1775,54 @@ Examples:
   registerSecretsMigrateAclCommand(cmd);
 }
 
-/** Validate a prompt-policy value, exiting with a clear message on a bad one.
- * Accepts the legacy `biometry`/`session` tokens as aliases for `always`/`daily`
- * so older flags and scripts keep working. `never`/`none` (no biometry ACL) is
- * rejected explicitly — it needs a separate signed-helper change (see
- * https://github.com/phnx-labs/agents-cli/issues/421). */
-function parsePolicyOpt(raw: string | undefined): SecretsPolicy {
+/** Validate a prompt-policy value, throwing a clear message on a bad one (the
+ * caller's try/catch renders it and exits). Accepts the legacy `biometry` /
+ * `session` / `none` tokens as aliases for `always` / `daily` / `never` so older
+ * flags and scripts keep working. `never`/`none` is the no-biometry-ACL tier —
+ * accepted here, then gated behind a loud confirmation in the command layer. */
+export function parsePolicyOpt(raw: string | undefined): SecretsPolicy {
   const v = (raw ?? 'always').toLowerCase();
   if (v === 'always' || v === 'biometry') return 'always';
   if (v === 'daily' || v === 'session') return 'daily';
-  if (v === 'never' || v === 'none') {
-    console.error(chalk.red("policy 'never' (no biometry ACL) is not available yet — see https://github.com/phnx-labs/agents-cli/issues/421. Use 'always' or 'daily'."));
-    process.exit(1);
+  if (v === 'never' || v === 'none') return 'never';
+  throw new Error(`Invalid policy '${raw}'. Use 'always', 'daily', or 'never'.`);
+}
+
+/**
+ * Gate a create/switch to the `never` prompt-policy behind an explicit,
+ * deliberate acknowledgement — it is the least-safe tier (no user-presence
+ * check on any read). Returns:
+ *   - `'ok'`    — not `never`, or already acknowledged via `--i-understand`.
+ *   - `'prompt'` — interactive shell: caller must run a loud confirm prompt.
+ * Throws in a non-interactive shell when the flag is absent, so a headless
+ * `create --policy never` can't silently downgrade a bundle's protection.
+ */
+export function assertNeverPolicyAcknowledged(
+  policy: SecretsPolicy | undefined,
+  opts: { iUnderstand?: boolean; interactive: boolean },
+): 'ok' | 'prompt' {
+  if (policy !== 'never') return 'ok';
+  if (opts.iUnderstand) return 'ok';
+  if (!opts.interactive) {
+    throw new Error(
+      "Refusing to set the 'never' prompt-policy without confirmation. This tier stores " +
+      'the bundle WITHOUT the biometry access control: every read is silent, with no Touch ID ' +
+      'and no user-presence check — any code running as you can read it. Re-run with ' +
+      '--i-understand to confirm you want an unprotected, automation-only bundle.',
+    );
   }
-  console.error(chalk.red(`Invalid policy '${raw}'. Use 'always' or 'daily'.`));
-  process.exit(1);
+  return 'prompt';
+}
+
+/** Loud confirm prompt shown before creating/switching to `never` in a TTY.
+ * Returns true to proceed. Kept separate from assertNeverPolicyAcknowledged so
+ * the decision logic stays pure and unit-testable. */
+async function confirmNeverPolicyInteractive(bundleName: string): Promise<boolean> {
+  console.error(chalk.red.bold('WARNING: policy "never" stores this bundle with NO biometry ACL.'));
+  console.error(chalk.red(`Reads of '${bundleName}' will be fully silent — no Touch ID, no user-presence check.`));
+  console.error(chalk.yellow('Use it only for low-sensitivity, automation-only credentials.'));
+  const { confirm } = await import('@inquirer/prompts');
+  return confirm({ message: `Store '${bundleName}' WITHOUT biometry protection?`, default: false });
 }
 
 /** Validate a --backend value, exiting with a clear message on a bad one. */
