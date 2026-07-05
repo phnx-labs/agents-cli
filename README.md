@@ -41,7 +41,7 @@ npm install -g @phnx-labs/agents-cli
 bun install -g @phnx-labs/agents-cli
 ```
 
-Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt).
+Already installed? `agents upgrade` updates agents-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- there is no `agents update` (on macOS, `agents helper update` is a different command that reinstalls the keychain helper, not agents-cli).
 
 Source: [github.com/phnx-labs/agents-cli](https://github.com/phnx-labs/agents-cli)
 
