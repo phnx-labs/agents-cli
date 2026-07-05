@@ -216,6 +216,20 @@ export function buildSecretsExecEnv(
   return env;
 }
 
+/**
+ * Resolve the CLI version for the MCP server's `serverInfo.version`. package.json
+ * sits at the repo root — two levels up from both `src/commands/` (bun/tsx dev)
+ * and `dist/commands/` (built). Cosmetic only, so any failure falls back cleanly.
+ */
+function getCliVersion(): string {
+  try {
+    const pkgPath = new URL('../../package.json', import.meta.url);
+    return JSON.parse(fs.readFileSync(pkgPath, 'utf-8')).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 /** POSIX single-quote a string for safe interpolation into a remote shell command. */
 function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -575,7 +589,7 @@ export function registerSecretsCommands(program: Command): void {
     { title: 'Agent commands', names: ['start', 'stop', 'unlock', 'lock', 'status', 'policy'] },
     { title: 'Raw item commands', names: ['get', 'set'] },
     { title: 'Sync commands', names: ['push', 'pull', 'remote-list'] },
-    { title: 'Utilities', names: ['exec', 'generate', 'migrate-acl'] },
+    { title: 'Utilities', names: ['exec', 'mcp', 'generate', 'migrate-acl'] },
   ]);
 
   cmd
@@ -1466,6 +1480,18 @@ Examples:
         console.error(chalk.red((err as Error).message));
         process.exit(1);
       }
+    });
+
+  cmd
+    .command('mcp')
+    .description('Run a stdio MCP server exposing get_secret(bundle, key) — hand credentials to an MCP-speaking agent by name at call time, never through the child process environment')
+    .action(async () => {
+      // JIT credential delivery (#333): unlike `secrets exec`, which bakes every
+      // resolved value into the child's env, this speaks MCP over stdio so a
+      // framework requests one secret at a time and the raw value never enters
+      // process.env. stdout is the JSON-RPC channel — nothing else may print there.
+      const { runSecretsMcpServer } = await import('../lib/secrets/mcp.js');
+      await runSecretsMcpServer({ version: getCliVersion() });
     });
 
   cmd
