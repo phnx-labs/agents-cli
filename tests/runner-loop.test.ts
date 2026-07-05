@@ -22,20 +22,26 @@ const hoistedState: LoopTestState =
   ((globalThis as Record<string, unknown>)['__agents_cli_runner_loop_test_state__'] as LoopTestState | undefined)
   ?? (((globalThis as Record<string, unknown>)['__agents_cli_runner_loop_test_state__'] = { TEST_DIR: '' }) as LoopTestState);
 
-vi.mock('../src/lib/state.js', () => {
-  const nodePath = require('node:path') as typeof import('path');
+// Partial mock: keep the real state.js exports (getModelsCachePath, loaded at
+// models.ts import time, and getMailboxRootDir, used by runLoop) and override
+// only the path getters to the isolated TEST_DIR. A full replacement drops
+// those transitive exports and fails under vitest (the CI runner).
+vi.mock('../src/lib/state.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/state.js')>();
   const gt = globalThis as Record<string, unknown>;
   if (!gt['__agents_cli_runner_loop_test_state__']) {
     gt['__agents_cli_runner_loop_test_state__'] = { TEST_DIR: '' };
   }
   const state = () => gt['__agents_cli_runner_loop_test_state__'] as LoopTestState;
   return {
-    get getRoutinesDir() { return () => nodePath.join(state().TEST_DIR, 'routines'); },
-    get getRunsDir() { return () => nodePath.join(state().TEST_DIR, 'runs'); },
-    get getUserAgentsDir() { return () => state().TEST_DIR; },
-    get getCliVersionCachePath() { return () => nodePath.join(state().TEST_DIR, '.cli-version-cache.json'); },
-    get ensureAgentsDir() { return () => {}; },
-    get getProjectRoutinesDir() { return () => null; },
+    ...actual,
+    getRoutinesDir: () => join(state().TEST_DIR, 'routines'),
+    getRunsDir: () => join(state().TEST_DIR, 'runs'),
+    getUserAgentsDir: () => state().TEST_DIR,
+    getCliVersionCachePath: () => join(state().TEST_DIR, '.cli-version-cache.json'),
+    ensureAgentsDir: () => {},
+    getProjectRoutinesDir: () => null,
+    getMailboxRootDir: () => join(state().TEST_DIR, 'mailbox'),
   };
 });
 
