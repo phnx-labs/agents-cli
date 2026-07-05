@@ -18,6 +18,8 @@
  * terminal output, json-per-wave output, or a TUI.
  */
 import type { AgentManager, AgentProcess } from './agents.js';
+import type { TeamBudgetWatcher } from '../budget/live-team.js';
+import type { BreachInfo } from '../budget/enforce.js';
 
 export interface WaveSummary {
   wave: number;
@@ -37,12 +39,23 @@ export interface SupervisorOptions {
   maxWaves?: number;
   /** Called once per wave. Return false to stop the loop gracefully. */
   onWave: (summary: WaveSummary) => void | Promise<void> | boolean | Promise<boolean>;
+  /**
+   * Optional live-spend watcher (issue #399). Polled once per wave; on first
+   * breach the supervisor calls `manager.stopByTask(team)` and exits with
+   * `stoppedBy: 'budget'`. Dormant when null — supervisor behavior is unchanged
+   * for teams that never opt into budget enforcement.
+   */
+  budgetWatcher?: TeamBudgetWatcher | null;
+  /** Called with the breach details when the budget watcher trips. */
+  onBudgetBreach?: (breach: BreachInfo) => void;
 }
 
 export interface SupervisorResult {
   waves: number;
-  stoppedBy: 'drained' | 'max-waves' | 'signal' | 'callback';
+  stoppedBy: 'drained' | 'max-waves' | 'signal' | 'callback' | 'budget';
   elapsed_ms: number;
+  /** Set when `stoppedBy === 'budget'` — the breach that terminated the team. */
+  budgetBreach?: BreachInfo;
 }
 
 /**
@@ -93,6 +106,25 @@ export async function runSupervisor(
       const keepGoing = await opts.onWave(summary);
       if (keepGoing === false) {
         return { waves: wave, stoppedBy: 'callback', elapsed_ms: Date.now() - startedAt };
+      }
+
+      // Live budget kill (issue #399). Poll AFTER the wave's callback so the
+      // most recent teammate stdout is already flushed to disk. On breach we
+      // stop every RUNNING teammate — the DAG effectively drains this wave.
+      if (opts.budgetWatcher) {
+        await opts.budgetWatcher.poll();
+        if (opts.budgetWatcher.breached()) {
+          const breach = opts.budgetWatcher.breach();
+          await mgr.stopByTask(team);
+          if (breach && opts.onBudgetBreach) opts.onBudgetBreach(breach);
+          opts.budgetWatcher.dispose();
+          return {
+            waves: wave,
+            stoppedBy: 'budget',
+            elapsed_ms: Date.now() - startedAt,
+            budgetBreach: breach ?? undefined,
+          };
+        }
       }
 
       // Re-check drain AFTER the callback. The callback may have added new

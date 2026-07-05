@@ -362,11 +362,31 @@ Examples:
       if (options.follow === false) return;
 
       try {
-        const result = await renderStream(provider.stream(task.id), { json });
+        // Live budget kill-switch (issue #399). Reuses makeLiveSpendWatcher to
+        // feed the provider's `usage` events into a shared watcher; on a cap
+        // breach we call provider.cancel(task.id) mid-stream. Dormant (returns
+        // null) when no caps are configured, so the raw stream flows unchanged.
+        const { wrapStreamWithBudgetGate } = await import('../lib/budget/live-cloud.js');
+        const gated = wrapStreamWithBudgetGate({
+          provider,
+          taskId: task.id,
+          project: task.repo ?? task.repos?.[0] ?? process.cwd(),
+          agent: task.agent ?? 'cloud',
+          cwd: process.cwd(),
+        });
+        const eventSource = gated ? gated.wrap(provider.stream(task.id)) : provider.stream(task.id);
+        const result = await renderStream(eventSource, { json });
         updateTaskStatus(task.id, result.status as CloudTaskStatus, {
           summary: result.summary,
           prUrl: result.prUrl,
         });
+        if (gated?.gate.breached()) {
+          const b = gated.gate.breach();
+          process.stderr.write(
+            `[budget] cap ${b?.cap} exceeded — cancelled cloud task ${task.id}\n`,
+          );
+          process.exitCode = 7; // Mirrors BUDGET_KILL_EXIT_CODE for CI/headless.
+        }
       } catch (err) {
         // Stream disconnect is OK — task keeps running
         process.stderr.write(chalk.dim(`\nStream disconnected. Task ${task.id} continues running.\n`));
@@ -516,11 +536,25 @@ Examples:
       const provider = resolveProvider(task.provider);
 
       try {
-        const result = await renderStream(provider.stream(id), { json });
+        // Live budget kill-switch (issue #399) — wrap the stream so a cap
+        // breach mid-stream cancels the task server-side. Dormant when no caps.
+        const { wrapStreamWithBudgetGate } = await import('../lib/budget/live-cloud.js');
+        const gated = wrapStreamWithBudgetGate({
+          provider,
+          taskId: id,
+          project: task.repo ?? task.repos?.[0] ?? process.cwd(),
+          agent: task.agent ?? 'cloud',
+          cwd: process.cwd(),
+        });
+        const eventSource = gated ? gated.wrap(provider.stream(id)) : provider.stream(id);
+        const result = await renderStream(eventSource, { json });
         updateTaskStatus(id, result.status as CloudTaskStatus, {
           summary: result.summary,
           prUrl: result.prUrl,
         });
+        if (gated?.gate.breached()) {
+          process.exitCode = 7;
+        }
       } catch (err) {
         process.stderr.write(chalk.dim(`\nStream ended. ${(err as Error).message}\n`));
       }
