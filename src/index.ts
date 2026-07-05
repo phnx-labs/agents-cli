@@ -97,6 +97,7 @@ import {
   loadTrash,
   loadRestore,
   loadDoctor,
+  loadCheck,
   loadStatus,
   loadProfiles,
   loadSecrets,
@@ -264,6 +265,7 @@ Credentials and profiles:
 
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence
+  check                           CI drift gate: exit non-zero when resources are out of sync
   usage [agent]                   Show rate-limit and quota usage per agent
 
 Config sync:
@@ -917,6 +919,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadTrash);
   await reg(loadRestore);
   await reg(loadDoctor);
+  await reg(loadCheck);
   await reg(loadStatus);
   registerExecAliasCommand(program);
   await reg(loadProfiles);
