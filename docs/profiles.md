@@ -8,7 +8,7 @@ A profile pins a host agent binary to a non-default API endpoint and model, with
 
 Built-in presets cover the top open-weight models via OpenRouter (one shared key) and native CLI providers (xAI, Google). Custom profiles work with any OpenAI-compatible endpoint: Ollama, vLLM, LiteLLM Proxy. Profile YAML files live under `~/.agents/profiles/` and are resolved by name at `agents run` time.
 
-> **Status:** Profiles are experimental. Enable with `agents beta profiles enable`.
+> **Status:** Profiles are experimental, but available by default — no enable step needed.
 
 ## Architecture
 

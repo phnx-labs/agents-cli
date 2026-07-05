@@ -121,7 +121,7 @@ Primary runs first; on rate-limit error, the next agent picks up.
 Run any OpenAI-compatible model (Kimi, DeepSeek, Qwen, etc.) through a host CLI by passing a profile name in the agent slot.
 
 ```bash
-agents profiles add kimi --host claude --endpoint https://api.moonshot.ai/anthropic --model kimi-k2-thinking
+agents profiles add kimi          # kimi is a built-in preset (host + endpoint + model baked in)
 agents run kimi "..."
 ```
 
