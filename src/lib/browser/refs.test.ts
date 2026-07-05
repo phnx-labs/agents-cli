@@ -49,6 +49,70 @@ describe('healRef', () => {
   });
 });
 
+describe('healRef — duplicate (role,name) disambiguation', () => {
+  it('tie-breaks on cached attrs so the right twin wins even when farther', () => {
+    // Cached ref 5 was the DISABLED "Submit". A (role,name)-only heal would
+    // grab whichever Submit it hit first — here the nearer, ENABLED one at
+    // ref 4 — and silently click the wrong element.
+    const cached = { ref: 5, role: 'button', name: 'Submit', attrs: ['disabled'] };
+    const fresh = new Map<number, RefNode>([
+      [4, { ref: 4, role: 'button', name: 'Submit', attrs: [], backendNodeId: 404 }],
+      [9, { ref: 9, role: 'button', name: 'Submit', attrs: ['disabled'], backendNodeId: 909 }],
+    ]);
+    expect(healRef(cached, fresh)).toBe(9);
+  });
+
+  it('tie-breaks on positional proximity when attrs are identical', () => {
+    // Repeated list-row action: two identical "Delete" buttons. The one
+    // nearest the original ref index is the intended twin.
+    const cached = { ref: 5, role: 'button', name: 'Delete', attrs: [] };
+    const fresh = new Map<number, RefNode>([
+      [4, { ref: 4, role: 'button', name: 'Delete', attrs: [], backendNodeId: 404 }],
+      [9, { ref: 9, role: 'button', name: 'Delete', attrs: [], backendNodeId: 909 }],
+    ]);
+    expect(healRef(cached, fresh)).toBe(4);
+  });
+
+  it('attrs outrank proximity — the exact-state twin wins over the nearer one', () => {
+    const cached = { ref: 2, role: 'checkbox', name: 'Agree', attrs: ['checked'] };
+    const fresh = new Map<number, RefNode>([
+      [1, { ref: 1, role: 'checkbox', name: 'Agree', attrs: [], backendNodeId: 11 }], // nearer, wrong state
+      [8, { ref: 8, role: 'checkbox', name: 'Agree', attrs: ['checked'], backendNodeId: 88 }], // farther, exact
+    ]);
+    expect(healRef(cached, fresh)).toBe(8);
+  });
+});
+
+describe('drift across a refs-once-then-many-clicks sequence', () => {
+  it('heals on EVERY click because the cached listing is never clobbered', () => {
+    // `browser refs` (interactive numbering): Submit is ref 5. This snapshot is
+    // owned by refs() — click()/type() read it and must never overwrite it.
+    const listing = new Map<number, RefNode>([
+      [4, node(4, 'link', 'Home', 104)],
+      [5, node(5, 'button', 'Submit', 105)],
+    ]);
+    const snapshot = describeRefs(listing);
+
+    // The page re-rendered: Submit drifted to ref 8; ref 5 is now a different
+    // button. Both clicks rebuild against this same fresh tree.
+    const afterRerender = new Map<number, RefNode>([
+      [5, node(5, 'button', 'Cancel', 205)],
+      [8, node(8, 'button', 'Submit', 208)],
+    ]);
+
+    const cachedForRef5 = () => snapshot.find((d) => d.ref === 5)!;
+
+    // First click heals 5 -> 8.
+    expect(healRef(cachedForRef5(), afterRerender)).toBe(8);
+    // Second click reads the SAME untouched snapshot and heals 5 -> 8 again.
+    // The old bug re-cached descriptors from the post-click map, so ref 5's
+    // cached descriptor became "Cancel" and the second click stopped healing
+    // and silently hit the wrong element.
+    expect(cachedForRef5()).toMatchObject({ role: 'button', name: 'Submit' });
+    expect(healRef(cachedForRef5(), afterRerender)).toBe(8);
+  });
+});
+
 describe('describeRefs', () => {
   it('captures the stable (role,name,attrs) identity without the backendNodeId', () => {
     const nodeMap = new Map<number, RefNode>([

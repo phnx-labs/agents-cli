@@ -34,7 +34,7 @@ import {
   type BrowserProfile,
   type HistoricalTask,
 } from './types.js';
-import { getRefs, resolveRefToCoords, describeRefs, healRef, type RefOpts, type RefNode } from './refs.js';
+import { getRefs, resolveRefToCoords, describeRefs, healRef, type RefOpts, type RefNode, type RefSnapshot } from './refs.js';
 import { clickAtCoords, hoverAtCoords, scrollAtCoords, typeText, pressKey, focusNode } from './input.js';
 import { typeEditorText } from './editor.js';
 import {
@@ -1153,17 +1153,65 @@ export class BrowserService {
 
     const sessionId = await this.getSessionId(conn, target.targetId);
     const result = await getRefs(conn.cdp, sessionId, opts);
-    // Snapshot the stable descriptors so a later click can self-heal a drifted
-    // ref. Persist to tasks.json — the cache must survive a daemon restart.
-    this.cacheRefDescriptors(task, shortId, result.nodeMap);
+    // Snapshot the stable descriptors AND the opts they were numbered against
+    // so a later click/type can self-heal a drifted ref by rebuilding with the
+    // same filter. `refs()` is the sole owner of this cache — actions read it,
+    // never overwrite it. Persist to tasks.json so it survives a daemon
+    // restart.
+    this.cacheRefDescriptors(task, shortId, result.nodeMap, result.opts);
     await this.saveTaskState(task.profile, conn.tasks);
-    return result;
+    return { refs: result.refs, nodeMap: result.nodeMap };
   }
 
-  /** Record the last ref descriptors for a tab into persisted task state. */
-  private cacheRefDescriptors(task: Task, shortId: string, nodeMap: Map<number, RefNode>): void {
+  /** Record the last ref listing (descriptors + opts) for a tab into state. */
+  private cacheRefDescriptors(
+    task: Task,
+    shortId: string,
+    nodeMap: Map<number, RefNode>,
+    opts: { interactive: boolean; limit: number }
+  ): void {
     if (!task.refDescriptors) task.refDescriptors = {};
-    task.refDescriptors[shortId] = describeRefs(nodeMap);
+    task.refDescriptors[shortId] = { descriptors: describeRefs(nodeMap), opts };
+  }
+
+  /**
+   * Re-resolve a caller-supplied ref against a freshly-built node map, healing
+   * it back to the right element when the integer ref has drifted since the
+   * cached `refs` listing. Shared by `click` and `type` so both self-heal
+   * identically. Returns the ref to act on plus, when a heal occurred, the
+   * {@link HealInfo} to surface. Throws when the cached element is gone.
+   */
+  private resolveHealedRef(
+    snapshot: RefSnapshot | undefined,
+    nodeMap: Map<number, RefNode>,
+    ref: number
+  ): { targetRef: number; healed?: HealInfo } {
+    const cached = snapshot?.descriptors.find((d) => d.ref === ref);
+    if (!cached) return { targetRef: ref };
+
+    const fresh = nodeMap.get(ref);
+    const stillMatches =
+      fresh !== undefined &&
+      fresh.role === cached.role &&
+      fresh.name === cached.name &&
+      fresh.backendNodeId !== undefined;
+    if (stillMatches) return { targetRef: ref };
+
+    const newRef = healRef(cached, nodeMap);
+    if (newRef === null) {
+      throw new Error(
+        `Ref ${ref} (${cached.role} "${cached.name}") could not be re-resolved: ` +
+          `no matching element on the current page. Re-run 'browser refs' to ` +
+          `refresh the ref numbers, or act by position with 'browser click --at X,Y'.`
+      );
+    }
+    if (newRef === ref) return { targetRef: ref };
+
+    console.error(
+      `[browser] self-healed ref ${ref} -> ${newRef} (${cached.role} "${cached.name}") — ` +
+        `cached descriptor re-matched after the ref drifted`
+    );
+    return { targetRef: newRef, healed: { from: ref, to: newRef, role: cached.role, name: cached.name } };
   }
 
   async click(taskId: string, ref: number, tabHint?: string): Promise<{ healed?: HealInfo }> {
@@ -1174,51 +1222,24 @@ export class BrowserService {
     if (!target) throw new Error(`Tab ${shortId} not found`);
 
     const sessionId = await this.getSessionId(conn, target.targetId);
-    const { nodeMap } = await getRefs(conn.cdp, sessionId, { interactive: false, limit: 1000 });
+    // Rebuild the node map with the SAME opts the cached listing was numbered
+    // against, so the caller's ref lands on the element they saw in `browser
+    // refs`. Rebuilding with a different filter (the old interactive:false)
+    // renumbers every ref and defeats self-heal on the second click. Default
+    // to the user-facing interactive numbering when no listing was cached yet.
+    const snapshot = task.refDescriptors?.[shortId];
+    const buildOpts = snapshot?.opts ?? { interactive: true, limit: 500 };
+    const { nodeMap } = await getRefs(conn.cdp, sessionId, buildOpts);
 
-    // Self-healing: the integer ref is positional and drifts on re-render (or
-    // simply because `refs` numbers interactive-only nodes while this rebuild
-    // counts all of them). If we have a cached descriptor for this ref and the
-    // fresh node at that position no longer matches it, re-resolve by (role,
-    // name) BEFORE clicking the wrong element.
-    const cached = task.refDescriptors?.[shortId]?.find((d) => d.ref === ref);
-    let targetRef = ref;
-    let healed: HealInfo | undefined;
-
-    if (cached) {
-      const fresh = nodeMap.get(ref);
-      const stillMatches =
-        fresh !== undefined &&
-        fresh.role === cached.role &&
-        fresh.name === cached.name &&
-        fresh.backendNodeId !== undefined;
-      if (!stillMatches) {
-        const newRef = healRef(cached, nodeMap);
-        if (newRef === null) {
-          throw new Error(
-            `Ref ${ref} (${cached.role} "${cached.name}") could not be re-resolved: ` +
-              `no matching element on the current page. Re-run 'browser refs', or ` +
-              `click by position with 'browser click --at X,Y'.`
-          );
-        }
-        if (newRef !== ref) {
-          healed = { from: ref, to: newRef, role: cached.role, name: cached.name };
-          targetRef = newRef;
-          console.error(
-            `[browser] self-healed ref ${ref} -> ${newRef} (${cached.role} "${cached.name}") — ` +
-              `cached descriptor re-matched after the ref drifted`
-          );
-        }
-      }
-    }
+    // Self-heal: the integer ref is positional and drifts on re-render. If the
+    // fresh node at this position no longer matches the cached descriptor,
+    // re-resolve (by attrs/proximity-tie-broken role+name) BEFORE clicking the
+    // wrong element. The cache is owned by refs() and NOT rewritten here — the
+    // caller's ref numbers stay anchored to the listing they came from.
+    const { targetRef, healed } = this.resolveHealedRef(snapshot, nodeMap, ref);
 
     const { x, y } = await resolveRefToCoords(conn.cdp, sessionId, nodeMap, targetRef);
     await clickAtCoords(conn.cdp, sessionId, x, y);
-
-    // Refresh the cache from this rebuild so the next click heals against a
-    // like-for-like snapshot.
-    this.cacheRefDescriptors(task, shortId, nodeMap);
-    await this.saveTaskState(task.profile, conn.tasks);
 
     return healed ? { healed } : {};
   }
@@ -1248,8 +1269,14 @@ export class BrowserService {
     if (!target) throw new Error(`Tab ${shortId} not found`);
 
     const sessionId = await this.getSessionId(conn, target.targetId);
-    const { nodeMap } = await getRefs(conn.cdp, sessionId, { interactive: false, limit: 1000 });
-    const node = nodeMap.get(ref);
+    // Same self-healing story as click(): rebuild against the cached listing's
+    // opts so refs line up with what the user saw, then heal a drifted ref
+    // before typing into the wrong field.
+    const snapshot = task.refDescriptors?.[shortId];
+    const buildOpts = snapshot?.opts ?? { interactive: true, limit: 500 };
+    const { nodeMap } = await getRefs(conn.cdp, sessionId, buildOpts);
+    const { targetRef } = this.resolveHealedRef(snapshot, nodeMap, ref);
+    const node = nodeMap.get(targetRef);
     if (!node) throw new Error(`Ref ${ref} not found`);
     if (node.editor) {
       await typeEditorText(conn.cdp, sessionId, node, text, clear);

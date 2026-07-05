@@ -74,11 +74,14 @@ export interface Task {
   createdAt: number;
   pid: number;
   /**
-   * Per-tab snapshot of the last ref descriptors captured for that tab
-   * (shortId -> descriptors). Persisted to tasks.json so a later `click <ref>`
-   * can self-heal a drifted ref by matching (role,name). See RefDescriptor.
+   * Per-tab snapshot of the last ref listing captured for that tab
+   * (shortId -> {descriptors, opts}). Persisted to tasks.json so a later
+   * `click`/`type <ref>` can self-heal a drifted ref — the cached `opts` let
+   * the action rebuild its node map with the SAME accessibility filter the
+   * listing was numbered against. Owned by `refs()`; actions never overwrite
+   * it. See RefSnapshot / RefDescriptor.
    */
-  refDescriptors?: Record<string, import('./refs.js').RefDescriptor[]>;
+  refDescriptors?: Record<string, import('./refs.js').RefSnapshot>;
 }
 
 export interface TabInfo {
