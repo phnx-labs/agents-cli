@@ -95,8 +95,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 21 (kimi via generic branch + grok anti-loop guard in dispatcher)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(21);
+  it('is 22 (claude auto-updater disabled for managed pinned installs)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(22);
   });
 });
 
@@ -156,7 +156,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(10);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(11);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
