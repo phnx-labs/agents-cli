@@ -280,7 +280,12 @@ describe('repoGitInfo', () => {
     expect(info.dirty).toBe(1);
   });
 
-  it('treats a repo path with shell metacharacters as a literal argument', () => {
+  // The `$(touch …)` payload is POSIX-shell syntax and embeds an absolute
+  // sentinel path (which contains `:` / `\` on Windows — illegal in a filename),
+  // so the demonstrator runs on POSIX only. The fix (argv-form execFileSync)
+  // removes the shell on every platform, so Windows is covered by construction,
+  // not by this sh-specific probe.
+  it.skipIf(process.platform === 'win32')('treats a repo path with shell metacharacters as a literal argument', () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-inject-'));
     tempDirs.push(base);
     const sentinel = path.join(base, 'pwned');
