@@ -18,6 +18,7 @@ import { AGENTS } from '../lib/agents.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { randomUUID } from 'crypto';
 
 interface ExecCommandActionOptions {
   mode: ExecMode;
@@ -384,6 +385,7 @@ export function registerRunCommand(program: Command): void {
         }
         const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
         const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
+        const { registerHostSession } = await import('../lib/hosts/session-index.js');
         let host = await resolveHost(hostName);
         if (!host) {
           // Not a host name — try capability routing (e.g. --host gpu). A
@@ -404,14 +406,31 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         try {
-          const { exitCode } = await dispatchToHost(host, {
-            agent: agentSpec.split('@')[0],
+          const runAgent = agentSpec.split('@')[0];
+          // `--resume [id]`: commander yields the string id, or `true` when the
+          // flag is passed bare. A bare resume needs the interactive picker,
+          // which can't run over a detached remote dispatch — only forward a
+          // concrete id.
+          const resumeId = typeof options.resume === 'string' ? options.resume : undefined;
+          // Mirror the local path (lib/exec.ts): only Claude accepts a forced
+          // `--session-id`. Generating it here lets us register the run in the
+          // local index and makes it resumable by that id. On resume the remote
+          // session keeps its existing id — don't mint a new one.
+          const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
+          const { task, exitCode } = await dispatchToHost(host, {
+            agent: runAgent,
             prompt,
             mode: options.mode,
             model: options.model,
             remoteCwd: options.remoteCwd,
+            sessionId: hostSessionId,
+            resume: resumeId,
             follow: options.follow !== false,
           });
+          // Register the dispatched run in the LOCAL session index so it shows
+          // up in `agents sessions` and resolves by id, even though its
+          // transcript lives on the host. No-op when no session id was captured.
+          registerHostSession(task, { cwd: process.cwd(), prompt });
           if (options.follow === false) {
             console.log(chalk.green(`Dispatched to ${host.name}.`) + chalk.gray(' Track: agents hosts ps · Follow: agents hosts logs <id> -f'));
             process.exit(0);

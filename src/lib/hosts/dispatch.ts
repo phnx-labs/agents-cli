@@ -41,6 +41,8 @@ interface LaunchOptions {
   /** Task-record labels for `agents hosts ps`. */
   agentLabel: string;
   promptLabel: string;
+  /** Session id the run was launched with, persisted on the task record. */
+  sessionId?: string;
 }
 
 /**
@@ -89,6 +91,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     agent: opts.agentLabel,
     prompt: opts.promptLabel,
     pid: Number.isFinite(pid) ? pid : undefined,
+    sessionId: opts.sessionId,
     remoteLog,
     remoteExit,
     status: 'running',
@@ -120,9 +123,32 @@ export interface DispatchOptions {
   mode?: string;
   model?: string;
   remoteCwd?: string;
+  /**
+   * Force the remote run's NEW session to use this exact id (Claude only, via
+   * `agents run --session-id`). Captured on the task record so the run is
+   * resumable by id. Mutually exclusive with `resume`.
+   */
+  sessionId?: string;
+  /** Resume an existing session on the host by id (via `agents run --resume`). */
+  resume?: string;
   /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
+}
+
+/**
+ * Build the remote `agents run …` argv for a host dispatch. Pure so the
+ * session-id / resume flag wiring is unit-testable without an SSH round-trip.
+ * `--session-id` and `--resume` are mutually exclusive (the CLI rejects both);
+ * resume wins when — defensively — both are set.
+ */
+export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
+  const args = ['run', opts.agent, opts.prompt, '--quiet'];
+  if (opts.mode) args.push('--mode', opts.mode);
+  if (opts.model) args.push('--model', opts.model);
+  if (opts.resume) args.push('--resume', opts.resume);
+  else if (opts.sessionId) args.push('--session-id', opts.sessionId);
+  return args;
 }
 
 /** Dispatch an `agents run <agent> "<prompt>"` onto a host (the `run --host` path). */
@@ -131,17 +157,16 @@ export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise
   const { warnings } = ensureHostReady(host, { agent: opts.agent });
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
-  const forwardedArgs = ['run', opts.agent, opts.prompt, '--quiet'];
-  if (opts.mode) forwardedArgs.push('--mode', opts.mode);
-  if (opts.model) forwardedArgs.push('--model', opts.model);
-
   return launchDetached(host, target, {
-    forwardedArgs,
+    forwardedArgs: buildRunForwardedArgs(opts),
     remoteCwd: opts.remoteCwd,
     follow: opts.follow,
     timeoutMs: opts.timeoutMs,
     agentLabel: opts.agent,
     promptLabel: opts.prompt,
+    // On resume the remote session keeps its existing id; record that id so the
+    // task stays mapped to the same session.
+    sessionId: opts.resume ?? opts.sessionId,
   });
 }
 

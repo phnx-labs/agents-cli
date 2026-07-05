@@ -21,6 +21,13 @@ export interface HostTask {
   agent: string;
   prompt: string;
   pid?: number;
+  /**
+   * The agent session id the remote run was launched with (Claude only — the
+   * only agent that accepts `--session-id` to force a NEW session's id). Lets
+   * `agents sessions`/resume-by-id map a discovered session back to the host it
+   * lives on. Absent for agents that don't take an explicit session id.
+   */
+  sessionId?: string;
   /** Remote paths (under the host's ~/.agents/.cache/hosts/). */
   remoteLog: string;
   remoteExit: string;
@@ -92,4 +99,18 @@ export function listTasks(): HostTask[] {
     if (task) tasks.push(task);
   }
   return tasks.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * Find the host task that launched a given agent session id, so a resume-by-id
+ * can re-dispatch to the host the session actually lives on. Newest task wins
+ * (listTasks is createdAt-desc) — a session id should be unique, but a re-run
+ * with the same forced id resolves to the most recent dispatch.
+ */
+export function findTaskBySessionId(sessionId: string): HostTask | null {
+  if (!sessionId) return null;
+  for (const task of listTasks()) {
+    if (task.sessionId === sessionId) return task;
+  }
+  return null;
 }
