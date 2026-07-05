@@ -131,6 +131,20 @@ const AGENT_CLI_NAMES: Record<string, string> = {
   droid: 'droid',
 };
 
+/**
+ * Resolve an agent kind from a process's reported executable. `comm` may be an
+ * absolute path (shim-launched agents), and Windows image names carry an
+ * `.exe` suffix (`claude.exe`), so basename + suffix-strip before the lookup.
+ */
+function agentKindFromComm(commRaw: string): string | undefined {
+  const base = path.basename(commRaw);
+  const stripped = base.replace(/\.exe$/i, '');
+  // Windows image names compare case-insensitively; POSIX comms stay exact —
+  // macOS's Claude desktop app process is named 'Claude' and must NOT match.
+  const key = stripped === base ? base : stripped.toLowerCase();
+  return AGENT_CLI_NAMES[key];
+}
+
 function isPidAlive(pid: number): boolean {
   if (!pid || pid < 1) return false;
   try {
@@ -445,14 +459,14 @@ interface ProcRow { pid: number; ppid: number; comm: string; kind?: string; }
  * and a terminal-app is preferred over the multiplexer inside it.
  */
 const HOST_MATCHERS: Array<{ host: string; tokens: string[] }> = [
-  // IDE renderers (Electron helper processes)
-  { host: 'code',     tokens: ['Code Helper', 'Code - Insiders Helper'] },
-  { host: 'cursor',   tokens: ['Cursor Helper'] },
-  { host: 'codium',   tokens: ['VSCodium Helper'] },
-  { host: 'windsurf', tokens: ['Windsurf Helper'] },
+  // IDE renderers (Electron helper processes on macOS, image names on Windows)
+  { host: 'code',     tokens: ['Code Helper', 'Code - Insiders Helper', 'Code.exe'] },
+  { host: 'cursor',   tokens: ['Cursor Helper', 'Cursor.exe'] },
+  { host: 'codium',   tokens: ['VSCodium Helper', 'VSCodium.exe'] },
+  { host: 'windsurf', tokens: ['Windsurf Helper', 'Windsurf.exe'] },
   // Native terminal apps
   { host: 'iterm',    tokens: ['iTerm2', 'iTermServer', 'iTerm'] },
-  { host: 'terminal', tokens: ['Terminal.app', '/Applications/Utilities/Terminal.app'] },
+  { host: 'terminal', tokens: ['Terminal.app', '/Applications/Utilities/Terminal.app', 'WindowsTerminal.exe'] },
   { host: 'warp',     tokens: ['Warp.app', 'stable_'] },
   { host: 'alacritty',tokens: ['alacritty', 'Alacritty'] },
   { host: 'kitty',    tokens: ['kitty'] },
@@ -471,6 +485,7 @@ const HOST_MATCHERS: Array<{ host: string; tokens: string[] }> = [
  * matching against AGENT_CLI_NAMES.
  */
 async function readProcessTable(): Promise<ProcRow[]> {
+  if (process.platform === 'win32') return readProcessTableWin32();
   let out: string;
   try {
     ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
@@ -485,8 +500,40 @@ async function readProcessTable(): Promise<ProcRow[]> {
     const ppid = parseInt(m[2], 10);
     if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
     const commRaw = m[3].trim();
-    const kind = AGENT_CLI_NAMES[path.basename(commRaw)];
-    rows.push({ pid, ppid, comm: commRaw, kind });
+    rows.push({ pid, ppid, comm: commRaw, kind: agentKindFromComm(commRaw) });
+  }
+  return rows;
+}
+
+/**
+ * Windows process table in one CIM query (`wmic` is removed on current
+ * Windows 11, so PowerShell is the stable interface). Same pid/ppid/comm
+ * shape as the POSIX `ps` snapshot; `Name` is the image name (`claude.exe`).
+ */
+async function readProcessTableWin32(): Promise<ProcRow[]> {
+  let out: string;
+  try {
+    ({ stdout: out } = await execFileAsync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Csv -NoTypeInformation',
+    ], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, windowsHide: true }));
+  } catch {
+    return [];
+  }
+  return parseWin32ProcessCsv(out);
+}
+
+/** Parse `ConvertTo-Csv` output of Win32_Process rows. Exported for tests. */
+export function parseWin32ProcessCsv(out: string): ProcRow[] {
+  const rows: ProcRow[] = [];
+  for (const line of out.split(/\r?\n/)) {
+    const m = line.trim().match(/^"(\d+)","(\d+)","(.*)"$/);
+    if (!m) continue;
+    const pid = parseInt(m[1], 10);
+    const ppid = parseInt(m[2], 10);
+    if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
+    const comm = m[3].replace(/""/g, '"');
+    rows.push({ pid, ppid, comm, kind: agentKindFromComm(comm) });
   }
   return rows;
 }
@@ -526,6 +573,9 @@ export function resolveCwds(
  * returns the cwd of every process on the system.
  */
 async function getCwdForPid(pid: number): Promise<string | undefined> {
+  // No lsof on Windows and no cheap foreign-process cwd API; the pid registry
+  // written by `ag run` supplies the cwd for registry-launched agents instead.
+  if (process.platform === 'win32') return undefined;
   let out: string;
   try {
     const res = await execFileAsync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
@@ -572,6 +622,64 @@ const UI_HOSTS = new Set<string>([
   'tmux', 'screen',
 ]);
 
+export interface AgentCandidate { pid: number; kind: string; }
+
+/**
+ * Collapse agent processes spawned by another live agent process of the same
+ * kind onto their nearest kept ancestor. Claude runs subagents, forks, and
+ * even its bundled ripgrep as child `claude` processes — on POSIX those
+ * children resolve to the parent's cwd and collapse in dedupeBySession, but
+ * where no cwd can be recovered (Windows has no lsof) every fork would print
+ * as its own headless row. Two exceptions keep their own row: a pid with its
+ * own registry entry (a distinct session launched by `ag run` from inside an
+ * agent), and a child of a *different* agent kind (claude shelling out to
+ * codex is a real second session, not a fork).
+ * Returns the kept roots plus, per root pid, how many descendants folded in.
+ */
+export function foldSubordinateAgents(
+  candidates: AgentCandidate[],
+  ppidMap: Map<number, number>,
+  hasOwnSession: (pid: number) => boolean,
+): { kept: AgentCandidate[]; foldedByRoot: Map<number, number> } {
+  const kindByPid = new Map(candidates.map(c => [c.pid, c.kind]));
+
+  const nearestSameKindAncestor = (pid: number, kind: string): number | undefined => {
+    let cur = ppidMap.get(pid);
+    const seen = new Set<number>();
+    while (cur && cur > 1 && !seen.has(cur)) {
+      if (kindByPid.get(cur) === kind) return cur;
+      seen.add(cur);
+      cur = ppidMap.get(cur);
+    }
+    return undefined;
+  };
+
+  const keptPids = new Set<number>();
+  for (const c of candidates) {
+    if (hasOwnSession(c.pid) || nearestSameKindAncestor(c.pid, c.kind) === undefined) {
+      keptPids.add(c.pid);
+    }
+  }
+
+  const kept: AgentCandidate[] = [];
+  const foldedByRoot = new Map<number, number>();
+  for (const c of candidates) {
+    if (keptPids.has(c.pid)) { kept.push(c); continue; }
+    // Walk up through folded intermediates to the nearest kept same-kind pid.
+    let cur = nearestSameKindAncestor(c.pid, c.kind);
+    const seen = new Set<number>();
+    while (cur !== undefined && !keptPids.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      cur = nearestSameKindAncestor(cur, c.kind);
+    }
+    // A fold target must itself be a kept row (a ppid cycle from pid reuse
+    // can orphan the whole chain) — otherwise keep the row rather than drop it.
+    if (cur === undefined || !keptPids.has(cur)) { kept.push(c); continue; }
+    foldedByRoot.set(cur, (foldedByRoot.get(cur) ?? 0) + 1);
+  }
+  return { kept, foldedByRoot };
+}
+
 /**
  * Agent processes not attributed to a team or the runtime registry.
  * Classified by walking the ppid chain: any recognised UI ancestor (IDE
@@ -588,7 +696,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
   }
 
   // Candidate PIDs first — we only shell out to lsof for these, not the whole table.
-  const candidates: { pid: number; kind: string }[] = [];
+  const candidates: AgentCandidate[] = [];
   for (const { pid, kind } of table) {
     if (!kind) continue;
     if (attributed.has(pid)) continue;
@@ -596,13 +704,21 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     candidates.push({ pid, kind });
   }
 
+  // Forks/subagents of a live agent process collapse onto their root before
+  // the cwd probes — fewer spawns, and one session stays one row even when
+  // cwd-based dedupe is unavailable (Windows).
+  const { kept, foldedByRoot } = foldSubordinateAgents(
+    candidates, ppidMap,
+    p => readPidSessionEntry(p) !== undefined,
+  );
+
   // Bounded + staggered lsof probes: same cwds, but a trickle of spawns instead
   // of one simultaneous system-wide burst that behavioral EDR flags as recon.
-  const cwds = await resolveCwds(candidates.map(c => c.pid));
+  const cwds = await resolveCwds(kept.map(c => c.pid));
 
   const out: ActiveSession[] = [];
-  for (let i = 0; i < candidates.length; i++) {
-    const { pid, kind } = candidates[i];
+  for (let i = 0; i < kept.length; i++) {
+    const { pid, kind } = kept[i];
     // The per-pid registry (written by `ag run`) gives the EXACT session id this
     // pid was launched with — so N agents in one cwd resolve to N distinct
     // sessions instead of all collapsing onto the newest .jsonl. Absent (agent
@@ -623,6 +739,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       sessionId: entry?.sessionId ?? sessionIdFromFile(sessionFile),
       topic,
       sessionFile,
+      pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
     }, state, sessionFile));
   }
   // Housekeeping: drop registry files for pids that have since died.
@@ -684,9 +801,10 @@ function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
     if (!key) { out.push(s); continue; }
     const existing = byKey.get(key);
     if (existing) {
-      existing.pidCount = (existing.pidCount ?? 1) + 1;
+      // Carry pre-folded fork counts (headless rows arrive with pidCount set).
+      existing.pidCount = (existing.pidCount ?? 1) + (s.pidCount ?? 1);
     } else {
-      s.pidCount = 1;
+      s.pidCount = s.pidCount ?? 1;
       byKey.set(key, s);
       out.push(s);
     }
