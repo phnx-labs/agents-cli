@@ -16,7 +16,13 @@ vi.mock('fs', async () => {
   };
 });
 
-import { findFirstInstalledBrowser, resolveBrowserBinary, isLauncherScript, isPortInUse } from './chrome.js';
+import {
+  findFirstInstalledBrowser,
+  resolveBrowserBinary,
+  isLauncherScript,
+  isPortInUse,
+  ensureProfilePreferences,
+} from './chrome.js';
 
 describe('findFirstInstalledBrowser', () => {
   beforeEach(() => {
@@ -242,5 +248,70 @@ describe('isPortInUse', () => {
     }
 
     expect(isPortInUse(port)).toBe(false);
+  });
+});
+
+describe('ensureProfilePreferences', () => {
+  // Real files in a real tmp dir — the function reads via readFileSync
+  // (never the mocked existsSync), so no presentPaths registration needed.
+  let dataDir: string;
+  const prefsPath = () => path.join(dataDir, 'Default', 'Preferences');
+  const readPrefs = () => JSON.parse(fs.readFileSync(prefsPath(), 'utf8'));
+
+  beforeEach(() => {
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-prefs-'));
+  });
+
+  it('creates Preferences with profile name and session-cookie persistence on first launch', () => {
+    ensureProfilePreferences(dataDir, 'idealista', true);
+    expect(readPrefs()).toEqual({
+      profile: { name: 'idealista' },
+      session: { restore_on_startup: 1 },
+    });
+  });
+
+  it('creates name-only Preferences for Electron profiles (no session pref)', () => {
+    ensureProfilePreferences(dataDir, 'notion', false);
+    expect(readPrefs()).toEqual({ profile: { name: 'notion' } });
+  });
+
+  it('patches restore_on_startup into an existing file, preserving everything else', () => {
+    fs.mkdirSync(path.join(dataDir, 'Default'), { recursive: true });
+    fs.writeFileSync(
+      prefsPath(),
+      JSON.stringify({
+        profile: { name: 'Person 1', exit_type: 'Normal' },
+        session: { startup_urls: ['https://example.com'] },
+        bookmarks: { enabled: true },
+      })
+    );
+
+    ensureProfilePreferences(dataDir, 'idealista', true);
+
+    expect(readPrefs()).toEqual({
+      // Existing profile name is NOT overwritten — only first launch stamps it.
+      profile: { name: 'Person 1', exit_type: 'Normal' },
+      session: { startup_urls: ['https://example.com'], restore_on_startup: 1 },
+      bookmarks: { enabled: true },
+    });
+  });
+
+  it('leaves the file byte-identical when the pref is already set', () => {
+    fs.mkdirSync(path.join(dataDir, 'Default'), { recursive: true });
+    const original = JSON.stringify({ session: { restore_on_startup: 1 }, other: 'x' });
+    fs.writeFileSync(prefsPath(), original);
+
+    ensureProfilePreferences(dataDir, 'idealista', true);
+
+    expect(fs.readFileSync(prefsPath(), 'utf8')).toBe(original);
+  });
+
+  it('never touches a malformed Preferences file', () => {
+    fs.mkdirSync(path.join(dataDir, 'Default'), { recursive: true });
+    fs.writeFileSync(prefsPath(), '{ not json');
+
+    ensureProfilePreferences(dataDir, 'idealista', true);
+
+    expect(fs.readFileSync(prefsPath(), 'utf8')).toBe('{ not json');
   });
 });

@@ -262,6 +262,14 @@ agents browser profiles doctor work
 # On future runs, cookies are already there.
 ```
 
+Logins persist across browser restarts, including sites that issue
+memory-only session cookies (`expires=-1`, e.g. idealista): each launch pins
+`session.restore_on_startup: 1` in the profile's Preferences, which stops
+Chromium purging session cookies at startup, while `--no-startup-window`
+keeps the visible side of session restore from ever happening — no tabs from
+a previous task reopen. The only logouts left are server-side session
+expiries, which no client can prevent.
+
 ### 2. Screenshot a logged-in page
 
 ```bash
