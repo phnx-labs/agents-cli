@@ -187,6 +187,47 @@ export function resolveAllowedSubagents(
   };
 }
 
+/**
+ * Prune stale workflow-managed subagent files from the shared per-agent agents
+ * dir before a scoped run writes the permitted set (issue #401, follow-up to
+ * #324). A prior *unrestricted* run of a workflow copies every subagent
+ * definition into the shared `~/.claude/agents/` dir; a later run that declares
+ * `allowedAgents:` copies only the permitted ones but never removes the
+ * leftovers — so an unlisted subagent stays on disk and remains dispatchable,
+ * silently defeating the fail-closed scope.
+ *
+ * Fail-closed fix (mirrors how `cleanupWorkflowMcpConfig` only tears down what
+ * the workflow itself created): remove any file that (a) belongs to THIS
+ * workflow's subagents/ — matched by filename, i.e. the workflow-managed
+ * universe — and (b) is NOT in the permitted set. A user's own hand-placed
+ * subagent shares no name with a workflow subagent file, so it is never
+ * touched. Permitted files are left in place; the caller (re)copies them.
+ *
+ * `workflowSubagentFiles` are the .md filenames in the workflow's subagents/
+ * dir (e.g. `security.md`); `allowedStems` are the permitted stems from
+ * `resolveAllowedSubagents`. Returns the filenames actually removed.
+ */
+export function pruneStaleWorkflowSubagents(
+  sharedAgentsDir: string,
+  workflowSubagentFiles: string[],
+  allowedStems: string[],
+): string[] {
+  if (!fs.existsSync(sharedAgentsDir)) return [];
+  const allow = new Set(allowedStems);
+  const pruned: string[] = [];
+  for (const file of workflowSubagentFiles) {
+    if (!file.endsWith('.md')) continue;
+    const stem = file.replace(/\.md$/, '');
+    if (allow.has(stem)) continue; // permitted → the copy step will (re)write it
+    const target = path.join(sharedAgentsDir, file);
+    if (fs.existsSync(target)) {
+      fs.rmSync(target, { force: true });
+      pruned.push(file);
+    }
+  }
+  return pruned;
+}
+
 /** Count subagent .md files in a workflow's subagents/ directory. */
 export function countWorkflowSubagents(workflowDir: string): number {
   const subagentsDir = path.join(workflowDir, 'subagents');

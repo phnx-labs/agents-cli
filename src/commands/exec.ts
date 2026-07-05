@@ -522,7 +522,7 @@ export function registerRunCommand(program: Command): void {
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
-        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents },
+        { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
         { resolveRunDefaults },
         { getMcpServersByName, buildWorkflowMcpConfig },
         { supports },
@@ -553,6 +553,10 @@ export function registerRunCommand(program: Command): void {
       // WORKFLOW.md capability scoping, translated to Claude headless flags below.
       let workflowToolsRestrict: string[] | undefined;
       let workflowMcpConfigPath: string | undefined;
+      // Full paths of workflow subagent files THIS run copied into the shared
+      // per-agent agents dir. Torn down after the run to restore the shared dir
+      // (issue #401), mirroring cleanupWorkflowMcpConfig for the mcp-config.
+      const workflowSubagentTargets: string[] = [];
       // WORKFLOW.md `loop:` block (issue #332). When a workflow declares it,
       // `agents run <workflow>` honors the loop without a --loop flag.
       let workflowLoop: import('../lib/workflows.js').LoopConfigRaw | undefined;
@@ -613,6 +617,15 @@ export function registerRunCommand(program: Command): void {
           const allFiles = fs.readdirSync(subagentsDir).filter(f => f.endsWith('.md'));
           const { allowedStems, missing } = resolveAllowedSubagents(allFiles, allowedAgents);
           const allowStemSet = new Set(allowedStems);
+          // Fail-closed prune (issue #401, follow-up to #324). A prior
+          // unrestricted run may have left workflow subagent files that THIS
+          // scoped run does not permit; they linger in the shared dir and stay
+          // dispatchable. Remove those no-longer-permitted workflow-managed
+          // files BEFORE writing the allowed set — never a user's own subagent.
+          const pruned = pruneStaleWorkflowSubagents(claudeAgentsDir, allFiles, allowedStems);
+          if (pruned.length > 0) {
+            process.stderr.write(chalk.gray(`[workflow] pruned ${pruned.length} stale workflow subagent(s) from shared dir: ${pruned.join(', ')}\n`));
+          }
           let copied = 0;
           let skipped = 0;
           for (const file of allFiles) {
@@ -621,7 +634,9 @@ export function registerRunCommand(program: Command): void {
               skipped++;
               continue;
             }
-            fs.copyFileSync(path.join(subagentsDir, file), path.join(claudeAgentsDir, file));
+            const dest = path.join(claudeAgentsDir, file);
+            fs.copyFileSync(path.join(subagentsDir, file), dest);
+            workflowSubagentTargets.push(dest);
             copied++;
           }
           if (allowedAgents !== undefined) {
@@ -1216,6 +1231,20 @@ export function registerRunCommand(program: Command): void {
         }
       };
 
+      // Restore the shared per-agent agents dir after the run (issue #401):
+      // remove the workflow subagent files THIS run copied in, so a scoped
+      // workflow never leaves definitions behind for the next, unrelated run to
+      // inherit. Mirrors cleanupWorkflowMcpConfig — tear down only what we made.
+      const cleanupWorkflowSubagents = () => {
+        for (const target of workflowSubagentTargets) {
+          try {
+            fs.rmSync(target, { force: true });
+          } catch {
+            // best-effort: nothing actionable if the file is already gone.
+          }
+        }
+      };
+
       // Loop dispatch (issue #332). Active when --loop is passed OR a workflow
       // declares a `loop:` block. The loop path runs AFTER the #346 pre-flight
       // gate above (which fired once) — the loop's token budget is an ADDITIONAL
@@ -1254,10 +1283,12 @@ export function registerRunCommand(program: Command): void {
             version,
           });
           cleanupWorkflowMcpConfig();
+          cleanupWorkflowSubagents();
           process.stderr.write(chalk.gray(`[loop] stopped: ${result.stoppedBy} after ${result.iterations} iteration(s), ${result.tokens} tokens (checkpoint: ${path.join(runDir, 'checkpoint.json')})\n`));
           process.exit(loopExitCode(result.stoppedBy));
         } catch (err) {
           cleanupWorkflowMcpConfig();
+          cleanupWorkflowSubagents();
           console.error(chalk.red(`Loop failed for ${agent}: ${(err as Error).message}`));
           process.exit(1);
         }
@@ -1272,9 +1303,11 @@ export function registerRunCommand(program: Command): void {
           exitCode = await execAgent(execOptions);
         }
         cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
         process.exit(exitCode);
       } catch (err) {
         cleanupWorkflowMcpConfig();
+        cleanupWorkflowSubagents();
         console.error(chalk.red(`Failed to execute ${agent}: ${(err as Error).message}`));
         process.exit(1);
       }

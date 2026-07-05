@@ -208,7 +208,7 @@ These fields are not just displayed — on Claude they translate to headless fla
 | `tools: [Read, Grep]` | `--tools Read Grep` (+ matching `--allowedTools`) | Read-only sandbox — `Write`, `Bash`, and `Edit` are unavailable in the session |
 | `mcpServers: [github]` | `--mcp-config <ephemeral json>` + `--strict-mcp-config` | ONLY the named registry servers load (the config flag alone would merely add them) |
 | `mcpServers: [missing]` (none installed) | `--mcp-config <empty {}>` + `--strict-mcp-config` | **Fail-closed:** declaring `mcpServers` with no installed match scopes the run to NO MCP servers — never the user's full ambient set |
-| `allowedAgents: [security]` | copies only `security.md` into the run's agents dir | Unlisted subagents have no definition on disk, so the orchestrator can't dispatch them. (A subagent left over from a prior unrestricted run can persist in the shared dir — not removed here.) |
+| `allowedAgents: [security]` | copies only `security.md` into the run's agents dir | Unlisted subagents have no definition on disk, so the orchestrator can't dispatch them. **Fail-closed prune (issue #401):** before copying, any workflow-managed subagent left over from a prior unrestricted run that is no longer permitted is removed from the shared dir (a user's own hand-placed subagent is never touched), and the run's copies are torn down afterward. |
 | `allowedAgents: []` (explicit empty) | copies NO subagent files | **Fail-closed:** allow none. Omitting the field entirely copies all subagents; an empty list copies zero |
 
 Read-only review example — this workflow can read and search but cannot write files or shell out:
