@@ -1161,6 +1161,16 @@ if (process.platform === 'darwin' && process.env.AGENTS_SKIP_MIGRATION !== '1') 
   } catch { /* never block CLI startup on the menu bar */ }
 }
 
+// Bare invocation prints the root help. Commander only auto-displays help on
+// an empty parse when subcommands are registered, and the lazy-startup path
+// registers none for a bare call — without this branch, `agents` exits
+// silently. Runs after first-run setup and migrations so those still fire;
+// exits 0 to match `agents --help` (and the pre-fix exit code).
+if (passedArgs.length === 0) {
+  program.outputHelp();
+  process.exit(0);
+}
+
 try {
   await maybeBootstrapShimIntegration(requestedCommand, helpOrVersionRequested);
   await program.parseAsync();
