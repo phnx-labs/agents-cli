@@ -72,7 +72,7 @@ first installed Chromium-family browser on your machine and saves it as the
 
 - macOS: Chrome > Brave > Edge > Chromium > Comet
 - Linux: Chrome > Chromium > Brave > Edge
-- Windows: Edge > Chrome > Brave
+- Windows: Edge > Chrome > Brave > Comet
 
 Safari and Firefox are not supported. They do not implement the Chrome
 DevTools Protocol.

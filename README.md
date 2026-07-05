@@ -389,7 +389,7 @@ Give agents access to a real browser — no relay extension, no cloud service, n
 # First run: omit --profile and we auto-pick the first installed Chromium-family
 # browser. macOS prefers Chrome > Brave > Edge > Chromium > Comet; Linux prefers
 # Chrome > Chromium > Brave > Edge; Windows prefers Edge (always preinstalled) >
-# Chrome > Brave. The auto-picked profile is saved as "default" for later runs.
+# Chrome > Brave > Comet. The auto-picked profile is saved as "default" for later runs.
 export AGENTS_BROWSER_TASK=$(agents browser start --url https://app.example.com)
 
 # Or pin a named profile to a specific browser (chrome, comet, brave, chromium,

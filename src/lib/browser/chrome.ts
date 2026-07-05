@@ -45,7 +45,11 @@ const BROWSER_PATHS: Record<string, Record<BrowserType, string[]>> = {
       `${WIN_PROGRAMFILES_X86}\\Google\\Chrome\\Application\\chrome.exe`,
       `${WIN_LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
     ],
-    comet: [],
+    comet: [
+      `${WIN_PROGRAMFILES}\\Perplexity\\Comet\\Application\\comet.exe`,
+      `${WIN_PROGRAMFILES_X86}\\Perplexity\\Comet\\Application\\comet.exe`,
+      `${WIN_LOCALAPPDATA}\\Perplexity\\Comet\\Application\\comet.exe`,
+    ],
     chromium: [
       `${WIN_LOCALAPPDATA}\\Chromium\\Application\\chrome.exe`,
     ],
@@ -164,8 +168,8 @@ export function findBrowserPath(browserType: BrowserType, customBinary?: string)
     }
   }
 
-  if (browserType === 'comet' && platform !== 'darwin') {
-    throw new Error('Browser "comet" is macOS-only (Comet is a macOS Chromium fork). Use chrome, chromium, brave, or edge on this platform.');
+  if (browserType === 'comet' && platform === 'linux') {
+    throw new Error('Browser "comet" is not available on Linux (Comet ships macOS and Windows builds only). Use chrome, chromium, brave, or edge on this platform.');
   }
   throw new Error(`Browser "${browserType}" not found. Install it first.`);
 }
@@ -181,7 +185,7 @@ const DEFAULT_BROWSER_PRIORITY: Record<string, BrowserType[]> = {
   linux: ['chrome', 'chromium', 'brave', 'edge'],
   // Windows: Edge is preinstalled on every supported build, so it's the
   // reliable always-there default.
-  win32: ['edge', 'chrome', 'brave'],
+  win32: ['edge', 'chrome', 'brave', 'comet'],
 };
 
 /**

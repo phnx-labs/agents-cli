@@ -66,6 +66,20 @@ describe('findFirstInstalledBrowser', () => {
     });
   });
 
+  it('auto-detects Comet on Windows when no other Chromium-family browser is installed', () => {
+    // Comet ships Windows builds under Perplexity\Comet (issue: profile create
+    // refused with "comet is macOS-only" on a machine running Comet).
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+    presentPaths.add(`${programFiles}\\Perplexity\\Comet\\Application\\comet.exe`);
+
+    const result = findFirstInstalledBrowser('win32');
+
+    expect(result).toEqual({
+      browserType: 'comet',
+      binary: `${programFiles}\\Perplexity\\Comet\\Application\\comet.exe`,
+    });
+  });
+
   it('walks the Linux priority list (chrome > chromium > brave > edge)', () => {
     presentPaths.add('/usr/bin/chromium');
     presentPaths.add('/usr/bin/brave-browser');
