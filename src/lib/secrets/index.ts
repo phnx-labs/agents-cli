@@ -428,6 +428,87 @@ export function migrateKeychainItem(item: string): boolean {
   throw new Error(msg || `Failed to migrate keychain item '${item}'.`);
 }
 
+/**
+ * Enumerate data-protection items whose service starts with `prefix` that live
+ * under a NON-concrete access group — pre-#279 "orphans" filed under the implicit
+ * default group (the literal `2HTP252L87.*`) that the pinned-group queries can't
+ * see. Attributes only: never decrypts, never prompts. macOS only — Linux/Windows
+ * and the test backend have no access-group concept, so this returns [].
+ */
+export function listOrphanedKeychainItems(prefix: string): string[] {
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux() || isWindows()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['list-orphans', prefix, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to enumerate orphaned keychain items with prefix '${prefix}'.`);
+  }
+  const out = result.stdout?.toString() || '';
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Outcome of re-homing one orphaned keychain item. */
+export interface OrphanMigrationResult {
+  item: string;
+  status: 'ok' | 'warn' | 'fail';
+  detail?: string;
+}
+
+/**
+ * Parse the `migrate-orphans` helper summary (one record per line):
+ *   OK <service>               re-homed
+ *   WARN <service> <detail>    pinned copy written but orphan not removed
+ *   FAIL <service> <detail>    could not re-home (orphan left intact)
+ * Unknown lines are ignored. Exported for unit testing without a keychain.
+ */
+export function parseOrphanMigrationOutput(stdout: string): OrphanMigrationResult[] {
+  const results: OrphanMigrationResult[] = [];
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const sep = trimmed.indexOf(' ');
+    const tag = sep === -1 ? trimmed : trimmed.slice(0, sep);
+    const rest = sep === -1 ? '' : trimmed.slice(sep + 1);
+    if (tag === 'OK') {
+      results.push({ item: rest, status: 'ok' });
+    } else if (tag === 'WARN' || tag === 'FAIL') {
+      const item = rest.split(' ')[0] ?? rest;
+      results.push({ item, status: tag === 'WARN' ? 'warn' : 'fail', detail: rest });
+    }
+  }
+  return results;
+}
+
+/**
+ * Re-home every pre-#279 orphaned data-protection item under `prefix` into the
+ * concrete access group, behind a SINGLE Touch ID prompt for the whole batch.
+ * The helper reads each orphan by its exact persistent ref, adds the pinned copy
+ * (add-before-delete: a failed add leaves the orphan intact), then deletes the
+ * orphan by ref. Returns one result per item. macOS only — no-op elsewhere.
+ *
+ * Throws on Touch ID cancellation (exit 4) so callers can distinguish "user
+ * aborted" from "nothing to do" (empty array).
+ */
+export function migrateOrphanedKeychainItems(prefix: string): OrphanMigrationResult[] {
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux() || isWindows()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['migrate-orphans', prefix, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 4) throw new Error('Touch ID cancelled during orphan migration.');
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to migrate orphaned keychain items with prefix '${prefix}'.`);
+  }
+  return parseOrphanMigrationOutput(result.stdout?.toString() || '');
+}
+
 /** Options controlling how secret refs are resolved. */
 export interface ResolveOptions {
   /** Translate a short keychain ID to a fully namespaced item name. */
