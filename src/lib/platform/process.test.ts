@@ -112,7 +112,8 @@ fs.writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));
     expect(isAlive(childPid)).toBe(true);
 
     killTree(childPid);
-    fs.rmSync(dir, { recursive: true, force: true });
+    // The killed child may release its log fd a beat after taskkill returns.
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('a child spawned with the current-platform options outlives its parent and stays killable', async () => {
