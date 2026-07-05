@@ -9,9 +9,10 @@
 
 import * as fs from 'fs';
 import chalk from 'chalk';
-import { loadTask, localLogPath, updateTask, terminalPatch } from './tasks.js';
+import { loadTask, localLogPath, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
 import { reconcileTask } from './reconcile.js';
+import { sshExecRaw } from '../ssh-exec.js';
 
 export interface HostLogResult {
   /** False when no host task with this id exists (caller may fall through to sessions). */
@@ -47,7 +48,31 @@ export async function showHostTaskLog(id: string, follow: boolean): Promise<Host
   try {
     process.stdout.write(fs.readFileSync(localLogPath(id), 'utf-8'));
   } catch {
-    console.log(chalk.gray('(no local log captured for this task)'));
+    // No local log — task was dispatched with --no-follow. Fetch from the remote
+    // on demand and cache locally so subsequent calls are instant.
+    const remote = fetchAndCacheRemoteLog(task);
+    if (remote !== null) {
+      process.stdout.write(remote);
+    } else {
+      console.log(chalk.gray('(no local log captured for this task)'));
+    }
   }
   return { found: true, exitCode: 0 };
+}
+
+/**
+ * Fetch a task's remote log over SSH, write it to the local mirror path (for
+ * future instant reads), and return its content. Returns null when the host is
+ * unreachable or the remote log is empty/absent.
+ *
+ * `remoteLog` is a $HOME-prefixed path with a safe (hex) basename — intentionally
+ * unquoted so the remote shell expands $HOME, matching the contract in reconcile.ts
+ * and progress.ts.
+ */
+function fetchAndCacheRemoteLog(task: HostTask): Buffer | null {
+  const res = sshExecRaw(task.target, `cat ${task.remoteLog} 2>/dev/null`, { timeoutMs: 30000, multiplex: true });
+  if (res.code !== 0 || res.stdout.length === 0) return null;
+  // The hosts cache dir already exists (saveTask created it) — write is best-effort.
+  try { fs.writeFileSync(localLogPath(task.id), res.stdout); } catch { /* best-effort cache */ }
+  return res.stdout;
 }
