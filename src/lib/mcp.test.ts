@@ -4,7 +4,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseMcpServerConfig, buildWorkflowMcpConfig, type InstalledMcpServer } from './mcp.js';
+import { parseMcpServerConfig, buildWorkflowMcpConfig, validateMcpServerName, registerMcpCommandToTargets, type InstalledMcpServer } from './mcp.js';
 import { IS_WINDOWS } from './platform/index.js';
 
 const tempDirs: string[] = [];
@@ -58,6 +58,40 @@ describe('MCP sync execution', () => {
     expect(() => parseMcpServerConfig(configPath)).toThrow('args must be a string array');
   });
 
+  it('rejects YAML configs whose name starts with a dash', () => {
+    const home = makeTempHome();
+    const configPath = path.join(home, 'evil.yaml');
+    fs.writeFileSync(
+      configPath,
+      [
+        'name: --dangerous-flag',
+        'transport: stdio',
+        'command: node',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    expect(() => parseMcpServerConfig(configPath)).toThrow("names cannot start with '-'");
+  });
+
+  it('rejects YAML configs whose name contains whitespace', () => {
+    const home = makeTempHome();
+    const configPath = path.join(home, 'evil.yaml');
+    fs.writeFileSync(
+      configPath,
+      [
+        'name: bad name',
+        'transport: stdio',
+        'command: node',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+
+    expect(() => parseMcpServerConfig(configPath)).toThrow('whitespace or control characters');
+  });
+
   // Proves installMcpServers spawns the CLI with an argv array (no shell), so a
   // `command: "/bin/echo; touch"` payload can't execute. The proof uses a
   // `#!/bin/sh` argv-logger fake binary, which is POSIX-only — on Windows the
@@ -101,8 +135,8 @@ describe('MCP sync execution', () => {
     const log = fs.readFileSync(logPath, 'utf-8');
     expect(result.success).toBe(true);
     expect(fs.existsSync(pwnedPath)).toBe(false);
-    expect(log).toContain('ARG:mcp\nARG:add\nARG:demo');
-    expect(log).toContain('ARG:/bin/echo; touch');
+    expect(log).toContain('ARG:mcp\nARG:add\nARG:--\nARG:demo');
+    expect(log).toContain('ARG:--\nARG:demo\nARG:/bin/echo; touch');
     expect(log).toContain(`ARG:${pwnedPath}`);
   });
 });
@@ -138,5 +172,124 @@ describe('buildWorkflowMcpConfig', () => {
 
   it('returns an empty mcpServers map for no servers', () => {
     expect(JSON.parse(buildWorkflowMcpConfig([]))).toEqual({ mcpServers: {} });
+  });
+});
+
+describe('validateMcpServerName', () => {
+  it('accepts common safe names', () => {
+    expect(() => validateMcpServerName('demo')).not.toThrow();
+    expect(() => validateMcpServerName('my_server')).not.toThrow();
+    expect(() => validateMcpServerName('server-123')).not.toThrow();
+    expect(() => validateMcpServerName('a.b')).not.toThrow();
+  });
+
+  it('rejects names starting with -', () => {
+    expect(() => validateMcpServerName('--dangerous-flag')).toThrow("names cannot start with '-'");
+    expect(() => validateMcpServerName('-rf')).toThrow("names cannot start with '-'");
+  });
+
+  it('rejects names containing whitespace or control characters', () => {
+    expect(() => validateMcpServerName('bad name')).toThrow('whitespace or control characters');
+    expect(() => validateMcpServerName('bad\tname')).toThrow('whitespace or control characters');
+    expect(() => validateMcpServerName('bad\nname')).toThrow('whitespace or control characters');
+    expect(() => validateMcpServerName('bad\x00name')).toThrow('whitespace or control characters');
+  });
+});
+
+describe('MCP argv construction', () => {
+  function makeServerYaml(home: string, fileName: string, lines: string[]): void {
+    const mcpDir = path.join(home, '.agents', 'mcp');
+    fs.mkdirSync(mcpDir, { recursive: true });
+    fs.writeFileSync(path.join(mcpDir, fileName), lines.join('\n') + '\n', 'utf-8');
+  }
+
+  function runInstall(agent: string, version: string, versionHome: string, home: string, logPath: string): ReturnType<typeof spawnSync> {
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    return spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { installMcpServers } from ${JSON.stringify(moduleUrl)};
+      const result = installMcpServers(${JSON.stringify(agent)}, ${JSON.stringify(version)}, ${JSON.stringify(versionHome)});
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home, LOG_PATH: logPath },
+      encoding: 'utf-8',
+    });
+  }
+
+  it.skipIf(IS_WINDOWS)('puts Claude stdio name and command after --', async () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const logPath = path.join(home, 'argv.log');
+    writeVersionBinary(home, 'claude', version, 'claude');
+    makeServerYaml(home, 'demo.yaml', [
+      'name: demo',
+      'transport: stdio',
+      'command: node',
+      'args: ["server.js"]',
+      'env:',
+      '  TOKEN: x',
+    ]);
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'claude', version, 'home');
+    const child = runInstall('claude', version, versionHome, home, logPath);
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+    const log = fs.readFileSync(logPath, 'utf-8');
+    expect(log).toMatch(/ARG:--\nARG:demo\nARG:node\nARG:server\.js/);
+  });
+
+  it.skipIf(IS_WINDOWS)('puts Claude http name and url after --', async () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const logPath = path.join(home, 'argv.log');
+    writeVersionBinary(home, 'claude', version, 'claude');
+    makeServerYaml(home, 'remote.yaml', [
+      'name: remote',
+      'transport: http',
+      'url: https://e.x/mcp',
+    ]);
+    const versionHome = path.join(home, '.agents', '.history', 'versions', 'claude', version, 'home');
+    const child = runInstall('claude', version, versionHome, home, logPath);
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result.success).toBe(true);
+    const log = fs.readFileSync(logPath, 'utf-8');
+    expect(log).toMatch(/ARG:--\nARG:remote\nARG:https:\/\/e\.x\/mcp/);
+  });
+
+  it('rejects option-like names from registerMcpCommand before spawning', async () => {
+    const result = await registerMcpCommandToTargets(
+      { directAgents: ['codex'], versionSelections: new Map() },
+      '--dangerous-flag',
+      { command: 'node', args: [] }
+    );
+    expect(result[0].success).toBe(false);
+    expect(result[0].error).toContain("names cannot start with '-'");
+  });
+
+  it.skipIf(IS_WINDOWS)('puts registerMcpCommand args after --', async () => {
+    const home = makeTempHome();
+    const version = '0.1.0';
+    const logPath = path.join(home, 'argv.log');
+    writeVersionBinary(home, 'claude', version, 'claude');
+    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { registerMcpCommandToTargets } from ${JSON.stringify(moduleUrl)};
+      const result = await registerMcpCommandToTargets(
+        { directAgents: [], versionSelections: new Map([['claude', ['${version}']]]) },
+        'demo',
+        { command: 'node', args: ['server.js'] },
+        'user',
+        'stdio'
+      );
+      console.log(JSON.stringify(result));
+    `], {
+      env: { ...process.env, HOME: home, LOG_PATH: logPath },
+      encoding: 'utf-8',
+    });
+    expect(child.status, child.stderr).toBe(0);
+    const result = JSON.parse(child.stdout.trim());
+    expect(result[0].success).toBe(true);
+    const log = fs.readFileSync(logPath, 'utf-8');
+    expect(log).toMatch(/ARG:--\nARG:demo\nARG:node\nARG:server\.js/);
   });
 });
