@@ -53,16 +53,24 @@ export async function gitDiff(
   worktreePath: string,
   maxBytes: number = DEFAULT_DIFF_MAX_BYTES,
 ): Promise<string> {
+  // Size the capture buffer off the cap (not an arbitrary 1MB floor) so a diff
+  // that overshoots gets TRUNCATED, never silently dropped. A diff larger than
+  // the buffer overflows maxBuffer, but Node still hands us the captured prefix
+  // on the rejection — we truncate that below rather than losing it to ''.
+  const maxBuffer = maxBytes * 4;
+  const truncate = (s: string) => s.slice(0, maxBytes) + `\n… [diff truncated at ${maxBytes} bytes]`;
   try {
     const { stdout } = await execFileAsync('git', ['diff', 'HEAD'], {
       cwd: worktreePath,
-      maxBuffer: Math.max(maxBytes * 4, 1_000_000),
+      maxBuffer,
     });
-    if (stdout.length > maxBytes) {
-      return stdout.slice(0, maxBytes) + `\n… [diff truncated at ${maxBytes} bytes]`;
-    }
-    return stdout;
-  } catch {
+    return stdout.length > maxBytes ? truncate(stdout) : stdout;
+  } catch (err) {
+    // ENOBUFS on an oversized diff still carries the partial capture; truncate
+    // it so the dashboard shows "[diff truncated]" instead of "no changes".
+    // A genuine non-git-worktree error has no stdout → fall through to ''.
+    const partial = (err as { stdout?: string })?.stdout;
+    if (typeof partial === 'string' && partial.length > 0) return truncate(partial);
     return '';
   }
 }

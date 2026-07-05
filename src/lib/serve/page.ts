@@ -67,6 +67,10 @@ export function renderPage(): string {
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// href allowlist: only http(s) URLs are linkable. esc() blocks attribute
+// breakout, but a javascript:/data: URL would still execute on click — so a
+// non-http(s) pr_url renders as an inert '#' rather than a live link.
+const safeUrl = (u) => { const s = String(u == null ? '' : u); return /^https?:\\/\\//i.test(s) ? s : '#'; };
 function colorDiff(text) {
   return esc(text).split('\\n').map((line) => {
     if (line.startsWith('+')) return '<span class="a">' + line + '</span>';
@@ -86,7 +90,7 @@ function renderTeams(res) {
     const agents = t.agents.map((a) =>
       '<div class="row"><span>' + esc(a.name || a.agent_id.slice(0,8)) +
       ' <span class="muted">' + esc(a.agent_type) + '</span>' +
-      (a.pr_url ? ' <a href="' + esc(a.pr_url) + '" target="_blank">PR</a>' : '') +
+      (a.pr_url ? ' <a href="' + esc(safeUrl(a.pr_url)) + '" target="_blank">PR</a>' : '') +
       '</span><span class="badge ' + esc(a.status) + '">' + esc(a.status) + '</span></div>'
     ).join('');
     const worktrees = t.worktrees.map((w) => {
@@ -116,7 +120,7 @@ function renderCloud(res) {
   el.innerHTML = '<div class="card"><table><tr><th>id</th><th>provider</th><th>status</th><th>repo</th><th></th></tr>' +
     res.data.map((c) => '<tr><td>' + esc(c.id.slice(0,10)) + '</td><td>' + esc(c.provider) + '</td><td><span class="badge ' + esc(c.status) + '">' +
       esc(c.status) + '</span></td><td class="muted">' + esc(c.repo || '') + '</td><td>' +
-      (c.prUrl ? '<a href="' + esc(c.prUrl) + '" target="_blank">PR</a>' : '') + '</td></tr>').join('') +
+      (c.prUrl ? '<a href="' + esc(safeUrl(c.prUrl)) + '" target="_blank">PR</a>' : '') + '</td></tr>').join('') +
     '</table></div>';
 }
 function render(state) {

@@ -4,8 +4,10 @@
  * loopback-only binding, and the read-only (GET-only) contract.
  */
 import { describe, it, expect, afterEach } from 'vitest';
-import type { Server } from 'http';
+import type { Server, IncomingMessage } from 'http';
+import net from 'net';
 import { startServeServer, SERVE_HOST } from './server.js';
+import type { ServeState } from './data.js';
 
 let server: Server | null = null;
 
@@ -80,5 +82,76 @@ describe('serve server', () => {
     const base = await boot();
     const res = await fetch(base + '/nope');
     expect(res.status).toBe(404);
+  });
+
+  // Regression: an SSE client that disconnects DURING the first (slow) snapshot
+  // must not leak the push interval. The one-shot 'close' has to be registered
+  // BEFORE the first `await push()`, and the interval must not arm once closed —
+  // otherwise it keeps calling assembleState()/res.write() on a dead socket
+  // forever. We reproduce the race deterministically by gating the first
+  // snapshot: disconnect, confirm the server observed the close, THEN release
+  // the snapshot. A correct server calls the snapshot exactly once (no interval
+  // ever fires); the buggy version calls it repeatedly.
+  it('does not leak the SSE interval when the client disconnects during the first snapshot', async () => {
+    const STATE: ServeState = {
+      generated_at: '2026-07-05T00:00:00.000Z',
+      teams: { ok: true, data: [] },
+      routines: { ok: true, data: [] },
+      cloud: { ok: true, data: [] },
+    };
+
+    let snapshotCalls = 0;
+    let signalEntered!: () => void;
+    const enteredFirstSnapshot = new Promise<void>((r) => (signalEntered = r));
+    let releaseFirstSnapshot!: () => void;
+    const gate = new Promise<void>((r) => (releaseFirstSnapshot = r));
+
+    const snapshot = async (): Promise<ServeState> => {
+      snapshotCalls += 1;
+      if (snapshotCalls === 1) {
+        signalEntered();
+        await gate; // hold the first snapshot open so we can disconnect mid-flight
+      }
+      return STATE;
+    };
+
+    const started = await startServeServer(0, { cwd: process.cwd(), intervalMs: 20, snapshot });
+    server = started.server;
+
+    // Observe the server-side close independently of the handler under test, so
+    // we can wait until the disconnect is truly seen before releasing the gate.
+    let serverSawClose = false;
+    server.on('request', (req: IncomingMessage) => {
+      if ((req.url || '').startsWith('/events')) req.on('close', () => (serverSawClose = true));
+    });
+
+    // Raw socket so we control exactly when the client goes away.
+    const sock = net.connect(started.port, SERVE_HOST);
+    await new Promise<void>((resolve, reject) => {
+      sock.once('connect', () => resolve());
+      sock.once('error', reject);
+    });
+    sock.write(`GET /events HTTP/1.1\r\nHost: ${SERVE_HOST}\r\nConnection: keep-alive\r\n\r\n`);
+
+    // Wait until we're inside the first snapshot, then kill the client.
+    await enteredFirstSnapshot;
+    sock.destroy();
+
+    // Deterministically wait for the server to register the disconnect before
+    // releasing the snapshot — this is what makes the assertion non-flaky.
+    const deadline = Date.now() + 2000;
+    while (!serverSawClose && Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, 5));
+    }
+    expect(serverSawClose).toBe(true);
+
+    // Let the (now-orphaned) first snapshot finish, then give any leaked
+    // interval many cadences to fire.
+    releaseFirstSnapshot();
+    await new Promise<void>((r) => setTimeout(r, 200)); // 10x the 20ms interval
+
+    // Exactly one snapshot: the first frame. No interval ever armed, so no
+    // write-after-close and no leaked timer.
+    expect(snapshotCalls).toBe(1);
   });
 });

@@ -27,6 +27,13 @@ export interface ServeOptions {
   cwd?: string;
   /** SSE push cadence in ms. Defaults to {@link DEFAULT_INTERVAL_MS}. */
   intervalMs?: number;
+  /**
+   * Snapshot data source. Defaults to {@link assembleState}. Read-only DI seam
+   * so tests can drive SSE lifecycle timing deterministically (e.g. gate the
+   * first snapshot to reproduce a mid-snapshot disconnect); production never
+   * sets it.
+   */
+  snapshot?: () => Promise<ServeState>;
 }
 
 /**
@@ -37,7 +44,7 @@ export function createServeServer(opts: ServeOptions = {}): http.Server {
   const cwd = opts.cwd ?? process.cwd();
   const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
 
-  const snapshot = (): Promise<ServeState> => assembleState(cwd);
+  const snapshot = opts.snapshot ?? ((): Promise<ServeState> => assembleState(cwd));
 
   const server = http.createServer(async (req, res) => {
     // Read-only: reject anything that could mutate. Only GET is served.
@@ -76,6 +83,17 @@ export function createServeServer(opts: ServeOptions = {}): http.Server {
       });
 
       let closed = false;
+      // Declare the timer first and register the disconnect cleanup BEFORE the
+      // first `await push()`. `assembleState()` (team scan + git diffs) can be
+      // slow; if the client disconnects during it, the one-shot 'close' must
+      // already have a listener — otherwise it fires into the void, the interval
+      // starts anyway, and we leak a timer writing to a destroyed socket forever.
+      let timer: ReturnType<typeof setInterval> | undefined;
+      req.on('close', () => {
+        closed = true;
+        if (timer) clearInterval(timer);
+      });
+
       const push = async () => {
         if (closed) return;
         try {
@@ -88,11 +106,10 @@ export function createServeServer(opts: ServeOptions = {}): http.Server {
       };
 
       await push(); // immediate first frame
-      const timer = setInterval(push, intervalMs);
-      req.on('close', () => {
-        closed = true;
-        clearInterval(timer);
-      });
+      // Only arm the interval if the client is still connected. If 'close' fired
+      // during the first push, `closed` is already true (and the handler ran
+      // while `timer` was undefined), so starting an interval here would leak.
+      if (!closed) timer = setInterval(push, intervalMs);
       return;
     }
 
