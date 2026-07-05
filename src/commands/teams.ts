@@ -24,6 +24,13 @@ import {
 import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
 import { runSupervisor } from '../lib/teams/supervisor.js';
+import { debug } from '../lib/teams/debug.js';
+import {
+  runPrWatch,
+  type WatchTarget,
+  type PrWatchAction,
+  type PrWatchEvent,
+} from '../lib/teams/pr-watch.js';
 import {
   handleSpawn,
   handleStatus,
@@ -322,6 +329,101 @@ async function runOneWave(mgr: AgentManager, team: string, json: boolean): Promi
       console.log(`  ${chalk.blue(h)}  ${chalk.gray('after')} ${a.after.join(', ')}`);
     }
   }
+}
+
+/**
+ * Path to the pr-watch dedupe-state file for a team. Persists the set of
+ * already-handled check/comment dedupe keys so a restart of `teams pr-watch`
+ * never re-spawns a fix wave for a failure it already reacted to. Lives in the
+ * teammate base dir; it's a flat file so loadExistingAgents (dir-only) skips it.
+ */
+async function prWatchStatePath(team: string): Promise<string> {
+  const safe = team.replace(/[^A-Za-z0-9_-]/g, '_');
+  return path.join(await getAgentsDir(), `pr-watch-${safe}.json`);
+}
+
+async function loadHandledKeys(team: string): Promise<Set<string>> {
+  try {
+    const raw = await fs.readFile(await prWatchStatePath(team), 'utf-8');
+    const parsed = JSON.parse(raw);
+    return new Set(Array.isArray(parsed?.handled) ? (parsed.handled as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function saveHandledKeys(team: string, handled: Set<string>): Promise<void> {
+  try {
+    await fs.writeFile(
+      await prWatchStatePath(team),
+      JSON.stringify({ handled: [...handled] }, null, 2)
+    );
+  } catch (err) {
+    debug(`Could not persist pr-watch state for ${team}: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * Resolve the PRs opened by a team's teammates, de-duplicated by PR URL. A
+ * teammate's PR URL comes from its own `pr_url` field or, failing that, the
+ * session it ran (detected from the transcript's `gh pr create`). The teammate
+ * name is the `--after` anchor for the fix/bugfix teammate we spawn.
+ */
+async function resolvePrWatchTargets(mgr: AgentManager, team: string): Promise<WatchTarget[]> {
+  const status = await handleStatus(mgr, team, 'all');
+  const sessions = await resolveTeammateSessions(status.agents);
+  const byPr = new Map<string, WatchTarget>();
+  for (const a of status.agents) {
+    const prUrl = a.pr_url || sessions.get(a.agent_id)?.prUrl || null;
+    if (!prUrl) continue;
+    if (byPr.has(prUrl)) continue; // first teammate to own a PR is its source
+    byPr.set(prUrl, { prUrl, sourceTeammate: a.name ?? null });
+  }
+  return [...byPr.values()];
+}
+
+/**
+ * React to one decided pr-watch action by spawning a follow-up teammate on the
+ * same PR — a ci-fix teammate on RED CI, or a `bugfix` teammate on a new review
+ * comment — linked `--after` the teammate that opened the PR so it slots into
+ * the same DAG the supervisor already drains. Returns the teammate label.
+ */
+async function reactWithTeammate(
+  mgr: AgentManager,
+  team: string,
+  action: PrWatchAction,
+  prompt: string,
+): Promise<string | null> {
+  // Unique name per reaction — teammate names must be unique within a team.
+  const uniq = action.dedupeKey.replace(/[^A-Za-z0-9]/g, '').slice(-10) || `${Date.now()}`;
+  const name = action.kind === 'ci-fix' ? `cifix-${uniq}` : `bugfix-${uniq}`;
+  const taskType: TaskType | null = action.kind === 'review-fix' ? 'bugfix' : null;
+  // Link --after the source teammate when it's a real, resolvable sibling; a
+  // missing source means the PR couldn't be traced to a named teammate, so the
+  // fix runs immediately with no dependency edge.
+  const after: string[] = [];
+  if (action.sourceTeammate) {
+    const resolved = await mgr.resolveAgentIdInTask(team, action.sourceTeammate);
+    if (resolved.kind === 'ok') after.push(action.sourceTeammate);
+  }
+  const result = await handleSpawn(
+    mgr,
+    team,
+    'claude',
+    prompt,
+    process.cwd(),
+    'edit',
+    'medium',
+    null,
+    process.cwd(),
+    null,
+    name,
+    after,
+    null,
+    null,
+    taskType,
+  );
+  return result.name ?? shortId(result.agent_id);
 }
 
 // Pick the display handle for a teammate: explicit teammate name, Claude
@@ -1431,6 +1533,90 @@ export function registerTeamsCommands(program: Command): void {
             `.`,
         ));
         process.exitCode = 7; // Mirrors BUDGET_KILL_EXIT_CODE for CI/headless.
+      }
+    });
+
+  // pr-watch — autonomous PR lifecycle (issue #338)
+  addHostOption(teams.command('pr-watch [team]'))
+    .description('Watch the PRs a team opened and react autonomously: RED CI -> spawn a fix teammate with the failure logs; new review comment -> route a bugfix teammate. Both slot into the team DAG (visible in `teams status`).')
+    .option('--interval <seconds>', 'Seconds between polls (default 30)', '30')
+    .option('--max-polls <n>', 'Stop after this many polls (default: run until Ctrl-C)', '0')
+    .option('--once', 'Poll a single time and exit (equivalent to --max-polls 1)')
+    .option('--json', 'Emit one JSON line per pr-watch event')
+    .action(async (team: string | undefined, opts: { interval: string; maxPolls: string; once?: boolean; json?: boolean }) => {
+      const mgr = mkManager();
+
+      if (!team) {
+        const picked = await pickTeamOr(mgr, 'agents teams pr-watch');
+        if (!picked) return;
+        team = picked;
+      }
+      const resolvedTeam = team;
+
+      const intervalMs = Math.max(1000, (Number.parseInt(opts.interval, 10) || 30) * 1000);
+      const maxPolls = opts.once ? 1 : Math.max(0, Number.parseInt(opts.maxPolls, 10) || 0);
+      const json = isJsonMode(opts);
+
+      const handled = await loadHandledKeys(resolvedTeam);
+
+      let stopSignal = false;
+      const onSig = () => { stopSignal = true; };
+      process.once('SIGINT', onSig);
+      process.once('SIGTERM', onSig);
+
+      const emit = (e: PrWatchEvent) => {
+        if (json) { console.log(JSON.stringify(e)); return; }
+        const ts = e.timestamp.slice(11, 19);
+        if (e.type === 'poll') {
+          console.log(`[${ts}] polled ${chalk.cyan(resolvedTeam)} — ${e.targets} PR(s) under watch`);
+        } else if (e.type === 'spawned') {
+          const verb = e.action.kind === 'ci-fix' ? 'CI-fix' : 'bugfix';
+          const detail = e.action.kind === 'ci-fix'
+            ? `check ${chalk.yellow(e.action.check.name)}`
+            : `comment ${chalk.yellow('#' + e.action.comment.id)}`;
+          console.log(
+            `[${ts}] ${chalk.green('spawned')} ${verb} teammate ${chalk.cyan(e.label ?? '?')} ` +
+            `for ${detail} on ${e.action.prUrl}`
+          );
+        } else if (e.type === 'error') {
+          console.error(`[${ts}] ${chalk.red('error')} on ${e.prUrl}: ${e.message}`);
+        }
+      };
+
+      try {
+        const result = await runPrWatch(
+          {
+            resolveTargets: async () => {
+              // Drive the DAG each pass so fix/bugfix teammates staged --after a
+              // now-completed source teammate actually launch — no separate
+              // `teams start --watch` needed.
+              await mgr.rescanFromDisk();
+              await mgr.startReady(resolvedTeam);
+              return resolvePrWatchTargets(mgr, resolvedTeam);
+            },
+            react: (action, prompt) => reactWithTeammate(mgr, resolvedTeam, action, prompt),
+            onEvent: emit,
+          },
+          {
+            intervalMs,
+            maxPolls,
+            handled,
+            shouldStop: () => stopSignal,
+          }
+        );
+        await saveHandledKeys(resolvedTeam, result.handled);
+        if (!json) {
+          console.log(
+            chalk.gray(
+              `pr-watch stopped (${result.stoppedBy}) after ${result.polls} poll(s); ` +
+              `spawned ${result.spawned} follow-up teammate(s).`
+            )
+          );
+          console.log(chalk.gray(`Check the team:  agents teams status ${resolvedTeam}`));
+        }
+      } finally {
+        process.off('SIGINT', onSig);
+        process.off('SIGTERM', onSig);
       }
     });
 
