@@ -55,8 +55,10 @@ you never need to start it manually.
       const result = startDaemon();
       if (result.method === 'already-running') {
         console.log(chalk.yellow(`Daemon already running (PID: ${result.pid})`));
-      } else {
+      } else if (result.pid) {
         console.log(chalk.green(`Daemon started (PID: ${result.pid}, method: ${result.method})`));
+      } else {
+        console.log(chalk.yellow('Daemon start dispatched but no PID surfaced. Check `agents routines status`.'));
       }
     });
 

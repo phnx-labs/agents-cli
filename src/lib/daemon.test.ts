@@ -309,3 +309,76 @@ describe('startDetached (integration: daemon stays alive)', () => {
     }
   }, 30_000);
 });
+
+// #414: enforce a single daemon instance and never report a null PID.
+//  - A second concurrent `daemon _run` must exit without clobbering the live
+//    daemon's pid file (else two schedulers double-fire every routine).
+//  - A start that produced no OS pid must fail loudly, never surface null.
+describe('daemon single-instance (#414)', () => {
+  it('startDetached fails loudly instead of returning a null PID when the binary is unspawnable', () => {
+    // A non-JS entry is spawned directly (getDaemonLaunch), so a missing binary
+    // makes spawn() yield an undefined pid — the exact `child.pid || null`
+    // footgun. Pre-fix this returned { pid: null }; now it throws.
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-null-'));
+    const logPath = path.join(tmpDir, 'stdio.log');
+    expect(() =>
+      startDetached({ agentsBin: '/nonexistent/agents-cli-does-not-exist', logPath }),
+    ).toThrow(/no PID/i);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses a second concurrent daemon: it exits without clobbering the live pid file', async () => {
+    // CI builds before tests; self-heal for a bare `vitest` run.
+    if (!fs.existsSync(DIST_ENTRY)) {
+      execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+    }
+
+    // Short POSIX base keeps the daemon's AF_UNIX browser socket under the
+    // 104-byte sun_path cap (see the integration test above for the rationale).
+    const tmpRoot = process.platform === 'win32' ? os.tmpdir() : '/tmp';
+    const tmpHome = fs.mkdtempSync(path.join(tmpRoot, 'agd-si-'));
+    // Satisfy the setup gate (`ensureInitialized`): ~/.agents/.system must be a repo.
+    const systemDir = path.join(tmpHome, '.agents', '.system');
+    fs.mkdirSync(systemDir, { recursive: true });
+    execFileSync('git', ['init', '-q', systemDir]);
+
+    const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+    const childEnv = { ...process.env, HOME: tmpHome };
+    delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const readPid = () => (fs.existsSync(pidFile) ? parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) : null);
+    const waitFor = async (cond: () => boolean, timeoutMs: number) => {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        if (cond()) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return cond();
+    };
+
+    let pidA: number | null = null;
+    let pidB: number | null = null;
+    try {
+      // Daemon A comes up and records itself as the pid-file owner.
+      pidA = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'a.log'), env: childEnv }).pid!;
+      expect(pidA).toBeTruthy();
+      expect(await waitFor(() => readPid() === pidA, 20_000)).toBe(true);
+
+      // Daemon B — a second concurrent `daemon _run` — must detect A and exit.
+      pidB = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'b.log'), env: childEnv }).pid!;
+      expect(pidB).toBeTruthy();
+      expect(pidB).not.toBe(pidA);
+
+      // B exits on its own (claimDaemonInstance() returned false → process.exit(0)).
+      expect(await waitFor(() => !alive(pidB!), 20_000)).toBe(true);
+
+      // A never lost ownership of the pid file and is still running.
+      expect(readPid()).toBe(pidA);
+      expect(alive(pidA)).toBe(true);
+    } finally {
+      for (const p of [pidA, pidB]) { try { if (p) process.kill(p, 'SIGKILL'); } catch { /* already gone */ } }
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  }, 60_000);
+});

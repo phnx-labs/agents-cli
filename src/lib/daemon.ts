@@ -132,6 +132,82 @@ export function isDaemonRunning(): boolean {
   return false;
 }
 
+/**
+ * Single-instance claim for the daemon `_run` entrypoint.
+ *
+ * `agents daemon _run` is reachable directly — a manual invocation, or a
+ * service-manager restart that races a still-alive predecessor — bypassing the
+ * start lock in startDaemon(). Without this guard runDaemon() would call
+ * writeDaemonPid() unconditionally, clobber a live daemon's recorded PID, and
+ * run a second JobScheduler concurrently, so every cron routine fires twice.
+ *
+ * Returns true and records our PID when no other live daemon owns the pid file;
+ * returns false when a live daemon already holds it (the caller must exit
+ * without touching any further state). The read-decide-write is serialized
+ * behind the same O_EXCL start lock startDaemon() uses, so two _run processes
+ * can't both claim in the window between the liveness check and the write.
+ */
+export function claimDaemonInstance(): boolean {
+  const release = acquireStartLock();
+  try {
+    const existing = readDaemonPid();
+    if (existing !== null && existing !== process.pid && isAlive(existing)) {
+      return false; // another live daemon already owns the pid file
+    }
+    writeDaemonPid(process.pid);
+    return true;
+  } finally {
+    release?.();
+  }
+}
+
+/**
+ * Reap stray duplicate daemon processes — a `daemon _run` of THIS install that
+ * isn't this process and isn't the pid-file owner. Mirrors the browser orphan
+ * reaper (below): a predecessor that was SIGKILLed/OOM-ed without cleaning up,
+ * or a duplicate that lost the pid-file write race, would otherwise keep a
+ * second scheduler alive and double-fire jobs even after claimDaemonInstance()
+ * hands the pid file to the survivor.
+ *
+ * Scoped to our own launch entry (process.argv[1]) so it only ever targets
+ * daemons of the same installation — a daemon from a different install / home
+ * (e.g. a side-by-side dev build, or a test fixture) is a legitimately separate
+ * instance and is left untouched. POSIX-only (uses `ps`); a no-op on Windows.
+ */
+export function reapStrayDaemons(keepPid: number = process.pid): { reaped: number; details: string[] } {
+  const details: string[] = [];
+  let reaped = 0;
+  if (process.platform === 'win32') return { reaped, details };
+
+  const selfEntry = process.argv[1];
+  if (!selfEntry) return { reaped, details };
+
+  let out: string;
+  try {
+    out = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return { reaped, details }; // no `ps` — best effort
+  }
+
+  const ownerPid = readDaemonPid();
+  for (const line of out.split('\n')) {
+    const m = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (!m) continue;
+    const pid = parseInt(m[1], 10);
+    const args = m[2];
+    if (isNaN(pid) || pid === keepPid || pid === process.pid || pid === ownerPid) continue;
+    // Same install (same launch entry) AND a `daemon _run` command line.
+    if (!args.includes(selfEntry)) continue;
+    if (!/\bdaemon\b.*\b_run\b/.test(args)) continue;
+    try {
+      process.kill(pid, 'SIGTERM');
+      reaped++;
+      details.push(`reaped stray daemon pid ${pid}`);
+    } catch { /* already gone */ }
+  }
+  return { reaped, details };
+}
+
 /** Redact values that look like tokens or credentials in a log message. */
 function redactSecrets(message: string): string {
   let safe = message;
@@ -166,8 +242,29 @@ export function log(level: string, message: string): void {
 
 /** Main daemon loop: load jobs, schedule crons, monitor runs, and handle signals. */
 export async function runDaemon(): Promise<void> {
-  writeDaemonPid(process.pid);
+  // Single-instance guard: a direct `agents daemon _run` (manual, or a
+  // service-manager restart racing a live predecessor) must not clobber a
+  // running daemon's pid file and start a second scheduler.
+  if (!claimDaemonInstance()) {
+    const owner = readDaemonPid();
+    log('WARN', `Another daemon already owns the pid file (PID: ${owner}); this instance (PID ${process.pid}) is exiting`);
+    // Exit cleanly (0) so a service manager treats it as an orderly no-op
+    // rather than a failure to restart-flap on.
+    process.exit(0);
+  }
   log('INFO', `Daemon started (PID: ${process.pid})`);
+
+  // Reap any stray duplicate daemon of this install that slipped past the start
+  // lock or was orphaned by a hard-crash — before it can double-fire jobs.
+  try {
+    const strays = reapStrayDaemons();
+    if (strays.reaped > 0) {
+      log('WARN', `Reaped ${strays.reaped} stray daemon process(es)`);
+      for (const d of strays.details) log('WARN', `  ${d}`);
+    }
+  } catch (err) {
+    log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
+  }
 
   const scheduler = new JobScheduler(async (config) => {
     log('INFO', `Triggering job '${config.name}' (agent: ${config.agent})`);
@@ -470,6 +567,33 @@ function getAgentsBinPath(): string {
   }
 }
 
+/**
+ * Ask the service manager for the daemon's live PID. Used as a fallback when
+ * the daemon hasn't yet written its pid file but launchd/systemd already report
+ * it running — so a start never has to surface a null PID for a daemon that is
+ * in fact up. Returns null when the service isn't running or the query fails.
+ */
+function readServiceManagerPid(platform: NodeJS.Platform = os.platform()): number | null {
+  try {
+    if (platform === 'linux') {
+      const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', SYSTEMD_UNIT],
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      const pid = parseInt(out, 10);
+      return !isNaN(pid) && pid > 0 ? pid : null;
+    }
+    if (platform === 'darwin') {
+      const out = execFileSync('launchctl', ['list', PLIST_NAME],
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const m = out.match(/"PID"\s*=\s*(\d+)/);
+      if (m) {
+        const pid = parseInt(m[1], 10);
+        return pid > 0 ? pid : null;
+      }
+    }
+  } catch { /* not running / manager unavailable */ }
+  return null;
+}
+
 /** Start the daemon via launchd, systemd, or as a detached process. */
 export function startDaemon(): { pid: number | null; method: string } {
   if (isDaemonRunning()) {
@@ -513,7 +637,7 @@ function startDaemonLocked(): { pid: number | null; method: string } {
       // of success. If no pid materializes within the window, give up on
       // launchd and fall through to a plain detached spawn.
       execFileSync('launchctl', ['load', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
-      const pid = waitForPid(3000);
+      const pid = waitForPid(3000) ?? readServiceManagerPid();
       if (pid) return { pid, method: 'launchd' };
       // launchctl claimed success but nothing ran. Fall through.
     } catch {
@@ -536,11 +660,14 @@ function startDaemonLocked(): { pid: number | null; method: string } {
       execFileSync('systemctl', ['--user', 'enable', SYSTEMD_UNIT], { encoding: 'utf-8' });
       execFileSync('systemctl', ['--user', 'start', SYSTEMD_UNIT], { encoding: 'utf-8' });
 
-      const pid = waitForPid(3000);
-      return { pid, method: 'systemd' };
+      const pid = waitForPid(3000) ?? readServiceManagerPid();
+      if (pid) return { pid, method: 'systemd' };
+      // systemctl returned success but no PID surfaced — fall through to a
+      // plain detached spawn rather than reporting a null PID.
     } catch {
-      return startDetached();
+      // start threw — fall through to detached spawn
     }
+    return startDetached();
   }
 
   return startDetached();
@@ -612,10 +739,22 @@ export function startDetached(opts: StartDetachedOptions = {}): { pid: number | 
     env: opts.env ?? buildDetachedDaemonEnv(),
   });
 
+  // A failed spawn (ENOENT/EACCES) emits 'error' asynchronously; without a
+  // listener that would crash the parent as an unhandled EventEmitter error.
+  // The synchronous `!child.pid` guard below is what reports the failure loudly.
+  child.on('error', () => { /* reported synchronously via the pid guard below */ });
+
   child.unref();
   fs.closeSync(logFd);
 
-  return { pid: child.pid || null, method: 'detached' };
+  // `spawn` leaves `pid` undefined only when the process could not be created.
+  // Returning null here (the old `child.pid || null`) let callers report
+  // "PID: null" as if the daemon had started — a start with no PID is a failed
+  // start, so fail loudly instead of manufacturing a phantom success.
+  if (!child.pid) {
+    throw new Error(`Failed to start daemon: spawning '${command}' produced no PID (binary missing or not executable?)`);
+  }
+  return { pid: child.pid, method: 'detached' };
 }
 
 function waitForPid(timeoutMs: number): number | null {

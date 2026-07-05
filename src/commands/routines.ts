@@ -769,8 +769,10 @@ export function registerRoutinesCommands(program: Command): void {
       const result = startDaemon();
       if (result.method === 'already-running') {
         console.log(chalk.yellow(`Scheduler already running (PID: ${result.pid})`));
-      } else {
+      } else if (result.pid) {
         console.log(chalk.green(`Scheduler started (PID: ${result.pid})`));
+      } else {
+        console.log(chalk.yellow('Scheduler start dispatched but no PID surfaced. Check `agents routines status`.'));
       }
     });
 
