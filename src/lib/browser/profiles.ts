@@ -1,5 +1,4 @@
 import * as path from 'path';
-import { execFileSync } from 'child_process';
 import {
   getBrowserRuntimeDir as getBrowserRuntimeDirRoot,
   readMeta,
@@ -7,7 +6,7 @@ import {
 } from '../state.js';
 import type { BrowserProfileConfig } from '../types.js';
 import type { BrowserProfile } from './types.js';
-import { findBrowserPath, findFirstInstalledBrowser } from './chrome.js';
+import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import { DEFAULT_VIEWPORT } from './devices.js';
 
 export type { BrowserProfile } from './types.js';
@@ -157,13 +156,12 @@ export async function findFreeProfilePort(): Promise<number> {
 
   for (let port = 9222; port <= 9399; port++) {
     if (usedByProfile.has(port)) continue;
-    try {
-      execFileSync('lsof', ['-i', `:${port}`], { stdio: 'ignore' });
-      // lsof succeeded → something is listening → port is in use
-    } catch {
-      // lsof threw → nothing on this port → it's free
-      return port;
-    }
+    // Platform-aware bound-port probe (lsof on POSIX, netstat on Windows).
+    // The old inline lsof call threw ENOENT on Windows — where lsof doesn't
+    // exist — so EVERY port scanned as "free", including one an already-
+    // running browser was listening on (typically 9222), and the new profile
+    // would silently attach to that browser instead of launching its own.
+    if (!isPortInUse(port)) return port;
   }
 
   throw new Error('No available ports in range 9222-9399');

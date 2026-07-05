@@ -386,8 +386,12 @@ function sleep(ms: number): Promise<void> {
  * Is a TCP port currently bound? `lsof` on POSIX, `netstat -ano` on Windows
  * (lsof doesn't exist there). Returns false on any tooling error so port
  * allocation degrades to "assume free" rather than throwing.
+ *
+ * Exported as the canonical cross-platform probe — `findFreeProfilePort`
+ * (profiles.ts) must use this rather than shelling out to lsof directly,
+ * or every port scans as free on Windows.
  */
-function isPortInUse(port: number): boolean {
+export function isPortInUse(port: number): boolean {
   if (process.platform === 'win32') {
     try {
       const out = execFileSync('netstat', ['-ano', '-p', 'TCP'], {
