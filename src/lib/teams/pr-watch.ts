@@ -27,18 +27,17 @@ const execFileAsync = promisify(execFile);
 /**
  * A CI check result. Shaped after `gh pr checks <pr> --json name,state,link,workflow`,
  * where `state` is one of SUCCESS | FAILURE | PENDING | ERROR | CANCELLED | SKIPPING | ...
+ *
+ * Note on identity: `gh pr checks` exposes NO stable check-run id — `link` is the
+ * per-run URL, which changes every time a workflow re-runs. So dedupe keys off the
+ * check NAME (stable across re-runs), not the link (see `checkDedupeKey`). `link`
+ * is retained only for the human-facing prompt and for scraping run logs.
  */
 export interface PrCheck {
   name: string;
   state: string;
   link?: string;
   workflow?: string;
-  /**
-   * Stable identity for dedupe. Prefer the check-run id (from the gh api call);
-   * fall back to the run link, then the check name, so a check with no id still
-   * dedupes deterministically across polls.
-   */
-  id?: string;
 }
 
 /** A PR review comment. Shaped after GitHub's `repos/{owner}/{repo}/pulls/{n}/comments`. */
@@ -64,6 +63,14 @@ export interface PrSnapshot {
   comments: PrReviewComment[];
 }
 
+/**
+ * Default cap on how many fix/bugfix waves pr-watch spawns for a single PR before
+ * it gives up and escalates to a human. A persistently-RED PR re-runs CI on every
+ * follow-up commit; without a cap the loop would spawn teammates without bound
+ * (issue #338). Configurable via `--max-waves`.
+ */
+export const DEFAULT_MAX_WAVES = 3;
+
 /** A decision to spawn a follow-up teammate. Pure output of `decidePrActions`. */
 export type PrWatchAction =
   | {
@@ -73,6 +80,8 @@ export type PrWatchAction =
       check: PrCheck;
       /** Idempotency key — record it in `handled` once acted on so it never re-fires. */
       dedupeKey: string;
+      /** 1-based wave number for this PR (used to name the spawned teammate uniquely). */
+      wave: number;
     }
   | {
       kind: 'review-fix';
@@ -80,7 +89,25 @@ export type PrWatchAction =
       sourceTeammate: string | null;
       comment: PrReviewComment;
       dedupeKey: string;
+      wave: number;
+    }
+  | {
+      /**
+       * The per-PR wave budget is exhausted — stop spawning, escalate to a human.
+       * Emitted once per PR (deduped via `needsHumanKey`) instead of an N+1th fix.
+       */
+      kind: 'needs-human';
+      prUrl: string;
+      sourceTeammate: string | null;
+      /** What triggered the escalation (e.g. `CI check "test"`). */
+      subject: string;
+      /** Waves already spent on this PR when the cap was hit. */
+      waves: number;
+      dedupeKey: string;
     };
+
+/** The spawnable subset of actions — everything except the `needs-human` escalation. */
+export type PrWatchSpawnAction = Extract<PrWatchAction, { kind: 'ci-fix' | 'review-fix' }>;
 
 /**
  * Check states that count as a RED CI failure worth spawning a fix wave for.
@@ -101,9 +128,18 @@ export function isFailedCheck(check: PrCheck): boolean {
   return FAILED_STATES.has((check.state || '').trim().toUpperCase());
 }
 
-/** Idempotency key for a failed check on a PR — dedupe by check-run id. */
+/**
+ * Idempotency key for a failed check on a PR — dedupe by check NAME.
+ *
+ * The name is the ONLY identity that's stable across re-runs: when a fixer pushes
+ * a follow-up commit, GitHub creates a fresh workflow run with a new `link` URL but
+ * the SAME check name. Keying off `link` (as an earlier draft did) would treat every
+ * re-run as a brand-new failure and spawn an unbounded chain of fixers (issue #338).
+ * Keying off the name means a re-run of the same check is recognised as the same
+ * logical failure; the per-PR wave counter then bounds how many times we retry it.
+ */
 export function checkDedupeKey(prUrl: string, check: PrCheck): string {
-  return `ci:${prUrl}:${check.id ?? check.link ?? check.name}`;
+  return `ci:${prUrl}:${check.name}`;
 }
 
 /** Idempotency key for a review comment on a PR — dedupe by comment id. */
@@ -111,43 +147,92 @@ export function commentDedupeKey(prUrl: string, comment: PrReviewComment): strin
   return `review:${prUrl}:${comment.id}`;
 }
 
+/** Idempotency key for the one-shot "needs human" escalation on a PR. */
+export function needsHumanKey(prUrl: string): string {
+  return `needs-human:${prUrl}`;
+}
+
 /**
- * The pure heart of pr-watch: given a PR snapshot and the set of ids already
- * acted on, decide which follow-up teammates to spawn. Emits:
- *   - one `ci-fix` action per NEW failed check (dedup by check-run id)
+ * The pure heart of pr-watch: given a PR snapshot, the set of dedupe keys already
+ * acted on, and how many fix waves each PR has already spent, decide which
+ * follow-up teammates to spawn. Emits:
+ *   - one `ci-fix` action per NEW failed check (dedup by check NAME)
  *   - one `review-fix` action per NEW review comment (dedup by comment id)
+ *   - a single `needs-human` action (per PR) once the wave budget is exhausted,
+ *     INSTEAD of spawning — so a persistently-failing PR escalates rather than
+ *     spawning teammates without bound (issue #338).
  *
- * No network, no side effects, no reference to already-handled ids beyond the
- * passed set — so the same failure never spawns twice.
+ * `waves` maps a PR URL to the number of fix/bugfix teammates already spawned for
+ * it; once that reaches `maxWaves`, no further spawns are emitted for that PR.
+ * Both the CI-fix and comment-routing paths draw from the SAME per-PR budget, so
+ * neither can loop unboundedly.
+ *
+ * No network, no side effects, no reference to state beyond the passed
+ * `handled` / `waves` — so the same failure never spawns twice and the caller
+ * stays in control of when a wave is "spent".
  */
 export function decidePrActions(
   snapshot: PrSnapshot,
-  handled: ReadonlySet<string>
+  handled: ReadonlySet<string>,
+  waves: ReadonlyMap<string, number> = new Map(),
+  maxWaves: number = DEFAULT_MAX_WAVES
 ): PrWatchAction[] {
   const actions: PrWatchAction[] = [];
+  const { prUrl } = snapshot;
+  // Waves already spent, plus the ones we're about to emit in THIS pass — so a
+  // single pass with several fresh failures can't blow past the budget.
+  let projected = waves.get(prUrl) ?? 0;
+  let escalated = false;
+
+  const escalate = (subject: string) => {
+    if (escalated) return;
+    const dedupeKey = needsHumanKey(prUrl);
+    if (handled.has(dedupeKey)) return; // already escalated this PR — stay silent
+    escalated = true;
+    actions.push({
+      kind: 'needs-human',
+      prUrl,
+      sourceTeammate: snapshot.sourceTeammate,
+      subject,
+      waves: projected,
+      dedupeKey,
+    });
+  };
 
   for (const check of snapshot.checks) {
     if (!isFailedCheck(check)) continue;
-    const dedupeKey = checkDedupeKey(snapshot.prUrl, check);
+    const dedupeKey = checkDedupeKey(prUrl, check);
     if (handled.has(dedupeKey)) continue;
+    if (projected >= maxWaves) {
+      escalate(`CI check "${check.name}"`);
+      continue;
+    }
+    projected++;
     actions.push({
       kind: 'ci-fix',
-      prUrl: snapshot.prUrl,
+      prUrl,
       sourceTeammate: snapshot.sourceTeammate,
       check,
       dedupeKey,
+      wave: projected,
     });
   }
 
   for (const comment of snapshot.comments) {
-    const dedupeKey = commentDedupeKey(snapshot.prUrl, comment);
+    const dedupeKey = commentDedupeKey(prUrl, comment);
     if (handled.has(dedupeKey)) continue;
+    if (projected >= maxWaves) {
+      escalate(`review comment #${comment.id}`);
+      continue;
+    }
+    projected++;
     actions.push({
       kind: 'review-fix',
-      prUrl: snapshot.prUrl,
+      prUrl,
       sourceTeammate: snapshot.sourceTeammate,
       comment,
       dedupeKey,
+      wave: projected,
     });
   }
 
@@ -219,9 +304,6 @@ export async function fetchPrChecks(prUrl: string): Promise<PrCheck[]> {
       state: String(r.state ?? ''),
       link: r.link ? String(r.link) : undefined,
       workflow: r.workflow ? String(r.workflow) : undefined,
-      // gh pr checks has no stable check-run id; the run link is the stablest
-      // per-check identity it exposes, so dedupe keys off it.
-      id: r.link ? String(r.link) : undefined,
     }));
   } catch {
     // `gh pr checks` exits non-zero when checks are failing OR when none are
@@ -311,18 +393,28 @@ export interface PrWatchDeps {
   /** Fetch CI failure logs for a ci-fix action. Defaults to `fetchCiFailureLogs`. */
   fetchLogs?: (check: PrCheck) => Promise<string>;
   /**
-   * React to one decided action: spawn the fix/bugfix teammate. The prompt is
-   * pre-built with logs/comment injected. Return the spawned teammate label for
-   * logging, or null if the spawn was skipped.
+   * React to one decided spawn action: spawn the fix/bugfix teammate. The prompt
+   * is pre-built with logs/comment injected. Return the spawned teammate label for
+   * logging, or null if the spawn was skipped. `needs-human` actions never reach
+   * here — they surface as a `needs-human` event instead.
    */
-  react: (action: PrWatchAction, prompt: string) => Promise<string | null>;
-  /** Progress sink — one call per notable event (poll, spawn, drain). */
+  react: (action: PrWatchSpawnAction, prompt: string) => Promise<string | null>;
+  /**
+   * True when a previously-spawned reaction has finished. Once its fixer settles,
+   * the dedupe guard for that check clears so a check that is STILL red can spawn
+   * its next (budget-bounded) wave; without this, a check would only ever get one
+   * fix attempt per pr-watch run. Optional — when omitted, a check gets a single
+   * wave until pr-watch restarts.
+   */
+  reactionSettled?: (label: string) => Promise<boolean>;
+  /** Progress sink — one call per notable event (poll, spawn, escalate, error). */
   onEvent?: (event: PrWatchEvent) => void;
 }
 
 export type PrWatchEvent =
   | { type: 'poll'; targets: number; timestamp: string }
-  | { type: 'spawned'; action: PrWatchAction; label: string | null; timestamp: string }
+  | { type: 'spawned'; action: PrWatchSpawnAction; label: string | null; timestamp: string }
+  | { type: 'needs-human'; prUrl: string; subject: string; waves: number; timestamp: string }
   | { type: 'error'; prUrl: string; message: string; timestamp: string };
 
 export interface PrWatchOptions {
@@ -331,6 +423,10 @@ export interface PrWatchOptions {
   maxPolls?: number;
   /** Seed of already-handled dedupe keys (e.g. restored from disk). */
   handled?: Set<string>;
+  /** Per-PR fix-wave counts, carried across restarts so the budget survives a restart. */
+  waves?: Map<string, number>;
+  /** Cap on fix waves per PR before escalating to a human. Defaults to DEFAULT_MAX_WAVES. */
+  maxWaves?: number;
   /** Abort signal — resolves the loop at the next interval boundary. */
   shouldStop?: () => boolean;
 }
@@ -338,15 +434,21 @@ export interface PrWatchOptions {
 export interface PrWatchResult {
   polls: number;
   spawned: number;
+  /** How many PRs escalated to a human (wave budget exhausted). */
+  neededHuman: number;
   handled: Set<string>;
+  waves: Map<string, number>;
   stoppedBy: 'max-polls' | 'signal';
 }
 
 /**
- * Run the pr-watch poll loop. Each pass: resolve watch targets, snapshot each
- * PR, decide actions against the running `handled` set, and react (spawn) to the
- * fresh ones — recording every acted-on dedupe key so a failure/comment never
- * spawns twice across passes.
+ * Run the pr-watch poll loop. Each pass: retire the dedupe guards of any fixers
+ * that have finished (so a still-red check can spawn its next wave), resolve watch
+ * targets, snapshot each PR, decide actions against the running `handled` set and
+ * per-PR `waves` budget, then react — spawning fresh fixers, or emitting a
+ * one-shot `needs-human` event once a PR's wave budget is spent. Every acted-on
+ * dedupe key is recorded so a failure/comment never spawns twice within a wave,
+ * and `waves` hard-caps the total spawns per PR (issue #338).
  */
 export async function runPrWatch(
   deps: PrWatchDeps,
@@ -354,17 +456,42 @@ export async function runPrWatch(
 ): Promise<PrWatchResult> {
   const intervalMs = opts.intervalMs ?? 15000;
   const maxPolls = opts.maxPolls ?? 0;
+  const maxWaves = opts.maxWaves ?? DEFAULT_MAX_WAVES;
   const handled = opts.handled ?? new Set<string>();
+  const waves = opts.waves ?? new Map<string, number>();
   const pollSnapshot = deps.pollSnapshot ?? pollPrSnapshot;
   const fetchLogs = deps.fetchLogs ?? fetchCiFailureLogs;
   const emit = deps.onEvent ?? (() => {});
 
+  // dedupeKey -> spawned teammate label, for the settle sweep. When a fixer
+  // finishes, its guard clears so the next wave (if still warranted) can fire.
+  const inFlight = new Map<string, string>();
+
   let polls = 0;
   let spawned = 0;
+  let neededHuman = 0;
 
   for (;;) {
     if (opts.shouldStop?.()) {
-      return { polls, spawned, handled, stoppedBy: 'signal' };
+      return { polls, spawned, neededHuman, handled, waves, stoppedBy: 'signal' };
+    }
+
+    // Retire guards for finished fixers so a check that's STILL red after a fix
+    // can spawn its next wave (bounded by `waves`). Skipped when no settle probe
+    // is wired — then a check gets one wave until pr-watch restarts.
+    if (deps.reactionSettled && inFlight.size > 0) {
+      for (const [key, label] of [...inFlight]) {
+        let done = false;
+        try {
+          done = await deps.reactionSettled(label);
+        } catch {
+          done = false;
+        }
+        if (done) {
+          handled.delete(key);
+          inFlight.delete(key);
+        }
+      }
     }
 
     const targets = await deps.resolveTargets();
@@ -385,11 +512,26 @@ export async function runPrWatch(
         continue;
       }
 
-      const actions = decidePrActions(snap, handled);
+      const actions = decidePrActions(snap, handled, waves, maxWaves);
       for (const action of actions) {
         // Record the key BEFORE reacting so a spawn failure can't loop-spam the
         // same failure — a bad action is dropped, not retried forever.
         handled.add(action.dedupeKey);
+
+        if (action.kind === 'needs-human') {
+          neededHuman++;
+          emit({
+            type: 'needs-human',
+            prUrl: action.prUrl,
+            subject: action.subject,
+            waves: action.waves,
+            timestamp: new Date().toISOString(),
+          });
+          continue;
+        }
+
+        // Spend a wave from this PR's budget for the spawn we're about to make.
+        waves.set(action.prUrl, (waves.get(action.prUrl) ?? 0) + 1);
         const prompt =
           action.kind === 'ci-fix'
             ? buildCiFixPrompt(action, await fetchLogs(action.check))
@@ -397,6 +539,7 @@ export async function runPrWatch(
         try {
           const label = await deps.react(action, prompt);
           spawned++;
+          if (label) inFlight.set(action.dedupeKey, label);
           emit({ type: 'spawned', action, label, timestamp: new Date().toISOString() });
         } catch (err) {
           emit({
@@ -410,7 +553,7 @@ export async function runPrWatch(
     }
 
     if (maxPolls > 0 && polls >= maxPolls) {
-      return { polls, spawned, handled, stoppedBy: 'max-polls' };
+      return { polls, spawned, neededHuman, handled, waves, stoppedBy: 'max-polls' };
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }

@@ -27,8 +27,9 @@ import { runSupervisor } from '../lib/teams/supervisor.js';
 import { debug } from '../lib/teams/debug.js';
 import {
   runPrWatch,
+  DEFAULT_MAX_WAVES,
   type WatchTarget,
-  type PrWatchAction,
+  type PrWatchSpawnAction,
   type PrWatchEvent,
 } from '../lib/teams/pr-watch.js';
 import {
@@ -342,21 +343,36 @@ async function prWatchStatePath(team: string): Promise<string> {
   return path.join(await getAgentsDir(), `pr-watch-${safe}.json`);
 }
 
-async function loadHandledKeys(team: string): Promise<Set<string>> {
+interface PrWatchState {
+  handled: Set<string>;
+  waves: Map<string, number>;
+}
+
+async function loadPrWatchState(team: string): Promise<PrWatchState> {
   try {
     const raw = await fs.readFile(await prWatchStatePath(team), 'utf-8');
     const parsed = JSON.parse(raw);
-    return new Set(Array.isArray(parsed?.handled) ? (parsed.handled as string[]) : []);
+    const handled = new Set(Array.isArray(parsed?.handled) ? (parsed.handled as string[]) : []);
+    const waves = new Map<string, number>(
+      parsed?.waves && typeof parsed.waves === 'object'
+        ? Object.entries(parsed.waves as Record<string, number>).map(([k, v]) => [k, Number(v) || 0])
+        : []
+    );
+    return { handled, waves };
   } catch {
-    return new Set();
+    return { handled: new Set(), waves: new Map() };
   }
 }
 
-async function saveHandledKeys(team: string, handled: Set<string>): Promise<void> {
+async function savePrWatchState(team: string, state: PrWatchState): Promise<void> {
   try {
     await fs.writeFile(
       await prWatchStatePath(team),
-      JSON.stringify({ handled: [...handled] }, null, 2)
+      JSON.stringify(
+        { handled: [...state.handled], waves: Object.fromEntries(state.waves) },
+        null,
+        2
+      )
     );
   } catch (err) {
     debug(`Could not persist pr-watch state for ${team}: ${(err as Error).message}`);
@@ -391,12 +407,15 @@ async function resolvePrWatchTargets(mgr: AgentManager, team: string): Promise<W
 async function reactWithTeammate(
   mgr: AgentManager,
   team: string,
-  action: PrWatchAction,
+  action: PrWatchSpawnAction,
   prompt: string,
 ): Promise<string | null> {
-  // Unique name per reaction — teammate names must be unique within a team.
-  const uniq = action.dedupeKey.replace(/[^A-Za-z0-9]/g, '').slice(-10) || `${Date.now()}`;
-  const name = action.kind === 'ci-fix' ? `cifix-${uniq}` : `bugfix-${uniq}`;
+  // Unique name per reaction. The dedupe key is stable across waves (keyed on the
+  // check NAME), so the wave number is what keeps successive fixers' names — and
+  // their worktrees — distinct within the team.
+  const uniq = action.dedupeKey.replace(/[^A-Za-z0-9]/g, '').slice(-10) || `${action.wave}`;
+  const slug = `${uniq}-w${action.wave}`;
+  const name = action.kind === 'ci-fix' ? `cifix-${slug}` : `bugfix-${slug}`;
   const taskType: TaskType | null = action.kind === 'review-fix' ? 'bugfix' : null;
   // Link --after the source teammate when it's a real, resolvable sibling; a
   // missing source means the PR couldn't be traced to a named teammate, so the
@@ -406,22 +425,48 @@ async function reactWithTeammate(
     const resolved = await mgr.resolveAgentIdInTask(team, action.sourceTeammate);
     if (resolved.kind === 'ok') after.push(action.sourceTeammate);
   }
+  // Isolate each fixer in its own worktree so concurrent `gh pr checkout`s (across
+  // PRs, or across waves) never clash in a shared cwd. Requires a git repo — which
+  // pr-watch always is, since it operates on PRs; fall back to the cwd only when
+  // the checkout somehow isn't a repo.
+  const baseCwd = process.cwd();
+  let worktreeName: string | null = null;
+  let worktreePath: string | null = null;
+  let cwd = baseCwd;
+  if (await isGitRepo(baseCwd)) {
+    try {
+      worktreeName = `prwatch-${name}`;
+      worktreePath = await createWorktree(baseCwd, worktreeName);
+      cwd = worktreePath;
+    } catch (err) {
+      debug(`pr-watch: could not create worktree for ${name}: ${(err as Error).message}`);
+      worktreeName = null;
+      worktreePath = null;
+      cwd = baseCwd;
+    }
+  }
   const result = await handleSpawn(
     mgr,
     team,
     'claude',
     prompt,
-    process.cwd(),
+    cwd,
     'edit',
     'medium',
     null,
-    process.cwd(),
+    cwd,
     null,
     name,
     after,
     null,
     null,
     taskType,
+    null,
+    null,
+    null,
+    null,
+    worktreeName,
+    worktreePath,
   );
   return result.name ?? shortId(result.agent_id);
 }
@@ -1541,9 +1586,10 @@ export function registerTeamsCommands(program: Command): void {
     .description('Watch the PRs a team opened and react autonomously: RED CI -> spawn a fix teammate with the failure logs; new review comment -> route a bugfix teammate. Both slot into the team DAG (visible in `teams status`).')
     .option('--interval <seconds>', 'Seconds between polls (default 30)', '30')
     .option('--max-polls <n>', 'Stop after this many polls (default: run until Ctrl-C)', '0')
+    .option('--max-waves <n>', `Fix waves per PR before escalating to a human (default ${DEFAULT_MAX_WAVES})`, String(DEFAULT_MAX_WAVES))
     .option('--once', 'Poll a single time and exit (equivalent to --max-polls 1)')
     .option('--json', 'Emit one JSON line per pr-watch event')
-    .action(async (team: string | undefined, opts: { interval: string; maxPolls: string; once?: boolean; json?: boolean }) => {
+    .action(async (team: string | undefined, opts: { interval: string; maxPolls: string; maxWaves: string; once?: boolean; json?: boolean }) => {
       const mgr = mkManager();
 
       if (!team) {
@@ -1555,9 +1601,10 @@ export function registerTeamsCommands(program: Command): void {
 
       const intervalMs = Math.max(1000, (Number.parseInt(opts.interval, 10) || 30) * 1000);
       const maxPolls = opts.once ? 1 : Math.max(0, Number.parseInt(opts.maxPolls, 10) || 0);
+      const maxWaves = Math.max(1, Number.parseInt(opts.maxWaves, 10) || DEFAULT_MAX_WAVES);
       const json = isJsonMode(opts);
 
-      const handled = await loadHandledKeys(resolvedTeam);
+      const { handled, waves } = await loadPrWatchState(resolvedTeam);
 
       let stopSignal = false;
       const onSig = () => { stopSignal = true; };
@@ -1576,11 +1623,26 @@ export function registerTeamsCommands(program: Command): void {
             : `comment ${chalk.yellow('#' + e.action.comment.id)}`;
           console.log(
             `[${ts}] ${chalk.green('spawned')} ${verb} teammate ${chalk.cyan(e.label ?? '?')} ` +
-            `for ${detail} on ${e.action.prUrl}`
+            `(wave ${e.action.wave}/${maxWaves}) for ${detail} on ${e.action.prUrl}`
+          );
+        } else if (e.type === 'needs-human') {
+          console.error(
+            `[${ts}] ${chalk.red('needs human')} — ${e.prUrl} still failing after ${e.waves} wave(s) ` +
+            `(${e.subject}). Not spawning again; hand it to a human.`
           );
         } else if (e.type === 'error') {
           console.error(`[${ts}] ${chalk.red('error')} on ${e.prUrl}: ${e.message}`);
         }
+      };
+
+      // A fixer's dedupe guard clears once it settles, so a still-red check can
+      // spawn its next (budget-bounded) wave. Terminal = completed/failed/stopped.
+      const reactionSettled = async (label: string): Promise<boolean> => {
+        const roster = await mgr.listByTask(resolvedTeam);
+        const teammate = roster.find((a) => a.name === label || shortId(a.agentId) === label);
+        if (!teammate) return false;
+        const s = String(teammate.status);
+        return s === 'completed' || s === 'failed' || s === 'stopped';
       };
 
       try {
@@ -1595,21 +1657,27 @@ export function registerTeamsCommands(program: Command): void {
               return resolvePrWatchTargets(mgr, resolvedTeam);
             },
             react: (action, prompt) => reactWithTeammate(mgr, resolvedTeam, action, prompt),
+            reactionSettled,
             onEvent: emit,
           },
           {
             intervalMs,
             maxPolls,
+            maxWaves,
             handled,
+            waves,
             shouldStop: () => stopSignal,
           }
         );
-        await saveHandledKeys(resolvedTeam, result.handled);
+        await savePrWatchState(resolvedTeam, { handled: result.handled, waves: result.waves });
         if (!json) {
+          const humanNote = result.neededHuman > 0
+            ? ` ${result.neededHuman} PR(s) escalated to a human.`
+            : '';
           console.log(
             chalk.gray(
               `pr-watch stopped (${result.stoppedBy}) after ${result.polls} poll(s); ` +
-              `spawned ${result.spawned} follow-up teammate(s).`
+              `spawned ${result.spawned} follow-up teammate(s).${humanNote}`
             )
           );
           console.log(chalk.gray(`Check the team:  agents teams status ${resolvedTeam}`));
