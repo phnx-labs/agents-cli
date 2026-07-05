@@ -924,9 +924,11 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
   const wt = session.worktreeSlug ? chalk.magenta(`wt:${session.worktreeSlug}`) : '';
 
   // The machine column only earns its width when the listing spans more than one
-  // box (i.e. the cross-machine fan-out folded remotes in) — same rule as the picker.
+  // box (i.e. the cross-machine fan-out folded remotes in) — same rule and
+  // pool-derived width as the picker.
+  const machineColW = cols.machineWidth ?? PICKER_MACHINE_W;
   const machineCell = cols.showMachine
-    ? chalk.gray(padToWidth(truncateToWidth((cols.machineLabel?.(session.machine ?? '') ?? session.machine ?? '') || '-', PICKER_MACHINE_W - 1), PICKER_MACHINE_W))
+    ? chalk.gray(padToWidth(truncateToWidth((cols.machineLabel?.(session.machine ?? '') ?? session.machine ?? '') || '-', machineColW - 1), machineColW))
     : '';
 
   const TICKET_W = 10;
@@ -934,7 +936,7 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
     ? chalk.blue(padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1))
     : '';
   const glyphW = glyph ? 2 : 0;
-  const machineW = cols.showMachine ? PICKER_MACHINE_W : 0;
+  const machineW = cols.showMachine ? machineColW : 0;
   const ticketW = showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const topicW = Math.max(16, terminalWidth() - (10 + 9 + 8 + 16) - glyphW - machineW - ticketW - wtW - stringWidth(when) - 1);
@@ -1206,6 +1208,9 @@ export interface PickerColumns {
   showMachine?: boolean;
   /** Map a full machine id to its compact display form (shared prefix stripped). */
   machineLabel?: (m: string) => string;
+  /** Total width of the machine column, sized to the widest compacted hostname
+   * in the pool (capped). Falls back to PICKER_MACHINE_W when absent. */
+  machineWidth?: number;
   /** Render the ticket/PR column (only when at least one row carries a ref). */
   showTicket?: boolean;
   /**
@@ -1216,7 +1221,20 @@ export interface PickerColumns {
   gutter?: number;
 }
 
+/** Fallback machine-column width when a pool-derived width isn't supplied.
+ * `pickerColumnsFor` normally computes `machineWidth` sized to the actual
+ * hostnames, floored/capped by these bounds so common ids like `yosemite-s0`
+ * (11) fit whole while a pathological hostname can't devour the topic column. */
 const PICKER_MACHINE_W = 11;
+const PICKER_MACHINE_MIN = 8;
+const PICKER_MACHINE_MAX = 18;
+
+/** Column width that shows every compacted hostname in `machines` whole (one
+ * trailing space for separation), bounded by MIN/MAX. */
+function machineColumnWidth(machines: string[], label: (m: string) => string): number {
+  const widest = machines.reduce((w, m) => Math.max(w, stringWidth(label(m))), 0);
+  return Math.min(PICKER_MACHINE_MAX, Math.max(PICKER_MACHINE_MIN, widest + 1));
+}
 
 /**
  * Compact display form for machine ids: strip the longest shared dash-delimited
@@ -1245,9 +1263,12 @@ export function machineLabeler(machines: string[]): (m: string) => string {
  */
 export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
   const machines = sessions.map((s) => s.machine).filter((m): m is string => !!m);
+  const distinct = [...new Set(machines)];
+  const machineLabel = machineLabeler(machines);
   return {
-    showMachine: new Set(machines).size > 1,
-    machineLabel: machineLabeler(machines),
+    showMachine: distinct.length > 1,
+    machineLabel,
+    machineWidth: machineColumnWidth(distinct, machineLabel),
     showTicket: sessions.some((s) => ticketLabel(s) !== ''),
   };
 }
@@ -1262,8 +1283,9 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
   const versionStr = s.version || '-';
   const wt = s.worktreeSlug ? chalk.magenta(`wt:${s.worktreeSlug}`) : '';
 
+  const machineW = cols.machineWidth ?? PICKER_MACHINE_W;
   const machineCell = cols.showMachine
-    ? chalk.gray(padRight(truncate((cols.machineLabel?.(s.machine ?? '') ?? s.machine ?? '') || '-', PICKER_MACHINE_W - 1), PICKER_MACHINE_W))
+    ? chalk.gray(padRight(truncate((cols.machineLabel?.(s.machine ?? '') ?? s.machine ?? '') || '-', machineW - 1), machineW))
     : '';
 
   const TICKET_W = 10;
@@ -1275,12 +1297,12 @@ export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerCol
   // reserve it, plus the conditional columns, so the topic shrinks to fit and
   // rows never wrap.
   const gutter = cols.gutter ?? 2;
-  const machineW = cols.showMachine ? PICKER_MACHINE_W : 0;
+  const machineColW = cols.showMachine ? machineW : 0;
   const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
   const wtW = wt ? stringWidth(wt) + 1 : 0;
   const topicW = Math.max(
     16,
-    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineW - ticketW - wtW - stringWidth(when) - 1,
+    terminalWidth() - gutter - (10 + 9 + 8 + 16) - machineColW - ticketW - wtW - stringWidth(when) - 1,
   );
 
   return (

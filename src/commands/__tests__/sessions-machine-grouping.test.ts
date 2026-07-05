@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { groupSessionsByMachine, dedupeByMachineSession, mergeLocalFirst } from '../sessions.js';
+import { groupSessionsByMachine, dedupeByMachineSession, mergeLocalFirst, pickerColumnsFor } from '../sessions.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 import type { SessionMeta } from '../../lib/session/types.js';
 
@@ -180,3 +180,33 @@ describe('mergeLocalFirst', () => {
     expect(merged).toHaveLength(2);
   });
 });
+
+describe('pickerColumnsFor machine column width', () => {
+  it('sizes the column to fit the widest hostname whole (no ellipsis truncation)', () => {
+    // 'yosemite-s0' (11) shares no prefix with 'zion', so it is shown whole and
+    // the column must be wide enough (>= 12) to render it without truncating.
+    const cols = pickerColumnsFor([
+      mkMeta({ id: 'a', machine: 'yosemite-s0' }),
+      mkMeta({ id: 'b', machine: 'zion' }),
+    ]);
+    expect(cols.showMachine).toBe(true);
+    expect(cols.machineWidth).toBe(12); // 11 + 1 trailing space
+  });
+
+  it('uses the COMPACTED label width when a shared prefix is stripped', () => {
+    // 'yosemite-s0'/'yosemite-s1' compact to 's0'/'s1' (width 2) → floored to MIN.
+    const cols = pickerColumnsFor([
+      mkMeta({ id: 'a', machine: 'yosemite-s0' }),
+      mkMeta({ id: 'b', machine: 'yosemite-s1' }),
+    ]);
+    expect(cols.machineWidth).toBe(8); // MIN floor, not the full 11
+  });
+
+  it('caps the column so a pathological hostname cannot devour the row', () => {
+    const cols = pickerColumnsFor([
+      mkMeta({ id: 'a', machine: 'a-really-absurdly-long-hostname-that-goes-on' }),
+      mkMeta({ id: 'b', machine: 'zion' }),
+    ]);
+    expect(cols.machineWidth).toBe(18); // MAX cap
+  });
+})
