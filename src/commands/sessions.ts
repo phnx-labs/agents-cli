@@ -71,6 +71,8 @@ interface SessionsOptions extends SessionFilterOptions {
   host?: string[];
   /** Group the listing by directory and drop the id/version columns. */
   tree?: boolean;
+  /** Force the plain flat table instead of the grouped default overview. */
+  flat?: boolean;
   /** With --active: show only sessions waiting on user input; exit 1 if any. */
   waiting?: boolean;
   /** Enrich the listing with live glyphs/preview for running rows. Default on;
@@ -149,6 +151,12 @@ function createScanProgressTracker(
 
 const PICKER_RECENT_COUNT = 15;
 const PICKER_POOL_LIMIT = 200;
+// The grouped default view ("overview"): fetch a generous recency-ordered pool
+// for accurate per-project totals, show each project's most-recent rows grouped
+// by project, newest-active project first.
+const OVERVIEW_ROWS_PER_PROJECT = 5; // recent rows shown per project before "· N more"
+const OVERVIEW_POOL_LIMIT = 1000; // fetch cap — accurate per-project totals up to this
+const OVERVIEW_MAX_PROJECTS = 12; // project groups shown before "+N more projects"
 
 /**
  * Resolve a path-like query to an absolute directory path.
@@ -745,8 +753,18 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   // Interactive picker loads a deep pool but shows only recent sessions
   // until the user starts typing. Non-interactive/JSON uses the explicit limit.
   const isInteractive = !options.json && isInteractiveTerminal();
-  const limit = parseInt(options.limit || (isInteractive ? String(PICKER_POOL_LIMIT) : '50'), 10);
-  const since = options.since ?? (isInteractive && !options.all ? '30d' : undefined);
+  // The grouped project overview is the default for a bare interactive listing:
+  // no query, no path drill-in, not explicitly --flat/--tree. It drops the silent
+  // cwd-scope + 50-cap + 30-day window that hide most of a large index.
+  const wantsOverview = isInteractive && !searchQuery && !pathFilter && !options.flat && !options.tree;
+  const limit = wantsOverview
+    ? OVERVIEW_POOL_LIMIT
+    : parseInt(options.limit || (isInteractive ? String(PICKER_POOL_LIMIT) : '50'), 10);
+  // Overview: recency order across the whole index, no default window; an explicit
+  // --since still narrows. Non-overview keeps the prior interactive-30d default.
+  const since = wantsOverview
+    ? options.since
+    : (options.since ?? (isInteractive && !options.all ? '30d' : undefined));
   const spinner = options.json ? null : ora().start();
   const tracker = createScanProgressTracker(LOAD_VERBS, 'sessions', spinner);
 
@@ -762,7 +780,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     const scope: DiscoverOptions = {
       agent,
       version,
-      all: pathFilter ? undefined : options.all,
+      all: pathFilter ? undefined : (wantsOverview ? true : options.all),
       cwd: process.cwd(),
       cwdPrefix: pathFilter,
       project: options.project,
@@ -859,9 +877,20 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       return;
     }
 
-    // --tree is a printed grouped listing, not an interactive pick — render it
-    // directly even in a TTY.
-    if (isInteractiveTerminal() && !options.tree) {
+    // The grouped project overview is the bare interactive default: a scannable
+    // dashboard of the whole fleet grouped by project, newest-active first.
+    // Interact/resume via `agents sessions <project>` or `agents sessions resume`.
+    if (wantsOverview) {
+      const liveIndex = await maybeLiveIndex(options);
+      // Per-project row cap is fixed (--limit carries a default of 50 and drives
+      // the fetch pool, not the display); `--all` expands every group instead.
+      printSessionOverview(sessions, hiddenCount, liveIndex, { perProjectCap: OVERVIEW_ROWS_PER_PROJECT, expand: !!options.all });
+      return;
+    }
+
+    // --tree / --flat are printed listings, not an interactive pick — render them
+    // directly even in a TTY. A search query keeps the interactive picker.
+    if (isInteractiveTerminal() && !options.tree && !options.flat) {
       const message = pathFilter
         ? `Search sessions (${path.basename(pathFilter)}):`
         : formatSearchMessage(options);
@@ -873,7 +902,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
       return;
     }
 
-    // Non-interactive fallback (piped output)
+    // Non-interactive fallback (piped output) or --flat/--tree.
     const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
     const liveIndex = await maybeLiveIndex(options);
     printSessionTable(filtered, hiddenCount, options.tree === true, liveIndex);
@@ -994,6 +1023,94 @@ async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, Act
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Group key for the overview: prefer the indexed project name; else fold the cwd
+ * to its repo — a worktree (`.../<repo>/.agents/worktrees/<slug>`) folds to the
+ * repo, and a monorepo subdir falls back to its leaf dir basename. Pure.
+ */
+export function overviewProjectKey(s: Pick<SessionMeta, 'project' | 'cwd'>): string {
+  if (s.project && s.project.trim()) return s.project.trim();
+  const cwd = (s.cwd ?? '').replace(/\/+$/, '');
+  if (!cwd) return '(no project)';
+  const wt = cwd.match(/\/([^/]+)\/\.agents\/worktrees\//);
+  if (wt) return wt[1];
+  const parts = cwd.split('/');
+  return parts[parts.length - 1] || cwd;
+}
+
+export interface OverviewGroup {
+  key: string;
+  total: number; // total sessions for this project in the fetched pool
+  shown: SessionMeta[]; // the recent slice that fell within the display budget
+  more: number; // total - shown.length
+  maxTs: string; // most-recent timestamp in the group
+}
+
+/**
+ * Turn a recency-descending pool into project groups: each group shows its
+ * `perProjectCap` most-recent sessions (the rest become `· N more`), and groups
+ * are ordered by their most-recent session so the newest-active project leads.
+ * `perProjectCap = Infinity` expands every group. Pure — unit-tested.
+ */
+export function buildOverviewGroups(
+  pool: SessionMeta[],
+  perProjectCap: number,
+): { groups: OverviewGroup[]; projectCount: number } {
+  const byKey = new Map<string, SessionMeta[]>();
+  for (const s of pool) {
+    const k = overviewProjectKey(s);
+    (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(s);
+  }
+  const cap = Math.max(1, perProjectCap);
+  const groups: OverviewGroup[] = [];
+  for (const [key, rows] of byKey) {
+    const shown = rows.slice(0, cap); // rows are recency-desc (pool was sorted)
+    groups.push({ key, total: rows.length, shown, more: rows.length - shown.length, maxTs: rows[0].timestamp });
+  }
+  groups.sort((a, b) => (a.maxTs < b.maxTs ? 1 : a.maxTs > b.maxTs ? -1 : a.key.localeCompare(b.key)));
+  return { groups, projectCount: byKey.size };
+}
+
+/**
+ * The grouped project overview — the bare interactive default. Shows the latest
+ * sessions grouped under their project, newest-active project first, with a
+ * `· N more` per project and a `+N more projects` when the list is capped.
+ */
+function printSessionOverview(
+  pool: SessionMeta[],
+  hiddenCount: number,
+  liveIndex: Map<string, ActiveSession> | undefined,
+  opts: { perProjectCap: number; expand: boolean },
+): void {
+  const { groups } = buildOverviewGroups(pool, opts.expand ? Infinity : opts.perProjectCap);
+  const shownGroups = opts.expand ? groups : groups.slice(0, OVERVIEW_MAX_PROJECTS);
+  const hiddenProjects = groups.length - shownGroups.length;
+
+  const total = pool.length;
+  const projWord = groups.length === 1 ? 'project' : 'projects';
+  console.log(chalk.gray(`${total} session${total === 1 ? '' : 's'} · ${groups.length} ${projWord} · recent activity\n`));
+
+  let first = true;
+  for (const g of shownGroups) {
+    if (!first) console.log();
+    first = false;
+    const { glyph } = liveGlyphAndPreview(liveIndex?.get(g.shown[0].id));
+    const head =
+      `${chalk.cyan('▸')} ${chalk.cyan.bold(g.key)}  ${chalk.gray(String(g.total))}` +
+      `${glyph ? '  ' + glyph : ''} ${chalk.gray(formatRelativeTime(g.maxTs))}`;
+    console.log(head);
+    for (const s of g.shown) console.log(treeSessionRow(s, liveIndex?.get(s.id)));
+    if (g.more > 0) console.log('  ' + chalk.gray(`· ${g.more} more`));
+  }
+
+  console.log();
+  const parts = [chalk.gray('newest first')];
+  if (hiddenProjects > 0) parts.push(chalk.gray(`+${hiddenProjects} more project${hiddenProjects === 1 ? '' : 's'} · agents sessions --all`));
+  parts.push(chalk.gray('agents sessions <project> to drill in · --flat for the plain list'));
+  console.log(parts.join(chalk.gray('  ·  ')));
+  if (hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
 }
 
 function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
@@ -1900,6 +2017,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--local', 'Only this machine — skip the cross-machine SSH fan-out (default listing and --active)')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')
+    .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)');
