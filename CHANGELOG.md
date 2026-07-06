@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.36
+
 **[windows] `agents sessions --active` detects sessions on Windows, and shim launches carry cwd + session identity everywhere**
 
 - The active listing found nothing on Windows: the headless scan shelled out to `ps -A` and per-pid `lsof` — both POSIX-only, both failing silently into "No active agent sessions" with a dozen live `claude.exe` processes running. The process table now comes from one CIM query on win32 (`powershell.exe Get-CimInstance Win32_Process`; `wmic` is removed on current Windows 11) parsed into the same pid/ppid/comm rows, agent-kind matching strips the `.exe` image suffix case-insensitively (POSIX comms stay exact-match — macOS's Claude *desktop app* process is named `Claude` and must not be listed), and the ancestry walk recognizes Windows terminal hosts (`Code.exe`, `Cursor.exe`, `VSCodium.exe`, `Windsurf.exe`, `WindowsTerminal.exe`). Where no cwd can be recovered (no `lsof` on Windows), same-kind child agent processes — Claude runs subagents and its bundled ripgrep as child `claude` processes — fold onto their root candidate (`foldSubordinateAgents`) instead of printing one row per fork; on POSIX those children collapsed via shared-cwd session dedupe, which now accumulates pre-folded pid counts instead of resetting them. Verified live: 6 root `claude.exe` processes render as 6 rows (previously zero). Source: `src/lib/session/active.ts`.
