@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   version TEXT,
   account TEXT,
   timestamp TEXT NOT NULL,
+  last_activity TEXT,
   project TEXT,
   cwd TEXT,
   git_branch TEXT,
@@ -110,6 +111,7 @@ export interface SessionRow {
   version: string | null;
   account: string | null;
   timestamp: string;
+  last_activity: string | null;
   project: string | null;
   cwd: string | null;
   git_branch: string | null;
@@ -242,6 +244,16 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.some(c => c.name === 'ticket_id')) db.exec(`ALTER TABLE sessions ADD COLUMN ticket_id TEXT`);
     db.exec(`DELETE FROM scan_ledger;`);
   }
+  if (fromVersion < 8) {
+    // v7 → v8: the listing now sorts and labels by last-activity (last message
+    // time) instead of creation time. Add the column, seed it to `timestamp` so
+    // no row sorts as NULL before the rescan lands, then force a full rescan so
+    // every session gets its true last_activity (from lastTsMs) repopulated.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'last_activity')) db.exec(`ALTER TABLE sessions ADD COLUMN last_activity TEXT`);
+    db.exec(`UPDATE sessions SET last_activity = timestamp WHERE last_activity IS NULL`);
+    db.exec(`DELETE FROM scan_ledger;`);
+  }
 }
 
 /** Open (or return the cached) sessions database, applying migrations as needed. */
@@ -269,6 +281,12 @@ export function getDB(): Database.Database {
     migrateSchema(db, currentVersion);
     db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', ?)`).run(String(SCHEMA_VERSION));
   }
+
+  // Index last_activity only after the column is guaranteed to exist — fresh DBs
+  // get it from CREATE TABLE above, existing pre-v8 DBs from the migration just
+  // run. It must NOT live in SCHEMA (executed before migration) or an existing
+  // DB would fail the index build on a column it doesn't have yet.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity DESC)`);
 
   // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
   // them anymore. Guarded by a meta flag so we only try once.
@@ -460,13 +478,13 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
 
 const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
-    id, short_id, agent, version, account, timestamp,
+    id, short_id, agent, version, account, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
     cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id
   ) VALUES (
-    @id, @short_id, @agent, @version, @account, @timestamp,
+    @id, @short_id, @agent, @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
@@ -478,6 +496,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     version = excluded.version,
     account = excluded.account,
     timestamp = excluded.timestamp,
+    last_activity = excluded.last_activity,
     project = excluded.project,
     cwd = excluded.cwd,
     git_branch = excluded.git_branch,
@@ -534,6 +553,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     version: meta.version ?? null,
     account: meta.account ?? null,
     timestamp: meta.timestamp,
+    last_activity: resolveLastActivity(meta, scan),
     project: meta.project ?? null,
     cwd: meta.cwd ?? null,
     git_branch: meta.gitBranch ?? null,
@@ -626,6 +646,7 @@ export function upsertSessionsBatch(
         version: meta.version ?? null,
         account: meta.account ?? null,
         timestamp: meta.timestamp,
+        last_activity: resolveLastActivity(meta, scan),
         project: meta.project ?? null,
         cwd: meta.cwd ?? null,
         git_branch: meta.gitBranch ?? null,
@@ -752,6 +773,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     shortId: row.short_id,
     agent: row.agent as SessionAgentId,
     timestamp: row.timestamp,
+    lastActivity: row.last_activity ?? undefined,
     project: row.project ?? undefined,
     cwd: row.cwd ?? undefined,
     filePath: row.file_path,
@@ -770,6 +792,20 @@ function rowToMeta(row: SessionRow): SessionMeta {
     worktreeSlug: row.worktree_slug ?? undefined,
     ticketId: row.ticket_id ?? undefined,
   };
+}
+
+/**
+ * The recency signal used to sort and label the listing: last-message time when
+ * a parser computed it (`meta.lastActivity` from `lastTsMs`), else the file's
+ * mtime (its last write), else creation time. Guarded on `filePath` so synthetic
+ * / cloud rows (no local file) fall to their creation timestamp rather than a
+ * bogus scan-time mtime. Always an ISO string, so it sorts lexicographically
+ * against `timestamp` and feeds `formatRelativeTime` unchanged.
+ */
+function resolveLastActivity(meta: SessionMeta, scan?: ScanStamp): string {
+  if (meta.lastActivity) return meta.lastActivity;
+  if (scan?.fileMtimeMs && meta.filePath) return new Date(scan.fileMtimeMs).toISOString();
+  return meta.timestamp;
 }
 
 /**
@@ -860,7 +896,7 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   return { clause, params };
 }
 
-/** Query sessions from the database, applying filters and ordering by timestamp descending. */
+/** Query sessions from the database, applying filters and ordering by last-activity descending (default). */
 export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const db = getDB();
   const { clause, params } = buildSessionWhere(options);
@@ -877,7 +913,7 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
       ? 'ORDER BY cost_usd IS NULL, cost_usd DESC, timestamp DESC'
       : options.sortBy === 'duration'
         ? 'ORDER BY duration_ms IS NULL, duration_ms DESC, timestamp DESC'
-        : 'ORDER BY timestamp DESC';
+        : 'ORDER BY IFNULL(last_activity, timestamp) DESC, timestamp DESC';
   const sql = `SELECT * FROM sessions ${clause} ${orderClause} ${limitClause}`;
   const rows = db.prepare(sql).all(...params) as SessionRow[];
   // Belt-and-suspenders: drop rows whose JSONL no longer exists on disk. The

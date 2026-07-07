@@ -107,6 +107,8 @@ interface ClaudeSessionScan {
   costUsd?: number;
   /** Wall-clock duration in ms between the first and last timestamped event. */
   durationMs?: number;
+  /** ISO time of the last timestamped event — the session's last activity. */
+  lastActivity?: string;
   /**
    * Value of the JSONL `entrypoint` field on the first event that carries it.
    * 'cli' for real interactive sessions, 'sdk-cli' for team-spawned ones.
@@ -133,6 +135,7 @@ interface CodexSessionScan {
   tokenCount?: number;
   costUsd?: number;
   durationMs?: number;
+  lastActivity?: string;
   contentText?: string;
   prUrl?: string;
   prNumber?: number;
@@ -613,6 +616,7 @@ async function readClaudeMeta(
       shortId: sessionId.slice(0, 8),
       agent: 'claude',
       timestamp: scan.timestamp,
+      lastActivity: scan.lastActivity,
       project: cwd ? path.basename(cwd) : undefined,
       cwd,
       filePath,
@@ -638,6 +642,7 @@ async function readClaudeMeta(
       shortId: sessionId.slice(0, 8),
       agent: 'claude',
       timestamp: stat ? stat.mtime.toISOString() : new Date().toISOString(),
+      lastActivity: scan.lastActivity,
       filePath,
       account,
       label,
@@ -859,6 +864,7 @@ export async function readCodexMeta(
     // Codex `session_meta` only carries the start time; use file mtime when
     // it's newer so long-running sessions register as recently active.
     timestamp: pickLatestCodexTimestamp(scan.timestamp, filePath),
+    lastActivity: scan.lastActivity,
     project: cwd ? path.basename(cwd) : undefined,
     cwd,
     filePath,
@@ -1069,6 +1075,7 @@ function readGeminiMeta(
     shortId: sessionId.slice(0, 8),
     agent: 'gemini',
     timestamp: startTime || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
+    lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
     project,
     cwd,
     filePath,
@@ -1749,6 +1756,7 @@ interface DroidSessionScan {
   model?: string;
   messageCount: number;
   durationMs?: number;
+  lastActivity?: string;
   contentText?: string;
 }
 
@@ -1829,6 +1837,7 @@ async function readDroidMeta(
     shortId: sessionId.slice(0, 8),
     agent: 'droid',
     timestamp: scan.timestamp || (stat ? stat.mtime.toISOString() : new Date().toISOString()),
+    lastActivity: scan.lastActivity,
     project: cwd ? path.basename(cwd) : undefined,
     cwd,
     filePath,
@@ -1955,6 +1964,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
     model,
     messageCount,
     durationMs,
+    lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
   };
 }
@@ -2143,6 +2153,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
     tokenCount: sawTokenCount ? tokenCount : undefined,
     costUsd: sawCost ? costUsd : undefined,
     durationMs,
+    lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
     prUrl,
     prNumber,
@@ -2284,6 +2295,7 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
     tokenCount,
     costUsd,
     durationMs,
+    lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
     prUrl,
     prNumber,

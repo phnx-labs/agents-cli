@@ -159,6 +159,16 @@ describe('scanClaudeSession title resolution', () => {
     ]);
     expect((await scanClaudeSession(fp)).topic).toBe('real prompt here');
   });
+
+  it('sets lastActivity to the last event time, distinct from the creation timestamp', async () => {
+    const fp = write([
+      { type: 'user', timestamp: '2026-06-28T00:00:00.000Z', cwd: '/x', message: { role: 'user', content: 'start' } },
+      { type: 'assistant', timestamp: '2026-06-28T02:30:00.000Z', cwd: '/x', message: { role: 'assistant', content: 'done' } },
+    ]);
+    const scan = await scanClaudeSession(fp);
+    expect(scan.timestamp).toBe('2026-06-28T00:00:00.000Z'); // first event = creation
+    expect(scan.lastActivity).toBe('2026-06-28T02:30:00.000Z'); // last event = activity
+  });
 });
 
 // ---------------------------------------------------------------------------

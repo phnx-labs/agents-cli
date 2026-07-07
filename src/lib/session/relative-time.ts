@@ -19,8 +19,12 @@ export function formatRelativeTime(isoTimestamp: string): string {
   if (diffHrs < 24) return `${diffHrs} hour${diffHrs === 1 ? '' : 's'} ago`;
   if (diffDays < 7) return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
 
-  // Older: show date
+  // Older: show the date. Append a 2-digit year for anything outside the current
+  // year so "Jun 28" is never ambiguous across years (e.g. "Jun 28 '25").
   const d = new Date(then);
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[d.getMonth()]} ${d.getDate()}`;
+  const label = `${months[d.getMonth()]} ${d.getDate()}`;
+  return d.getFullYear() === new Date(now).getFullYear()
+    ? label
+    : `${label} '${String(d.getFullYear()).slice(-2)}`;
 }

@@ -53,6 +53,12 @@ export interface SessionMeta {
   shortId: string;
   agent: SessionAgentId;
   timestamp: string;
+  /**
+   * Last-activity time (ISO): the last message timestamp when a parser computed
+   * it, else file mtime, else `timestamp`. This is the recency signal the
+   * listing sorts and labels by; `timestamp` stays the creation time.
+   */
+  lastActivity?: string;
   project?: string;
   cwd?: string;
   filePath: string;

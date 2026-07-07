@@ -140,7 +140,7 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   it('schema_version is recorded as the current version', () => {
     const db = getDB();
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
-    expect(row.value).toBe('7');
+    expect(row.value).toBe('8');
   });
 
   it('v7 adds the session-state columns (pr_url, worktree_slug, ticket_id)', () => {
@@ -150,6 +150,53 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
     expect(cols).toContain('pr_number');
     expect(cols).toContain('worktree_slug');
     expect(cols).toContain('ticket_id');
+  });
+
+  it('v8 adds the last_activity column', () => {
+    const db = getDB();
+    const cols = (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('last_activity');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// last_activity (v8) — the listing sorts and labels by last-message time, not
+// creation time. A session created long ago but active recently must lead.
+// ---------------------------------------------------------------------------
+const ACTIVITY_FILES_DIR = path.join(TEST_HOME, 'activity-files');
+fs.mkdirSync(ACTIVITY_FILES_DIR, { recursive: true });
+
+function seedActive(id: string, timestamp: string, lastActivity: string | undefined): void {
+  const filePath = path.join(ACTIVITY_FILES_DIR, `${id}.jsonl`);
+  fs.writeFileSync(filePath, '');
+  upsertSession(
+    { id, shortId: id.slice(0, 8), agent: 'claude', timestamp, lastActivity, project: 'agents-cli', cwd: ACTIVITY_FILES_DIR, filePath },
+    '',
+  );
+}
+
+describe('default sort orders by last_activity (v8)', () => {
+  beforeAll(() => {
+    // Creation order and activity order deliberately disagree.
+    seedActive('la-oldcreate-newactive', '2026-01-01T00:00:00.000Z', '2026-07-04T12:00:00.000Z');
+    seedActive('la-midcreate-midactive', '2026-06-01T00:00:00.000Z', '2026-06-15T00:00:00.000Z');
+    seedActive('la-newcreate-oldactive', '2026-07-01T00:00:00.000Z', '2026-07-01T00:05:00.000Z');
+    seedActive('la-noactivity', '2026-05-20T00:00:00.000Z', undefined); // no lastActivity → falls back to timestamp
+  });
+
+  it('round-trips last_activity through SQLite', () => {
+    const rows = querySessions({ cwdPrefix: ACTIVITY_FILES_DIR });
+    expect(rows.find(r => r.id === 'la-oldcreate-newactive')!.lastActivity).toBe('2026-07-04T12:00:00.000Z');
+  });
+
+  it('ranks by last activity, not creation time (fallback = timestamp)', () => {
+    const rows = querySessions({ cwdPrefix: ACTIVITY_FILES_DIR });
+    expect(rows.map(r => r.id)).toEqual([
+      'la-oldcreate-newactive', // active Jul 4 (though created back in Jan)
+      'la-newcreate-oldactive', // active Jul 1
+      'la-midcreate-midactive', // active Jun 15
+      'la-noactivity',          // no activity → creation ts May 20
+    ]);
   });
 });
 
