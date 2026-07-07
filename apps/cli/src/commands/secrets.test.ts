@@ -215,7 +215,13 @@ describe('readImportDotenv', () => {
     }
   });
 
-  it('reads the .env from stdin when passed "-"', () => {
+  // Skipped on Windows: this exercises the helper in a child process launched
+  // with `node --import tsx`, and tsx's ESM loader hook fails to register under
+  // Windows CI (`tsx/dist/register-*.mjs`), so the harness — not the product —
+  // can't run there. `readImportDotenv('-')` -> `readStdinSync` is plain
+  // `fs.readSync(0)` (platform-agnostic), and the POSIX CI legs (Linux + macOS)
+  // cover this path end to end.
+  it.skipIf(process.platform === 'win32')('reads the .env from stdin when passed "-"', () => {
     // The in-process fd 0 can't be swapped, so exercise the real helper end to
     // end in a child process with piped stdin — the exact path `export --host`
     // drives when it pipes the resolved dotenv into `import --from -`.
