@@ -703,12 +703,46 @@ async function enrichLocalLocators(local: ActiveSession[]): Promise<void> {
   } catch { /* non-fatal */ }
 }
 
+/** Normalize a `--host`/`--device` token (`alias`, `user@host`, `host.domain`)
+ * to the machine id the fan-out and registry key off. */
+function hostToken(h: string): string {
+  return normalizeHost(h.split('@').pop() || h);
+}
+
 /**
- * Render the unified active-session view, grouped by machine. Local sessions
- * come from `getActiveSessions()`; unless `--local`, sessions from other
- * machines are folded in over SSH (explicit `--host` targets, else the
- * registered online devices from `ag devices`). A tip is shown when there are
- * no other machines to include.
+ * Whether the local machine's sessions belong in an `--active` view. Local is
+ * included by default; an explicit `--host`/`--device` list scopes the view to
+ * exactly those machines, so local is dropped unless it is itself named (by
+ * alias or `user@host`, matched on the normalized machine id). Exported for
+ * unit testing without touching SSH or the live process table.
+ */
+export function shouldIncludeLocal(hosts: string[] | undefined, self: string): boolean {
+  if (!hosts || hosts.length === 0) return true;
+  return hosts.some(h => hostToken(h) === self);
+}
+
+/**
+ * The peers to dial for an `--active` view. No `--host` → `undefined`, which
+ * tells `gatherRemoteActive` to sweep the registered online devices. An
+ * explicit list → exactly those, minus this machine (its sessions come from the
+ * local seed, so dialing self would be a wasted SSH and a spurious "unreachable"
+ * note). Returns `[]` when the only named host is self — the caller then skips
+ * the remote fan-out entirely rather than letting `[]` trigger the sweep.
+ * Exported for unit testing.
+ */
+export function remoteHostsToDial(hosts: string[] | undefined, self: string): string[] | undefined {
+  if (!hosts || hosts.length === 0) return undefined;
+  return hosts.filter(h => hostToken(h) !== self);
+}
+
+/**
+ * Render the unified active-session view, grouped by machine. With no `--host`,
+ * local sessions come from `getActiveSessions()` and (unless `--local`) the
+ * registered online devices from `ag devices` are folded in over SSH. An
+ * explicit `--host`/`--device` list SCOPES the view to exactly those machines —
+ * the local machine is included only when it is itself named — so `--host` is a
+ * filter, not an addition (matching the non-`--active` listing path). A tip is
+ * shown when there are no other machines to include.
  */
 async function renderActiveSessions(
   asJson: boolean,
@@ -716,15 +750,22 @@ async function renderActiveSessions(
   opts: { local?: boolean; hosts?: string[] } = {},
 ): Promise<void> {
   const self = machineId();
-  const local = await getActiveSessions();
+  // An explicit --host/--device list scopes the view: seed local sessions only
+  // when no hosts are named, or when this machine is one of the named targets.
+  const local = shouldIncludeLocal(opts.hosts, self) ? await getActiveSessions() : [];
   for (const s of local) if (!s.machine) s.machine = self;
 
   let remoteDeviceCount = 0;
   let merged = local;
   if (!opts.local) {
-    const remote = await gatherRemoteActive(opts.hosts);
-    remoteDeviceCount = remote.deviceCount;
-    merged = dedupeByMachineSession([...local, ...remote.sessions]);
+    const remoteHosts = remoteHostsToDial(opts.hosts, self);
+    // An explicit list naming only self leaves nothing remote to dial — skip the
+    // fan-out rather than let an empty list fall through to the device sweep.
+    if (!opts.hosts?.length || (remoteHosts && remoteHosts.length > 0)) {
+      const remote = await gatherRemoteActive(remoteHosts);
+      remoteDeviceCount = remote.deviceCount;
+      merged = dedupeByMachineSession([...local, ...remote.sessions]);
+    }
   }
 
   // --waiting: only sessions blocked on the user. Exits non-zero when any are
