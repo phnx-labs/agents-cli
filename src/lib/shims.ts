@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 import { confirm, select } from '@inquirer/prompts';
 import type { AgentId } from './types.js';
 import { IS_WINDOWS, prependToWindowsUserPath } from './platform/index.js';
-import { getShimsDir, getVersionsDir, getBackupsDir, ensureAgentsDir } from './state.js';
+import { getShimsDir, getVersionsDir, getBackupsDir, getHistoryDir, ensureAgentsDir } from './state.js';
 export { getShimsDir };
 import { AGENTS, agentConfigDirName } from './agents.js';
 
@@ -332,15 +332,19 @@ fi
 
 # When agents-cli "adopts" a harness's own launcher (symlinks the native binary
 # in ~/.local/bin to this dispatcher so version management wins regardless of
-# PATH order), it records the real original at this path. It is the only safe
-# fall-through target: exec it by ABSOLUTE PATH so we never re-resolve through
-# PATH (which now points back at this dispatcher → infinite re-exec loop).
-ADOPTED_ORIGINAL="$AGENTS_USER_DIR/.cache/shims/.adopted/$CLI_COMMAND"
+# PATH order), it records the real original here. Durable (.history, not the
+# regenerable .cache) so the reverse pointer survives a cache wipe. Line 1 is
+# the original binary (what we fall through to); line 2 is the launcher path
+# (used by --release). It is the only safe fall-through target: exec it by
+# ABSOLUTE PATH so we never re-resolve through PATH (which now points back at
+# this dispatcher → infinite re-exec loop).
+ADOPTED_ORIGINAL="$AGENTS_USER_DIR/.history/adopted-launchers/$CLI_COMMAND"
 # Print the recorded original binary iff it is an executable file, else nothing.
 adopted_original_bin() {
   [ -f "$ADOPTED_ORIGINAL" ] || return 1
   local orig
-  orig=$(cat "$ADOPTED_ORIGINAL" 2>/dev/null)
+  # First line only — line 2 (launcher path) is for --release, not exec.
+  IFS= read -r orig < "$ADOPTED_ORIGINAL" 2>/dev/null || return 1
   [ -n "$orig" ] && [ -x "$orig" ] || return 1
   printf '%s' "$orig"
 }
@@ -1764,12 +1768,49 @@ export function removeLegacyUserShim(agent: AgentId, overrides?: { homeDir?: str
 }
 
 /**
- * Where the real original target of an adopted launcher is recorded. The shim
- * reads this at ~/.agents/.cache/shims/.adopted/<cli> to fall through to the
- * native binary by absolute path when no managed version resolves.
+ * Where an adopted launcher's provenance is recorded. Lives under durable
+ * `.history` (NOT the regenerable `.cache`) so the reverse pointer to the native
+ * binary survives a cache wipe — the shim reads it to fall through to the native
+ * binary by absolute path when no managed version resolves. Two lines:
+ * line 1 = original binary, line 2 = launcher path (for `--release`).
  */
-export function getAdoptedRecordPath(agent: AgentId, shimsDir: string = getShimsDir()): string {
-  return path.join(shimsDir, '.adopted', AGENTS[agent].cliCommand);
+export function getAdoptedRecordPath(agent: AgentId, historyDir: string = getHistoryDir()): string {
+  return path.join(historyDir, 'adopted-launchers', AGENTS[agent].cliCommand);
+}
+
+/**
+ * The launcher a harness's own installer drops in an early-PATH dir. Detection
+ * for adoption keys on the launcher *existing as a symlink resolving outside our
+ * shims dir* — NOT on current PATH order. That's deliberate: the shim only loses
+ * PATH races in non-interactive / GUI-launched shells, which an interactive
+ * `agents` run can't observe via its own PATH. Keying on the durable symlink lets
+ * auto-adoption fire for those users too. Returns the launcher path or null.
+ */
+export function findAdoptableLauncher(
+  agent: AgentId,
+  overrides?: { homeDir?: string; shimsDir?: string },
+): string | null {
+  const cliCommand = AGENTS[agent].cliCommand;
+  const homeDir = overrides?.homeDir ?? os.homedir();
+  const shimsDirReal = canonical(overrides?.shimsDir ?? getShimsDir());
+  // ~/.local/bin is where grok/kimi/antigravity/claude/codex/droid self-install.
+  const candidate = path.join(homeDir, '.local', 'bin', cliCommand);
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(candidate);
+  } catch {
+    return null;
+  }
+  if (!stat.isSymbolicLink()) return null; // real binaries are never auto-adopted
+  let resolved: string;
+  try {
+    resolved = fs.realpathSync(candidate); // broken symlink throws → skip
+  } catch {
+    return null;
+  }
+  // Already ours, or resolves into our shims dir → not adoptable.
+  if (resolved === shimsDirReal || resolved.startsWith(shimsDirReal + path.sep)) return null;
+  return candidate;
 }
 
 /** Canonical path for identity comparison — realpath when it exists (resolves
@@ -1800,19 +1841,21 @@ export type AdoptResult =
  *
  * Regression bounds:
  * - Only ever touches a **symlink** (never renames/deletes a real binary).
- * - Records the resolved original for lossless restore (`releaseAdoptedLauncher`).
+ * - Records the resolved original + launcher path for lossless restore
+ *   (`releaseAdoptedLauncher`), in durable `.history` so a cache wipe can't
+ *   orphan the reverse pointer.
  * - Idempotent: a no-op once the launcher already points at our shim.
  * - Never records our own shim as the "original" (would loop).
  */
 export function adoptShadowingLauncher(
   agent: AgentId,
-  overrides?: { shadowedBy?: string; shimsDir?: string },
+  overrides?: { shadowedBy?: string; shimsDir?: string; historyDir?: string },
 ): AdoptResult {
   const shimsDir = overrides?.shimsDir ?? getShimsDir();
   const shimPath = path.join(shimsDir, AGENTS[agent].cliCommand);
   const shimReal = canonical(shimPath);
   const shimsDirReal = canonical(shimsDir);
-  const launcher = overrides?.shadowedBy ?? getPathShadowingExecutable(agent);
+  const launcher = overrides?.shadowedBy ?? getPathShadowingExecutable(agent) ?? findAdoptableLauncher(agent, { shimsDir });
   if (!launcher) return { adopted: false, reason: 'no-shadow' };
 
   let stat: fs.Stats;
@@ -1843,9 +1886,13 @@ export function adoptShadowingLauncher(
   }
 
   try {
-    const recordPath = getAdoptedRecordPath(agent, shimsDir);
+    const recordPath = getAdoptedRecordPath(agent, overrides?.historyDir);
     fs.mkdirSync(path.dirname(recordPath), { recursive: true });
-    fs.writeFileSync(recordPath, resolved, 'utf-8');
+    // Line 1: original binary (shim fall-through target). Line 2: launcher path
+    // (release restores this exact symlink, independent of PATH order at release
+    // time — the M3 fix). Absolute launcher path so release never has to
+    // re-derive it from a PATH scan that may miss.
+    fs.writeFileSync(recordPath, `${resolved}\n${path.resolve(launcher)}\n`, 'utf-8');
     // Repoint the launcher at our shim. rm + symlink (not atomic rename) is fine
     // here: the record is already written, so a crash between the two leaves a
     // recoverable state and the next run re-adopts idempotently.
@@ -1865,20 +1912,25 @@ export function adoptShadowingLauncher(
  */
 export function releaseAdoptedLauncher(
   agent: AgentId,
-  overrides?: { shadowedBy?: string; shimsDir?: string },
+  overrides?: { shimsDir?: string; historyDir?: string },
 ): string | null {
   const shimsDir = overrides?.shimsDir ?? getShimsDir();
-  const recordPath = getAdoptedRecordPath(agent, shimsDir);
-  let original: string;
+  const recordPath = getAdoptedRecordPath(agent, overrides?.historyDir);
+  let lines: string[];
   try {
-    original = fs.readFileSync(recordPath, 'utf-8').trim();
+    lines = fs.readFileSync(recordPath, 'utf-8').split('\n').map((l) => l.trim());
   } catch {
     return null;
   }
+  const original = lines[0] ?? '';
   if (!original) return null;
+  // Line 2 is the exact launcher we rewrote at adopt time. Restoring it directly
+  // (rather than re-deriving from PATH) means release works regardless of the
+  // current shell's PATH order — the M3 fix. Fall back to a PATH scan only for
+  // records written before this format existed.
+  const launcher = lines[1] || getPathShadowingExecutable(agent) || original;
 
   const shimReal = canonical(path.join(shimsDir, AGENTS[agent].cliCommand));
-  const launcher = overrides?.shadowedBy ?? getPathShadowingExecutable(agent) ?? original;
   try {
     // Only rewrite the launcher if it currently points at our shim (i.e. we own
     // it). If the user has since replaced it themselves, leave it alone.

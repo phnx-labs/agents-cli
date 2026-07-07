@@ -568,7 +568,11 @@ export function registerDoctorCommand(program: Command): void {
       // Launcher adoption escape hatch. `--adopt <agent>` forces the take-over
       // even for a non-default agent; `--release <agent>` reverses it.
       if (opts.adopt || opts.release) {
-        const { adoptShadowingLauncher, releaseAdoptedLauncher, getPathShadowingExecutable } = await import('../lib/shims.js');
+        if (opts.adopt && opts.release) {
+          console.error(chalk.red('--adopt and --release are mutually exclusive; pass only one.'));
+          process.exit(1);
+        }
+        const { adoptShadowingLauncher, releaseAdoptedLauncher } = await import('../lib/shims.js');
         const raw = (opts.adopt || opts.release) as string;
         const agent = resolveAgentName(raw);
         if (!agent) {
@@ -584,14 +588,16 @@ export function registerDoctorCommand(program: Command): void {
           }
           return;
         }
-        const shadowedBy = getPathShadowingExecutable(agent);
-        const result = adoptShadowingLauncher(agent, shadowedBy ? { shadowedBy } : undefined);
+        // adoptShadowingLauncher resolves the launcher itself (PATH shadow, then
+        // the durable ~/.local/bin symlink), so it forces the take-over even when
+        // this shell's PATH already has the shim first.
+        const result = adoptShadowingLauncher(agent);
         if (result.adopted) {
           console.log(chalk.green(`Adopted ${AGENTS[agent].cliCommand} launcher (${result.launcher} -> shim). Original recorded for --release; version management now wins regardless of PATH order.`));
         } else if (result.reason === 'already-adopted') {
           console.log(chalk.gray(`${AGENTS[agent].cliCommand} launcher is already adopted.`));
         } else if (result.reason === 'no-shadow') {
-          console.log(chalk.gray(`Nothing to adopt — ${AGENTS[agent].cliCommand} is not shadowed on PATH.`));
+          console.log(chalk.gray(`Nothing to adopt — no ${AGENTS[agent].cliCommand} launcher found shadowing the shim (checked PATH and ~/.local/bin).`));
         } else if (result.reason === 'not-a-symlink') {
           console.log(chalk.yellow(`${AGENTS[agent].cliCommand} is shadowed by a real binary (${result.launcher}), not a symlink. agents-cli won't move a real binary — remove/reorder it or reorder PATH.`));
         } else {

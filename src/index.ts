@@ -647,12 +647,12 @@ async function maybeBootstrapShimIntegration(
   // Auto-adopt any harness launcher that shadows our shim. PATH-order repair
   // (below) cannot win against `~/.local/bin` — it's prepended in .zshenv for
   // every shell while our prepend only lands in .zshrc — so for symlink
-  // launchers we *become* the launcher instead. Reversible via
-  // `releaseAdoptedLauncher`; only ever rewrites a symlink. Silent + idempotent.
+  // launchers we *become* the launcher instead. Detection keys on the launcher
+  // symlink EXISTING (via adoptShadowingLauncher's own fallback), not on this
+  // shell's PATH order, so it also heals the GUI/non-interactive shadow an
+  // interactive run can't see. Reversible; only ever rewrites a symlink.
   for (const agent of defaultAgents) {
-    const shadowedBy = getPathShadowingExecutable(agent);
-    if (!shadowedBy) continue;
-    const result = adoptShadowingLauncher(agent, { shadowedBy });
+    const result = adoptShadowingLauncher(agent);
     if (result.adopted) {
       console.log(chalk.green(`Adopted ${AGENTS[agent].cliCommand} launcher (${result.launcher}) — version management now wins regardless of PATH order.`));
     }
