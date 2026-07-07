@@ -1703,6 +1703,80 @@ export function isShimCurrent(agent: AgentId): boolean {
   return version === SHIM_SCHEMA_VERSION;
 }
 
+/** Extract the baked `AGENTS_BIN='...'` value from a shim file, or null. */
+function readAgentsBinFromShim(shimPath: string): string | null {
+  try {
+    const header = fs.readFileSync(shimPath, 'utf8').split('\n', 12).join('\n');
+    const m = header.match(/^AGENTS_BIN=(?:'([^']*)'|"([^"]*)"|(\S+))/m);
+    return m ? (m[1] ?? m[2] ?? m[3] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when the agent shim's baked `AGENTS_BIN` is fine to keep: it either already
+ * points at the install we'd generate now, OR points at some OTHER install that
+ * still exists on disk (leave it — regenerating could ping-pong two live installs
+ * sharing the shims dir). Returns FALSE only when the shim points at a DIFFERENT,
+ * now-removed install — the exact drift a deleted dev build (`~/.local/agents-cli-dev`),
+ * an old npm-global (`/opt/homebrew`), or a rotated version dir leaves behind. A shim
+ * can pass the schema check (`isShimCurrent`) yet still carry that stale path.
+ */
+export function shimPointsAtLiveInstall(agent: AgentId): boolean {
+  if (!shimExists(agent)) return true; // missing shim is handled by ensureShimCurrent
+  const baked = readAgentsBinFromShim(onDiskShimPath(agent));
+  if (!baked) return true;
+  if (baked === getAgentsBinForGeneratedShim()) return true; // already the current install
+  return fs.existsSync(baked); // a different install — keep only while it still exists
+}
+
+/** Shim files in the shims dir, excluding the hooks/ subdir and @-versioned aliases. */
+export function listShimFileNames(): string[] {
+  try {
+    return fs
+      .readdirSync(getShimsDir(), { withFileTypes: true })
+      .filter((e) => e.isFile() && !e.name.includes('@'))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Prune a stale, orphaned shim: one that is NOT a managed agent shim and NOT a user
+ * alias, whose baked `AGENTS_BIN` points at an install that no longer exists. These
+ * are legacy `exec "$AGENTS_BIN" <cmd>` command shims (browser/secrets/sessions/…)
+ * left behind by a removed install — the current source never generates them, and
+ * they either die with `exit 127` or shadow the real package bin on PATH. Only
+ * removed when the baked target is gone, so a working shim is never touched.
+ * Returns true if removed.
+ */
+export function pruneOrphanedCommandShim(fileName: string): boolean {
+  // Never touch a shim that corresponds to a real agent — agents-cli manages those.
+  const isAgentCommand = Object.values(AGENTS).some((a) => a.cliCommand === fileName);
+  if (isAgentCommand) return false;
+
+  const shimPath = path.join(getShimsDir(), fileName);
+  let content: string;
+  try {
+    content = fs.readFileSync(shimPath, 'utf8');
+  } catch {
+    return false;
+  }
+  if (content.includes('# Alias shim:')) return false; // a user `agents alias` — leave it
+  const bin = readAgentsBinFromShim(shimPath);
+  if (!bin) return false; // not an AGENTS_BIN-baked shim
+  if (fs.existsSync(bin)) return false; // its install is still alive — leave it
+
+  try {
+    fs.rmSync(shimPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Regenerate the shim if it's missing or outdated. Returns a status describing
  * what happened — callers can surface a one-line notice to the user ("Updated
