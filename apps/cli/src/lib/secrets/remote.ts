@@ -16,7 +16,7 @@
  * in argv / `ps` / remote shell history. Nothing is persisted locally.
  */
 
-import { sshExec, assertValidSshTarget, type SshExecResult } from '../ssh-exec.js';
+import { sshExec, sshStream, assertValidSshTarget, type SshExecResult } from '../ssh-exec.js';
 import { resolveHost } from '../hosts/registry.js';
 import { emit } from '../events.js';
 import { sshTargetFor } from '../hosts/types.js';
@@ -98,6 +98,24 @@ export function remoteSecretsRaw(
     input: opts.input,
     extraSshArgs: opts.tty ? ['-tt'] : undefined,
   });
+}
+
+/**
+ * Run a remote `agents secrets <args>` FOREGROUND, with the local stdio wired
+ * straight through (`stdio: 'inherit'` + `-tt`), and return its exit code.
+ *
+ * Unlike `remoteSecretsRaw` — which pipes stdin, so even with `-tt` the remote
+ * process's `process.stdin.isTTY` is false and a passphrase prompt refuses to
+ * appear (the macOS file-store guard then hard-errors "needs
+ * AGENTS_SECRETS_PASSPHRASE") — this inherits the caller's real terminal, so the
+ * remote sees a genuine TTY and its hidden passphrase prompt surfaces and reads
+ * the keystrokes. This is the transport for `unlock --host`: you type the remote
+ * bundle's passphrase at your own terminal. Output is NOT captured (it streams
+ * to the terminal); only the exit code is returned.
+ */
+export function remoteSecretsStream(target: string, args: string[]): number {
+  const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target));
+  return sshStream(target, remoteCmd, { tty: true });
 }
 
 /**

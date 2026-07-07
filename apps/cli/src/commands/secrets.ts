@@ -17,6 +17,7 @@ import {
   parseHostsOption,
   remoteResolveEnv,
   remoteSecretsRaw,
+  remoteSecretsStream,
   resolveSshTarget,
 } from '../lib/secrets/remote.js';
 import { remoteShellFor, buildWindowsStdinImportCommand } from '../lib/hosts/remote-cmd.js';
@@ -1692,15 +1693,17 @@ Examples:
         let failures = 0;
         for (const h of hosts) {
           const target = await resolveSshTarget(h);
-          const res = remoteSecretsRaw(target, unlockArgs, { tty: true });
-          if (res.code === 0) {
-            if (res.stdout.trim()) process.stdout.write(res.stdout.endsWith('\n') ? res.stdout : `${res.stdout}\n`);
+          // FOREGROUND stream (stdio inherited), NOT the piped remoteSecretsRaw:
+          // the remote's passphrase prompt only surfaces if the remote process
+          // sees a real TTY, which requires our local terminal to pass straight
+          // through. The remote's prompt + output stream to this terminal; we get
+          // back only the exit code.
+          const code = remoteSecretsStream(target, unlockArgs);
+          if (code === 0) {
             console.log(chalk.green(`${h}: unlocked`));
           } else {
             failures++;
-            const msg = (res.stderr || res.stdout || '').trim();
-            const why = res.timedOut ? 'timed out' : res.code === null ? 'ssh failed' : `exit ${res.code}`;
-            console.error(chalk.red(`${h}: ${why}${msg ? `: ${msg}` : ''}`));
+            console.error(chalk.red(`${h}: unlock failed (exit ${code})`));
           }
         }
         if (failures > 0) process.exit(1);
