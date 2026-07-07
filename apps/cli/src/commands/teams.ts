@@ -57,7 +57,7 @@ import {
   hasUncommittedChanges,
   removeWorktree,
 } from '../lib/teams/worktree.js';
-import { isVersionInstalled, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/versions.js';
+import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose, verifyInstalledBinaryLaunches } from '../lib/versions.js';
 import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
@@ -1970,6 +1970,29 @@ export function registerTeamsCommands(program: Command): void {
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts: { json?: boolean }) => {
       const info = checkAllClis();
+
+      // Deep integrity probe. `checkAllClis` reports presence (shim + stub guard),
+      // but a GUTTED native binary (JS wrapper present, platform binary missing —
+      // the codex/kimi optional-dep partial-extract failure) still passes that. So
+      // actually launch the resolved default version and, if it won't run, flip the
+      // agent to not-installed with a repair hint — otherwise doctor says "ready"
+      // and the teammate ENOENTs at spawn. Parallel; win32 is treated as healthy by
+      // verifyInstalledBinaryLaunches.
+      await Promise.all(
+        Object.entries(info).map(async ([name, entry]) => {
+          if (!entry.installed) return;
+          const agent = name as AgentId;
+          const version = resolveVersion(agent);
+          if (!version) return;
+          const health = await verifyInstalledBinaryLaunches(agent, version);
+          if (!health.ok) {
+            entry.installed = false;
+            entry.path = null;
+            entry.error = `${AGENTS[agent]?.cliCommand ?? name}@${version} is installed but its binary won't launch`
+              + `${health.detail ? ` (${health.detail})` : ''}. Repair: agents add ${agent}@${version}`;
+          }
+        })
+      );
 
       // Advisory enrichment only. Sign-in detection is UNRELIABLE, so it never
       // changes the authoritative installed/ready column — it annotates. And an
