@@ -45,13 +45,15 @@ prefix (`teams` catches `teams create`); `--event` filters a typed event
 (repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
 raw records for external consumers.
 
-**Secret access is audited at every read, not just at the command.** `agents
-events --module secrets` (or `--event secrets.get`) surfaces every path that
-resolves a secret VALUE — `run --secrets`, `secrets exec`/`export`, the MCP
-`get_secret` tool, `secrets view --reveal`, the raw `secrets get <item>`,
-`secrets push` (which reads the whole bundle to upload it), and remote
-`bundle@host` resolves. Each record carries a `source` telling you HOW it was
-read — `keychain` (real Touch-ID read), `agent` (served from the unlocked
+**Secret-bundle reads are audited at the read, not just at the command.**
+`agents events --module secrets` (or `--event secrets.get`) surfaces every path
+that resolves a secret VALUE out of a bundle — `run --secrets`, `secrets
+exec`/`export`, the MCP `get_secret` tool, `secrets view --reveal`, the raw
+`secrets get <item>`, `secrets push` (which reads the whole bundle to upload
+it), and remote `bundle@host` resolves. (Value reads in adjacent subsystems that
+don't go through the bundle resolver — e.g. `wallet`, profile auth tokens — are
+not part of this `secrets.*` stream.) Each record carries a `source` telling you
+HOW it was read — `keychain` (real Touch-ID read), `agent` (served from the unlocked
 broker), `reveal`, `raw-item`, `sync-push`, or `remote` (with the `host`) — plus
 the `bundle`, `caller`, `keyCount`, and OS-user/host/transport. The resolved
 **value is never written to the log** — only names and counts. Note the event

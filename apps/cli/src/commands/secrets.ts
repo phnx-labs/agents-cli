@@ -709,16 +709,22 @@ export function registerSecretsCommands(program: Command): void {
           }
           // Revealing plaintext bypasses readAndResolveBundleEnv (the usual
           // audit chokepoint), so emit here — a `--reveal` exposes real values
-          // and must show up in `agents events --module secrets`. Values are
-          // never included, only how many keys were exposed.
-          if (revealedValues.size > 0) {
+          // and must show up in `agents events --module secrets`. Count both the
+          // keychain values actually decrypted AND the inline literals (which
+          // `--reveal` always prints, even for a literal-only bundle with no
+          // keychain refs — see the entries loop below). Values are never
+          // included, only how many keys were exposed. Emit only when something
+          // was actually shown (a cancelled Touch ID + no literals reveals none).
+          const literalCount = entries.filter((e) => e.kind === 'literal').length;
+          const exposedCount = revealedValues.size + literalCount;
+          if (exposedCount > 0) {
             emit('secrets.get', {
               module: 'secrets',
               bundle: bundle.name,
               caller: 'view --reveal',
               source: 'reveal',
               status: 'success',
-              keyCount: revealedValues.size,
+              keyCount: exposedCount,
             });
           }
         }
