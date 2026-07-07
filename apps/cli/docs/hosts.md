@@ -336,8 +336,8 @@ Host dispatch has two shapes, chosen by whether a prompt is present:
   TTY over SSH (`ssh -tt`) so the remote agent starts its normal interactive UI.
   The tmux wrapper runs on the remote machine, exactly as it would if you had
   SSH'd in and typed `agents run <agent>` yourself. Passing both a prompt and
-  `--interactive` with `--host` currently still takes the headless path; use the
-  prompt-less form for an interactive remote session.
+  `--interactive` with `--host` also takes the interactive path and forwards the
+  prompt to the remote TUI.
 
 (`--json`/`--quiet`/`--mode`/`--model` are real flags on `agents run`, registered in
 `src/commands/exec.ts`; there is no user-facing `--print` — the per-harness

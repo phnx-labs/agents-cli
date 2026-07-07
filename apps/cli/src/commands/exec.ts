@@ -547,7 +547,14 @@ export function registerRunCommand(program: Command): void {
           // concrete id.
           const resumeId = typeof options.resume === 'string' ? options.resume : undefined;
 
-          if (prompt === undefined) {
+          // Decide whether this host run is interactive. No prompt always means
+          // interactive (matching local resolveInteractive); --interactive forces
+          // interactive even when a prompt is provided; --headless forces headless
+          // and therefore requires a prompt. --interactive and --headless are
+          // mutually exclusive (validated earlier).
+          const interactiveHost = options.interactive === true || (prompt === undefined && options.headless !== true);
+
+          if (interactiveHost) {
             // Interactive host run: forward the local TTY over SSH and let the
             // remote agent start its normal interactive UI (tmux on the host).
             if (options.follow === false) {
@@ -570,6 +577,7 @@ export function registerRunCommand(program: Command): void {
             }
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
+              prompt,
               mode: options.mode,
               model: options.model,
               remoteCwd: options.remoteCwd,
@@ -578,12 +586,17 @@ export function registerRunCommand(program: Command): void {
               resume: resumeId,
               passthroughArgs,
               raw: options.raw || options.tmux === false || options.disableTmux === true,
+              forceInteractive: options.interactive,
             });
             process.exit(exitCode);
           }
 
           // Headless host run: launch detached, tail the remote log, and follow
           // until the remote process exits.
+          if (prompt === undefined) {
+            console.error(chalk.red('A prompt is required for headless host runs: agents run <agent> "<task>" --host <name>'));
+            process.exit(1);
+          }
           const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
           const { task, exitCode } = await dispatchToHost(host, {
             agent: runAgent,

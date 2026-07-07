@@ -76,4 +76,18 @@ describe('buildInteractiveRunForwardedArgs', () => {
     const args = buildInteractiveRunForwardedArgs({ agent: 'claude', passthroughArgs: [] });
     expect(args).toEqual(['run', 'claude']);
   });
+
+  it('forwards a prompt only when interactive mode is forced, plus --interactive flag', () => {
+    const args = buildInteractiveRunForwardedArgs({
+      agent: 'claude',
+      prompt: 'do a thing',
+      forceInteractive: true,
+    });
+    expect(args).toEqual(['run', 'claude', 'do a thing', '--interactive']);
+  });
+
+  it('drops the prompt when interactive mode is not forced', () => {
+    const args = buildInteractiveRunForwardedArgs({ agent: 'claude', prompt: 'do a thing' });
+    expect(args).toEqual(['run', 'claude']);
+  });
 });

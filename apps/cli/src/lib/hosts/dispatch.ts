@@ -162,6 +162,8 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
 
 export interface InteractiveDispatchOptions {
   agent: string;
+  /** Optional prompt — forwarded only when the caller explicitly forced interactive mode. */
+  prompt?: string;
   mode?: string;
   model?: string;
   remoteCwd?: string;
@@ -170,15 +172,21 @@ export interface InteractiveDispatchOptions {
   resume?: string;
   passthroughArgs?: string[];
   raw?: boolean;
+  /** Forward `--interactive` to the remote so a prompt-bearing run still starts the TUI. */
+  forceInteractive?: boolean;
 }
 
 /**
  * Build the remote `agents run …` argv for an INTERACTIVE host dispatch. The
- * remote agent sees a TTY, so we omit both the prompt and `--quiet`; the remote
- * CLI will launch its normal interactive TUI / tmux wrapper.
+ * remote agent sees a TTY, so we omit `--quiet`; the remote CLI will launch its
+ * normal interactive TUI / tmux wrapper. A prompt is only included when the
+ * caller explicitly forced interactive mode (otherwise the remote CLI would
+ * infer headless from the prompt).
  */
 export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOptions): string[] {
   const args = ['run', opts.agent];
+  if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
+  if (opts.forceInteractive) args.push('--interactive');
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
   if (opts.name) args.push('--name', opts.name);
