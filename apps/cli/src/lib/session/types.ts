@@ -74,6 +74,14 @@ export interface SessionMeta {
   topic?: string;
   /** Custom name the user gave the session (e.g. Claude Code /rename). */
   label?: string;
+  /**
+   * Durable launch handle from `agents run --name <slug>` — an alias chosen at
+   * launch (not derived from the session id), used to resolve the run in
+   * `agents sessions <name>`. Distinct from `label` (post-hoc /rename): a run's
+   * name is immutable; both are searchable. Absent for runs launched without
+   * `--name`.
+   */
+  name?: string;
   /** Set when this session was spawned by `agents teams`. */
   teamOrigin?: TeamOrigin;
   /** Durable state signals extracted at scan time by the session-state engine. */

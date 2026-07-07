@@ -18,6 +18,7 @@ import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from '.
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
+import { recordRunName } from './session/run-names.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { isTmuxInstalled } from './tmux/binary.js';
@@ -141,6 +142,13 @@ export interface ExecOptions {
   addDirs?: string[];
   timeout?: string;
   sessionId?: string;
+  /**
+   * Durable `agents run --name <slug>` handle. Exported to the agent's env as
+   * `AGENT_SESSION_NAME` (companion to `AGENT_SESSION_ID`) and, when a session
+   * id is known at launch, recorded in the run-name index so `agents sessions
+   * <name>` resolves the run. Absent for unnamed runs — no behavior change.
+   */
+  name?: string;
   /**
    * Resume the conversation named by `sessionId` using the agent's NATIVE resume
    * form (claude `--resume`, codex `resume`) instead of the default `--session-id`
@@ -334,6 +342,13 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   // iterations share one inbox.
   if (options.sessionId && isValidMailboxId(options.sessionId)) {
     result.AGENTS_MAILBOX_DIR = mailboxDir(options.sessionId);
+  }
+
+  // Export the run's durable name (companion to AGENT_SESSION_ID) so a
+  // SessionStart hook / the agent can associate its transcript with the handle
+  // the user gave the run. Only set when --name was passed.
+  if (options.name) {
+    result.AGENT_SESSION_NAME = options.name;
   }
 
   return {
@@ -1110,6 +1125,12 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   // buildExecCommand). Skip on resume — the id is the one being resumed.
   if (options.agent === 'claude' && !options.resume && !options.sessionId) {
     options = { ...options, sessionId: randomUUID() };
+  }
+  // Record the run's --name against its session id (when both are known at
+  // launch) so `agents sessions <name>` resolves it. Best-effort; unnamed runs
+  // and agents whose id isn't known up front simply skip this.
+  if (options.name && options.sessionId) {
+    recordRunName({ sessionId: options.sessionId, name: options.name, agent: options.agent, cwd: options.cwd });
   }
   const cmd = buildExecCommand(options);
   const [executable, ...args] = cmd;

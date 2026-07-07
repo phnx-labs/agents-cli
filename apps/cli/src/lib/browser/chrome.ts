@@ -239,11 +239,11 @@ export async function launchBrowser(
   const userDataDir = path.join(runtimeDir, 'chrome-data');
   fs.mkdirSync(userDataDir, { recursive: true });
 
-  // First-launch seed: stamp the user-data-dir's Default/Preferences with
-  // the agents-cli profile name so Chromium's UI shows "<profile>" instead
-  // of its default "Person 1". Done only when the file doesn't exist —
-  // subsequent launches inherit whatever Chrome wrote in the meantime.
-  seedDefaultProfileName(userDataDir, profileName);
+  // Pre-launch Preferences pass: first-launch profile-name stamp, plus (for
+  // real browsers, not Electron apps) the session-cookie persistence pin.
+  // Electron apps manage their own storage and don't read Chromium's
+  // `session.*` prefs, so they get the name stamp only.
+  ensureProfilePreferences(userDataDir, profileName, !isElectron);
 
   // Chromium on macOS coordinates instances via the SingletonLock file
   // *inside* each user-data-dir. Direct binary spawn with a fresh
@@ -271,6 +271,14 @@ export async function launchBrowser(
     // remote-debugging transport is active. That property is the loudest
     // signal Cloudflare Turnstile, hCaptcha, and similar checks read.
     '--disable-blink-features=AutomationControlled',
+    // Companion to `session.restore_on_startup: 1` (see
+    // ensureProfilePreferences): the pref keeps session cookies alive across
+    // restarts, but on its own it would also reopen last session's tabs at
+    // startup. Suppressing the startup window leaves restore nothing to fill —
+    // cookies survive, no ghost tabs — and the task flow creates its own tab
+    // over CDP anyway. Electron apps need their window to appear (the CDP
+    // driver binds to it), so they skip the flag.
+    ...(isElectron ? [] : ['--no-startup-window']),
     ...(options.headless ? ['--headless=new'] : []),
     `--window-size=${viewport.width},${viewport.height}`,
     ...(viewport.x !== undefined && viewport.y !== undefined
@@ -359,22 +367,55 @@ export function getRunningChromeInfo(
 }
 
 /**
- * Stamp `<userDataDir>/Default/Preferences` with our profile name so
- * Chrome's UI labels the window with the agents-cli name rather than the
- * default "Person 1". Only writes when the file is absent (first launch).
- * Best-effort: any I/O hiccup is silently ignored; missing the rename is
- * cosmetic, not functional.
+ * Prepare `<userDataDir>/Default/Preferences` before launch.
+ *
+ * Two concerns, one write:
+ *  - First launch (file absent): stamp the agents-cli profile name so
+ *    Chromium's UI shows "<profile>" instead of its default "Person 1".
+ *    Cosmetic; existing files keep whatever Chrome wrote in the meantime.
+ *  - Every launch (when `persistSessionCookies`): pin
+ *    `session.restore_on_startup: 1` ("continue where you left off").
+ *    Chromium purges memory-only session cookies at startup UNLESS this
+ *    preference says the session will be restored — it keys the purge off
+ *    the pref, not off tabs actually reopening. Sites like idealista issue
+ *    login cookies with `expires=-1`, so without this every browser restart
+ *    silently logs the profile out. The visible tab-restore side effect is
+ *    suppressed separately via `--no-startup-window` (see launchBrowser).
+ *
+ * Runs only while the browser is down (called before spawn), so Chromium
+ * can't overwrite the patch on exit. Best-effort: a malformed existing file
+ * is left untouched (Chromium recovers its own state better than we can),
+ * and any I/O hiccup is silently ignored.
  */
-function seedDefaultProfileName(userDataDir: string, profileName: string): void {
+export function ensureProfilePreferences(
+  userDataDir: string,
+  profileName: string,
+  persistSessionCookies: boolean
+): void {
   const defaultDir = path.join(userDataDir, 'Default');
   const prefsPath = path.join(defaultDir, 'Preferences');
-  if (fs.existsSync(prefsPath)) return;
+
+  let prefs: Record<string, any> | undefined;
+  try {
+    prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf8'));
+    if (typeof prefs !== 'object' || prefs === null) return; // not ours to fix
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') return; // unreadable/malformed: leave alone
+  }
+
+  const firstLaunch = prefs === undefined;
+  if (firstLaunch) prefs = { profile: { name: profileName } };
+
+  let dirty = firstLaunch;
+  if (persistSessionCookies && prefs!.session?.restore_on_startup !== 1) {
+    prefs!.session = { ...prefs!.session, restore_on_startup: 1 };
+    dirty = true;
+  }
+  if (!dirty) return;
+
   try {
     fs.mkdirSync(defaultDir, { recursive: true });
-    fs.writeFileSync(
-      prefsPath,
-      JSON.stringify({ profile: { name: profileName } })
-    );
+    fs.writeFileSync(prefsPath, JSON.stringify(prefs));
   } catch { /* not critical */ }
 }
 

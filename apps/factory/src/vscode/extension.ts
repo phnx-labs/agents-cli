@@ -73,6 +73,7 @@ import { generateLabelWithLLM } from '../core/labelgen';
 import { readClaudeSessionName } from '../core/sessionName';
 import { resolveTerminalCwd, tryReleaseWorktreeForTerminal } from '../core/worktree';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import {
   createTmuxTerminal,
   getTmuxState,
@@ -211,6 +212,55 @@ function buildAgentLaunchCommand(
     command += ` ${additionalFlags.trim()}`;
   }
   return command;
+}
+
+// PATH augmented with the agents shim dirs — the extension-host PATH can omit them,
+// so a bare `agents` spawn would fail to resolve. Shared by the detached spawns below.
+function agentsSpawnEnv(): NodeJS.ProcessEnv {
+  const home = os.homedir();
+  const extraPath = [
+    path.join(home, '.agents/.cache/shims'),
+    path.join(home, '.local/bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ].join(':');
+  return { ...process.env, PATH: `${extraPath}:${process.env.PATH ?? ''}` };
+}
+
+// Dispatch an agent HEADLESS: `agents run <agent> --mode <m> --headless -p <prompt>`
+// spawned DETACHED with no terminal tab. The run outlives this call (`unref`) and
+// shows in `agents sessions --active` under this machine as context:'headless', so it
+// can be focused/resumed later via `agents sessions focus`. No shell: args go straight
+// to the binary (prompt stays a single arg, no quoting hazard).
+export function runHeadlessAgent(
+  agentKey: string,
+  prompt: string,
+  mode: AgentLaunchMode,
+  cwd?: string,
+): void {
+  // modeFlagForAgent -> '--mode auto' | '--mode edit' | ... ; split into argv parts.
+  const modeArgs = (modeFlagForAgent(agentKey, mode) ?? '').split(' ').filter(Boolean);
+  const args = ['run', agentKey, ...modeArgs, '--headless', '-p', prompt];
+  const child = spawn('agents', args, {
+    cwd: cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
+    detached: true,
+    stdio: 'ignore',
+    env: agentsSpawnEnv(),
+  });
+  child.unref();
+}
+
+// Focus a session: `agents sessions focus <id>` opens/attaches a real terminal on it (a
+// background/headless run reopens in a new tab and resumes; a live terminal session is
+// attached). It auto-resolves the surface (no interactive picker), so it's safe to run
+// detached from the extension host.
+export function focusSessionInTerminal(sessionId: string): void {
+  const child = spawn('agents', ['sessions', 'focus', sessionId], {
+    detached: true,
+    stdio: 'ignore',
+    env: agentsSpawnEnv(),
+  });
+  child.unref();
 }
 
 // Back-compat shim: keeps the old name used elsewhere in this file. The

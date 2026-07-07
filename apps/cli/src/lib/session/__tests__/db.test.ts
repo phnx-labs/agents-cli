@@ -141,7 +141,13 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   it('schema_version is recorded as the current version', () => {
     const db = getDB();
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
-    expect(row.value).toBe('8');
+    expect(row.value).toBe('9');
+  });
+
+  it('v8 -> v9 adds the run-name column', () => {
+    const db = getDB();
+    const cols = (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('name');
   });
 
   it('v7 adds the session-state columns (pr_url, worktree_slug, ticket_id)', () => {

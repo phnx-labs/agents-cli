@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   git_branch TEXT,
   topic TEXT,
   label TEXT,
+  name TEXT,
   message_count INTEGER,
   token_count INTEGER,
   cost_usd REAL,
@@ -117,6 +118,7 @@ export interface SessionRow {
   git_branch: string | null;
   topic: string | null;
   label: string | null;
+  name: string | null;
   message_count: number | null;
   token_count: number | null;
   cost_usd: number | null;
@@ -253,6 +255,14 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.some(c => c.name === 'last_activity')) db.exec(`ALTER TABLE sessions ADD COLUMN last_activity TEXT`);
     db.exec(`UPDATE sessions SET last_activity = timestamp WHERE last_activity IS NULL`);
     db.exec(`DELETE FROM scan_ledger;`);
+  }
+  if (fromVersion < 9) {
+    // v8 → v9: `agents run --name <slug>` gives a run a durable launch handle,
+    // resolvable via `agents sessions <name>`. Additive column; NO rescan — the
+    // name is set at run time (host sidecar / run-name sidecar), not parsed from
+    // transcripts, so existing rows stay valid with a NULL name.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'name')) db.exec(`ALTER TABLE sessions ADD COLUMN name TEXT`);
   }
 }
 
@@ -479,13 +489,13 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
 const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, version, account, timestamp, last_activity,
-    project, cwd, git_branch, topic, label, message_count, token_count,
+    project, cwd, git_branch, topic, label, name, message_count, token_count,
     cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id
   ) VALUES (
     @id, @short_id, @agent, @version, @account, @timestamp, @last_activity,
-    @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
+    @project, @cwd, @git_branch, @topic, @label, @name, @message_count, @token_count,
     @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id
@@ -559,6 +569,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     git_branch: meta.gitBranch ?? null,
     topic: meta.topic ?? null,
     label: meta.label ?? null,
+    name: meta.name ?? null,
     message_count: meta.messageCount ?? null,
     token_count: meta.tokenCount ?? null,
     cost_usd: meta.costUsd ?? null,
@@ -660,6 +671,7 @@ export function upsertSessionsBatch(
         git_branch: meta.gitBranch ?? null,
         topic: meta.topic ?? null,
         label: meta.label ?? null,
+        name: meta.name ?? null,
         message_count: meta.messageCount ?? null,
         token_count: meta.tokenCount ?? null,
         cost_usd: meta.costUsd ?? null,
@@ -736,6 +748,45 @@ export function syncLabels(labelMap: Map<string, string | null>): number {
 }
 
 /**
+ * Sync `agents run --name` handles for a set of sessions, keyed by session id.
+ * The name's source of truth lives outside the transcript (host task sidecars,
+ * run-name sidecars written at launch), so — like {@link syncLabels} — it is
+ * re-applied by id every scan rather than parsed per-file. Updates only
+ * `sessions.name` (names resolve via a direct column tier in ftsSearch, not
+ * FTS, so there's no session_text column to touch). Only writes when the value
+ * differs; cheap to call every run. Returns the number of rows updated.
+ */
+export function syncNames(nameMap: Map<string, string | null>): number {
+  if (nameMap.size === 0) return 0;
+  const db = getDB();
+  const ids = [...nameMap.keys()];
+  const CHUNK = 500;
+  const updates: Array<{ id: string; name: string | null }> = [];
+
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db
+      .prepare(`SELECT id, name FROM sessions WHERE id IN (${placeholders})`)
+      .all(...chunk) as Array<{ id: string; name: string | null }>;
+    for (const row of rows) {
+      const live = nameMap.get(row.id) ?? null;
+      if ((live ?? '') !== (row.name ?? '')) {
+        updates.push({ id: row.id, name: live });
+      }
+    }
+  }
+  if (updates.length === 0) return 0;
+
+  const upd = db.prepare(`UPDATE sessions SET name = ? WHERE id = ?`);
+  const txn = db.transaction((items: typeof updates) => {
+    for (const { id, name } of items) upd.run(name, id);
+  });
+  txn(updates);
+  return updates.length;
+}
+
+/**
  * Sync topics (session titles) for a set of sessions, keyed by id. For agents
  * whose human-readable title lives in a side index that updates independently
  * of the transcript (Codex `session_index.jsonl`), the per-file scan can't see
@@ -799,6 +850,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     account: row.account ?? undefined,
     topic: row.topic ?? undefined,
     label: row.label ?? undefined,
+    name: row.name ?? undefined,
     isTeamOrigin: row.is_team_origin === 1,
     prUrl: row.pr_url ?? undefined,
     prNumber: row.pr_number ?? undefined,
@@ -1117,25 +1169,35 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
   const seen = new Set<string>();
   const hits: FtsHit[] = [];
 
-  // Tier 1-3: label-based matches, ordered by exactness.
+  // Tier 1-3: handle-based matches, ordered by exactness. A session's handle is
+  // its /rename `label` OR its `agents run --name` handle — both are user-chosen
+  // aliases and rank identically, so typing either the renamed title or the run
+  // name resolves the session ahead of any FTS content hit.
   const labelRows = db.prepare(`
-    SELECT id, label FROM sessions
-    WHERE label IS NOT NULL AND LOWER(label) LIKE ?
-  `).all(`%${lower}%`) as Array<{ id: string; label: string }>;
+    SELECT id, label, name FROM sessions
+    WHERE (label IS NOT NULL AND LOWER(label) LIKE ?)
+       OR (name  IS NOT NULL AND LOWER(name)  LIKE ?)
+  `).all(`%${lower}%`, `%${lower}%`) as Array<{ id: string; label: string | null; name: string | null }>;
 
   let hasExactLabelMatch = false;
   for (const row of labelRows) {
-    const labelLower = row.label.toLowerCase();
-    let score: number;
-    if (labelLower === lower) {
-      score = 1_000_000;
-      hasExactLabelMatch = true;
-    } else if (labelLower.startsWith(lower)) {
-      score = 900_000;
-    } else {
-      score = 800_000;
+    // Score against whichever handle matches best (exact > prefix > contains).
+    let score = 0;
+    for (const handle of [row.label, row.name]) {
+      if (!handle) continue;
+      const h = handle.toLowerCase();
+      if (!h.includes(lower)) continue;
+      if (h === lower) {
+        score = Math.max(score, 1_000_000);
+        hasExactLabelMatch = true;
+      } else if (h.startsWith(lower)) {
+        score = Math.max(score, 900_000);
+      } else {
+        score = Math.max(score, 800_000);
+      }
     }
-    // matchedTerms is empty for label hits — the picker can render the label
+    if (score === 0) continue;
+    // matchedTerms is empty for handle hits — the picker can render the handle
     // itself as the highlight, no badge needed.
     hits.push({ sessionId: row.id, score, matchedTerms: [] });
     seen.add(row.id);

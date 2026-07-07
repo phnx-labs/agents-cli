@@ -238,14 +238,16 @@ describe('pickBalancedCandidate', () => {
     expect(counts['2.1.112']).toBeGreaterThan(counts['2.1.113'] * 10);
   });
 
-  it('uses the highest non-session window for capacity weighting', () => {
-    // session=100 should NOT exclude the candidate or zero its weight; weekly
-    // is what matters for routing. A high session% with low week% remains a
-    // valid, high-weight pick.
-    const sessionMaxed = cand({
+  it('weights by weekly headroom, not session, among eligible accounts', () => {
+    // A high — but not maxed — session% must not distort the weight: routing
+    // capacity is driven by the weekly window. sessionBusy has lots of weekly
+    // headroom despite a near-full session, so it should win most trials. (When
+    // session actually hits 100 the account is instead excluded outright — see
+    // the next test.)
+    const sessionBusy = cand({
       version: '2.1.112',
       email: 'icloud@example.com',
-      usageSnapshot: claudeUsage(100, 15, 0),
+      usageSnapshot: claudeUsage(90, 15, 0),
       lastActive: new Date('2026-04-20T10:00:00Z'),
     });
     const weeklyBusy = cand({
@@ -255,18 +257,60 @@ describe('pickBalancedCandidate', () => {
       lastActive: new Date('2026-04-15T00:00:00Z'),
     });
 
-    // sessionMaxed: routing usage = max(15, 0) = 15 → weight 85
-    // weeklyBusy:    routing usage = max(80, 7) = 80 → weight 20
-    // Expected: sessionMaxed wins ~85/(85+20) = 81% of trials.
+    // sessionBusy: routing usage = max(15, 0) = 15 → weight 85
+    // weeklyBusy:  routing usage = max(80, 7) = 80 → weight 20
+    // Expected: sessionBusy wins ~85/(85+20) = 81% of trials.
     const counts: Record<string, number> = { '2.1.112': 0, '2.1.110': 0 };
     const iterations = 2000;
     for (let i = 0; i < iterations; i++) {
-      const result = pickBalancedCandidate([sessionMaxed, weeklyBusy]);
+      const result = pickBalancedCandidate([sessionBusy, weeklyBusy]);
       counts[result!.picked.version] += 1;
     }
-    const sessionMaxedRatio = counts['2.1.112'] / iterations;
-    expect(sessionMaxedRatio).toBeGreaterThan(0.7);
-    expect(sessionMaxedRatio).toBeLessThan(0.92);
+    const sessionBusyRatio = counts['2.1.112'] / iterations;
+    expect(sessionBusyRatio).toBeGreaterThan(0.7);
+    expect(sessionBusyRatio).toBeLessThan(0.92);
+  });
+
+  it('excludes a session-maxed account even when its weekly window has headroom', () => {
+    // The real bug: 2.1.187 with session=100 but week=60 was deemed eligible
+    // (routing looked at weekly only) and kept getting picked, while `ag view`
+    // showed it rate-limited. A session-maxed account cannot serve the next
+    // request, so balanced must skip it and route to the healthy account.
+    const sessionMaxed = cand({
+      version: '2.1.187',
+      email: 'getrush@example.com',
+      usageSnapshot: claudeUsage(100, 60, 0),
+      lastActive: new Date('2026-04-20T10:00:00Z'),
+    });
+    const healthy = cand({
+      version: '2.1.181',
+      email: 'icloud@example.com',
+      usageSnapshot: claudeUsage(60, 20, 0),
+      lastActive: new Date('2026-04-19T10:00:00Z'),
+    });
+
+    const result = pickBalancedCandidate([sessionMaxed, healthy]);
+    expect(result!.picked.version).toBe('2.1.181');
+    expect(result!.excluded.map((c) => c.version)).toContain('2.1.187');
+  });
+
+  it('keeps a sonnet-week-maxed account eligible (router mirrors the `ag view` badge)', () => {
+    // Deliberate design choice — router eligibility == the badge's signal
+    // (deriveUsageStatusFromSnapshot), which EXCLUDES the model-specific
+    // sonnet_week sub-limit: hitting it throttles one model, not the account, so
+    // the row stays "available" and the account can still serve Opus/Haiku. This
+    // locks in the behavior: a sonnet_week=100 / session,week-healthy account must
+    // NOT be excluded (the earlier design that also gated on getRoutingUsedPercent
+    // would wrongly exclude it, reintroducing router-vs-badge disagreement).
+    const sonnetMaxed = cand({
+      version: '2.1.187',
+      email: 'getrush@example.com',
+      usageSnapshot: claudeUsage(30, 40, 100), // sonnet_week=100, session/week healthy
+      lastActive: new Date('2026-04-20T10:00:00Z'),
+    });
+    const result = pickBalancedCandidate([sonnetMaxed]);
+    expect(result!.picked.version).toBe('2.1.187');
+    expect(result!.excluded.map((c) => c.version)).not.toContain('2.1.187');
   });
 
   it('dedupes by email — same account on two versions collapses to one candidate', () => {
@@ -384,6 +428,27 @@ describe('pickAvailableCandidate', () => {
     const result = pickAvailableCandidate([preferred, available], '2.1.113');
     expect(result!.picked.version).toBe('2.1.112');
     expect(result!.excluded.map((candidate) => candidate.version)).toContain('2.1.113');
+  });
+
+  it('switches away from a session-maxed pinned version (live window, weekly headroom)', () => {
+    // Same shape as the 2.1.187 bug but exercised through `available`: the
+    // pinned/preferred version is session-maxed via a live snapshot while its
+    // weekly window still has room. It must NOT be preferred — route to the
+    // healthy account instead.
+    const preferred = cand({
+      version: '2.1.187',
+      email: 'getrush@example.com',
+      usageSnapshot: claudeUsage(100, 60, 0),
+    });
+    const healthy = cand({
+      version: '2.1.181',
+      email: 'icloud@example.com',
+      usageSnapshot: claudeUsage(60, 20, 0),
+    });
+
+    const result = pickAvailableCandidate([preferred, healthy], '2.1.187');
+    expect(result!.picked.version).toBe('2.1.181');
+    expect(result!.excluded.map((c) => c.version)).toContain('2.1.187');
   });
 
   it('keeps the pinned version when live usage still has headroom', () => {

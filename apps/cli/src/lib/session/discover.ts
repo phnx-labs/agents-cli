@@ -35,6 +35,7 @@ import {
   getScanStampsForPaths,
   recordScans,
   syncLabels,
+  syncNames,
   syncTopics,
   upsertSessionsBatch,
   querySessions,
@@ -45,6 +46,7 @@ import {
   type ScanStamp,
   type QueryOptions,
 } from './db.js';
+import { buildRunNameMap } from './run-names.js';
 
 const HOME = os.homedir();
 // Versions can live under either repo: the user repo (current canonical
@@ -176,6 +178,9 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
       // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
       // file-enumeration sweep. Same dirs, same results — just not all at once.
       await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, onProgress));
+      // Apply `agents run --name` handles onto the freshly-scanned rows by id —
+      // the same idempotent, re-applied-every-scan pattern as /rename labels.
+      syncNames(buildRunNameMap());
     } finally {
       releaseScan(process.pid);
     }

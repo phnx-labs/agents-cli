@@ -22,7 +22,7 @@ import {
   localCliVersion,
 } from '../lib/hosts/ready.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
-import { listTasks } from '../lib/hosts/tasks.js';
+import { listTasks, loadTask, findTaskByName, findTaskBySessionId } from '../lib/hosts/tasks.js';
 import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import { showHostTaskLog } from '../lib/hosts/logs.js';
 
@@ -197,19 +197,23 @@ async function doPs(json: boolean): Promise<void> {
     return;
   }
   const cols = terminalWidth();
-  console.log(chalk.bold('ID').padEnd(11) + chalk.bold('HOST').padEnd(16) + chalk.bold('AGENT').padEnd(10) + chalk.bold('STATUS').padEnd(11) + chalk.bold('PROMPT'));
+  console.log(chalk.bold('ID').padEnd(11) + chalk.bold('NAME').padEnd(16) + chalk.bold('HOST').padEnd(16) + chalk.bold('AGENT').padEnd(10) + chalk.bold('STATUS').padEnd(11) + chalk.bold('PROMPT'));
   for (const t of tasks) {
     const status = t.status === 'completed' ? chalk.green(t.status) : t.status === 'failed' ? chalk.red(t.status) : chalk.yellow(t.status);
+    const nameCol = truncateToWidth(t.name ?? chalk.gray('-'), 15).padEnd(16);
     // Prompt fills the remaining width instead of a fixed 50-char byte slice (98-char rows).
-    const promptCol = truncateToWidth(t.prompt, Math.max(12, cols - (11 + 16 + 10 + 11)));
-    console.log(t.id.padEnd(11) + t.host.padEnd(16) + t.agent.padEnd(10) + status.padEnd(11) + promptCol);
+    const promptCol = truncateToWidth(t.prompt, Math.max(12, cols - (11 + 16 + 16 + 10 + 11)));
+    console.log(t.id.padEnd(11) + nameCol + t.host.padEnd(16) + t.agent.padEnd(10) + status.padEnd(11) + promptCol);
   }
 }
 
-async function doLogs(id: string, follow: boolean): Promise<void> {
+async function doLogs(ref: string, follow: boolean): Promise<void> {
+  // Resolve the ref as a task id first, then fall back to a `--name` handle so
+  // `agents hosts logs <name>` works, not just the opaque id.
+  const id = loadTask(ref) ? ref : (findTaskByName(ref)?.id ?? findTaskBySessionId(ref)?.id ?? ref);
   const res = await showHostTaskLog(id, follow);
   if (!res.found) {
-    console.log(chalk.red(`Unknown task "${id}".`));
+    console.log(chalk.red(`Unknown task "${ref}".`));
     process.exitCode = 1;
     return;
   }
