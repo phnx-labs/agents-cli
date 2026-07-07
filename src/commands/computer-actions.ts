@@ -328,10 +328,48 @@ async function resolveTargetPid(
   return resolved.pid;
 }
 
-// --raise flag: app-level focus_window before the main action so coordinate
-// clicks and keystrokes land on a visible, key window.
-async function raiseIfRequested(client: ComputerClient, pid: number, raise?: boolean): Promise<void> {
-  if (raise) unwrap(await client.call('focus_window', { pid }));
+// Focus-safety policy for input verbs. Element mode (--id) drives an app through
+// Accessibility actions (AXPress / set AXValue) that never activate the app or move
+// the cursor, so the user keeps working while an agent acts. The two paths that DO
+// take over the screen are (a) --raise (brings the app to the front + steals keyboard
+// focus) and (b) coordinate mode (--x/--y warps the physical cursor and needs the app
+// frontmost). Both are surfaced as notes, and --raise is ignored in element mode so a
+// reflexive flag cannot hijack the user's session.
+
+// Pure, unit-tested: the focus/cursor costs an action will impose, as human notes.
+export function focusStealNotes(opts: { id?: string; x?: number; y?: number; raise?: boolean }): string[] {
+  const notes: string[] = [];
+  const elementMode = opts.id != null;
+  if (opts.raise) {
+    notes.push(
+      elementMode
+        ? 'note: --raise ignored in element mode (--id) — element actions do not need the app frontmost, so your focus is left alone.'
+        : 'note: --raise brings the target app to the front and takes keyboard focus from you. Element mode (`describe` then --id) drives apps without stealing focus.',
+    );
+  }
+  if (!elementMode && (opts.x != null || opts.y != null)) {
+    notes.push(
+      'note: coordinate mode moves your real cursor and needs the app frontmost. Prefer element mode (`describe` then --id) to act without moving your pointer.',
+    );
+  }
+  return notes;
+}
+
+// Pure, unit-tested: whether --raise is actually honored. Element mode suppresses it
+// so an element-targeted action never steals the user's foreground.
+export function shouldRaise(opts: { id?: string; raise?: boolean }): boolean {
+  return Boolean(opts.raise) && opts.id == null;
+}
+
+// Apply the focus-safety policy for an input verb: print the cost notes, and raise
+// only when raising is actually warranted (non-element mode with --raise).
+async function applyFocusPolicy(
+  client: ComputerClient,
+  pid: number,
+  opts: { id?: string; x?: number; y?: number; raise?: boolean },
+): Promise<void> {
+  for (const note of focusStealNotes(opts)) console.error(note);
+  if (shouldRaise(opts)) unwrap(await client.call('focus_window', { pid }));
 }
 
 function emit(result: Record<string, unknown>, json: boolean, human: () => string): void {
@@ -356,9 +394,9 @@ function addTargetOpts(cmd: Command): Command {
 // Add the shared --id/--x/--y element-or-coords options to a verb.
 function addElementOrCoordOpts(cmd: Command): Command {
   return cmd
-    .option('--id <@eN>', 'Element id from `describe`')
-    .option('--x <n>', 'X coordinate (global, points)', (v) => parseInt(v, 10))
-    .option('--y <n>', 'Y coordinate (global, points)', (v) => parseInt(v, 10));
+    .option('--id <@eN>', 'Element id from `describe` (focus-safe: no foreground steal, no cursor move)')
+    .option('--x <n>', 'X coordinate (global, points; moves your real cursor, needs app frontmost)', (v) => parseInt(v, 10))
+    .option('--y <n>', 'Y coordinate (global, points; moves your real cursor, needs app frontmost)', (v) => parseInt(v, 10));
 }
 
 type TargetOpts = { pid?: number; bundle?: string; host?: string; json?: boolean };
@@ -411,7 +449,7 @@ export function registerActionCommands(program: Command): void {
         .description('Click an element (--id) or screen coordinate (--x --y)')
         .option('--count <n>', 'Click count (2 = double-click)', (v) => parseInt(v, 10))
         .option('--background', 'Focus-safe postToPid delivery (plain AppKit only; skips HID tap)')
-        .option('--raise', 'Bring the target app to the front first')
+        .option('--raise', 'Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)')
         .option('--json', 'Emit JSON'),
     ),
   ).action(async (opts: ElemOpts & { count?: number; background?: boolean; raise?: boolean }) => {
@@ -422,7 +460,7 @@ export function registerActionCommands(program: Command): void {
         console.error(spec.error);
         process.exit(1);
       }
-      await raiseIfRequested(client, pid, opts.raise);
+      await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = { pid, ...spec.params };
       if (opts.count != null) params.count = opts.count;
       if (opts.background) params.background = true;
@@ -447,6 +485,7 @@ export function registerActionCommands(program: Command): void {
         console.error(spec.error);
         process.exit(1);
       }
+      await applyFocusPolicy(client, pid, opts);
       const res = unwrap(await client.call('right_click', { pid, ...spec.params }));
       emit(res, Boolean(opts.json), () => `right-clicked (${res.method ?? 'ok'})`);
     });
@@ -471,6 +510,7 @@ export function registerActionCommands(program: Command): void {
         console.error(spec.error);
         process.exit(1);
       }
+      await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = { pid, ...spec.params, text: opts.text };
       if (opts.commit) params.commit = true;
       if (opts.allowSecureField) params.allow_secure_field = true;
@@ -486,14 +526,14 @@ export function registerActionCommands(program: Command): void {
       .description('Type an arbitrary unicode string into the focused field (focus first via click/focus)')
       .requiredOption('--text <s>', 'Text to type')
       .option('--commit', 'Press Return after typing')
-      .option('--raise', 'Bring the target app to the front first')
+      .option('--raise', 'Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)')
       .option('--require-frontmost', 'Fail (not warn) if the target is not the frontmost app')
       .option('--char-delay <ms>', 'Inter-character delay in ms (default 4; raise for lossy keyboard relays like VM guests, e.g. 25). Clamped to [1, 250].', (v) => parseInt(v, 10))
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { text: string; commit?: boolean; raise?: boolean; requireFrontmost?: boolean; charDelay?: number }) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'type-text' });
-      await raiseIfRequested(client, pid, opts.raise);
+      await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = { pid, text: opts.text };
       if (opts.commit) params.commit = true;
       if (opts.requireFrontmost) params.require_frontmost = true;
@@ -511,13 +551,13 @@ export function registerActionCommands(program: Command): void {
       .command('key')
       .description('Send a key chord, e.g. "cmd+shift+s", "enter", "esc"')
       .requiredOption('--keys <chord>', 'Key chord')
-      .option('--raise', 'Bring the target app to the front first')
+      .option('--raise', 'Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)')
       .option('--require-frontmost', 'Fail (not warn) if the target is not the frontmost app')
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { keys: string; raise?: boolean; requireFrontmost?: boolean }) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'key' });
-      await raiseIfRequested(client, pid, opts.raise);
+      await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = { pid, keys: opts.keys };
       if (opts.requireFrontmost) params.require_frontmost = true;
       const res = unwrap(await client.call('key', params));
@@ -535,7 +575,7 @@ export function registerActionCommands(program: Command): void {
       .requiredOption('--to <x,y>', 'End coordinate "x,y"')
       .option('--button <left|right>', 'Mouse button', 'left')
       .option('--background', 'Focus-safe postToPid delivery (plain AppKit only)')
-      .option('--raise', 'Bring the target app to the front first')
+      .option('--raise', 'Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)')
       .option('--json', 'Emit JSON'),
   ).action(async (opts: TargetOpts & { from: string; to: string; button: string; background?: boolean; raise?: boolean }) => {
     let from: { x: number; y: number };
@@ -549,7 +589,7 @@ export function registerActionCommands(program: Command): void {
     }
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'drag' });
-      await raiseIfRequested(client, pid, opts.raise);
+      await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = {
         pid,
         from: [from.x, from.y],
@@ -570,13 +610,13 @@ export function registerActionCommands(program: Command): void {
         .description('Scroll by a pixel delta at an element or coordinate')
         .option('--dy <n>', 'Vertical delta (negative = down)', (v) => parseInt(v, 10))
         .option('--dx <n>', 'Horizontal delta', (v) => parseInt(v, 10))
-        .option('--raise', 'Bring the target app to the front first')
+        .option('--raise', 'Bring the target app to the front first (steals your foreground + keyboard focus; ignored in element mode --id)')
         .option('--json', 'Emit JSON'),
     ),
   ).action(async (opts: ElemOpts & { dy?: number; dx?: number; raise?: boolean }) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'scroll' });
-      await raiseIfRequested(client, pid, opts.raise);
+      await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = { pid };
       if (opts.id) params.element_id = opts.id;
       if (opts.x != null) params.x = opts.x;

@@ -9,6 +9,8 @@ import {
   buildRaiseParams,
   buildWaitParams,
   clampCharDelay,
+  focusStealNotes,
+  shouldRaise,
   resolveTargetPidDecision,
   CHAR_DELAY_MIN_MS,
   CHAR_DELAY_MAX_MS,
@@ -331,6 +333,48 @@ describe('clampCharDelay', () => {
   it('truncates fractional input and rejects NaN', () => {
     expect(clampCharDelay(25.9)).toBe(25);
     expect(clampCharDelay(NaN)).toBeUndefined();
+  });
+});
+
+describe('focusStealNotes', () => {
+  it('is silent for focus-safe element mode without --raise', () => {
+    expect(focusStealNotes({ id: '@e7' })).toEqual([]);
+  });
+
+  it('element mode ignores --raise and says so (never steals the user\'s foreground)', () => {
+    const notes = focusStealNotes({ id: '@e7', raise: true });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('ignored in element mode');
+  });
+
+  it('warns about the cursor in coordinate mode', () => {
+    const notes = focusStealNotes({ x: 10, y: 20 });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('moves your real cursor');
+  });
+
+  it('coordinate mode with --raise warns about both foreground and cursor', () => {
+    const notes = focusStealNotes({ x: 10, y: 20, raise: true });
+    expect(notes).toHaveLength(2);
+    expect(notes.join(' ')).toContain('takes keyboard focus');
+    expect(notes.join(' ')).toContain('moves your real cursor');
+  });
+
+  it('a target-only verb (key/type-text) with --raise warns about foreground only', () => {
+    expect(focusStealNotes({ raise: true })).toEqual([expect.stringContaining('takes keyboard focus')]);
+  });
+
+  it('is silent when no target and no --raise are given', () => {
+    expect(focusStealNotes({})).toEqual([]);
+  });
+});
+
+describe('shouldRaise', () => {
+  it('honors --raise only outside element mode, so an element action never takes foreground', () => {
+    expect(shouldRaise({ raise: true })).toBe(true);
+    expect(shouldRaise({ raise: true, id: '@e1' })).toBe(false);
+    expect(shouldRaise({ id: '@e1' })).toBe(false);
+    expect(shouldRaise({})).toBe(false);
   });
 });
 
