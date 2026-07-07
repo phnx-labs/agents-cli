@@ -243,7 +243,8 @@ agents hosts check gpu-box              # reachable? which agents-cli version?
 
 # Run there instead of locally
 agents run claude --host gpu-box "profile this build"   # follows live by default
-agents logs --host gpu-box              # pick a dispatched run and view its log
+agents logs --host gpu-box              # pick a dispatched run — concise summary by default
+agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
 agents logs <id> -f                     # re-attach to a running one and follow
 agents view claude --host gpu-box       # inspect the remote install
 agents sync --host gpu-box              # make the remote machine current
@@ -274,7 +275,7 @@ agents teams start auth-feature     # Fires teammates whose deps are done
 agents teams status auth-feature    # Who's working, what they changed, what they said
 ```
 
-Teammates run detached -- close your terminal, they keep working. Check in with `teams status`, read full output with `teams logs <name>`, clean up with `teams disband`.
+Teammates run detached -- close your terminal, they keep working. Check in with `teams status`, glance at a teammate's summary with `teams logs <name>` (add `--full` for the raw output), clean up with `teams disband`.
 
 Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/06-observability.md](docs/06-observability.md).
 
@@ -534,7 +535,7 @@ agents routines add daily-digest \
 
 agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
-agents routines logs daily-digest      # Check last execution
+agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
