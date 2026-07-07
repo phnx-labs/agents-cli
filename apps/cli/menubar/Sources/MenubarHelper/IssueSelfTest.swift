@@ -1,0 +1,104 @@
+import Foundation
+
+// Self-test for the quick-issue capture logic (Cmd-Shift-O). Follows the repo's
+// env-gated self-test idiom (see Bench.swift / MENUBAR_CLIP_TEST): no XCTest
+// target exists for the menu-bar helper. Exercises the real code paths — newest
+// clip selection over a fixture dir, ticket-id parsing, and the prompt contract
+// — then exits nonzero on any failure so CI/a caller can gate on it.
+//
+//   MENUBAR_ISSUE_TEST=1 MenubarHelper
+enum IssueSelfTest {
+    private static var failures = 0
+
+    static func run() -> Never {
+        print("menubar issue-capture self-test")
+        testImageFilePick()
+        testTicketIDParse()
+        testPromptContract()
+        if failures == 0 {
+            print("\nALL PASS")
+            exit(0)
+        }
+        print("\n\(failures) FAILED")
+        exit(1)
+    }
+
+    // imageFiles must return images newest-first ACROSS dirs, skip non-images and
+    // `.json` sidecars, honor the limit, and collapse duplicate paths.
+    private static func testImageFilePick() {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("menubar-img-test-\(ProcessInfo.processInfo.processIdentifier)",
+                                    isDirectory: true)
+        let dirA = base.appendingPathComponent("a"), dirB = base.appendingPathComponent("b")
+        defer { try? FileManager.default.removeItem(at: base) }
+        for d in [dirA, dirB] { try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+
+        // dirA: an older png + a non-image + a sidecar (both must be skipped).
+        write(dirA, "old.png", modified: -300)
+        write(dirA, "notes.txt", modified: -1)      // non-image
+        write(dirA, "old.png.json", modified: -1)   // sidecar
+        // dirB holds the newest image, and a mid-age one.
+        write(dirB, "newest.png", modified: -10)
+        write(dirB, "mid.jpg", modified: -120)
+
+        let got = AgentsCLI.imageFiles(inDirs: [dirA, dirB], limit: 6)
+        check("newest image across dirs is first",
+              (got.first as NSString?)?.lastPathComponent == "newest.png", detail: got.first ?? "nil")
+        check("only the 3 images returned (txt + sidecar skipped)",
+              got.count == 3 &&
+              got.allSatisfy { AgentsCLI.imageExtensions.contains(($0 as NSString).pathExtension.lowercased()) },
+              detail: got.map { ($0 as NSString).lastPathComponent }.joined(separator: ","))
+        check("limit is honored", AgentsCLI.imageFiles(inDirs: [dirA, dirB], limit: 1).count == 1)
+        check("no dirs yields empty", AgentsCLI.imageFiles(inDirs: [], limit: 6).isEmpty)
+    }
+
+    // parseCreatedTicketID pulls the identifier from the linear CLI success line,
+    // prefers the `Created <ID>:` form, and returns nil when there is no ticket.
+    private static func testTicketIDParse() {
+        check("parses Created RUSH line",
+              AgentsCLI.parseCreatedTicketID("Created RUSH-1532: Fix the thing") == "RUSH-1532")
+        check("parses id from a noisy multi-line tail",
+              AgentsCLI.parseCreatedTicketID("thinking...\nCreated ENG-42: Add retry [proj | me]\n") == "ENG-42")
+        check("no ticket → nil", AgentsCLI.parseCreatedTicketID("could not create the issue") == nil)
+        check("takes the final 'Created' over an earlier reasoning mention",
+              AgentsCLI.parseCreatedTicketID("I saw Created RUSH-99 referenced.\nCreated RUSH-200: real") == "RUSH-200")
+    }
+
+    // The meta-prompt must carry the user's note and the screenshot path forward
+    // to the agent, and drop the screenshot line when there is none.
+    private static func testPromptContract() {
+        let oneShot = AgentsCLI.ticketAgentPrompt(note: "cards show raw uuids",
+                                                  screenshotPaths: ["/tmp/clip-1.png"])
+        check("prompt embeds the note", oneShot.contains("cards show raw uuids"))
+        check("prompt embeds the screenshot path", oneShot.contains("/tmp/clip-1.png"))
+        check("prompt names the linear create step", oneShot.contains("linear create"))
+
+        let multi = AgentsCLI.ticketAgentPrompt(note: "before/after",
+                                                screenshotPaths: ["/tmp/a.png", "/tmp/b.png"])
+        check("multi-shot prompt lists both paths",
+              multi.contains("/tmp/a.png") && multi.contains("/tmp/b.png"))
+        check("multi-shot prompt states the count", multi.contains("2 screenshots"))
+
+        let noShot = AgentsCLI.ticketAgentPrompt(note: "flaky test", screenshotPaths: [])
+        check("no-screenshot prompt says so", noShot.contains("No screenshots"))
+        check("no-screenshot prompt has no /tmp path", !noShot.contains("/tmp/"))
+    }
+
+    // MARK: helpers
+
+    private static func write(_ dir: URL, _ name: String, modified offset: TimeInterval) {
+        let url = dir.appendingPathComponent(name)
+        try? Data("x".utf8).write(to: url)
+        try? FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(offset)], ofItemAtPath: url.path)
+    }
+
+    private static func check(_ name: String, _ ok: Bool, detail: String? = nil) {
+        if ok {
+            print("  PASS  \(name)")
+        } else {
+            failures += 1
+            print("  FAIL  \(name)" + (detail.map { "  (got: \($0))" } ?? ""))
+        }
+    }
+}

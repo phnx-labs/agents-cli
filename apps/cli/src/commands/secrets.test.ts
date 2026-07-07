@@ -222,12 +222,19 @@ describe('readImportDotenv', () => {
   // (verified end-to-end: 13 keys -> win-mini; unit-tested by the decoded-script
   // assertions in remote-cmd.test.ts). So this test exercises the POSIX branch on
   // the POSIX CI legs; the Windows branch is covered by that separate test.
-  it.skipIf(process.platform === 'win32')('reads the .env from stdin when passed "-"', () => {
+  it.skipIf(process.platform === 'win32')('reads the .env from stdin when passed "-"', ({ skip }) => {
     // The in-process fd 0 can't be swapped, so exercise the real helper end to
     // end in a child process with piped stdin. Run it with `bun` (repo-standard,
     // on CI PATH): bun executes TS natively with no ESM loader hook — cleaner
     // than the old `node --import tsx`, whose loader also failed to register on
     // Windows.
+    //
+    // Belt-and-suspenders: the release matrix showed `it.skipIf` failing to keep
+    // this test off Windows runners, so also call the runtime skip explicitly.
+    if (process.platform === 'win32') {
+      skip();
+      return;
+    }
     const srcUrl = new URL('./secrets.ts', import.meta.url).href;
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-stdin-'));
     const probe = path.join(dir, 'probe.ts');

@@ -366,14 +366,18 @@ export async function runDaemon(): Promise<void> {
     if (healing) return;
     healing = true;
     try {
-      const { heal, summarizeHeal, notifyHeal, healChangedAnything } = await import('./heal.js');
-      const result = await heal({ mode: 'safe' });
-      if (healChangedAnything(result) || result.skippedPlugins.length > 0) {
-        log('INFO', `heal: ${summarizeHeal(result)}`);
-        notifyHeal(result);
+      const { runSelfHeal, selfHealChangedAnything, selfHealNeedsAttention, summarizeSelfHeal } =
+        await import('./self-heal/registry.js');
+      // Background heal is conservative (mode: 'safe'): fixes low-risk drift (shims,
+      // symlink adoption, PATH, missing resources) and only reports risky ones. The
+      // 30s kickoff means shims/PATH settle shortly after the daemon starts. No
+      // desktop toast here — background heal is silent by design; the log is the record.
+      const report = await runSelfHeal({ mode: 'safe' });
+      if (selfHealChangedAnything(report) || selfHealNeedsAttention(report)) {
+        log('INFO', `self-heal: ${summarizeSelfHeal(report)}`);
       }
     } catch (err) {
-      log('ERROR', `heal check failed: ${(err as Error).message}`);
+      log('ERROR', `self-heal check failed: ${(err as Error).message}`);
     } finally {
       healing = false;
     }
