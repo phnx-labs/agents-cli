@@ -13,7 +13,7 @@ import * as terminals from './terminals.vscode';
 import * as swarm from './swarm.vscode';
 import { fetchAllTasks, detectAvailableSources } from './tasks.vscode';
 import { getBuiltInByTitle, configFromDef } from './agents.vscode';
-import { openSingleAgentWithQueue } from './extension';
+import { openSingleAgentWithQueue, runHeadlessAgent, focusSessionInTerminal } from './extension';
 import { generateClaudeSessionId } from '../core/prewarm.simple';
 import { nudgeSession } from '../mcp/watchdog-bridge';
 import { runAgents } from '../core/agentsBin';
@@ -248,6 +248,7 @@ interface DispatchRequestMsg {
   repo?: string;
   branch?: string;
   mode: DispatchModeMsg;
+  headless?: boolean;
   watchdog: WatchdogPolicyMsg;
   notify: NotifyPrefsMsg;
   batch: 'all' | 'per';
@@ -2477,6 +2478,12 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // which openSingleAgentWithQueue guarantees when no cwd is passed).
         const cwd = projectId.includes('/') ? await resolveLocalRepoPath(projectId) : null;
         for (const unit of units) {
+          // Headless: run detached with NO terminal tab. It surfaces in the Floor
+          // under this machine (context:'headless') and is focusable later.
+          if (req.headless) {
+            runHeadlessAgent(req.agent, unit.prompt, mode, cwd ?? undefined);
+            continue;
+          }
           // Pre-mint the session id for plan-mode Claude so we can watch that
           // exact session file for the ExitPlanMode plan afterwards.
           const preSessionId = req.agent === 'claude' && mode === 'plan' ? generateClaudeSessionId() : undefined;
@@ -2881,6 +2888,23 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           vscode.env.openExternal(vscode.Uri.parse(message.url));
         }
         break;
+      // Focus a session — open/attach a real terminal on it (handles the headless
+      // "open it and step in" case). Delegates to `agents sessions focus <id>`.
+      case 'focusSession': {
+        const sessionId = typeof message.sessionId === 'string' ? message.sessionId.trim() : '';
+        if (!sessionId) break;
+        focusSessionInTerminal(sessionId);
+        break;
+      }
+      // Stop a background (headless) run by killing its pid — sends it back to parked
+      // (the transcript survives; it stays resumable via Focus / sessions resume).
+      case 'stopSession': {
+        const pid = typeof message.pid === 'number' ? message.pid : 0;
+        if (pid > 1) {
+          try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+        }
+        break;
+      }
       case 'quickSpawn': {
         const prompt = typeof message.prompt === 'string' ? message.prompt.trim() : '';
         if (prompt) {

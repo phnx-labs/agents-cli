@@ -83,6 +83,12 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
     a.pr && a.ci === 'failed' ? <span className="pill cifail">CI failed</span> :
     a.pr && a.ci === 'running' ? <span className="pill cirun">CI running</span> : null
 
+  // Background (headless) run: no terminal tab. Reads alongside the status pill so
+  // a background agent is distinct from a terminal one within its device group.
+  const bgBadge = a.context === 'headless'
+    ? <span className="pill bg" title="Background (headless) — no terminal; open with Focus">bg</span>
+    : null
+
   return (
     <div
       className={`fitem ${attn}${selected ? ' selsel' : ''}`}
@@ -96,6 +102,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         <span className="path">{meta}</span>
         <span className="when">
           {marker}
+          {bgBadge}
           {ciBadge}
           {tok && (
             <span className="tps">{!plain && <Icon name="zap" size={11} />}{tok}</span>

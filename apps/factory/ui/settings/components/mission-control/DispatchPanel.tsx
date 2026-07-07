@@ -13,6 +13,7 @@ import { AgentSelect } from './AgentSelect'
 import { HostSelect, suggestedHost } from './HostSelect'
 import { ProjectSelect } from './ProjectSelect'
 import { ModeSeg } from './ModeSeg'
+import { SurfaceSeg } from './SurfaceSeg'
 import { WatchdogSeg } from './WatchdogSeg'
 import { NotifyBell } from './NotifyBell'
 import { BatchToggle } from './BatchToggle'
@@ -123,6 +124,7 @@ interface PanelState {
   project: string
   repo: string
   mode: DispatchMode
+  headless: boolean
   watchdog: WatchdogPolicy
   expanded: boolean
   batch: 'all' | 'per'
@@ -150,6 +152,7 @@ function initialState(prefill?: string, prefillTicketId?: string): PanelState {
     project: '',
     repo: '',
     mode: 'auto',         // locked default
+    headless: false,      // default: open a terminal tab; opt into background
     watchdog: 'keep',
     expanded: false,
     batch: 'all',
@@ -349,6 +352,7 @@ export function DispatchPanel(props: DispatchPanelProps) {
       repo: isCloud ? effRepo?.id : undefined,
       branch: isCloud ? S.branch : undefined,
       mode: S.mode,
+      headless: S.headless,
       watchdog: S.watchdog,
       notify: S.notify,
       batch: S.batch,
@@ -480,6 +484,10 @@ export function DispatchPanel(props: DispatchPanelProps) {
             <div className="row">
               <span className="lbl">Mode</span>
               <span className="ctl"><ModeSeg value={S.mode} onChange={m => patch({ mode: m })} /></span>
+            </div>
+            <div className="row">
+              <span className="lbl">Surface</span>
+              <span className="ctl"><SurfaceSeg headless={S.headless} onChange={h => patch({ headless: h })} /></span>
             </div>
             <div className="row">
               <span className="lbl">Watchdog</span>

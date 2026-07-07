@@ -247,6 +247,43 @@ describe('toFloorAgentFromRemote', () => {
     expect(a.hostLabel).toBeUndefined()
   })
 
+  test('carries context/sessionId/pid so a headless run gets the bg badge + Focus/Stop', () => {
+    const r: RemoteSessionLike = {
+      host: 'this-mac',
+      sessionId: 'headless99abcd',
+      agentType: 'claude',
+      cwd: '/home/u/src/app',
+      project: 'app',
+      phase: 'running',
+      activity: 'Editing src/auth.ts',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      prUrl: null,
+      ticket: null,
+      branch: '',
+      sinceMs: 9_000,
+      startedAtMs: NOW - 9_000,
+      topic: 'auth refactor',
+      context: 'headless',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 40912,
+      transport: '',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set(), 'zion')
+    // context drives the bg badge; sessionId/pid drive Focus/Stop.
+    expect(a.context).toBe('headless')
+    expect(a.sessionId).toBe('headless99abcd')
+    expect(a.pid).toBe(40912)
+    // 'this-mac' folds to the real device name so the run groups under 'zion'.
+    expect(a.hostLabel).toBe('zion')
+  })
+
   test("this machine's out-of-window sessions (host 'this-mac') take the real name as hostLabel so they fold, not duplicate", () => {
     const base: RemoteSessionLike = {
       host: 'this-mac',

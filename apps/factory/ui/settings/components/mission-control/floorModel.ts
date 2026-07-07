@@ -113,6 +113,9 @@ export interface FloorAgent {
   id: string
   host: string          // 'this-mac' for local; remote hostname otherwise. ROUTING key — reply/nudge/reassign target it.
   hostLabel?: string    // DISPLAY name for host: the local machine's real device name (e.g. 'zion') so it isn't shown as 'this-mac'. Falls back to host.
+  context?: string      // CLI session context ('terminal' | 'headless' | 'cloud' | 'teams'); drives the bg badge for background runs.
+  sessionId?: string    // CLI session id — Focus targets it (`agents sessions focus <id>`).
+  pid?: number          // process id (headless/background runs) — Stop kills it.
   project: string       // repo or cwd basename (worktrees folded to their repo)
   name: string          // displayName / branch-derived label
   abbr: AgentAbbr       // agentType -> CC/CX/GX/...

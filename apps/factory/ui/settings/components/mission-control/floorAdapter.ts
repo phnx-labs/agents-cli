@@ -252,6 +252,8 @@ export function toFloorAgentFromUnified(
   return {
     id: u.id,
     host: 'this-mac',
+    // In-window tab agents are always terminal-attached.
+    context: 'terminal',
     // Display the machine's real device name (e.g. 'zion') instead of the
     // internal 'this-mac' routing key. Undefined until the fleet list resolves.
     hostLabel: opts.localHostName || undefined,
@@ -308,6 +310,11 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
   return {
     id,
     host: r.host,
+    // Carry the CLI context ('headless' | 'terminal' | 'cloud' | 'teams') so the
+    // feed can badge a background (headless) run distinctly from a terminal one.
+    context: r.context,
+    sessionId: r.sessionId,
+    pid: r.pid,
     // This machine's own sessions reported by the machine-wide fetch carry the
     // synthetic 'this-mac'; give them the real device name so they fold into the
     // same HOSTS row as in-window local agents instead of a second bucket.

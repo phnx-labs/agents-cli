@@ -74,6 +74,7 @@ export interface DispatchRequest {
   repo?: string                  // cloud repo id — for cloud hosts
   branch?: string
   mode: DispatchMode
+  headless: boolean              // run detached with NO terminal tab (background). Orthogonal to mode — a headless run still uses mode's permissions. Focus/resume it later via `agents focus`.
   watchdog: WatchdogPolicy
   notify: NotifyPrefs
   batch: 'all' | 'per'           // when ticketIds.length > 1: one agent for all, or one per ticket
