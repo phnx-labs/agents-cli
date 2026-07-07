@@ -340,10 +340,13 @@ export async function runDaemon(): Promise<void> {
     if (syncing) return;
     syncing = true;
     try {
-      const { isSyncConfigured, isSyncEnabled } = await import('./session/sync/config.js');
-      // isSyncEnabled() first: a machine the operator turned off must skip the
-      // keychain read entirely, not just the network cycle.
-      if (!isSyncEnabled() || !isSyncConfigured()) return;
+      const { isBetaEnabled } = await import('./beta.js');
+      // Off by default: session sync is an opt-in beta feature. Check the beta
+      // flag FIRST so a machine that hasn't opted in skips the keychain read
+      // (isSyncConfigured) entirely, not just the network cycle.
+      if (!isBetaEnabled('session-sync')) return;
+      const { isSyncConfigured } = await import('./session/sync/config.js');
+      if (!isSyncConfigured()) return;
       const { syncSessions } = await import('./session/sync/sync.js');
       const r = await syncSessions();
       if (r.pushed || r.pulled || r.errors.length) {

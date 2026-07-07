@@ -1,17 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-
-// Redirect the durable enable-flag home to a temp dir for the enable-switch
-// tests. Every other state.ts export stays real; the secrets path used by the
-// R2-cache tests below never calls getHistoryDir, so it is unaffected.
-const hist = vi.hoisted(() => ({ dir: '' }));
-vi.mock('../../state.js', async (importActual) => {
-  const actual = await importActual<typeof import('../../state.js')>();
-  return { ...actual, getHistoryDir: () => hist.dir };
-});
-
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { setKeychainBackendForTest, type KeychainBackend } from '../../secrets/index.js';
 import { writeBundle, type SecretsBundle } from '../../secrets/bundles.js';
 import {
@@ -20,10 +7,6 @@ import {
   clearR2ConfigCache,
   RESOLVE_RETRY_COOLDOWN_MS,
   SYNC_BUNDLE,
-  isSyncEnabled,
-  setSyncEnabled,
-  syncStateFilePath,
-  SYNC_ENABLED_ENV,
 } from './config.js';
 
 /**
@@ -142,61 +125,5 @@ describe('R2 config resolution cache', () => {
     // absent path does not back off, so the very next check resolves
     expect(isSyncConfigured(t0 + 1)).toBe(true);
     expect(loadR2Config().bucket).toBe('agents-sessions');
-  });
-});
-
-describe('session sync enable switch', () => {
-  let savedEnv: string | undefined;
-
-  beforeEach(() => {
-    hist.dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-toggle-'));
-    savedEnv = process.env[SYNC_ENABLED_ENV];
-    delete process.env[SYNC_ENABLED_ENV];
-  });
-
-  afterEach(() => {
-    if (savedEnv === undefined) delete process.env[SYNC_ENABLED_ENV];
-    else process.env[SYNC_ENABLED_ENV] = savedEnv;
-    fs.rmSync(hist.dir, { recursive: true, force: true });
-  });
-
-  it('defaults to enabled when no flag file and no env', () => {
-    expect(fs.existsSync(syncStateFilePath())).toBe(false);
-    expect(isSyncEnabled()).toBe(true);
-  });
-
-  it('persists disabled and reads it back across calls', () => {
-    setSyncEnabled(false);
-    expect(fs.existsSync(syncStateFilePath())).toBe(true);
-    expect(isSyncEnabled()).toBe(false);
-    setSyncEnabled(true);
-    expect(isSyncEnabled()).toBe(true);
-  });
-
-  it('env off overrides an enabled flag file', () => {
-    setSyncEnabled(true);
-    process.env[SYNC_ENABLED_ENV] = 'off';
-    expect(isSyncEnabled()).toBe(false);
-  });
-
-  it('env on overrides a disabled flag file', () => {
-    setSyncEnabled(false);
-    process.env[SYNC_ENABLED_ENV] = 'true';
-    expect(isSyncEnabled()).toBe(true);
-  });
-
-  it('an unrecognized env value falls through to the persisted flag', () => {
-    setSyncEnabled(false);
-    process.env[SYNC_ENABLED_ENV] = 'maybe';
-    expect(isSyncEnabled()).toBe(false);
-  });
-
-  it('a malformed flag file falls back to the enabled default (no silent lockout)', () => {
-    fs.writeFileSync(syncStateFilePath(), 'not json', 'utf-8');
-    expect(isSyncEnabled()).toBe(true);
-  });
-
-  it('stores the flag in the durable history tree, not cache', () => {
-    expect(syncStateFilePath()).toBe(path.join(hist.dir, 'sessions-sync.json'));
   });
 });

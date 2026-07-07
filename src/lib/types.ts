@@ -70,7 +70,7 @@ export interface BudgetConfig {
 }
 
 /** Preview features that users can opt into via `agents beta`. */
-export type BetaFeatureName = 'drive' | 'factory';
+export type BetaFeatureName = 'drive' | 'factory' | 'session-sync';
 
 /** Subset of chalk color names used for agent-specific terminal output. */
 export type ChalkColor = 'magenta' | 'green' | 'blue' | 'cyan' | 'yellowBright' | 'redBright' | 'whiteBright' | 'blueBright' | 'greenBright' | 'magentaBright' | 'cyanBright';

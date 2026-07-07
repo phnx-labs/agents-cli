@@ -13,7 +13,7 @@ import type { BetaFeatureName, Manifest, Meta } from './types.js';
 import { getAgentsDir, getOptionalUserAgentsDir, readMeta, writeMeta } from './state.js';
 import { readManifest, writeManifest } from './manifest.js';
 
-export const ALL_BETA_FEATURES = ['drive', 'factory'] as const satisfies readonly BetaFeatureName[];
+export const ALL_BETA_FEATURES = ['drive', 'factory', 'session-sync'] as const satisfies readonly BetaFeatureName[];
 
 function isBetaFeatureName(value: unknown): value is BetaFeatureName {
   return typeof value === 'string' && ALL_BETA_FEATURES.includes(value as BetaFeatureName);

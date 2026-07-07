@@ -7,13 +7,12 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
-import {
-  isSyncConfigured,
-  isSyncEnabled,
-  setSyncEnabled,
-  SYNC_BUNDLE,
-} from '../lib/session/sync/config.js';
+import { isSyncConfigured, SYNC_BUNDLE } from '../lib/session/sync/config.js';
+import { isBetaEnabled, setBetaEnabled, betaEnableHint } from '../lib/beta.js';
 import { syncSessions } from '../lib/session/sync/sync.js';
+
+/** The daemon's automatic session sync is gated by this beta feature. */
+const SYNC_BETA = 'session-sync' as const;
 
 interface SyncCmdOptions {
   verbose?: boolean;
@@ -24,31 +23,37 @@ interface SyncCmdOptions {
 }
 
 export async function runSessionsSync(options: SyncCmdOptions): Promise<void> {
-  // Toggle / status actions short-circuit before any network cycle.
+  // Toggle / status delegate to the `session-sync` beta feature — the single
+  // source of truth for whether the daemon auto-syncs (opt-in, off by default).
+  // These short-circuit before any network cycle.
   if (options.disable) {
-    setSyncEnabled(false);
+    setBetaEnabled([SYNC_BETA], false);
     console.log(
       chalk.yellow('Automatic session sync disabled') +
-      chalk.dim(' — the daemon stops pushing/pulling within ~90s. Re-enable: agents sessions sync --enable'),
+      chalk.dim(' — the daemon stops pushing/pulling within ~90s. (Same as: agents beta disable session-sync)'),
     );
     return;
   }
   if (options.enable) {
-    setSyncEnabled(true);
-    console.log(chalk.green('Automatic session sync enabled') + chalk.dim(' — the daemon resumes on its next cycle.'));
+    setBetaEnabled([SYNC_BETA], true);
+    console.log(
+      chalk.green('Automatic session sync enabled') +
+      chalk.dim(' — the daemon resumes on its next cycle. (Same as: agents beta enable session-sync)'),
+    );
     return;
   }
   if (options.status) {
-    const enabled = isSyncEnabled();
+    const enabled = isBetaEnabled(SYNC_BETA);
     const configured = isSyncConfigured();
     if (options.json) {
       console.log(JSON.stringify({ enabled, configured }, null, 2));
     } else {
       console.log(
-        `automatic sync: ${enabled ? chalk.green('enabled') : chalk.yellow('disabled')}` +
+        `automatic sync: ${enabled ? chalk.green('enabled (beta)') : chalk.yellow('disabled')}` +
         chalk.dim('  ·  ') +
         `credentials: ${configured ? chalk.green('configured') : chalk.yellow(`missing (${SYNC_BUNDLE})`)}`,
       );
+      if (!enabled) console.log(chalk.dim(`  ${betaEnableHint(SYNC_BETA)}`));
     }
     return;
   }
@@ -102,9 +107,9 @@ export function registerSessionsSyncCommand(sessionsCmd: Command): void {
     .description('Sync session transcripts across machines via R2 (CRDT merge). Claude and Codex.')
     .option('-v, --verbose', 'Log each pushed and pulled session')
     .option('--json', 'Output the sync result as JSON')
-    .option('--enable', 'Turn ON automatic background sync on this machine (persisted)')
-    .option('--disable', 'Turn OFF automatic background sync on this machine (persisted)')
-    .option('--status', 'Show whether automatic sync is enabled and configured');
+    .option('--enable', 'Opt in to automatic background sync (beta; alias for: agents beta enable session-sync)')
+    .option('--disable', 'Opt out of automatic background sync (alias for: agents beta disable session-sync)')
+    .option('--status', 'Show whether automatic sync is opted-in (beta) and configured');
 
   setHelpSections(syncCmd, {
     examples: `
@@ -123,11 +128,11 @@ export function registerSessionsSyncCommand(sessionsCmd: Command): void {
     notes: `
       - Credentials come from the '${SYNC_BUNDLE}' secrets bundle (R2 S3 API, read+write).
       - Each machine writes only its own prefix; conflicts are impossible by construction.
-      - The daemon runs this automatically (~90s); this command forces an immediate cycle.
       - Sessions present locally always win; synced-in copies fill in other machines' sessions.
-      - --disable/--enable persist a machine-local switch (~/.agents/.history) that gates the
-        daemon's automatic sync; a bare 'agents sessions sync' still forces a manual cycle.
-        The AGENTS_SESSIONS_SYNC env var (on/off) overrides the switch for one invocation.
+      - Automatic background sync is an opt-in BETA feature, OFF by default. The daemon only
+        syncs (~90s) once you opt in via 'agents beta enable session-sync' (or the --enable
+        alias here). A bare 'agents sessions sync' always forces a manual one-shot cycle
+        regardless of the beta opt-in.
     `,
   });
 
