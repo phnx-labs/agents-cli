@@ -2634,7 +2634,7 @@ async function scanKimiIncremental(onProgress?: (p: ScanProgress) => void): Prom
 }
 
 /** Parse a single Kimi session state.json file to extract session metadata. */
-function readKimiMeta(filePath: string): { meta: SessionMeta; content: string } | null {
+export function readKimiMeta(filePath: string): { meta: SessionMeta; content: string } | null {
   let state: any;
   try {
     state = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -2652,7 +2652,14 @@ function readKimiMeta(filePath: string): { meta: SessionMeta; content: string } 
 
   const createdAt = typeof state.createdAt === 'string' ? state.createdAt : undefined;
   const updatedAt = typeof state.updatedAt === 'string' ? state.updatedAt : undefined;
-  const timestamp = updatedAt || createdAt;
+  // Coerce to never-null, the same way every other parser does (Rush/Hermes/Droid/…):
+  // a real createdAt/updatedAt still wins; otherwise fall back to the state.json mtime.
+  // Kimi was the lone parser that could yield `undefined`, which binds NULL into
+  // `timestamp TEXT NOT NULL` and aborts the whole batch index. mtime also matches how
+  // the listing already ranks Kimi (last_activity resolves to the file mtime).
+  const stat = safeStatSync(filePath);
+  const timestamp = updatedAt || createdAt
+    || (stat ? stat.mtime.toISOString() : new Date().toISOString());
 
   const shortId = sessionId.replace(/^session_/, '').slice(0, 8);
 
