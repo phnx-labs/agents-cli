@@ -25,6 +25,7 @@ import { FloorSidebar } from './FloorSidebar'
 import { BacklogCenter } from './BacklogCenter'
 import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
+import { ProjectsPane } from './ProjectsPane'
 import { FeedItem, FollowUpBox } from './FeedItem'
 import { TodoChecklist } from './TodoChecklist'
 import { NeedsYouClusters } from './NeedsYouClusters'
@@ -43,6 +44,8 @@ import {
   type TicketSource,
   type AgentAbbr,
   type CiStatus,
+  type ManagedProject,
+  type LinearProjectLite,
 } from './floorModel'
 import { SavedViews } from './SavedViewsBar'
 import { loadSavedViews, persistSavedViews, upsertView, removeView, viewMatches, type SavedView } from './savedViews'
@@ -633,6 +636,11 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
   const [hostInventories, setHostInventories] = useState<Record<string, HostInventory>>({})
   const [hostConfigError, setHostConfigError] = useState<string | null>(null)
+  // Curated managed projects (sidebar top-3 + Projects pane), the Linear projects
+  // available to link, and the most recent host folder-picker result (prefills the form).
+  const [managedProjects, setManagedProjects] = useState<ManagedProject[]>([])
+  const [linearProjects, setLinearProjects] = useState<LinearProjectLite[]>([])
+  const [pickedFolder, setPickedFolder] = useState<{ path: string; repoSlug?: string; name: string; suggestedLinear?: LinearProjectLite } | null>(null)
 
   // Persist the durable Floor prefs (pinned set, plain/sidebar/right toggles, group-by, host pins).
   useEffect(() => {
@@ -725,6 +733,32 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         setHostConfigError(null)
       } else if (msg?.type === 'hostConfigError' && typeof msg.error === 'string') {
         setHostConfigError(msg.error)
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
+
+  // Managed projects + linkable Linear projects for the sidebar top-3 and the
+  // Projects pane. Fetch on mount; the host re-sends managedProjectsData after any
+  // save/delete, so no optimistic update is needed. projectFolderPicked answers the
+  // pane's Browse… button and prefills its add form.
+  useEffect(() => {
+    postMessage({ type: 'fetchManagedProjects' })
+    postMessage({ type: 'fetchLinearProjects' })
+    const onMsg = (event: MessageEvent) => {
+      const msg = event.data
+      if (msg?.type === 'managedProjectsData' && Array.isArray(msg.projects)) {
+        setManagedProjects(msg.projects as ManagedProject[])
+      } else if (msg?.type === 'linearProjectsData' && Array.isArray(msg.projects)) {
+        setLinearProjects(msg.projects as LinearProjectLite[])
+      } else if (msg?.type === 'projectFolderPicked' && typeof msg.path === 'string') {
+        setPickedFolder({
+          path: msg.path,
+          repoSlug: typeof msg.repoSlug === 'string' ? msg.repoSlug : undefined,
+          name: typeof msg.name === 'string' ? msg.name : '',
+          suggestedLinear: msg.suggestedLinear as LinearProjectLite | undefined,
+        })
       }
     }
     window.addEventListener('message', onMsg)
@@ -1727,7 +1761,17 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     </div>
   )
 
-  const rightContent = center === 'host'
+  const rightContent = center === 'projects'
+    ? <ProjectsPane
+        projects={managedProjects}
+        linearProjects={linearProjects}
+        pickedFolder={pickedFolder}
+        onSave={(p) => postMessage({ type: 'saveManagedProject', project: p })}
+        onDelete={(id) => postMessage({ type: 'deleteManagedProject', id })}
+        onPickFolder={() => postMessage({ type: 'pickProjectFolder' })}
+        onClose={() => setCenter('agents')}
+      />
+    : center === 'host'
     ? (selectedHostId
       ? <HostDetail
           host={selectedHostId}
@@ -1788,6 +1832,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             selectedHost={center === 'host' ? selectedHostId : null}
             hosts={hostRoster}
             localHost={localHostName || undefined}
+            projects={managedProjects}
+            onManageProjects={() => { setCenter('projects'); setRightOpen(true) }}
           />
         )}
         <div className="feed-col">{centerContent}</div>

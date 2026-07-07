@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Icon } from './icons'
-import { computeHostRows, type FloorAgent, type FloorTicket, type HostRow } from './floorModel'
+import { computeHostRows, orderManagedProjects, type FloorAgent, type FloorTicket, type HostRow, type ManagedProject } from './floorModel'
 
 // Left scope sidebar. Prototype buildSidebar(): factory-floor.html:563-579,
 // wiring wireSidebar():580-588. Smart (All / Needs you), Queue (Backlog),
@@ -40,9 +40,13 @@ interface FloorSidebarProps {
   hosts?: Array<{ name: string; online: boolean }>
   /** Local machine's canonical device name — always gets a HOSTS row, even off-registry. */
   localHost?: string
+  /** Curated managed projects (top 3 render here; the rest fold into "+N more"). */
+  projects?: ManagedProject[]
+  /** Open the Projects management pane (gear + "+N more" row). */
+  onManageProjects?: () => void
 }
 
-export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, offlineHosts = [], devices = [], hostPins = [], onToggleHostPin, onReorderHostPins, onScope, localHost }: FloorSidebarProps) {
+export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, offlineHosts = [], devices = [], hostPins = [], onToggleHostPin, onReorderHostPins, onScope, localHost, projects = [], onManageProjects }: FloorSidebarProps) {
   const byProj: Record<string, number> = {}
   const projWait: Record<string, number> = {}
   for (const a of agents) {
@@ -118,16 +122,35 @@ export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, o
         <span className="c">{tickets.length} tickets</span>
       </div>
 
-      <div className="sb-sec">PROJECTS</div>
-      {Object.keys(byProj).sort().map((p) => (
-        <div key={p} className={`sb-item ${projFilter === p ? 'on' : ''}`} onClick={() => onScope(p)}>
-          <span>{p}</span>
-          <span className="c">
-            {projWait[p] ? <span className="w"><Icon name="clock" size={10} />{projWait[p]}</span> : null}
-            {byProj[p]}
-          </span>
+      <div className="sb-sec" style={{ display: 'flex', alignItems: 'center' }}>
+        <span>PROJECTS</span>
+        <button
+          type="button"
+          title="Manage projects"
+          onClick={() => onManageProjects?.()}
+          style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', background: 'none', border: 0, padding: 0, cursor: 'pointer', color: 'var(--ds-text-faint)' }}
+        >
+          <Icon name="cog" size={12} />
+        </button>
+      </div>
+      {orderManagedProjects(projects, byProj).slice(0, 3).map((p) => {
+        const count = byProj[p.name] ?? 0
+        return (
+          <div key={p.id} className={`sb-item ${projFilter === p.name ? 'on' : ''}`} onClick={() => onScope(p.name)}>
+            {p.linearProjectId ? <span className="hd" style={{ background: '#8b8ce8' }} title="Linear-linked" /> : null}
+            <span>{p.name}</span>
+            <span className="c">
+              {projWait[p.name] ? <span className="w"><Icon name="clock" size={10} />{projWait[p.name]}</span> : null}
+              {count > 0 ? count : <span style={{ color: 'var(--ds-text-faint)' }}>—</span>}
+            </span>
+          </div>
+        )
+      })}
+      {projects.length > 3 ? (
+        <div className="sb-item" style={{ color: 'var(--ds-text-faint)' }} onClick={() => onManageProjects?.()}>
+          <span>＋{projects.length - 3} more · manage</span>
         </div>
-      ))}
+      ) : null}
 
       <div className="sb-sec">HOSTS</div>
       {pinnedRows.map(renderHost)}
