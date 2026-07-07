@@ -217,6 +217,8 @@ describe('toFloorAgentFromRemote', () => {
       lastResponse: 'Merge the green PR?',
       prUrl: 'https://github.com/o/r/pull/50',
       ticket: 'RUSH-812',
+      createdTickets: ['RUSH-901'],
+      spawnedTeam: 'rate-limiter',
       branch: 'feat-x',
       sinceMs: 42_000,
       startedAtMs: NOW - 42_000,
@@ -240,6 +242,8 @@ describe('toFloorAgentFromRemote', () => {
     expect(a.needs).toBe(true)
     expect(a.pr).toBe('#50')
     expect(a.ticket).toBe('RUSH-812')
+    expect(a.createdTickets).toEqual(['RUSH-901'])
+    expect(a.spawnedTeam).toBe('rate-limiter')
     expect(a.question?.kind).toBe('confirm')
     // remote carries only session-start; heartbeat anchors to it until backend adds a stamp.
     expect(a.lastActivityMs).toBe(NOW - 42_000)

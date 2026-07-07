@@ -210,7 +210,7 @@
    distinct from the injected/worked-on ticket. Cyan-tinted, sits below the response. */
 .swarmify-root .fitem .artifacts { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; }
 .swarmify-root .fitem .artifact { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 1px 7px 1px 6px; border-radius: 999px; background: var(--status-running-bg); color: var(--status-running); border: 1px solid transparent; font-variant-numeric: tabular-nums; }
-.swarmify-root .fitem .artifact.team { background: var(--brand-50, rgba(163,230,53,0.12)); color: var(--brand-700, #65a30d); }
+.swarmify-root .fitem .artifact.team { background: var(--brand-ring); color: var(--brand); }
 .swarmify-root .fitem .summary { font-size: 12px; color: var(--ds-text-muted); line-height: 1.4; margin: 0 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .swarmify-root .fitem .nowline { font-family: "Geist Mono", monospace; font-size: 11px; color: var(--ds-text-muted); display: flex; align-items: center; gap: 8px; }
 .swarmify-root .fitem .nowline .v { color: var(--brand-600); }
