@@ -2,9 +2,13 @@
  * Shared host-task log viewer — the show-or-follow core behind both
  * `agents hosts logs <id>` and the top-level `agents logs <id>`.
  *
- * A running task with follow re-enters the offset-tail (`followHostTask`);
- * otherwise the captured local mirror (`localLogPath`) is printed. Kept in one
- * place so the two commands can never drift.
+ * A running task with follow re-enters the offset-tail (`followHostTask`).
+ * Otherwise the view is **concise by default**: a bounded tail of the captured
+ * combined-stdout, so an agent glancing at a dispatched run never pulls the whole
+ * log. `full` opts into the entire raw log. (A host run's real transcript lives
+ * on the remote, not the local index — surfacing its rich summary needs remote
+ * runs to be discoverable there first; until then the bounded tail is the safe
+ * concise default.) Kept in one place so the two commands can never drift.
  */
 
 import * as fs from 'fs';
@@ -21,8 +25,14 @@ export interface HostLogResult {
   exitCode?: number;
 }
 
-/** Show (or follow, when running) a dispatched host task's combined-stdout log. */
-export async function showHostTaskLog(id: string, follow: boolean): Promise<HostLogResult> {
+/** Lines of raw combined-stdout to show in the concise (non-`full`) view. */
+const HOST_LOG_TAIL_LINES = 40;
+
+/**
+ * Show (or follow, when running) a dispatched host task. Bounded-tail summary by
+ * default; `full` dumps the entire raw combined-stdout log.
+ */
+export async function showHostTaskLog(id: string, follow: boolean, full = false): Promise<HostLogResult> {
   const task = loadTask(id);
   if (!task) return { found: false };
 
@@ -45,19 +55,38 @@ export async function showHostTaskLog(id: string, follow: boolean): Promise<Host
   // plain `logs <id>` also unsticks a task whose follower was killed. No-op (no
   // ssh) once the record is already terminal.
   reconcileTask(task);
+
+  // Raw combined-stdout: the whole log with `full`, else a bounded tail.
+  const raw = readTaskLog(task);
+  if (raw === null) {
+    process.stdout.write(chalk.gray('(no local log captured for this task)\n'));
+    return { found: true, exitCode: 0 };
+  }
+  process.stdout.write(full ? raw : tailLines(raw, HOST_LOG_TAIL_LINES));
+  return { found: true, exitCode: 0 };
+}
+
+/** Read the task's combined-stdout — local mirror first, else fetch+cache remote. */
+function readTaskLog(task: HostTask): string | null {
   try {
-    process.stdout.write(fs.readFileSync(localLogPath(id), 'utf-8'));
+    return fs.readFileSync(localLogPath(task.id), 'utf-8');
   } catch {
     // No local log — task was dispatched with --no-follow. Fetch from the remote
     // on demand and cache locally so subsequent calls are instant.
     const remote = fetchAndCacheRemoteLog(task);
-    if (remote !== null) {
-      process.stdout.write(remote);
-    } else {
-      process.stdout.write(chalk.gray('(no local log captured for this task)\n'));
-    }
+    return remote !== null ? remote.toString('utf-8') : null;
   }
-  return { found: true, exitCode: 0 };
+}
+
+/** Last `n` lines of `text`, prefixed with an elision note when truncated. */
+export function tailLines(text: string, n: number): string {
+  const lines = text.split('\n');
+  // A trailing newline yields a final empty element — drop it from the count.
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  if (lines.length <= n) return lines.join('\n') + '\n';
+  const hidden = lines.length - n;
+  const note = chalk.gray(`… ${hidden} earlier line${hidden === 1 ? '' : 's'} hidden — pass --full for the whole log\n`);
+  return note + lines.slice(-n).join('\n') + '\n';
 }
 
 /**
