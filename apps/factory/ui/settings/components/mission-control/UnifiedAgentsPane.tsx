@@ -1646,6 +1646,22 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             <div className="dhead" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
               <div className="title">{a.project} / {a.name}</div>
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
+              {/* Artifacts row: the agent's outputs at a glance — the PR (click-through),
+                  CI, the team it spawned, and tickets it created. Mirrors the card chips. */}
+              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
+                <div className="arts">
+                  {a.prUrl && (
+                    <ExtLink href={a.prUrl} className="art pr" style={{ textDecoration: 'none' }}>
+                      <Icon name="chevR" size={10} /> PR {a.pr ?? ''}
+                    </ExtLink>
+                  )}
+                  {a.ci && <span className={`art ci ${a.ci}`}>CI {a.ci}</span>}
+                  {a.spawnedTeam && <span className="art team"><Icon name="grip" size={10} /> team · {a.spawnedTeam}</span>}
+                  {(a.createdTickets ?? []).map((t) => (
+                    <span key={t} className="art tk"><Icon name="plus" size={10} /> {t}</span>
+                  ))}
+                </div>
+              )}
               {/* Actions: give a selected agent something to DO (issue: clicking a card
                   offered nothing). Focus opens the session's terminal — local via the
                   live vscode terminal, remote via an ssh + tmux-attach terminal.
