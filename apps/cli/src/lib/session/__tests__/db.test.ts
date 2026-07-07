@@ -17,6 +17,7 @@ const {
   findSessionsById,
   closeDB,
   upsertSession,
+  upsertSessionsBatch,
   queryUsageRollup,
   topSessionsByCost,
   syncTopics,
@@ -424,5 +425,29 @@ describe('findSessionsById', () => {
   it('returns empty for an unknown id and a blank query', () => {
     expect(findSessionsById('deadbeef', { agent: 'claude' })).toEqual([]);
     expect(findSessionsById('   ', { agent: 'claude' })).toEqual([]);
+  });
+});
+
+describe('upsertSessionsBatch per-row guard', () => {
+  it('skips a row that violates a NOT NULL column and still indexes the rest', () => {
+    const goodFile = path.join(SEED_FILES_DIR, 'batch-good.jsonl');
+    const badFile = path.join(SEED_FILES_DIR, 'batch-bad.jsonl');
+    fs.writeFileSync(goodFile, '');
+    fs.writeFileSync(badFile, '');
+    const mk = (id: string, timestamp: string, filePath: string) => ({
+      meta: { id, shortId: id.slice(0, 8), agent: 'kimi' as const, timestamp, filePath } as SessionMeta,
+      content: '',
+      scan: { fileMtimeMs: 0, fileSize: 0 },
+    });
+    const good = mk('batch-good-0000-4000-8000-000000000001', '2026-07-01T00:00:00.000Z', goodFile);
+    // A NULL timestamp violates `timestamp TEXT NOT NULL`. Before the guard this threw
+    // and rolled back the whole batch; now it must skip just this row.
+    const bad = mk('batch-bad-00000-4000-8000-000000000002', null as unknown as string, badFile);
+
+    expect(() => upsertSessionsBatch([bad, good])).not.toThrow();
+
+    const ids = querySessions({}).map((s) => s.id);
+    expect(ids).toContain('batch-good-0000-4000-8000-000000000001');
+    expect(ids).not.toContain('batch-bad-00000-4000-8000-000000000002');
   });
 });
