@@ -89,6 +89,16 @@ const PR_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/pull\/(\d+)/;
 const WORKTREE_RE = /\/\.agents\/worktrees\/([^/]+)/;
 /** gh invocations that create/open a PR. */
 const GH_PR_CREATE_RE = /\bgh\s+pr\s+(?:create|new)\b/;
+/** gh invocation that opens an issue — the created number is read from its result. */
+const GH_ISSUE_CREATE_RE = /\bgh\s+issue\s+create\b/;
+/** A created GitHub issue URL (…/issues/123) in tool-result output. */
+const GH_ISSUE_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/issues\/(\d+)/;
+/**
+ * `agents teams create <name>` / `agents teams add <team> …` (also the `ag` alias).
+ * The team NAME is the first bareword after the sub-verb, skipping any flags. This
+ * is the structural signal that a session SPAWNED a team (vs. was spawned by one).
+ */
+const TEAMS_SPAWN_RE = /\bag(?:ents)?\s+teams?\s+(?:create|add)\s+(?:--?[a-z][\w-]*(?:[= ]\S+)?\s+)*([A-Za-z0-9][\w-]*)/;
 
 /** Collapse to a single trimmed line for a one-row preview cell. */
 function oneLine(s: string): string {
@@ -130,6 +140,43 @@ export function extractPrUrl(output?: string): DetectedPr | undefined {
 /** True when a Bash/exec command string is a `gh pr create`. */
 export function isPrCreateCommand(command?: string): boolean {
   return !!command && GH_PR_CREATE_RE.test(command);
+}
+
+/**
+ * The team a session SPAWNED, from an `agents teams create/add <name>` command.
+ * Returns the team name, or undefined if the command isn't a team spawn. Note this
+ * is the opposite of `isTeamOrigin` (which marks sessions spawned BY a team).
+ */
+export function detectSpawnedTeam(command?: string): string | undefined {
+  if (!command) return undefined;
+  const m = command.match(TEAMS_SPAWN_RE);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * True when a tool_use call CREATES a tracker ticket — a Linear MCP `create_issue`
+ * tool, or a Bash `gh issue create`. The created id is then read from the matching
+ * tool_result via {@link extractCreatedTicket}.
+ */
+export function isTicketCreateTool(name?: string, command?: string): boolean {
+  if (typeof name === 'string' && /linear/i.test(name) && /create[_-]?issue/i.test(name)) return true;
+  // Any shell tool (Bash / shell / local_shell) running `gh issue create`.
+  if (!!command && GH_ISSUE_CREATE_RE.test(command)) return true;
+  return false;
+}
+
+/**
+ * Pull a created ticket ref out of a create-issue tool_result. Linear returns a
+ * key like `RUSH-1234`; `gh issue create` returns the issue URL, from which we
+ * take `#<number>`. Returns undefined when neither shape is present.
+ */
+export function extractCreatedTicket(text?: string): string | undefined {
+  if (!text) return undefined;
+  const lin = text.match(TICKET_RE);
+  if (lin && !TICKET_DENYLIST.has(lin[1].split('-')[0])) return lin[1];
+  const gh = text.match(GH_ISSUE_URL_RE);
+  if (gh) return `#${gh[1]}`;
+  return undefined;
 }
 
 /** Does an assistant message read as a question directed at the user? */

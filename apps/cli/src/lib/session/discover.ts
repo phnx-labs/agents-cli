@@ -25,7 +25,7 @@ import { getConfigSymlinkVersion } from '../shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { extractSessionTopic } from './prompt.js';
 import { parseAntigravity } from './parse.js';
-import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand } from './state.js';
+import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket } from './state.js';
 import { costOfUsage } from '../pricing/index.js';
 import { machineId } from './sync/config.js';
 import { mapBounded } from '../concurrency.js';
@@ -123,6 +123,10 @@ interface ClaudeSessionScan {
   prNumber?: number;
   worktreeSlug?: string;
   ticketId?: string;
+  /** Tracker refs the session CREATED (Linear create_issue / gh issue create). */
+  createdTickets?: string[];
+  /** Team name this session SPAWNED via `agents teams create/add` (not team-of-origin). */
+  spawnedTeam?: string;
 }
 
 /** Lightweight metadata extracted from a Codex JSONL file during incremental scan. */
@@ -143,6 +147,8 @@ interface CodexSessionScan {
   prNumber?: number;
   worktreeSlug?: string;
   ticketId?: string;
+  createdTickets?: string[];
+  spawnedTeam?: string;
 }
 
 const cachedAgentVersions = new Map<SessionAgentId, Promise<string | undefined>>();
@@ -641,6 +647,8 @@ async function readClaudeMeta(
       prNumber: scan.prNumber,
       worktreeSlug: scan.worktreeSlug,
       ticketId: scan.ticketId,
+      createdTickets: scan.createdTickets,
+      spawnedTeam: scan.spawnedTeam,
     };
   } else {
     const stat = safeStatSync(filePath);
@@ -663,6 +671,8 @@ async function readClaudeMeta(
       prNumber: scan.prNumber,
       worktreeSlug: scan.worktreeSlug,
       ticketId: scan.ticketId,
+      createdTickets: scan.createdTickets,
+      spawnedTeam: scan.spawnedTeam,
     };
   }
 
@@ -887,6 +897,8 @@ export async function readCodexMeta(
     prNumber: scan.prNumber,
     worktreeSlug: scan.worktreeSlug,
     ticketId: scan.ticketId,
+    createdTickets: scan.createdTickets,
+    spawnedTeam: scan.spawnedTeam,
   };
   return { meta, content: scan.contentText || '' };
 }
@@ -2028,6 +2040,13 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
   let prUrl: string | undefined;
   let prNumber: number | undefined;
 
+  // Artifacts the session PRODUCED: tracker refs it created and any team it spawned.
+  // Ticket creation spans two events — a create_issue tool_use, then the tool_result
+  // carrying the new id — so we hold the pending tool_use ids until their result lands.
+  const createdTickets = new Set<string>();
+  const pendingTicketTools = new Set<string>();
+  let spawnedTeam: string | undefined;
+
   try {
     for await (const line of rl) {
       if (!line.trim()) continue;
@@ -2043,6 +2062,35 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
       // and is the clean structural signal for "was this a team spawn?"
       if (!entrypoint && typeof parsed.entrypoint === 'string') {
         entrypoint = parsed.entrypoint;
+      }
+
+      // Produced-artifact signals, structurally (independent of the PR gate below):
+      //   - a Bash `agents teams create/add` command → the team it spawned
+      //   - a Linear create_issue / `gh issue create` tool_use → its result carries
+      //     the new ticket ref, read from the matching tool_result.
+      if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+        for (const b of parsed.message.content) {
+          if (b?.type !== 'tool_use') continue;
+          if (!spawnedTeam && typeof b?.input?.command === 'string') {
+            const team = detectSpawnedTeam(b.input.command);
+            if (team) spawnedTeam = team;
+          }
+          if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
+            pendingTicketTools.add(b.id);
+          }
+        }
+      }
+      if (pendingTicketTools.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+        for (const b of parsed.message.content) {
+          if (b?.type !== 'tool_result' || typeof b?.tool_use_id !== 'string') continue;
+          if (!pendingTicketTools.has(b.tool_use_id)) continue;
+          pendingTicketTools.delete(b.tool_use_id);
+          const text = typeof b.content === 'string'
+            ? b.content
+            : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
+          const t = extractCreatedTicket(text);
+          if (t) createdTickets.add(t);
+        }
       }
 
       // PR signal, structurally: a Bash tool_use whose command is `gh pr create`
@@ -2173,6 +2221,8 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
     prNumber,
     worktreeSlug: worktree?.slug,
     ticketId: ticket?.id,
+    createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
+    spawnedTeam,
   };
 }
 
@@ -2197,6 +2247,10 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
   let sawPrCreate = false;
   let prUrl: string | undefined;
   let prNumber: number | undefined;
+  // Produced artifacts (mirror of the Claude scan): created tracker refs + spawned team.
+  const createdTickets = new Set<string>();
+  const pendingTicketTools = new Set<string>();
+  let spawnedTeam: string | undefined;
 
   try {
     for await (const line of rl) {
@@ -2211,19 +2265,33 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
 
       // PR signal, structurally: a Codex `function_call` whose command is
       // `gh pr create`, then the pull URL from a `function_call_output`.
-      if (!prUrl && parsed.type === 'response_item') {
+      if (parsed.type === 'response_item') {
         const p = parsed.payload || {};
-        if (!sawPrCreate && p.type === 'function_call') {
+        if (p.type === 'function_call') {
           let cmd = '';
           try {
             const args = typeof p.arguments === 'string' ? JSON.parse(p.arguments) : (p.arguments || {});
             cmd = String(args.command || args.cmd || '');
           } catch { /* non-JSON args */ }
-          if (isPrCreateCommand(cmd)) sawPrCreate = true;
+          if (!prUrl && !sawPrCreate && isPrCreateCommand(cmd)) sawPrCreate = true;
+          if (!spawnedTeam) {
+            const team = detectSpawnedTeam(cmd);
+            if (team) spawnedTeam = team;
+          }
+          if (typeof p.call_id === 'string' && isTicketCreateTool(p.name, cmd)) {
+            pendingTicketTools.add(p.call_id);
+          }
         }
-        if (sawPrCreate && p.type === 'function_call_output') {
-          const pr = extractPrUrl(String(p.output || ''));
-          if (pr) { prUrl = pr.url; prNumber = pr.number; }
+        if (p.type === 'function_call_output') {
+          if (!prUrl && sawPrCreate) {
+            const pr = extractPrUrl(String(p.output || ''));
+            if (pr) { prUrl = pr.url; prNumber = pr.number; }
+          }
+          if (typeof p.call_id === 'string' && pendingTicketTools.has(p.call_id)) {
+            pendingTicketTools.delete(p.call_id);
+            const t = extractCreatedTicket(String(p.output || ''));
+            if (t) createdTickets.add(t);
+          }
         }
       }
 
@@ -2315,6 +2383,8 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
     prNumber,
     worktreeSlug: worktree?.slug,
     ticketId: ticket?.id,
+    createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
+    spawnedTeam,
   };
 }
 

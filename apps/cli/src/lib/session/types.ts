@@ -94,6 +94,17 @@ export interface SessionMeta {
   /** Tracker ticket ref (e.g. RUSH-1234) from the prompt or branch. */
   ticketId?: string;
   /**
+   * Tracker refs the session CREATED during its run — Linear `create_issue` MCP
+   * calls or `gh issue create` shell commands — read from the tool result. Distinct
+   * from `ticketId` (the injected/worked-on ticket from the prompt or branch).
+   */
+  createdTickets?: string[];
+  /**
+   * Team name this session SPAWNED via `agents teams create/add`. The inverse of
+   * `isTeamOrigin` (which marks sessions spawned BY a team).
+   */
+  spawnedTeam?: string;
+  /**
    * True when the session was spawned programmatically (SDK entrypoint) rather
    * than by a human at the Claude CLI. Captured at scan time from the JSONL
    * `entrypoint` field ('sdk-cli' for team spawns, 'cli' for real sessions).

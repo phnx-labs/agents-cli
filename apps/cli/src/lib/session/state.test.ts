@@ -8,6 +8,9 @@ import {
   extractPrUrl,
   isPrCreateCommand,
   detectDurableSignals,
+  detectSpawnedTeam,
+  isTicketCreateTool,
+  extractCreatedTicket,
 } from './state.js';
 
 const now = Date.now();
@@ -142,6 +145,48 @@ describe('ticket false positives', () => {
   });
   it('still detects a real letters-only key', () => {
     expect(detectTicket('working on ENG-42')?.id).toBe('ENG-42');
+  });
+});
+
+describe('detectSpawnedTeam', () => {
+  it('extracts the team name from `agents teams create <name>`', () => {
+    expect(detectSpawnedTeam('agents teams create my-feature')).toBe('my-feature');
+  });
+  it('extracts from the `ag` alias and `add` sub-verb, skipping flags', () => {
+    expect(detectSpawnedTeam('ag teams add auth-work claude --name auth --mode edit')).toBe('auth-work');
+  });
+  it('handles a leading `--enable-worktrees` flag before the name', () => {
+    expect(detectSpawnedTeam('agents teams create --enable-worktrees redesign')).toBe('redesign');
+  });
+  it('returns undefined for a non-spawn teams command', () => {
+    expect(detectSpawnedTeam('agents teams list')).toBeUndefined();
+    expect(detectSpawnedTeam('git commit -m "teams create fake"')).toBeUndefined();
+    expect(detectSpawnedTeam(undefined)).toBeUndefined();
+  });
+});
+
+describe('created-ticket detection', () => {
+  it('flags a Linear create_issue MCP tool by name', () => {
+    expect(isTicketCreateTool('mcp__claude_ai_Linear__create_issue', undefined)).toBe(true);
+    expect(isTicketCreateTool('mcp__linear__createIssue', undefined)).toBe(true);
+  });
+  it('flags any shell tool running `gh issue create`', () => {
+    expect(isTicketCreateTool('Bash', 'gh issue create --title x')).toBe(true);
+    expect(isTicketCreateTool('shell', 'gh issue create --title x')).toBe(true);
+  });
+  it('does NOT flag unrelated tools/commands', () => {
+    expect(isTicketCreateTool('Bash', 'gh issue list')).toBe(false);
+    expect(isTicketCreateTool('Read', undefined)).toBe(false);
+  });
+  it('extracts a Linear key from the create result', () => {
+    expect(extractCreatedTicket('Created issue RUSH-1519 (In Progress)')).toBe('RUSH-1519');
+  });
+  it('extracts a #number from a gh issue-create result URL', () => {
+    expect(extractCreatedTicket('https://github.com/phnx-labs/agents-cli/issues/812')).toBe('#812');
+  });
+  it('returns undefined when the result carries no ticket', () => {
+    expect(extractCreatedTicket('done, nothing to report')).toBeUndefined();
+    expect(extractCreatedTicket(undefined)).toBeUndefined();
   });
 });
 
