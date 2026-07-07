@@ -514,13 +514,9 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const hostName = hostGiven[0];
-        if (prompt === undefined) {
-          console.error(chalk.red('A prompt is required for host runs: agents run <agent> "<task>" --host <name>'));
-          process.exit(1);
-        }
         const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
-        const { dispatchToHost } = await import('../lib/hosts/dispatch.js');
-        const { registerHostSession } = await import('../lib/hosts/session-index.js');
+        const { dispatchToHost, runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
+        const { registerHostSession, registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
         // A password-auth device throws DeviceOffloadUnsupportedError here; it's
         // printed cleanly by the top-level catch in index.ts (covers every
         // resolveHost caller), so it never falls through to capability routing.
@@ -550,10 +546,60 @@ export function registerRunCommand(program: Command): void {
           // which can't run over a detached remote dispatch — only forward a
           // concrete id.
           const resumeId = typeof options.resume === 'string' ? options.resume : undefined;
-          // Mirror the local path (lib/exec.ts): only Claude accepts a forced
-          // `--session-id`. Generating it here lets us register the run in the
-          // local index and makes it resumable by that id. On resume the remote
-          // session keeps its existing id — don't mint a new one.
+
+          // Decide whether this host run is interactive. No prompt always means
+          // interactive (matching local resolveInteractive); --interactive forces
+          // interactive even when a prompt is provided; --headless forces headless
+          // and therefore requires a prompt.
+          if (options.interactive && options.headless) {
+            console.error(chalk.red('--interactive and --headless are mutually exclusive. Pass one, or neither (mode is inferred from prompt presence).'));
+            process.exit(1);
+          }
+          const interactiveHost = options.interactive === true || (prompt === undefined && options.headless !== true);
+
+          if (interactiveHost) {
+            // Interactive host run: forward the local TTY over SSH and let the
+            // remote agent start its normal interactive UI (tmux on the host).
+            if (options.follow === false) {
+              console.error(chalk.red('--no-follow is not compatible with interactive host runs. Interactive runs are attached by definition.'));
+              process.exit(1);
+            }
+            // Mirror the local path (lib/exec.ts): only Claude accepts a forced
+            // `--session-id`. Generating it here lets us register the run in the
+            // local index and makes it resumable by id. On resume the remote
+            // session keeps its existing id — don't mint a new one.
+            const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
+            if (hostSessionId) {
+              registerInteractiveHostSession({
+                cwd: process.cwd(),
+                host: host.name,
+                agent: runAgent,
+                sessionId: hostSessionId,
+                name: options.name,
+              });
+            }
+            const exitCode = await runInteractiveOnHost(host, {
+              agent: runAgent,
+              prompt,
+              mode: options.mode,
+              model: options.model,
+              remoteCwd: options.remoteCwd,
+              sessionId: hostSessionId,
+              name: options.name,
+              resume: resumeId,
+              passthroughArgs,
+              raw: options.raw || options.tmux === false || options.disableTmux === true,
+              forceInteractive: options.interactive,
+            });
+            process.exit(exitCode);
+          }
+
+          // Headless host run: launch detached, tail the remote log, and follow
+          // until the remote process exits.
+          if (prompt === undefined) {
+            console.error(chalk.red('A prompt is required for headless host runs: agents run <agent> "<task>" --host <name>'));
+            process.exit(1);
+          }
           const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
           const { task, exitCode } = await dispatchToHost(host, {
             agent: runAgent,
