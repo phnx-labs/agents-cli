@@ -240,7 +240,7 @@ async function promptConflictStrategy(
 // v22 — export DISABLE_AUTOUPDATER=1 for claude shims so a pinned per-version
 //        install can't self-mutate: Claude Code's background auto-updater would
 //        otherwise rewrite the pinned binary in place. Explicit user value wins.
-export const SHIM_SCHEMA_VERSION = 23;
+export const SHIM_SCHEMA_VERSION = 24;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -381,16 +381,37 @@ find_project_version() {
   return 1
 }
 
-# Resolve version from agents.yaml (user default)
+# Parse the agents: default map of one agents.yaml for this AGENT's version.
+parse_agents_default() {
+  local meta="$1"
+  [ -f "$meta" ] || return 0
+  awk -v agent="$AGENT" '
+    /^agents:/ { in_agents=1; next }
+    in_agents && /^[^ ]/ { in_agents=0 }
+    in_agents && $0 ~ "^  " agent ":" { gsub(/.*:[[:space:]]*["'"'"']?|["'"'"']?[[:space:]]*$/, ""); print; exit }
+  ' "$meta"
+}
+
+# This machine's device id — mirrors machineId()/normalizeHost() in
+# src/lib/machine-id.ts: first hostname label, lowercased, non-[a-z0-9_-] -> '-'.
+# MUST stay in sync or the shim reads the wrong device folder.
+machine_id() {
+  local raw="\${AGENTS_SYNC_MACHINE_ID:-$(hostname 2>/dev/null)}"
+  raw=$(printf '%s' "$raw" | cut -d. -f1 | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')
+  [ -n "$raw" ] && printf '%s' "$raw" || printf 'unknown'
+}
+
+# Resolve the default version. The agents: version pins are stored PER-DEVICE at
+# devices/<machine>/agents.yaml (moved there so multi-machine syncs never
+# conflict); read that first, then fall back to the central agents.yaml for
+# pre-split installs. Must match readMeta()'s central+device merge in state.ts --
+# reading only the central file (the old behavior) missed every device pin and
+# made the shim re-prompt "no default set" on every launch.
 resolve_default_version() {
-  local meta="$AGENTS_USER_DIR/agents.yaml"
-  if [ -f "$meta" ]; then
-    awk -v agent="$AGENT" '
-      /^agents:/ { in_agents=1; next }
-      in_agents && /^[^ ]/ { in_agents=0 }
-      in_agents && $0 ~ "^  " agent ":" { gsub(/.*:[[:space:]]*["'"'"']?|["'"'"']?[[:space:]]*$/, ""); print; exit }
-    ' "$meta"
-  fi
+  local v
+  v=$(parse_agents_default "$AGENTS_USER_DIR/devices/$(machine_id)/agents.yaml")
+  [ -n "$v" ] || v=$(parse_agents_default "$AGENTS_USER_DIR/agents.yaml")
+  printf '%s' "$v"
 }
 
 # Find the latest installed version by numeric component comparison.

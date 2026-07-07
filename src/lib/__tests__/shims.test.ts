@@ -95,8 +95,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 23 (adopted-launcher fall-through when no managed version resolves)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(23);
+  it('is 24 (shim resolves per-device default pins from devices/<machine>/agents.yaml)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(24);
   });
 });
 
