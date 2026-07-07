@@ -245,6 +245,7 @@ interface DispatchRequestMsg {
   agent: string;
   runOn: string;
   project?: string;
+  projectPath?: string;
   repo?: string;
   branch?: string;
   mode: DispatchModeMsg;
@@ -2472,10 +2473,15 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         const agentConfig = configFromDef(context.extensionPath, def);
         const projectId = typeof req.project === 'string' ? req.project : '';
-        // A slug carrying an owner ("owner/repo") resolves to a local clone;
-        // a bare project id falls through to the workspace folder (never $HOME,
+        const curatedPath = typeof req.projectPath === 'string' ? req.projectPath.trim() : '';
+        // A curated managed project ships its absolute path — authoritative, and the
+        // only way a manual (non-"owner/repo") project resolves to its real folder.
+        // Fall back to slug resolution for a bare id: "owner/repo" resolves to a local
+        // clone; anything else falls through to the workspace folder (never $HOME,
         // which openSingleAgentWithQueue guarantees when no cwd is passed).
-        const cwd = projectId.includes('/') ? await resolveLocalRepoPath(projectId) : null;
+        const cwd = curatedPath && fs.existsSync(curatedPath)
+          ? curatedPath
+          : projectId.includes('/') ? await resolveLocalRepoPath(projectId) : null;
         for (const unit of units) {
           // Pre-mint the session id for plan-mode Claude so we can watch that
           // exact session file for the ExitPlanMode plan afterwards.

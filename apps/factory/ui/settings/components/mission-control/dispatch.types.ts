@@ -71,6 +71,7 @@ export interface DispatchRequest {
   agent: string                  // InstalledAgent.id
   runOn: string                  // DispatchHost.id (cloud id implies cloud)
   project?: string               // local dir id — REQUIRED for local hosts (never $HOME)
+  projectPath?: string           // curated absolute dir for local dispatch — authoritative cwd when present
   repo?: string                  // cloud repo id — for cloud hosts
   branch?: string
   mode: DispatchMode

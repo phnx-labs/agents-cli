@@ -346,6 +346,9 @@ export function DispatchPanel(props: DispatchPanelProps) {
       agent: effAgent.id,
       runOn: effHost.id,
       project: isCloud ? undefined : effProject?.id,
+      // Send the curated absolute path so local dispatch lands in the managed
+      // project's folder — the id alone can't resolve a manual (non-owner/repo) project.
+      projectPath: isCloud ? undefined : effProject?.path,
       repo: isCloud ? effRepo?.id : undefined,
       branch: isCloud ? S.branch : undefined,
       mode: S.mode,
