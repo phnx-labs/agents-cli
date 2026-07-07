@@ -283,6 +283,49 @@ function menubarSetupStale(): boolean {
 }
 
 /**
+ * Pure re-point decision (no I/O): the plist's baked interpreter/entry no longer
+ * match the install that is now running `agents`. This catches DUAL-INSTALL skew
+ * that a version bump can't — e.g. the plist was baked by an nvm copy but the
+ * user's `agents` now resolves to a bun copy (same or different version), so the
+ * helper keeps shelling the stale install for its menu data AND the quick-issue
+ * dispatch. A null active entry (a dev/tsx run where the compiled entry can't be
+ * resolved) never triggers a re-point, so it can't churn the plist onto a
+ * transient path.
+ */
+export function menubarPlistNeedsRepoint(opts: {
+  plistEntry: string | null;
+  plistNode: string | null;
+  activeEntry: string | null;
+  activeNode: string | null;
+}): boolean {
+  if (!opts.activeEntry) return false; // can't resolve the running install — don't churn
+  if (opts.plistEntry !== opts.activeEntry) return true;
+  if (opts.activeNode && opts.plistNode !== opts.activeNode) return true;
+  return false;
+}
+
+/** Read one EnvironmentVariables value from the installed service plist. */
+function readPlistEnvValue(key: string): string | null {
+  try {
+    const xml = fs.readFileSync(servicePlistPath(), 'utf-8');
+    const m = xml.match(new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`));
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the installed plist points at a different install than the active one. */
+function menubarSetupNeedsRepoint(): boolean {
+  return menubarPlistNeedsRepoint({
+    plistEntry: readPlistEnvValue('AGENTS_ENTRY'),
+    plistNode: readPlistEnvValue('AGENTS_NODE'),
+    activeEntry: resolveCliEntry(),
+    activeNode: process.execPath,
+  });
+}
+
+/**
  * Stop + remove the menu-bar service and write the sticky opt-out so the
  * upgrade migration won't re-enable it.
  */
@@ -321,7 +364,10 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
       enableMenubarService({ clearOptOut: false });
       return;
     }
-    if (menubarSetupStale()) {
+    // Re-enable (recopy helper + rewrite plist) when the version drifted OR the
+    // plist's baked interpreter/entry no longer point at the install now running
+    // `agents` — the dual-install skew a version bump alone can't catch.
+    if (menubarSetupStale() || menubarSetupNeedsRepoint()) {
       enableMenubarService({ clearOptOut: false });
     }
   } catch {
