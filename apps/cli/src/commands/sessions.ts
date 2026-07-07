@@ -21,7 +21,8 @@ import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
-import { mapPanesToTargets } from '../lib/tmux/session.js';
+import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
+import { resolveViewingIn } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
@@ -402,6 +403,15 @@ function locatorBadge(s: ActiveSession): string {
   if (p?.transport === 'ssh') parts.push(chalk.red('ssh'));
   if (p?.mux?.kind === 'tmux' && (s.tmuxTarget || p.mux.pane)) {
     parts.push(chalk.green(s.tmuxTarget ?? p.mux.pane!));
+    // For a tmux-hosted session, say which app+tab is looking at it right now
+    // (or that it's running detached). Only meaningful for tmux (the pane is the
+    // durable handle; the viewer is transient).
+    if (s.viewingIn) {
+      const tab = s.viewingIn.tab != null ? ` tab ${s.viewingIn.tab}` : '';
+      parts.push(chalk.gray(`viewing in ${s.viewingIn.app}${tab}`));
+    } else {
+      parts.push(chalk.gray('detached'));
+    }
   } else if (p?.mux?.kind === 'screen') {
     parts.push(chalk.green('screen'));
   }
@@ -723,17 +733,24 @@ async function enrichLocalLocators(local: ActiveSession[]): Promise<void> {
     }
   } catch { /* non-fatal */ }
 
-  // tmux attach targets, one batched query per distinct socket.
+  // tmux attach targets + "viewing in <app> tab N", one batched query per socket.
   try {
     const tmux = local.filter(s => s.provenance?.mux?.kind === 'tmux' && s.provenance.mux.pane);
-    const sockets = new Set(tmux.map(s => s.provenance!.mux!.socket));
-    for (const socket of sockets) {
-      const paneMap = await mapPanesToTargets(socket);
-      if (paneMap.size === 0) continue;
-      for (const s of tmux) {
-        if (s.provenance!.mux!.socket !== socket) continue;
-        const target = paneMap.get(s.provenance!.mux!.pane!);
-        if (target) s.tmuxTarget = target;
+    if (tmux.length > 0) {
+      // One Ghostty enumeration shared across every socket's viewing-in resolve
+      // (a tmux client can be attached from a Ghostty tab).
+      const surfaces = await enumerateGhosttyTabs();
+      const sockets = new Set(tmux.map(s => s.provenance!.mux!.socket));
+      for (const socket of sockets) {
+        const paneMap = await mapPanesToTargets(socket);
+        if (paneMap.size === 0) continue;
+        const clients = await listClients(socket);
+        for (const s of tmux) {
+          if (s.provenance!.mux!.socket !== socket) continue;
+          const target = paneMap.get(s.provenance!.mux!.pane!);
+          if (target) s.tmuxTarget = target;
+          s.viewingIn = await resolveViewingIn(s, clients, { paneToTarget: paneMap, ghosttySurfaces: surfaces });
+        }
       }
     }
   } catch { /* non-fatal */ }

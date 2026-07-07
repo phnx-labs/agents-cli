@@ -133,9 +133,14 @@ export function describeWhere(s: ActiveSession, self: string): Where {
   const remote = s.machine && s.machine !== self ? s.machine : undefined;
   const mux = s.provenance?.mux;
   if (mux?.kind === 'tmux' && mux.pane) {
+    // When the renderer has resolved the current viewer, fold it into the label
+    // so `focus` reports "tmux %3 (viewing in codium tab 2)" / "(detached)".
+    const view = s.viewingIn
+      ? ` (viewing in ${s.viewingIn.app}${s.viewingIn.tab != null ? ` tab ${s.viewingIn.tab}` : ''})`
+      : '';
     return remote
       ? { label: `tmux ${mux.pane} on ${remote}`, action: `ssh + attach on ${remote}` }
-      : { label: `tmux ${mux.pane}`, action: 'attach its tmux' };
+      : { label: `tmux ${mux.pane}${view}`, action: 'attach its tmux' };
   }
   if (!remote && s.host === 'ghostty') return { label: 'Ghostty', action: 'focus its Ghostty tab' };
   if (remote) return { label: `${s.host ?? 'shell'} on ${remote}`, action: `open a shell on ${remote}` };
