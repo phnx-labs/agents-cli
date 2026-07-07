@@ -195,6 +195,8 @@ export interface FloorAgent {
   todos: TodoItem[]      // task checklist from the latest TodoWrite; empty when none
   summary: string        // the "what is it doing" line (CLI-provided); '' when unknown
   recent: RecentToolCall[] // rolling window of this session's recent tool calls; [] when none
+  pane?: string          // tmux `%N` pane handle for unique addressing; undefined for non-tmux
+  viewingIn?: string     // "Codium tab 3" / "Ghostty tab 2" / "detached"; undefined when unknown
 }
 
 // ---------- HOSTS sidebar rows ----------

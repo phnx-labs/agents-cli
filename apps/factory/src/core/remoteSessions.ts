@@ -143,6 +143,13 @@ export interface RemoteSession {
   replyMuxTarget: string;
   /** tmux socket path for the tmux rail. Empty otherwise. */
   replyMuxSocket: string;
+  /** The session's own tmux `%N` pane handle (from `provenance.mux.pane`), shown
+   *  on the card for unique addressing. Falls back to the reply-rail pane when the
+   *  CLI hasn't populated mux yet. Empty for non-tmux sessions. */
+  tmuxPane: string;
+  /** Where the session is currently being viewed, pre-formatted by the CLI (e.g.
+   *  "Codium tab 3", "Ghostty tab 2", "detached"). '' when the CLI supplies none. */
+  viewingIn: string;
 }
 
 /** One machine's worth of sessions plus its reachability + freshness stamp. */
@@ -198,12 +205,18 @@ export interface RawActiveSession {
   branch?: string;
   prUrl?: string;
   ticket?: string;
+  /** Where the session is being viewed right now, pre-formatted by the CLI's
+   *  client resolver (e.g. "Codium tab 3", "Ghostty tab 2", "detached"). */
+  viewingIn?: string;
   /** How the CLI says a reply reaches this session. `reply` is null for raw TTYs
    *  (e.g. bare Ghostty) with no programmatic input channel; a tmux-backed session
-   *  carries the socket + pane to drive via `tmux send-keys` (over ssh when remote). */
+   *  carries the socket + pane to drive via `tmux send-keys` (over ssh when remote).
+   *  `mux` carries the session's OWN pane/socket (its authoritative %pane handle),
+   *  distinct from the reply rail which may target a different pane. */
   provenance?: {
     transport?: string;
     reply?: { rail?: string; target?: string; socket?: string } | null;
+    mux?: { pane?: string; socket?: string; session?: string } | null;
   } | null;
 }
 
@@ -394,6 +407,10 @@ export function normalizeActiveSession(
     replyRail: raw.provenance?.reply?.rail || '',
     replyMuxTarget: raw.provenance?.reply?.target || '',
     replyMuxSocket: raw.provenance?.reply?.socket || '',
+    // Prefer the session's own pane (provenance.mux.pane); fall back to the
+    // reply-rail pane, which today already carries a %pane for tmux sessions.
+    tmuxPane: raw.provenance?.mux?.pane || raw.provenance?.reply?.target || '',
+    viewingIn: asStr(raw.viewingIn),
   };
 }
 

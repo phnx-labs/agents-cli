@@ -45,7 +45,11 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
 
   const tok = plainTok(a.tok, plain)
   const filesLabel = !plain && a.files > 0 ? ` · ${a.files} ${a.files === 1 ? 'file' : 'files'}` : ''
-  const meta = plain ? a.project : `${a.project} · ${a.hostLabel ?? a.host}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}`
+  // tmux pane handle (unique addressing) + where the session is being viewed, appended
+  // to the meta line. Both only show in full (non-plain) mode when the CLI supplies them.
+  const paneLabel = !plain && a.pane ? ` · ${a.pane}` : ''
+  const viewingLabel = !plain && a.viewingIn ? ` · viewing in ${a.viewingIn}` : ''
+  const meta = plain ? a.project : `${a.project} · ${a.hostLabel ?? a.host}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 

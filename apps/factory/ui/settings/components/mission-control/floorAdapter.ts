@@ -89,6 +89,8 @@ export interface RemoteSessionLike {
   replyRail: string
   replyMuxTarget: string
   replyMuxSocket: string
+  tmuxPane: string
+  viewingIn?: string
 }
 
 // ---------- primitive helpers ----------
@@ -332,6 +334,9 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // response but no tool calls yet, so recent stays empty until Tier-2 enrichment.
     summary: r.topic || r.lastResponse || '',
     recent: [],
+    // tmux %pane handle + where it's being viewed, surfaced on the card.
+    pane: r.tmuxPane || undefined,
+    viewingIn: r.viewingIn || undefined,
   }
 }
 

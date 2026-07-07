@@ -78,6 +78,7 @@ const running: FloorAgent[] = [
   agent({
     id: 'r1', abbr: 'CX', name: 'bench-saved-views', project: 'rush', phase: 'running',
     pr: '#148', ci: 'running', tok: 41, files: 9, since: '3s', lastActivityMs: Date.now() - 3000,
+    pane: '%42', viewingIn: 'Codium tab 3',
     verb: 'Porting', target: 'the group-by control into the shared model',
     summary: 'Collapsed the three ticket surfaces into one list; now porting the group-by control into the shared model.',
     todos: [
@@ -89,6 +90,7 @@ const running: FloorAgent[] = [
   agent({
     id: 'r2', abbr: 'CC', name: 'heartbeat-lastactivity', project: 'agents-cli', phase: 'running',
     tok: 55, files: 4, since: '1s', lastActivityMs: Date.now() - 1000,
+    pane: '%57', viewingIn: 'Ghostty tab 2',
     verb: 'Reading', target: 'the remote-session adapter',
     summary: 'Tracing where remote sessions lose their last-activity timestamp — found it in the adapter, drafting the fix.',
   }),

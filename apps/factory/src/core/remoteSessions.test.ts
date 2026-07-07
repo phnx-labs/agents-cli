@@ -215,6 +215,27 @@ describe('normalizeActiveSession', () => {
     expect(s.replyMuxSocket).toBe('/tmp/tmux-1000/default');
   });
 
+  test('captures the session pane from provenance.mux and viewingIn', () => {
+    const s = normalizeActiveSession(
+      { context: 'terminal', kind: 'claude', sessionId: 'abc', status: 'running',
+        viewingIn: 'Codium tab 3',
+        provenance: { transport: 'local', mux: { pane: '%42', socket: '/sock', session: 'agents-1' } } },
+      'this-mac', FETCHED_AT,
+    );
+    expect(s.tmuxPane).toBe('%42');
+    expect(s.viewingIn).toBe('Codium tab 3');
+  });
+
+  test('tmuxPane falls back to the reply-rail pane when mux is absent', () => {
+    const s = normalizeActiveSession(
+      { context: 'terminal', kind: 'claude', sessionId: 'abc', status: 'running',
+        provenance: { transport: 'ssh', reply: { rail: 'tmux', target: '%65', socket: '/tmp/s' } } },
+      'yosemite-s0', FETCHED_AT,
+    );
+    expect(s.tmuxPane).toBe('%65');
+    expect(s.viewingIn).toBe('');
+  });
+
   test('a raw TTY with reply=null carries no rail', () => {
     const s = normalizeActiveSession(
       { context: 'terminal', kind: 'claude', sessionId: 'ghost', status: 'running',
