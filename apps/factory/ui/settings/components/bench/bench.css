@@ -1,0 +1,1031 @@
+/* Bench tab - 2-column industrial work queue layout */
+
+/* Shell wraps a shared toolbar (view switcher + filters) above the active view. */
+.sw-bench-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sw-bench-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  flex-shrink: 0;
+  border-bottom: 2px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  box-shadow: var(--shadow-emboss);
+  font-family: "Geist Mono", monospace;
+}
+
+.sw-bench-view-switch {
+  margin-left: 4px;
+}
+
+.sw-bench {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Left column - task list */
+.sw-bench-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 2px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+}
+
+.sw-bench-list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  flex-shrink: 0;
+  border-bottom: 2px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  box-shadow: var(--shadow-emboss);
+  font-family: "Geist Mono", monospace;
+}
+
+.sw-bench-list-head .sw-section-label {
+  flex-shrink: 0;
+}
+
+.sw-bench-list-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.sw-bench-filter-select {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 20px 3px 6px;
+  color: var(--ds-text-muted);
+  background: var(--ds-bg-recessed);
+  border: 1px solid var(--ds-border);
+  border-radius: 3px;
+  box-shadow: var(--shadow-inset);
+  cursor: pointer;
+  max-width: 130px;
+  text-overflow: ellipsis;
+}
+
+.sw-bench-filter-select:hover {
+  color: var(--ds-text);
+}
+
+.sw-bench-filter-select:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.sw-bench-list-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 8px;
+}
+
+/* Right column - task detail */
+.sw-bench-detail {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--ds-bg);
+}
+
+.sw-bench-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  flex-shrink: 0;
+  border-bottom: 2px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  box-shadow: var(--shadow-emboss);
+}
+
+.sw-bench-detail-head .detail-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ds-text);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sw-bench-detail-body {
+  overflow-y: auto;
+  flex: 1;
+  padding: 16px;
+}
+
+.sw-bench-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  flex-shrink: 0;
+  border-top: 2px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  box-shadow: inset 0 1px 0 var(--ds-bevel-light);
+}
+
+/* Task card */
+.sw-task-card {
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--ds-border);
+  margin: 3px 0;
+  cursor: pointer;
+  transition: .12s;
+  box-shadow: var(--shadow-emboss);
+  background: var(--ds-bg-panel);
+}
+
+.sw-task-card:hover {
+  border-color: var(--ds-border-strong);
+}
+
+.sw-task-card.selected {
+  border-left: 3px solid var(--brand);
+  box-shadow: var(--shadow-inset);
+  background: rgba(242,109,91,0.04);
+}
+
+.theme-dark .sw-task-card.selected {
+  background: rgba(242,109,91,0.06);
+}
+
+.sw-task-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.sw-task-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ds-text);
+  line-height: 1.35;
+}
+
+.sw-task-card-desc {
+  font-size: 11.5px;
+  color: var(--ds-text-dim);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.sw-task-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.sw-task-age {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  color: var(--ds-text-faint);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.sw-task-card-bottom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  color: var(--ds-text-faint);
+}
+
+/* Source badge */
+.sw-source-badge {
+  font-family: "Geist Mono", monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.sw-source-badge.md {
+  background: #6366f1;
+}
+
+.sw-source-badge.ln {
+  background: #5e6ad2;
+}
+
+.sw-source-badge.gh {
+  background: #238636;
+}
+
+/* Priority LED */
+.sw-priority-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0,0,0,0.2);
+}
+
+.sw-priority-led.urgent {
+  background: var(--led-failed);
+  box-shadow: 0 0 6px var(--led-failed-glow);
+}
+
+.sw-priority-led.high {
+  background: var(--led-pending);
+  box-shadow: 0 0 4px var(--led-pending-glow);
+}
+
+.sw-priority-led.medium {
+  background: var(--led-idle);
+}
+
+.sw-priority-led.low {
+  background: var(--ds-text-faint);
+}
+
+/* Label chip in task card meta */
+.sw-label-chip {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--ds-bg-recessed);
+  border: 1px solid var(--ds-border);
+  color: var(--ds-text-dim);
+  box-shadow: var(--shadow-inset);
+  letter-spacing: .02em;
+}
+
+/* Identifier in mono */
+.sw-task-identifier {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  color: var(--ds-text-muted);
+}
+
+/* Detail view sections */
+.sw-detail-meta {
+  background: var(--ds-bg-panel);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-emboss);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.sw-detail-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.sw-detail-meta-row + .sw-detail-meta-row {
+  border-top: 1px solid var(--ds-border-subtle);
+}
+
+.sw-detail-meta-label {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ds-text-dim);
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.sw-detail-meta-value {
+  font-size: 12px;
+  color: var(--ds-text);
+  flex: 1;
+  min-width: 0;
+}
+
+/* Detail description panel */
+.sw-detail-desc {
+  background: var(--ds-bg-recessed);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-inset);
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ds-text-muted);
+  word-break: break-word;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* Activity / comments section */
+.sw-detail-activity {
+  margin-bottom: 16px;
+}
+
+.sw-detail-comment {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--ds-border-subtle);
+}
+
+.sw-detail-comment:last-child {
+  border-bottom: none;
+}
+
+.sw-detail-comment-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sw-detail-comment-author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ds-text);
+}
+
+.sw-detail-comment-time {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  color: var(--ds-text-faint);
+}
+
+.sw-detail-comment-body {
+  font-size: 12px;
+  color: var(--ds-text-muted);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Status LED badge */
+.sw-status-led {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  box-shadow: var(--shadow-inset);
+}
+
+.sw-status-led.todo {
+  background: var(--status-idle-bg);
+  color: var(--status-idle);
+}
+
+.sw-status-led.in_progress {
+  background: var(--status-running-bg);
+  color: var(--status-running);
+  text-shadow: 0 0 8px var(--led-running-glow);
+}
+
+.sw-status-led.done {
+  background: var(--status-running-bg);
+  color: var(--status-running);
+}
+
+/* Filter chip for source toggle */
+.sw-source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  color: var(--ds-text-dim);
+  cursor: pointer;
+  transition: .12s;
+  box-shadow: var(--shadow-raised);
+}
+
+.sw-source-chip:hover {
+  color: var(--ds-text);
+}
+
+.sw-source-chip:active {
+  box-shadow: var(--shadow-inset);
+  transform: translateY(1px);
+}
+
+.sw-source-chip.active {
+  color: #fff;
+  border-color: transparent;
+  box-shadow: var(--shadow-inset);
+}
+
+.sw-source-chip.active.md {
+  background: #6366f1;
+}
+
+.sw-source-chip.active.ln {
+  background: #5e6ad2;
+}
+
+.sw-source-chip.active.gh {
+  background: #238636;
+}
+
+/* Cycle countdown bar */
+.sw-cycle-bar {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  flex-shrink: 0;
+}
+
+.sw-cycle-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: "Geist Mono", monospace;
+}
+
+.sw-cycle-bar-name {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ds-text-dim);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sw-cycle-bar-remaining {
+  font-size: 10px;
+  color: var(--ds-text);
+  flex-shrink: 0;
+  letter-spacing: .03em;
+}
+
+.sw-cycle-bar-gauge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sw-cycle-bar-gauge .sw-gauge {
+  flex: 1;
+}
+
+.sw-cycle-bar-pct {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  color: var(--ds-text-faint);
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* Mini calendar in task detail */
+.sw-task-calendar {
+  background: var(--ds-bg-panel);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-emboss);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.sw-calendar-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sw-calendar-month {
+  font-family: "Geist Mono", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ds-text);
+  letter-spacing: .04em;
+}
+
+.sw-calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0;
+  margin-bottom: 2px;
+}
+
+.sw-calendar-weekdays span {
+  font-family: "Geist Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--ds-text-faint);
+  text-align: center;
+  padding: 2px 0;
+  letter-spacing: .08em;
+}
+
+.sw-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+}
+
+.sw-calendar-day {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  text-align: center;
+  padding: 4px 2px;
+  border-radius: 3px;
+  color: var(--ds-text-muted);
+}
+
+.sw-calendar-day.other-month {
+  color: var(--ds-text-faint);
+  opacity: 0.35;
+}
+
+.sw-calendar-day.in-cycle {
+  background: var(--status-running-bg);
+}
+
+.sw-calendar-day.today {
+  outline: 1.5px solid var(--ds-text-dim);
+  outline-offset: -1px;
+  font-weight: 700;
+  color: var(--ds-text);
+}
+
+/* Calendar timeline — variant D.
+ * Created = solid neon green, work window ramps up green toward due,
+ * due cell has a bright green ring (red ring when overdue),
+ * overdue burn-down ramps red from due → today, today cell glows red.
+ * Specificity note: in-span / in-overdue rules come after in-cycle so
+ * the gradient wins over the cycle band when both apply. */
+
+/* In-span / in-overdue tints. Use a CSS custom property --t (0..1) set inline. */
+.sw-calendar-day.in-span {
+  background: rgba(163,230,53, calc(0.06 + 0.22 * var(--t, 0.5)));
+  color: var(--ds-text);
+}
+.sw-calendar-day.in-span.other-month {
+  background: rgba(163,230,53, calc(0.04 + 0.10 * var(--t, 0.5)));
+}
+.sw-calendar-day.in-overdue {
+  background: rgba(239,68,68, calc(0.12 + 0.42 * var(--t, 0.5)));
+  color: #fff;
+}
+.sw-calendar-day.in-overdue.other-month {
+  background: rgba(239,68,68, calc(0.06 + 0.20 * var(--t, 0.5)));
+}
+
+/* Created endpoint — solid neon green, dark text, glow. */
+.sw-calendar-day.created {
+  background: var(--brand);
+  color: #0a0a0a;
+  font-weight: 800;
+  box-shadow: 0 0 8px rgba(163,230,53,0.45);
+}
+
+/* Due endpoint (upcoming). Light green fill, bright green ring. */
+.sw-calendar-day.due {
+  background: rgba(163,230,53, 0.12);
+  color: var(--brand);
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--brand), 0 0 10px rgba(163,230,53,0.45);
+}
+
+/* Due endpoint (overdue) — flip the ring to red. */
+.sw-calendar-day.due.overdue {
+  background: rgba(239,68,68, 0.18);
+  color: var(--stale-rotten);
+  box-shadow: 0 0 0 2px var(--stale-rotten), 0 0 10px var(--stale-rotten-glow);
+}
+
+/* Today + overdue — saturated red square with glow. Wins over in-overdue tint. */
+.sw-calendar-day.today.overdue {
+  background: rgba(239,68,68, 0.55);
+  color: #fff;
+  outline-color: var(--stale-rotten);
+  box-shadow: 0 0 0 1.5px var(--stale-rotten), 0 0 12px var(--stale-rotten-glow);
+}
+
+.theme-dark .sw-calendar-day.in-cycle {
+  background: rgba(34,197,94,0.06);
+}
+
+.sw-calendar-legend {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  font-family: "Geist Mono", monospace;
+  font-size: 9px;
+  color: var(--ds-text-dim);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.sw-calendar-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sw-calendar-legend-item.created::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--brand);
+}
+
+.sw-calendar-legend-item.cycle::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--status-running-bg);
+  border: 1px solid var(--led-running);
+}
+
+.sw-calendar-legend-item.today-legend::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  outline: 1.5px solid var(--ds-text-dim);
+}
+
+.sw-calendar-legend-item.due::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: rgba(163,230,53, 0.12);
+  box-shadow: 0 0 0 1.5px var(--brand);
+}
+.sw-calendar-legend-item.due.overdue {
+  color: var(--stale-rotten, #EF4444);
+  font-weight: 700;
+}
+.sw-calendar-legend-item.due.overdue::before {
+  background: rgba(239,68,68, 0.18);
+  box-shadow: 0 0 0 1.5px var(--stale-rotten, #EF4444), 0 0 4px var(--stale-rotten-glow, rgba(239,68,68,0.35));
+}
+
+/* Staleness — surfaces task age + due-date delay on cards.
+ * Tiers: fresh <7d · aging 7-14d · stale 14-30d · rotten 30d+ (cycle = 14d). */
+:root {
+  --stale-aging: #C9A24A;
+  --stale-stale: #E08749;
+  --stale-rotten: #EF4444;
+  --stale-rotten-glow: rgba(239,68,68,0.35);
+}
+
+.sw-task-card.ribbon-aging  { border-left: 3px solid var(--stale-aging); }
+.sw-task-card.ribbon-stale  { border-left: 3px solid var(--stale-stale); }
+.sw-task-card.ribbon-rotten {
+  border-left: 3px solid var(--stale-rotten);
+  box-shadow: var(--shadow-emboss), inset 3px 0 12px -3px var(--stale-rotten-glow);
+}
+
+.sw-task-age.tier-aging  { color: var(--stale-aging); }
+.sw-task-age.tier-stale  { color: var(--stale-stale); font-weight: 600; }
+.sw-task-age.tier-rotten {
+  color: var(--stale-rotten);
+  font-weight: 700;
+  text-shadow: 0 0 6px var(--stale-rotten-glow);
+}
+
+.sw-due-chip {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--ds-border);
+  background: var(--ds-bg-recessed);
+  color: var(--ds-text-dim);
+  box-shadow: var(--shadow-inset);
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.sw-due-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ds-text-faint);
+}
+.sw-due-chip.soon {
+  color: var(--stale-aging);
+  border-color: rgba(201,162,74,0.4);
+}
+.sw-due-chip.soon::before { background: var(--stale-aging); }
+.sw-due-chip.late {
+  color: var(--stale-rotten);
+  border-color: rgba(239,68,68,0.45);
+  background: rgba(239,68,68,0.08);
+}
+.sw-due-chip.late::before {
+  background: var(--stale-rotten);
+  box-shadow: 0 0 4px var(--stale-rotten-glow);
+}
+
+/* ============================================
+   BENCH KANBAN — status columns (To Do / In Progress / Done)
+   ============================================ */
+.sw-kanban {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--ds-border);
+  overflow: hidden;
+}
+
+.sw-kanban-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--ds-bg);
+  overflow: hidden;
+}
+
+.sw-kanban-col-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  box-shadow: var(--shadow-emboss);
+}
+
+.sw-kanban-col-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--ds-text-faint);
+}
+.sw-kanban-col.todo .sw-kanban-col-led { background: var(--ds-text-dim); }
+.sw-kanban-col.in_progress .sw-kanban-col-led {
+  background: var(--led-running);
+  box-shadow: 0 0 6px var(--led-running-glow);
+}
+.sw-kanban-col.done .sw-kanban-col-led { background: var(--led-running); }
+
+.sw-kanban-col-head .sw-section-count {
+  margin-left: auto;
+}
+
+.sw-kanban-col-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sw-kanban-col-empty {
+  font-family: "Geist Mono", monospace;
+  font-size: 10.5px;
+  color: var(--ds-text-faint);
+  text-align: center;
+  padding: 20px 0;
+  letter-spacing: 0.04em;
+}
+
+/* ============================================
+   BENCH DEADLINE — month grid plotting tasks by due date
+   ============================================ */
+.sw-deadline {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 12px 14px;
+  background: var(--ds-bg);
+}
+
+.sw-deadline-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.sw-deadline-month {
+  font-family: "Geist Mono", monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ds-text);
+  letter-spacing: 0.02em;
+  min-width: 140px;
+}
+
+.sw-deadline-nav {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--ds-border);
+  background: var(--ds-bg-recessed);
+  color: var(--ds-text-dim);
+  cursor: pointer;
+  box-shadow: var(--shadow-raised);
+  font-size: 14px;
+  line-height: 1;
+}
+.sw-deadline-nav:hover { color: var(--ds-text); }
+
+.sw-deadline-today {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 3px 9px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--ds-border);
+  background: var(--ds-bg-recessed);
+  color: var(--ds-text-dim);
+  cursor: pointer;
+  box-shadow: var(--shadow-raised);
+}
+.sw-deadline-today:hover { color: var(--ds-text); }
+
+.sw-deadline-count {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  color: var(--ds-text-faint);
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.sw-deadline-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 1px;
+  flex-shrink: 0;
+  margin-bottom: 1px;
+}
+.sw-deadline-weekdays span {
+  font-family: "Geist Mono", monospace;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ds-text-faint);
+  text-align: center;
+  padding: 4px 0;
+}
+
+.sw-deadline-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  background: var(--ds-border);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.sw-deadline-cell {
+  background: var(--ds-bg-panel);
+  padding: 4px 5px;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sw-deadline-cell.other-month { background: var(--ds-bg-recessed); }
+.sw-deadline-cell.other-month .sw-deadline-cell-num { opacity: 0.35; }
+.sw-deadline-cell.today {
+  outline: 1.5px solid var(--brand);
+  outline-offset: -1.5px;
+}
+
+.sw-deadline-cell-num {
+  font-family: "Geist Mono", monospace;
+  font-size: 10px;
+  color: var(--ds-text-dim);
+  flex-shrink: 0;
+}
+.sw-deadline-cell.today .sw-deadline-cell-num {
+  color: var(--brand);
+  font-weight: 700;
+}
+
+.sw-deadline-cell-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.sw-deadline-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  border-radius: var(--r-xs);
+  border: 1px solid var(--ds-border);
+  background: var(--ds-bg-recessed);
+  box-shadow: var(--shadow-inset);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: var(--ds-text-muted);
+  transition: border-color 0.12s;
+}
+.sw-deadline-chip:hover { border-color: var(--ds-border-strong); }
+.sw-deadline-chip.soon { border-left: 2px solid var(--stale-aging); }
+.sw-deadline-chip.late {
+  border-left: 2px solid var(--stale-rotten);
+  background: rgba(239, 68, 68, 0.06);
+}
+.sw-deadline-chip .sw-priority-led { width: 6px; height: 6px; }
+.sw-deadline-chip-title {
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.sw-deadline-unscheduled {
+  flex-shrink: 0;
+  margin-top: 10px;
+  border-top: 1px solid var(--ds-border);
+  padding-top: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.sw-deadline-unscheduled-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.sw-deadline-unscheduled-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.sw-deadline-unscheduled-body .sw-deadline-chip {
+  width: auto;
+  max-width: 260px;
+}

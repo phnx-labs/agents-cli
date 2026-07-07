@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Factory Floor -- Split Ops</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #E8E6E1;
+    --panel: #F0EEEA;
+    --recessed: #D8D5CF;
+    --coral: #F26D5B;
+    --text: #1C1917;
+    --dim: #78716C;
+    --led-green: #22C55E;
+    --led-red: #EF4444;
+    --led-amber: #D4A72C;
+    --led-gray: #6B7280;
+    --blue: #4A7DFF;
+    --font: 'SF Mono', 'Menlo', 'Monaco', monospace;
+    --emboss: inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 3px rgba(0,0,0,0.12);
+    --recess: inset 0 1px 3px rgba(0,0,0,0.15), inset 0 0 0 1px rgba(0,0,0,0.06);
+  }
+
+  html, body {
+    height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: var(--font);
+    font-size: 12px;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .shell {
+    width: 100%;
+    max-width: 1400px;
+    height: 100vh;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* -- Top Bar -- */
+  .topbar {
+    height: 36px;
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    background: var(--panel);
+    border-bottom: 1px solid rgba(0,0,0,0.08);
+    box-shadow: var(--emboss);
+  }
+  .topbar-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+  }
+  .topbar-stats {
+    display: flex;
+    gap: 16px;
+  }
+  .topbar-stat {
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 0.05em;
+  }
+  .topbar-stat b {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* -- Main Split -- */
+  .main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+
+  /* -- Left Pane -- */
+  .left-pane {
+    width: 35%;
+    min-width: 340px;
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+    border-right: 2px solid #C4C0B8;
+    box-shadow: inset -1px 0 0 rgba(255,255,255,0.5), 2px 0 4px rgba(0,0,0,0.08);
+    overflow-y: auto;
+  }
+
+  .section-header {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+    padding: 12px 14px 6px;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    user-select: none;
+  }
+  .section-header .count {
+    display: inline-block;
+    background: var(--recessed);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: 9px;
+    font-weight: 600;
+    margin-left: 6px;
+    box-shadow: var(--recess);
+  }
+
+  /* -- Agent Row -- */
+  .agent-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(0,0,0,0.04);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .agent-row:hover {
+    background: rgba(0,0,0,0.025);
+  }
+  .agent-row.selected {
+    background: rgba(242,109,91,0.07);
+    border-left: 3px solid var(--coral);
+    padding-left: 11px;
+  }
+
+  .avatar {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    flex-shrink: 0;
+    box-shadow: var(--emboss);
+  }
+  .avatar.claude { background: var(--coral); }
+  .avatar.codex { background: #292524; }
+  .avatar.gemini { background: var(--blue); }
+
+  .led {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
+  .led.running {
+    background: var(--led-green);
+    box-shadow: 0 0 6px rgba(34,197,94,0.5);
+    animation: pulse-led 2s ease-in-out infinite;
+  }
+  .led.completed { background: var(--led-green); }
+  .led.failed { background: var(--led-red); box-shadow: 0 0 4px rgba(239,68,68,0.4); }
+  .led.pending { background: var(--led-amber); }
+  .led.idle { background: var(--led-gray); }
+  .led.urgent { background: var(--led-red); animation: pulse-led 1.2s ease-in-out infinite; }
+
+  @keyframes pulse-led {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .agent-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .agent-name {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .agent-activity {
+    font-size: 10px;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .vu-meter {
+    width: 48px;
+    height: 5px;
+    background: var(--recessed);
+    border-radius: 2px;
+    flex-shrink: 0;
+    box-shadow: var(--recess);
+    overflow: hidden;
+  }
+  .vu-meter-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+  .vu-meter-fill.high { background: var(--led-green); }
+  .vu-meter-fill.mid { background: var(--led-amber); }
+  .vu-meter-fill.low { background: var(--led-gray); }
+
+  .agent-time {
+    font-size: 10px;
+    color: var(--dim);
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* -- Queue Row -- */
+  .queue-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(0,0,0,0.04);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .queue-row:hover {
+    background: rgba(0,0,0,0.025);
+  }
+  .queue-row.selected {
+    background: rgba(242,109,91,0.07);
+    border-left: 3px solid var(--coral);
+    padding-left: 11px;
+  }
+
+  .task-badge {
+    font-size: 9px;
+    font-weight: 700;
+    background: var(--recessed);
+    border-radius: 3px;
+    padding: 2px 5px;
+    flex-shrink: 0;
+    box-shadow: var(--recess);
+    letter-spacing: 0.02em;
+  }
+
+  .queue-title {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dispatch-btn-small {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 3px 8px;
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 3px;
+    background: var(--panel);
+    box-shadow: var(--emboss);
+    cursor: pointer;
+    color: var(--text);
+    flex-shrink: 0;
+    transition: background 0.1s;
+  }
+  .dispatch-btn-small:hover {
+    background: var(--coral);
+    color: white;
+    border-color: var(--coral);
+  }
+
+  /* -- Right Pane -- */
+  .right-pane {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    overflow-y: auto;
+    padding: 20px 24px;
+  }
+
+  /* -- Station Card -- */
+  .station-card {
+    background: var(--panel);
+    border-radius: 6px;
+    box-shadow: var(--emboss);
+    border: 1px solid rgba(0,0,0,0.06);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .station-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .station-led {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
+  .station-led.running {
+    background: var(--led-green);
+    box-shadow: 0 0 10px rgba(34,197,94,0.45);
+    animation: pulse-led 2s ease-in-out infinite;
+  }
+  .station-led.completed {
+    background: var(--led-green);
+  }
+  .station-led.failed {
+    background: var(--led-red);
+    box-shadow: 0 0 8px rgba(239,68,68,0.4);
+  }
+  .station-name {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .station-kind {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: var(--recessed);
+    border-radius: 3px;
+    padding: 3px 7px;
+    box-shadow: var(--recess);
+    color: var(--dim);
+  }
+  .station-time {
+    font-size: 11px;
+    color: var(--dim);
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .card-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+    margin-bottom: 6px;
+  }
+
+  /* Readout */
+  .readout {
+    background: #2A2825;
+    color: #C8F7C5;
+    font-size: 12px;
+    padding: 10px 14px;
+    border-radius: 4px;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(0,0,0,0.2);
+    font-family: var(--font);
+    letter-spacing: 0.03em;
+    line-height: 1.5;
+  }
+  .readout .prompt-char {
+    color: var(--led-green);
+    opacity: 0.7;
+  }
+
+  /* File Manifest */
+  .file-manifest {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .file-pill {
+    font-size: 10px;
+    font-weight: 500;
+    background: var(--recessed);
+    border-radius: 3px;
+    padding: 4px 8px;
+    box-shadow: var(--recess);
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+
+  /* Activity / VU */
+  .activity-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .activity-vu {
+    flex: 1;
+    height: 8px;
+    background: var(--recessed);
+    border-radius: 3px;
+    box-shadow: var(--recess);
+    overflow: hidden;
+  }
+  .activity-vu-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: var(--led-green);
+  }
+  .activity-stats {
+    display: flex;
+    gap: 16px;
+  }
+  .activity-stat {
+    font-size: 10px;
+    color: var(--dim);
+  }
+  .activity-stat b {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* Links */
+  .links-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .link-item {
+    font-size: 11px;
+    color: var(--coral);
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .link-item:hover { opacity: 0.7; }
+  .link-label {
+    font-size: 10px;
+    color: var(--dim);
+    font-weight: 400;
+    margin-right: 4px;
+  }
+
+  /* Actions */
+  .actions-row {
+    display: flex;
+    gap: 8px;
+  }
+  .action-btn {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 7px 16px;
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 4px;
+    background: var(--panel);
+    box-shadow: var(--emboss);
+    cursor: pointer;
+    color: var(--text);
+    transition: all 0.1s;
+  }
+  .action-btn:hover {
+    background: #E8E6E1;
+  }
+  .action-btn.primary {
+    background: var(--coral);
+    color: white;
+    border-color: var(--coral);
+  }
+  .action-btn.primary:hover {
+    background: #E55A48;
+  }
+  .action-btn.danger {
+    color: var(--led-red);
+    border-color: rgba(239,68,68,0.3);
+  }
+  .action-btn.danger:hover {
+    background: rgba(239,68,68,0.08);
+  }
+
+  /* Mode badge */
+  .mode-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-radius: 3px;
+    padding: 2px 6px;
+  }
+  .mode-badge.terminal {
+    background: rgba(34,197,94,0.12);
+    color: #16A34A;
+    border: 1px solid rgba(34,197,94,0.2);
+  }
+  .mode-badge.cloud {
+    background: rgba(74,125,255,0.1);
+    color: var(--blue);
+    border: 1px solid rgba(74,125,255,0.2);
+  }
+  .mode-badge.team {
+    background: rgba(212,167,44,0.12);
+    color: #B8930E;
+    border: 1px solid rgba(212,167,44,0.2);
+  }
+
+  /* Recent row dimming */
+  .agent-row.recent .agent-name {
+    color: var(--dim);
+  }
+  .agent-row.recent .agent-activity {
+    color: #A8A29E;
+  }
+
+  /* Dispatch Card */
+  .dispatch-card {
+    background: var(--panel);
+    border-radius: 6px;
+    box-shadow: var(--emboss);
+    border: 1px solid rgba(0,0,0,0.06);
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .dispatch-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .dispatch-id {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .dispatch-priority {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--led-red);
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.2);
+    border-radius: 3px;
+    padding: 2px 6px;
+  }
+  .dispatch-title-text {
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .dispatch-context {
+    font-size: 11px;
+    color: var(--dim);
+    line-height: 1.6;
+  }
+  .agent-picker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .agent-picker label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+  }
+  .agent-picker select {
+    font-family: var(--font);
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 4px;
+    border: 1px solid rgba(0,0,0,0.12);
+    background: var(--panel);
+    box-shadow: var(--emboss);
+    color: var(--text);
+    cursor: pointer;
+    outline: none;
+  }
+  .agent-picker select:focus {
+    border-color: var(--coral);
+  }
+
+  /* Scrollbar */
+  .left-pane::-webkit-scrollbar,
+  .right-pane::-webkit-scrollbar {
+    width: 6px;
+  }
+  .left-pane::-webkit-scrollbar-track,
+  .right-pane::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .left-pane::-webkit-scrollbar-thumb,
+  .right-pane::-webkit-scrollbar-thumb {
+    background: rgba(0,0,0,0.12);
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="topbar-title">Factory Floor -- Split Ops</div>
+    <div class="topbar-stats">
+      <div class="topbar-stat"><b>3</b> running</div>
+      <div class="topbar-stat"><b>2</b> queued</div>
+      <div class="topbar-stat"><b>2</b> recent</div>
+    </div>
+  </div>
+
+  <!-- Main Split -->
+  <div class="main">
+
+    <!-- Left Pane -->
+    <div class="left-pane">
+
+      <!-- ACTIVE -->
+      <div class="section-header">Active <span class="count">3</span></div>
+
+      <!-- Claude a1b2c3d4 -- SELECTED -->
+      <div class="agent-row selected" data-agent="claude-a1b2c3d4" onclick="selectAgent(this)">
+        <div class="avatar claude"></div>
+        <div class="led running"></div>
+        <div class="agent-info">
+          <div class="agent-name">Claude a1b2c3d4</div>
+          <div class="agent-activity">$ bun test --watch</div>
+        </div>
+        <div class="vu-meter"><div class="vu-meter-fill high" style="width:78%"></div></div>
+        <div class="agent-time">14m</div>
+      </div>
+
+      <!-- Codex e5f6g7h8 -->
+      <div class="agent-row" data-agent="codex-e5f6g7h8" onclick="selectAgent(this)">
+        <div class="avatar codex"></div>
+        <div class="led running"></div>
+        <div class="agent-info">
+          <div class="agent-name">Codex e5f6g7h8</div>
+          <div class="agent-activity">Editing auth.ts</div>
+        </div>
+        <div class="vu-meter"><div class="vu-meter-fill mid" style="width:52%"></div></div>
+        <div class="agent-time">8m</div>
+      </div>
+
+      <!-- Claude j9k0l1m2 -->
+      <div class="agent-row" data-agent="claude-j9k0l1m2" onclick="selectAgent(this)">
+        <div class="avatar claude"></div>
+        <div class="led running"></div>
+        <div class="agent-info">
+          <div class="agent-name">Claude j9k0l1m2</div>
+          <div class="agent-activity">Reading package.json</div>
+        </div>
+        <div class="vu-meter"><div class="vu-meter-fill low" style="width:25%"></div></div>
+        <div class="agent-time">3m</div>
+      </div>
+
+      <!-- QUEUE -->
+      <div class="section-header">Queue <span class="count">2</span></div>
+
+      <div class="queue-row" data-queue="rush-361" onclick="selectQueue(this)">
+        <div class="led urgent"></div>
+        <div class="task-badge">RUSH-361</div>
+        <div class="queue-title">Restaurant picker agent</div>
+        <button class="dispatch-btn-small">Dispatch</button>
+      </div>
+
+      <div class="queue-row" data-queue="rush-362" onclick="selectQueue(this)">
+        <div class="led urgent"></div>
+        <div class="task-badge">RUSH-362</div>
+        <div class="queue-title">Trip mode agent</div>
+        <button class="dispatch-btn-small">Dispatch</button>
+      </div>
+
+      <!-- RECENT -->
+      <div class="section-header">Recent <span class="count">2</span></div>
+
+      <div class="agent-row recent" data-agent="gemini-n3o4p5q6" onclick="selectAgent(this)">
+        <div class="avatar gemini"></div>
+        <div class="led completed"></div>
+        <div class="agent-info">
+          <div class="agent-name">Gemini n3o4p5q6</div>
+          <div class="agent-activity">Completed -- PR #45</div>
+        </div>
+        <div class="vu-meter"><div class="vu-meter-fill high" style="width:100%"></div></div>
+        <div class="agent-time">23m</div>
+      </div>
+
+      <div class="agent-row recent" data-agent="claude-r7s8t9u0" onclick="selectAgent(this)">
+        <div class="avatar claude"></div>
+        <div class="led failed"></div>
+        <div class="agent-info">
+          <div class="agent-name">Claude r7s8t9u0</div>
+          <div class="agent-activity">Failed</div>
+        </div>
+        <div class="vu-meter"><div class="vu-meter-fill" style="width:0%"></div></div>
+        <div class="agent-time">7m</div>
+      </div>
+
+    </div>
+
+    <!-- Right Pane -->
+    <div class="right-pane" id="right-pane">
+
+      <!-- Station Card: Claude a1b2c3d4 (default visible) -->
+      <div class="station-card" id="card-claude-a1b2c3d4">
+        <div class="station-header">
+          <div class="station-led running"></div>
+          <div class="station-name">Claude a1b2c3d4</div>
+          <div class="station-kind">Claude</div>
+          <span class="mode-badge terminal">terminal</span>
+          <div class="station-time">Running 14 minutes</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Readout</div>
+          <div class="readout"><span class="prompt-char">$</span> bun test --watch<br>Tests: 166 passed, 0 failed<br>Watching for changes...</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">File Manifest</div>
+          <div class="file-manifest">
+            <div class="file-pill">auth.ts</div>
+            <div class="file-pill">index.ts</div>
+            <div class="file-pill">router.ts</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Activity</div>
+          <div class="activity-bar-wrap">
+            <div class="activity-vu"><div class="activity-vu-fill" style="width:78%"></div></div>
+            <div class="activity-stats">
+              <div class="activity-stat"><b>6</b> tools</div>
+              <div class="activity-stat"><b>14</b> min</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Links</div>
+          <div class="links-row">
+            <a class="link-item"><span class="link-label">Linear</span>RUSH-361</a>
+            <a class="link-item"><span class="link-label">PR</span>#47</a>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Actions</div>
+          <div class="actions-row">
+            <button class="action-btn primary">Focus</button>
+            <button class="action-btn danger">Kill</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Station Card: Codex e5f6g7h8 -->
+      <div class="station-card" id="card-codex-e5f6g7h8" style="display:none">
+        <div class="station-header">
+          <div class="station-led running"></div>
+          <div class="station-name">Codex e5f6g7h8</div>
+          <div class="station-kind">Codex</div>
+          <span class="mode-badge cloud">cloud</span>
+          <div class="station-time">Running 8 minutes</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Readout</div>
+          <div class="readout">Editing auth.ts<br>Refactoring OAuth token refresh logic<br>Writing updated handler...</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">File Manifest</div>
+          <div class="file-manifest">
+            <div class="file-pill">router.ts</div>
+            <div class="file-pill">types.ts</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Activity</div>
+          <div class="activity-bar-wrap">
+            <div class="activity-vu"><div class="activity-vu-fill" style="width:52%"></div></div>
+            <div class="activity-stats">
+              <div class="activity-stat"><b>4</b> tools</div>
+              <div class="activity-stat"><b>8</b> min</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Links</div>
+          <div class="links-row">
+            <a class="link-item"><span class="link-label">Linear</span>RUSH-362</a>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Actions</div>
+          <div class="actions-row">
+            <button class="action-btn primary">Focus</button>
+            <button class="action-btn danger">Kill</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Station Card: Claude j9k0l1m2 -->
+      <div class="station-card" id="card-claude-j9k0l1m2" style="display:none">
+        <div class="station-header">
+          <div class="station-led running"></div>
+          <div class="station-name">Claude j9k0l1m2</div>
+          <div class="station-kind">Claude</div>
+          <span class="mode-badge team">team</span>
+          <div class="station-time">Running 3 minutes</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Readout</div>
+          <div class="readout">Reading package.json<br>Analyzing dependency tree...</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">File Manifest</div>
+          <div class="file-manifest">
+            <div class="file-pill">deps.ts</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Activity</div>
+          <div class="activity-bar-wrap">
+            <div class="activity-vu"><div class="activity-vu-fill" style="width:25%"></div></div>
+            <div class="activity-stats">
+              <div class="activity-stat"><b>2</b> tools</div>
+              <div class="activity-stat"><b>3</b> min</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Links</div>
+          <div class="links-row">
+            <span class="activity-stat" style="color:var(--dim)">No links</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Actions</div>
+          <div class="actions-row">
+            <button class="action-btn primary">Focus</button>
+            <button class="action-btn danger">Kill</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Station Card: Gemini n3o4p5q6 -->
+      <div class="station-card" id="card-gemini-n3o4p5q6" style="display:none">
+        <div class="station-header">
+          <div class="station-led completed"></div>
+          <div class="station-name">Gemini n3o4p5q6</div>
+          <div class="station-kind">Gemini</div>
+          <div class="station-time">Completed in 23 minutes</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Readout</div>
+          <div class="readout" style="color:#A8A29E">Session completed successfully<br>All tasks finished</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Links</div>
+          <div class="links-row">
+            <a class="link-item"><span class="link-label">PR</span>#45</a>
+          </div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Actions</div>
+          <div class="actions-row">
+            <button class="action-btn">View Log</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Station Card: Claude r7s8t9u0 FAILED -->
+      <div class="station-card" id="card-claude-r7s8t9u0" style="display:none">
+        <div class="station-header">
+          <div class="station-led failed"></div>
+          <div class="station-name">Claude r7s8t9u0</div>
+          <div class="station-kind">Claude</div>
+          <div class="station-time" style="color:var(--led-red)">Failed after 7 minutes</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Readout</div>
+          <div class="readout" style="color:#F87171">Error: Process exited with code 1<br>TypeError: Cannot read properties of undefined<br>  at processAuth (auth.ts:142)</div>
+        </div>
+
+        <div>
+          <div class="card-section-label">Actions</div>
+          <div class="actions-row">
+            <button class="action-btn primary">Retry</button>
+            <button class="action-btn">View Log</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dispatch Card: RUSH-361 -->
+      <div class="dispatch-card" id="card-rush-361" style="display:none">
+        <div class="dispatch-header">
+          <div class="led urgent"></div>
+          <div class="dispatch-id">RUSH-361</div>
+          <div class="dispatch-priority">Urgent</div>
+        </div>
+        <div class="dispatch-title-text">Restaurant picker agent</div>
+        <div>
+          <div class="card-section-label">Context</div>
+          <div class="dispatch-context">
+            Team: Engineering<br>
+            Priority: Urgent<br>
+            Type: Feature<br><br>
+            Build a restaurant recommendation agent that integrates with location services and user preference history. Should support multi-city lookups and dietary restrictions filtering.
+          </div>
+        </div>
+        <div>
+          <div class="card-section-label">Dispatch</div>
+          <div class="agent-picker">
+            <label>Agent</label>
+            <select>
+              <option>Claude (plan)</option>
+              <option>Claude (edit)</option>
+              <option>Codex (edit)</option>
+              <option>Gemini (plan)</option>
+              <option>Gemini (edit)</option>
+            </select>
+            <button class="action-btn primary">Dispatch</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dispatch Card: RUSH-362 -->
+      <div class="dispatch-card" id="card-rush-362" style="display:none">
+        <div class="dispatch-header">
+          <div class="led urgent"></div>
+          <div class="dispatch-id">RUSH-362</div>
+          <div class="dispatch-priority">Urgent</div>
+        </div>
+        <div class="dispatch-title-text">Trip mode agent</div>
+        <div>
+          <div class="card-section-label">Context</div>
+          <div class="dispatch-context">
+            Team: Engineering<br>
+            Priority: Urgent<br>
+            Type: Feature<br><br>
+            Create a trip planning mode that orchestrates multiple sub-agents for flights, hotels, and activities. Should maintain a shared context across all sub-agents for coherent itinerary building.
+          </div>
+        </div>
+        <div>
+          <div class="card-section-label">Dispatch</div>
+          <div class="agent-picker">
+            <label>Agent</label>
+            <select>
+              <option>Claude (plan)</option>
+              <option>Claude (edit)</option>
+              <option>Codex (edit)</option>
+              <option>Gemini (plan)</option>
+              <option>Gemini (edit)</option>
+            </select>
+            <button class="action-btn primary">Dispatch</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  var allCards = [
+    'card-claude-a1b2c3d4',
+    'card-codex-e5f6g7h8',
+    'card-claude-j9k0l1m2',
+    'card-gemini-n3o4p5q6',
+    'card-claude-r7s8t9u0',
+    'card-rush-361',
+    'card-rush-362'
+  ];
+
+  function hideAllCards() {
+    allCards.forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  }
+
+  function clearSelections() {
+    document.querySelectorAll('.agent-row.selected, .queue-row.selected').forEach(function(el) {
+      el.classList.remove('selected');
+    });
+  }
+
+  function selectAgent(row) {
+    clearSelections();
+    row.classList.add('selected');
+    hideAllCards();
+    var agentId = row.getAttribute('data-agent');
+    var card = document.getElementById('card-' + agentId);
+    if (card) card.style.display = '';
+  }
+
+  function selectQueue(row) {
+    clearSelections();
+    row.classList.add('selected');
+    hideAllCards();
+    var queueId = row.getAttribute('data-queue');
+    var card = document.getElementById('card-' + queueId);
+    if (card) card.style.display = '';
+  }
+</script>
+
+</body>
+</html>

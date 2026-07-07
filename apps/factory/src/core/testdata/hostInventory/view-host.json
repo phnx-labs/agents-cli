@@ -1,0 +1,67 @@
+[
+  {
+    "agent": "claude",
+    "versions": [
+      {
+        "version": "2.1.181",
+        "isDefault": true,
+        "signedIn": true,
+        "email": "muqsit@icloud.com",
+        "plan": "Pro",
+        "usageStatus": "available",
+        "overageCredits": null,
+        "windows": [
+          { "key": "session", "usedPercent": 69, "resetsAt": "2026-07-01T08:20:00.000Z" },
+          { "key": "week", "usedPercent": 22, "resetsAt": "2026-07-07T05:59:59.000Z" }
+        ],
+        "lastActive": "2026-07-01T07:15:15.000Z",
+        "path": "/Users/muqsit/.agents/.history/versions/claude/2.1.181",
+        "resources": {
+          "skills": [
+            { "name": "1password", "scope": "user", "syncState": "new" },
+            { "name": "audit", "scope": "user", "syncState": "synced" },
+            { "name": "browser", "scope": "project" }
+          ],
+          "plugins": [{ "name": "rush" }, { "name": "git" }],
+          "mcp": [{ "name": "linear", "scope": "user", "syncState": "synced" }],
+          "commands": [{ "name": "commit", "scope": "user", "syncState": "modified" }],
+          "workflows": [{ "name": "review", "scope": "user" }],
+          "memory": [{ "name": "AGENTS.md", "scope": "user", "syncState": "synced" }],
+          "hooks": [{ "name": "git-guard", "scope": "user", "syncState": "synced" }]
+        }
+      },
+      {
+        "version": "2.1.170",
+        "isDefault": false,
+        "signedIn": false,
+        "email": null,
+        "plan": null,
+        "usageStatus": null,
+        "overageCredits": null,
+        "windows": [],
+        "lastActive": null,
+        "path": "/Users/muqsit/.agents/.history/versions/claude/2.1.170"
+      }
+    ],
+    "profiles": []
+  },
+  {
+    "agent": "codex",
+    "versions": [
+      {
+        "version": "0.134.0",
+        "isDefault": true,
+        "signedIn": true,
+        "email": "muqsit@gmail.com",
+        "plan": "Pro",
+        "usageStatus": "available",
+        "overageCredits": null,
+        "windows": [{ "key": "session", "usedPercent": 14, "resetsAt": null }],
+        "lastActive": "2026-07-01T01:00:00.000Z",
+        "path": "/Users/muqsit/.agents/.history/versions/codex/0.134.0",
+        "resources": { "skills": [], "plugins": [], "mcp": [{ "name": "linear", "scope": "user", "syncState": "synced" }] }
+      }
+    ],
+    "profiles": []
+  }
+]

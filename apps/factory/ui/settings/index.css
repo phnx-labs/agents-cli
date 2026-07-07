@@ -1,0 +1,543 @@
+@import "tailwindcss";
+@import "./components/mission-control/design-system.css";
+@import "./components/mission-control/floor.css";
+@import "./components/mission-control/dispatch.css";
+@import "./components/bench/bench.css";
+@import "./components/panel/panel.css";
+
+:root {
+  /* Light mode palette with coral accent from logo */
+  --background: #ffffff;
+  --foreground: #1a1a1a;
+  --muted: #f5f5f5;
+  --muted-foreground: #6b6b6b;
+  --border: #e5e5e5;
+  --input: #f5f5f5;
+  --ring: #e85d5d;
+  --primary: #e85d5d;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f0;
+  --secondary-foreground: #1a1a1a;
+  --accent: #f0f0f0;
+  --accent-foreground: #1a1a1a;
+  --card: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Dark mode palette */
+    --background: #000000;
+    --foreground: #f5f5f7;
+    --muted: #1c1c1e;
+    --muted-foreground: #86868b;
+    --border: #38383a;
+    --input: #1c1c1e;
+    --primary: #e85d5d;
+    --primary-foreground: #ffffff;
+    --secondary: #2c2c2e;
+    --secondary-foreground: #f5f5f7;
+    --accent: #2c2c2e;
+    --accent-foreground: #f5f5f7;
+    --card: #1c1c1e;
+  }
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Legacy tab content (Workspace, Settings) — keep centered max-width layout for now */
+.sw-legacy-scroll {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 24px 20px 40px;
+}
+
+.sw-legacy-inner {
+  width: 100%;
+  max-width: 720px;
+}
+
+.todo-md {
+  color: var(--muted-foreground);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.todo-md-clamp {
+  max-height: calc(1.5em * 5);
+  overflow: hidden;
+}
+
+.todo-md p {
+  margin: 0 0 8px 0;
+  line-height: 1.5;
+}
+
+.todo-md p:last-child {
+  margin-bottom: 0;
+}
+
+.todo-md a {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
+.todo-md a:hover {
+  color: var(--primary);
+}
+
+.todo-md ul,
+.todo-md ol {
+  margin: 0 0 8px 18px;
+  padding: 0;
+}
+
+.todo-md li {
+  margin: 2px 0;
+}
+
+.todo-md pre {
+  margin: 8px 0;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.todo-md code {
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.todo-md :not(pre) > code {
+  background: var(--muted);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 11px;
+}
+
+.todo-md blockquote {
+  margin: 8px 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+/* Refined input styling */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.toggle-switch {
+  width: 44px;
+  height: 22px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, #e7e9ee, #cfd5df);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  cursor: pointer;
+  transition: background 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+.toggle-switch[data-state="on"] {
+  background: var(--primary);
+  border-color: rgba(232, 93, 93, 0.6);
+  box-shadow: 0 4px 12px rgba(232, 93, 93, 0.25);
+}
+
+.toggle-switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(232, 93, 93, 0.35);
+}
+
+.toggle-knob {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transform: translateX(0);
+  transition: transform 160ms ease;
+}
+
+.toggle-switch[data-state="on"] .toggle-knob {
+  transform: translateX(22px);
+}
+
+@media (prefers-color-scheme: dark) {
+  .toggle-switch {
+    background: linear-gradient(135deg, #2c2f36, #1a1d22);
+    border-color: #2b3037;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+
+  .toggle-switch[data-state="on"] {
+    background: var(--primary);
+    border-color: rgba(232, 93, 93, 0.6);
+    box-shadow: 0 4px 12px rgba(232, 93, 93, 0.3);
+  }
+
+  .toggle-knob {
+    background: #f6f7fb;
+  }
+}
+
+/* Responsive layout for narrow sidebars */
+@media (max-width: 350px) {
+  body {
+    padding: 16px 12px;
+  }
+
+  #root {
+    max-width: 100%;
+  }
+
+  /* Compact tab bar */
+  .tab-bar {
+    gap: 2px;
+  }
+
+  .tab-bar button {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  /* Dense agent pills */
+  .agent-pill {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .agent-pill img {
+    width: 16px;
+    height: 16px;
+  }
+
+  .agent-pill span {
+    font-size: 12px;
+  }
+
+  /* Compact terminal cards */
+  .terminal-card {
+    padding: 10px 12px;
+  }
+
+  .terminal-card .header {
+    font-size: 12px;
+  }
+
+  .terminal-card .activity {
+    font-size: 11px;
+  }
+
+  /* Compact task rows */
+  .task-row {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .task-row .badge {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
+
+  /* Hide non-essential elements in narrow mode */
+  .hide-narrow {
+    display: none;
+  }
+
+  /* Stack settings sections */
+  .settings-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .settings-row > select,
+  .settings-row > input {
+    width: 100%;
+  }
+}
+
+/* -------- Foreman orb (floating voice coordinator) -------- */
+
+.foreman-orb {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  pointer-events: auto;
+  outline: none;
+  transition: transform 180ms ease;
+}
+
+.foreman-orb:hover {
+  transform: scale(1.06);
+}
+
+.foreman-orb:active {
+  transform: scale(0.96);
+}
+
+.foreman-orb-svg {
+  display: block;
+  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.35));
+  transition: width 240ms ease, height 240ms ease, opacity 240ms ease;
+}
+
+/* idle: slow breathe on the outer ring + outer glow */
+.foreman-orb-svg-idle .foreman-orb-outer {
+  transform-origin: center;
+  animation: foreman-breathe 3.4s ease-in-out infinite;
+}
+.foreman-orb-svg-idle .foreman-orb-inner {
+  opacity: 0.85;
+}
+.foreman-orb-svg-idle .foreman-orb-ring {
+  opacity: 0.3;
+}
+
+/* connecting: quick pulse */
+.foreman-orb-svg-connecting .foreman-orb-outer,
+.foreman-orb-svg-connecting .foreman-orb-inner {
+  transform-origin: center;
+  animation: foreman-pulse 0.7s ease-in-out infinite;
+}
+
+/* listening: gentle breathing + expanding ring ripple */
+.foreman-orb-svg-listening .foreman-orb-outer {
+  transform-origin: center;
+  animation: foreman-breathe 1.6s ease-in-out infinite;
+}
+.foreman-orb-svg-listening .foreman-orb-inner {
+  transform-origin: center;
+  animation: foreman-inner-pulse 1.6s ease-in-out infinite;
+}
+.foreman-orb-svg-listening .foreman-orb-ring {
+  transform-origin: center;
+  animation: foreman-ripple 2.2s ease-out infinite;
+}
+
+/* speaking: rapid amplitude pulse */
+.foreman-orb-svg-speaking .foreman-orb-outer {
+  transform-origin: center;
+  animation: foreman-speak 0.52s ease-in-out infinite;
+}
+.foreman-orb-svg-speaking .foreman-orb-inner {
+  transform-origin: center;
+  animation: foreman-speak-inner 0.52s ease-in-out infinite;
+}
+.foreman-orb-svg-speaking .foreman-orb-ring {
+  opacity: 0.45;
+}
+
+/* hibernating: dim + slow fade breathe */
+.foreman-orb-svg-hibernating {
+  opacity: 0.55;
+}
+.foreman-orb-svg-hibernating .foreman-orb-outer {
+  transform-origin: center;
+  animation: foreman-breathe 2.8s ease-in-out infinite;
+}
+
+@keyframes foreman-breathe {
+  0%, 100% { transform: scale(0.96); opacity: 0.82; }
+  50%      { transform: scale(1.05); opacity: 1; }
+}
+
+@keyframes foreman-inner-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50%      { transform: scale(0.82); opacity: 0.6; }
+}
+
+@keyframes foreman-pulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.7; }
+  50%      { transform: scale(1.08); opacity: 1; }
+}
+
+@keyframes foreman-speak {
+  0%, 100% { transform: scale(0.94); }
+  25%      { transform: scale(1.08); }
+  50%      { transform: scale(0.98); }
+  75%      { transform: scale(1.12); }
+}
+
+@keyframes foreman-speak-inner {
+  0%, 100% { transform: scale(1.1); opacity: 1; }
+  50%      { transform: scale(0.72); opacity: 0.7; }
+}
+
+@keyframes foreman-ripple {
+  0%   { transform: scale(0.6); opacity: 0.7; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+
+.foreman-orb-transcript {
+  pointer-events: auto;
+  max-width: 320px;
+  min-width: 180px;
+  padding: 8px 10px;
+  background: var(--ds-bg-panel, var(--card));
+  border: 1px solid var(--ds-border, var(--border));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: foreman-fade-in 180ms ease-out;
+}
+
+.foreman-orb-line {
+  color: var(--ds-text, var(--foreground));
+  position: relative;
+  padding-right: 16px;
+}
+
+.foreman-orb-line-delete {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  line-height: 1;
+  font-size: 10px;
+  font-family: var(--ds-font-mono, ui-monospace, monospace);
+  color: var(--ds-text-muted, var(--muted-foreground));
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.foreman-orb-line:hover .foreman-orb-line-delete {
+  opacity: 0.7;
+}
+
+.foreman-orb-line-delete:hover {
+  opacity: 1;
+  color: var(--ds-text, var(--foreground));
+  background: var(--ds-border, var(--border));
+}
+
+.foreman-orb-role {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  margin-right: 6px;
+  text-transform: uppercase;
+}
+
+.foreman-orb-role.you {
+  color: var(--ds-text-muted, var(--muted-foreground));
+}
+
+.foreman-orb-role.frmn {
+  color: var(--ds-accent, #4a90e2);
+}
+
+.foreman-orb-hint {
+  pointer-events: auto;
+  font-size: 11px;
+  color: var(--ds-text-muted, var(--muted-foreground));
+  background: var(--ds-bg-panel, var(--card));
+  border: 1px solid var(--ds-border, var(--border));
+  border-radius: 6px;
+  padding: 4px 8px;
+  animation: foreman-fade-in 180ms ease-out;
+}
+
+.foreman-orb-speaker {
+  pointer-events: auto;
+  font-size: 10px;
+  font-family: var(--ds-font-mono, ui-monospace, monospace);
+  letter-spacing: 0.5px;
+  color: var(--ds-text-muted, var(--muted-foreground));
+  background: var(--ds-bg-panel, var(--card));
+  border: 1px solid var(--ds-border, var(--border));
+  border-radius: 10px;
+  padding: 2px 10px;
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 120ms ease;
+}
+
+.foreman-orb-speaker:hover {
+  opacity: 1;
+}
+
+.foreman-orb-speaker.is-muted {
+  color: var(--ds-accent, #4a90e2);
+  border-color: var(--ds-accent, #4a90e2);
+  opacity: 0.9;
+}
+
+.foreman-orb-error {
+  pointer-events: auto;
+  font-size: 11px;
+  color: var(--ds-danger, #c03030);
+  background: var(--ds-bg-panel, var(--card));
+  border: 1px solid var(--ds-border, var(--border));
+  border-radius: 6px;
+  padding: 4px 8px;
+  max-width: 280px;
+  font-family: var(--ds-font-mono, ui-monospace, monospace);
+  white-space: pre-wrap;
+}
+
+@keyframes foreman-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .foreman-orb-svg-idle .foreman-orb-outer,
+  .foreman-orb-svg-connecting .foreman-orb-outer,
+  .foreman-orb-svg-connecting .foreman-orb-inner,
+  .foreman-orb-svg-listening .foreman-orb-outer,
+  .foreman-orb-svg-listening .foreman-orb-inner,
+  .foreman-orb-svg-listening .foreman-orb-ring,
+  .foreman-orb-svg-speaking .foreman-orb-outer,
+  .foreman-orb-svg-speaking .foreman-orb-inner,
+  .foreman-orb-svg-hibernating .foreman-orb-outer {
+    animation: none;
+  }
+}

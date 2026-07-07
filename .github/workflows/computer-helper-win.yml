@@ -11,11 +11,11 @@ on:
   push:
     branches: ['win-computer-use', 'main']
     paths:
-      - 'packages/computer-helper-win/**'
+      - 'native/computer-win/**'
       - '.github/workflows/computer-helper-win.yml'
   pull_request:
     paths:
-      - 'packages/computer-helper-win/**'
+      - 'native/computer-win/**'
       - '.github/workflows/computer-helper-win.yml'
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
     permissions: {}
     defaults:
       run:
-        working-directory: packages/computer-helper-win
+        working-directory: native/computer-win
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -56,7 +56,7 @@ jobs:
     permissions: {}
     defaults:
       run:
-        working-directory: packages/computer-helper-win
+        working-directory: native/computer-win
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

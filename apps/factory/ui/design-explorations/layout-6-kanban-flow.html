@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layout 6 - Kanban Flow - Factory Floor</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+  :root {
+    --bg: #E8E6E1;
+    --panel: #F0EEEA;
+    --recessed: #D8D5CF;
+    --coral: #F26D5B;
+    --text: #1C1917;
+    --dim: #78716C;
+    --led-green: #22C55E;
+    --led-red: #EF4444;
+    --led-amber: #D4A72C;
+    --led-gray: #6B7280;
+    --font: 'SF Mono', 'Menlo', 'Monaco', monospace;
+
+    --claude-color: #F26D5B;
+    --codex-color: #1C1917;
+    --gemini-color: #3B82F6;
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: var(--font);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  /* -- Board -- */
+  .board {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr 1fr;
+    gap: 12px;
+    height: 100vh;
+    padding: 12px;
+  }
+
+  /* -- Columns -- */
+  .column {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-radius: 6px;
+    background: var(--panel);
+    box-shadow:
+      1px 1px 0 #fff,
+      -1px -1px 0 #D0CDC6,
+      inset 0 0 0 1px rgba(0,0,0,0.04);
+  }
+
+  .column--active {
+    background: #F4F1EB;
+    box-shadow:
+      1px 1px 0 #fff,
+      -1px -1px 0 #D0CDC6,
+      inset 0 0 0 1px rgba(0,0,0,0.04),
+      inset 0 0 30px rgba(242,109,91,0.03);
+  }
+
+  .column-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+    background: linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 100%);
+    border-radius: 6px 6px 0 0;
+  }
+
+  .column-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .column-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    background: var(--dim);
+  }
+
+  .column--active .column-count {
+    background: var(--coral);
+  }
+
+  .column-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .column-body::-webkit-scrollbar { width: 4px; }
+  .column-body::-webkit-scrollbar-track { background: transparent; }
+  .column-body::-webkit-scrollbar-thumb { background: var(--recessed); border-radius: 2px; }
+
+  /* -- QUEUE cards -- */
+  .queue-card {
+    background: #fff;
+    border-radius: 5px;
+    border-top: 2px dashed var(--recessed);
+    padding: 10px 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  }
+
+  .queue-card--urgent {
+    border-top-color: var(--coral);
+  }
+
+  .queue-card-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .priority-led {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--led-gray);
+    flex-shrink: 0;
+  }
+
+  .priority-led--urgent {
+    background: var(--led-red);
+    box-shadow: 0 0 6px var(--led-red);
+    animation: pulse-red 1.8s ease-in-out infinite;
+  }
+
+  @keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 4px var(--led-red); opacity: 1; }
+    50% { box-shadow: 0 0 10px var(--led-red); opacity: 0.7; }
+  }
+
+  .urgent-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--coral);
+    text-transform: uppercase;
+  }
+
+  .task-id-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--dim);
+    background: var(--recessed);
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: auto;
+  }
+
+  .queue-card-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+
+  .queue-card-desc {
+    font-size: 11px;
+    color: var(--dim);
+    margin-bottom: 8px;
+    line-height: 1.45;
+  }
+
+  .label-pill {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: var(--dim);
+    background: var(--recessed);
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+
+  .dispatch-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .agent-picker {
+    display: flex;
+    gap: 4px;
+  }
+
+  .agent-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+
+  .agent-swatch:hover {
+    transform: scale(1.15);
+  }
+
+  .agent-swatch--selected {
+    border-color: var(--text);
+  }
+
+  .agent-swatch--claude { background: var(--claude-color); }
+  .agent-swatch--codex { background: var(--codex-color); }
+  .agent-swatch--gemini { background: var(--gemini-color); }
+
+  .dispatch-btn {
+    margin-left: auto;
+    font-family: var(--font);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #fff;
+    background: var(--coral);
+    border: none;
+    border-radius: 4px;
+    padding: 5px 14px;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(242,109,91,0.3);
+    transition: background 0.15s;
+  }
+
+  .dispatch-btn:hover {
+    background: #E55C4A;
+  }
+
+  /* -- ACTIVE cards -- */
+  .active-card {
+    background: #fff;
+    border-radius: 5px;
+    border-left: 4px solid var(--dim);
+    padding: 10px 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+  }
+
+  .active-card--claude { border-left-color: var(--claude-color); }
+  .active-card--codex { border-left-color: var(--codex-color); }
+  .active-card--gemini { border-left-color: var(--gemini-color); }
+
+  .active-card-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .status-led {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .status-led--running {
+    background: var(--led-green);
+    box-shadow: 0 0 6px var(--led-green);
+    animation: pulse-green 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 4px var(--led-green); opacity: 1; }
+    50% { box-shadow: 0 0 12px var(--led-green); opacity: 0.75; }
+  }
+
+  .agent-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .kind-badge {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--dim);
+    background: var(--recessed);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+
+  .duration {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .readout {
+    background: #1C1917;
+    color: #A3E635;
+    font-size: 10px;
+    line-height: 1.5;
+    padding: 6px 8px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+    box-shadow: inset 0 1px 4px rgba(0,0,0,0.4);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .section-label {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: var(--dim);
+    text-transform: uppercase;
+    margin-bottom: 3px;
+  }
+
+  .file-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .file-pill {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--recessed);
+    padding: 2px 7px;
+    border-radius: 3px;
+  }
+
+  .metrics-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .vu-meter {
+    flex: 1;
+    height: 4px;
+    background: var(--recessed);
+    border-radius: 2px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+  }
+
+  .vu-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  .vu-fill--claude { background: var(--claude-color); }
+  .vu-fill--codex { background: var(--codex-color); }
+  .vu-fill--gemini { background: var(--gemini-color); }
+
+  .metrics-text {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+
+  .links-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .link-tag {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--dim);
+    background: var(--recessed);
+    padding: 2px 7px;
+    border-radius: 3px;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .link-tag:hover {
+    color: var(--text);
+  }
+
+  .active-card-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .btn-focus, .btn-kill {
+    font-family: var(--font);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn-focus {
+    color: var(--text);
+    background: var(--recessed);
+  }
+
+  .btn-focus:hover {
+    background: #CCC9C2;
+  }
+
+  .btn-kill {
+    color: var(--led-red);
+    background: rgba(239,68,68,0.1);
+  }
+
+  .btn-kill:hover {
+    background: rgba(239,68,68,0.18);
+  }
+
+  /* -- DONE cards -- */
+  .done-card {
+    background: #fff;
+    border-radius: 5px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    opacity: 0.7;
+  }
+
+  .done-card-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+
+  .status-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 3px;
+  }
+
+  .status-badge--completed {
+    color: #166534;
+    background: rgba(34,197,94,0.15);
+  }
+
+  .status-badge--failed {
+    color: #991B1B;
+    background: rgba(239,68,68,0.12);
+  }
+
+  .done-agent {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .done-duration {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--dim);
+  }
+
+  .done-summary {
+    font-size: 11px;
+    color: var(--dim);
+    margin-bottom: 4px;
+  }
+
+  .done-pr-link {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--coral);
+    text-decoration: none;
+    cursor: pointer;
+  }
+
+  .done-pr-link:hover {
+    text-decoration: underline;
+  }
+</style>
+</head>
+<body>
+
+<div class="board">
+
+  <!-- QUEUE COLUMN -->
+  <div class="column">
+    <div class="column-header">
+      <span class="column-title">Queue</span>
+      <span class="column-count">2</span>
+    </div>
+    <div class="column-body">
+
+      <!-- Queue Card 1 - Urgent -->
+      <div class="queue-card queue-card--urgent">
+        <div class="queue-card-top">
+          <div class="priority-led priority-led--urgent"></div>
+          <span class="urgent-badge">Urgent</span>
+          <span class="task-id-badge">RUSH-361</span>
+        </div>
+        <div class="queue-card-title">Fix auth token refresh loop</div>
+        <div class="queue-card-desc">
+          Users hitting infinite refresh cycle when session expires during active request. Affects 12% of sessions.
+        </div>
+        <span class="label-pill">engineering</span>
+        <div class="dispatch-row">
+          <div class="agent-picker">
+            <div class="agent-swatch agent-swatch--claude agent-swatch--selected" title="Claude"></div>
+            <div class="agent-swatch agent-swatch--codex" title="Codex"></div>
+            <div class="agent-swatch agent-swatch--gemini" title="Gemini"></div>
+          </div>
+          <button class="dispatch-btn">Dispatch</button>
+        </div>
+      </div>
+
+      <!-- Queue Card 2 - Normal -->
+      <div class="queue-card">
+        <div class="queue-card-top">
+          <div class="priority-led"></div>
+          <span class="task-id-badge">RUSH-364</span>
+        </div>
+        <div class="queue-card-title">Add workspace usage metrics endpoint</div>
+        <div class="queue-card-desc">
+          New API endpoint to return per-workspace token and request counts for the billing dashboard.
+        </div>
+        <span class="label-pill">backend</span>
+        <div class="dispatch-row">
+          <div class="agent-picker">
+            <div class="agent-swatch agent-swatch--claude" title="Claude"></div>
+            <div class="agent-swatch agent-swatch--codex agent-swatch--selected" title="Codex"></div>
+            <div class="agent-swatch agent-swatch--gemini" title="Gemini"></div>
+          </div>
+          <button class="dispatch-btn">Dispatch</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ACTIVE COLUMN -->
+  <div class="column column--active">
+    <div class="column-header">
+      <span class="column-title">Active</span>
+      <span class="column-count">3</span>
+    </div>
+    <div class="column-body">
+
+      <!-- Active Card 1 - Claude -->
+      <div class="active-card active-card--claude">
+        <div class="active-card-top">
+          <div class="status-led status-led--running"></div>
+          <span class="agent-name">Claude</span>
+          <span class="kind-badge">Edit</span>
+          <span class="duration">4 minutes</span>
+        </div>
+        <div class="section-label">Readout</div>
+        <div class="readout">writing tests for auth middleware refresh handler</div>
+        <div class="section-label">Files</div>
+        <div class="file-pills">
+          <span class="file-pill">auth.ts</span>
+          <span class="file-pill">middleware.ts</span>
+          <span class="file-pill">auth.test.ts</span>
+          <span class="file-pill">session.ts</span>
+        </div>
+        <div class="section-label">Metrics</div>
+        <div class="metrics-row">
+          <div class="vu-meter"><div class="vu-fill vu-fill--claude" style="width:62%"></div></div>
+          <span class="metrics-text">6 tool calls</span>
+        </div>
+        <div class="links-row">
+          <span class="link-tag">RUSH-358</span>
+          <span class="link-tag">PR #142</span>
+        </div>
+        <div class="active-card-actions">
+          <button class="btn-focus">Focus</button>
+          <button class="btn-kill">Kill</button>
+        </div>
+      </div>
+
+      <!-- Active Card 2 - Codex -->
+      <div class="active-card active-card--codex">
+        <div class="active-card-top">
+          <div class="status-led status-led--running"></div>
+          <span class="agent-name">Codex</span>
+          <span class="kind-badge">Edit</span>
+          <span class="duration">2 minutes</span>
+        </div>
+        <div class="section-label">Readout</div>
+        <div class="readout">refactoring billing aggregation query to use window functions</div>
+        <div class="section-label">Files</div>
+        <div class="file-pills">
+          <span class="file-pill">billing.py</span>
+          <span class="file-pill">queries.sql</span>
+        </div>
+        <div class="section-label">Metrics</div>
+        <div class="metrics-row">
+          <div class="vu-meter"><div class="vu-fill vu-fill--codex" style="width:38%"></div></div>
+          <span class="metrics-text">3 tool calls</span>
+        </div>
+        <div class="links-row">
+          <span class="link-tag">RUSH-360</span>
+        </div>
+        <div class="active-card-actions">
+          <button class="btn-focus">Focus</button>
+          <button class="btn-kill">Kill</button>
+        </div>
+      </div>
+
+      <!-- Active Card 3 - Gemini -->
+      <div class="active-card active-card--gemini">
+        <div class="active-card-top">
+          <div class="status-led status-led--running"></div>
+          <span class="agent-name">Gemini</span>
+          <span class="kind-badge">Plan</span>
+          <span class="duration">7 minutes</span>
+        </div>
+        <div class="section-label">Readout</div>
+        <div class="readout">analyzing dependency graph for workspace isolation RFC</div>
+        <div class="section-label">Files</div>
+        <div class="file-pills">
+          <span class="file-pill">workspace.ts</span>
+          <span class="file-pill">isolation.ts</span>
+          <span class="file-pill">graph.ts</span>
+          <span class="file-pill">types.ts</span>
+          <span class="file-pill">config.ts</span>
+        </div>
+        <div class="section-label">Metrics</div>
+        <div class="metrics-row">
+          <div class="vu-meter"><div class="vu-fill vu-fill--gemini" style="width:85%"></div></div>
+          <span class="metrics-text">14 tool calls</span>
+        </div>
+        <div class="links-row">
+          <span class="link-tag">RUSH-355</span>
+          <span class="link-tag">PR #139</span>
+        </div>
+        <div class="active-card-actions">
+          <button class="btn-focus">Focus</button>
+          <button class="btn-kill">Kill</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- DONE COLUMN -->
+  <div class="column">
+    <div class="column-header">
+      <span class="column-title">Done</span>
+      <span class="column-count">2</span>
+    </div>
+    <div class="column-body">
+
+      <!-- Done Card 1 - Completed -->
+      <div class="done-card">
+        <div class="done-card-top">
+          <span class="status-badge status-badge--completed">Completed</span>
+          <span class="done-agent">Claude</span>
+          <span class="done-duration">13 minutes</span>
+        </div>
+        <div class="done-summary">12 files changed</div>
+        <a class="done-pr-link" href="#">PR #138 -- Add rate limiting to public API</a>
+      </div>
+
+      <!-- Done Card 2 - Failed -->
+      <div class="done-card">
+        <div class="done-card-top">
+          <span class="status-badge status-badge--failed">Failed</span>
+          <span class="done-agent">Codex</span>
+          <span class="done-duration">5 minutes</span>
+        </div>
+        <div class="done-summary">3 files changed</div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layout 5 - Dashboard Gauges</title>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  :root {
+    --bg: #E8E6E1;
+    --panel: #F0EEEA;
+    --recessed: #D8D5CF;
+    --coral: #F26D5B;
+    --text: #1C1917;
+    --dim: #78716C;
+    --led-green: #22C55E;
+    --led-red: #EF4444;
+    --led-amber: #D4A72C;
+    --led-gray: #6B7280;
+    --blue: #3B82F6;
+    --font: 'SF Mono', 'Menlo', 'Monaco', monospace;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 100vh;
+  }
+
+  .dashboard {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 16px 20px 32px;
+  }
+
+  /* ---- Header ---- */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--recessed);
+  }
+
+  .header-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  .header-status {
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ---- Throughput Counter (FPS-style) ---- */
+  .throughput {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 14px;
+    background: #2A2825;
+    border-radius: 6px;
+    box-shadow: inset 0 1px 4px rgba(0,0,0,0.4);
+  }
+
+  .throughput-value {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--led-green);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    min-width: 48px;
+    text-align: right;
+  }
+
+  .throughput-unit {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .throughput-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #7A756D;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+
+  .throughput-sub {
+    font-size: 8px;
+    color: #5A5650;
+    letter-spacing: 0.5px;
+  }
+
+  .throughput-sparkline {
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    height: 24px;
+  }
+
+  .spark-bar {
+    width: 3px;
+    border-radius: 1px 1px 0 0;
+    background: var(--led-green);
+    opacity: 0.7;
+    transition: height 0.3s ease;
+  }
+
+  .spark-bar:nth-last-child(-n+3) {
+    opacity: 1;
+  }
+
+  /* ---- Gauges Row ---- */
+  .gauges-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .gauge-widget {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 12px 16px;
+    background: var(--panel);
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow:
+      0 1px 3px rgba(0,0,0,0.06),
+      inset 0 1px 0 rgba(255,255,255,0.8);
+  }
+
+  .gauge-svg-wrap {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    margin-bottom: 10px;
+  }
+
+  .gauge-svg-wrap svg {
+    width: 100px;
+    height: 100px;
+    transform: rotate(-90deg);
+  }
+
+  .gauge-svg-wrap .gauge-bg {
+    fill: none;
+    stroke: var(--recessed);
+    stroke-width: 8;
+    stroke-linecap: round;
+  }
+
+  .gauge-svg-wrap .gauge-arc {
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+    transition: stroke-dashoffset 0.6s ease;
+  }
+
+  .gauge-value {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .gauge-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .gauge-sub {
+    font-size: 9px;
+    color: var(--dim);
+    margin-top: 2px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ---- Section Headers ---- */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    margin-top: 4px;
+  }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .section-count {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--panel);
+    background: var(--dim);
+    padding: 1px 7px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+  }
+
+  .section-line {
+    flex: 1;
+    height: 1px;
+    background: var(--recessed);
+  }
+
+  /* ---- Agent Strips ---- */
+  .agent-strips {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 24px;
+  }
+
+  .agent-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px 10px 0;
+    background: var(--panel);
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.6);
+    box-shadow:
+      0 1px 2px rgba(0,0,0,0.05),
+      inset 0 1px 0 rgba(255,255,255,0.7);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .agent-strip.dimmed {
+    opacity: 0.55;
+  }
+
+  .strip-color-bar {
+    width: 4px;
+    align-self: stretch;
+    border-radius: 6px 0 0 6px;
+    flex-shrink: 0;
+  }
+
+  .strip-color-bar.claude { background: var(--coral); }
+  .strip-color-bar.codex { background: var(--blue); }
+  .strip-color-bar.gemini { background: var(--led-amber); }
+  .strip-color-bar.cursor { background: #A78BFA; }
+
+  /* LED */
+  .strip-led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 4px currentColor;
+  }
+
+  .strip-led.green {
+    background: var(--led-green);
+    color: var(--led-green);
+    animation: led-pulse 2s ease-in-out infinite;
+  }
+
+  .strip-led.gray {
+    background: var(--led-gray);
+    color: var(--led-gray);
+    box-shadow: none;
+  }
+
+  .strip-led.red {
+    background: var(--led-red);
+    color: var(--led-red);
+  }
+
+  @keyframes led-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 4px currentColor; }
+    50% { opacity: 0.6; box-shadow: 0 0 8px currentColor; }
+  }
+
+  /* Agent identity */
+  .strip-identity {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 130px;
+  }
+
+  .strip-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+    color: white;
+    flex-shrink: 0;
+  }
+
+  .strip-avatar.claude { background: var(--coral); }
+  .strip-avatar.codex { background: var(--blue); }
+  .strip-avatar.gemini { background: var(--led-amber); }
+  .strip-avatar.cursor { background: #A78BFA; }
+
+  .strip-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .strip-kind {
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--dim);
+    background: var(--recessed);
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* Activity readout */
+  .strip-activity {
+    flex: 1;
+    min-width: 0;
+    background: #2A2825;
+    color: #BFB9AE;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+    font-family: var(--font);
+  }
+
+  .strip-activity .highlight {
+    color: var(--coral);
+  }
+
+  /* File pills */
+  .strip-files {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+    overflow-x: auto;
+    max-width: 180px;
+    scrollbar-width: none;
+  }
+
+  .strip-files::-webkit-scrollbar { display: none; }
+
+  .file-pill {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--dim);
+    background: var(--recessed);
+    padding: 3px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* VU meter */
+  .strip-vu {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
+  .vu-seg {
+    width: 4px;
+    border-radius: 1px;
+    background: var(--recessed);
+    transition: background 0.3s;
+  }
+
+  .vu-seg.on-green { background: var(--led-green); }
+  .vu-seg.on-amber { background: var(--led-amber); }
+  .vu-seg.on-red { background: var(--led-red); }
+
+  /* Tags */
+  .strip-tags {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .tag-linear {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--blue);
+    background: rgba(59, 130, 246, 0.1);
+    padding: 3px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+  }
+
+  .tag-pr {
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--led-green);
+    background: rgba(34, 197, 94, 0.1);
+    padding: 3px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+  }
+
+  /* Strip actions */
+  .strip-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .btn-strip {
+    font-family: var(--font);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-focus {
+    background: var(--recessed);
+    color: var(--text);
+  }
+
+  .btn-focus:hover {
+    background: #CBC8C1;
+  }
+
+  .btn-kill {
+    background: transparent;
+    color: var(--led-red);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
+
+  .btn-kill:hover {
+    background: rgba(239, 68, 68, 0.08);
+  }
+
+  /* ---- Queue Section ---- */
+  .queue-section {
+    margin-top: 8px;
+  }
+
+  .queue-cards {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .queue-cards::-webkit-scrollbar { display: none; }
+
+  .queue-card {
+    flex-shrink: 0;
+    width: 260px;
+    padding: 14px 16px;
+    background: var(--panel);
+    border: 2px dashed var(--recessed);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .queue-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .queue-priority-led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .queue-priority-led.high {
+    background: var(--led-red);
+    box-shadow: 0 0 4px var(--led-red);
+  }
+
+  .queue-priority-led.medium {
+    background: var(--led-amber);
+    box-shadow: 0 0 4px var(--led-amber);
+  }
+
+  .queue-badge {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: var(--dim);
+    background: var(--recessed);
+    padding: 2px 7px;
+    border-radius: 3px;
+  }
+
+  .queue-priority-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-left: auto;
+  }
+
+  .queue-priority-label.high { color: var(--led-red); }
+  .queue-priority-label.medium { color: var(--led-amber); }
+
+  .queue-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.4;
+  }
+
+  .queue-meta {
+    font-size: 10px;
+    color: var(--dim);
+  }
+
+  .btn-dispatch {
+    font-family: var(--font);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 7px 0;
+    border-radius: 4px;
+    border: 1px solid var(--coral);
+    background: transparent;
+    color: var(--coral);
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+
+  .btn-dispatch:hover {
+    background: var(--coral);
+    color: white;
+  }
+</style>
+</head>
+<body>
+<div class="dashboard">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">Factory Floor</div>
+    <div class="header-status">System nominal -- 3 agents online</div>
+  </div>
+
+  <!-- Gauges Row -->
+  <div class="gauges-row">
+    <!-- Agents gauge: 3 of 4 = 75% -->
+    <div class="gauge-widget">
+      <div class="gauge-svg-wrap">
+        <svg viewBox="0 0 100 100">
+          <circle class="gauge-bg" cx="50" cy="50" r="40" />
+          <circle class="gauge-arc" cx="50" cy="50" r="40"
+            stroke="#F26D5B"
+            stroke-dasharray="251.3"
+            stroke-dashoffset="62.8" />
+        </svg>
+        <div class="gauge-value">3</div>
+      </div>
+      <div class="gauge-label">Agents</div>
+      <div class="gauge-sub">of 4 slots</div>
+    </div>
+
+    <!-- Files gauge: 8 of 10 = 80% -->
+    <div class="gauge-widget">
+      <div class="gauge-svg-wrap">
+        <svg viewBox="0 0 100 100">
+          <circle class="gauge-bg" cx="50" cy="50" r="40" />
+          <circle class="gauge-arc" cx="50" cy="50" r="40"
+            stroke="#22C55E"
+            stroke-dasharray="251.3"
+            stroke-dashoffset="50.3" />
+        </svg>
+        <div class="gauge-value">8</div>
+      </div>
+      <div class="gauge-label">Files</div>
+      <div class="gauge-sub">changed</div>
+    </div>
+
+    <!-- PRs gauge: 2 of 5 = 40% -->
+    <div class="gauge-widget">
+      <div class="gauge-svg-wrap">
+        <svg viewBox="0 0 100 100">
+          <circle class="gauge-bg" cx="50" cy="50" r="40" />
+          <circle class="gauge-arc" cx="50" cy="50" r="40"
+            stroke="#3B82F6"
+            stroke-dasharray="251.3"
+            stroke-dashoffset="150.8" />
+        </svg>
+        <div class="gauge-value">2</div>
+      </div>
+      <div class="gauge-label">PRs</div>
+      <div class="gauge-sub">open</div>
+    </div>
+
+    <!-- Queue gauge: 2 of 5 = 40% -->
+    <div class="gauge-widget">
+      <div class="gauge-svg-wrap">
+        <svg viewBox="0 0 100 100">
+          <circle class="gauge-bg" cx="50" cy="50" r="40" />
+          <circle class="gauge-arc" cx="50" cy="50" r="40"
+            stroke="#D4A72C"
+            stroke-dasharray="251.3"
+            stroke-dashoffset="150.8" />
+        </svg>
+        <div class="gauge-value">2</div>
+      </div>
+      <div class="gauge-label">Queue</div>
+      <div class="gauge-sub">pending</div>
+    </div>
+  </div>
+
+  <!-- Active Agents -->
+  <div class="section-header">
+    <span class="section-label">Active</span>
+    <span class="section-count">3</span>
+    <span class="section-line"></span>
+  </div>
+
+  <div class="agent-strips">
+    <!-- Agent 1: Claude -->
+    <div class="agent-strip">
+      <div class="strip-color-bar claude"></div>
+      <div class="strip-led green"></div>
+      <div class="strip-identity">
+        <div class="strip-avatar claude">CC</div>
+        <div>
+          <div class="strip-name">Claude</div>
+          <div class="strip-kind">Edit</div>
+        </div>
+      </div>
+      <div class="strip-activity">
+        Writing <span class="highlight">auth.ts</span> -- implementing OAuth refresh token rotation
+      </div>
+      <div class="strip-files">
+        <span class="file-pill">auth.ts</span>
+        <span class="file-pill">session.ts</span>
+        <span class="file-pill">types.ts</span>
+      </div>
+      <div class="strip-vu">
+        <div class="vu-seg on-green" style="height:6px"></div>
+        <div class="vu-seg on-green" style="height:9px"></div>
+        <div class="vu-seg on-green" style="height:13px"></div>
+        <div class="vu-seg on-green" style="height:16px"></div>
+        <div class="vu-seg on-amber" style="height:18px"></div>
+        <div class="vu-seg on-amber" style="height:15px"></div>
+        <div class="vu-seg" style="height:10px"></div>
+        <div class="vu-seg" style="height:6px"></div>
+      </div>
+      <div class="strip-tags">
+        <span class="tag-linear">SWM-142</span>
+        <span class="tag-pr">#87</span>
+      </div>
+      <div class="strip-actions">
+        <button class="btn-strip btn-focus">Focus</button>
+        <button class="btn-strip btn-kill">Kill</button>
+      </div>
+    </div>
+
+    <!-- Agent 2: Codex -->
+    <div class="agent-strip">
+      <div class="strip-color-bar codex"></div>
+      <div class="strip-led green"></div>
+      <div class="strip-identity">
+        <div class="strip-avatar codex">CX</div>
+        <div>
+          <div class="strip-name">Codex</div>
+          <div class="strip-kind">Edit</div>
+        </div>
+      </div>
+      <div class="strip-activity">
+        Running <span class="highlight">test suite</span> -- 14 of 22 passing
+      </div>
+      <div class="strip-files">
+        <span class="file-pill">api.test.ts</span>
+        <span class="file-pill">handler.ts</span>
+      </div>
+      <div class="strip-vu">
+        <div class="vu-seg on-green" style="height:5px"></div>
+        <div class="vu-seg on-green" style="height:8px"></div>
+        <div class="vu-seg on-green" style="height:12px"></div>
+        <div class="vu-seg on-amber" style="height:14px"></div>
+        <div class="vu-seg on-amber" style="height:11px"></div>
+        <div class="vu-seg" style="height:8px"></div>
+        <div class="vu-seg" style="height:5px"></div>
+        <div class="vu-seg" style="height:3px"></div>
+      </div>
+      <div class="strip-tags">
+        <span class="tag-linear">SWM-156</span>
+      </div>
+      <div class="strip-actions">
+        <button class="btn-strip btn-focus">Focus</button>
+        <button class="btn-strip btn-kill">Kill</button>
+      </div>
+    </div>
+
+    <!-- Agent 3: Gemini -->
+    <div class="agent-strip">
+      <div class="strip-color-bar gemini"></div>
+      <div class="strip-led green"></div>
+      <div class="strip-identity">
+        <div class="strip-avatar gemini">GX</div>
+        <div>
+          <div class="strip-name">Gemini</div>
+          <div class="strip-kind">Plan</div>
+        </div>
+      </div>
+      <div class="strip-activity">
+        Analyzing <span class="highlight">migration plan</span> -- mapping database schema dependencies
+      </div>
+      <div class="strip-files">
+        <span class="file-pill">schema.sql</span>
+        <span class="file-pill">migrate.ts</span>
+        <span class="file-pill">models.ts</span>
+      </div>
+      <div class="strip-vu">
+        <div class="vu-seg on-green" style="height:4px"></div>
+        <div class="vu-seg on-green" style="height:7px"></div>
+        <div class="vu-seg on-green" style="height:10px"></div>
+        <div class="vu-seg on-green" style="height:13px"></div>
+        <div class="vu-seg on-green" style="height:17px"></div>
+        <div class="vu-seg on-amber" style="height:20px"></div>
+        <div class="vu-seg on-red" style="height:18px"></div>
+        <div class="vu-seg" style="height:8px"></div>
+      </div>
+      <div class="strip-tags">
+        <span class="tag-linear">SWM-161</span>
+        <span class="tag-pr">#91</span>
+      </div>
+      <div class="strip-actions">
+        <button class="btn-strip btn-focus">Focus</button>
+        <button class="btn-strip btn-kill">Kill</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recent Agents -->
+  <div class="section-header">
+    <span class="section-label">Recent</span>
+    <span class="section-count">2</span>
+    <span class="section-line"></span>
+  </div>
+
+  <div class="agent-strips">
+    <!-- Recent 1: Cursor - completed -->
+    <div class="agent-strip dimmed">
+      <div class="strip-color-bar cursor"></div>
+      <div class="strip-led gray"></div>
+      <div class="strip-identity">
+        <div class="strip-avatar cursor">CR</div>
+        <div>
+          <div class="strip-name">Cursor</div>
+          <div class="strip-kind">Edit</div>
+        </div>
+      </div>
+      <div class="strip-activity">
+        Completed -- fixed race condition in websocket reconnect
+      </div>
+      <div class="strip-files">
+        <span class="file-pill">ws.ts</span>
+        <span class="file-pill">reconnect.ts</span>
+      </div>
+      <div class="strip-vu">
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+      </div>
+      <div class="strip-tags">
+        <span class="tag-linear">SWM-139</span>
+        <span class="tag-pr">#85</span>
+      </div>
+      <div class="strip-actions">
+        <button class="btn-strip btn-focus">Focus</button>
+      </div>
+    </div>
+
+    <!-- Recent 2: Codex - failed -->
+    <div class="agent-strip dimmed">
+      <div class="strip-color-bar codex"></div>
+      <div class="strip-led red"></div>
+      <div class="strip-identity">
+        <div class="strip-avatar codex">CX</div>
+        <div>
+          <div class="strip-name">Codex</div>
+          <div class="strip-kind">Edit</div>
+        </div>
+      </div>
+      <div class="strip-activity">
+        Failed -- timeout after 5 minutes on lint step
+      </div>
+      <div class="strip-files">
+        <span class="file-pill">config.ts</span>
+      </div>
+      <div class="strip-vu">
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+        <div class="vu-seg" style="height:4px"></div>
+      </div>
+      <div class="strip-tags">
+        <span class="tag-linear">SWM-148</span>
+      </div>
+      <div class="strip-actions">
+        <button class="btn-strip btn-focus">Focus</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dispatch Queue -->
+  <div class="queue-section">
+    <div class="section-header">
+      <span class="section-label">Dispatch Queue</span>
+      <span class="section-count">2</span>
+      <span class="section-line"></span>
+    </div>
+
+    <div class="queue-cards">
+      <!-- Queue card 1 -->
+      <div class="queue-card">
+        <div class="queue-card-header">
+          <div class="queue-priority-led high"></div>
+          <span class="queue-badge">RUSH-204</span>
+          <span class="queue-priority-label high">High</span>
+        </div>
+        <div class="queue-title">Add rate limiting to public API endpoints</div>
+        <div class="queue-meta">Estimated 20 minutes -- assigned to Claude pool</div>
+        <button class="btn-dispatch">Dispatch</button>
+      </div>
+
+      <!-- Queue card 2 -->
+      <div class="queue-card">
+        <div class="queue-card-header">
+          <div class="queue-priority-led medium"></div>
+          <span class="queue-badge">RUSH-211</span>
+          <span class="queue-priority-label medium">Medium</span>
+        </div>
+        <div class="queue-title">Migrate user preferences to new schema format</div>
+        <div class="queue-meta">Estimated 15 minutes -- assigned to Codex pool</div>
+        <button class="btn-dispatch">Dispatch</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

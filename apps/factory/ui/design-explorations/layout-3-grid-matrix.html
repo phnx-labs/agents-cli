@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Factory Floor - Grid Matrix</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #E8E6E1;
+    --panel: #F0EEEA;
+    --recessed: #D8D5CF;
+    --coral: #F26D5B;
+    --text: #1C1917;
+    --dim: #78716C;
+    --led-green: #22C55E;
+    --led-red: #EF4444;
+    --led-amber: #D4A72C;
+    --led-gray: #6B7280;
+    --readout-bg: #1C1917;
+    --readout-text: #A8A29E;
+    --codex-color: #292524;
+    --gemini-color: #3B82F6;
+    --claude-color: #F26D5B;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', 'Menlo', 'Monaco', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-y: auto;
+  }
+
+  .viewport {
+    max-width: 1400px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  /* ── HEADER BAR ── */
+  .header {
+    background: var(--panel);
+    border: 1px solid #CCC9C2;
+    border-bottom: 2px solid #B8B5AE;
+    border-radius: 6px;
+    padding: 12px 20px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.7),
+      0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .header-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .header-counts {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .count-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--dim);
+    font-weight: 500;
+  }
+
+  .count-badge .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .count-badge .dot.green { background: var(--led-green); box-shadow: 0 0 4px var(--led-green); }
+  .count-badge .dot.amber { background: var(--led-amber); box-shadow: 0 0 4px var(--led-amber); }
+  .count-badge .dot.gray  { background: var(--led-gray); }
+
+  .header-filters {
+    display: flex;
+    gap: 6px;
+  }
+
+  .filter-btn {
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border: 1px solid #CCC9C2;
+    border-radius: 4px;
+    background: var(--panel);
+    color: var(--dim);
+    cursor: pointer;
+    transition: all 0.15s;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.5),
+      0 1px 2px rgba(0,0,0,0.06);
+  }
+
+  .filter-btn:hover { color: var(--text); border-color: #AAA7A0; }
+
+  .filter-btn.active {
+    background: var(--coral);
+    color: #fff;
+    border-color: #D95A49;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.15),
+      0 1px 2px rgba(0,0,0,0.1);
+  }
+
+  /* ── GRID ── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+
+  @media (max-width: 980px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* ── CARD BASE ── */
+  .card {
+    background: var(--panel);
+    border: 1px solid #CCC9C2;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.7),
+      0 1px 3px rgba(0,0,0,0.08);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── RUNNING CARD ── */
+  .card.running {
+    border-left: 4px solid var(--claude-color);
+  }
+
+  .card.running.agent-codex  { border-left-color: var(--codex-color); }
+  .card.running.agent-gemini { border-left-color: var(--gemini-color); }
+
+  .card-inner {
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Card Top Row */
+  .card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .card-top-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .agent-name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .kind-badge {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--recessed);
+    color: var(--dim);
+    border: 1px solid #CCC9C2;
+  }
+
+  .duration {
+    font-size: 11px;
+    color: var(--dim);
+    font-weight: 500;
+  }
+
+  /* Status Row */
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .led.green {
+    background: var(--led-green);
+    box-shadow: 0 0 6px var(--led-green);
+    animation: pulse-green 2s ease-in-out infinite;
+  }
+
+  .led.red {
+    background: var(--led-red);
+    box-shadow: 0 0 6px var(--led-red);
+  }
+
+  .led.amber {
+    background: var(--led-amber);
+    box-shadow: 0 0 6px var(--led-amber);
+  }
+
+  .led.gray {
+    background: var(--led-gray);
+  }
+
+  @keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 4px var(--led-green); opacity: 1; }
+    50%      { box-shadow: 0 0 10px var(--led-green); opacity: 0.85; }
+  }
+
+  .status-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  /* Readout Strip */
+  .readout {
+    background: var(--readout-bg);
+    color: var(--readout-text);
+    font-size: 11px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border: 1px solid #0C0A09;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Section Label */
+  .section-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 4px;
+  }
+
+  /* File Manifest */
+  .file-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .file-pill {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--recessed);
+    color: var(--dim);
+    border: 1px solid #C5C2BB;
+  }
+
+  /* Metrics / VU Meter */
+  .vu-meter-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .vu-track {
+    flex: 1;
+    height: 6px;
+    background: var(--recessed);
+    border-radius: 3px;
+    border: 1px solid #C5C2BB;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+    overflow: hidden;
+  }
+
+  .vu-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--led-green), var(--led-amber));
+    transition: width 0.3s;
+  }
+
+  .vu-count {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    min-width: 50px;
+    text-align: right;
+  }
+
+  /* Links Row */
+  .links-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .link-tag {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--coral);
+    text-decoration: none;
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid rgba(242,109,91,0.3);
+    background: rgba(242,109,91,0.06);
+    cursor: pointer;
+  }
+
+  .link-tag:hover {
+    background: rgba(242,109,91,0.12);
+  }
+
+  .env-badge {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--recessed);
+    color: var(--dim);
+    border: 1px solid #C5C2BB;
+  }
+
+  /* Action Buttons */
+  .card-actions {
+    display: flex;
+    gap: 6px;
+    padding-top: 4px;
+    border-top: 1px solid #DDD9D3;
+    margin-top: 2px;
+  }
+
+  .btn {
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    border: 1px solid #CCC9C2;
+  }
+
+  .btn-default {
+    background: var(--panel);
+    color: var(--dim);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.5),
+      0 1px 2px rgba(0,0,0,0.06);
+  }
+  .btn-default:hover { color: var(--text); border-color: #AAA7A0; }
+
+  .btn-danger {
+    background: var(--panel);
+    color: var(--led-red);
+    border-color: rgba(239,68,68,0.3);
+  }
+  .btn-danger:hover {
+    background: rgba(239,68,68,0.06);
+    border-color: rgba(239,68,68,0.5);
+  }
+
+  .btn-primary {
+    background: var(--coral);
+    color: #fff;
+    border-color: #D95A49;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.15),
+      0 1px 2px rgba(0,0,0,0.1);
+  }
+  .btn-primary:hover {
+    background: #E5604E;
+  }
+
+  /* ── QUEUE CARD ── */
+  .card.queued {
+    border: 2px dashed #B8B5AE;
+    background: var(--panel);
+  }
+
+  .queue-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .task-id-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    border-radius: 3px;
+    background: var(--readout-bg);
+    color: var(--readout-text);
+  }
+
+  .priority-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--led-red);
+  }
+
+  .queue-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.4;
+  }
+
+  .queue-desc {
+    font-size: 11px;
+    color: var(--dim);
+    line-height: 1.4;
+  }
+
+  .agent-picker {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .agent-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #fff;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.15s;
+  }
+
+  .agent-avatar:hover {
+    border-color: var(--text);
+    transform: scale(1.1);
+  }
+
+  .agent-avatar.claude  { background: var(--claude-color); }
+  .agent-avatar.codex   { background: var(--codex-color); }
+  .agent-avatar.gemini  { background: var(--gemini-color); }
+
+  .queue-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 4px;
+    border-top: 1px solid #DDD9D3;
+    margin-top: 2px;
+  }
+
+  /* ── COMPLETED / FAILED CARD ── */
+  .card.completed,
+  .card.failed {
+    opacity: 0.6;
+  }
+
+  .card.completed {
+    border-left: 4px solid var(--led-green);
+  }
+
+  .card.failed {
+    border-left: 4px solid var(--led-red);
+  }
+
+  .result-indicator {
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .result-indicator.success { color: var(--led-green); }
+  .result-indicator.failure { color: var(--led-red); }
+
+  .done-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    color: var(--dim);
+  }
+
+  .done-meta .strikethrough {
+    text-decoration: line-through;
+    color: #A8A29E;
+  }
+
+  .done-links {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+</style>
+</head>
+<body>
+<div class="viewport">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="header-title">Factory Floor</div>
+      <div class="header-counts">
+        <span class="count-badge"><span class="dot green"></span> 3 running</span>
+        <span class="count-badge"><span class="dot amber"></span> 2 queued</span>
+        <span class="count-badge"><span class="dot gray"></span> 2 done</span>
+      </div>
+    </div>
+    <div class="header-filters">
+      <button class="filter-btn active">All</button>
+      <button class="filter-btn">Running</button>
+      <button class="filter-btn">Queue</button>
+      <button class="filter-btn">Done</button>
+      <button class="filter-btn">Claude</button>
+      <button class="filter-btn">Codex</button>
+      <button class="filter-btn">Gemini</button>
+    </div>
+  </div>
+
+  <!-- GRID -->
+  <div class="grid">
+
+    <!-- RUNNING: Claude a1b2c3d4 -->
+    <div class="card running">
+      <div class="card-inner">
+        <div class="card-top">
+          <div class="card-top-left">
+            <span class="agent-name">Claude a1b2c3d4</span>
+            <span class="kind-badge">terminal</span>
+          </div>
+          <span class="duration">14m</span>
+        </div>
+
+        <div class="status-row">
+          <span class="led green"></span>
+          <span class="status-label">Running</span>
+        </div>
+
+        <div class="readout">$ bun test --watch</div>
+
+        <div>
+          <div class="section-label">File Manifest</div>
+          <div class="file-pills">
+            <span class="file-pill">auth.ts</span>
+            <span class="file-pill">index.ts</span>
+            <span class="file-pill">router.ts</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-label">Tool Calls</div>
+          <div class="vu-meter-row">
+            <div class="vu-track"><div class="vu-fill" style="width: 60%"></div></div>
+            <span class="vu-count">6 calls</span>
+          </div>
+        </div>
+
+        <div class="links-row">
+          <a class="link-tag">RUSH-361</a>
+          <a class="link-tag">PR #47</a>
+        </div>
+
+        <div class="card-actions">
+          <button class="btn btn-default">Focus</button>
+          <button class="btn btn-danger">Kill</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RUNNING: Codex e5f6g7h8 -->
+    <div class="card running agent-codex">
+      <div class="card-inner">
+        <div class="card-top">
+          <div class="card-top-left">
+            <span class="agent-name">Codex e5f6g7h8</span>
+            <span class="kind-badge">cloud</span>
+          </div>
+          <span class="duration">8m</span>
+        </div>
+
+        <div class="status-row">
+          <span class="led green"></span>
+          <span class="status-label">Running</span>
+        </div>
+
+        <div class="readout">Editing auth.ts</div>
+
+        <div>
+          <div class="section-label">File Manifest</div>
+          <div class="file-pills">
+            <span class="file-pill">router.ts</span>
+            <span class="file-pill">types.ts</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-label">Tool Calls</div>
+          <div class="vu-meter-row">
+            <div class="vu-track"><div class="vu-fill" style="width: 40%"></div></div>
+            <span class="vu-count">4 calls</span>
+          </div>
+        </div>
+
+        <div class="links-row">
+          <a class="link-tag">RUSH-362</a>
+        </div>
+
+        <div class="card-actions">
+          <button class="btn btn-default">Focus</button>
+          <button class="btn btn-danger">Kill</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RUNNING: Claude j9k0l1m2 -->
+    <div class="card running">
+      <div class="card-inner">
+        <div class="card-top">
+          <div class="card-top-left">
+            <span class="agent-name">Claude j9k0l1m2</span>
+            <span class="kind-badge">team</span>
+          </div>
+          <span class="duration">3m</span>
+        </div>
+
+        <div class="status-row">
+          <span class="led green"></span>
+          <span class="status-label">Running</span>
+        </div>
+
+        <div class="readout">Reading package.json</div>
+
+        <div>
+          <div class="section-label">File Manifest</div>
+          <div class="file-pills">
+            <span class="file-pill">deps.ts</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-label">Tool Calls</div>
+          <div class="vu-meter-row">
+            <div class="vu-track"><div class="vu-fill" style="width: 20%"></div></div>
+            <span class="vu-count">2 calls</span>
+          </div>
+        </div>
+
+        <div class="card-actions">
+          <button class="btn btn-default">Focus</button>
+          <button class="btn btn-danger">Kill</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUEUE: RUSH-361 -->
+    <div class="card queued">
+      <div class="card-inner">
+        <div class="queue-top">
+          <span class="led red"></span>
+          <span class="task-id-badge">RUSH-361</span>
+          <span class="priority-label">Urgent</span>
+        </div>
+
+        <div class="queue-title">Restaurant picker agent</div>
+
+        <div class="queue-desc">Build an agent that recommends restaurants based on preferences, location, and group size.</div>
+
+        <div class="queue-actions">
+          <div class="agent-picker">
+            <div class="section-label" style="margin-bottom: 0; margin-right: 4px">Assign</div>
+            <span class="agent-avatar claude">CC</span>
+            <span class="agent-avatar codex">CX</span>
+            <span class="agent-avatar gemini">GX</span>
+          </div>
+          <button class="btn btn-primary">Dispatch</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QUEUE: RUSH-362 -->
+    <div class="card queued">
+      <div class="card-inner">
+        <div class="queue-top">
+          <span class="led red"></span>
+          <span class="task-id-badge">RUSH-362</span>
+          <span class="priority-label">Urgent</span>
+        </div>
+
+        <div class="queue-title">Trip mode agent</div>
+
+        <div class="queue-desc">Create an agent that handles multi-day trip planning with itinerary generation and booking coordination.</div>
+
+        <div class="queue-actions">
+          <div class="agent-picker">
+            <div class="section-label" style="margin-bottom: 0; margin-right: 4px">Assign</div>
+            <span class="agent-avatar claude">CC</span>
+            <span class="agent-avatar codex">CX</span>
+            <span class="agent-avatar gemini">GX</span>
+          </div>
+          <button class="btn btn-primary">Dispatch</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMPLETED: Gemini n3o4p5q6 -->
+    <div class="card completed">
+      <div class="card-inner">
+        <div class="card-top">
+          <div class="card-top-left">
+            <span class="result-indicator success">[DONE]</span>
+            <span class="agent-name">Gemini n3o4p5q6</span>
+          </div>
+          <span class="duration">23m</span>
+        </div>
+
+        <div class="status-row">
+          <span class="led gray"></span>
+          <span class="status-label">Completed</span>
+        </div>
+
+        <div class="done-meta">
+          <span class="strikethrough">3 files</span>
+          <span>12 tool calls</span>
+        </div>
+
+        <div class="done-links">
+          <a class="link-tag">PR #45</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- FAILED: Claude r7s8t9u0 -->
+    <div class="card failed">
+      <div class="card-inner">
+        <div class="card-top">
+          <div class="card-top-left">
+            <span class="result-indicator failure">[FAIL]</span>
+            <span class="agent-name">Claude r7s8t9u0</span>
+          </div>
+          <span class="duration">7m</span>
+        </div>
+
+        <div class="status-row">
+          <span class="led gray"></span>
+          <span class="status-label">Failed</span>
+        </div>
+
+        <div class="done-meta">
+          <span class="strikethrough">1 file</span>
+          <span>3 tool calls</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

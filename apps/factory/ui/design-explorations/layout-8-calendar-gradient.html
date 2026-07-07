@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Layout 8 — Calendar gradient (created → due → today)</title>
+<style>
+  /* Tokens from extension/ui/settings/components/mission-control/design-system.css */
+  :root {
+    --brand: #a3e635;
+    --brand-600: #84cc16;
+    --brand-700: #65a30d;
+    --brand-ring: rgba(163,230,53,0.45);
+    --led-failed: #EF4444;
+    --led-failed-glow: rgba(239,68,68,0.5);
+    --status-running-bg: rgba(34,197,94,0.1);
+    --led-running: #22C55E;
+    --r-md: 6px;
+
+    --ds-bg: #0a0a0a;
+    --ds-bg-panel: #141414;
+    --ds-bg-sunken: #050505;
+    --ds-bg-recessed: #0f0f0f;
+    --ds-border: rgba(255,255,255,0.08);
+    --ds-bevel-light: rgba(255,255,255,0.06);
+    --ds-bevel-dark: rgba(0,0,0,0.6);
+    --ds-text: #E7E5E4;
+    --ds-text-muted: #A8A29E;
+    --ds-text-dim: #6E6A63;
+    --ds-text-faint: #44403C;
+    --shadow-emboss: inset 0 1px 0 var(--ds-bevel-light), inset 0 -1px 0 var(--ds-bevel-dark);
+
+    --stale-rotten: #EF4444;
+    --stale-rotten-glow: rgba(239,68,68,0.35);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    background: var(--ds-bg);
+    color: var(--ds-text);
+    font-family: Geist, -apple-system, system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    min-height: 100vh;
+  }
+  body { padding: 24px 32px 64px; max-width: 1480px; margin: 0 auto; }
+
+  h1 {
+    font-family: "Geist Mono", "SF Mono", Menlo, monospace;
+    font-size: 13px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ds-text-muted);
+    margin-bottom: 4px;
+  }
+  .subtitle { color: var(--ds-text-dim); font-size: 12px; margin-bottom: 28px; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 28px;
+    margin-bottom: 36px;
+  }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+
+  .variant {
+    background: var(--ds-bg-panel);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--r-md);
+    padding: 16px;
+    box-shadow: var(--shadow-emboss);
+  }
+  .variant h2 {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--brand);
+    margin-bottom: 4px;
+  }
+  .variant p.note {
+    font-size: 11.5px; color: var(--ds-text-dim);
+    margin-bottom: 14px; line-height: 1.5;
+  }
+  .calendars { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .case {
+    background: var(--ds-bg-sunken);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--r-md);
+    padding: 12px;
+  }
+  .case-label {
+    font-family: "Geist Mono", monospace;
+    font-size: 9.5px; letter-spacing: 0.08em;
+    color: var(--ds-text-dim); text-transform: uppercase;
+    margin-bottom: 6px;
+    display: flex; justify-content: space-between;
+  }
+  .case-label .meta { color: var(--ds-text-faint); }
+  .case-label .meta.bad { color: var(--stale-rotten); }
+
+  /* ==== Calendar — verbatim base from bench.css ==== */
+  .sw-panel-section-head {
+    font-family: "Geist Mono", monospace;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--ds-text-dim); text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .sw-calendar-header { display: flex; align-items: center; margin-bottom: 4px; }
+  .sw-calendar-month {
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px; color: var(--ds-text);
+  }
+  .sw-calendar-weekdays {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
+    font-family: "Geist Mono", monospace;
+    font-size: 9px; color: var(--ds-text-faint);
+    text-align: center; text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+  .sw-calendar-grid {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
+    position: relative;
+  }
+  .sw-calendar-day {
+    font-family: "Geist Mono", monospace;
+    font-size: 10px; text-align: center;
+    padding: 4px 2px; border-radius: 3px;
+    color: var(--ds-text-muted);
+    position: relative; z-index: 1;
+  }
+  .sw-calendar-day.other-month { color: var(--ds-text-faint); opacity: 0.35; }
+  .sw-calendar-day.in-cycle { background: rgba(34,197,94,0.06); }
+  .sw-calendar-day.today {
+    outline: 1.5px solid var(--ds-text-dim);
+    outline-offset: -1px; font-weight: 700; color: var(--ds-text);
+  }
+
+  /* ==== A · Per-cell discrete fade ==== */
+  /* Each span cell uses opacity-on-green for the work window. */
+  .va .sw-calendar-day.created {
+    background: var(--brand);
+    color: #0a0a0a;
+    font-weight: 800;
+    box-shadow: 0 0 6px var(--brand-ring);
+  }
+  .va .sw-calendar-day.in-span {
+    background: rgba(163,230,53, calc(0.30 * var(--t, 1)));
+    color: var(--ds-text);
+  }
+  .va .sw-calendar-day.due {
+    background: rgba(163,230,53, 0.18);
+    color: var(--brand);
+    font-weight: 700;
+    box-shadow: 0 0 0 1.5px var(--brand), 0 0 8px var(--brand-ring);
+  }
+  .va .sw-calendar-day.in-overdue {
+    background: rgba(239,68,68, calc(0.20 + 0.40 * var(--t, 1)));
+    color: #fff;
+  }
+  .va .sw-calendar-day.due.overdue {
+    background: rgba(239,68,68, 0.20);
+    color: var(--stale-rotten);
+    box-shadow: 0 0 0 1.5px var(--stale-rotten), 0 0 6px var(--stale-rotten-glow);
+  }
+  .va .sw-calendar-day.today.overdue {
+    outline-color: var(--stale-rotten);
+    color: var(--stale-rotten);
+    box-shadow: 0 0 8px var(--stale-rotten-glow);
+  }
+
+  /* ==== B · Continuous bar UNDER the cells ==== */
+  /* The actual day cells stay neutral. A horizontal bar runs behind the row. */
+  .vb .week-row { position: relative; }
+  .vb .span-bar {
+    position: absolute; left: 0; right: 0; top: 50%;
+    height: 18px; transform: translateY(-50%);
+    border-radius: 9px;
+    pointer-events: none; z-index: 0;
+    opacity: 0.55;
+  }
+  .vb .sw-calendar-day { background: transparent !important; }
+  .vb .sw-calendar-day.created {
+    color: #0a0a0a; font-weight: 800;
+    background: var(--brand) !important;
+    box-shadow: 0 0 6px var(--brand-ring);
+    z-index: 2;
+  }
+  .vb .sw-calendar-day.due {
+    color: var(--brand); font-weight: 700;
+    box-shadow: 0 0 0 1.5px var(--brand), 0 0 8px var(--brand-ring);
+    background: var(--ds-bg-sunken) !important;
+    z-index: 2;
+  }
+  .vb .sw-calendar-day.due.overdue {
+    color: var(--stale-rotten);
+    box-shadow: 0 0 0 1.5px var(--stale-rotten), 0 0 6px var(--stale-rotten-glow);
+  }
+
+  /* ==== C · Wrapped span "box" ==== */
+  /* A pill outline encloses created→due. If overdue, a red pill encloses due→today. */
+  .vc .span-outline {
+    position: absolute; top: 1px; bottom: 1px;
+    border-radius: 14px;
+    border: 1.5px solid rgba(163,230,53, 0.55);
+    background: linear-gradient(90deg, rgba(163,230,53,0.28), rgba(163,230,53,0.04));
+    pointer-events: none; z-index: 0;
+  }
+  .vc .span-outline.overdue {
+    border-color: rgba(239,68,68, 0.6);
+    background: linear-gradient(90deg, rgba(239,68,68,0.04), rgba(239,68,68,0.35));
+    box-shadow: 0 0 8px var(--stale-rotten-glow);
+  }
+  .vc .week-row { position: relative; }
+  .vc .sw-calendar-day { background: transparent !important; }
+  .vc .sw-calendar-day.created {
+    color: #0a0a0a; font-weight: 800;
+    background: var(--brand) !important;
+    z-index: 2;
+  }
+  .vc .sw-calendar-day.due {
+    color: var(--brand); font-weight: 700;
+    box-shadow: 0 0 0 1.5px var(--brand);
+    z-index: 2;
+  }
+  .vc .sw-calendar-day.due.overdue {
+    color: var(--stale-rotten);
+    box-shadow: 0 0 0 1.5px var(--stale-rotten);
+  }
+
+  /* ==== D · Combined (recommended) ==== */
+  /* Per-cell fade + bright endpoints + today outline + red overflow when overdue.
+     Same data model as A but with the visual polish from B/C. */
+  .vd .sw-calendar-day.created {
+    background: var(--brand);
+    color: #0a0a0a;
+    font-weight: 800;
+    box-shadow: 0 0 8px var(--brand-ring);
+  }
+  .vd .sw-calendar-day.in-span {
+    background: rgba(163,230,53, calc(0.06 + 0.22 * var(--t, 1)));
+    color: var(--ds-text);
+  }
+  .vd .sw-calendar-day.in-span.other-month {
+    background: rgba(163,230,53, calc(0.06 + 0.10 * var(--t, 1)));
+  }
+  .vd .sw-calendar-day.due {
+    background: rgba(163,230,53, 0.12);
+    color: var(--brand);
+    font-weight: 700;
+    box-shadow: 0 0 0 2px var(--brand), 0 0 10px var(--brand-ring);
+  }
+  .vd .sw-calendar-day.due.overdue {
+    background: rgba(239,68,68, 0.18);
+    color: var(--stale-rotten);
+    box-shadow: 0 0 0 2px var(--stale-rotten), 0 0 10px var(--stale-rotten-glow);
+  }
+  .vd .sw-calendar-day.in-overdue {
+    background: rgba(239,68,68, calc(0.12 + 0.42 * var(--t, 1)));
+    color: #fff;
+  }
+  .vd .sw-calendar-day.today.overdue {
+    outline-color: var(--stale-rotten);
+    color: var(--stale-rotten);
+    background: rgba(239,68,68, 0.55);
+    box-shadow: 0 0 0 1.5px var(--stale-rotten), 0 0 12px var(--stale-rotten-glow);
+  }
+
+  /* Legend */
+  .legend {
+    margin-top: 12px;
+    display: flex; gap: 14px; flex-wrap: wrap;
+    font-family: "Geist Mono", monospace;
+    font-size: 9px; color: var(--ds-text-dim);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .legend .item { display: inline-flex; align-items: center; gap: 5px; }
+  .swatch { width: 9px; height: 9px; border-radius: 2px; }
+  .swatch.created { background: var(--brand); }
+  .swatch.span {
+    background: linear-gradient(90deg, rgba(163,230,53,0.4), rgba(163,230,53,0.08));
+  }
+  .swatch.due { background: rgba(163,230,53,0.18); box-shadow: 0 0 0 1.5px var(--brand); }
+  .swatch.overdue { background: linear-gradient(90deg, rgba(239,68,68,0.08), rgba(239,68,68,0.5)); }
+  .swatch.due-od { background: rgba(239,68,68,0.18); box-shadow: 0 0 0 1.5px var(--stale-rotten); }
+  .swatch.today { background: transparent; outline: 1.5px solid var(--ds-text-dim); outline-offset: -1px; }
+</style>
+</head>
+<body>
+  <h1>Layout 8 — Calendar gradient</h1>
+  <p class="subtitle">
+    Same scenario in every cell: Created May 4 · Due May 18 · Today is either May 12 (upcoming)
+    or May 26 (overdue 8d). Four ways to paint the work window + overdue burn-down.
+  </p>
+
+  <div class="grid">
+
+    <!-- ============ A · Per-cell discrete fade ============ -->
+    <section class="variant va">
+      <h2>A · Per-cell fade</h2>
+      <p class="note">
+        Each cell in the window gets its own opacity from neon green (created)
+        down to a faint tint (due−1). Due cell has a bright ring. Overdue days
+        ramp from soft red to vivid red as they approach today.
+      </p>
+      <div class="calendars">
+
+        <div class="case">
+          <div class="case-label"><span>Upcoming</span><span class="meta">May 12 · due in 6d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day in-span" style="--t:0.93">5</span>
+            <span class="sw-calendar-day in-span" style="--t:0.86">6</span>
+            <span class="sw-calendar-day in-span" style="--t:0.79">7</span>
+            <span class="sw-calendar-day in-span" style="--t:0.71">8</span>
+            <span class="sw-calendar-day in-span" style="--t:0.64">9</span>
+            <span class="sw-calendar-day in-span" style="--t:0.57">10</span>
+
+            <span class="sw-calendar-day in-span" style="--t:0.50">11</span>
+            <span class="sw-calendar-day in-span today" style="--t:0.43">12</span>
+            <span class="sw-calendar-day in-span" style="--t:0.36">13</span>
+            <span class="sw-calendar-day in-span" style="--t:0.28">14</span>
+            <span class="sw-calendar-day in-span" style="--t:0.21">15</span>
+            <span class="sw-calendar-day in-span" style="--t:0.14">16</span>
+            <span class="sw-calendar-day in-span" style="--t:0.07">17</span>
+
+            <span class="sw-calendar-day due">18</span>
+            <span class="sw-calendar-day">19</span>
+            <span class="sw-calendar-day">20</span>
+            <span class="sw-calendar-day">21</span>
+            <span class="sw-calendar-day">22</span>
+            <span class="sw-calendar-day">23</span>
+            <span class="sw-calendar-day">24</span>
+
+            <span class="sw-calendar-day">25</span>
+            <span class="sw-calendar-day">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+        <div class="case">
+          <div class="case-label"><span>Overdue</span><span class="meta bad">May 26 · overdue 8d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day in-span" style="--t:0.93">5</span>
+            <span class="sw-calendar-day in-span" style="--t:0.86">6</span>
+            <span class="sw-calendar-day in-span" style="--t:0.79">7</span>
+            <span class="sw-calendar-day in-span" style="--t:0.71">8</span>
+            <span class="sw-calendar-day in-span" style="--t:0.64">9</span>
+            <span class="sw-calendar-day in-span" style="--t:0.57">10</span>
+
+            <span class="sw-calendar-day in-span" style="--t:0.50">11</span>
+            <span class="sw-calendar-day in-span" style="--t:0.43">12</span>
+            <span class="sw-calendar-day in-span" style="--t:0.36">13</span>
+            <span class="sw-calendar-day in-span" style="--t:0.28">14</span>
+            <span class="sw-calendar-day in-span" style="--t:0.21">15</span>
+            <span class="sw-calendar-day in-span" style="--t:0.14">16</span>
+            <span class="sw-calendar-day in-span" style="--t:0.07">17</span>
+
+            <span class="sw-calendar-day due overdue">18</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.15">19</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.30">20</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.45">21</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.60">22</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.75">23</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.85">24</span>
+
+            <span class="sw-calendar-day in-overdue" style="--t:0.92">25</span>
+            <span class="sw-calendar-day in-overdue today overdue" style="--t:1.0">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+      </div>
+      <div class="legend">
+        <span class="item"><span class="swatch created"></span>Created</span>
+        <span class="item"><span class="swatch span"></span>Work window</span>
+        <span class="item"><span class="swatch due"></span>Due</span>
+        <span class="item"><span class="swatch overdue"></span>Overdue ramp</span>
+        <span class="item"><span class="swatch today"></span>Today</span>
+      </div>
+    </section>
+
+    <!-- ============ B · Continuous bar under cells ============ -->
+    <section class="variant vb">
+      <h2>B · Continuous bar</h2>
+      <p class="note">
+        A gradient bar runs <em>behind</em> the day row. Day cells stay neutral
+        so the numbers are readable; the green→fade and red→intense bars carry
+        the meaning. Closest to a Gantt strip.
+      </p>
+      <div class="calendars">
+
+        <div class="case">
+          <div class="case-label"><span>Upcoming</span><span class="meta">May 12 · due in 6d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-bar" style="left: 0%; right: 0%; background: linear-gradient(90deg, var(--brand), rgba(163,230,53,0.10));"></span>
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day">5</span>
+            <span class="sw-calendar-day">6</span>
+            <span class="sw-calendar-day">7</span>
+            <span class="sw-calendar-day">8</span>
+            <span class="sw-calendar-day">9</span>
+            <span class="sw-calendar-day">10</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-bar" style="left: 0%; right: 0%; background: linear-gradient(90deg, rgba(163,230,53,0.08), rgba(163,230,53,0.02));"></span>
+            <span class="sw-calendar-day">11</span>
+            <span class="sw-calendar-day today">12</span>
+            <span class="sw-calendar-day">13</span>
+            <span class="sw-calendar-day">14</span>
+            <span class="sw-calendar-day">15</span>
+            <span class="sw-calendar-day">16</span>
+            <span class="sw-calendar-day">17</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-bar" style="left: 0%; right: 86%; background: rgba(163,230,53,0.02);"></span>
+            <span class="sw-calendar-day due">18</span>
+            <span class="sw-calendar-day">19</span>
+            <span class="sw-calendar-day">20</span>
+            <span class="sw-calendar-day">21</span>
+            <span class="sw-calendar-day">22</span>
+            <span class="sw-calendar-day">23</span>
+            <span class="sw-calendar-day">24</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day">25</span>
+            <span class="sw-calendar-day">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+        <div class="case">
+          <div class="case-label"><span>Overdue</span><span class="meta bad">May 26 · overdue 8d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-bar" style="background: linear-gradient(90deg, var(--brand), rgba(163,230,53,0.10));"></span>
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day">5</span>
+            <span class="sw-calendar-day">6</span>
+            <span class="sw-calendar-day">7</span>
+            <span class="sw-calendar-day">8</span>
+            <span class="sw-calendar-day">9</span>
+            <span class="sw-calendar-day">10</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-bar" style="background: linear-gradient(90deg, rgba(163,230,53,0.08), rgba(163,230,53,0.02));"></span>
+            <span class="sw-calendar-day">11</span>
+            <span class="sw-calendar-day">12</span>
+            <span class="sw-calendar-day">13</span>
+            <span class="sw-calendar-day">14</span>
+            <span class="sw-calendar-day">15</span>
+            <span class="sw-calendar-day">16</span>
+            <span class="sw-calendar-day">17</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-bar" style="background: linear-gradient(90deg, rgba(239,68,68,0.06) 0%, rgba(239,68,68,0.50) 100%);"></span>
+            <span class="sw-calendar-day due overdue">18</span>
+            <span class="sw-calendar-day">19</span>
+            <span class="sw-calendar-day">20</span>
+            <span class="sw-calendar-day">21</span>
+            <span class="sw-calendar-day">22</span>
+            <span class="sw-calendar-day">23</span>
+            <span class="sw-calendar-day">24</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-bar" style="left:0%; right:71.4%; background: linear-gradient(90deg, rgba(239,68,68,0.55), rgba(239,68,68,0.70));"></span>
+            <span class="sw-calendar-day">25</span>
+            <span class="sw-calendar-day today overdue" style="color: var(--stale-rotten); outline-color: var(--stale-rotten);">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+      </div>
+      <div class="legend">
+        <span class="item"><span class="swatch created"></span>Created</span>
+        <span class="item"><span class="swatch span"></span>Work window bar</span>
+        <span class="item"><span class="swatch due"></span>Due ring</span>
+        <span class="item"><span class="swatch overdue"></span>Overdue bar</span>
+        <span class="item"><span class="swatch today"></span>Today</span>
+      </div>
+    </section>
+
+    <!-- ============ C · Wrapped span pill ============ -->
+    <section class="variant vc">
+      <h2>C · Wrapped pill</h2>
+      <p class="note">
+        A green pill outlines the created→due range, filled with a left-to-right fade.
+        When overdue, a second red pill grows backwards from today to the due day —
+        the two boundaries kiss at the due cell.
+      </p>
+      <div class="calendars">
+
+        <div class="case">
+          <div class="case-label"><span>Upcoming</span><span class="meta">May 12 · due in 6d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-outline" style="left: 0%; right: 0%;"></span>
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day">5</span>
+            <span class="sw-calendar-day">6</span>
+            <span class="sw-calendar-day">7</span>
+            <span class="sw-calendar-day">8</span>
+            <span class="sw-calendar-day">9</span>
+            <span class="sw-calendar-day">10</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-outline" style="left: 0%; right: 0%; border-radius: 0;"></span>
+            <span class="sw-calendar-day">11</span>
+            <span class="sw-calendar-day today">12</span>
+            <span class="sw-calendar-day">13</span>
+            <span class="sw-calendar-day">14</span>
+            <span class="sw-calendar-day">15</span>
+            <span class="sw-calendar-day">16</span>
+            <span class="sw-calendar-day">17</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-outline" style="left: 0%; right: 85.7%;"></span>
+            <span class="sw-calendar-day due">18</span>
+            <span class="sw-calendar-day">19</span>
+            <span class="sw-calendar-day">20</span>
+            <span class="sw-calendar-day">21</span>
+            <span class="sw-calendar-day">22</span>
+            <span class="sw-calendar-day">23</span>
+            <span class="sw-calendar-day">24</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day">25</span>
+            <span class="sw-calendar-day">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+        <div class="case">
+          <div class="case-label"><span>Overdue</span><span class="meta bad">May 26 · overdue 8d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-outline" style="left: 0%; right: 0%;"></span>
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day">5</span>
+            <span class="sw-calendar-day">6</span>
+            <span class="sw-calendar-day">7</span>
+            <span class="sw-calendar-day">8</span>
+            <span class="sw-calendar-day">9</span>
+            <span class="sw-calendar-day">10</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-outline" style="left: 0%; right: 0%; border-radius: 0;"></span>
+            <span class="sw-calendar-day">11</span>
+            <span class="sw-calendar-day">12</span>
+            <span class="sw-calendar-day">13</span>
+            <span class="sw-calendar-day">14</span>
+            <span class="sw-calendar-day">15</span>
+            <span class="sw-calendar-day">16</span>
+            <span class="sw-calendar-day">17</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-outline" style="left: 0%; right: 85.7%;"></span>
+            <span class="span-outline overdue" style="left: 14.3%; right: 0%;"></span>
+            <span class="sw-calendar-day due overdue">18</span>
+            <span class="sw-calendar-day">19</span>
+            <span class="sw-calendar-day">20</span>
+            <span class="sw-calendar-day">21</span>
+            <span class="sw-calendar-day">22</span>
+            <span class="sw-calendar-day">23</span>
+            <span class="sw-calendar-day">24</span>
+          </div>
+          <div class="sw-calendar-grid week-row">
+            <span class="span-outline overdue" style="left: 0%; right: 71.4%;"></span>
+            <span class="sw-calendar-day">25</span>
+            <span class="sw-calendar-day today overdue" style="color: var(--stale-rotten); outline-color: var(--stale-rotten);">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+      </div>
+      <div class="legend">
+        <span class="item"><span class="swatch created"></span>Created</span>
+        <span class="item"><span class="swatch span"></span>Work pill</span>
+        <span class="item"><span class="swatch due"></span>Due ring</span>
+        <span class="item"><span class="swatch overdue"></span>Overdue pill</span>
+        <span class="item"><span class="swatch today"></span>Today</span>
+      </div>
+    </section>
+
+    <!-- ============ D · Combined (recommended) ============ -->
+    <section class="variant vd">
+      <h2>D · Combined (recommended)</h2>
+      <p class="note">
+        Per-cell fade like A, but cleaner: faint base tint that ramps up toward
+        the due cell, vivid endpoints, and a strong red burn-down that ends at
+        today when overdue. Today gets a glowing red square when overdue —
+        you can&rsquo;t miss it.
+      </p>
+      <div class="calendars">
+
+        <div class="case">
+          <div class="case-label"><span>Upcoming</span><span class="meta">May 12 · due in 6d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day in-span" style="--t:0.05">5</span>
+            <span class="sw-calendar-day in-span" style="--t:0.10">6</span>
+            <span class="sw-calendar-day in-span" style="--t:0.20">7</span>
+            <span class="sw-calendar-day in-span" style="--t:0.30">8</span>
+            <span class="sw-calendar-day in-span" style="--t:0.40">9</span>
+            <span class="sw-calendar-day in-span" style="--t:0.50">10</span>
+
+            <span class="sw-calendar-day in-span" style="--t:0.55">11</span>
+            <span class="sw-calendar-day in-span today" style="--t:0.60">12</span>
+            <span class="sw-calendar-day in-span" style="--t:0.68">13</span>
+            <span class="sw-calendar-day in-span" style="--t:0.76">14</span>
+            <span class="sw-calendar-day in-span" style="--t:0.84">15</span>
+            <span class="sw-calendar-day in-span" style="--t:0.90">16</span>
+            <span class="sw-calendar-day in-span" style="--t:0.96">17</span>
+
+            <span class="sw-calendar-day due">18</span>
+            <span class="sw-calendar-day">19</span>
+            <span class="sw-calendar-day">20</span>
+            <span class="sw-calendar-day">21</span>
+            <span class="sw-calendar-day">22</span>
+            <span class="sw-calendar-day">23</span>
+            <span class="sw-calendar-day">24</span>
+
+            <span class="sw-calendar-day">25</span>
+            <span class="sw-calendar-day">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+        <div class="case">
+          <div class="case-label"><span>Overdue</span><span class="meta bad">May 26 · overdue 8d</span></div>
+          <div class="sw-panel-section-head">Timeline</div>
+          <div class="sw-calendar-header"><span class="sw-calendar-month">May 2026</span></div>
+          <div class="sw-calendar-weekdays">
+            <span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span><span>Su</span>
+          </div>
+          <div class="sw-calendar-grid">
+            <span class="sw-calendar-day other-month">27</span>
+            <span class="sw-calendar-day other-month">28</span>
+            <span class="sw-calendar-day other-month">29</span>
+            <span class="sw-calendar-day other-month">30</span>
+            <span class="sw-calendar-day">1</span>
+            <span class="sw-calendar-day">2</span>
+            <span class="sw-calendar-day">3</span>
+
+            <span class="sw-calendar-day created">4</span>
+            <span class="sw-calendar-day in-span" style="--t:0.05">5</span>
+            <span class="sw-calendar-day in-span" style="--t:0.10">6</span>
+            <span class="sw-calendar-day in-span" style="--t:0.20">7</span>
+            <span class="sw-calendar-day in-span" style="--t:0.30">8</span>
+            <span class="sw-calendar-day in-span" style="--t:0.40">9</span>
+            <span class="sw-calendar-day in-span" style="--t:0.50">10</span>
+
+            <span class="sw-calendar-day in-span" style="--t:0.55">11</span>
+            <span class="sw-calendar-day in-span" style="--t:0.60">12</span>
+            <span class="sw-calendar-day in-span" style="--t:0.68">13</span>
+            <span class="sw-calendar-day in-span" style="--t:0.76">14</span>
+            <span class="sw-calendar-day in-span" style="--t:0.84">15</span>
+            <span class="sw-calendar-day in-span" style="--t:0.90">16</span>
+            <span class="sw-calendar-day in-span" style="--t:0.96">17</span>
+
+            <span class="sw-calendar-day due overdue">18</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.15">19</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.28">20</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.42">21</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.56">22</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.70">23</span>
+            <span class="sw-calendar-day in-overdue" style="--t:0.82">24</span>
+
+            <span class="sw-calendar-day in-overdue" style="--t:0.92">25</span>
+            <span class="sw-calendar-day in-overdue today overdue" style="--t:1.0">26</span>
+            <span class="sw-calendar-day">27</span>
+            <span class="sw-calendar-day">28</span>
+            <span class="sw-calendar-day">29</span>
+            <span class="sw-calendar-day">30</span>
+            <span class="sw-calendar-day">31</span>
+          </div>
+        </div>
+
+      </div>
+      <div class="legend">
+        <span class="item"><span class="swatch created"></span>Created</span>
+        <span class="item"><span class="swatch span"></span>Work window (ramps toward due)</span>
+        <span class="item"><span class="swatch due"></span>Due ring</span>
+        <span class="item"><span class="swatch due-od"></span>Due (overdue)</span>
+        <span class="item"><span class="swatch overdue"></span>Overdue burn-down</span>
+        <span class="item"><span class="swatch today"></span>Today</span>
+      </div>
+    </section>
+
+  </div>
+
+  <div style="background: var(--ds-bg-panel); border: 1px solid var(--ds-border); border-radius: var(--r-md); padding: 16px; box-shadow: var(--shadow-emboss); margin-top: 8px;">
+    <div style="font-family: 'Geist Mono', monospace; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--ds-text-muted); margin-bottom: 10px;">Read me back what I'm proposing</div>
+    <div style="font-size: 12px; color: var(--ds-text-dim); line-height: 1.6;">
+      <strong style="color: var(--ds-text)">1. Created day</strong> — solid neon green (brand color, same as lime LED). The anchor.<br />
+      <strong style="color: var(--ds-text)">2. Days between created &amp; due</strong> — green tint that ramps <em>up</em> in intensity as it approaches the due date (D's choice) — or ramps <em>down</em> as time burns through it (A's choice). Two valid metaphors; the prototypes show both. D's "ramp toward due" reads as "pressure building".<br />
+      <strong style="color: var(--ds-text)">3. Due day</strong> — same green family, bright ring around the cell. The visual goal post.<br />
+      <strong style="color: var(--ds-text)">4. Past the due day, if today &gt; due (overdue)</strong> — that bright ring flips to red, and every day from due → today fills with a red gradient that gets more intense as it nears today. Today itself is a saturated red square with a glow.<br />
+      <strong style="color: var(--ds-text)">5. Days beyond today</strong> — neutral. We don't color the unknown future.
+    </div>
+  </div>
+
+</body>
+</html>

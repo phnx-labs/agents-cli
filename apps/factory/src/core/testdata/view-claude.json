@@ -1,0 +1,227 @@
+{
+  "agent": "claude",
+  "versions": [
+    {
+      "version": "2.1.112",
+      "isDefault": true,
+      "signedIn": true,
+      "email": "muqsitnawaz@gmail.com",
+      "plan": "Max",
+      "usageStatus": "rate_limited",
+      "windows": [
+        {
+          "key": "session",
+          "usedPercent": 19,
+          "resetsAt": "2026-04-22T14:00:00.511Z"
+        },
+        {
+          "key": "week",
+          "usedPercent": 66,
+          "resetsAt": "2026-04-24T05:00:00.511Z"
+        },
+        {
+          "key": "sonnet_week",
+          "usedPercent": 1,
+          "resetsAt": "2026-04-25T05:00:00.511Z"
+        }
+      ],
+      "lastActive": "2026-04-22T12:12:02.249Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.112"
+    },
+    {
+      "version": "2.1.113",
+      "isDefault": false,
+      "signedIn": true,
+      "email": "muqsitnawaz@icloud.com",
+      "plan": "Max",
+      "usageStatus": "out_of_credits",
+      "windows": [
+        {
+          "key": "session",
+          "usedPercent": 0,
+          "resetsAt": null
+        },
+        {
+          "key": "week",
+          "usedPercent": 66,
+          "resetsAt": "2026-04-23T22:00:01.462Z"
+        },
+        {
+          "key": "sonnet_week",
+          "usedPercent": 2,
+          "resetsAt": "2026-04-24T06:00:00.462Z"
+        }
+      ],
+      "lastActive": "2026-04-22T12:03:13.130Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.113"
+    },
+    {
+      "version": "2.1.111",
+      "isDefault": false,
+      "signedIn": true,
+      "email": "muqsit@getrush.ai",
+      "plan": "Max",
+      "usageStatus": "rate_limited",
+      "windows": [
+        {
+          "key": "session",
+          "usedPercent": 0,
+          "resetsAt": null
+        },
+        {
+          "key": "week",
+          "usedPercent": 11,
+          "resetsAt": "2026-04-24T14:00:00.392Z"
+        },
+        {
+          "key": "sonnet_week",
+          "usedPercent": 0,
+          "resetsAt": null
+        }
+      ],
+      "lastActive": "2026-04-20T16:03:30.930Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.111"
+    },
+    {
+      "version": "2.1.110",
+      "isDefault": false,
+      "signedIn": true,
+      "email": "muqsit@trp.so",
+      "plan": "Max",
+      "usageStatus": "out_of_credits",
+      "windows": [
+        {
+          "key": "session",
+          "usedPercent": 10,
+          "resetsAt": "2026-04-22T13:00:00.671Z"
+        },
+        {
+          "key": "week",
+          "usedPercent": 64,
+          "resetsAt": "2026-04-23T22:00:00.671Z"
+        },
+        {
+          "key": "sonnet_week",
+          "usedPercent": 13,
+          "resetsAt": "2026-04-24T02:00:00.671Z"
+        }
+      ],
+      "lastActive": "2026-04-22T10:55:58.111Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.110"
+    },
+    {
+      "version": "2.1.98",
+      "isDefault": false,
+      "signedIn": true,
+      "email": "muqsitnawaz@gmail.com",
+      "plan": "Max",
+      "usageStatus": "rate_limited",
+      "windows": [
+        {
+          "key": "session",
+          "usedPercent": 19,
+          "resetsAt": "2026-04-22T14:00:00.511Z"
+        },
+        {
+          "key": "week",
+          "usedPercent": 66,
+          "resetsAt": "2026-04-24T05:00:00.511Z"
+        },
+        {
+          "key": "sonnet_week",
+          "usedPercent": 1,
+          "resetsAt": "2026-04-25T05:00:00.511Z"
+        }
+      ],
+      "lastActive": "2026-04-22T11:09:18.517Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.98"
+    },
+    {
+      "version": "2.1.92",
+      "isDefault": false,
+      "signedIn": true,
+      "email": "muqsitnawaz@icloud.com",
+      "plan": "Max",
+      "usageStatus": "out_of_credits",
+      "windows": [
+        {
+          "key": "session",
+          "usedPercent": 0,
+          "resetsAt": null
+        },
+        {
+          "key": "week",
+          "usedPercent": 66,
+          "resetsAt": "2026-04-23T22:00:01.462Z"
+        },
+        {
+          "key": "sonnet_week",
+          "usedPercent": 2,
+          "resetsAt": "2026-04-24T06:00:00.462Z"
+        }
+      ],
+      "lastActive": "2026-04-16T02:23:21.041Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.92"
+    },
+    {
+      "version": "2.1.85",
+      "isDefault": false,
+      "signedIn": false,
+      "email": null,
+      "plan": null,
+      "usageStatus": "available",
+      "windows": [],
+      "lastActive": "2026-04-20T13:05:30.167Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.85"
+    },
+    {
+      "version": "2.1.80",
+      "isDefault": false,
+      "signedIn": false,
+      "email": null,
+      "plan": null,
+      "usageStatus": "available",
+      "windows": [],
+      "lastActive": "2026-04-20T13:02:37.597Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.80"
+    },
+    {
+      "version": "2.1.62",
+      "isDefault": false,
+      "signedIn": true,
+      "email": "muqsitnawaz@gmail.com",
+      "plan": "Max",
+      "usageStatus": "rate_limited",
+      "windows": [
+        {
+          "key": "session",
+          "usedPercent": 19,
+          "resetsAt": "2026-04-22T14:00:00.511Z"
+        },
+        {
+          "key": "week",
+          "usedPercent": 66,
+          "resetsAt": "2026-04-24T05:00:00.511Z"
+        },
+        {
+          "key": "sonnet_week",
+          "usedPercent": 1,
+          "resetsAt": "2026-04-25T05:00:00.511Z"
+        }
+      ],
+      "lastActive": "2026-04-17T05:43:57.473Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.1.62"
+    },
+    {
+      "version": "2.0.65",
+      "isDefault": false,
+      "signedIn": false,
+      "email": null,
+      "plan": null,
+      "usageStatus": "available",
+      "windows": [],
+      "lastActive": "2026-04-20T13:05:20.945Z",
+      "path": "/Users/muqsit/.agents/versions/claude/2.0.65"
+    }
+  ]
+}

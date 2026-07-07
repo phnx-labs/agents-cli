@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mission Control - Factory Floor</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+  :root {
+    --bg: #E8E6E1;
+    --panel: #F0EEEA;
+    --recess: #D8D5CF;
+    --coral: #F26D5B;
+    --text: #1C1917;
+    --dim: #78716C;
+    --green: #22C55E;
+    --red: #EF4444;
+    --amber: #D4A72C;
+    --gray: #6B7280;
+    --font: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+    --emboss: inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 3px rgba(0,0,0,0.12);
+    --emboss-heavy: inset 0 1px 0 rgba(255,255,255,0.7), 0 2px 6px rgba(0,0,0,0.15);
+    --recess-shadow: inset 0 2px 4px rgba(0,0,0,0.15), inset 0 0 0 1px rgba(0,0,0,0.05);
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: var(--font);
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  body {
+    display: flex;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .mission-control {
+    width: 100%;
+    max-width: 1400px;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    padding: 16px 20px;
+    gap: 12px;
+  }
+
+  /* -- HEADER -- */
+  .mc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+
+  .mc-header h1 {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--dim);
+  }
+
+  .mc-header .clock {
+    font-size: 11px;
+    color: var(--dim);
+    letter-spacing: 0.05em;
+  }
+
+  /* -- SECTION HEADERS -- */
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+    margin-bottom: 8px;
+    padding-left: 2px;
+  }
+
+  /* -- TOP BAND: AGENT STATIONS -- */
+  .stations-band {
+    flex-shrink: 0;
+  }
+
+  .stations-row {
+    display: flex;
+    gap: 12px;
+  }
+
+  .station-card {
+    flex: 1;
+    min-width: 0;
+    background: var(--panel);
+    border-radius: 8px;
+    box-shadow: var(--emboss-heavy);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: box-shadow 0.15s;
+  }
+
+  .station-card.dimmed {
+    opacity: 0.5;
+  }
+
+  .station-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* LED dot */
+  .led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .led.green {
+    background: var(--green);
+    box-shadow: 0 0 6px var(--green), 0 0 12px rgba(34,197,94,0.4);
+    animation: pulse-green 2s ease-in-out infinite;
+  }
+
+  .led.red {
+    background: var(--red);
+    box-shadow: 0 0 4px rgba(239,68,68,0.5);
+  }
+
+  .led.amber {
+    background: var(--amber);
+    box-shadow: 0 0 4px rgba(212,167,44,0.4);
+  }
+
+  .led.gray {
+    background: var(--gray);
+  }
+
+  @keyframes pulse-green {
+    0%, 100% { box-shadow: 0 0 6px var(--green), 0 0 12px rgba(34,197,94,0.4); }
+    50% { box-shadow: 0 0 10px var(--green), 0 0 20px rgba(34,197,94,0.6); }
+  }
+
+  .station-agent-name {
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .station-session {
+    font-size: 10px;
+    color: var(--dim);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  /* Status badge */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    line-height: 1;
+  }
+
+  .status-badge.running {
+    background: rgba(34,197,94,0.15);
+    color: #16a34a;
+  }
+
+  .status-badge.completed {
+    background: rgba(107,114,128,0.15);
+    color: var(--gray);
+  }
+
+  .status-badge.failed {
+    background: rgba(239,68,68,0.12);
+    color: var(--red);
+  }
+
+  /* Readout strip (LCD display) */
+  .readout-strip {
+    background: #1C1917;
+    border-radius: 4px;
+    padding: 8px 10px;
+    box-shadow: var(--recess-shadow);
+    font-size: 11px;
+    color: #A3E635;
+    font-family: var(--font);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: 0.02em;
+    position: relative;
+  }
+
+  .readout-strip::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 4px;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.03) 2px,
+      rgba(0,0,0,0.03) 4px
+    );
+    pointer-events: none;
+  }
+
+  .readout-cursor {
+    display: inline-block;
+    width: 6px;
+    height: 12px;
+    background: #A3E635;
+    margin-left: 4px;
+    vertical-align: middle;
+    animation: blink-cursor 1s step-end infinite;
+  }
+
+  @keyframes blink-cursor {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+
+  /* Meta row below readout */
+  .station-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .meta-tag {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--dim);
+    background: var(--recess);
+    padding: 2px 5px;
+    border-radius: 3px;
+    letter-spacing: 0.02em;
+  }
+
+  .meta-tag.coral {
+    background: rgba(242,109,91,0.12);
+    color: var(--coral);
+  }
+
+  /* VU Meter */
+  .vu-meter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .vu-label {
+    font-size: 9px;
+    color: var(--dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  .vu-meter {
+    display: flex;
+    gap: 2px;
+    flex: 1;
+  }
+
+  .vu-segment {
+    height: 10px;
+    flex: 1;
+    border-radius: 1px;
+    background: var(--recess);
+    transition: background 0.3s;
+  }
+
+  .vu-segment.filled {
+    background: var(--green);
+  }
+
+  .vu-segment.filled.coral {
+    background: var(--coral);
+  }
+
+  .vu-count {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text);
+    min-width: 16px;
+    text-align: right;
+  }
+
+  /* File pills */
+  .file-manifest {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .file-pill {
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--text);
+    background: var(--recess);
+    padding: 2px 6px;
+    border-radius: 3px;
+    letter-spacing: 0.01em;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+  }
+
+  /* -- MIDDLE BAND: ACTIVITY TICKER -- */
+  .ticker-band {
+    flex-shrink: 0;
+  }
+
+  .ticker-container {
+    background: var(--panel);
+    border-radius: 8px;
+    box-shadow: var(--emboss);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .ticker-viewport {
+    height: 80px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .ticker-track {
+    display: flex;
+    flex-direction: column;
+    animation: scroll-ticker 20s linear infinite;
+    position: absolute;
+    width: 100%;
+  }
+
+  @keyframes scroll-ticker {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(-50%); }
+  }
+
+  .ticker-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 14px;
+    border-bottom: 1px solid rgba(0,0,0,0.04);
+    white-space: nowrap;
+    font-size: 11px;
+    min-height: 26px;
+  }
+
+  .ticker-time {
+    color: var(--dim);
+    font-size: 10px;
+    font-weight: 600;
+    flex-shrink: 0;
+    width: 38px;
+  }
+
+  .ticker-led {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .ticker-agent {
+    font-weight: 700;
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+
+  .ticker-sep {
+    color: var(--recess);
+    flex-shrink: 0;
+  }
+
+  .ticker-msg {
+    color: var(--dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .ticker-files {
+    margin-left: auto;
+    color: var(--dim);
+    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  /* Fade edges on ticker */
+  .ticker-viewport::before,
+  .ticker-viewport::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 20px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .ticker-viewport::before {
+    top: 0;
+    background: linear-gradient(to bottom, var(--panel), transparent);
+  }
+  .ticker-viewport::after {
+    bottom: 0;
+    background: linear-gradient(to top, var(--panel), transparent);
+  }
+
+  /* -- BOTTOM BAND -- */
+  .bottom-band {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  /* -- TASK QUEUE (DISPATCH SLOTS) -- */
+  .dispatch-section {
+    flex-shrink: 0;
+  }
+
+  .dispatch-row {
+    display: flex;
+    gap: 12px;
+  }
+
+  .dispatch-slot {
+    flex: 1;
+    background: var(--panel);
+    border-radius: 8px;
+    box-shadow: var(--emboss-heavy);
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: box-shadow 0.15s;
+  }
+
+  .dispatch-priority {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .dispatch-priority.urgent {
+    background: var(--red);
+    box-shadow: 0 0 6px rgba(239,68,68,0.5);
+    animation: pulse-red 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse-red {
+    0%, 100% { box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+    50% { box-shadow: 0 0 12px rgba(239,68,68,0.7); }
+  }
+
+  .dispatch-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .dispatch-id {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--coral);
+    letter-spacing: 0.04em;
+  }
+
+  .dispatch-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dispatch-dept {
+    font-size: 9px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 2px;
+  }
+
+  .dispatch-btn {
+    background: var(--coral);
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 7px 16px;
+    font-family: var(--font);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    box-shadow: 0 2px 4px rgba(242,109,91,0.3), inset 0 1px 0 rgba(255,255,255,0.2);
+    transition: transform 0.1s, box-shadow 0.1s;
+    flex-shrink: 0;
+  }
+
+  .dispatch-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(242,109,91,0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+  }
+
+  .dispatch-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(242,109,91,0.3), inset 0 1px 0 rgba(255,255,255,0.1);
+  }
+
+  /* -- COMPLETED / FAILED SECTION -- */
+  .history-section {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .history-section::-webkit-scrollbar {
+    width: 4px;
+  }
+  .history-section::-webkit-scrollbar-thumb {
+    background: var(--recess);
+    border-radius: 2px;
+  }
+
+  .history-row {
+    display: flex;
+    gap: 12px;
+  }
+
+  .history-card {
+    flex: 1;
+    background: var(--panel);
+    border-radius: 8px;
+    box-shadow: var(--emboss);
+    padding: 12px 14px;
+    opacity: 0.55;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .history-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .history-agent {
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .history-session {
+    font-size: 10px;
+    color: var(--dim);
+  }
+
+  .history-summary {
+    font-size: 11px;
+    color: var(--dim);
+  }
+
+  .history-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* -- HOVER INTERACTION -- */
+  .station-card:hover {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 3px 10px rgba(0,0,0,0.18);
+  }
+
+  .dispatch-slot:hover {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), 0 3px 10px rgba(0,0,0,0.18);
+  }
+
+  /* -- AGENT KIND INDICATOR -- */
+  .kind-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    color: var(--dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .kind-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--dim);
+  }
+
+  .kind-dot.terminal { background: var(--green); }
+  .kind-dot.cloud { background: #3B82F6; }
+  .kind-dot.team { background: #A855F7; }
+</style>
+</head>
+<body>
+
+<div class="mission-control">
+
+  <!-- Header -->
+  <div class="mc-header">
+    <h1>Factory Floor -- Mission Control</h1>
+    <span class="clock">2026-04-20 14:23 UTC</span>
+  </div>
+
+  <!-- TOP BAND: LIVE AGENT STATIONS -->
+  <div class="stations-band">
+    <div class="section-label">Live Agent Stations</div>
+    <div class="stations-row">
+
+      <!-- Station 1: Claude a1b2c3d4 -->
+      <div class="station-card">
+        <div class="station-header">
+          <div class="led green"></div>
+          <span class="station-agent-name">Claude</span>
+          <span class="station-session">a1b2c3d4</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span class="status-badge running">Running</span>
+          <span class="meta-tag">14m</span>
+          <span class="kind-indicator"><span class="kind-dot terminal"></span> terminal</span>
+          <span class="meta-tag coral">RUSH-361</span>
+          <span class="meta-tag coral">PR #47</span>
+        </div>
+        <div class="readout-strip">
+          $ bun test --watch<span class="readout-cursor"></span>
+        </div>
+        <div class="vu-meter-row">
+          <span class="vu-label">Tools</span>
+          <div class="vu-meter">
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+          </div>
+          <span class="vu-count">6</span>
+        </div>
+        <div class="file-manifest">
+          <span class="file-pill">auth.ts</span>
+          <span class="file-pill">index.ts</span>
+          <span class="file-pill">router.ts</span>
+        </div>
+      </div>
+
+      <!-- Station 2: Codex e5f6g7h8 -->
+      <div class="station-card">
+        <div class="station-header">
+          <div class="led green"></div>
+          <span class="station-agent-name">Codex</span>
+          <span class="station-session">e5f6g7h8</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span class="status-badge running">Running</span>
+          <span class="meta-tag">8m</span>
+          <span class="kind-indicator"><span class="kind-dot cloud"></span> cloud</span>
+          <span class="meta-tag coral">RUSH-362</span>
+        </div>
+        <div class="readout-strip">
+          Editing auth.ts<span class="readout-cursor"></span>
+        </div>
+        <div class="vu-meter-row">
+          <span class="vu-label">Tools</span>
+          <div class="vu-meter">
+            <div class="vu-segment filled coral"></div>
+            <div class="vu-segment filled coral"></div>
+            <div class="vu-segment filled coral"></div>
+            <div class="vu-segment filled coral"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+          </div>
+          <span class="vu-count">4</span>
+        </div>
+        <div class="file-manifest">
+          <span class="file-pill">router.ts</span>
+          <span class="file-pill">types.ts</span>
+        </div>
+      </div>
+
+      <!-- Station 3: Claude j9k0l1m2 (team) -->
+      <div class="station-card">
+        <div class="station-header">
+          <div class="led green"></div>
+          <span class="station-agent-name">Claude</span>
+          <span class="station-session">j9k0l1m2</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span class="status-badge running">Running</span>
+          <span class="meta-tag">3m</span>
+          <span class="kind-indicator"><span class="kind-dot team"></span> team (3)</span>
+        </div>
+        <div class="readout-strip">
+          Reading package.json<span class="readout-cursor"></span>
+        </div>
+        <div class="vu-meter-row">
+          <span class="vu-label">Tools</span>
+          <div class="vu-meter">
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment filled"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+            <div class="vu-segment"></div>
+          </div>
+          <span class="vu-count">2</span>
+        </div>
+        <div class="file-manifest">
+          <span class="file-pill">deps.ts</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MIDDLE BAND: ACTIVITY TICKER -->
+  <div class="ticker-band">
+    <div class="section-label">Activity Feed</div>
+    <div class="ticker-container">
+      <div class="ticker-viewport">
+        <div class="ticker-track">
+          <!-- Set 1 -->
+          <div class="ticker-entry">
+            <span class="ticker-time">14:23</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude a1b2</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">$ bun test --watch</span>
+            <span class="ticker-files">auth.ts, index.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:22</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Codex e5f6</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Editing auth.ts -- rewrote token refresh logic</span>
+            <span class="ticker-files">auth.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:21</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude j9k0</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Reading package.json -- dependency audit</span>
+            <span class="ticker-files">package.json</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:20</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude a1b2</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Write router.ts -- added /api/auth/callback</span>
+            <span class="ticker-files">router.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:18</span>
+            <span class="ticker-led" style="background:var(--gray)"></span>
+            <span class="ticker-agent">Gemini n3o4</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Completed -- refactored auth flow across 12 files</span>
+            <span class="ticker-files">PR #45</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:15</span>
+            <span class="ticker-led" style="background:var(--red)"></span>
+            <span class="ticker-agent">Claude r7s8</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Failed -- migration script threw ENOENT on schema.sql</span>
+            <span class="ticker-files">migrate.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:12</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Codex e5f6</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Read types.ts -- analyzing interface exports</span>
+            <span class="ticker-files">types.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:09</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude a1b2</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Spawned -- assigned RUSH-361, terminal mode</span>
+            <span class="ticker-files">--</span>
+          </div>
+          <!-- Set 2 (duplicate for seamless loop) -->
+          <div class="ticker-entry">
+            <span class="ticker-time">14:23</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude a1b2</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">$ bun test --watch</span>
+            <span class="ticker-files">auth.ts, index.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:22</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Codex e5f6</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Editing auth.ts -- rewrote token refresh logic</span>
+            <span class="ticker-files">auth.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:21</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude j9k0</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Reading package.json -- dependency audit</span>
+            <span class="ticker-files">package.json</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:20</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude a1b2</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Write router.ts -- added /api/auth/callback</span>
+            <span class="ticker-files">router.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:18</span>
+            <span class="ticker-led" style="background:var(--gray)"></span>
+            <span class="ticker-agent">Gemini n3o4</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Completed -- refactored auth flow across 12 files</span>
+            <span class="ticker-files">PR #45</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:15</span>
+            <span class="ticker-led" style="background:var(--red)"></span>
+            <span class="ticker-agent">Claude r7s8</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Failed -- migration script threw ENOENT on schema.sql</span>
+            <span class="ticker-files">migrate.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:12</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Codex e5f6</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Read types.ts -- analyzing interface exports</span>
+            <span class="ticker-files">types.ts</span>
+          </div>
+          <div class="ticker-entry">
+            <span class="ticker-time">14:09</span>
+            <span class="ticker-led" style="background:var(--green);box-shadow:0 0 4px var(--green)"></span>
+            <span class="ticker-agent">Claude a1b2</span>
+            <span class="ticker-sep">--</span>
+            <span class="ticker-msg">Spawned -- assigned RUSH-361, terminal mode</span>
+            <span class="ticker-files">--</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM BAND -->
+  <div class="bottom-band">
+
+    <!-- Dispatch Queue -->
+    <div class="dispatch-section">
+      <div class="section-label">Dispatch Queue</div>
+      <div class="dispatch-row">
+
+        <div class="dispatch-slot">
+          <div class="dispatch-priority urgent"></div>
+          <div class="dispatch-info">
+            <div class="dispatch-id">RUSH-361</div>
+            <div class="dispatch-title">Restaurant picker agent</div>
+            <div class="dispatch-dept">Engineering</div>
+          </div>
+          <button class="dispatch-btn">Dispatch</button>
+        </div>
+
+        <div class="dispatch-slot">
+          <div class="dispatch-priority urgent"></div>
+          <div class="dispatch-info">
+            <div class="dispatch-id">RUSH-362</div>
+            <div class="dispatch-title">Trip mode agent</div>
+            <div class="dispatch-dept">Engineering</div>
+          </div>
+          <button class="dispatch-btn">Dispatch</button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- History (completed / failed) -->
+    <div class="history-section">
+      <div class="section-label">Recent History</div>
+      <div class="history-row">
+
+        <div class="history-card">
+          <div class="history-header">
+            <div class="led gray"></div>
+            <span class="history-agent">Gemini</span>
+            <span class="history-session">n3o4p5q6</span>
+            <span class="status-badge completed" style="margin-left:auto">Completed</span>
+          </div>
+          <div class="history-summary">Refactored auth flow</div>
+          <div class="history-meta">
+            <span class="meta-tag">12 files</span>
+            <span class="meta-tag">23m</span>
+            <span class="meta-tag coral">PR #45</span>
+          </div>
+        </div>
+
+        <div class="history-card">
+          <div class="history-header">
+            <div class="led red"></div>
+            <span class="history-agent">Claude</span>
+            <span class="history-session">r7s8t9u0</span>
+            <span class="status-badge failed" style="margin-left:auto">Failed</span>
+          </div>
+          <div class="history-summary">Migration script</div>
+          <div class="history-meta">
+            <span class="meta-tag">3 files</span>
+            <span class="meta-tag">7m</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>
