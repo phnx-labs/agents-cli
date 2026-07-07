@@ -132,7 +132,9 @@ export interface FloorAgent {
   pr: string | null      // "#142" when a PR is open
   prUrl: string | null   // full PR URL (https://github.com/…/pull/N) — the real external link to open
   ci: CiStatus           // CI state of the open PR; null when no PR / unknown
-  ticket: string | null  // "RUSH-812" when linked
+  ticket: string | null  // "RUSH-812" when linked (injected/worked-on ticket from prompt or branch)
+  createdTickets?: string[] // tracker refs this session CREATED (Linear create_issue / gh issue create); [] / undefined when none
+  spawnedTeam?: string   // team name this session SPAWNED via `agents teams create/add`; undefined when none
   branch: string
   worktreeSlug: string   // "<slug>" under .agents/worktrees/; '' when not a worktree. Disambiguates sibling sessions + labels the card when topic/preview are empty.
   worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree
