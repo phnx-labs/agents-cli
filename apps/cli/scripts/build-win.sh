@@ -39,7 +39,8 @@ if [[ -z "$DOTNET" && -x "$HOME/.dotnet/dotnet" ]]; then
 fi
 [[ -n "$DOTNET" ]] || die "dotnet not found. Install the .NET 10 SDK: curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0"
 
-PROJECT="native/computer-win"
+# native/ lives at the repo root (siblings of apps/), not under apps/cli.
+PROJECT="../../native/computer-win"
 OUT="$PROJECT/dist"
 
 bold "Build (win-x64)"; echo "  $("$DOTNET" --version) — $PROJECT"

@@ -6,8 +6,8 @@ package-lock.json
 dist/
 *.tsbuildinfo
 
-# Compiled keychain helper + provisioning profile (rebuild via scripts/build-keychain-helper.sh)
-/bin/
+# Compiled keychain helper + provisioning profile (rebuild via apps/cli/scripts/build-keychain-helper.sh)
+/apps/cli/bin/
 
 # Caches
 .npm-cache/
