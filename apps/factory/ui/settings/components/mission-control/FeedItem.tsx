@@ -5,7 +5,7 @@ import { StructuredReply, type ReplyCallbacks } from './StructuredReply'
 import { heartbeatLevel, sessionTaskLine, type FloorAgent, type FloorTicket } from './floorModel'
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
-import { TodoProgressBar } from './TodoChecklist'
+import { CardChecklist } from './TodoChecklist'
 
 // One agent row in the feed (feedItem: factory-floor.html:608-620) + the Next-Up
 // ticketStrip teaser row (:621-623). Pure presentation; selection + replies raised
@@ -113,7 +113,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         </span>
       </div>
       <div className="resp">{destructive ? <span className="q">{a.resp}</span> : a.resp}</div>
-      {!plain && a.todos.length > 0 && <TodoProgressBar todos={a.todos} />}
+      {!plain && a.todos.length > 0 && <CardChecklist todos={a.todos} />}
       {showSummary && <div className="summary">{taskLine}</div>}
       {showNowline && (
         <div className={`nowline ${stalled ? 'stall' : ''}`}>
