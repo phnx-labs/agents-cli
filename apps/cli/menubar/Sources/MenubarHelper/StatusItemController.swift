@@ -249,6 +249,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         addRecent(menu, recentSessions: recentSessions)
         menu.addItem(.separator())
 
+        // Tickets filed via the quick-issue bar (Cmd-Shift-O), clickable → open.
+        if addRecentTickets(menu) {
+            menu.addItem(.separator())
+        }
+
         addRoutinesRow(menu, routines: routines)
         addSetup(menu, doctor: doctor)
         addWatchdog(menu)
@@ -409,6 +414,27 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             item.submenu = recentSessionSubmenu(session)
             menu.addItem(item)
         }
+    }
+
+    // Tickets filed via the quick-issue bar. Returns false (renders nothing) when
+    // the ledger is empty. Each row opens the ticket in Linear on click.
+    private func addRecentTickets(_ menu: NSMenu) -> Bool {
+        let tickets = RecentTickets.load(limit: 5)
+        guard !tickets.isEmpty else { return false }
+        addSectionTitle(menu, "RECENT TICKETS", color: .secondaryLabelColor)
+        for t in tickets {
+            let clickable = t.url != nil
+            let item = NSMenuItem(title: "  \(t.id)  \(trim(t.title, 42))",
+                                  action: clickable ? #selector(onOpenPath(_:)) : nil,
+                                  keyEquivalent: "")
+            if clickable {
+                item.target = self
+                item.representedObject = t.url
+                item.toolTip = t.url
+            }
+            menu.addItem(item)
+        }
+        return true
     }
 
     private func addRoutinesRow(_ menu: NSMenu, routines: [Routine]) {

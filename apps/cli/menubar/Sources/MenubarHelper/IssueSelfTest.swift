@@ -15,6 +15,7 @@ enum IssueSelfTest {
         testImageFilePick()
         testTicketIDParse()
         testPromptContract()
+        testRecentTicketsMerge()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -90,6 +91,22 @@ enum IssueSelfTest {
         let noShot = AgentsCLI.ticketAgentPrompt(note: "flaky test", screenshotPaths: [])
         check("no-screenshot prompt says so", noShot.contains("No screenshots"))
         check("no-screenshot prompt has no /tmp path", !noShot.contains("/tmp/"))
+    }
+
+    // The recent-tickets ledger merge: newest-first, dedup by id, capped.
+    private static func testRecentTicketsMerge() {
+        func t(_ id: String) -> RecentTicket { RecentTicket(id: id, title: id, url: nil, createdAt: id) }
+        let after = RecentTickets.merged([t("RUSH-1"), t("RUSH-2")], adding: t("RUSH-3"))
+        check("new ticket is newest-first", after.first?.id == "RUSH-3")
+
+        let deduped = RecentTickets.merged([t("RUSH-1"), t("RUSH-2")], adding: t("RUSH-2"))
+        check("re-filing an id dedups (no stacking)",
+              deduped.filter { $0.id == "RUSH-2" }.count == 1 && deduped.first?.id == "RUSH-2",
+              detail: deduped.map { $0.id }.joined(separator: ","))
+
+        var many = (1...12).map { t("RUSH-\($0)") }
+        many = RecentTickets.merged(many, adding: t("RUSH-99"))
+        check("capped at 10", many.count == 10 && many.first?.id == "RUSH-99")
     }
 
     // MARK: helpers

@@ -258,9 +258,13 @@ enum AgentsCLI {
                                        : "The ticket agent exited with an error.")
                 return
             }
+            let url = parseTicketURL(output)
+            // Persist to the ledger so the menu bar's RECENT TICKETS section can
+            // surface it beyond the transient notification.
+            RecentTickets.record(id: id, title: note, url: url,
+                                 createdAt: ISO8601DateFormatter().string(from: Date()))
             // Attach the ticket URL so the notification is clickable → opens it.
-            Notifier.post(title: "Created \(id)", body: shortenForNotice(note),
-                          url: parseTicketURL(output))
+            Notifier.post(title: "Created \(id)", body: shortenForNotice(note), url: url)
         }
     }
 
