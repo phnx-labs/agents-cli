@@ -195,6 +195,8 @@
 .swarmify-root .decide .qt { font-size: 13.5px; font-weight: 600; margin-bottom: 10px; }
 .swarmify-root .feed-sec { font-size: 11px; font-weight: 800; letter-spacing: .05em; color: var(--ds-text-dim); margin: 18px 4px 8px; display: flex; align-items: center; gap: 8px; }
 .swarmify-root .feed-sec.attn { color: var(--status-pending); }
+/* Linear project link pill in a project group header (mockup: "RUSH · Agents CLI"). */
+.swarmify-root .feed-sec .proj-lk { font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 600; letter-spacing: 0; color: #4a8dff; border: 1px solid rgba(74,141,255,0.32); border-radius: 20px; padding: 2px 9px; text-transform: none; }
 .swarmify-root .feed-sec .ln { flex: 1; height: 1px; background: var(--ds-border-subtle); }
 .swarmify-root .fitem { background: var(--ds-bg-panel); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-lg); padding: 12px 14px; margin-bottom: 10px; cursor: pointer; }
 .swarmify-root .fitem.selsel { box-shadow: 0 0 0 2px var(--brand); }
@@ -202,6 +204,7 @@
 .swarmify-root .fitem.fail { border-color: var(--status-failed); box-shadow: 0 0 0 1px var(--status-failed-bg); }
 .swarmify-root .fitem .head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
 .swarmify-root .fitem .who { font-weight: 700; font-size: 13px; }
+.swarmify-root .fitem .sid { font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-faint); background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); border-radius: 5px; padding: 1px 6px; flex: none; }
 .swarmify-root .fitem .path { color: var(--ds-text-dim); font-size: 11px; }
 .swarmify-root .fitem .when { margin-left: auto; color: var(--ds-text-dim); font-size: 11px; display: flex; align-items: center; gap: 8px; }
 .swarmify-root .fitem .resp { font-size: 12.5px; color: var(--ds-text); line-height: 1.5; margin: 2px 0 8px; border-left: 2px solid var(--ds-border); padding-left: 10px; }

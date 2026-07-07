@@ -56,6 +56,12 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const meta = plain
     ? a.project
     : `${a.project} · ${a.hostLabel ?? a.host}${wt ? ` · ${wt}` : ''}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
+  // Compact provenance chip next to the name: "<agent>·<short session id>", e.g.
+  // "claude·4de7b016" — so a human label ("terminal-race-fix") reads as the title
+  // while the session stays identifiable. Only when the id differs from the shown name.
+  const agentSlug = agentIdFromPrefix(a.abbr) ?? a.abbr.toLowerCase()
+  const shortSid = a.sessionId ? a.sessionId.replace(/-/g, '').slice(0, 8) : ''
+  const sid = shortSid && a.name !== shortSid ? `${agentSlug}·${shortSid}` : ''
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 
@@ -104,6 +110,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         <span className={`dot ${a.phase}`} />
         <AgentAvatar id={agentIdFromPrefix(a.abbr) ?? a.abbr.toLowerCase()} size={20} title={a.abbr} />
         <span className="who">{a.name}</span>
+        {!plain && sid && <span className="sid" title={a.sessionId}>{sid}</span>}
         <span className="path">{meta}</span>
         <span className="when">
           {marker}

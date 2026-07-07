@@ -34,6 +34,8 @@ export interface UnifiedAgentLike {
   id: string
   agentType: string
   displayName: string
+  /** Underlying agent session id (for the card's provenance chip). */
+  sessionId?: string | null
   activity: string
   active: boolean
   timestamp: string
@@ -258,6 +260,7 @@ export function toFloorAgentFromUnified(
   return {
     id: u.id,
     host: 'this-mac',
+    sessionId: u.sessionId ?? undefined,
     // In-window tab agents are always terminal-attached.
     context: 'terminal',
     // Display the machine's real device name (e.g. 'zion') instead of the

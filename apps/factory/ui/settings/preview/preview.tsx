@@ -97,7 +97,7 @@ const askAgent = agent({
 // RUNNING lane.
 const running: FloorAgent[] = [
   agent({
-    id: 'r1', abbr: 'CX', name: 'bench-saved-views', project: 'rush', phase: 'running',
+    id: 'r1', abbr: 'CX', name: 'bench-saved-views', sessionId: '4de7b016-2c1a-4f9e-b2d1-7a3c9e10ab55', project: 'rush', phase: 'running',
     pr: '#148', ci: 'running', tok: 41, files: 9, since: '3s', lastActivityMs: Date.now() - 3000,
     pane: '%42', viewingIn: 'Codium tab 3',
     verb: 'Porting', target: 'the group-by control into the shared model',

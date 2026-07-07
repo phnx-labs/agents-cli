@@ -173,11 +173,15 @@ function buildUnifiedList(terminals: TerminalInfo[], tasks: TaskSummary[]): Unif
     const isActive = isTerminalActive(t, now)
     const files: string[] = []
     if (t.recentFiles) files.push(...t.recentFiles.slice(0, 5))
+    // Prefer a human label (manual > auto) so a card reads "terminal-race-fix" rather
+    // than "claude-596c4c07"; the hash still identifies the session via the sid chip.
+    const humanLabel = (t.label || t.autoLabel || '').trim()
     items.push({
       kind: 'terminal',
       id: `term-${t.id}`,
       agentType: t.agentType,
-      displayName: `${t.agentType}-${chunk}`,
+      sessionId: t.sessionId ?? undefined,
+      displayName: humanLabel || `${t.agentType}-${chunk}`,
       activity: t.currentActivity || t.label || (justSpawned ? 'Starting...' : t.status === 'idle' ? 'idle' : t.role ?? 'terminal'),
       active: isActive,
       duration: t.firstMessageTimestamp ? relTime(t.firstMessageTimestamp) : '',
@@ -1809,9 +1813,22 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onAttach={onAttachScreenshot}
             />
           ))
-        : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => (
+        : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => {
+            // When grouped by project, enrich the header: "N agents" + a Linear project
+            // link pill (mockup: "agents-cli · 8 agents · RUSH · Agents CLI").
+            const linkedProject = floorGroup === 'project'
+              ? managedProjects.find((p) => p.name === k)?.linearProjectName
+              : undefined
+            const countLabel = floorGroup === 'project'
+              ? `${arr.length} agent${arr.length === 1 ? '' : 's'}`
+              : `${arr.length}`
+            return (
             <React.Fragment key={k}>
-              <div className="feed-sec">{k} · {arr.length}<span className="ln" /></div>
+              <div className="feed-sec">
+                {k} · {countLabel}
+                {linkedProject && <span className="proj-lk">{linkedProject}</span>}
+                <span className="ln" />
+              </div>
               {arr.map((a) => (
                 <FeedItem
                   key={a.id}
@@ -1825,7 +1842,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                 />
               ))}
             </React.Fragment>
-          ))}
+          )})}
 
       {floorGroup === 'none' && doneFeed.length > 0 && (
         <>
