@@ -49,6 +49,10 @@ export interface SessionState {
   pr?: DetectedPr;
   worktree?: DetectedWorktree;
   ticket?: DetectedTicket;
+  /** Tracker refs this session CREATED (Linear create_issue / gh issue create). */
+  createdTickets?: string[];
+  /** Team name this session SPAWNED via `agents teams create/add`. */
+  spawnedTeam?: string;
 }
 
 export interface StateContext {
@@ -287,14 +291,24 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
 }
 
 /**
- * Scan an event slice for the durable signals (PR opened, ticket) that aren't
- * about the cwd. Correlates each `gh pr create` with the nearest following
- * tool_result URL; keeps the last PR found.
+ * Scan an event slice for the durable signals that aren't about the cwd: the PR
+ * opened, the injected ticket, plus the artifacts the session PRODUCED — tracker
+ * refs it created and any team it spawned. Each `gh pr create` / create-issue tool
+ * call is correlated with the nearest following tool_result; the team name comes
+ * straight off the `agents teams create/add` command.
  */
-export function detectDurableSignals(events: SessionEvent[]): { pr?: DetectedPr; ticket?: DetectedTicket } {
+export function detectDurableSignals(events: SessionEvent[]): {
+  pr?: DetectedPr;
+  ticket?: DetectedTicket;
+  createdTickets?: string[];
+  spawnedTeam?: string;
+} {
   let pr: DetectedPr | undefined;
   let sawPrCreate = false;
   let ticket: DetectedTicket | undefined;
+  let sawTicketCreate = false;
+  let spawnedTeam: string | undefined;
+  const createdTickets = new Set<string>();
 
   for (const e of events) {
     // Structural PR signal: a real `gh pr create` tool call, then the pull URL
@@ -304,22 +318,43 @@ export function detectDurableSignals(events: SessionEvent[]): { pr?: DetectedPr;
       const found = extractPrUrl(e.output);
       if (found) { pr = found; sawPrCreate = false; }
     }
+    // Produced artifacts: a team spawn is read off the command; a created ticket
+    // is a create-issue tool call whose following tool_result carries the new ref.
+    if (e.type === 'tool_use') {
+      if (!spawnedTeam) {
+        const team = detectSpawnedTeam(e.command);
+        if (team) spawnedTeam = team;
+      }
+      if (isTicketCreateTool(e.tool, e.command)) sawTicketCreate = true;
+    }
+    if (sawTicketCreate && e.type === 'tool_result') {
+      const t = extractCreatedTicket(e.output);
+      if (t) createdTickets.add(t);
+      sawTicketCreate = false;
+    }
     if (!ticket && e.type === 'message' && e.role === 'user') {
       ticket = detectTicket(e.content);
     }
   }
-  return { pr, ticket };
+  return {
+    pr,
+    ticket,
+    createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
+    spawnedTeam,
+  };
 }
 
 /** Full inference: activity + preview + durable signals + worktree/ticket from ctx. */
 export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}): SessionState {
   const state = inferActivity(events, ctx);
-  const { pr, ticket } = detectDurableSignals(events);
+  const { pr, ticket, createdTickets, spawnedTeam } = detectDurableSignals(events);
   const worktree = detectWorktree(ctx.cwd, ctx.gitBranch);
   return {
     ...state,
     pr: pr ?? state.pr,
     worktree: worktree ?? state.worktree,
     ticket: ticket ?? detectTicket(undefined, ctx.gitBranch) ?? state.ticket,
+    createdTickets,
+    spawnedTeam,
   };
 }

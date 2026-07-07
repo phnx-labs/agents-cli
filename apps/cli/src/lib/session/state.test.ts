@@ -136,6 +136,35 @@ describe('PR detection', () => {
   });
 });
 
+describe('detectDurableSignals — produced artifacts', () => {
+  it('correlates a Linear create_issue tool with the created ref in its result', () => {
+    const events: SessionEvent[] = [
+      tool('mcp__claude_ai_Linear__create_issue', { title: 'Fix flaky test' }),
+      toolResult('mcp__claude_ai_Linear__create_issue', 'Created issue RUSH-1519 in Rush'),
+    ];
+    expect(detectDurableSignals(events).createdTickets).toEqual(['RUSH-1519']);
+  });
+  it('captures a gh issue-create ref and a spawned team from shell commands', () => {
+    const events: SessionEvent[] = [
+      tool('Bash', { command: 'agents teams create redesign --enable-worktrees' }, 'agents teams create redesign --enable-worktrees'),
+      tool('Bash', { command: 'gh issue create --title x' }, 'gh issue create --title x'),
+      toolResult('Bash', 'https://github.com/phnx-labs/agents-cli/issues/812'),
+    ];
+    const sig = detectDurableSignals(events);
+    expect(sig.spawnedTeam).toBe('redesign');
+    expect(sig.createdTickets).toEqual(['#812']);
+  });
+  it('leaves artifacts undefined for a session that created nothing', () => {
+    const events: SessionEvent[] = [
+      tool('Bash', { command: 'gh issue list' }, 'gh issue list'),
+      msg('user', 'just browsing'),
+    ];
+    const sig = detectDurableSignals(events);
+    expect(sig.createdTickets).toBeUndefined();
+    expect(sig.spawnedTeam).toBeUndefined();
+  });
+});
+
 describe('ticket false positives', () => {
   it('does NOT treat a regex snippet like [A-Z0-9]-\\d as a ticket', () => {
     expect(detectTicket('the pattern /([A-Z0-9]-\\d)/ matches')).toBeUndefined();
