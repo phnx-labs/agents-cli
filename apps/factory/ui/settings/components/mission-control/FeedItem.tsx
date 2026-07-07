@@ -61,7 +61,9 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   // while the session stays identifiable. Only when the id differs from the shown name.
   const agentSlug = agentIdFromPrefix(a.abbr) ?? a.abbr.toLowerCase()
   const shortSid = a.sessionId ? a.sessionId.replace(/-/g, '').slice(0, 8) : ''
-  const sid = shortSid && a.name !== shortSid ? `${agentSlug}·${shortSid}` : ''
+  // Suppress the chip when the name is the fallback hash label ("claude-596c4c07")
+  // that already carries the same id — only show it beside a genuine human label.
+  const sid = shortSid && !a.name.endsWith(shortSid) ? `${agentSlug}·${shortSid}` : ''
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 

@@ -12,6 +12,7 @@ import '../index.css'
 
 import { Icon } from '../components/mission-control/icons'
 import { FloorSidebar } from '../components/mission-control/FloorSidebar'
+import { FloorRail } from '../components/mission-control/FloorRail'
 import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
@@ -273,7 +274,16 @@ function Sidebar() {
     { name: 'yosemite-s0', online: true, agents: 2 },
     { name: 'yosemite-s1', online: false, agents: 1 },
   ]
-  return (
+  const [collapsed, setCollapsed] = useState(true)
+  return collapsed ? (
+    <FloorRail
+      agents={sidebarAgents}
+      tickets={tickets}
+      scope={null}
+      onScope={noop}
+      onExpand={() => setCollapsed(false)}
+    />
+  ) : (
     <FloorSidebar
       agents={sidebarAgents}
       tickets={tickets}
@@ -283,6 +293,7 @@ function Sidebar() {
       hostPins={pins}
       projects={managedProjects}
       onManageProjects={noop}
+      onCollapse={() => setCollapsed(true)}
       onToggleHostPin={(n) => setPins((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))}
       onReorderHostPins={setPins}
       onScope={noop}

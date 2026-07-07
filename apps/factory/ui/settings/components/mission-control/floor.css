@@ -270,6 +270,19 @@
 /* page with optional project sidebar */
 .swarmify-root .page { display: flex; height: 100%; min-height: 0; }
 .swarmify-root .sidebar { width: 210px; flex: 0 0 210px; border-right: 1px solid var(--ds-border); overflow: auto; padding: 8px 0; background: var(--ds-bg); }
+/* Icon rail — collapsed left nav (mockup default): a column of 46px rounded icon
+   buttons with count/needs badges, active button lime-outlined. */
+.swarmify-root .floor-rail { flex: 0 0 68px; width: 68px; border-right: 1px solid var(--ds-border); background: var(--ds-bg); padding: 16px 0; overflow: visible; }
+.swarmify-root .floor-rail-col { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.swarmify-root .rail-ib { position: relative; width: 46px; height: 46px; border-radius: 12px; background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); display: flex; align-items: center; justify-content: center; color: var(--ds-text-dim); cursor: pointer; transition: .12s; }
+.swarmify-root .rail-ib:hover { color: var(--ds-text); border-color: var(--ds-text-dim); }
+.swarmify-root .rail-ib.on { border-color: var(--brand); color: var(--brand); box-shadow: 0 0 0 1px var(--brand-ring); }
+.swarmify-root .rail-ib .rail-bdg { position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 9px; background: var(--ds-bg-panel); border: 1px solid var(--ds-border); color: var(--ds-text-dim); font-family: "Geist Mono", monospace; font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.swarmify-root .rail-ib .rail-bdg.attn { background: var(--status-pending); border-color: var(--status-pending); color: #1a1a1a; }
+.swarmify-root .floor-rail .rail-gap { height: 6px; }
+.swarmify-root .rail-ib.rail-expand { color: var(--ds-text-faint); }
+.swarmify-root .sb-sec .sb-collapse { margin-left: auto; background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--ds-text-faint); display: inline-flex; align-items: center; }
+.swarmify-root .sb-sec .sb-collapse:hover { color: var(--ds-text); }
 .swarmify-root .sb-sec { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--ds-text-faint); padding: 12px 14px 4px; }
 .swarmify-root .sb-item { display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12.5px; cursor: pointer; color: var(--ds-text-muted); }
 .swarmify-root .sb-item:hover { background: var(--ds-bg-panel); }

@@ -22,6 +22,7 @@ import {
 } from './dispatch'
 import { FloorControls, type StatusChip } from './FloorControls'
 import { FloorSidebar } from './FloorSidebar'
+import { FloorRail } from './FloorRail'
 import { BacklogCenter } from './BacklogCenter'
 import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
@@ -601,6 +602,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('project')
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
+  // Collapsed = the icon rail (mockup default); expanded = the full text sidebar.
+  const [railCollapsed, setRailCollapsed] = useState(true)
   const [rightOpen, setRightOpen] = useState(floorPrefs0.right)
   const [pinned, setPinned] = useState<Set<string>>(() => new Set(floorPrefs0.pinned))
   // Ordered pinned HOSTS names (null = default: pin the local machine).
@@ -1935,7 +1938,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       />
 
       <div className="page" style={{ flex: 1, minHeight: 0, height: 'auto' }}>
-        {sidebarOpen && (
+        {sidebarOpen && (railCollapsed ? (
+          <FloorRail
+            agents={floorAgents}
+            tickets={floorTickets}
+            scope={projFilter}
+            onScope={onScope}
+            onExpand={() => setRailCollapsed(false)}
+          />
+        ) : (
           <FloorSidebar
             agents={floorAgents}
             tickets={floorTickets}
@@ -1951,6 +1962,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             onToggleHostPin={toggleHostPin}
             onReorderHostPins={reorderHostPins}
             onScope={onScope}
+            onCollapse={() => setRailCollapsed(true)}
             onSelectHost={onSelectHost}
             selectedHost={center === 'host' ? selectedHostId : null}
             hosts={hostRoster}
@@ -1958,7 +1970,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             projects={managedProjects}
             onManageProjects={() => { setCenter('projects'); setRightOpen(true) }}
           />
-        )}
+        ))}
         <div className="feed-col">{centerContent}</div>
         {rightOpen && <div className="detail-col">{rightContent}</div>}
       </div>
