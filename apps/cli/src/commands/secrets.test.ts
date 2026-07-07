@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import { fileURLToPath } from 'url';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -215,29 +214,37 @@ describe('readImportDotenv', () => {
     }
   });
 
-  // Skipped on Windows: this exercises the helper in a child process launched
-  // with `node --import tsx`, and tsx's ESM loader hook fails to register under
-  // Windows CI (`tsx/dist/register-*.mjs`), so the harness — not the product —
-  // can't run there. `readImportDotenv('-')` -> `readStdinSync` is plain
-  // `fs.readSync(0)` (platform-agnostic), and the POSIX CI legs (Linux + macOS)
-  // cover this path end to end.
+  // POSIX-only by design, NOT a harness dodge: `--from -` (readStdinSync ->
+  // fs.readSync(0)) is the POSIX way `export --host` pipes a .env into a remote
+  // `import`. On Windows the export deliberately does NOT use `--from -` — the
+  // npm `agents.ps1` shim doesn't forward piped stdin to node, so it routes
+  // through the temp-file bridge in `buildWindowsStdinImportCommand` instead
+  // (verified end-to-end: 13 keys -> win-mini; unit-tested by the decoded-script
+  // assertions in remote-cmd.test.ts). So this test exercises the POSIX branch on
+  // the POSIX CI legs; the Windows branch is covered by that separate test.
   it.skipIf(process.platform === 'win32')('reads the .env from stdin when passed "-"', () => {
     // The in-process fd 0 can't be swapped, so exercise the real helper end to
-    // end in a child process with piped stdin — the exact path `export --host`
-    // drives when it pipes the resolved dotenv into `import --from -`.
-    const src = fileURLToPath(new URL('./secrets.ts', import.meta.url));
-    const res = spawnSync(
-      process.execPath,
-      [
-        '--import', 'tsx', '--input-type=module', '-e',
-        `import { readImportDotenv } from ${JSON.stringify(src)}; process.stdout.write(JSON.stringify(readImportDotenv('-')));`,
-      ],
-      { input: 'A="1"\nB="two words"\n', encoding: 'utf-8' },
+    // end in a child process with piped stdin. Run it with `bun` (repo-standard,
+    // on CI PATH): bun executes TS natively with no ESM loader hook — cleaner
+    // than the old `node --import tsx`, whose loader also failed to register on
+    // Windows.
+    const srcUrl = new URL('./secrets.ts', import.meta.url).href;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-stdin-'));
+    const probe = path.join(dir, 'probe.ts');
+    fs.writeFileSync(
+      probe,
+      `import { readImportDotenv } from ${JSON.stringify(srcUrl)};\n` +
+        `process.stdout.write(JSON.stringify(readImportDotenv('-')));\n`,
     );
-    expect(res.status, res.stderr).toBe(0);
-    // readStdinSync trims trailing whitespace; parseDotenv is line-based so a
-    // single trailing newline is immaterial — the KEY="VALUE" lines round-trip.
-    expect(JSON.parse(res.stdout)).toBe('A="1"\nB="two words"');
+    try {
+      const res = spawnSync('bun', [probe], { input: 'A="1"\nB="two words"\n', encoding: 'utf-8' });
+      expect(res.status, res.stderr).toBe(0);
+      // readStdinSync trims trailing whitespace; parseDotenv is line-based so a
+      // single trailing newline is immaterial — the KEY="VALUE" lines round-trip.
+      expect(JSON.parse(res.stdout)).toBe('A="1"\nB="two words"');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
