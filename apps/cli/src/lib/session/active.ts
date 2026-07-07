@@ -26,6 +26,7 @@ import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
 import { buildClaudeLabelMap } from './discover.js';
+import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTail } from './tail.js';
@@ -58,6 +59,8 @@ export interface ActiveSession {
   cwd?: string;
   /** User-given name from /rename command. */
   label?: string;
+  /** Durable `agents run --name` launch handle, when the run was named. */
+  name?: string;
   /** First meaningful line of the initial prompt (extracted topic). */
   topic?: string;
   /** Live preview: the latest turn (agent message or tool action), from the state engine. */
@@ -447,6 +450,9 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
 
   // Build label map from Claude's sessions/*.json for /rename support
   const labelMap = buildClaudeLabelMap();
+  // Run-name handles (`agents run --name`) keyed by session id, for the same
+  // sessionId → handle resolution as labels.
+  const runNameMap = buildRunNameMap();
 
   return entries.map((t): ActiveSession => {
     // The id cached in live-terminals.json goes stale when Claude rotates its
@@ -462,6 +468,8 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, resolvedId);
     // Prefer label from live terminal, fall back to Claude's session label
     const label = t.label ?? (t.sessionId ? labelMap.get(t.sessionId) : undefined) ?? undefined;
+    // Durable run name from `agents run --name`, resolved by the run's session id.
+    const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     // Extract topic from session file (first meaningful user message)
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const state = computeLiveState(t.kind, sessionFile, t.cwd ?? undefined, isPidAlive(t.pid));
@@ -474,6 +482,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       sessionId: t.sessionId ?? sessionIdFromFile(sessionFile),
       cwd: t.cwd ?? undefined,
       label,
+      name,
       topic,
       sessionFile,
       startedAtMs: t.startedAtMs,

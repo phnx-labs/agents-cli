@@ -43,6 +43,8 @@ interface LaunchOptions {
   promptLabel: string;
   /** Session id the run was launched with, persisted on the task record. */
   sessionId?: string;
+  /** Durable `--name` handle, persisted on the task record for name resolution. */
+  name?: string;
 }
 
 /**
@@ -92,6 +94,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     prompt: opts.promptLabel,
     pid: Number.isFinite(pid) ? pid : undefined,
     sessionId: opts.sessionId,
+    name: opts.name,
     remoteLog,
     remoteExit,
     status: 'running',
@@ -129,6 +132,11 @@ export interface DispatchOptions {
    * resumable by id. Mutually exclusive with `resume`.
    */
   sessionId?: string;
+  /**
+   * Durable `--name <slug>` handle, forwarded to the remote `agents run` and
+   * recorded on the local task so `agents hosts logs/ps <name>` resolve it.
+   */
+  name?: string;
   /** Resume an existing session on the host by id (via `agents run --resume`). */
   resume?: string;
   /** Stream progress and block until completion (default true). */
@@ -146,6 +154,7 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   const args = ['run', opts.agent, opts.prompt, '--quiet'];
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
+  if (opts.name) args.push('--name', opts.name);
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
   return args;
@@ -164,6 +173,7 @@ export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise
     timeoutMs: opts.timeoutMs,
     agentLabel: opts.agent,
     promptLabel: opts.prompt,
+    name: opts.name,
     // On resume the remote session keeps its existing id; record that id so the
     // task stays mapped to the same session.
     sessionId: opts.resume ?? opts.sessionId,

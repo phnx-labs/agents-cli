@@ -8,10 +8,10 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-hosttasks-'));
 process.env.HOME = TEST_HOME;
 
-const { saveTask, findTaskBySessionId } = await import('./tasks.js');
+const { saveTask, findTaskBySessionId, findTaskByName } = await import('./tasks.js');
 type HostTask = import('./tasks.js').HostTask;
 
-function task(id: string, sessionId?: string): HostTask {
+function task(id: string, sessionId?: string, name?: string): HostTask {
   return {
     id,
     host: 'box',
@@ -19,6 +19,7 @@ function task(id: string, sessionId?: string): HostTask {
     agent: 'claude',
     prompt: 'p',
     sessionId,
+    name,
     remoteLog: `/r/${id}.log`,
     remoteExit: `/r/${id}.exit`,
     status: 'running',
@@ -42,5 +43,26 @@ describe('findTaskBySessionId', () => {
   it('returns null for an empty query and never matches tasks with no session id', () => {
     saveTask(task('cc')); // no sessionId
     expect(findTaskBySessionId('')).toBeNull();
+  });
+});
+
+describe('findTaskByName', () => {
+  it('resolves a --name handle to its host task (case-insensitive)', () => {
+    saveTask(task('d1', 'sess-d1', 'nightly-audit'));
+    const found = findTaskByName('Nightly-Audit');
+    expect(found?.id).toBe('d1');
+  });
+
+  it('returns the newest task when a name was reused across dispatches', () => {
+    // 'e2' sorts after 'e1' by createdAt (parseInt base36), so it is newer.
+    saveTask(task('e1', 'sess-e1', 'probe'));
+    saveTask(task('e2', 'sess-e2', 'probe'));
+    expect(findTaskByName('probe')?.id).toBe('e2');
+  });
+
+  it('returns null for an unknown name, an empty query, and unnamed tasks', () => {
+    saveTask(task('f1', 'sess-f1')); // no name
+    expect(findTaskByName('nope')).toBeNull();
+    expect(findTaskByName('')).toBeNull();
   });
 });

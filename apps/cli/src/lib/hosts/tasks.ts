@@ -22,6 +22,14 @@ export interface HostTask {
   prompt: string;
   pid?: number;
   /**
+   * The durable `agents run --name <slug>` handle for this dispatch, if given.
+   * Chosen at launch and agent-agnostic (unlike sessionId), so `agents hosts
+   * ps/logs <name>` and the dispatch tip can reference the run by a stable name
+   * even for agents that never expose a session id up front. Absent when the
+   * run was launched without `--name`.
+   */
+  name?: string;
+  /**
    * The agent session id the remote run was launched with (Claude only — the
    * only agent that accepts `--session-id` to force a NEW session's id). Lets
    * `agents sessions`/resume-by-id map a discovered session back to the host it
@@ -111,6 +119,21 @@ export function findTaskBySessionId(sessionId: string): HostTask | null {
   if (!sessionId) return null;
   for (const task of listTasks()) {
     if (task.sessionId === sessionId) return task;
+  }
+  return null;
+}
+
+/**
+ * Find the newest host task launched with `--name <name>`, so `agents hosts
+ * logs/ps <name>` and resolve-by-handle can address a run by its durable name.
+ * Case-insensitive; newest wins (listTasks is createdAt-desc) when a name was
+ * reused across dispatches.
+ */
+export function findTaskByName(name: string): HostTask | null {
+  if (!name) return null;
+  const wanted = name.toLowerCase();
+  for (const task of listTasks()) {
+    if (task.name && task.name.toLowerCase() === wanted) return task;
   }
   return null;
 }

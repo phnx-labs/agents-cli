@@ -46,6 +46,7 @@ export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): Sessio
     filePath: '',
     topic: ctx.prompt.split('\n')[0]?.slice(0, 120) || undefined,
     label: `[host/${task.host}]`,
+    name: task.name,
   };
 }
 

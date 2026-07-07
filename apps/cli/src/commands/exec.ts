@@ -37,6 +37,8 @@ interface ExecCommandActionOptions {
   /** --resume [id]: string id/prefix, or `true` for the bare flag (interactive picker). */
   resume?: string | boolean;
   sessionId?: string;
+  /** --name <slug>: durable launch handle, resolvable via `agents sessions <name>`. */
+  name?: string;
   verbose?: boolean;
   raw?: boolean;
   timeout?: string;
@@ -317,6 +319,7 @@ export function registerRunCommand(program: Command): void {
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
     .option('--resume [id]', 'Resume a previous conversation. Accepts a full or partial session id (prefix-matched against the index); omit the id to pick from recent sessions interactively. Resumes under the version that started the session. claude/codex resume natively; other agents replay via a /continue first message. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
+    .option('--name <slug>', 'Give the run a durable name — a stable handle you can check on later with `agents sessions <name>` (and `agents hosts logs <name>` for --host runs), instead of an opaque id. Optional; omitting it keeps today\'s id-only behavior.')
     .option('--verbose', 'Show detailed execution logs')
     .option('--raw', 'Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.')
     .option('--timeout <duration>', 'Kill the agent after this duration (e.g., 30m, 1h, 2h30m)')
@@ -552,15 +555,24 @@ export function registerRunCommand(program: Command): void {
             model: options.model,
             remoteCwd: options.remoteCwd,
             sessionId: hostSessionId,
+            name: options.name,
             resume: resumeId,
             follow: options.follow !== false,
           });
           // Register the dispatched run in the LOCAL session index so it shows
-          // up in `agents sessions` and resolves by id, even though its
+          // up in `agents sessions` and resolves by id/name, even though its
           // transcript lives on the host. No-op when no session id was captured.
           registerHostSession(task, { cwd: process.cwd(), prompt });
           if (options.follow === false) {
-            console.log(chalk.green(`Dispatched to ${host.name}.`) + chalk.gray(' Track: agents hosts ps · Follow: agents hosts logs <id> -f'));
+            // The handle the caller uses to check on the run: the name if given,
+            // else the real host-task id (never the old literal `<id>`). Steer
+            // to the compact `agents sessions` digest over the raw log first.
+            const handle = task.name ?? task.id;
+            console.log(
+              chalk.green(`Dispatched to ${host.name}${task.name ? ` as "${task.name}"` : ''}.`) + '\n' +
+              chalk.gray(`  Status:  agents sessions ${handle}`) + chalk.gray('   (compact digest — use this)') + '\n' +
+              chalk.gray(`  Raw log: agents hosts logs ${handle} -f`) + chalk.gray('   (heavy, only if needed)'),
+            );
             process.exit(0);
           }
           // -1 = the follow window closed but the run continues on the host (the
@@ -1235,6 +1247,7 @@ export function registerRunCommand(program: Command): void {
         json: options.json,
         headless: options.headless,
         sessionId: resumeSessionId ?? options.sessionId,
+        name: options.name,
         resume: resumeNative,
         verbose: options.verbose,
         raw: options.raw,
