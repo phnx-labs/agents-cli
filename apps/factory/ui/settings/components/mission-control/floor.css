@@ -100,7 +100,7 @@
 .swarmify-root .spark { display: inline-flex; align-items: flex-end; gap: 1px; height: 12px; }
 .swarmify-root .spark i { width: 2px; background: var(--brand-600); border-radius: 1px; display: block; opacity: .85; }
 .swarmify-root .since { color: var(--ds-text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
-.swarmify-root .tps { color: var(--brand-600); font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; }
+.swarmify-root .tps { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; flex: 0 0 auto; color: var(--brand-600); font-weight: 600; font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* ============ LAYOUT: RAIL ============ */
 .swarmify-root .rail-wrap { display: grid; grid-template-columns: 320px 1fr; height: 100%; min-height: 0; }
@@ -262,7 +262,7 @@
 .swarmify-root .sb-item.on { background: var(--ds-bg-panel); color: var(--ds-text); font-weight: 600; box-shadow: inset 3px 0 0 var(--brand); }
 .swarmify-root .sb-item .c { margin-left: auto; font-size: 11px; color: var(--ds-text-dim); font-variant-numeric: tabular-nums; display: flex; gap: 6px; }
 .swarmify-root .sb-item .c .w { color: var(--status-pending); font-weight: 700; }
-.swarmify-root .sb-item .hd { width: 7px; height: 7px; border-radius: 50%; background: var(--status-running); }
+.swarmify-root .sb-item .hd { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--status-running); }
 .swarmify-root .sb-item .hd.off { background: var(--status-failed); }
 /* HOSTS pin + drag-reorder. Grip column is reserved on every host row so the
    status dots line up whether or not a row is pinned/draggable. */

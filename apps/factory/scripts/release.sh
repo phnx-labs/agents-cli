@@ -72,6 +72,19 @@ fi
 VERSION="$BASE_VERSION"
 if [ -n "$PRE_TAG" ]; then VERSION="${BASE_VERSION}-${PRE_TAG}"; fi
 
+# --- Pre-flight: the changelog must document this version ----------------
+#
+# A release must document itself. Require a `## [<X.Y.Z>]` section in
+# CHANGELOG.md (the base version, ignoring any --pre tag) so we can never
+# publish a version whose changes are undocumented. Cheapest check -> runs first.
+if ! grep -qE "^## \[${BASE_VERSION//./\\.}\]" CHANGELOG.md; then
+    echo "Error: no CHANGELOG.md entry for ${BASE_VERSION}." >&2
+    echo "       Add a '## [${BASE_VERSION}] - <date>' section before releasing." >&2
+    exit 1
+fi
+echo "Changelog entry for ${BASE_VERSION}: found."
+echo
+
 PUBLISHER_ID="swarmify"
 EXT_NAME="swarm-ext"
 EXT_FQN="${PUBLISHER_ID}.${EXT_NAME}"

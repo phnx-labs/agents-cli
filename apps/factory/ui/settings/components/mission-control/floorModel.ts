@@ -13,78 +13,20 @@
 // (+ DESIGN.md). Field names mirror the prototype's AGENTS / TICKETS mock objects
 // so the port is a 1:1 translation, not a redesign.
 
-import type { UnifiedTask, RecentToolCall, ProjectRule } from '../../types'
+import type { UnifiedTask, RecentToolCall } from '../../types'
 
 export type { RecentToolCall }
 
 // ---------- project resolution ----------
 //
-// Mirror of src/core/remoteSessions.ts resolveProject (hand-kept; the src/ and ui/
-// builds cannot share imports, so the logic lives on both sides of the postMessage
-// boundary). Keep the two in lockstep.
-
-/** Glob -> RegExp. `**` spans path separators, `*` does not, `?` a single char.
- *  A trailing subpath always matches so a rule for a dir captures work inside it. */
-function projectGlobToRegExp(glob: string): RegExp {
-  let re = ''
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i]
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        re += '.*'
-        i++
-      } else {
-        re += '[^/]*'
-      }
-    } else if (c === '?') {
-      re += '[^/]'
-    } else {
-      re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    }
-  }
-  return new RegExp('^' + re + '(?:/.*)?$')
-}
-
-/** A rule pattern with no glob metacharacters is a path prefix; else a glob. */
-function matchesProjectRule(cwd: string, pattern: string): boolean {
-  const p = pattern.trim().replace(/\/+$/, '')
-  if (!p) return false
-  if (!/[*?]/.test(p)) return cwd === p || cwd.startsWith(p + '/')
-  return projectGlobToRegExp(p).test(cwd)
-}
-
-function pathBasename(p: string): string {
-  const parts = p.replace(/\/+$/, '').split('/').filter(Boolean)
-  return parts[parts.length - 1] || ''
-}
-
-/**
- * Resolve a session cwd to a display project. Order:
- *   1. user rules (first match wins) — glob or path-prefix against the cwd.
- *   2. worktree fold: `.../<repo>/.agents/worktrees/<slug>` -> `<repo>`.
- *   3. git repo root basename when `repoRoot` is supplied — so a monorepo subdir
- *      folds to the repo, not the leaf dir.
- *   4. ultimate fallback: the cwd's last path segment (legacy behavior).
- */
-export function resolveProject(
-  cwd: string,
-  rules: ProjectRule[] = [],
-  repoRoot?: string | null,
-): string {
-  if (!cwd) return ''
-  const norm = cwd.replace(/\/+$/, '')
-  for (const rule of rules) {
-    if (rule && matchesProjectRule(norm, rule.pattern)) return rule.project
-  }
-  const wt = norm.match(/\/([^/]+)\/\.agents\/worktrees\//)
-  if (wt) return wt[1]
-  if (repoRoot) {
-    const base = pathBasename(repoRoot)
-    if (base) return base
-  }
-  const parts = norm.split('/').filter(Boolean)
-  return parts[parts.length - 1] || norm
-}
+// resolveProject + worktreeSlugOf are canonical in src/shared/project.ts, imported
+// via @shared — the SAME impl the extension host uses, so a session's project can no
+// longer resolve differently on each side of the postMessage boundary. Re-exported
+// so existing importers (e.g. floorAdapter) keep their `from './floorModel'` path.
+import { resolveProject, worktreeSlugOf } from '@shared/project'
+import type { ProjectRule } from '@shared/project'
+export { resolveProject, worktreeSlugOf }
+export type { ProjectRule }
 
 // ---------- agent view-model ----------
 
@@ -189,6 +131,8 @@ export interface FloorAgent {
   ci: CiStatus           // CI state of the open PR; null when no PR / unknown
   ticket: string | null  // "RUSH-812" when linked
   branch: string
+  worktreeSlug: string   // "<slug>" under .agents/worktrees/; '' when not a worktree. Disambiguates sibling sessions + labels the card when topic/preview are empty.
+  worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree
   resp: string           // last response text (Anthropic Agent-view style)
   question: StructuredQuestion | null
   reply: ReplyTarget     // how a user reply reaches this agent (host dispatches on kind)
@@ -299,6 +243,7 @@ export interface FloorTicket {
   status: TicketStatus
   desc: string
   labels: string[]
+  owner: string        // metadata.assignee (human or agent) || '' when unassigned
 }
 
 // ---------- controls state ----------
@@ -354,7 +299,7 @@ export interface HostInventory {
 }
 export type FloorGroupBy = 'host' | 'project' | 'status' | 'agent'
 export type FloorSort = 'needs' | 'recent' | 'tok' | 'name'
-export type TicketGroupBy = 'project' | 'priority' | 'source' | 'status'
+export type TicketGroupBy = 'project' | 'priority' | 'source' | 'status' | 'owner'
 export type TicketSort = 'priority' | 'id'
 
 // ---------- stable rank constants (data — final, not stubs) ----------
@@ -413,6 +358,18 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | un
     if (typeof v === 'string' && v.trim()) return v.trim()
   }
   return undefined
+}
+
+/**
+ * The one "what is this session doing" line, used by BOTH the card and the detail
+ * rail so no surface re-derives it or renders blank. Fallback chain: the CLI summary
+ * / live preview, then the last response, then the worktree slug or branch (a task
+ * label when there's no narrative — e.g. "headless-secrets-shadow"). Returns '' when
+ * the agent carries no task signal at all; callers that need an absolute fallback add
+ * `|| a.name` (the card already shows the name separately, so it omits that).
+ */
+export function sessionTaskLine(a: FloorAgent): string {
+  return firstNonEmpty(a.summary, a.resp, a.worktreeSlug, a.branch) ?? ''
 }
 
 /**
@@ -620,9 +577,12 @@ function cleanOption(raw: string): string {
 
 /** Group agents by the chosen dimension. Prototype groupKey: factory-floor.html:412. */
 export function groupAgents(agents: FloorAgent[], by: FloorGroupBy): Map<string, FloorAgent[]> {
+  // Coalesce empty keys to a human label (same rule as groupTickets) so a Floor
+  // group header is never blank. Host groups by its DISPLAY label so 'this-mac'
+  // collapses onto the real device name, matching the HOSTS sidebar.
   const accessor: Record<FloorGroupBy, (a: FloorAgent) => string> = {
-    host: (a) => a.host,
-    project: (a) => a.project,
+    host: (a) => (a.hostLabel ?? a.host) || 'Unknown host',
+    project: (a) => a.project || 'Unlabeled',
     status: (a) => a.phase,
     agent: (a) => a.abbr,
   }
@@ -683,13 +643,16 @@ export function toFloorTicket(task: UnifiedTask): FloorTicket {
   return {
     id: task.metadata.identifier ?? task.id,
     title: task.title,
-    // UnifiedTask.metadata has no `project`; repo is the closest scope we have.
-    project: task.metadata.repo ?? '',
+    // The formal project as defined in the source: Linear's `project` (from
+    // linear-cli), else the repo scope for GitHub-sourced tickets. Empty when the
+    // source declares neither — grouping renders that as 'Unlabeled' (never blank).
+    project: task.metadata.project ?? task.metadata.repo ?? '',
     source: task.source === 'linear' ? 'LN' : 'GH',
     pri: toTicketPriority(task.priority),
     status: toTicketStatus(task.status),
     desc: task.description ?? '',
     labels: task.metadata.labels ?? [],
+    owner: task.metadata.assignee ?? '',
   }
 }
 
@@ -720,11 +683,14 @@ function toTicketStatus(s: UnifiedTask['status']): TicketStatus {
 }
 
 export function groupTickets(tickets: FloorTicket[], by: TicketGroupBy): Map<string, FloorTicket[]> {
+  // Every accessor coalesces an empty key to a human label so a group header is
+  // never blank (the "· 76" bug) — one generic rule across all axes.
   const accessor: Record<TicketGroupBy, (t: FloorTicket) => string> = {
-    project: (t) => t.project,
+    project: (t) => t.project || 'Unlabeled',
     priority: (t) => t.pri,
     source: (t) => (t.source === 'LN' ? 'Linear' : 'GitHub'),
     status: (t) => t.status.replace('-', ' '),
+    owner: (t) => t.owner || 'Unassigned',
   }
   const get = accessor[by]
   const groups = new Map<string, FloorTicket[]>()

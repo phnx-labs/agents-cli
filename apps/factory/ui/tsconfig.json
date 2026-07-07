@@ -14,6 +14,13 @@
     "verbatimModuleSyntax": true,
     "noEmit": true,
 
+    // Types + pure logic shared with the extension host (mirrors the vite @shared
+    // alias) — one source of truth across the postMessage boundary.
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["../src/shared/*"]
+    },
+
     // Best practices
     "strict": true,
     "skipLibCheck": true,

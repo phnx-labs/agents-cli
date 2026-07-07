@@ -1,6 +1,6 @@
 import React from 'react'
 import { Icon } from './icons'
-import type { AgentAbbr, FloorSort } from './floorModel'
+import type { AgentAbbr, FloorSort, FloorGroupBy } from './floorModel'
 
 // Single Floor filter bar (Sort · Status · Agent · search · stats · toggles · Dispatch).
 // The old duplicate ".top" header (second FACTORY logo + theme toggle) was removed —
@@ -18,6 +18,16 @@ const SORT_OPTS: { value: FloorSort; label: string }[] = [
 
 const DEFAULT_AGENT_CHIPS: AgentAbbr[] = ['CC', 'CX', 'GX']
 
+// Group the live feed by an axis; 'none' keeps the default phase sections. Same axes
+// as the Backlog's group control (BacklogCenter GROUP_OPTS) so the two bars match.
+const GROUP_OPTS: { value: FloorGroupBy | 'none'; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'project', label: 'Project' },
+  { value: 'host', label: 'Host' },
+  { value: 'status', label: 'Status' },
+  { value: 'agent', label: 'Agent' },
+]
+
 const SVG = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 } as const
 
 interface FloorControlsProps {
@@ -33,6 +43,9 @@ interface FloorControlsProps {
 
   sort: FloorSort
   onSort: (s: FloorSort) => void
+  /** How the live feed is grouped ('none' = default phase sections). */
+  group: FloorGroupBy | 'none'
+  onGroup: (g: FloorGroupBy | 'none') => void
   /** Which status chips are active. */
   activeStatus: StatusChip[]
   onToggleStatus: (chip: StatusChip) => void
@@ -50,7 +63,7 @@ interface FloorControlsProps {
 export function FloorControls({
   runningCount, totalCount,
   sidebarOpen, onToggleSidebar, rightOpen, onToggleRight, plain, onTogglePlain,
-  sort, onSort, activeStatus, onToggleStatus, agentChips = DEFAULT_AGENT_CHIPS, activeAbbrs, onToggleAbbr,
+  sort, onSort, group, onGroup, activeStatus, onToggleStatus, agentChips = DEFAULT_AGENT_CHIPS, activeAbbrs, onToggleAbbr,
   search, onSearch, onDispatch,
 }: FloorControlsProps) {
   const statusOn = new Set(activeStatus)
@@ -92,6 +105,17 @@ export function FloorControls({
         {agentChips.map((ab) => (
           <span key={ab} className={`chip ${abbrOn.has(ab) ? 'on' : ''}`} onClick={() => onToggleAbbr(ab)}>{ab}</span>
         ))}
+      </div>
+
+      <div className="fsep" />
+
+      <div className="fgroup">
+        <span className="fgroup-label">Group</span>
+        <select className="sel" value={group} onChange={(e) => onGroup(e.target.value as FloorGroupBy | 'none')}>
+          {GROUP_OPTS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
       </div>
 
       <div className="fsep" />
