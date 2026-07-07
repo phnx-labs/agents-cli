@@ -83,6 +83,33 @@ interface SessionsOptions extends SessionFilterOptions {
   /** Force local-only: skip the cross-machine SSH fan-out (both the default
    * listing and --active). */
   local?: boolean;
+  /** --device <target...> — alias for --host; resolves against the device registry. */
+  device?: string[];
+  /** Per-agent shorthands: aliases for `--agent <name>` (prioritized harnesses). */
+  claude?: boolean;
+  codex?: boolean;
+  kimi?: boolean;
+  antigravity?: boolean;
+  grok?: boolean;
+  opencode?: boolean;
+}
+
+/**
+ * The prioritized harnesses that get a boolean shorthand flag (e.g. `--claude`
+ * === `--agent claude`). The rest stay reachable via `--agent <name>`, which
+ * also carries version pins like `codex@0.116.0`.
+ */
+const AGENT_SHORTHANDS = ['claude', 'codex', 'kimi', 'antigravity', 'grok', 'opencode'] as const;
+
+/**
+ * Resolve a per-agent shorthand (`--claude`, `--kimi`, …) into `options.agent`.
+ * An explicit `--agent` wins; if two shorthands are passed we take the first and
+ * ignore the rest (commander gives no ordering, so this is a best-effort alias).
+ */
+function applyAgentShorthands(options: SessionsOptions): void {
+  if (options.agent) return;
+  const hit = AGENT_SHORTHANDS.find((name) => (options as Record<string, unknown>)[name] === true);
+  if (hit) options.agent = hit;
 }
 
 interface ClaudeHistoryEntry {
@@ -748,6 +775,14 @@ function printCrossMachineTip(): void {
 
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
 async function sessionsAction(query: string | undefined, options: SessionsOptions): Promise<void> {
+  // Normalize convenience flags before any routing reads them: per-agent
+  // shorthands fold into --agent, and --device is an alias for --host (both
+  // resolve against the same device registry).
+  applyAgentShorthands(options);
+  if (options.device && options.device.length > 0) {
+    options.host = [...(options.host ?? []), ...options.device];
+  }
+
   // --host WITHOUT --active keeps the legacy per-host stream (each remote's raw
   // stdout under a `── host ──` banner). With --active, the hosts are folded
   // into the merged machine-grouped view instead (handled below).
@@ -855,9 +890,12 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     const scope: DiscoverOptions = {
       agent,
       version,
-      all: pathFilter ? undefined : (wantsOverview ? true : options.all),
+      all: pathFilter ? undefined : options.all,
       cwd: process.cwd(),
-      cwdPrefix: pathFilter,
+      // Default overview scopes to the current repo SUBTREE (prefix match), so a
+      // monorepo shows its sub-projects grouped instead of collapsing to the one
+      // exact-cwd project. `--all` clears the prefix and spans the whole index.
+      cwdPrefix: pathFilter ?? (wantsOverview && !options.all ? process.cwd() : undefined),
       project: options.project,
       since,
       until: options.until,
@@ -1017,7 +1055,7 @@ function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
  * dashes and needlessly truncate the topic. Worktree stays a trailing badge. */
 function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket = false, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(session.agent);
-  const when = formatRelativeTime(session.timestamp);
+  const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
   const project = session.project || '-';
   const tag = teamTag(session);
   const label = (session as any).label;
@@ -1062,7 +1100,7 @@ function flatSessionRow(session: SessionMeta, live?: ActiveSession, showTicket =
 /** One tree-mode row (grouped under a dir header): id · agent · badges · topic · time. No version/project column. */
 function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const agentColor = colorAgent(session.agent);
-  const when = formatRelativeTime(session.timestamp);
+  const when = formatRelativeTime(session.lastActivity ?? session.timestamp);
   const tag = teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
@@ -1144,7 +1182,7 @@ export function buildOverviewGroups(
   const groups: OverviewGroup[] = [];
   for (const [key, rows] of byKey) {
     const shown = rows.slice(0, cap); // rows are recency-desc (pool was sorted)
-    groups.push({ key, total: rows.length, shown, more: rows.length - shown.length, maxTs: rows[0].timestamp });
+    groups.push({ key, total: rows.length, shown, more: rows.length - shown.length, maxTs: rows[0].lastActivity ?? rows[0].timestamp });
   }
   groups.sort((a, b) => (a.maxTs < b.maxTs ? 1 : a.maxTs > b.maxTs ? -1 : a.key.localeCompare(b.key)));
   return { groups, projectCount: byKey.size };
@@ -1183,9 +1221,9 @@ function printSessionOverview(
   }
 
   console.log();
-  const parts = [chalk.gray('newest first')];
-  if (hiddenProjects > 0) parts.push(chalk.gray(`+${hiddenProjects} more project${hiddenProjects === 1 ? '' : 's'} · agents sessions --all`));
-  parts.push(chalk.gray('agents sessions <project> to drill in · --flat for the plain list'));
+  const parts = [chalk.gray('newest first (by last activity)')];
+  if (hiddenProjects > 0) parts.push(chalk.gray(`+${hiddenProjects} more project${hiddenProjects === 1 ? '' : 's'}`));
+  parts.push(chalk.gray('agents sessions --all spans every project on disk · <project> to drill in · --flat for the plain list'));
   console.log(parts.join(chalk.gray('  ·  ')));
   if (hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
 }
@@ -1467,7 +1505,7 @@ export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
 
 export function formatPickerLabel(s: SessionMeta, query: string, cols: PickerColumns = {}): string {
   const agentColor = colorAgent(s.agent);
-  const when = formatRelativeTime(s.timestamp);
+  const when = formatRelativeTime(s.lastActivity ?? s.timestamp);
   const project = s.project || '-';
   const tag = teamTag(s);
   const label = (s as any).label;
@@ -2094,6 +2132,12 @@ export function registerSessionsCommands(program: Command): void {
     .argument('[query]', 'Session ID, search query, or path (., ../, /path) to filter by project')
     .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
+    .option('--claude', 'Shorthand for --agent claude')
+    .option('--codex', 'Shorthand for --agent codex')
+    .option('--kimi', 'Shorthand for --agent kimi')
+    .option('--antigravity', 'Shorthand for --agent antigravity')
+    .option('--grok', 'Shorthand for --agent grok')
+    .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Include sessions from every directory (not just current project)')
     .option('--teams', 'Include team-spawned sessions (hidden by default)')
     .option('--project <name>', 'Filter by project name (searches across all directories)')
@@ -2117,7 +2161,8 @@ export function registerSessionsCommands(program: Command): void {
     .option('--flat', 'Plain flat table (one row per session) instead of the grouped project overview')
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
-    .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)');
+    .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)')
+    .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable)');
 
   setHelpSections(sessionsCmd, {
     examples: `

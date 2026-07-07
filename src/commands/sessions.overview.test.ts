@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { overviewProjectKey, buildOverviewGroups } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
 
-function s(id: string, project: string | undefined, timestamp: string, cwd?: string): SessionMeta {
-  return { id, shortId: id.slice(0, 8), agent: 'claude', timestamp, project, cwd, filePath: '' } as SessionMeta;
+function s(id: string, project: string | undefined, timestamp: string, cwd?: string, lastActivity?: string): SessionMeta {
+  return { id, shortId: id.slice(0, 8), agent: 'claude', timestamp, lastActivity, project, cwd, filePath: '' } as SessionMeta;
 }
 
 describe('overviewProjectKey', () => {
@@ -56,6 +56,19 @@ describe('buildOverviewGroups', () => {
     ];
     const { groups } = buildOverviewGroups(p, 4);
     expect(groups.map((g) => g.key)).toEqual(['newproj', 'bigproj']);
+  });
+
+  it('orders and labels by last activity, not creation time', () => {
+    // 'revived' was CREATED long before 'fresh' but was ACTIVE most recently.
+    // The pool arrives last-activity-descending (as the SQL now returns it), so
+    // the revived project must lead and its maxTs must be the last-activity time.
+    const p: SessionMeta[] = [
+      s('r1', 'revived', '2026-06-01T09:00:00.000Z', undefined, '2026-07-04T12:00:00.000Z'),
+      s('f1', 'fresh', '2026-07-04T08:00:00.000Z', undefined, '2026-07-04T08:05:00.000Z'),
+    ];
+    const { groups } = buildOverviewGroups(p, 5);
+    expect(groups.map((g) => g.key)).toEqual(['revived', 'fresh']);
+    expect(groups[0].maxTs).toBe('2026-07-04T12:00:00.000Z'); // last activity, NOT the June creation
   });
 
   it('caps rows per project and rolls the rest into "more"', () => {
