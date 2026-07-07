@@ -517,8 +517,12 @@ export function listBundles(): SecretsBundle[] {
       // so only the first list per ~7d prompts. The cache key is a hash of the
       // current keychain name-set (enumerated silently above): add / remove /
       // rename a bundle and the key changes, so the stale snapshot is never
-      // served — no active invalidation needed. Values are never cached here;
-      // this is metadata only.
+      // served. A same-name metadata edit (e.g. `secrets policy <b> always`)
+      // does NOT change the key, so the POLICY column in `secrets list` can lag
+      // by up to the hold window (~7d) until the next name-set change or `lock`.
+      // This is cosmetic only — enforcement always reads the bundle's live
+      // policy (readBundle), never this snapshot, and `secrets view <b>` shows
+      // the fresh value immediately. Values are never cached here; metadata only.
       const useAgent =
         process.env.AGENTS_SECRETS_NO_AGENT !== '1' &&
         !isKeychainBackendOverridden() &&

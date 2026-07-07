@@ -661,9 +661,9 @@ export interface Meta {
   run?: RunConfig;
   /** macOS secrets-agent config. `policy` is the default prompt policy for
    * bundles without an explicit per-bundle policy: `daily` (the default) asks
-   * once per ~24h, `always` asks every time. `auto` (default on) lets the first
-   * real keychain read of a `daily` bundle populate the broker so concurrent
-   * runs read silently — set it `false` to force a prompt on every read. */
+   * once per ~7 days, `always` asks every time. `auto` (default on) lets the
+   * first real keychain read of a `daily` bundle populate the broker so
+   * concurrent runs read silently — set it `false` to force a prompt on every read. */
   secrets?: {
     policy?: 'always' | 'daily';
     agent?: {

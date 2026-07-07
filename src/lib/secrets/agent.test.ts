@@ -127,7 +127,7 @@ describe('secrets list metadata cache (broker-held snapshot)', () => {
     }
   });
 
-  it('lock-all still wipes the metadata cache (screen-lock drops it too)', () => {
+  it('lock-all still wipes the metadata cache (sleep / explicit lock drops it too)', () => {
     const store = freshStore();
     handleAgentRequest(store, loadReq(metaKey, { __snapshot__: '[]' }, 60_000), 0);
     handleAgentRequest(store, { cmd: 'lock' }, 0);

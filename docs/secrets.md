@@ -453,7 +453,7 @@ Auto-cache is **on by default** and only ever applies to `daily`-policy bundles 
 
 Snapshot semantics: `unlock` stores the **resolved** env, so a bundle's dynamic refs (`exec:`, `env:`, `file:`) are frozen at unlock time until you re-unlock. Keychain and literal values — the overwhelming majority — are unaffected.
 
-Source: `src/lib/secrets/agent.ts`. Auto-lock on screen-lock/sleep uses the signed keychain helper's `watch-lock` mode (`src/lib/secrets/keychain-helper.swift`); with an older helper that predates it, the agent degrades to TTL-only locking.
+Source: `src/lib/secrets/agent.ts`. Auto-lock on sleep uses the signed keychain helper's `watch-lock` mode (`src/lib/secrets/keychain-helper.swift`) — a bare screen-lock does **not** wipe the hold (the login password already gates a locked screen); with an older helper that predates `watch-lock`, the agent degrades to TTL-only locking.
 
 ## Linux: headless servers and the encrypted-file fallback
 

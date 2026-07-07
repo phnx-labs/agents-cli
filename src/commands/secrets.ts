@@ -1715,8 +1715,17 @@ Examples:
           console.error(chalk.yellow('Aborted.'));
           return;
         }
+        const wasDaily = bundlePolicy(bundle) === 'daily';
         bundle.policy = next;
         writeBundle(bundle);
+        // Tightening daily -> always/never must take effect NOW, not up to the
+        // ~7d hold later. If the broker is already serving this bundle silently
+        // (auto-cached under the old `daily` policy), evict it so the next read
+        // re-prompts (`always`) or reads its no-ACL item directly (`never`).
+        // macOS-only + best-effort; agentLock no-ops off darwin / with no broker.
+        if (wasDaily && next !== 'daily') {
+          try { await agentLock(bundle.name); } catch { /* broker down — nothing held */ }
+        }
         console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
         if (next === 'daily') {
           console.log(chalk.gray('Held by the secrets-agent for ~7 days after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));
