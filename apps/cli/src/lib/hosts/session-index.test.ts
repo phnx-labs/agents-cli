@@ -43,6 +43,11 @@ describe('hostSessionMeta', () => {
     expect(meta!.topic).toBe('first line');
   });
 
+  it('seeds the label with the run --name when present (falls back to the host tag)', () => {
+    const meta = hostSessionMeta(task({ name: 'remote-audit' }), { cwd: '/x', prompt: 'p' });
+    expect(meta!.label).toBe('remote-audit');
+  });
+
   it('returns null when the run captured no session id (nothing to key on)', () => {
     expect(hostSessionMeta(task({ sessionId: undefined }), { cwd: '/x', prompt: 'p' })).toBeNull();
   });

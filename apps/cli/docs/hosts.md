@@ -223,9 +223,11 @@ agents run <agent> "<task>" --host <host>
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
 > opaque id: `agents hosts ps` shows it under a **NAME** column, and
-> `agents hosts logs <name>` resolves by name (case-insensitive, newest-wins).
-> Omitting `--name` is a no-op — unnamed runs stay id-only and render `-` in the
-> NAME column.
+> `agents hosts logs <name>` resolves by name (case-insensitive, newest-wins). The
+> name also seeds the run's **session label**, so it shows up as `<name>` in
+> `agents sessions` and `agents sessions <name>` resolves it. Omitting `--name` is
+> a no-op — unnamed runs stay id-only, render `-` in the NAME column, and show the
+> `[host/<name>]` tag as their session label.
 
 ### Host sources — owned (registered) + leased on demand (crabbox)
 

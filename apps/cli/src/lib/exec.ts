@@ -632,7 +632,13 @@ export function buildExecCommand(options: ExecOptions): string[] {
     } else if (fs.existsSync(absPath)) {
       cmd[0] = absPath;
     } else {
-      cmd[0] = versionedName;
+      // No versioned shim on disk. Prefer the version's REAL launch binary
+      // (node_modules/.bin/<cli>) over the bare `<cli>@<version>` name — that
+      // literal is not on PATH and spawns as ENOENT (the `kimi@0.19.2` failure).
+      // Fall back to the literal only if the binary is absent (the run path's
+      // ensureAgentRunnable normally repairs/creates the alias before we reach here).
+      const realBinary = options.agent ? getBinaryPath(options.agent, options.version) : undefined;
+      cmd[0] = realBinary && fs.existsSync(realBinary) ? realBinary : versionedName;
     }
   }
 
@@ -973,6 +979,22 @@ export function buildTmuxAgentCommand(executable: string, args: string[], env: N
 }
 
 /**
+ * Trim a raw `tmux capture-pane` dump to its last `maxLines` non-empty lines
+ * (right-stripping each). Used by runInTmux to recap a fast-failed agent's
+ * output into the caller's shell so a launch crash (e.g. a gutted install that
+ * dies with ENOENT the instant it spawns) isn't swallowed by the bare
+ * `[detached]` the pane-died hook otherwise leaves behind.
+ */
+export function formatPaneTail(raw: string, maxLines = 30): string {
+  return raw
+    .split('\n')
+    .map(l => l.replace(/\s+$/, ''))
+    .filter(l => l.length > 0)
+    .slice(-maxLines)
+    .join('\n');
+}
+
+/**
  * Run an interactive agent inside a detached tmux session on the shared socket,
  * attach the current TTY, and propagate the wrapped agent's exit code.
  *
@@ -992,7 +1014,7 @@ export function buildTmuxAgentCommand(executable: string, args: string[], env: N
  *      (Ctrl-b d) — return 0 and LEAVE the session for `agents focus` to re-attach.
  */
 async function runInTmux(options: ExecOptions, executable: string, args: string[]): Promise<SpawnResult> {
-  const { createSession, killSession, paneExitStatus, setSessionHook, slugifyName } = await import('./tmux/session.js');
+  const { createSession, killSession, paneExitStatus, setSessionHook, slugifyName, agentPaneDiedHook, markSessionHookSchema } = await import('./tmux/session.js');
   const { getDefaultSocketPath } = await import('./tmux/paths.js');
   const { attachTmux, runTmux } = await import('./tmux/binary.js');
 
@@ -1016,12 +1038,10 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     // that split in place instead of detaching everyone (the pane-died hook runs
     // in the dead pane's context, so bare `kill-pane` targets it). Without the
     // guard, exiting any split kicked the user clean out of tmux.
-    await setSessionHook(
-      name,
-      'pane-died',
-      `if -F '#{==:#{hook_pane},${pane}}' 'detach-client -s =${name}' 'kill-pane'`,
-      socket,
-    );
+    await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane), socket);
+    // Stamp the schema marker so the daemon reconcile (which retrofits older
+    // sessions) recognizes this one as already current and skips it.
+    await markSessionHookSchema(name, socket);
 
     // Record the agent's OS pid (the pane leaf, thanks to `exec`) WITH its tmux
     // pane so the active-scan attributes it exactly and shows the %pane.
@@ -1040,15 +1060,54 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     });
   }
 
+  // Recap a dead pane's tail into THIS shell's stderr. The pane-died hook
+  // detaches the client the instant the agent exits, so a fast failure (a
+  // gutted install that dies with ENOENT, a bad flag, a crash on startup) would
+  // otherwise leave only a bare `[detached]` with no clue why. Must run BEFORE
+  // killSession — capture-pane needs the session still alive (remain-on-exit
+  // keeps the dead pane readable until we tear it down). Best-effort throughout.
+  const surfacePaneFailure = async (status: number | undefined, headline: string): Promise<void> => {
+    if (!pane) return;
+    let tail = '';
+    try {
+      const r = await runTmux({ socket, args: ['capture-pane', '-p', '-t', pane, '-S', '-200'], throwOnError: false });
+      if (r.code === 0) tail = formatPaneTail(r.stdout);
+    } catch { /* best-effort — a missing pane just means no recap */ }
+    const RED = '\x1b[31m', GRAY = '\x1b[90m', OFF = '\x1b[0m';
+    process.stderr.write(`\n${RED}agents: ${headline} (exit ${status ?? 1}).${OFF}\n`);
+    if (tail) {
+      process.stderr.write(`${GRAY}  ── last output from ${options.agent} ──${OFF}\n`);
+      process.stderr.write(tail.replace(/^/gm, '  ') + '\n');
+      process.stderr.write(`${GRAY}  ${'─'.repeat(30)}${OFF}\n`);
+    }
+    process.stderr.write(`${GRAY}  Tip: re-run with --no-tmux to launch the agent directly and see its full output.${OFF}\n\n`);
+  };
+
   // The agent could exit before we attach (fast failure). Don't attach to an
-  // already-dead pane — read its status directly and tear down.
+  // already-dead pane — surface its output + status directly and tear down.
   const before = pane ? await paneExitStatus(pane, socket) : { dead: false };
-  if (!before.dead) {
-    await attachTmux({ socket, args: ['attach-session', '-t', name] });
+  if (before.dead) {
+    // Only recap a FAILURE. A clean (0) exit before we attached is a successful
+    // quick run, not a crash — a red banner there would be spurious (mirrors the
+    // post-attach guard below).
+    if ((before.status ?? 0) !== 0) {
+      await surfacePaneFailure(before.status, `${options.agent} exited before it could start`);
+    }
+    await killSession(name, socket).catch(() => {});
+    return { exitCode: before.status ?? 0, stderr: '' };
   }
+
+  await attachTmux({ socket, args: ['attach-session', '-t', name] });
 
   const after = pane ? await paneExitStatus(pane, socket) : { dead: false };
   if (after.dead) {
+    // Nonzero exit after attach → the agent crashed rather than the user
+    // detaching cleanly (a clean detach leaves the pane ALIVE, handled below).
+    // The pane-died hook may have yanked the view before the error was readable,
+    // so recap it into the shell. A clean (0) exit stays quiet — nothing to say.
+    if ((after.status ?? 0) !== 0) {
+      await surfacePaneFailure(after.status, `${options.agent} exited`);
+    }
     await killSession(name, socket).catch(() => {});
     return { exitCode: after.status ?? 0, stderr: '' };
   }

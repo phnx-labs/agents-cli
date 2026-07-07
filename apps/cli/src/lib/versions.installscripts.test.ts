@@ -51,6 +51,17 @@ describe('installVersion npm install argv', () => {
     try {
       vi.resetModules();
       const { installVersion } = await import('./versions.js');
+      // installVersion now verifies the installed binary actually launches (an
+      // integrity gate against gutted installs). The mocked `npm install` writes
+      // no files, so stub the binary a real install would drop into
+      // node_modules/.bin — otherwise the gate correctly fails the install and
+      // this argv assertion never runs. The binary's --version probe is itself
+      // intercepted by the child_process mock above (non-ENOENT → treated as
+      // healthy), so only the file's existence matters here.
+      const binDir = path.join(home, '.agents', '.history', 'versions', 'codex', '0.116.0', 'node_modules', '.bin');
+      fs.mkdirSync(binDir, { recursive: true });
+      fs.writeFileSync(path.join(binDir, 'codex'), '#!/bin/sh\necho 0.116.0\n');
+      fs.chmodSync(path.join(binDir, 'codex'), 0o755);
       const result = await installVersion('codex', '0.116.0');
       expect(result.success).toBe(true);
       expect(npmInstallCapture.argv).toBeDefined();

@@ -12,7 +12,7 @@ import { sshReachable } from '../ssh-exec.js';
 let CACHE_ROOT: string = mkdtempSync(join(tmpdir(), 'agents-cli-hostlogs-boot-'));
 vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 
-import { showHostTaskLog } from './logs.js';
+import { showHostTaskLog, tailLines } from './logs.js';
 import { saveTask, localLogPath, type HostTask } from './tasks.js';
 
 // Gate real-SSH tests on localhost being reachable so they pass on dev machines
@@ -150,5 +150,42 @@ describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost
 
     expect(res.found).toBe(true);
     expect(out).toContain('no local log');
+  });
+});
+
+// tailLines is the concise-by-default view for host-task stdout: it must bound
+// the output and never silently drop lines without saying so.
+describe('tailLines', () => {
+  const strip = (s: string): string => s.replace(/\[[0-9;]*m/g, ''); // drop ANSI color
+
+  it('returns the whole text (with a trailing newline) when under the limit', () => {
+    const out = strip(tailLines('a\nb\nc', 40));
+    expect(out).toBe('a\nb\nc\n');
+    expect(out).not.toContain('hidden');
+  });
+
+  it('does not count a trailing newline as an extra hidden line', () => {
+    // Exactly 40 real lines + a trailing "" must NOT trip the elision note.
+    const text = Array.from({ length: 40 }, (_, i) => `L${i}`).join('\n') + '\n';
+    const out = strip(tailLines(text, 40));
+    expect(out).not.toContain('hidden');
+    expect(out.split('\n').filter(Boolean)).toHaveLength(40);
+  });
+
+  it('keeps only the last n lines and reports how many were hidden', () => {
+    const text = Array.from({ length: 100 }, (_, i) => `L${i}`).join('\n');
+    const out = strip(tailLines(text, 40));
+    expect(out).toContain('60 earlier lines hidden');
+    expect(out).toContain('--full');
+    expect(out).toContain('L99'); // last line kept
+    expect(out).toContain('L60'); // first kept line
+    expect(out).not.toContain('L59'); // the line just before the window is dropped
+  });
+
+  it('uses the singular "line" when exactly one is hidden', () => {
+    const text = Array.from({ length: 41 }, (_, i) => `L${i}`).join('\n');
+    const out = strip(tailLines(text, 40));
+    expect(out).toContain('1 earlier line hidden');
+    expect(out).not.toContain('1 earlier lines');
   });
 });

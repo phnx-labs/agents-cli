@@ -21,7 +21,9 @@ import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from '../gemini-set
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
+import { resolveVersion, isVersionInstalled } from '../versions.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
+import { recordRunName } from '../session/run-names.js';
 
 let lastMemoryWarnAt = 0;
 
@@ -358,20 +360,28 @@ export async function ensureGeminiPlanMode(): Promise<void> {
  * (for CLIs the user installed outside agents-cli).
  */
 export function checkCliAvailable(agentType: AgentType): [boolean, string | null] {
-  const executable = AGENTS[agentType as AgentId]?.cliCommand;
+  const agent = agentType as AgentId;
+  const executable = AGENTS[agent]?.cliCommand;
   if (!executable) {
     return [false, `Unknown agent type: ${agentType}`];
   }
 
   const shimPath = path.join(getShimsDir(), executable);
-  if (fsSync.existsSync(shimPath)) {
-    return [true, shimPath];
+  const dispatch = fsSync.existsSync(shimPath) ? shimPath : findExecutable(executable);
+  if (!dispatch) {
+    return [false, `CLI tool '${executable}' not found in PATH. Install it first.`];
   }
 
-  const resolved = findExecutable(executable);
-  return resolved
-    ? [true, resolved]
-    : [false, `CLI tool '${executable}' not found in PATH. Install it first.`];
+  // A shim file (or a PATH entry) existing does NOT mean the agent is runnable:
+  // the managed default version's binary can be a stub or gutted (a partial/raced
+  // npm extract leaves the version dir + JS wrapper but no real binary). Verify
+  // the resolved default version is actually installed so `teams doctor` reports
+  // the truth instead of a false `installed: true` that ENOENTs at spawn.
+  const version = resolveVersion(agent);
+  if (version && !isVersionInstalled(agent, version)) {
+    return [false, `${executable}@${version} is not runnable — its binary is missing/incomplete. Repair: agents add ${agent}@${version}`];
+  }
+  return [true, dispatch];
 }
 
 /** Check availability of all known agent CLIs. Returns a map of agent type to install status. */
@@ -1308,6 +1318,15 @@ export class AgentManager {
       throw new Error(`Failed to create agent directory: ${err.message}`);
     }
     this.agents.set(agentId, agent);
+
+    // Seed the teammate's session label with its friendly team name, so the run
+    // shows up as `<name>` in `agents sessions` and resolves by it — consistent
+    // with `agents run --name`. For Claude the agent id IS the session id (passed
+    // via --session-id in buildCommand); other agents don't expose a launch-time
+    // id, so they're seeded once discovery captures one. Best-effort.
+    if (agentType === 'claude' && name && !isCloudBacked) {
+      recordRunName({ sessionId: agentId, name, agent: agentType, cwd: resolvedCwd ?? undefined });
+    }
 
     if (isStaged) {
       await agent.saveMeta();

@@ -1,5 +1,8 @@
-import { describe, it, expect } from 'vitest';
-import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, type TmuxWrapContext } from './exec.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as os from 'node:os';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -77,6 +80,45 @@ describe('nativeResume (Tier-1 capability derives from the command template)', (
   it('opencode and gemini do not (they fall back to /continue replay)', () => {
     expect(nativeResume('opencode')).toBe(false);
     expect(nativeResume('gemini')).toBe(false);
+  });
+});
+
+describe('buildExecCommand — versioned launch target (no unspawnable literal)', () => {
+  let tmpHome: string;
+  let origHome: string | undefined;
+
+  // state.ts caches HOME at module load, so set HOME then re-import exec.js fresh.
+  beforeEach(() => {
+    origHome = process.env.HOME;
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-ver-'));
+    process.env.HOME = tmpHome;
+    vi.resetModules();
+  });
+  afterEach(() => {
+    if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  // Regression for `spawn kimi@0.19.2 ENOENT`: when a specific version is requested
+  // and no versioned shim exists on disk, we must resolve the version's REAL binary
+  // — never leave the bare `<agent>@<version>` literal as argv[0] (it's not on PATH).
+  it('resolves the version binary when no versioned shim exists', async () => {
+    const binDir = path.join(tmpHome, '.agents', '.history', 'versions', 'kimi', '0.19.2', 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const realBin = path.join(binDir, 'kimi');
+    fs.writeFileSync(realBin, '#!/bin/sh\n', { mode: 0o755 });
+
+    const { buildExecCommand: build } = await import('./exec.js');
+    const cmd = build(execOpts({ agent: 'kimi', version: '0.19.2', interactive: true }));
+    expect(cmd[0]).toBe(realBin);
+    expect(cmd[0]).not.toBe('kimi@0.19.2');
+  });
+
+  it('falls back to the bare versioned name only when no binary exists at all', async () => {
+    const { buildExecCommand: build } = await import('./exec.js');
+    const cmd = build(execOpts({ agent: 'kimi', version: '0.19.2', interactive: true }));
+    expect(cmd[0]).toBe('kimi@0.19.2');
   });
 });
 
@@ -237,6 +279,31 @@ describe('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
 
   it('does not wrap when tmux is not installed', () => {
     expect(shouldWrapInTmux({ ...base, tmuxAvailable: false })).toBe(false);
+  });
+});
+
+describe('formatPaneTail (dead-pane failure recap)', () => {
+  it('keeps the last N non-empty lines, right-stripped, in order', () => {
+    const raw = 'a  \n\n b\nc\t\n\n';
+    expect(formatPaneTail(raw, 2)).toBe(' b\nc');
+  });
+
+  it('surfaces the real ENOENT crash a fast-failing agent leaves in the pane', () => {
+    // The exact class of output that used to be swallowed by the bare [detached].
+    const raw = [
+      'Error: spawn /Users/x/.agents/.history/versions/codex/0.116.0/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex ENOENT',
+      "    at ChildProcess._handle.onexit (node:internal/child_process:285:19)",
+      '',
+      'Pane is dead (status 1, Tue Jul  7 07:06:21 2026)',
+    ].join('\n');
+    const out = formatPaneTail(raw);
+    expect(out).toContain('ENOENT');
+    expect(out).toContain('Pane is dead (status 1');
+    expect(out).not.toMatch(/\n\n/); // blank lines dropped
+  });
+
+  it('returns empty string for an all-whitespace capture', () => {
+    expect(formatPaneTail('  \n\n\t\n')).toBe('');
   });
 });
 

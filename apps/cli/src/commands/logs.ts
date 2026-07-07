@@ -5,6 +5,10 @@
  *  - host-dispatch tasks (`agents run --host`) → combined-stdout log, offset-tailed
  *  - sessions (the local index) → transcript, tailed via the sessions tailer
  *
+ * Concise by default: a bare `agents logs <id>` prints the same summary digest as
+ * `agents sessions <id>` — cheap for an agent to glance at. The token-heavy full
+ * transcript / raw stdout is opt-in behind `--full` (alias `-m/--markdown`).
+ *
  * `[id]`/`--session` load directly (host task tried first, then session). With no
  * id, `--host`/`--agent`/`--version` filter a merged candidate list; one match is
  * shown, several open the fuzzy picker (or, non-TTY, print the list).
@@ -29,6 +33,7 @@ interface LogsOptions {
   version?: string;
   session?: string;
   follow?: boolean;
+  full?: boolean;
 }
 
 type Candidate =
@@ -50,8 +55,8 @@ function candidateLabel(c: Candidate): string {
   return `${chalk.gray('sess')} ${s.shortId.padEnd(9)} ${(s.agent + ver).padEnd(14)} ${chalk.gray(s.timestamp.slice(0, 16))}  ${title.slice(0, 40)}`;
 }
 
-/** Show a resolved session — follow (tail) or render its transcript. */
-async function showSession(session: SessionMeta, follow: boolean): Promise<void> {
+/** Show a resolved session — follow (tail), concise summary, or (`full`) transcript. */
+async function showSession(session: SessionMeta, follow: boolean, full: boolean): Promise<void> {
   if (follow) {
     if (!isTailable(session.agent)) {
       console.error(chalk.red(`Tailing is supported for claude and codex sessions only (got ${session.agent}).`));
@@ -60,21 +65,21 @@ async function showSession(session: SessionMeta, follow: boolean): Promise<void>
     await streamSessionTail(session, {});
     return;
   }
-  await renderSessionLog(session);
+  await renderSessionLog(session, full ? 'markdown' : 'summary');
 }
 
-async function showCandidate(c: Candidate, follow: boolean): Promise<void> {
+async function showCandidate(c: Candidate, follow: boolean, full: boolean): Promise<void> {
   if (c.kind === 'task') {
-    const res = await showHostTaskLog(c.task.id, follow);
+    const res = await showHostTaskLog(c.task.id, follow, full);
     if (res.exitCode !== undefined) process.exitCode = res.exitCode;
     return;
   }
-  await showSession(c.session, follow);
+  await showSession(c.session, follow, full);
 }
 
 /** Resolve an explicit id/--session: host task first, then a session. */
-async function showById(id: string, follow: boolean): Promise<void> {
-  const hostRes = await showHostTaskLog(id, follow);
+async function showById(id: string, follow: boolean, full: boolean): Promise<void> {
+  const hostRes = await showHostTaskLog(id, follow, full);
   if (hostRes.found) {
     if (hostRes.exitCode !== undefined) process.exitCode = hostRes.exitCode;
     return;
@@ -85,15 +90,16 @@ async function showById(id: string, follow: boolean): Promise<void> {
     console.error(chalk.red(`No run or session found matching "${id}".`));
     process.exit(1);
   }
-  await showSession(matches[0], follow);
+  await showSession(matches[0], follow, full);
 }
 
 async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void> {
   const follow = !!opts.follow;
+  const full = !!opts.full;
 
   const directId = opts.session ?? id;
   if (directId) {
-    await showById(directId, follow);
+    await showById(directId, follow, full);
     return;
   }
 
@@ -120,7 +126,7 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
   }
 
   if (candidates.length === 1) {
-    await showCandidate(candidates[0], follow);
+    await showCandidate(candidates[0], follow, full);
     return;
   }
 
@@ -143,18 +149,19 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
     shortIdFor: (c: Candidate) => (c.kind === 'task' ? c.task.id : c.session.shortId),
   });
   if (!picked) return;
-  await showCandidate(picked.item, follow);
+  await showCandidate(picked.item, follow, full);
 }
 
 /** Register the top-level `agents logs` command. */
 export function registerLogsCommand(program: Command): void {
   program
     .command('logs [id]')
-    .description('Show a run’s log — a host-dispatch task or a session. -f to follow a live one.')
+    .description('Show a run’s concise summary — a host-dispatch task or a session. --full for the raw transcript, -f to follow a live one.')
     .option('--host <name>', 'Scope to runs dispatched to a host')
     .option('-a, --agent <agent>', 'Filter by agent (e.g. claude, codex@0.116.0)')
     .option('--version <version>', 'Filter by agent version')
     .option('--session <id>', 'Select a session/run by id (same as the positional id)')
     .option('-f, --follow', 'Follow live output')
+    .option('-m, --full', 'Show the full raw transcript / stdout instead of the concise summary')
     .action((id: string | undefined, opts: LogsOptions) => runLogs(id, opts));
 }

@@ -1141,7 +1141,8 @@ export function setGlobalDefault(agent: AgentId, version: string | undefined): v
 export async function installVersion(
   agent: AgentId,
   version: string,
-  onProgress?: (message: string) => void
+  onProgress?: (message: string) => void,
+  opts?: { clean?: boolean }
 ): Promise<{ success: boolean; installedVersion: string; error?: string }> {
   const agentConfig = AGENTS[agent];
 
@@ -1247,6 +1248,15 @@ export async function installVersion(
   ensureAgentsDir();
   const versionDir = getVersionDir(agent, version);
 
+  // A `clean` (repair) reinstall wipes a possibly partially-extracted
+  // node_modules first. npm treats a present-but-gutted platform package (its
+  // package.json landed, its vendored native binary did not) as already
+  // installed and would skip re-fetching it — so without this the corrupt
+  // vendor/ survives the reinstall and the ENOENT persists. home/ is preserved.
+  if (opts?.clean && fs.existsSync(versionDir)) {
+    removeInstallArtifacts(versionDir);
+  }
+
   // Create version directory and isolated home
   fs.mkdirSync(versionDir, { recursive: true });
   fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
@@ -1325,6 +1335,24 @@ export async function installVersion(
       } catch {
         /* non-fatal; the install itself succeeded */
       }
+    }
+
+    // Integrity gate: confirm the install actually launches, not just that the
+    // JS wrapper landed. A gutted install (wrapper present, native platform
+    // binary missing) otherwise gets silently pinned as the default and crashes
+    // with ENOENT on run. Fail loudly here so `agents add` never records a
+    // broken version as healthy — the caller then won't set it as default.
+    const health = await verifyInstalledBinaryLaunches(agent, installedVersion);
+    if (!health.ok) {
+      if (fs.existsSync(versionDir)) removeInstallArtifacts(versionDir);
+      const detail = health.detail ? ` (${health.detail})` : '';
+      emit('version.install', { agent, version: installedVersion, error: `binary failed to launch${detail}` });
+      return {
+        success: false,
+        installedVersion,
+        error: `${agentConfig.name}@${installedVersion} installed but its binary failed to launch${detail}. `
+          + `The install is incomplete — the platform binary is missing. Re-run: agents add ${agent}@${installedVersion}`,
+      };
     }
 
     emit('version.install', { agent, version: installedVersion });
@@ -1692,6 +1720,127 @@ export async function getInstalledVersion(agent: AgentId, version: string): Prom
   } catch {
     return version;
   }
+}
+
+/**
+ * True when a probe's combined output/error looks like the runnable binary (or a
+ * native sub-binary it execs) is MISSING — the "gutted install" signature. This
+ * is the exact class of failure behind the ENOENT crash: an npm package whose JS
+ * wrapper landed at node_modules/.bin/<cli> while its native platform binary
+ * (shipped via an optional per-arch dependency, e.g. @openai/codex-<platform>)
+ * did not — so the wrapper spawns and immediately dies with `spawn … ENOENT`.
+ *
+ * Deliberately narrow: only the missing-file signature counts. An agent that
+ * merely dislikes `--version` (nonzero exit, ordinary error text) or ignores it
+ * (times out) must NOT match, so a healthy install is never falsely condemned.
+ */
+export function isMissingBinarySignature(output: string): boolean {
+  return /\bENOENT\b|no such file|cannot find|command not found|is not recognized/i.test(output);
+}
+
+/**
+ * Verify a freshly-installed agent can actually LAUNCH — not merely that its JS
+ * wrapper exists. getBinaryPath()/isVersionInstalled() only check the wrapper, so
+ * a gutted install (wrapper present, native binary missing) reads as healthy,
+ * gets pinned as the default, and gets picked to run — then dies with ENOENT the
+ * instant it spawns (which, wrapped in tmux, showed up as a silent `[detached]`).
+ *
+ * We probe `<binary> --version` under the version's isolated HOME so config
+ * resolution matches a real launch. Because the ENOENT originates in the child
+ * (the wrapper spawns fine, then fails to exec the absent native binary), we
+ * inspect the child's OUTPUT, not just whether our spawn succeeded. Only the
+ * missing-binary signature (see isMissingBinarySignature) fails the check; a
+ * plain nonzero exit or a timeout is treated as healthy so we never false-fail.
+ */
+export async function verifyInstalledBinaryLaunches(
+  agent: AgentId,
+  version: string,
+): Promise<{ ok: boolean; detail?: string }> {
+  // Windows: `getBinaryPath` returns the extensionless `.bin/<cli>` (a shell
+  // wrapper), NOT the `.cmd`/`.exe` that actually launches there — `execFile`ing
+  // it would ENOENT on a perfectly healthy install, and the integrity gate would
+  // then WIPE it. The gutted-native-binary failure this guards against is a POSIX
+  // concern in practice; treat win32 as healthy rather than risk destroying a
+  // good install. (isVersionInstalled already validates presence on Windows.)
+  if (process.platform === 'win32') return { ok: true };
+  const binary = getBinaryPath(agent, version);
+  if (!fs.existsSync(binary)) {
+    return { ok: false, detail: `binary not found at ${binary}` };
+  }
+  try {
+    await execFileAsync(binary, ['--version'], {
+      timeout: 15000,
+      env: { ...process.env, HOME: getVersionHomePath(agent, version) },
+    });
+    return { ok: true };
+  } catch (err: any) {
+    const blob = `${err?.code ?? ''} ${err?.stdout ?? ''} ${err?.stderr ?? ''} ${err?.message ?? ''}`;
+    if (err?.code === 'ENOENT' || isMissingBinarySignature(blob)) {
+      const detail = String(err?.stderr || err?.message || '')
+        .split('\n').map((s: string) => s.trim()).filter(Boolean)[0];
+      return { ok: false, detail: detail || 'native binary missing (ENOENT)' };
+    }
+    // Launched but exited nonzero without a missing-file signature, or timed out
+    // waiting for input: the binary is present and runnable. Healthy.
+    return { ok: true };
+  }
+}
+
+/**
+ * Launch-path self-heal. Given the concrete version `agents run` is about to
+ * spawn, make sure it will actually run — and if not, repair it instead of
+ * letting the agent die with a raw `ENOENT` deep inside its own wrapper.
+ *
+ * Steps, cheapest first:
+ *   1. Probe the version (verifyInstalledBinaryLaunches). Healthy → return it.
+ *   2. Broken → **clean** reinstall in place (wipes the partial node_modules so
+ *      npm actually re-fetches the platform binary). Re-probe; good → return it.
+ *   3. Still broken → fall back to another INSTALLED version that launches,
+ *      re-pinning it as the default so the shim path heals too. Return it.
+ *   4. Nothing runnable installed → install `latest`, pin it, return it.
+ *   5. Give up → return null (caller surfaces a clear error).
+ *
+ * Gated to npm-package agents: their native binary ships as an optional per-arch
+ * dependency whose tarball can extract partially (interrupted/raced install) —
+ * the exact failure this repairs. Agents with a global/native binary (grok,
+ * droid) have no such tarball and are returned unchanged.
+ */
+export async function ensureAgentRunnable(
+  agent: AgentId,
+  version: string,
+  log?: (message: string) => void,
+): Promise<string | null> {
+  const cfg = AGENTS[agent];
+  if (!cfg?.npmPackage) return version;
+
+  if ((await verifyInstalledBinaryLaunches(agent, version)).ok) return version;
+
+  log?.(`${cfg.name}@${version} is broken (platform binary missing) — repairing…`);
+  const repair = await installVersion(agent, version, undefined, { clean: true });
+  if (repair.success && (await verifyInstalledBinaryLaunches(agent, version)).ok) {
+    log?.(`repaired ${cfg.name}@${version}.`);
+    return version;
+  }
+
+  // In-place repair failed → adopt another installed version that launches.
+  const others = listInstalledVersions(agent).filter(v => v !== version).sort(compareVersions).reverse();
+  for (const cand of others) {
+    if ((await verifyInstalledBinaryLaunches(agent, cand)).ok) {
+      setGlobalDefault(agent, cand);
+      log?.(`${cfg.name}@${version} could not be repaired — using ${cfg.name}@${cand} instead (now the default).`);
+      return cand;
+    }
+  }
+
+  // Nothing runnable installed → last resort: install latest and pin it.
+  log?.(`no runnable ${cfg.name} version installed — installing ${cfg.name}@latest…`);
+  const latest = await installVersion(agent, 'latest', undefined, { clean: true });
+  if (latest.success) {
+    setGlobalDefault(agent, latest.installedVersion);
+    log?.(`installed ${cfg.name}@${latest.installedVersion} and set it as the default.`);
+    return latest.installedVersion;
+  }
+  return null;
 }
 
 async function getCliVersionFromPath(agent: AgentId): Promise<string | null> {

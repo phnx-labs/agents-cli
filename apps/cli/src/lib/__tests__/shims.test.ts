@@ -95,8 +95,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 24 (shim resolves per-device default pins from devices/<machine>/agents.yaml)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(24);
+  it('is 25 (shim self-recovers a vanished dispatcher via `agents` on PATH)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(25);
   });
 });
 
@@ -355,6 +355,21 @@ describe('generateShimScript', () => {
     expect(script).toContain('if [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then');
     expect(script).toContain('agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN');
     expect(script).toContain('exit 127');
+  });
+
+  it('self-recovers a vanished dispatcher via `agents` on PATH before erroring', () => {
+    const script = generateShimScript('claude');
+    // When the baked AGENTS_BIN is gone (removed/moved dev build), resolve the
+    // real `agents` on PATH and use it, rather than bricking the launch.
+    expect(script).toContain('RECOVERED_BIN="$(command -v agents 2>/dev/null || true)"');
+    expect(script).toContain('AGENTS_BIN="$RECOVERED_BIN"');
+    // The recovery must sit INSIDE the not-executable guard, before exit 127.
+    const guard = script.indexOf('[ ! -x "$AGENTS_BIN" ]; then');
+    const recover = script.indexOf('command -v agents');
+    const bail = script.indexOf('exit 127');
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(recover).toBeGreaterThan(guard);
+    expect(bail).toBeGreaterThan(recover);
   });
 });
 

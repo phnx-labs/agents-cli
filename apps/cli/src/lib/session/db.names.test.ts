@@ -9,7 +9,8 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-dbnames-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-const { upsertSession, syncNames, ftsSearch, getSessionById } = await import('./db.js');
+const { upsertSession, seedLabelsFromNames, syncLabels, ftsSearch, getSessionById } =
+  await import('./db.js');
 type SessionMeta = import('./types.js').SessionMeta;
 
 function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
@@ -23,53 +24,56 @@ function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {
   };
 }
 
-describe('run-name resolution in the session index', () => {
+describe('--name seeds the unified session label', () => {
   it('resolves `agents sessions <name>` to the run, exact match ranked top', () => {
     upsertSession(meta('run-alpha'), '');
     upsertSession(meta('run-beta'), '');
-    // Name applied by id via the idempotent sync path (mirrors label sync).
-    syncNames(new Map([['run-alpha', 'fix-bug'], ['run-beta', 'other']]));
+    // `--name` seeds the label by id — the same idempotent, re-applied-every-scan
+    // path used in discovery (seedLabelsFromNames), keyed off the run-name sidecars.
+    seedLabelsFromNames(new Map([['run-alpha', 'fix-bug'], ['run-beta', 'other']]));
 
     const hits = ftsSearch('fix-bug');
     expect(hits[0]?.sessionId).toBe('run-alpha');
     expect(hits[0]?.score).toBe(1_000_000);
-    // The name is persisted on the row, readable back.
-    expect(getSessionById('run-alpha')?.name).toBe('fix-bug');
+    // The seed lands on the single `label` field, readable back — no separate `name`.
+    expect(getSessionById('run-alpha')?.label).toBe('fix-bug');
   });
 
-  it('matches a name by prefix below an exact match', () => {
+  it('matches a seeded name by prefix below an exact match', () => {
     upsertSession(meta('run-gamma'), '');
-    syncNames(new Map([['run-gamma', 'nightly-audit']]));
+    seedLabelsFromNames(new Map([['run-gamma', 'nightly-audit']]));
     const hits = ftsSearch('nightly');
     const hit = hits.find(h => h.sessionId === 'run-gamma');
     expect(hit?.score).toBe(900_000);
   });
 
-  it('accepts a name set directly at upsert (host-run path) without a sync pass', () => {
-    upsertSession(meta('run-host', { name: 'remote-audit', label: '[host/box]' }), '');
-    expect(getSessionById('run-host')?.name).toBe('remote-audit');
-    expect(ftsSearch('remote-audit')[0]?.sessionId).toBe('run-host');
-    // The /rename label channel still resolves independently of the name.
-    expect(ftsSearch('[host/box]')[0]?.sessionId).toBe('run-host');
+  it('an agent-generated title WINS over the --name seed (refine beats seed)', () => {
+    upsertSession(meta('run-refine'), '');
+    // Discovery order: the per-agent scan applies the generated title first...
+    syncLabels(new Map([['run-refine', 'Real generated title']]));
+    // ...then the seed pass runs — and must NOT clobber the real title.
+    seedLabelsFromNames(new Map([['run-refine', 'my-seed']]));
+    expect(getSessionById('run-refine')?.label).toBe('Real generated title');
+    // The refined title resolves; the superseded seed no longer does.
+    expect(ftsSearch('Real generated title')[0]?.sessionId).toBe('run-refine');
+    expect(ftsSearch('my-seed').some(h => h.score >= 800_000)).toBe(false);
   });
 
-  it('leaves unnamed runs resolvable by id only (no behavior change)', () => {
-    upsertSession(meta('run-plain'), '');
-    expect(getSessionById('run-plain')?.name).toBeUndefined();
-    // A content/name search for a non-existent handle finds nothing spurious.
-    expect(ftsSearch('run-plain').some(h => h.score >= 800_000)).toBe(false);
-  });
-
-  it('a discovery rescan never nulls an existing name', () => {
-    // Load-bearing invariant: `name` is in the INSERT column list but deliberately
-    // absent from the ON CONFLICT(id) DO UPDATE SET clause, so a later discovery
-    // re-upsert (which carries no name) must PRESERVE the name already on the row.
-    // If someone adds `name = excluded.name` to the SET clause this test fails.
-    upsertSession(meta('run-persist', { name: 'keep-me' }), '');
-    expect(getSessionById('run-persist')?.name).toBe('keep-me');
-    // Re-upsert the same id as a bare rescan would — no name field.
+  it('the seed shows until a title exists, and re-applies across a bare rescan', () => {
+    upsertSession(meta('run-persist'), '');
+    seedLabelsFromNames(new Map([['run-persist', 'keep-me']]));
+    expect(getSessionById('run-persist')?.label).toBe('keep-me');
+    // A bare rescan re-upserts with no label (label = excluded.label clears it)...
     upsertSession(meta('run-persist'), 'rescanned preview');
-    expect(getSessionById('run-persist')?.name).toBe('keep-me');
+    // ...and the seed pass restores it every scan, so the handle stays resolvable.
+    seedLabelsFromNames(new Map([['run-persist', 'keep-me']]));
+    expect(getSessionById('run-persist')?.label).toBe('keep-me');
     expect(ftsSearch('keep-me')[0]?.sessionId).toBe('run-persist');
+  });
+
+  it('leaves unnamed runs resolvable by id only (no spurious handle match)', () => {
+    upsertSession(meta('run-plain'), '');
+    expect(getSessionById('run-plain')?.label).toBeUndefined();
+    expect(ftsSearch('run-plain').some(h => h.score >= 800_000)).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { todoProgress, type TodoItem } from './floorModel'
 
 // Per-session task checklist, parsed from the agent's latest TodoWrite call.
@@ -15,6 +15,45 @@ export function TodoProgressBar({ todos }: { todos: TodoItem[] }) {
     <div className="sw-todobar" title={`${done} of ${total} tasks done`}>
       <span className="sw-todobar-frac">{done}/{total}</span>
       <span className="sw-todobar-track"><i style={{ width: `${pct}%` }} /></span>
+    </div>
+  )
+}
+
+/**
+ * Card affordance: the progress bar with the full checklist EXPANDED beneath it by
+ * default, so the current step reads at a glance without a click. The bar doubles as a
+ * collapse/expand toggle (still collapsible for a denser feed). The in-progress item is
+ * highlighted and completed items struck through via the shared `.sw-todocheck-item`
+ * styles. Clicks are stopped so toggling never selects the card.
+ */
+export function CardChecklist({ todos }: { todos: TodoItem[] }) {
+  const { done, total } = todoProgress(todos)
+  const [open, setOpen] = useState(true)
+  if (total === 0) return null
+  const pct = Math.round((done / total) * 100)
+  return (
+    <div className="sw-cardchecklist">
+      <button
+        type="button"
+        className="sw-cardchecklist-bar"
+        aria-expanded={open}
+        title={open ? 'Collapse checklist' : 'Expand checklist'}
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o) }}
+      >
+        <span className="sw-todobar-frac">{done}/{total}</span>
+        <span className="sw-todobar-track"><i style={{ width: `${pct}%` }} /></span>
+        <span className="sw-cardchecklist-chev">{open ? '⌄' : '›'}</span>
+      </button>
+      {open && (
+        <ul className="sw-todocheck-list">
+          {todos.map((t, i) => (
+            <li key={i} className={`sw-todocheck-item status-${t.status}`}>
+              <span className="sw-todocheck-mk" />
+              <span className="sw-todocheck-txt">{t.content}</span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

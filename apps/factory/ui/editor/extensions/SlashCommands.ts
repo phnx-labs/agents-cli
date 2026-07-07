@@ -3,6 +3,7 @@ import { ReactRenderer } from '@tiptap/react';
 import Suggestion from '@tiptap/suggestion';
 import tippy from 'tippy.js';
 import SlashCommandsList from '../components/SlashCommandsList';
+import { getVsCodeApi } from '../vscodeApi';
 
 export default Extension.create({
   name: 'slashCommands',
@@ -119,7 +120,7 @@ export default Extension.create({
               title: 'Send to Agent',
               command: ({ editor, range }: any) => {
                 editor.chain().focus().deleteRange(range).run();
-                const vscode = (window as any).acquireVsCodeApi?.();
+                const vscode = getVsCodeApi();
                 if (vscode) {
                   // Get entire document content
                   const content = editor.storage.markdown.getMarkdown();
@@ -131,7 +132,7 @@ export default Extension.create({
               title: 'Ask Agent',
               command: ({ editor, range }: any) => {
                 editor.chain().focus().deleteRange(range).run();
-                const vscode = (window as any).acquireVsCodeApi?.();
+                const vscode = getVsCodeApi();
                 if (vscode) {
                   vscode.postMessage({ type: 'triggerAgent', action: 'ask' });
                 }

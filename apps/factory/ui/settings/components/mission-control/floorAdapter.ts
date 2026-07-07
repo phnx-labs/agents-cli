@@ -306,6 +306,10 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
   // Remote (Tier-1) sessions have no enriched last-response yet — fall back to the
   // session's task line (topic) so the card shows what it's working on, not blank.
   const resp = r.lastResponse || r.topic || ''
+  // Cloud tasks run in a provider sandbox, not on the dispatching machine — the CLI
+  // attributes them to the querier ('zion') for reply routing, but they should NOT
+  // fold under that local host in the feed. Give them their own "Cloud" category.
+  const isCloud = (r.context || '').toLowerCase() === 'cloud' || !!r.cloudTaskId
 
   return {
     id,
@@ -318,7 +322,7 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // This machine's own sessions reported by the machine-wide fetch carry the
     // synthetic 'this-mac'; give them the real device name so they fold into the
     // same HOSTS row as in-window local agents instead of a second bucket.
-    hostLabel: r.host === 'this-mac' ? localHostName || undefined : undefined,
+    hostLabel: isCloud ? 'Cloud' : (r.host === 'this-mac' ? localHostName || undefined : undefined),
     project: deriveProject(r.cwd, r.project, r.project || '—', projectRules),
     name,
     abbr: abbrFor(r.agentType),

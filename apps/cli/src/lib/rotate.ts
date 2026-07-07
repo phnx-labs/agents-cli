@@ -135,6 +135,56 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
   return true;
 }
 
+/**
+ * Whether a specific account can serve a run right now, and — when it can't —
+ * why. `signed_out` covers no-email / invalid-auth; `rate_limited` and
+ * `out_of_credits` name the throttle. Used to pre-warn on a version-pinned
+ * teammate whose account rotation won't route around (a pin IS the target).
+ */
+export type AccountReadiness =
+  | { ready: true }
+  | { ready: false; reason: 'rate_limited' | 'out_of_credits' | 'signed_out'; email: string | null };
+
+/**
+ * Pure decision reusing the router's own eligibility gate (`hasUsageAvailable`
+ * + email/auth, i.e. `isRotationEligible`), so a pre-flight warning can NEVER
+ * disagree with what rotation would actually do. The `reason` combines the two
+ * signals `hasUsageAvailable` reads: the live snapshot (session-inclusive
+ * rate-limit) and the coarse cached `usageStatus` (out-of-credits, which a
+ * snapshot never carries). When a live snapshot exists it wins over the cached
+ * status — matching the gate — so a stale `out_of_credits` cache is not
+ * reported while the account is actually serving requests.
+ */
+export function readinessFromCandidate(candidate: RotateCandidate): AccountReadiness {
+  if (!candidate.email || !candidate.authValid) {
+    return { ready: false, reason: 'signed_out', email: candidate.email };
+  }
+  if (hasUsageAvailable(candidate)) {
+    return { ready: true };
+  }
+  const snap = candidate.usageSnapshot;
+  const snapRateLimited =
+    !!snap && snap.windows.length > 0 && deriveUsageStatusFromSnapshot(snap) === 'rate_limited';
+  const reason: 'rate_limited' | 'out_of_credits' =
+    !snapRateLimited && candidate.usageStatus === 'out_of_credits' ? 'out_of_credits' : 'rate_limited';
+  return { ready: false, reason, email: candidate.email };
+}
+
+/**
+ * Readiness for a specific installed (agent, version). Returns `{ ready: true }`
+ * when the version isn't among the collected candidates — absence is the
+ * caller's `isVersionInstalled` concern, not ours; don't cry wolf. Only
+ * meaningful for a version-pinned target: a bare target rotates to a healthy
+ * account on its own, and a profile injects its own auth (a different account
+ * than the version home carries), so neither is checkable here.
+ */
+export async function checkRunAccountReadiness(agent: AgentId, version: string): Promise<AccountReadiness> {
+  const candidates = await collectRunCandidates(agent);
+  const candidate = candidates.find((c) => c.version === version);
+  if (!candidate) return { ready: true };
+  return readinessFromCandidate(candidate);
+}
+
 function getRoutingUsedPercent(snapshot: UsageSnapshot | null | undefined): number | null {
   if (!snapshot || snapshot.windows.length === 0) return null;
   const routingWindows = snapshot.windows.filter((window) => window.key !== 'session');

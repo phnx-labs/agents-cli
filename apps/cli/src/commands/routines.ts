@@ -47,6 +47,24 @@ import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 
 /**
+ * Human-friendly wall-clock a run took (e.g. "  · 3 min", "  · 45 sec"), or ""
+ * when it hasn't completed or timestamps are unparseable. Leading separator lets
+ * callers drop it straight into a status line.
+ */
+export function formatRunDuration(startedAt: string, completedAt: string | null): string {
+  if (!completedAt) return '';
+  const ms = Date.parse(completedAt) - Date.parse(startedAt);
+  if (!Number.isFinite(ms) || ms < 0) return '';
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `  · ${sec} sec`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `  · ${min} min`;
+  const hr = Math.floor(min / 60);
+  const rem = min % 60;
+  return rem ? `  · ${hr} hr ${rem} min` : `  · ${hr} hr`;
+}
+
+/**
  * Human label for what fires a job: its cron schedule, or its event trigger
  * for schedule-less (trigger-only) routines.
  */
@@ -752,32 +770,71 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('logs [name]')
-    .description('Read stdout from the most recent execution. Use --run to see a specific past run.')
+    .description('Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.')
     .option('-r, --run <runId>', 'Show logs from this run ID instead of the latest')
+    .option('-m, --full', 'Show the full raw stdout stream instead of the concise summary')
     .action(async (name: string | undefined, options) => {
       if (!name) {
         name = await pickJob('Select job to view logs', undefined, ['agents routines logs <name>', 'agents routines logs <name> --run <run-id>']) ?? undefined;
         if (!name) return;
       }
 
-      let runId = options.run;
-      if (!runId) {
-        const latest = getLatestRun(name);
-        if (!latest) {
-          console.log(chalk.yellow(`No runs found for job '${name}'`));
+      // Resolve the run: an explicit --run row, else the latest.
+      const run = options.run
+        ? listRuns(name).find((r) => r.runId === options.run)
+        : getLatestRun(name);
+      if (!run) {
+        console.log(chalk.yellow(options.run ? `No run '${options.run}' for job '${name}'` : `No runs found for job '${name}'`));
+        return;
+      }
+      const runId = run.runId;
+      const logPath = path.join(getRunDir(name, runId), 'stdout.log');
+
+      // --full: the raw combined stdout stream (the old default).
+      if (options.full) {
+        if (!fs.existsSync(logPath)) {
+          console.log(chalk.yellow(`Log not found: ${logPath}`));
           return;
         }
-        runId = latest.runId;
-      }
-
-      const logPath = path.join(getRunDir(name, runId), 'stdout.log');
-      if (!fs.existsSync(logPath)) {
-        console.log(chalk.yellow(`Log not found: ${logPath}`));
+        console.log(chalk.gray(`Run: ${runId}\n`));
+        console.log(fs.readFileSync(logPath, 'utf-8'));
         return;
       }
 
-      console.log(chalk.gray(`Run: ${runId}\n`));
-      console.log(fs.readFileSync(logPath, 'utf-8'));
+      // Concise by default: a status header + the extracted report (final
+      // assistant message). Routine runs are sandboxed (transcript in an overlay
+      // HOME, not the session index), so the captured report — not renderSummary —
+      // is the concise view. Falls back to a bounded stdout tail when no report
+      // was extracted (e.g. the run failed before finishing).
+      const statusColor = run.status === 'completed' ? chalk.green
+        : run.status === 'failed' || run.status === 'timeout' ? chalk.red
+        : chalk.yellow;
+      console.log(chalk.bold(name) + chalk.gray(`  run ${runId}`));
+      console.log(
+        statusColor(run.status) +
+        chalk.gray(`  ${run.startedAt}`) +
+        chalk.gray(formatRunDuration(run.startedAt, run.completedAt)) +
+        (run.exitCode !== null && run.exitCode !== undefined ? chalk.gray(`  exit ${run.exitCode}`) : '')
+      );
+      console.log(chalk.gray('─'.repeat(60)));
+
+      const reportPath = path.join(getRunDir(name, runId), 'report.md');
+      if (fs.existsSync(reportPath)) {
+        console.log(fs.readFileSync(reportPath, 'utf-8').trimEnd());
+        console.log(chalk.gray('\n(pass --full for the raw stdout stream)'));
+        return;
+      }
+
+      // No report — show a bounded tail rather than dumping the whole stream.
+      if (fs.existsSync(logPath)) {
+        const lines = fs.readFileSync(logPath, 'utf-8').split('\n');
+        const tail = lines.slice(-40).join('\n').trimEnd();
+        console.log(chalk.gray('(no report extracted — showing the last lines of stdout)'));
+        if (tail) console.log(tail);
+        console.log(chalk.gray('\n(pass --full for the raw stdout stream)'));
+      } else {
+        console.log(chalk.gray('(no output captured for this run)'));
+      }
     });
 
   routinesCmd

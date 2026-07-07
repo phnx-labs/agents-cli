@@ -57,13 +57,15 @@ import {
   hasUncommittedChanges,
   removeWorktree,
 } from '../lib/teams/worktree.js';
-import { isVersionInstalled, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/versions.js';
+import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose, verifyInstalledBinaryLaunches } from '../lib/versions.js';
 import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
+import { renderSessionLog } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { buildPreview as buildSessionPreview } from './sessions-picker.js';
 import { parseExecEnv } from '../lib/exec.js';
+import { checkRunAccountReadiness, type AccountReadiness } from '../lib/rotate.js';
 import { teamPicker, printTeamTable, type TeamRow } from './teams-picker.js';
 import { itemPicker } from '../lib/picker.js';
 import type { AgentProcess } from '../lib/teams/agents.js';
@@ -271,6 +273,61 @@ export function wireCloudDispatcher(mgr: AgentManager): void {
  * teammate whose CLI may not be signed in. Warn-only — never blocks `start`.
  * Local teammates only; cloud teammates authenticate through their provider.
  */
+/**
+ * Advisory line for a version-pinned teammate whose account can't serve a run
+ * right now. A pinned target (`agents run <agent>@<version>`) bypasses account
+ * rotation — the pin IS the target — so unlike a bare teammate it can't route
+ * around a throttled/expired account; it will launch and likely 429 at once.
+ */
+function throttleWarningLine(
+  agent: AgentType,
+  version: string,
+  r: Extract<AccountReadiness, { ready: false }>,
+): string {
+  const who = `${AGENT_NAMES[agent]} ${version}`;
+  const acct = r.email ? ` (${r.email})` : '';
+  const reason =
+    r.reason === 'out_of_credits' ? 'is out of credits'
+    : r.reason === 'signed_out' ? 'is not signed in'
+    : 'is rate-limited right now';
+  return (
+    chalk.yellow(`⚠ ${who}${acct} ${reason}.`) +
+    chalk.gray(
+      `\n  A pinned version skips account rotation, so it will launch on this account and may immediately hit its limit.` +
+      `\n  Use a bare \`${agent}\` teammate to let the team pick a healthy account, or pass --force to silence this.`,
+    )
+  );
+}
+
+/**
+ * Advisory: for each staged VERSION-PINNED teammate, warn if its account is
+ * rate-limited / out of credits / signed out right now — reusing the router's
+ * own eligibility signal (`checkRunAccountReadiness`) so the warning matches
+ * what the spawn would actually do. Bare teammates (rotation handles them) and
+ * profile/cloud teammates (account not locally checkable) are skipped. Warns,
+ * never blocks. Deduped by agent@version so N teammates on one account warn once.
+ */
+async function warnThrottledTeammates(mgr: AgentManager, team: string): Promise<void> {
+  let pending;
+  try {
+    pending = (await mgr.listByTask(team)).filter(
+      (a) => a.status === 'pending' && !a.cloudProvider && !a.profileName && a.version,
+    );
+  } catch {
+    return; // team not loadable yet — nothing to warn about
+  }
+  const seen = new Set<string>();
+  for (const a of pending) {
+    const agent = a.agentType as AgentType;
+    const version = a.version as string;
+    const key = `${agent}@${version}`;
+    if (seen.has(key) || !AGENT_NAMES[agent]) continue;
+    seen.add(key);
+    const readiness = await checkRunAccountReadiness(agent, version);
+    if (!readiness.ready) console.error(throttleWarningLine(agent, version, readiness));
+  }
+}
+
 async function warnUnsignedTeammates(mgr: AgentManager, team: string): Promise<void> {
   let pending;
   try {
@@ -1140,7 +1197,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--cloud <provider>', `Dispatch to cloud backend instead of local CLI: ${VALID_CLOUD_PROVIDERS.join('|')}`)
     .option('--repo <owner/repo>', 'GitHub repository (required for --cloud rush)')
     .option('--branch <name>', 'Target git branch for cloud dispatch')
-    .option('--force', "Skip the advisory 'may not be signed in' warning (detection is unreliable)")
+    .option('--force', "Skip the advisory 'may not be signed in' / 'account throttled' warnings")
     .option('--json', 'Output machine-readable JSON')
     .action(async (team: string, teammate: string, task: string, opts: {
       name?: string; mode: string; effort: string; model?: string; env: string[];
@@ -1191,6 +1248,16 @@ export function registerTeamsCommands(program: Command): void {
           chalk.yellow(`⚠ ${AGENT_NAMES[agent]} may not be signed in (detection is unreliable). Adding anyway.`) +
             chalk.gray(`\n  If it fails to start, run \`${AGENTS[agent].cliCommand}\` to log in, or pass --force to silence this.`)
         );
+      }
+
+      // Advisory throttle check — only for a version-pinned teammate, which
+      // bypasses account rotation and so can't route around a rate-limited /
+      // out-of-credits / signed-out account (see throttleWarningLine). Skip bare
+      // targets (rotation handles them), profiles (auth-injected account isn't
+      // the version-home one we can read), and cloud dispatch. Warn, never block.
+      if (!opts.force && !cloudProviderId && !profileName && version) {
+        const readiness = await checkRunAccountReadiness(agent, version);
+        if (!readiness.ready) console.error(throttleWarningLine(agent, version, readiness));
       }
 
       if (opts.name !== undefined) {
@@ -1504,7 +1571,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--watch', 'Keep running: poll every --interval seconds, fire new waves, exit when the DAG drains.')
     .option('--interval <seconds>', 'Seconds between waves in --watch mode (default 8)', '8')
     .option('--max-waves <n>', 'Safety cap on waves in --watch mode (default 1000)', '1000')
-    .option('--force', "Skip the advisory 'may not be signed in' warning for staged teammates (detection is unreliable)")
+    .option('--force', "Skip the advisory 'may not be signed in' / 'account throttled' warnings for staged teammates")
     .action(async (team: string | undefined, opts: { json?: boolean; watch?: boolean; interval: string; maxWaves: string; force?: boolean }) => {
       const mgr = mkManager();
       wireCloudDispatcher(mgr);
@@ -1515,7 +1582,10 @@ export function registerTeamsCommands(program: Command): void {
         team = picked;
       }
 
-      if (!opts.force && !isJsonMode(opts)) await warnUnsignedTeammates(mgr, team);
+      if (!opts.force && !isJsonMode(opts)) {
+        await warnUnsignedTeammates(mgr, team);
+        await warnThrottledTeammates(mgr, team);
+      }
 
       if (!opts.watch) {
         await runOneWave(mgr, team, Boolean(opts.json));
@@ -1912,11 +1982,12 @@ export function registerTeamsCommands(program: Command): void {
   teams
     .command('logs [teammate]')
     .alias('log')
-    .description("Read a teammate's raw log output. Accepts positional name, --teammate <name>, UUID, or UUID prefix.")
-    .option('-n, --tail <n>', 'Show only the last N lines instead of the full log')
+    .description("Show a teammate's concise session summary. --full (or -n <lines>) for the raw stdout. Accepts positional name, --teammate <name>, UUID, or UUID prefix.")
+    .option('-n, --tail <n>', 'Show the last N lines of raw stdout instead of the concise summary')
+    .option('-m, --full', 'Show the full raw stdout log instead of the concise summary')
     .option('--team <team>', 'Disambiguate when the same name appears in multiple teams')
     .option('--teammate <name>', 'Teammate name (alias for the positional arg; useful for scripts)')
-    .action(async (ref: string | undefined, opts: { tail?: string; team?: string; teammate?: string }) => {
+    .action(async (ref: string | undefined, opts: { tail?: string; full?: boolean; team?: string; teammate?: string }) => {
       const base = await getAgentsDir();
 
       // Resolve teammate identity. Precedence:
@@ -1947,14 +2018,29 @@ export function registerTeamsCommands(program: Command): void {
         agentId = resolved.agentId;
       }
 
+      // Concise by default: a teammate's agentId IS its agent session id (passed
+      // as --session-id at launch), so render the same summary digest as
+      // `agents sessions <id>`. --full / -n <lines> opt into the raw stdout.log.
+      if (!opts.full && !opts.tail) {
+        const all = await discoverSessions({ all: true, limit: 5000 });
+        const matches = resolveSessionById(all, agentId);
+        if (matches.length > 0) {
+          await renderSessionLog(matches[0], 'summary');
+          return;
+        }
+        // No resolvable session (e.g. a non-Claude teammate) — fall through to a
+        // bounded tail of raw stdout rather than dumping the whole file.
+      }
+
       const logPath = path.join(base, agentId, 'stdout.log');
       try {
         const content = await fs.readFile(logPath, 'utf-8');
-        if (!opts.tail) {
+        if (opts.full) {
           process.stdout.write(content);
           return;
         }
-        const n = Math.max(1, parseInt(opts.tail, 10) || 50);
+        // Default tail size keeps an un-resolvable teammate's glance bounded too.
+        const n = opts.tail ? Math.max(1, parseInt(opts.tail, 10) || 50) : 40;
         const lines = content.split('\n');
         process.stdout.write(lines.slice(-n).join('\n'));
       } catch {
@@ -1970,6 +2056,29 @@ export function registerTeamsCommands(program: Command): void {
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts: { json?: boolean }) => {
       const info = checkAllClis();
+
+      // Deep integrity probe. `checkAllClis` reports presence (shim + stub guard),
+      // but a GUTTED native binary (JS wrapper present, platform binary missing —
+      // the codex/kimi optional-dep partial-extract failure) still passes that. So
+      // actually launch the resolved default version and, if it won't run, flip the
+      // agent to not-installed with a repair hint — otherwise doctor says "ready"
+      // and the teammate ENOENTs at spawn. Parallel; win32 is treated as healthy by
+      // verifyInstalledBinaryLaunches.
+      await Promise.all(
+        Object.entries(info).map(async ([name, entry]) => {
+          if (!entry.installed) return;
+          const agent = name as AgentId;
+          const version = resolveVersion(agent);
+          if (!version) return;
+          const health = await verifyInstalledBinaryLaunches(agent, version);
+          if (!health.ok) {
+            entry.installed = false;
+            entry.path = null;
+            entry.error = `${AGENTS[agent]?.cliCommand ?? name}@${version} is installed but its binary won't launch`
+              + `${health.detail ? ` (${health.detail})` : ''}. Repair: agents add ${agent}@${version}`;
+          }
+        })
+      );
 
       // Advisory enrichment only. Sign-in detection is UNRELIABLE, so it never
       // changes the authoritative installed/ready column — it annotates. And an
