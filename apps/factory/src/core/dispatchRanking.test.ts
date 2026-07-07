@@ -6,7 +6,9 @@ import {
   rankTargets,
   rankHostUses,
   parseRemoteCpuRatio,
+  buildManagedTargets,
 } from './dispatchRanking';
+import type { ManagedProject } from './managedProjects';
 import { RemoteSession, HostInfo } from './remoteSessions';
 import { AgentInventory, AgentInventoryVersion } from './agentInventory';
 
@@ -248,5 +250,47 @@ describe('parseRemoteCpuRatio', () => {
 
   it('returns null when the load line is missing', () => {
     expect(parseRemoteCpuRatio('8\n')).toBeNull();
+  });
+});
+
+describe('buildManagedTargets', () => {
+  function mp(overrides: Partial<ManagedProject> = {}): ManagedProject {
+    return {
+      id: 'x',
+      name: 'x',
+      path: '/x',
+      confidence: 'low',
+      source: 'manual',
+      ...overrides,
+    };
+  }
+
+  it('orders by confidence, then active uses, then name — from the curated list, not sessions', () => {
+    const managed = [
+      mp({ id: 'lo', name: 'zeta', confidence: 'low' }),
+      mp({ id: 'hi', name: 'agents-cli', confidence: 'high', linearProjectName: 'Agents CLI' }),
+      mp({ id: 'md', name: 'prix', confidence: 'medium' }),
+    ];
+    const out = buildManagedTargets(managed, []);
+    expect(out.map((t) => t.id)).toEqual(['hi', 'md', 'lo']);
+    // high-confidence one carries the Linear pill name
+    expect(out[0].linearProject).toBe('Agents CLI');
+    // present even with zero active sessions
+    expect(out[0].uses).toBe(0);
+  });
+
+  it('breaks confidence ties by active-session uses', () => {
+    const managed = [
+      mp({ id: 'a', name: 'alpha', confidence: 'high' }),
+      mp({ id: 'b', name: 'beta', confidence: 'high' }),
+    ];
+    const sessions = [
+      session({ project: 'beta', cwd: '/beta' }),
+      session({ project: 'beta', cwd: '/beta' }),
+      session({ project: 'alpha', cwd: '/alpha' }),
+    ];
+    const out = buildManagedTargets(managed, sessions);
+    expect(out.map((t) => t.id)).toEqual(['b', 'a']); // beta has more uses
+    expect(out[0].uses).toBe(2);
   });
 });
