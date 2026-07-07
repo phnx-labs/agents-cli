@@ -1297,6 +1297,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         s.directory,
         s.version,
         s.time_created,
+        s.time_updated,
         COALESCE(stats.message_count, 0),
         stats.token_count,
         COALESCE(stats.has_token_data, 0)
@@ -1330,14 +1331,19 @@ async function scanOpenCodeIncremental(): Promise<void> {
     const entries: ScanEntry[] = [];
     for (const line of out.split('\n')) {
       if (!line.trim()) continue;
-      const [id, title, directory, version, timeCreatedStr, messageCountStr, tokenCountStr, hasTokenDataStr] = line.split('|||');
+      const [id, title, directory, version, timeCreatedStr, timeUpdatedStr, messageCountStr, tokenCountStr, hasTokenDataStr] = line.split('|||');
       if (!id) continue;
 
       const timeCreated = parseInt(timeCreatedStr, 10);
+      const timeUpdated = parseInt(timeUpdatedStr, 10);
       const messageCount = parseInt(messageCountStr, 10);
       const tokenCount = parseInt(tokenCountStr, 10);
       const hasTokenData = hasTokenDataStr === '1';
       const timestamp = isNaN(timeCreated) ? new Date().toISOString() : new Date(timeCreated).toISOString();
+      // OpenCode is one shared DB, not one file per session — its row carries a
+      // per-session updated time. Set lastActivity explicitly (falling back to
+      // creation, never the whole-DB mtime the ScanStamp would otherwise supply).
+      const lastActivity = Number.isNaN(timeUpdated) ? timestamp : new Date(timeUpdated).toISOString();
       const topic = title || undefined;
 
       const meta: SessionMeta = {
@@ -1345,6 +1351,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         shortId: id.replace(/^ses_/, '').slice(0, 8),
         agent: 'opencode',
         timestamp,
+        lastActivity,
         project: directory ? path.basename(directory) : undefined,
         cwd: directory ? normalizeCwd(directory) : undefined,
         filePath: `${OPENCODE_DB}#${id}`,
