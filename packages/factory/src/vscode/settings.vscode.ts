@@ -13,7 +13,7 @@ import * as terminals from './terminals.vscode';
 import * as swarm from './swarm.vscode';
 import { fetchAllTasks, detectAvailableSources } from './tasks.vscode';
 import { getBuiltInByTitle, configFromDef } from './agents.vscode';
-import { openSingleAgentWithQueue } from './extension';
+import { openSingleAgentWithQueue, runHeadlessAgent } from './extension';
 import { generateClaudeSessionId } from '../core/prewarm.simple';
 import { nudgeSession } from '../mcp/watchdog-bridge';
 import { runAgents } from '../core/agentsBin';
@@ -237,6 +237,7 @@ interface DispatchRequestMsg {
   repo?: string;
   branch?: string;
   mode: DispatchModeMsg;
+  headless?: boolean;
   watchdog: WatchdogPolicyMsg;
   notify: NotifyPrefsMsg;
   batch: 'all' | 'per';
@@ -2388,6 +2389,12 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         // which openSingleAgentWithQueue guarantees when no cwd is passed).
         const cwd = projectId.includes('/') ? await resolveLocalRepoPath(projectId) : null;
         for (const unit of units) {
+          // Headless: run detached with NO terminal tab. It surfaces in the Floor
+          // under this machine (context:'headless') and is focusable later.
+          if (req.headless) {
+            runHeadlessAgent(req.agent, unit.prompt, mode, cwd ?? undefined);
+            continue;
+          }
           // Pre-mint the session id for plan-mode Claude so we can watch that
           // exact session file for the ExitPlanMode plan afterwards.
           const preSessionId = req.agent === 'claude' && mode === 'plan' ? generateClaudeSessionId() : undefined;

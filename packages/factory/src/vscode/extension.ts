@@ -73,6 +73,7 @@ import { generateLabelWithLLM } from '../core/labelgen';
 import { readClaudeSessionName } from '../core/sessionName';
 import { resolveTerminalCwd, tryReleaseWorktreeForTerminal } from '../core/worktree';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import {
   createTmuxTerminal,
   getTmuxState,
@@ -210,6 +211,38 @@ function buildAgentLaunchCommand(
     command += ` ${additionalFlags.trim()}`;
   }
   return command;
+}
+
+// Dispatch an agent HEADLESS: `agents run <agent> --mode <m> --headless -p <prompt>`
+// spawned DETACHED with no terminal tab. The run outlives this call (`unref`) and
+// shows in `agents sessions --active` under this machine as context:'headless', so it
+// can be focused/resumed later via `agents focus`. No shell: args go straight to the
+// binary (prompt stays a single arg, no quoting hazard), and PATH is augmented with the
+// agents shim dirs since the extension-host PATH can omit them.
+export function runHeadlessAgent(
+  agentKey: string,
+  prompt: string,
+  mode: AgentLaunchMode,
+  cwd?: string,
+): void {
+  const home = os.homedir();
+  const extraPath = [
+    path.join(home, '.agents/.cache/shims'),
+    path.join(home, '.local/bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
+  ].join(':');
+  const env = { ...process.env, PATH: `${extraPath}:${process.env.PATH ?? ''}` };
+  // modeFlagForAgent -> '--mode auto' | '--mode edit' | ... ; split into argv parts.
+  const modeArgs = (modeFlagForAgent(agentKey, mode) ?? '').split(' ').filter(Boolean);
+  const args = ['run', agentKey, ...modeArgs, '--headless', '-p', prompt];
+  const child = spawn('agents', args, {
+    cwd: cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd(),
+    detached: true,
+    stdio: 'ignore',
+    env,
+  });
+  child.unref();
 }
 
 // Back-compat shim: keeps the old name used elsewhere in this file. The
