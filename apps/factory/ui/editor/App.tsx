@@ -4,9 +4,11 @@ import Outline from './components/Outline';
 import FrontmatterPanel from './components/FrontmatterPanel';
 import Toolbar from './components/Toolbar';
 import { Editor as TiptapEditor } from '@tiptap/core';
+import { getVsCodeApi } from './vscodeApi';
 
-declare const acquireVsCodeApi: () => any;
-const vscode = acquireVsCodeApi();
+// Acquire the single webview API handle once; the Tiptap extensions share it
+// via getVsCodeApi() rather than re-calling the one-shot acquireVsCodeApi().
+const vscode = getVsCodeApi()!;
 
 function App() {
   const [content, setContent] = useState<string>('');

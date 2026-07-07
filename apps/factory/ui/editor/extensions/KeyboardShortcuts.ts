@@ -1,4 +1,5 @@
 import { Extension } from '@tiptap/core';
+import { getVsCodeApi } from '../vscodeApi';
 
 /**
  * Custom keyboard shortcuts for Notion-like editing experience
@@ -62,7 +63,7 @@ export default Extension.create({
 
       // Send selection to agent (Cmd+Shift+A)
       'Mod-Shift-a': () => {
-        const vscode = (window as any).acquireVsCodeApi?.();
+        const vscode = getVsCodeApi();
         if (vscode) {
           const selection = this.editor.state.doc.textBetween(
             this.editor.state.selection.from,
@@ -78,7 +79,7 @@ export default Extension.create({
 
       // AI improve shortcut
       'Mod-Shift-i': () => {
-        const vscode = (window as any).acquireVsCodeApi?.();
+        const vscode = getVsCodeApi();
         if (vscode) {
           const selection = this.editor.state.doc.textBetween(
             this.editor.state.selection.from,
