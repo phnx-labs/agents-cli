@@ -10,7 +10,10 @@ import path from 'node:path';
 // from doctor-diff.test.ts). No mocks: real shim generation, real launcher adoption,
 // real rc-file edit — all confined to the temp home.
 
-describe('runSelfHeal — shims/shadowing/path against a planted home', () => {
+// POSIX-only: exercises symlink-launcher adoption (the `shadowing` check is gated to
+// darwin/linux) plus a `/bin/echo` symlink and a bash rc-file edit — none of which
+// apply on Windows, where PATH lives in the registry and adoption is a no-op.
+describe.skipIf(process.platform === 'win32')('runSelfHeal — shims/shadowing/path against a planted home', () => {
   let home: string;
   let binDir: string;
 
