@@ -10,7 +10,7 @@ This file is a **map**. Read the code (and [README.md](README.md)) for current d
 
 ```
 Program.cs      Entry point (top-level statements) — TCP listener, auth, RPC loop
-Rpc.cs          Method dispatch table (18 methods)
+Rpc.cs          Method dispatch table (19 methods)
 Automation.cs   UI Automation tree walk + SendInput (click/type/key/scroll/drag) + window focus
 Screenshot.cs   Graphics.CopyFromScreen over the virtual screen
 Apps.cs         Process/window enumeration; launch_app via PATH + App Paths registry

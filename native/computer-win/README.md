@@ -78,7 +78,7 @@ in : {"id":N,"method":"...","params":{...}}
 out: {"id":N,"result":{...}}  |  {"id":N,"error":{"code":"...","message":"..."}}
 ```
 
-18 methods, dispatched in `Rpc.cs`: `ping`, `trust_status`, `list_apps`,
+19 methods, dispatched in `Rpc.cs`: `ping`, `trust_status`, `list_apps`,
 `launch_app`, `screenshot`, `describe`, `click`, `type`, `type_text`, `key`,
 `set_focus`, `get_text`, `scroll`, `drag`, `right_click`, `focus_window`,
 `ax_action`, `wait`, `notify`. Element IDs (`@eN`) and the `element_stale` error
