@@ -2769,7 +2769,10 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
   return { meta, content: lastPrompt || '' };
 }
 
-/** Parse Kimi's wire.jsonl to extract message count and token usage. */
+/** Parse Kimi's wire.jsonl to extract message count and token usage.
+ * TODO: optimize to stream (like scanClaudeSession) to avoid loading large files into memory.
+ * For now, synchronous readFileSync matches the pattern of reading state.json and is acceptable
+ * since session dirs are usually fresh in FS cache during incremental scans. */
 function parseKimiWireMetrics(sessionDir: string): { messageCount: number; tokenCount: number } {
   const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
   let messageCount = 0;
