@@ -632,7 +632,13 @@ export function buildExecCommand(options: ExecOptions): string[] {
     } else if (fs.existsSync(absPath)) {
       cmd[0] = absPath;
     } else {
-      cmd[0] = versionedName;
+      // No versioned shim on disk. Prefer the version's REAL launch binary
+      // (node_modules/.bin/<cli>) over the bare `<cli>@<version>` name — that
+      // literal is not on PATH and spawns as ENOENT (the `kimi@0.19.2` failure).
+      // Fall back to the literal only if the binary is absent (the run path's
+      // ensureAgentRunnable normally repairs/creates the alias before we reach here).
+      const realBinary = options.agent ? getBinaryPath(options.agent, options.version) : undefined;
+      cmd[0] = realBinary && fs.existsSync(realBinary) ? realBinary : versionedName;
     }
   }
 
@@ -1008,7 +1014,7 @@ export function formatPaneTail(raw: string, maxLines = 30): string {
  *      (Ctrl-b d) — return 0 and LEAVE the session for `agents focus` to re-attach.
  */
 async function runInTmux(options: ExecOptions, executable: string, args: string[]): Promise<SpawnResult> {
-  const { createSession, killSession, paneExitStatus, setSessionHook, slugifyName } = await import('./tmux/session.js');
+  const { createSession, killSession, paneExitStatus, setSessionHook, slugifyName, agentPaneDiedHook, markSessionHookSchema } = await import('./tmux/session.js');
   const { getDefaultSocketPath } = await import('./tmux/paths.js');
   const { attachTmux, runTmux } = await import('./tmux/binary.js');
 
@@ -1032,12 +1038,10 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     // that split in place instead of detaching everyone (the pane-died hook runs
     // in the dead pane's context, so bare `kill-pane` targets it). Without the
     // guard, exiting any split kicked the user clean out of tmux.
-    await setSessionHook(
-      name,
-      'pane-died',
-      `if -F '#{==:#{hook_pane},${pane}}' 'detach-client -s =${name}' 'kill-pane'`,
-      socket,
-    );
+    await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane), socket);
+    // Stamp the schema marker so the daemon reconcile (which retrofits older
+    // sessions) recognizes this one as already current and skips it.
+    await markSessionHookSchema(name, socket);
 
     // Record the agent's OS pid (the pane leaf, thanks to `exec`) WITH its tmux
     // pane so the active-scan attributes it exactly and shows the %pane.

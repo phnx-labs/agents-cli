@@ -207,11 +207,11 @@ async function doPs(json: boolean): Promise<void> {
   }
 }
 
-async function doLogs(ref: string, follow: boolean): Promise<void> {
+async function doLogs(ref: string, follow: boolean, full: boolean): Promise<void> {
   // Resolve the ref as a task id first, then fall back to a `--name` handle so
   // `agents hosts logs <name>` works, not just the opaque id.
   const id = loadTask(ref) ? ref : (findTaskByName(ref)?.id ?? findTaskBySessionId(ref)?.id ?? ref);
-  const res = await showHostTaskLog(id, follow);
+  const res = await showHostTaskLog(id, follow, full);
   if (!res.found) {
     console.log(chalk.red(`Unknown task "${ref}".`));
     process.exitCode = 1;
@@ -260,7 +260,8 @@ export function registerHostsCommand(program: Command): void {
 
   hosts
     .command('logs <id>')
-    .description('Show a host task log; -f to follow a running one.')
+    .description('Show a host task’s concise summary; --full for the raw log, -f to follow a running one.')
     .option('-f, --follow', 'Follow live output')
-    .action((id: string, opts: { follow?: boolean }) => doLogs(id, !!opts.follow));
+    .option('-m, --full', 'Show the full raw combined-stdout log instead of the concise summary')
+    .action((id: string, opts: { follow?: boolean; full?: boolean }) => doLogs(id, !!opts.follow, !!opts.full));
 }

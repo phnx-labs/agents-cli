@@ -340,6 +340,43 @@ describe('toFloorAgentFromRemote', () => {
     }
     expect(toFloorAgentFromRemote(r, new Set()).lastActivityMs).toBe(0)
   })
+
+  test('a cloud task gets its own "Cloud" category instead of folding under the dispatching machine', () => {
+    // The CLI attributes a cloud task to the querier ('zion') for reply routing, but
+    // it runs in a provider sandbox — the feed must NOT show it under the local host.
+    const r: RemoteSessionLike = {
+      host: 'zion',
+      sessionId: 'task_e',
+      agentType: 'codex',
+      cwd: '',
+      project: '',
+      phase: 'waiting',
+      activity: '',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      prUrl: null,
+      ticket: null,
+      branch: '',
+      sinceMs: 0,
+      startedAtMs: NOW,
+      topic: 'Read README.md',
+      context: 'cloud',
+      cloudTaskId: 'task_e',
+      cloudProvider: 'codex',
+      teamName: '',
+      pid: 0,
+      transport: '',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set(), 'zion')
+    // Groups under "Cloud", never the local machine — grouping keys off hostLabel ?? host.
+    expect(a.hostLabel).toBe('Cloud')
+    // Reply routing still targets the real querier host, unaffected by the display label.
+    expect(a.reply.host).toBe('zion')
+  })
 })
 
 describe('deriveReplyTargetFromRemote', () => {

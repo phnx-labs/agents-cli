@@ -586,10 +586,12 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // 0 live agents — so an empty host shows recent work instead of a blank pane.
   const [recentByHost, setRecentByHost] = useState<Record<string, RemoteSessionLike[]>>({})
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
-  // Group the live feed by an axis (project/host/status/agent). 'none' keeps the
-  // default phase sections (NEEDS YOU -> RUNNING -> DONE). Reuses the same
-  // groupAgents() the Backlog's group control uses, so the two bars behave alike.
-  const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('none')
+  // Group the live feed by an axis (project/host/status/agent). Defaults to 'project'
+  // so sessions cluster under the repo/Linear project they're working on (NEEDS YOU
+  // stays pinned above the groups); 'none' falls back to flat phase sections
+  // (NEEDS YOU -> RUNNING -> DONE). Reuses the same groupAgents() the Backlog's group
+  // control uses, so the two bars behave alike.
+  const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('project')
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
   const [rightOpen, setRightOpen] = useState(floorPrefs0.right)
