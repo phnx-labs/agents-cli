@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import { assignGhosttyTabs, type GhosttySurface } from './ghostty-tabs.js';
 import type { ActiveSession } from './active.js';
 
