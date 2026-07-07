@@ -6,6 +6,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.284] - 2026-07-07
+
 ### Added
 
 - **Factory Floor redesign — the card now shows the agent's outputs at a glance.**
