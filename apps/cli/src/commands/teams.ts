@@ -61,6 +61,7 @@ import { isVersionInstalled, resolveVersionAlias, resolveVersionAliasLoose } fro
 import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
+import { renderSessionLog } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { buildPreview as buildSessionPreview } from './sessions-picker.js';
 import { parseExecEnv } from '../lib/exec.js';
@@ -1912,11 +1913,12 @@ export function registerTeamsCommands(program: Command): void {
   teams
     .command('logs [teammate]')
     .alias('log')
-    .description("Read a teammate's raw log output. Accepts positional name, --teammate <name>, UUID, or UUID prefix.")
-    .option('-n, --tail <n>', 'Show only the last N lines instead of the full log')
+    .description("Show a teammate's concise session summary. --full (or -n <lines>) for the raw stdout. Accepts positional name, --teammate <name>, UUID, or UUID prefix.")
+    .option('-n, --tail <n>', 'Show the last N lines of raw stdout instead of the concise summary')
+    .option('-m, --full', 'Show the full raw stdout log instead of the concise summary')
     .option('--team <team>', 'Disambiguate when the same name appears in multiple teams')
     .option('--teammate <name>', 'Teammate name (alias for the positional arg; useful for scripts)')
-    .action(async (ref: string | undefined, opts: { tail?: string; team?: string; teammate?: string }) => {
+    .action(async (ref: string | undefined, opts: { tail?: string; full?: boolean; team?: string; teammate?: string }) => {
       const base = await getAgentsDir();
 
       // Resolve teammate identity. Precedence:
@@ -1947,14 +1949,29 @@ export function registerTeamsCommands(program: Command): void {
         agentId = resolved.agentId;
       }
 
+      // Concise by default: a teammate's agentId IS its agent session id (passed
+      // as --session-id at launch), so render the same summary digest as
+      // `agents sessions <id>`. --full / -n <lines> opt into the raw stdout.log.
+      if (!opts.full && !opts.tail) {
+        const all = await discoverSessions({ all: true, limit: 5000 });
+        const matches = resolveSessionById(all, agentId);
+        if (matches.length > 0) {
+          await renderSessionLog(matches[0], 'summary');
+          return;
+        }
+        // No resolvable session (e.g. a non-Claude teammate) — fall through to a
+        // bounded tail of raw stdout rather than dumping the whole file.
+      }
+
       const logPath = path.join(base, agentId, 'stdout.log');
       try {
         const content = await fs.readFile(logPath, 'utf-8');
-        if (!opts.tail) {
+        if (opts.full) {
           process.stdout.write(content);
           return;
         }
-        const n = Math.max(1, parseInt(opts.tail, 10) || 50);
+        // Default tail size keeps an un-resolvable teammate's glance bounded too.
+        const n = opts.tail ? Math.max(1, parseInt(opts.tail, 10) || 50) : 40;
         const lines = content.split('\n');
         process.stdout.write(lines.slice(-n).join('\n'));
       } catch {
