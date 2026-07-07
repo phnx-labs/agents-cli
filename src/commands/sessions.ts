@@ -20,6 +20,8 @@ import { SESSION_AGENTS } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, findExecutable } from '../lib/platform/index.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
+import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
+import { mapPanesToTargets } from '../lib/tmux/session.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
@@ -261,22 +263,38 @@ function formatStartedAt(startedAtMs?: number): string {
 }
 
 /**
+ * Strip terminal/harness noise from a preview so the column stays a single line
+ * of plain prose: OSC title escapes, CSI/SGR ANSI, and the harness wrapper tags
+ * (`<local-command-stdout>`, `<task-notification>`, `<command-*>`) that leak from
+ * a captured transcript tail. Collapses runs of whitespace.
+ */
+export function cleanPreview(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')        // OSC (title) sequences
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')                    // CSI / SGR ANSI
+    .replace(/<\/?(?:local-command-stdout|command-name|command-message|command-args|task-notification|system-reminder)>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
  * Build the live description for an active session: prefer the state engine's
  * preview (the latest turn), then a user label, then the first-prompt topic.
  */
 function buildSessionDescription(s: ActiveSession): string {
   if (s.context === 'cloud') {
-    return s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`;
+    return cleanPreview(s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`);
   }
   if (s.context === 'teams') {
     const parts = [s.teamName];
     if (s.preview) parts.push(s.preview);
     else if (s.label) parts.push(s.label);
     else if (s.topic) parts.push(s.topic);
-    return parts.filter(Boolean).join(' · ');
+    return cleanPreview(parts.filter(Boolean).join(' · '));
   }
   // Terminal or headless: prefer the live preview, then label, then topic.
-  return s.preview || s.label || s.topic || '';
+  return cleanPreview(s.preview || s.label || s.topic || '');
 }
 
 /** Short human word for a session's activity (falls back to the coarse status). */
@@ -342,16 +360,22 @@ function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree
 }
 
 /**
- * Compact provenance badge: how to reach the session, not what it's doing.
- * `ssh` flags a remote host; the tmux pane id is the send-keys target the feed
- * would type back into. Local, non-tmux sessions add nothing (the common case).
+ * Compact locator badge: how to JUMP to the session, not what it's doing.
+ * `ssh` flags a remote host. For tmux, prefer the resolved `session:window.pane`
+ * (a real `tmux attach -t <session:window>` target) over the raw `%pane` id. For
+ * a local Ghostty session we know the tab, show `tab N`. Local, unlocatable
+ * sessions add nothing (the common case).
  */
-function provenanceBadge(p?: ActiveSession['provenance']): string {
-  if (!p) return '';
+function locatorBadge(s: ActiveSession): string {
+  const p = s.provenance;
   const parts: string[] = [];
-  if (p.transport === 'ssh') parts.push(chalk.red('ssh'));
-  if (p.mux?.kind === 'tmux' && p.mux.pane) parts.push(chalk.green(`tmux ${p.mux.pane}`));
-  else if (p.mux?.kind === 'screen') parts.push(chalk.green('screen'));
+  if (p?.transport === 'ssh') parts.push(chalk.red('ssh'));
+  if (p?.mux?.kind === 'tmux' && (s.tmuxTarget || p.mux.pane)) {
+    parts.push(chalk.green(s.tmuxTarget ?? p.mux.pane!));
+  } else if (p?.mux?.kind === 'screen') {
+    parts.push(chalk.green('screen'));
+  }
+  if (s.ghosttyTab != null) parts.push(chalk.green(`tab ${s.ghosttyTab}`));
   return parts.join(' ');
 }
 
@@ -368,7 +392,7 @@ function printActiveRow(s: ActiveSession, indent: string): void {
   const hostCol = chalk.gray(padToWidth(truncateToWidth(s.host ?? '-', 8), 9));
   const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), 8), 9));
   const fork = s.pidCount && s.pidCount > 1 ? chalk.dim(`×${s.pidCount} `) : '';
-  const badges = (fork ? fork : '') + [signalBadges(s), provenanceBadge(s.provenance)].filter(Boolean).join(' ');
+  const badges = (fork ? fork : '') + [signalBadges(s), locatorBadge(s)].filter(Boolean).join(' ');
   const desc = buildSessionDescription(s) || '-';
   // Fill the remaining width with the preview so nothing wraps under tmux/SSH.
   const fixed = stringWidth(indent) + 9 + 9 + 9 + 9 + (badges ? stringWidth(badges) + 1 : 0);
@@ -561,6 +585,24 @@ export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): 
   return keys.flatMap((k) => byMachine.get(k)!);
 }
 
+/**
+ * `running N · idle N · waiting N · queued N` for a bucket of sessions (zero
+ * buckets omitted). Same bucketing as the grand-total summary so per-group
+ * counts reconcile with the `(total)` beside the header. Empty when nothing.
+ */
+function groupTally(sessions: ActiveSession[]): string {
+  const running = sessions.filter(s => s.status === 'running').length;
+  const idle = sessions.filter(s => s.status === 'idle').length;
+  const waiting = sessions.filter(s => s.status === 'input_required').length;
+  const queued = sessions.filter(s => s.status === 'queued').length;
+  const parts: string[] = [];
+  if (running) parts.push(`${running} running`);
+  if (idle) parts.push(`${idle} idle`);
+  if (waiting) parts.push(`${waiting} waiting`);
+  if (queued) parts.push(`${queued} queued`);
+  return parts.join(' · ');
+}
+
 /** Print one machine's workspace tree, indented under its machine header. */
 function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string): void {
   let first = true;
@@ -573,7 +615,9 @@ function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string): void
       : ws.key === '__unknown__'
         ? chalk.gray.bold('unknown')
         : chalk.cyan.bold(shortCwd(ws.key));
-    console.log(`${base}${header} ${chalk.gray(`(${ws.total})`)}`);
+    const wsSessions = [...ws.windows.flatMap(w => w.sessions), ...ws.flat];
+    const tally = groupTally(wsSessions);
+    console.log(`${base}${header} ${chalk.gray(`(${ws.total})`)}${tally ? chalk.gray(`  ${tally}`) : ''}`);
 
     for (const win of ws.windows) {
       // Host is per-process, but every terminal in the same IDE window shares
@@ -595,6 +639,39 @@ function printMachineHeader(mg: MachineGroup): void {
   const name = mg.isLocal ? chalk.bold.cyan(mg.machine) : chalk.bold(mg.machine);
   const here = mg.isLocal ? chalk.cyan('  ← this machine') : '';
   console.log(`${marker}${name} ${chalk.gray(`(${mg.total})`)}${here}`);
+}
+
+/**
+ * Attach display-only jump locators onto LOCAL sessions: the Ghostty tab number
+ * (one batched read-only osascript, only when a local ghostty session exists)
+ * and the tmux `session:window.pane` target (one `list-panes -a` per socket).
+ * Every step is best-effort and swallowed — a failure just leaves the raw pane
+ * id / no tab number, and the rows render as before. Mutates the sessions.
+ */
+async function enrichLocalLocators(local: ActiveSession[]): Promise<void> {
+  // Ghostty tab numbers.
+  try {
+    const ghostty = local.filter(s => s.host === 'ghostty' && s.provenance?.transport !== 'ssh');
+    if (ghostty.length > 0) {
+      const surfaces = await enumerateGhosttyTabs();
+      for (const [sess, tab] of assignGhosttyTabs(ghostty, surfaces)) sess.ghosttyTab = tab;
+    }
+  } catch { /* non-fatal */ }
+
+  // tmux attach targets, one batched query per distinct socket.
+  try {
+    const tmux = local.filter(s => s.provenance?.mux?.kind === 'tmux' && s.provenance.mux.pane);
+    const sockets = new Set(tmux.map(s => s.provenance!.mux!.socket));
+    for (const socket of sockets) {
+      const paneMap = await mapPanesToTargets(socket);
+      if (paneMap.size === 0) continue;
+      for (const s of tmux) {
+        if (s.provenance!.mux!.socket !== socket) continue;
+        const target = paneMap.get(s.provenance!.mux!.pane!);
+        if (target) s.tmuxTarget = target;
+      }
+    }
+  } catch { /* non-fatal */ }
 }
 
 /**
@@ -637,6 +714,11 @@ async function renderActiveSessions(
     return;
   }
 
+  // Enrich LOCAL sessions with jump locators (display-only, after the --json /
+  // --waiting gates so scriptable output stays osascript-free). Remote sessions
+  // keep their raw pane id — their tmux/Ghostty live on the other machine.
+  await enrichLocalLocators(sessions.filter(s => !s.machine || s.machine === self));
+
   const grouped = groupSessionsByMachine(sessions, self);
   let firstMachine = true;
   for (const mg of grouped.machines) {
@@ -646,14 +728,7 @@ async function renderActiveSessions(
     renderWorkspaceLayout(mg.layout, '  ');
   }
 
-  const runningCount = sessions.filter(s => s.status === 'running').length;
-  const idleCount = sessions.filter(s => s.status === 'idle').length;
-  const queuedCount = sessions.filter(s => s.status === 'queued' || s.status === 'input_required').length;
-
-  const parts: string[] = [];
-  if (runningCount > 0) parts.push(`${runningCount} running`);
-  if (idleCount > 0) parts.push(`${idleCount} idle`);
-  if (queuedCount > 0) parts.push(`${queuedCount} queued`);
+  const parts = groupTally(sessions).split(' · ').filter(Boolean);
   const machineWord = grouped.machines.length === 1 ? 'machine' : 'machines';
   console.log(chalk.gray(`\n${sessions.length} active (${parts.join(', ')}) across ${grouped.machines.length} ${machineWord}.`));
 
