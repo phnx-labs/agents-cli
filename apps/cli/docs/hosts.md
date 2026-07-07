@@ -15,10 +15,10 @@ by name from a small local registry, over plain SSH, with no central service to
 run or pay for:
 
 ```
-agents run claude "fix the auth bug"   --on mac-mini   # headless: prompt given
-agents run codex  "port this to rust"  --on spark-0    # headless: prompt given
-agents run droid  "triage the inbox"   --on win-mini    # headless: prompt given
-agents run claude                      --on mac-mini   # interactive: TTY forwarded
+agents run claude "fix the auth bug"   --host mac-mini   # headless: prompt given
+agents run codex  "port this to rust"  --host spark-0    # headless: prompt given
+agents run droid  "triage the inbox"   --host win-mini    # headless: prompt given
+agents run claude                      --host mac-mini   # interactive: TTY forwarded
 ```
 
 It sits next to the vendor clouds (`agents cloud run --provider rush|codex|…`),
@@ -207,7 +207,7 @@ agents run <agent> ["<task>"] --host <host>
   │          durable log. Offset-tracked reads, parsed by session/parse.ts.
   │
   └─ no prompt?                interactive TTY-forwarded path
-        ssh -tt <node> 'agents run <agent>'
+        ssh -tt <node> 'agents run <agent>'   (only when local stdin is a TTY)
         remote agents-cli launches its normal interactive UI (tmux on the host)
         local CLI exits when the SSH session ends
 ```
@@ -215,8 +215,9 @@ agents run <agent> ["<task>"] --host <host>
 > Shipped surface: dispatch is `agents run <agent> ["<task>"] --host <name>`.
 > With a prompt, the run is headless, follows live by default, and `--no-follow`
 > detaches; track with `agents hosts ps` and `agents hosts logs <id>`. With no
-> prompt, the local TTY is forwarded over SSH and the agent runs interactively on
-> the remote host (`ssh -tt`), using the remote machine's normal tmux wrapper.
+> prompt (and a local TTY), the local TTY is forwarded over SSH and the agent runs
+> interactively on the remote host (`ssh -tt`), using the remote machine's normal
+> tmux wrapper.
 > Host runs are tracked in a **local** task store, not `agents cloud` (a separate
 > subsystem for Rush/Codex/Factory backends).
 >
@@ -334,7 +335,9 @@ Host dispatch has two shapes, chosen by whether a prompt is present:
   `agents run <agent>` with no prompt and no `--quiet`; the local CLI forwards its
   TTY over SSH (`ssh -tt`) so the remote agent starts its normal interactive UI.
   The tmux wrapper runs on the remote machine, exactly as it would if you had
-  SSH'd in and typed `agents run <agent>` yourself.
+  SSH'd in and typed `agents run <agent>` yourself. Passing both a prompt and
+  `--interactive` with `--host` currently still takes the headless path; use the
+  prompt-less form for an interactive remote session.
 
 (`--json`/`--quiet`/`--mode`/`--model` are real flags on `agents run`, registered in
 `src/commands/exec.ts`; there is no user-facing `--print` — the per-harness
