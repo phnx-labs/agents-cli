@@ -1,44 +1,72 @@
 import AppKit
 import Carbon.HIToolbox
 
-// Global hotkey via Carbon RegisterEventHotKey. Chosen over an NSEvent global
+// Global hotkeys via Carbon RegisterEventHotKey. Chosen over an NSEvent global
 // monitor (passive, can't act cleanly) or a CGEvent tap (needs Input-Monitoring
 // TCC and can be disabled under load): RegisterEventHotKey needs NO extra TCC to
-// register, and because we use a DEDICATED chord (Cmd-Shift-V) we never hijack
-// the OS Cmd-V. The Accessibility grant is only needed later, for the paste
-// injection itself (Clip.inject).
+// register, and because we use DEDICATED chords (Cmd-Shift-V, Cmd-Shift-O) we
+// never hijack the OS Cmd-V. The Accessibility grant is only needed later, for
+// the paste injection itself (Clip.inject).
+//
+// Two chords are demultiplexed through ONE installed handler by reading the
+// fired EventHotKeyID.id and routing to a static dispatch table — the
+// InstallEventHandler callback is a bare C function pointer with no captured
+// context, so per-instance closures can't be reached any other way.
 final class HotkeyManager {
-    // The InstallEventHandler callback is a bare C function pointer with no
-    // captured context, so route through a static singleton.
-    static var shared: HotkeyManager?
+    // A chord to register and the action it fires.
+    struct Binding {
+        let id: UInt32          // EventHotKeyID.id, namespaced under 'AGCT'
+        let keyCode: UInt32     // e.g. UInt32(kVK_ANSI_V)
+        let modifiers: UInt32   // e.g. UInt32(cmdKey | shiftKey)
+        let onFire: () -> Void
+    }
 
-    private var hotKeyRef: EventHotKeyRef?
+    // Stable ids so main.swift and this file can't drift.
+    static let clipID: UInt32 = 1    // Cmd-Shift-V → Clip.run()
+    static let promptID: UInt32 = 2  // Cmd-Shift-O → prompt panel
+
+    // Demux table: EventHotKeyID.id → action. Static for the same reason the old
+    // `shared` was — the C callback has no context pointer.
+    private static var handlers: [UInt32: () -> Void] = [:]
+
+    private var hotKeyRefs: [EventHotKeyRef?] = []
     private var handlerRef: EventHandlerRef?
-    private let onFire: () -> Void
 
-    init(onFire: @escaping () -> Void) { self.onFire = onFire }
-
-    func register() {
-        HotkeyManager.shared = self
+    func register(_ bindings: [Binding]) {
+        for b in bindings { HotkeyManager.handlers[b.id] = b.onFire }
 
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
                                  eventKind: UInt32(kEventHotKeyPressed))
-        let installed = InstallEventHandler(GetApplicationEventTarget(), { _, _, _ -> OSStatus in
-            HotkeyManager.shared?.onFire()
+        let installed = InstallEventHandler(GetApplicationEventTarget(), { _, event, _ -> OSStatus in
+            // Read which chord fired and route to its action.
+            var hkID = EventHotKeyID()
+            let status = GetEventParameter(event,
+                                           EventParamName(kEventParamDirectObject),
+                                           EventParamType(typeEventHotKeyID),
+                                           nil, MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+            if status == noErr { HotkeyManager.handlers[hkID.id]?() }
             return noErr
         }, 1, &spec, nil, &handlerRef)
 
-        // 'AGCT' signature keeps our hotkey id namespaced from other apps'.
-        let id = EventHotKeyID(signature: OSType(0x41474354), id: 1)
-        let modifiers = UInt32(cmdKey | shiftKey)
-        let registered = RegisterEventHotKey(UInt32(kVK_ANSI_V), modifiers, id,
-                                             GetApplicationEventTarget(), 0, &hotKeyRef)
+        // 'AGCT' signature keeps our hotkey ids namespaced from other apps'.
+        let signature = OSType(0x41474354)
+        for b in bindings {
+            var ref: EventHotKeyRef?
+            let registered = RegisterEventHotKey(b.keyCode, b.modifiers,
+                                                 EventHotKeyID(signature: signature, id: b.id),
+                                                 GetApplicationEventTarget(), 0, &ref)
+            hotKeyRefs.append(ref)
+            // Registration fails if another app already owns the chord — surface
+            // it rather than silently never firing.
+            if registered != noErr {
+                FileHandle.standardError.write(Data(
+                    "hotkey: registration failed id=\(b.id) (register=\(registered))\n".utf8))
+            }
+        }
 
-        // Registration fails if another app already owns the chord — surface it
-        // rather than silently never firing.
-        if installed != noErr || registered != noErr {
+        if installed != noErr {
             FileHandle.standardError.write(Data(
-                "clip: hotkey registration failed (install=\(installed) register=\(registered))\n".utf8))
+                "hotkey: handler install failed (install=\(installed))\n".utf8))
         }
     }
 }

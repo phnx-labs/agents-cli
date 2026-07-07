@@ -131,6 +131,157 @@ enum AgentsCLI {
     // KeepAlive policy, then the app terminates.
     static func menubarDisable() { runDetached(argv(["menubar", "disable"])) }
 
+    // MARK: Quick issue capture (Cmd-Shift-O)
+
+    // Image extensions the clip hotkey / screenshot tools produce.
+    static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "tiff", "webp", "bmp"]
+
+    // Where the user's recent screenshots ACTUALLY live. A shot taken with the
+    // system tool or CleanShot does not land in the clip attachments dir (that
+    // only fills on Cmd-Shift-V), so the panel must look where screenshots are
+    // really saved or a shot the user just took won't appear:
+    //   • the system screencapture location (`com.apple.screencapture location`,
+    //     unset => ~/Desktop),
+    //   • CleanShot X's export path (`pl.maketheweb.cleanshotx exportPath`),
+    //   • the clip attachments dir (Cmd-Shift-V history).
+    // Deduped, existing directories only.
+    static func screenshotSourceDirs() -> [URL] {
+        var raw: [String] = []
+        let sys = UserDefaults(suiteName: "com.apple.screencapture")?.string(forKey: "location")
+        raw.append((sys?.isEmpty == false) ? sys! : "~/Desktop")
+        if let cs = UserDefaults(suiteName: "pl.maketheweb.cleanshotx")?.string(forKey: "exportPath"),
+           !cs.isEmpty {
+            raw.append(cs)
+        }
+        var urls = raw.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        urls.append(Clip.attachmentsDir)
+        var seen = Set<String>()
+        return urls.filter { url in
+            let p = url.standardizedFileURL.path
+            guard seen.insert(p).inserted else { return false }
+            var isDir: ObjCBool = false
+            return FileManager.default.fileExists(atPath: p, isDirectory: &isDir) && isDir.boolValue
+        }
+    }
+
+    // The most-recent screenshots (newest first) for the panel's thumbnail strip
+    // — the "recent screenshots" the user attaches from, across every source dir.
+    static func recentImageAttachments(limit: Int = 6) -> [String] {
+        imageFiles(inDirs: screenshotSourceDirs(), limit: limit)
+    }
+
+    // Pure newest-first image selection across directories; non-images and JSON
+    // sidecars are excluded, duplicate paths collapsed. Split out so it can be
+    // driven over fixture dirs in the MENUBAR_ISSUE_TEST self-test.
+    static func imageFiles(inDirs dirs: [URL], limit: Int) -> [String] {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        var found: [(path: String, mtime: Date)] = []
+        var seen = Set<String>()
+        for dir in dirs {
+            guard let entries = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { continue }
+            for url in entries {
+                guard imageExtensions.contains(url.pathExtension.lowercased()),
+                      (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile ?? false,
+                      let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                          .contentModificationDate else { continue }
+                let p = url.standardizedFileURL.path
+                if seen.insert(p).inserted { found.append((p, d)) }
+            }
+        }
+        return found.sorted { $0.mtime > $1.mtime }.prefix(limit).map { $0.path }
+    }
+
+    // The standing brief handed to the ticket agent. It embeds the user's note
+    // and the screenshot path; the agent does project detection + investigation
+    // itself (Swift pre-computes nothing). `linear create` takes a POSITIONAL
+    // title, no --json, and prints `Created RUSH-###: <title>` — parsed back in
+    // the termination handler for the completion notification.
+    static func ticketAgentPrompt(note: String, screenshotPaths: [String]) -> String {
+        let linear = "\(home)/.agents/skills/linear/scripts/linear"
+        let shots: String
+        if screenshotPaths.isEmpty {
+            shots = "No screenshots were attached; work from the note alone."
+        } else if screenshotPaths.count == 1 {
+            shots = "A screenshot is attached at: \(screenshotPaths[0]) — read it first with your image tools."
+        } else {
+            let list = screenshotPaths.map { "  - \($0)" }.joined(separator: "\n")
+            shots = "\(screenshotPaths.count) screenshots are attached — read each with your image tools:\n\(list)"
+        }
+        return """
+        You are filing exactly ONE Linear ticket from a quick capture bar. Do not ask \
+        questions — make your best call and act.
+
+        User note: \(note)
+        \(shots)
+
+        Steps:
+        1. If screenshots are attached, inspect them to understand what the user is pointing at.
+        2. Run `agents sessions --all --limit 20` and skim the recent local sessions to \
+        identify which repository / project this concerns (match the note + screenshot to a \
+        repo you have been working in). Derive the repo name (e.g. `agents-cli`).
+        3. Do a brief investigation for real context — name the likely file/area, a \
+        reproduction path, or at minimum a crisp problem statement. Do NOT over-investigate; \
+        a couple of focused reads is enough.
+        4. File the ticket, piping a proper multi-line description via stdin:
+
+           printf '%s' "<your markdown description>" | \\
+             \(linear) create "<crisp imperative title>" \\
+               --priority <urgent|high|medium|low> \\
+               --project "<Linear project name matching the repo>" \\
+               --label "repo:<repo-name>" \\
+               --description-file -
+
+           Pick an HONEST priority. Keep the title short and specific.
+        5. Print ONLY the resulting `Created RUSH-###: <title>` line and nothing else.
+        """
+    }
+
+    // Dispatch the ticket agent for a captured note (+ optional screenshot). This
+    // is the SINGLE isolation point: swapping to a cloud pod later (uploading the
+    // screenshot, serializing session context) changes only this function. The
+    // agent runs headless in `auto` mode so it may read files, run `agents
+    // sessions`, investigate, and call `linear create` — but genuinely
+    // destructive ops still gate. It runs as a MONITORED async process (not fully
+    // detached) so its `Created RUSH-###` line drives a real completion
+    // notification without blocking the panel/UI.
+    static func dispatchTicketAgent(note: String, screenshotPaths: [String]) {
+        let prompt = ticketAgentPrompt(note: note, screenshotPaths: screenshotPaths)
+        let agent = env["AGENTS_ISSUE_AGENT"] ?? "claude"
+        Notifier.post(title: "Filing ticket…", body: shortenForNotice(note))
+        runMonitored(argv(["run", agent, prompt, "--mode", "auto"])) { output, ok in
+            guard ok, let id = parseCreatedTicketID(output) else {
+                Notifier.post(title: "Ticket agent finished",
+                              body: ok ? "Could not confirm a ticket was created."
+                                       : "The ticket agent exited with an error.")
+                return
+            }
+            Notifier.post(title: "Created \(id)", body: shortenForNotice(note))
+        }
+    }
+
+    // Pull the `RUSH-123` / `ENG-45` identifier out of the agent's final line.
+    static func parseCreatedTicketID(_ output: String) -> String? {
+        // Match "Created ABC-123:" (the linear CLI's create success line), else
+        // any bare TEAM-123 token as a fallback for a paraphrased final line.
+        // Take the LAST match: if the agent mentioned an existing ticket id in its
+        // reasoning, the real "Created …" result line still comes after it.
+        let patterns = ["Created ([A-Z][A-Z0-9]+-[0-9]+)", "\\b([A-Z][A-Z0-9]+-[0-9]+)\\b"]
+        for pat in patterns {
+            guard let re = try? NSRegularExpression(pattern: pat) else { continue }
+            let matches = re.matches(in: output, range: NSRange(output.startIndex..., in: output))
+            if let last = matches.last, let r = Range(last.range(at: 1), in: output) {
+                return String(output[r])
+            }
+        }
+        return nil
+    }
+
+    private static func shortenForNotice(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.count > 80 ? String(t.prefix(79)) + "…" : t
+    }
+
     // MARK: Process helpers
     private static func capture(_ argv: [String]) -> Data? {
         let p = Process()
@@ -156,6 +307,35 @@ enum AgentsCLI {
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         try? p.run()
+    }
+
+    // Async, non-blocking process whose stdout is captured and handed to `onFinish`
+    // (on the main queue) when it exits. Unlike runDetached this keeps a strong
+    // reference until termination so the completion callback can fire — used for
+    // the ticket agent, which is long-running but must still report its result.
+    private static var monitored: [Process] = []
+    private static func runMonitored(_ argv: [String], onFinish: @escaping (String, Bool) -> Void) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: argv[0])
+        p.arguments = Array(argv.dropFirst())
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { proc in
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            let text = String(data: data, encoding: .utf8) ?? ""
+            let ok = proc.terminationStatus == 0
+            DispatchQueue.main.async {
+                monitored.removeAll { $0 === proc }
+                onFinish(text, ok)
+            }
+        }
+        do {
+            try p.run()
+            monitored.append(p)
+        } catch {
+            DispatchQueue.main.async { onFinish("", false) }
+        }
     }
 
     private static func shellQuote(_ s: String) -> String {

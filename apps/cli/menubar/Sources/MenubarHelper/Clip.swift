@@ -21,7 +21,9 @@ import UniformTypeIdentifiers
 enum Clip {
     // ~/.agents/.history/attachments — .history is gitignored (never pushed) and
     // DURABLE (unlike .cache, a cache-clear won't sweep an in-flight reference).
-    private static var attachmentsDir: URL {
+    // Non-private so the quick-issue panel can surface recent clips in its
+    // attach strip (AgentsCLI.screenshotSourceDirs) — one canonical path.
+    static var attachmentsDir: URL {
         URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".agents/.history/attachments", isDirectory: true)
     }
