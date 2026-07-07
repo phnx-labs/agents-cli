@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.41
+
 - **NEW: `agents sessions focus [id]`** — one command to get back to a session, however it's reachable. It **attaches** a live session in place (tmux `switch-client`/`attach-session`, a remote tmux over `ssh -tt`, or a Ghostty tab — joining the live process without forking); where there's **no live terminal to attach**, it **opens a new tab and resumes** the session — locally, or on the remote peer over SSH (`runOnPeer`, so the peer resolves the version-pinned binary). No id opens the rich live-session picker (this-machine first). Reuses the live-session detection and the terminal launch engine (`openSurfaces`), and folds `go`'s attach paths in. Source: `src/commands/focus.ts`, `src/commands/go.ts`.
 - **`--device` is now a first-class alias of `--host`** on every host-routable command (`sessions`, `run`, …), registered centrally on `addHostOption` so a local fall-through no longer errors. Source: `src/lib/hosts/`.
 - **`agents computer` steers Electron/webview targets over CDP** instead of reporting a fake success when the native-automation path can't reach them (#716).
