@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isMissingBinarySignature } from './versions.js';
+import { isMissingBinarySignature, probeSpawnSpec } from './versions.js';
 
 /**
  * isMissingBinarySignature is the gate that decides whether a freshly-installed
@@ -31,5 +31,44 @@ describe('isMissingBinarySignature (gutted-install detector)', () => {
   it('does NOT match on unrelated text that merely contains a substring like "enoent"', () => {
     // Word-boundaried: only a standalone ENOENT token counts, not e.g. a hash.
     expect(isMissingBinarySignature('token: abcENOENTxyz')).toBe(false);
+  });
+});
+
+/**
+ * probeSpawnSpec builds the argv for the `<binary> --version` launch probe. The
+ * load-bearing case: on Windows the `.cmd` runs through cmd.exe, so a spaced
+ * profile path (`C:\Users\John Doe\…`) MUST be fully quoted — else cmd.exe splits
+ * it at the space, emits "'C:\Users\John' is not recognized", trips
+ * isMissingBinarySignature, and false-fails a HEALTHY install into a destructive
+ * reinstall. The probe must compose the quoted line + empty args (never let Node
+ * concatenate the path into a shell string unescaped).
+ */
+describe('probeSpawnSpec (launch-probe quoting)', () => {
+  it('fully quotes a SPACED Windows .cmd path and empties the args array', () => {
+    const spaced =
+      'C:\\Users\\John Doe\\.agents\\.history\\versions\\claude\\2.1.191\\node_modules\\.bin\\claude.cmd';
+    const spec = probeSpawnSpec(spaced, true);
+    expect(spec.shell).toBe(true);
+    expect(spec.args).toEqual([]); // args never concatenated into the cmd.exe line
+    // The path is wrapped in quotes so cmd.exe reads it as one token, not split at the space.
+    expect(spec.command).toBe(`"${spaced}" --version`);
+    // The bug (raw path) would start with C, not a quote, and cmd.exe would stop at the space.
+    expect(spec.command.startsWith('"')).toBe(true);
+  });
+
+  it('does not quote a space-free Windows path (nothing to escape) but keeps empty args', () => {
+    const p = 'C:\\Users\\muqsit\\.agents\\...\\claude.cmd';
+    const spec = probeSpawnSpec(p, true);
+    expect(spec.shell).toBe(true);
+    expect(spec.args).toEqual([]);
+    expect(spec.command).toBe(`${p} --version`);
+  });
+
+  it('POSIX: no shell, binary exec\'d directly with --version', () => {
+    const p = '/home/user/.agents/.history/versions/claude/2.1.191/node_modules/.bin/claude';
+    const spec = probeSpawnSpec(p, false);
+    expect(spec.shell).toBe(false);
+    expect(spec.command).toBe(p);
+    expect(spec.args).toEqual(['--version']);
   });
 });
