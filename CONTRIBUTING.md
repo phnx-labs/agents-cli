@@ -6,7 +6,7 @@ Thanks for your interest in contributing. This guide covers the setup, conventio
 
 ```bash
 git clone https://github.com/phnx-labs/agents-cli
-cd agents-cli
+cd agents-cli/apps/cli
 bun install
 bun run build
 bun run test
@@ -17,7 +17,7 @@ Requires Node.js 22.5+ and Bun. SQLite support uses the built-in `bun:sqlite` an
 ## Project structure
 
 ```
-src/
+apps/cli/src/
   index.ts           # CLI entry point (commander.js)
   commands/          # One file per CLI command
   lib/               # Business logic, types, and integrations
@@ -26,7 +26,7 @@ src/
     teams/           # Multi-agent coordination
 ```
 
-Commands live in `src/commands/`, business logic in `src/lib/`. Tests are colocated as `*.test.ts` files under `__tests__/` directories.
+Commands live in `apps/cli/src/commands/`, business logic in `apps/cli/src/lib/`. Tests are colocated as `*.test.ts` files under `__tests__/` directories.
 
 ## Code conventions
 
@@ -41,7 +41,7 @@ Commands live in `src/commands/`, business logic in `src/lib/`. Tests are coloca
 
 1. **Build and test before submitting:**
    ```bash
-   bun run build && bun run test
+   cd apps/cli && bun run build && bun run test
    ```
 
 2. **Keep PRs focused.** One feature or fix per PR. Don't bundle unrelated changes.
@@ -52,18 +52,18 @@ Commands live in `src/commands/`, business logic in `src/lib/`. Tests are coloca
 
 ## Adding a new agent
 
-Agents are defined in `src/lib/agents.ts` as entries in the `AGENTS` object. Each entry declares:
+Agents are defined in `apps/cli/src/lib/agents.ts` as entries in the `AGENTS` object. Each entry declares:
 
 - CLI command name and npm package
 - Config directory and file format
 - Memory file name (e.g., `CLAUDE.md`, `GEMINI.md`)
 - Capability flags (hooks, MCP, skills, commands, permissions)
 
-Add the agent ID to the `AgentId` type in `src/lib/types.ts`, then add the config entry in `src/lib/agents.ts`.
+Add the agent ID to the `AgentId` type in `apps/cli/src/lib/types.ts`, then add the config entry in `apps/cli/src/lib/agents.ts`.
 
 ## Adding a cloud provider
 
-Cloud providers implement the `CloudProvider` interface in `src/lib/cloud/types.ts`. See `src/lib/cloud/rush.ts` for a complete example. Register the provider in `src/lib/cloud/registry.ts`.
+Cloud providers implement the `CloudProvider` interface in `apps/cli/src/lib/cloud/types.ts`. See `apps/cli/src/lib/cloud/rush.ts` for a complete example. Register the provider in `apps/cli/src/lib/cloud/registry.ts`.
 
 ## Commit messages
 

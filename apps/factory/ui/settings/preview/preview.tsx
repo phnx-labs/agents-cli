@@ -3,7 +3,7 @@
 // current UI can be seen/screenshotted without the VS Code extension host. Not
 // shipped (vite.settings.config.ts only inputs settings/index.html); a dev harness.
 //
-// Run:  cd extension/ui && bun run dev  ->  open http://localhost:5173/preview/
+// Run:  cd extension/ui && bun run dev  ->  open http://localhost:5173/settings/preview/
 //   URL params:  ?view=feed|dispatch  &  ?theme=dark|light
 // (Serve over http, not file://, or ES-module imports are CORS-blocked.)
 import React, { useState } from 'react'
@@ -11,10 +11,12 @@ import ReactDOM from 'react-dom/client'
 import '../index.css'
 
 import { Icon } from '../components/mission-control/icons'
+import { FloorSidebar } from '../components/mission-control/FloorSidebar'
 import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
-import type { FloorAgent, FloorTicket, StructuredQuestion } from '../components/mission-control/floorModel'
+import { BacklogCenter } from '../components/mission-control/BacklogCenter'
+import type { FloorAgent, FloorTicket, StructuredQuestion, TicketGroupBy, TicketSort } from '../components/mission-control/floorModel'
 import type { UnifiedTask } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
 
@@ -42,6 +44,8 @@ function agent(p: Partial<FloorAgent>): FloorAgent {
     ci: null,
     ticket: null,
     branch: 'main',
+    worktreeSlug: '',
+    worktreePath: '',
     resp: '',
     question: null,
     reply: { kind: 'terminal', host: 'this-mac' },
@@ -51,6 +55,22 @@ function agent(p: Partial<FloorAgent>): FloorAgent {
     ...p,
   }
 }
+
+// Issue-2 demo: two sessions in the SAME repo + worktree that used to render as
+// identical, contextless "Edit linux.ts / waiting_input" cards. They now carry the
+// project, the worktree slug, and a distinct task line.
+const twinA = agent({
+  id: 'twin-a', abbr: 'CC', name: '02ebf318', project: 'agents-cli', phase: 'waiting',
+  needs: true, worktreeSlug: 'headless-secrets-shadow', branch: 'muqsit/headless-secrets',
+  verb: 'Edit', target: 'src/lib/secrets/linux.ts',
+  summary: 'Removing the stale BYOK resolver and its keychain writes.', since: '0s',
+})
+const twinB = agent({
+  id: 'twin-b', abbr: 'CC', name: 'e3d6852d', project: 'agents-cli', phase: 'waiting',
+  needs: true, worktreeSlug: 'headless-secrets-shadow', branch: 'muqsit/headless-secrets',
+  verb: 'Edit', target: 'src/lib/secrets/linux.ts',
+  summary: 'Adding the Linux secret-service fallback path + a regression test.', since: '0s',
+})
 
 const dropQuestion: StructuredQuestion = {
   kind: 'destructive',
@@ -112,9 +132,12 @@ const done: FloorAgent[] = [
 
 // READY TO DISPATCH backlog.
 const tickets: FloorTicket[] = [
-  { id: 'RUSH-1262', title: '[security] rush CLI PKCE token exchange uses unpinned http client', project: 'rush', source: 'LN', pri: 'urgent', status: 'todo', desc: '', labels: ['security'] },
-  { id: 'RUSH-799', title: 'Remote agent heartbeat anchors to start time, shows false stall', project: 'agents-cli', source: 'LN', pri: 'high', status: 'todo', desc: '', labels: [] },
-  { id: '#418', title: 'Kanban / Deadline feed views are stubs -> "coming soon"', project: 'swarmify', source: 'GH', pri: 'med', status: 'todo', desc: '', labels: [] },
+  { id: 'RUSH-1262', title: '[security] rush CLI PKCE token exchange uses unpinned http client', project: 'rush', source: 'LN', pri: 'urgent', status: 'todo', desc: '', labels: ['security'], owner: 'Muqsit' },
+  { id: 'RUSH-799', title: 'Remote agent heartbeat anchors to start time, shows false stall', project: 'agents-cli', source: 'LN', pri: 'high', status: 'todo', desc: '', labels: [], owner: 'Muqsit' },
+  { id: '#418', title: 'Kanban / Deadline feed views are stubs -> "coming soon"', project: 'swarmify', source: 'GH', pri: 'med', status: 'todo', desc: '', labels: [], owner: '' },
+  // A ticket with no formal project — grouping renders it under "Unlabeled", never a
+  // blank "· N" header (issue 1).
+  { id: 'RUSH-1240', title: '[rush/app] X/social integration renders a broken avatar (not CSP)', project: '', source: 'LN', pri: 'high', status: 'todo', desc: '', labels: ['Bug'], owner: 'Muqsit' },
 ]
 
 // Dispatch panel mock data.
@@ -158,9 +181,11 @@ function Feed() {
       />
 
       <div className="feed-sec attn">
-        <Icon name="alert" size={11} /> NEEDS YOU · 2
+        <Icon name="alert" size={11} /> NEEDS YOU · 4
         <span className="ln" />
       </div>
+      <FeedItem agent={twinA} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
+      <FeedItem agent={twinB} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
       <FeedItem agent={askAgent} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
       <FeedItem agent={reviewAgent} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
 
@@ -189,6 +214,64 @@ function Feed() {
   )
 }
 
+// Backlog center with the group/sort/filter toolbar. Defaults to grouping by
+// Owner so the preview shows tickets bucketed by assignee (incl. Unassigned).
+function Backlog() {
+  const [group, setGroup] = useState<TicketGroupBy>('project')
+  const [sort, setSort] = useState<TicketSort>('priority')
+  const [srcFilter, setSrcFilter] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
+  const [selected, setSelected] = useState<string | null>(null)
+  return (
+    <BacklogCenter
+      tickets={tickets}
+      group={group}
+      sort={sort}
+      srcFilter={srcFilter}
+      projFilter={null}
+      search=""
+      selectedTicketId={selected}
+      onGroup={setGroup}
+      onSort={setSort}
+      onToggleSrc={(s) => setSrcFilter((f) => ({ ...f, [s]: !f[s] }))}
+      onSelectTicket={setSelected}
+      onBackToAgents={noop}
+    />
+  )
+}
+
+// Sidebar with the HOSTS rail — local + online + offline devices, one pinned —
+// so the host status dots (`.hd`) can be screenshotted at their true size.
+function Sidebar() {
+  const [pins, setPins] = useState<string[]>(['zion'])
+  const sidebarAgents: FloorAgent[] = [
+    ...running,
+    agent({ id: 's1', hostLabel: 'yosemite-s0', project: 'agents-cli' }),
+    agent({ id: 's2', hostLabel: 'yosemite-s0', project: 'agents-cli' }),
+    agent({ id: 's3', hostLabel: 'yosemite-s1', project: 'agents-cli' }),
+  ]
+  const devices = [
+    { name: 'zion', online: true, agents: 8 },
+    { name: 'mac-mini', online: true, agents: 0 },
+    { name: 'win-mini', online: true, agents: 0 },
+    { name: 'yosemite-s0', online: true, agents: 2 },
+    { name: 'yosemite-s1', online: false, agents: 1 },
+  ]
+  return (
+    <FloorSidebar
+      agents={sidebarAgents}
+      tickets={tickets}
+      projFilter={null}
+      offlineHosts={['yosemite-s1']}
+      devices={devices}
+      hostPins={pins}
+      onToggleHostPin={(n) => setPins((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))}
+      onReorderHostPins={setPins}
+      onScope={noop}
+      localHost="zion"
+    />
+  )
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
@@ -197,8 +280,8 @@ function Preview() {
   return (
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
-        <div className="page">
-          <div className="feed-col"><Feed /></div>
+        <div className="page" style={{ display: 'flex' }}>
+          {view === 'sidebar' ? <Sidebar /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel

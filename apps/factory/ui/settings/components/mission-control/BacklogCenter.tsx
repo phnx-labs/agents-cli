@@ -18,6 +18,7 @@ const GROUP_OPTS: { value: TicketGroupBy; label: string }[] = [
   { value: 'priority', label: 'Priority' },
   { value: 'source', label: 'Source' },
   { value: 'status', label: 'Status' },
+  { value: 'owner', label: 'Owner' },
 ]
 const SORT_OPTS: TicketSort[] = ['priority', 'id']
 

@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isTmuxInstalled } from './binary.js';
+import { isTmuxInstalled, runTmux } from './binary.js';
 import {
   assertValidSessionName,
   capturePane,
@@ -23,6 +23,7 @@ import {
   listSessions,
   paneExitStatus,
   sendKeys,
+  setSessionHook,
   slugifyName,
   splitPane,
   TmuxSessionError,
@@ -232,6 +233,57 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(await hasSession('short', socket)).toBe(true);
     const screen = await capturePane({ name: 'short', socket, lines: 10 });
     expect(screen).toContain('BRIEF');
+  });
+
+  it('pane-guarded pane-died hook: exiting a user split closes only that split, agent pane survives', async () => {
+    // Replicates runInTmux()'s hook wiring: a pane-died hook scoped to the AGENT
+    // pane via #{hook_pane}. Exiting a user-created split must close that split in
+    // place (kill-pane, else-branch) WITHOUT detaching — the agent pane keeps
+    // running. Without the #{hook_pane} guard, exiting any split detached the
+    // whole client and kicked the user out of tmux.
+    const meta = await createSession({ name: 'guardsplit', cmd: 'sleep 30', socket });
+    const agentPane = meta.pane!;
+    expect(agentPane).toMatch(/^%\d+$/);
+    // Same hook string runInTmux installs (detach agent-pane / kill-pane others).
+    await setSessionHook(
+      'guardsplit',
+      'pane-died',
+      `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =guardsplit' 'kill-pane'`,
+      socket,
+    );
+    // User opens a split (a plain shell), then exits it.
+    const splitPaneId = await splitPane({ name: 'guardsplit', direction: 'v', cmd: '/bin/sh', socket });
+    await wait(200);
+    let panes = (await runTmux({ socket, args: ['list-panes', '-t', 'guardsplit', '-F', '#{pane_id}'] })).stdout.trim().split('\n');
+    expect(panes).toHaveLength(2);
+    await runTmux({ socket, args: ['send-keys', '-t', splitPaneId, 'exit', 'Enter'] });
+    await wait(400);
+
+    // Session is still alive, the split is gone (no lingering dead husk), and the
+    // agent pane is still live — i.e. the user was NOT kicked out.
+    expect(await hasSession('guardsplit', socket)).toBe(true);
+    panes = (await runTmux({ socket, args: ['list-panes', '-t', 'guardsplit', '-F', '#{pane_id}:#{pane_dead}'] })).stdout.trim().split('\n');
+    expect(panes).toHaveLength(1);
+    expect(panes[0]).toBe(`${agentPane}:0`);
+  });
+
+  it('pane-guarded pane-died hook: exiting the agent pane fires the guard (dead husk kept for status read)', async () => {
+    // The true-branch: when the AGENT pane exits, the hook fires. remain-on-exit
+    // keeps it as a dead husk so runInTmux can read the exit status before teardown.
+    const meta = await createSession({ name: 'guardagent', cmd: 'sh -c "exit 7"', socket });
+    const agentPane = meta.pane!;
+    await setSessionHook(
+      'guardagent',
+      'pane-died',
+      `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =guardagent' 'kill-pane'`,
+      socket,
+    );
+    await wait(400);
+    // Guard matched the agent pane → the else-branch kill-pane did NOT run, so the
+    // dead husk survives and its exit status is still readable.
+    const exit = await paneExitStatus(agentPane, socket);
+    expect(exit.dead).toBe(true);
+    expect(exit.status).toBe(7);
   });
 });
 

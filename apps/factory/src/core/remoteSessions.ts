@@ -16,9 +16,14 @@ import {
   computeOutputTokensPerSec,
   formatActivity,
 } from './session.activity';
-import type { ProjectRule } from './settings';
+import { resolveProject, normalizeHost, worktreeSlugOf } from '../shared/project';
+import type { ProjectRule } from '../shared/project';
 
-export type { ProjectRule } from './settings';
+// Re-exported so existing host importers keep their `from '../core/remoteSessions'`
+// path. The impls now live in src/shared/project so the webview (@shared) imports
+// the SAME source instead of a hand-mirrored copy that silently drifts.
+export { resolveProject, normalizeHost, worktreeSlugOf };
+export type { ProjectRule } from '../shared/project';
 
 /** Mirror of floorModel.FloorPhase (kept in sync by hand; not imported). */
 export type RemotePhase = 'running' | 'idle' | 'waiting' | 'failed' | 'done';
@@ -26,20 +31,26 @@ export type RemotePhase = 'running' | 'idle' | 'waiting' | 'failed' | 'done';
 /** Agent types whose session files session.activity.ts knows how to parse. */
 type ParsableAgentType = 'claude' | 'codex' | 'gemini';
 
+// normalizeHost now lives in src/shared/project.ts (imported + re-exported above).
+
 /**
- * Canonicalize a hostname to its short device label, mirroring agents-cli's
- * `normalizeHost` (machineId in its session/sync config): take the first dotted
- * label, lowercase it, and collapse any non-alphanumeric run to a single hyphen.
- * So `zion.local` and `ZION` both become `zion`, which lines up with the
- * `agents devices` registry names used under the HOSTS sidebar. Empty in → empty out.
+ * Decide which HOSTS bucket a session belongs to. A bare `agents sessions
+ * --active --json` fans out over the whole fleet, so a single query answers for
+ * many machines — each row carries its own `machine` id. Bucket by that id, NOT
+ * by the host we happened to query (`fallbackHost`), or every remote session
+ * collapses onto the querying machine. The local machine's own id maps to
+ * `localLabel` ('this-mac') so the webview's `host === 'this-mac'` routing keeps
+ * working. Rows with no machine (cloud) fall back to the querying host.
  */
-export function normalizeHost(raw: string): string {
-  return (raw || '')
-    .split('.')[0]
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+export function resolveSessionHost(
+  rawMachine: string | undefined,
+  fallbackHost: string,
+  localMachineId: string,
+  localLabel: string,
+): string {
+  const norm = normalizeHost(rawMachine || '');
+  if (!norm) return fallbackHost;
+  return norm === localMachineId ? localLabel : norm;
 }
 
 /** A registered device as seen by the host reconciler (from `agents devices list`). */
@@ -102,6 +113,13 @@ export interface RemoteSession {
   prUrl: string | null;
   ticket: string | null;
   branch: string;
+  /** The `<slug>` under `.agents/worktrees/<slug>/` — the strong per-session
+   *  disambiguator (two agents in sibling worktrees of one repo differ only here).
+   *  '' when the session isn't in a worktree. */
+  worktreeSlug: string;
+  /** Absolute worktree path (== cwd for a worktree session), for the Reveal-worktree
+   *  action. '' when not a worktree. */
+  worktreePath: string;
   /** Elapsed ms since the session started, computed against the fetch clock so
    *  host clock skew does not distort it. */
   sinceMs: number;
@@ -204,10 +222,23 @@ export interface RawActiveSession {
   cloudStatus?: string;
   branch?: string;
   prUrl?: string;
-  ticket?: string;
   /** Where the session is being viewed right now, pre-formatted by the CLI's
    *  client resolver (e.g. "Codium tab 3", "Ghostty tab 2", "detached"). */
   viewingIn?: string;
+  /** The CLI emits these NESTED objects on `sessions --active --json` (agents-cli
+   *  ActiveSession: preview / pr / worktree / ticket). Earlier this shape declared
+   *  none of them, so normalizeActiveSession silently dropped the worktree slug, the
+   *  live preview (activity line), the structured ticket id, and the real branch —
+   *  which is why remote/worktree cards showed only "Edit <file>" + a status word. */
+  preview?: string;
+  pr?: { url?: string; number?: number } | null;
+  worktree?: { slug?: string; path?: string; branch?: string } | null;
+  ticket?: string | { id?: string; url?: string } | null;
+  /** Normalized device id the CLI attributes this session to (machineId() form,
+   *  e.g. 'zion', 'yosemite-s0'). Present on every row of a fanned-out
+   *  `sessions --active --json` — the load-bearing signal for which physical
+   *  machine a session runs on. Absent for cloud rows (attributed to the querier). */
+  machine?: string;
   /** How the CLI says a reply reaches this session. `reply` is null for raw TTYs
    *  (e.g. bare Ghostty) with no programmatic input channel; a tmux-backed session
    *  carries the socket + pane to drive via `tmux send-keys` (over ssh when remote).
@@ -266,76 +297,9 @@ export function mapStatusToPhase(status: string | undefined): RemotePhase {
   }
 }
 
-/**
- * Convert a project-rule glob to a RegExp. `**` spans path separators, `*` does
- * not, `?` matches a single non-separator char. A trailing subpath always matches
- * so a rule for a directory also captures sessions running inside it.
- */
-function projectGlobToRegExp(glob: string): RegExp {
-  let re = '';
-  for (let i = 0; i < glob.length; i++) {
-    const c = glob[i];
-    if (c === '*') {
-      if (glob[i + 1] === '*') {
-        re += '.*';
-        i++;
-      } else {
-        re += '[^/]*';
-      }
-    } else if (c === '?') {
-      re += '[^/]';
-    } else {
-      re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-    }
-  }
-  return new RegExp('^' + re + '(?:/.*)?$');
-}
-
-/**
- * Does a rule's pattern match a cwd? A pattern with no glob metacharacters is a
- * plain path prefix (the exact dir or any descendant); otherwise it is a glob.
- */
-function matchesProjectRule(cwd: string, pattern: string): boolean {
-  const p = pattern.trim().replace(/\/+$/, '');
-  if (!p) return false;
-  if (!/[*?]/.test(p)) return cwd === p || cwd.startsWith(p + '/');
-  return projectGlobToRegExp(p).test(cwd);
-}
-
-/** Last path segment of a repo-root path (or a bare repo name). */
-function pathBasename(p: string): string {
-  const parts = p.replace(/\/+$/, '').split('/').filter(Boolean);
-  return parts[parts.length - 1] || '';
-}
-
-/**
- * Resolve a session cwd to a display project for Floor grouping. Order:
- *   1. user rules (first match wins) — glob or path-prefix against the cwd.
- *   2. worktree fold: `.../<repo>/.agents/worktrees/<slug>` -> `<repo>`.
- *   3. git repo root basename, when the caller supplies `repoRoot` — so a
- *      monorepo subdir (`.../agents/prix/api`) folds to the repo, not the leaf.
- *   4. ultimate fallback: the cwd's last path segment (legacy behavior).
- * Pure — mirrored in ui/.../floorModel.ts across the webview boundary.
- */
-export function resolveProject(
-  cwd: string,
-  rules: ProjectRule[] = [],
-  repoRoot?: string | null
-): string {
-  if (!cwd) return '';
-  const norm = cwd.replace(/\/+$/, '');
-  for (const rule of rules) {
-    if (rule && matchesProjectRule(norm, rule.pattern)) return rule.project;
-  }
-  const wt = norm.match(/\/([^/]+)\/\.agents\/worktrees\//);
-  if (wt) return wt[1];
-  if (repoRoot) {
-    const base = pathBasename(repoRoot);
-    if (base) return base;
-  }
-  const parts = norm.split('/').filter(Boolean);
-  return parts[parts.length - 1] || norm;
-}
+// projectGlobToRegExp / matchesProjectRule / pathBasename / resolveProject now
+// live in src/shared/project.ts (imported + re-exported above) — one impl shared
+// with the webview, no lockstep-mirrored copy.
 
 /**
  * Derive a display project from a working directory with no user rules — the
@@ -373,9 +337,16 @@ export function normalizeActiveSession(
     '';
   const cwd = raw.cwd || '';
   const startedAtMs = typeof raw.startedAtMs === 'number' ? raw.startedAtMs : 0;
-  const rawTicket = asStr(raw.ticket);
+  // Ticket can arrive as a structured object ({ id }) OR a bare string; read the id
+  // first, then fall back to scanning ticket/label/topic text for a RUSH-123 token.
+  const rawTicket =
+    raw.ticket && typeof raw.ticket === 'object' ? asStr(raw.ticket.id) : asStr(raw.ticket);
   const ticketText = `${rawTicket} ${asStr(raw.label)} ${asStr(raw.topic)}`;
   const ticketMatch = rawTicket || ticketText.match(TICKET_RE)?.[0] || null;
+  // The live preview (latest agent turn/tool action) is the human "what is it doing"
+  // line; it was previously never read, leaving remote cards blank.
+  const preview = asStr(raw.preview);
+  const worktreeSlug = asStr(raw.worktree?.slug) || worktreeSlugOf(cwd);
 
   return {
     host,
@@ -387,10 +358,16 @@ export function normalizeActiveSession(
     activity: '',
     tokPerSec: 0,
     waitingForInput: phase === 'waiting',
-    lastResponse: '',
-    prUrl: asStr(raw.prUrl) || null,
+    lastResponse: preview,
+    // pr is a { url, number } object on the CLI payload; keep top-level prUrl as a
+    // fallback for older shapes.
+    prUrl: asStr(raw.prUrl) || asStr(raw.pr?.url) || null,
     ticket: ticketMatch,
-    branch: asStr(raw.branch),
+    // The remote branch lives at worktree.branch; the top-level `branch` is usually
+    // absent, which is why remote branch was always empty.
+    branch: asStr(raw.branch) || asStr(raw.worktree?.branch),
+    worktreeSlug,
+    worktreePath: asStr(raw.worktree?.path) || (worktreeSlug ? cwd : ''),
     sinceMs: startedAtMs > 0 ? Math.max(0, fetchedAt - startedAtMs) : 0,
     startedAtMs,
     // 0 = no activity signal yet; the fan-out sets the real file mtime for file-backed
@@ -411,6 +388,80 @@ export function normalizeActiveSession(
     // reply-rail pane, which today already carries a %pane for tmux sessions.
     tmuxPane: raw.provenance?.mux?.pane || raw.provenance?.reply?.target || '',
     viewingIn: asStr(raw.viewingIn),
+  };
+}
+
+/**
+ * The FLAT `SessionMeta` shape emitted by `agents sessions --json` (recent, not
+ * --active). Field names differ from the active payload (ticketId vs ticket,
+ * gitBranch vs worktree.branch, lastActivity ISO vs startedAtMs), so recent sessions
+ * get their own normalizer that lands on the SAME RemoteSession shape — one card path
+ * for active AND recent. Unknown fields ignored.
+ */
+export interface RawRecentSession {
+  id?: string;
+  shortId?: string;
+  agent?: string;
+  timestamp?: string;
+  lastActivity?: string;
+  project?: string;
+  cwd?: string;
+  gitBranch?: string;
+  worktreeSlug?: string;
+  ticketId?: string;
+  prUrl?: string;
+  prNumber?: number;
+  topic?: string;
+  label?: string;
+  machine?: string;
+}
+
+/** Map a recent (historical, non-active) SessionMeta onto RemoteSession. Recent =
+ *  not live, so phase is always 'idle'; lastActivity drives the "…ago" stamp. */
+export function normalizeRecentSession(
+  raw: RawRecentSession,
+  host: string,
+  fetchedAt: number,
+  projectRules: ProjectRule[] = []
+): RemoteSession {
+  const cwd = asStr(raw.cwd);
+  const worktreeSlug = asStr(raw.worktreeSlug) || worktreeSlugOf(cwd);
+  const lastActivityMs = raw.lastActivity ? Date.parse(raw.lastActivity) || 0 : 0;
+  const startedAtMs = raw.timestamp ? Date.parse(raw.timestamp) || 0 : 0;
+  return {
+    host,
+    sessionId: asStr(raw.id),
+    agentType: asStr(raw.agent).toLowerCase(),
+    cwd,
+    project: asStr(raw.project) || resolveProject(cwd, projectRules),
+    phase: 'idle',
+    activity: '',
+    tokPerSec: 0,
+    waitingForInput: false,
+    lastResponse: '',
+    prUrl: asStr(raw.prUrl) || null,
+    ticket: asStr(raw.ticketId) || null,
+    branch: asStr(raw.gitBranch),
+    worktreeSlug,
+    worktreePath: worktreeSlug ? cwd : '',
+    sinceMs: startedAtMs > 0 ? Math.max(0, fetchedAt - startedAtMs) : 0,
+    startedAtMs,
+    lastActivityMs,
+    topic: asStr(raw.topic) || asStr(raw.label),
+    sessionFile: '',
+    context: 'recent',
+    cloudTaskId: '',
+    cloudProvider: '',
+    teamName: '',
+    pid: 0,
+    transport: '',
+    replyRail: '',
+    replyMuxTarget: '',
+    replyMuxSocket: '',
+    // Recent sessions are historical/idle, not live — no tmux pane or "viewing in"
+    // client to resolve, so both are empty (the required-string default).
+    tmuxPane: '',
+    viewingIn: '',
   };
 }
 
