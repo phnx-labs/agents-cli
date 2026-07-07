@@ -443,10 +443,13 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   return entries.map((t): ActiveSession => {
     // The id cached in live-terminals.json goes stale when Claude rotates its
     // transcript uuid on resume/compact, so it often no longer matches any
-    // <id>.jsonl. Prefer the EXACT id this pid was launched with from the pid
-    // registry (written by the shim delegate) — the same source the headless path
-    // uses — so each tab resolves to its OWN current transcript instead of every
-    // co-located tab collapsing onto the newest file. Falls back to the cached id.
+    // <id>.jsonl. When the pid registry knows this pid's current id, prefer it —
+    // the same source the headless path uses. NOTE: live-terminals.json stores the
+    // SHELL pid, while the by-pid registry is keyed by the AGENT pid, so for
+    // editor-launched terminals this lookup returns undefined today and we fall
+    // back to the stale cached id — the duplicate-card fix comes from
+    // pickSessionFile no longer borrowing a sibling, not from this lookup. Kept as
+    // a forward-looking hook for the cases where the pid does line up.
     const resolvedId = readPidSessionEntry(t.pid)?.sessionId ?? t.sessionId;
     const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, resolvedId);
     // Prefer label from live terminal, fall back to Claude's session label
