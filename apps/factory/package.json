@@ -567,10 +567,20 @@
           "default": ".assets",
           "description": "Folder for storing images and attachments from the markdown editor"
         },
-        "agents.enableTmux": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable tmux for per-tab splits in agent terminals. When enabled, Cmd+Shift+H/V create tmux panes instead of VS Code editor splits."
+        "agents.terminalMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "tmux",
+            "native"
+          ],
+          "enumDescriptions": [
+            "Use tmux when available (macOS/Linux with tmux on PATH), otherwise a native VS Code terminal.",
+            "Always run agents inside tmux; warn and fall back to native when tmux is unavailable.",
+            "Never use tmux; always use a native VS Code editor terminal."
+          ],
+          "default": "auto",
+          "description": "How agent terminals are launched. 'auto' (default) runs agents inside a tmux session on macOS/Linux for uniform addressing, resume, and tracking — falling back to a native terminal on Windows or when tmux is missing. Cmd+Shift+H/V create tmux panes instead of VS Code editor splits when tmux is active."
         },
         "agents.worktreePerTerminal": {
           "type": "boolean",

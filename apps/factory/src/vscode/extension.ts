@@ -82,6 +82,7 @@ import {
   tmuxSplitV,
   isTmuxAvailable
 } from './tmux';
+import { normalizeTerminalMode, resolveTerminalMode } from '../core/terminalMode';
 import { DEFAULT_DISPLAY_PREFERENCES } from '../core/settings';
 import * as readiness from './terminalReadiness';
 import { resolveAlias, isAgentInstalled } from '../core/agentModels';
@@ -994,10 +995,10 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgentHSplit', async () => {
       const config = vscode.workspace.getConfiguration('agents');
-      const enableTmux = config.get<boolean>('enableTmux', false);
+      const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
       const terminal = vscode.window.activeTerminal;
 
-      if (enableTmux && terminal && isTmuxTerminal(terminal)) {
+      if (tmuxEnabled && terminal && isTmuxTerminal(terminal)) {
         const state = getTmuxState(terminal);
         if (state) {
           const agentDef = getBuiltInByKey(state.agentType);
@@ -1024,10 +1025,10 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.newAgentVSplit', async () => {
       const config = vscode.workspace.getConfiguration('agents');
-      const enableTmux = config.get<boolean>('enableTmux', false);
+      const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
       const terminal = vscode.window.activeTerminal;
 
-      if (enableTmux && terminal && isTmuxTerminal(terminal)) {
+      if (tmuxEnabled && terminal && isTmuxTerminal(terminal)) {
         const state = getTmuxState(terminal);
         if (state) {
           const agentDef = getBuiltInByKey(state.agentType);
@@ -1093,11 +1094,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.enableTmux', async () => {
+      // Back-compat command id: flips terminalMode back to 'auto' (tmux by
+      // default when available). The setting is the source of truth now.
       const config = vscode.workspace.getConfiguration();
-      const current = config.get<boolean>('agents.enableTmux', false);
-      await config.update('agents.enableTmux', !current, vscode.ConfigurationTarget.Global);
-      const status = !current ? 'enabled' : 'disabled';
-      vscode.window.showInformationMessage(`Tmux mode ${status}. New agent terminals will ${!current ? 'use tmux for per-tab splits' : 'use VS Code editor splits'}.`);
+      await config.update('agents.terminalMode', 'auto', vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage('Tmux mode enabled (auto). New agent terminals will run inside tmux when available.');
       await updateContextKeys(context);
     })
   );
@@ -1105,12 +1106,9 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('agents.disableTmux', async () => {
       const config = vscode.workspace.getConfiguration();
-      const current = config.get<boolean>('agents.enableTmux', false);
-      if (current) {
-        await config.update('agents.enableTmux', false, vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage('Tmux mode disabled. New agent terminals will use VS Code editor splits.');
-        await updateContextKeys(context);
-      }
+      await config.update('agents.terminalMode', 'native', vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage('Tmux mode disabled. New agent terminals will use VS Code editor terminals.');
+      await updateContextKeys(context);
     })
   );
 
@@ -1587,11 +1585,13 @@ async function openSingleAgent(
   strategy?: RunStrategy
 ) {
   const config = vscode.workspace.getConfiguration('agents');
-  const enableTmux = config.get<boolean>('enableTmux', false);
-  const tmuxOk = enableTmux ? await isTmuxAvailable() : false;
+  const terminalMode = normalizeTerminalMode(config.get('terminalMode'));
+  // 'auto' (default) and 'tmux' both need the availability probe; 'native' skips it.
+  const tmuxAvailable = terminalMode === 'native' ? false : await isTmuxAvailable();
+  const { useTmux: tmuxOk, warnUnavailable } = resolveTerminalMode(terminalMode, tmuxAvailable);
 
-  if (enableTmux && !tmuxOk) {
-    vscode.window.showWarningMessage('Tmux mode is enabled, but tmux is not available on PATH. Falling back to VS Code splits.');
+  if (warnUnavailable) {
+    vscode.window.showWarningMessage('Tmux mode is forced, but tmux is not available on PATH. Falling back to VS Code terminals.');
   }
 
   // Build command with default model if configured
@@ -3873,7 +3873,8 @@ async function reloadActiveTerminal(context: vscode.ExtensionContext) {
 
 async function updateContextKeys(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration('agents');
-  const tmuxEnabled = config.get<boolean>('enableTmux', false);
+  // 'native' hides the "Disable Tmux" toggle; 'auto'/'tmux' show it (tmux is active).
+  const tmuxEnabled = normalizeTerminalMode(config.get('terminalMode')) !== 'native';
   await vscode.commands.executeCommand('setContext', 'agents.tmuxEnabled', tmuxEnabled);
 
   const viewEnabled = workbench.isStreamlineLayout();
