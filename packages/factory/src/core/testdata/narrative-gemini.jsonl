@@ -1,0 +1,4 @@
+{"type":"message","role":"assistant","timestamp":"2026-06-30T09:00:05.000Z","content":"Scanning the repository layout before touching the build config."}
+{"type":"tool_call","tool_name":"read_file","parameters":{"file_path":"vite.config.ts"},"timestamp":"2026-06-30T09:00:10.000Z"}
+{"type":"message","role":"assistant","timestamp":"2026-06-30T09:00:18.000Z","content":"Wiring the alias into vite.config.ts so the webview bundle resolves the shared model."}
+{"type":"tool_call","tool_name":"write_file","parameters":{"file_path":"vite.config.ts"},"timestamp":"2026-06-30T09:00:24.000Z"}

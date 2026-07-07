@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Layout 4 — Timeline Rail</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+  :root{
+    --bg:#E8E6E1;
+    --panel:#F0EEEA;
+    --recessed:#D8D5CF;
+    --coral:#F26D5B;
+    --text:#1C1917;
+    --dim:#78716C;
+    --led-green:#22C55E;
+    --led-red:#EF4444;
+    --led-amber:#D4A72C;
+    --led-gray:#6B7280;
+    --font:'SF Mono','Menlo','Monaco',monospace;
+    --codex:#1C1917;
+    --gemini:#3B82F6;
+  }
+
+  html,body{
+    height:100%;
+    width:100%;
+    overflow:hidden;
+    background:var(--bg);
+    color:var(--text);
+    font-family:var(--font);
+    font-size:12px;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* Layout */
+  .factory-floor{
+    display:grid;
+    grid-template-columns:60px 1fr 280px;
+    height:100vh;
+    gap:0;
+  }
+
+  /* Timeline Rail (left) */
+  .timeline-rail{
+    background:var(--panel);
+    border-right:1px solid var(--recessed);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:16px 0;
+    position:relative;
+    overflow-y:auto;
+  }
+
+  .timeline-rail-label{
+    font-size:9px;
+    letter-spacing:1.5px;
+    color:var(--dim);
+    text-transform:uppercase;
+    writing-mode:vertical-lr;
+    transform:rotate(180deg);
+    margin-bottom:16px;
+    user-select:none;
+  }
+
+  .timeline-track{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    flex:1;
+  }
+
+  .timeline-line{
+    position:absolute;
+    top:0;
+    bottom:0;
+    left:50%;
+    transform:translateX(-50%);
+    width:2px;
+    background:var(--recessed);
+    z-index:0;
+  }
+
+  .timeline-node{
+    position:relative;
+    z-index:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    margin-bottom:24px;
+    cursor:pointer;
+  }
+
+  .timeline-dot{
+    width:12px;
+    height:12px;
+    border-radius:50%;
+    position:relative;
+    transition:transform 0.15s ease;
+  }
+  .timeline-node:hover .timeline-dot{
+    transform:scale(1.3);
+  }
+
+  .timeline-dot.coral{background:var(--coral)}
+  .timeline-dot.dark{background:var(--codex)}
+  .timeline-dot.blue{background:var(--gemini)}
+
+  .timeline-dot.completed{background:var(--led-green)}
+  .timeline-dot.failed{background:var(--led-red)}
+
+  .timeline-dot.running::after{
+    content:'';
+    position:absolute;
+    top:-4px;left:-4px;
+    width:20px;height:20px;
+    border-radius:50%;
+    border:2px solid var(--led-green);
+    animation:pulse-ring 1.8s ease-out infinite;
+  }
+  @keyframes pulse-ring{
+    0%{opacity:1;transform:scale(0.85)}
+    70%{opacity:0;transform:scale(1.5)}
+    100%{opacity:0;transform:scale(1.5)}
+  }
+
+  .timeline-ts{
+    font-size:9px;
+    color:var(--dim);
+    margin-top:4px;
+    white-space:nowrap;
+    letter-spacing:0.3px;
+  }
+
+  .timeline-node.selected .timeline-dot{
+    box-shadow:0 0 0 3px var(--bg),0 0 0 5px var(--dim);
+  }
+
+  /* Main Area */
+  .main-area{
+    display:flex;
+    flex-direction:column;
+    padding:16px 20px;
+    overflow-y:auto;
+    gap:12px;
+  }
+
+  .main-header{
+    font-size:10px;
+    letter-spacing:1.5px;
+    color:var(--dim);
+    text-transform:uppercase;
+    margin-bottom:2px;
+  }
+
+  /* Channel Strip */
+  .channel-strip{
+    background:var(--panel);
+    border:1px solid #D0CEC8;
+    border-radius:4px;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.6),
+      0 1px 3px rgba(0,0,0,0.08),
+      0 2px 6px rgba(0,0,0,0.04);
+    display:flex;
+    align-items:stretch;
+    min-height:88px;
+  }
+
+  .strip-section{
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    padding:10px 14px;
+    position:relative;
+    gap:4px;
+  }
+  .strip-section+.strip-section{
+    border-left:1px solid var(--recessed);
+  }
+  .strip-section+.strip-section::before{
+    content:'';
+    position:absolute;
+    left:0;top:8px;bottom:8px;
+    width:1px;
+    background:rgba(255,255,255,0.5);
+    transform:translateX(-1px);
+  }
+
+  .strip-label{
+    font-size:8px;
+    letter-spacing:1.5px;
+    color:var(--dim);
+    text-transform:uppercase;
+    margin-bottom:2px;
+  }
+
+  /* STATUS section */
+  .section-status{min-width:130px}
+
+  .status-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .led{
+    width:8px;height:8px;
+    border-radius:50%;
+    flex-shrink:0;
+  }
+  .led.green{
+    background:var(--led-green);
+    box-shadow:0 0 6px var(--led-green);
+  }
+  .led.red{
+    background:var(--led-red);
+    box-shadow:0 0 6px var(--led-red);
+  }
+  .led.amber{
+    background:var(--led-amber);
+    box-shadow:0 0 6px var(--led-amber);
+  }
+  .led.gray{
+    background:var(--led-gray);
+  }
+
+  .status-agent{
+    font-size:13px;
+    font-weight:600;
+    color:var(--text);
+    letter-spacing:-0.3px;
+  }
+  .status-duration{
+    font-size:11px;
+    color:var(--dim);
+  }
+  .status-model{
+    font-size:9px;
+    color:var(--dim);
+    letter-spacing:0.3px;
+  }
+
+  /* READOUT section (LCD strip) */
+  .section-readout{flex:1;min-width:180px}
+
+  .lcd-strip{
+    background:#1C1917;
+    border-radius:3px;
+    padding:6px 10px;
+    font-size:11px;
+    color:var(--led-green);
+    letter-spacing:0.4px;
+    line-height:1.5;
+    box-shadow:inset 0 1px 3px rgba(0,0,0,0.5);
+    min-height:38px;
+    display:flex;
+    align-items:center;
+    overflow:hidden;
+    white-space:nowrap;
+    text-overflow:ellipsis;
+  }
+
+  /* FILES section */
+  .section-files{min-width:140px;max-width:220px}
+
+  .file-pills{
+    display:flex;
+    flex-wrap:wrap;
+    gap:4px;
+  }
+  .file-pill{
+    background:var(--recessed);
+    border:1px solid #C8C5BF;
+    border-radius:3px;
+    padding:2px 7px;
+    font-size:9px;
+    color:var(--text);
+    white-space:nowrap;
+  }
+
+  /* METRICS section */
+  .section-metrics{min-width:100px}
+
+  .vu-meter{
+    height:8px;
+    background:#1C1917;
+    border-radius:2px;
+    overflow:hidden;
+    box-shadow:inset 0 1px 2px rgba(0,0,0,0.4);
+    margin-bottom:4px;
+  }
+  .vu-fill{
+    height:100%;
+    border-radius:2px;
+    transition:width 0.3s ease;
+  }
+  .vu-fill.green{background:linear-gradient(90deg,var(--led-green),#4ADE80)}
+  .vu-fill.amber{background:linear-gradient(90deg,var(--led-amber),#FBBF24)}
+  .vu-fill.red{background:linear-gradient(90deg,var(--led-red),#F87171)}
+
+  .metric-row{
+    display:flex;
+    justify-content:space-between;
+    font-size:9px;
+    color:var(--dim);
+  }
+  .metric-val{
+    color:var(--text);
+    font-weight:600;
+  }
+
+  /* LINKS section */
+  .section-links{min-width:90px}
+
+  .link-badge{
+    display:inline-block;
+    background:var(--recessed);
+    border:1px solid #C8C5BF;
+    border-radius:3px;
+    padding:2px 8px;
+    font-size:9px;
+    color:var(--text);
+    cursor:pointer;
+    margin-bottom:4px;
+    transition:background 0.15s;
+  }
+  .link-badge:hover{background:#CCC9C2}
+
+  /* ACTIONS section */
+  .section-actions{min-width:90px}
+
+  .strip-btn{
+    display:block;
+    width:100%;
+    padding:5px 10px;
+    border:1px solid #C8C5BF;
+    border-radius:3px;
+    background:var(--panel);
+    font-family:var(--font);
+    font-size:9px;
+    letter-spacing:0.5px;
+    text-transform:uppercase;
+    color:var(--text);
+    cursor:pointer;
+    text-align:center;
+    transition:all 0.15s;
+    margin-bottom:4px;
+    box-shadow:0 1px 2px rgba(0,0,0,0.06);
+  }
+  .strip-btn:hover{background:var(--recessed)}
+  .strip-btn.primary{
+    background:var(--coral);
+    color:#fff;
+    border-color:var(--coral);
+  }
+  .strip-btn.primary:hover{
+    background:#E05A49;
+  }
+  .strip-btn.danger{
+    background:var(--led-red);
+    color:#fff;
+    border-color:var(--led-red);
+  }
+  .strip-btn.danger:hover{background:#DC2626}
+
+  /* Task description area */
+  .strip-description{
+    background:var(--panel);
+    border:1px solid #D0CEC8;
+    border-radius:4px;
+    padding:10px 14px;
+    box-shadow:inset 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .strip-desc-label{
+    font-size:8px;
+    letter-spacing:1.5px;
+    color:var(--dim);
+    text-transform:uppercase;
+    margin-bottom:4px;
+  }
+  .strip-desc-text{
+    font-size:11px;
+    color:var(--text);
+    line-height:1.5;
+  }
+
+  /* Task Queue Sidebar (right) */
+  .task-queue{
+    background:var(--panel);
+    border-left:1px solid var(--recessed);
+    display:flex;
+    flex-direction:column;
+    overflow-y:auto;
+  }
+
+  .queue-header{
+    padding:14px 16px 10px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    border-bottom:1px solid var(--recessed);
+  }
+  .queue-title{
+    font-size:10px;
+    letter-spacing:1.5px;
+    color:var(--dim);
+    text-transform:uppercase;
+  }
+  .queue-badge{
+    background:var(--coral);
+    color:#fff;
+    font-size:9px;
+    font-weight:700;
+    padding:1px 7px;
+    border-radius:10px;
+    letter-spacing:0.3px;
+  }
+
+  .queue-list{
+    flex:1;
+    padding:8px 0;
+  }
+
+  .queue-card{
+    padding:12px 16px;
+    border-bottom:1px solid var(--recessed);
+    transition:background 0.15s;
+  }
+  .queue-card:hover{background:rgba(0,0,0,0.02)}
+  .queue-card:last-child{border-bottom:none}
+
+  .queue-card-top{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    margin-bottom:6px;
+  }
+  .priority-dot{
+    width:6px;height:6px;
+    border-radius:50%;
+    flex-shrink:0;
+  }
+  .priority-dot.urgent{background:var(--led-red)}
+  .priority-dot.high{background:var(--led-amber)}
+  .priority-dot.medium{background:var(--led-gray)}
+
+  .task-id{
+    font-size:9px;
+    font-weight:700;
+    letter-spacing:0.5px;
+    color:var(--dim);
+    background:var(--recessed);
+    border:1px solid #C8C5BF;
+    border-radius:3px;
+    padding:1px 6px;
+  }
+
+  .queue-card-title{
+    font-size:11px;
+    color:var(--text);
+    line-height:1.4;
+    margin-bottom:6px;
+  }
+
+  .queue-card-bottom{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+  }
+  .queue-label{
+    font-size:9px;
+    color:var(--dim);
+    background:var(--recessed);
+    border-radius:3px;
+    padding:1px 6px;
+    letter-spacing:0.3px;
+  }
+
+  .dispatch-btn{
+    padding:4px 12px;
+    border:1px solid var(--coral);
+    border-radius:3px;
+    background:transparent;
+    font-family:var(--font);
+    font-size:9px;
+    font-weight:600;
+    letter-spacing:0.5px;
+    text-transform:uppercase;
+    color:var(--coral);
+    cursor:pointer;
+    transition:all 0.15s;
+  }
+  .dispatch-btn:hover{
+    background:var(--coral);
+    color:#fff;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar{width:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--recessed);border-radius:2px}
+  ::-webkit-scrollbar-thumb:hover{background:#B8B5AF}
+</style>
+</head>
+<body>
+
+<div class="factory-floor">
+
+  <!-- Timeline Rail -->
+  <div class="timeline-rail">
+    <div class="timeline-rail-label">TIMELINE</div>
+    <div class="timeline-track">
+      <div class="timeline-line"></div>
+
+      <div class="timeline-node selected" data-agent="0" onclick="selectAgent(0)">
+        <div class="timeline-dot coral running"></div>
+        <div class="timeline-ts">3m</div>
+      </div>
+
+      <div class="timeline-node" data-agent="1" onclick="selectAgent(1)">
+        <div class="timeline-dot dark running"></div>
+        <div class="timeline-ts">7m</div>
+      </div>
+
+      <div class="timeline-node" data-agent="2" onclick="selectAgent(2)">
+        <div class="timeline-dot blue running"></div>
+        <div class="timeline-ts">11m</div>
+      </div>
+
+      <div class="timeline-node" data-agent="3" onclick="selectAgent(3)">
+        <div class="timeline-dot completed"></div>
+        <div class="timeline-ts">24m</div>
+      </div>
+
+      <div class="timeline-node" data-agent="4" onclick="selectAgent(4)">
+        <div class="timeline-dot failed"></div>
+        <div class="timeline-ts">38m</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Main Area -->
+  <div class="main-area" id="mainArea">
+    <div class="main-header">CHANNEL STRIP</div>
+    <div id="channelStrip"></div>
+    <div id="channelDesc"></div>
+  </div>
+
+  <!-- Task Queue Sidebar -->
+  <div class="task-queue">
+    <div class="queue-header">
+      <span class="queue-title">Dispatch Queue</span>
+      <span class="queue-badge">2</span>
+    </div>
+    <div class="queue-list">
+
+      <div class="queue-card">
+        <div class="queue-card-top">
+          <div class="priority-dot urgent"></div>
+          <span class="task-id">RUSH-361</span>
+        </div>
+        <div class="queue-card-title">OAuth token refresh fails silently after 24h idle</div>
+        <div class="queue-card-bottom">
+          <span class="queue-label">engineering</span>
+          <button class="dispatch-btn">Dispatch</button>
+        </div>
+      </div>
+
+      <div class="queue-card">
+        <div class="queue-card-top">
+          <div class="priority-dot high"></div>
+          <span class="task-id">RUSH-358</span>
+        </div>
+        <div class="queue-card-title">Webhook payload missing tenant_id on plan downgrade</div>
+        <div class="queue-card-bottom">
+          <span class="queue-label">engineering</span>
+          <button class="dispatch-btn">Dispatch</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<script>
+  var agents = [
+    {
+      name: 'Claude',
+      model: 'Opus 4.5',
+      status: 'running',
+      duration: '3 minutes',
+      led: 'green',
+      activity: 'Edit src/parse/tokens.ts  line 142  +4 / -1',
+      files: ['tokens.ts', 'lexer.test.ts', 'parser.ts'],
+      vuPercent: 62,
+      vuColor: 'green',
+      tokens: '12.4k',
+      tools: '8',
+      linearId: 'RUSH-355',
+      prUrl: '#4217',
+      task: 'Fix trailing comma parsing in JSON lexer. The parser crashes on malformed input when a trailing comma appears before a closing brace at EOF.'
+    },
+    {
+      name: 'Codex',
+      model: 'gpt-5-codex',
+      status: 'running',
+      duration: '7 minutes',
+      led: 'green',
+      activity: 'Bash pnpm test parse/lexer.test.ts  --watch',
+      files: ['lexer.test.ts', 'fixtures.json'],
+      vuPercent: 41,
+      vuColor: 'green',
+      tokens: '8.7k',
+      tools: '5',
+      linearId: 'RUSH-355',
+      prUrl: null,
+      task: 'Run test suite for parse module and verify trailing comma fix. Reproduce 3 failing cases, confirm all pass after patch.'
+    },
+    {
+      name: 'Gemini',
+      model: '3.0 Pro',
+      status: 'running',
+      duration: '11 minutes',
+      led: 'amber',
+      activity: 'Read src/billing/timezone.ts  analyzing drift logic',
+      files: ['timezone.ts', 'invoice.ts', 'cron.ts', 'tz.test.ts'],
+      vuPercent: 78,
+      vuColor: 'amber',
+      tokens: '22.1k',
+      tools: '14',
+      linearId: 'RUSH-412',
+      prUrl: null,
+      task: 'Root cause investigation for billing timezone drift. Invoices generated at midnight UTC show wrong dates for US-Pacific customers.'
+    },
+    {
+      name: 'Claude',
+      model: 'Opus 4.5',
+      status: 'completed',
+      duration: '18 minutes',
+      led: 'gray',
+      activity: 'Completed  all tests passing  PR merged',
+      files: ['auth.ts', 'session.ts', 'middleware.ts'],
+      vuPercent: 100,
+      vuColor: 'green',
+      tokens: '31.2k',
+      tools: '22',
+      linearId: 'RUSH-349',
+      prUrl: '#4201',
+      task: 'Implement session rotation on privilege escalation. When a user upgrades their role, invalidate the old session and issue a new token.'
+    },
+    {
+      name: 'Codex',
+      model: 'gpt-5-codex',
+      status: 'failed',
+      duration: '6 minutes',
+      led: 'red',
+      activity: 'Error  type check failed  src/api/routes.ts:87',
+      files: ['routes.ts', 'handler.ts'],
+      vuPercent: 33,
+      vuColor: 'red',
+      tokens: '4.2k',
+      tools: '3',
+      linearId: 'RUSH-351',
+      prUrl: null,
+      task: 'Add rate limiting middleware to public API endpoints. Failed due to type mismatch in route handler signature.'
+    }
+  ];
+
+  function renderStrip(idx) {
+    var a = agents[idx];
+    var strip = document.getElementById('channelStrip');
+    var desc = document.getElementById('channelDesc');
+
+    var filesHtml = '';
+    for (var i = 0; i < a.files.length; i++) {
+      filesHtml += '<span class="file-pill">' + a.files[i] + '</span>';
+    }
+
+    var linksHtml = '';
+    if (a.linearId) {
+      linksHtml += '<span class="link-badge">' + a.linearId + '</span><br>';
+    }
+    if (a.prUrl) {
+      linksHtml += '<span class="link-badge">PR ' + a.prUrl + '</span>';
+    }
+    if (!a.linearId && !a.prUrl) {
+      linksHtml = '<span style="font-size:9px;color:var(--dim)">none</span>';
+    }
+
+    var actionsHtml = '';
+    if (a.status === 'running') {
+      actionsHtml =
+        '<button class="strip-btn primary">Focus</button>' +
+        '<button class="strip-btn danger">Stop</button>';
+    } else if (a.status === 'completed') {
+      actionsHtml =
+        '<button class="strip-btn">View Log</button>' +
+        '<button class="strip-btn">Restart</button>';
+    } else {
+      actionsHtml =
+        '<button class="strip-btn">View Log</button>' +
+        '<button class="strip-btn primary">Retry</button>';
+    }
+
+    strip.innerHTML =
+      '<div class="channel-strip">' +
+        '<div class="strip-section section-status">' +
+          '<div class="strip-label">Status</div>' +
+          '<div class="status-row">' +
+            '<div class="led ' + a.led + '"></div>' +
+            '<span class="status-agent">' + a.name + '</span>' +
+          '</div>' +
+          '<div class="status-duration">' + a.duration + '</div>' +
+          '<div class="status-model">' + a.model + '</div>' +
+        '</div>' +
+        '<div class="strip-section section-readout">' +
+          '<div class="strip-label">Readout</div>' +
+          '<div class="lcd-strip">' + a.activity + '</div>' +
+        '</div>' +
+        '<div class="strip-section section-files">' +
+          '<div class="strip-label">Files</div>' +
+          '<div class="file-pills">' + filesHtml + '</div>' +
+        '</div>' +
+        '<div class="strip-section section-metrics">' +
+          '<div class="strip-label">Load</div>' +
+          '<div class="vu-meter"><div class="vu-fill ' + a.vuColor + '" style="width:' + a.vuPercent + '%"></div></div>' +
+          '<div class="metric-row"><span>Tokens</span><span class="metric-val">' + a.tokens + '</span></div>' +
+          '<div class="metric-row"><span>Tools</span><span class="metric-val">' + a.tools + '</span></div>' +
+        '</div>' +
+        '<div class="strip-section section-links">' +
+          '<div class="strip-label">Links</div>' +
+          linksHtml +
+        '</div>' +
+        '<div class="strip-section section-actions">' +
+          '<div class="strip-label">Actions</div>' +
+          actionsHtml +
+        '</div>' +
+      '</div>';
+
+    desc.innerHTML =
+      '<div class="strip-description">' +
+        '<div class="strip-desc-label">Task</div>' +
+        '<div class="strip-desc-text">' + a.task + '</div>' +
+      '</div>';
+  }
+
+  function selectAgent(idx) {
+    var nodes = document.querySelectorAll('.timeline-node');
+    for (var i = 0; i < nodes.length; i++) {
+      nodes[i].classList.remove('selected');
+    }
+    nodes[idx].classList.add('selected');
+    renderStrip(idx);
+  }
+
+  renderStrip(0);
+</script>
+
+</body>
+</html>

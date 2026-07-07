@@ -1,0 +1,61 @@
+[
+  {
+    "context": "teams",
+    "kind": "claude",
+    "pid": 96973,
+    "sessionId": "4e48a2fc-9669-44f8-9927-989d085e90c5",
+    "cwd": "/Users/muqsit/src/github.com/muqsitnawaz/swarmify/.agents/worktrees/factory-floor-port",
+    "label": "backend",
+    "topic": "Port RUSH-812 cross-host aggregation into the extension host",
+    "sessionFile": "/Users/muqsit/.claude/projects/-Users-muqsit-swarmify--agents-worktrees-factory-floor-port/4e48a2fc-9669-44f8-9927-989d085e90c5.jsonl",
+    "startedAtMs": 1782865917676,
+    "status": "running",
+    "teamName": "factory-floor-port",
+    "agentId": "4e48a2fc-9669-44f8-9927-989d085e90c5"
+  },
+  {
+    "context": "teams",
+    "kind": "claude",
+    "pid": 96382,
+    "sessionId": "7ae06d79-bf92-414d-bf75-1d02a9633011",
+    "cwd": "/Users/muqsit/src/github.com/muqsitnawaz/swarmify/.agents/worktrees/factory-floor-port",
+    "label": "logic",
+    "topic": "Fill floorModel pure functions",
+    "sessionFile": "/Users/muqsit/.claude/projects/-Users-muqsit-swarmify/7ae06d79-bf92-414d-bf75-1d02a9633011.jsonl",
+    "startedAtMs": 1782865916646,
+    "status": "idle",
+    "teamName": "factory-floor-port",
+    "agentId": "7ae06d79-bf92-414d-bf75-1d02a9633011"
+  },
+  {
+    "context": "terminal",
+    "kind": "codex",
+    "host": "ghostty",
+    "pid": 66863,
+    "cwd": "/Users/muqsit/src/github.com/muqsitnawaz/agents",
+    "topic": "Refactor the menu bar surface",
+    "sessionFile": "/Users/muqsit/.codex/sessions/2026/06/30/d71b62ce-01d1-40ae-af9d-8ed34275234b.jsonl",
+    "startedAtMs": 1782860000000,
+    "status": "input_required"
+  },
+  {
+    "context": "cloud",
+    "kind": "codex",
+    "label": "Read README.md and reply with a one-sentence summary",
+    "startedAtMs": 1782354015534,
+    "status": "queued",
+    "cloudProvider": "codex",
+    "cloudTaskId": "task_e",
+    "cloudStatus": "queued"
+  },
+  {
+    "context": "cloud",
+    "kind": "claude",
+    "label": "Fix the flaky RUSH-903 test",
+    "startedAtMs": 1782294376036,
+    "status": "failed",
+    "cloudProvider": "rush",
+    "cloudTaskId": "task_f",
+    "cloudStatus": "failed"
+  }
+]

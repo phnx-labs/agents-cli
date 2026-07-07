@@ -1,0 +1,2 @@
+{"type":"assistant","timestamp":"2026-06-30T12:00:10.000Z","message":{"usage":{"output_tokens":120},"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"/Users/muqsit/src/core/tasks.ts"}}]}}
+{"type":"assistant","timestamp":"2026-06-30T12:00:20.000Z","message":{"usage":{"output_tokens":80},"content":[{"type":"tool_use","name":"Bash","input":{"command":"bun test"}}]}}

@@ -1,0 +1,939 @@
+{
+  "name": "swarm-ext",
+  "displayName": "Agents",
+  "publisher": "swarmify",
+  "description": "Run Claude, Codex, Gemini, Cursor, and other coding agents from one IDE workspace.",
+  "version": "0.9.283",
+  "license": "MIT",
+  "author": "Muqsit Nawaz <dev@muqsitnawaz.com>",
+  "icon": "assets/agents.png",
+  "galleryBanner": {
+    "color": "#0a0a0a",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/muqsitnawaz/swarmify",
+    "directory": "extension"
+  },
+  "homepage": "https://swarmify.co/#agents-ext",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "claude",
+    "codex",
+    "gemini",
+    "cursor",
+    "copilot",
+    "swarm",
+    "orchestration",
+    "mcp",
+    "multi-agent",
+    "coding-agent",
+    "ai-coding",
+    "llm",
+    "iae",
+    "agents-cli"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri",
+    "onLanguage:markdown",
+    "onCustomEditor:agents.markdownEditor"
+  ],
+  "main": "./out/vscode/extension.js",
+  "contributes": {
+    "iconThemes": [
+      {
+        "id": "agents-icons",
+        "label": "Agents File Icons",
+        "path": "./icons/agents-icons.json"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "agents.markdownEditor",
+        "displayName": "Agents Markdown Editor",
+        "selector": [
+          {
+            "filenamePattern": "*.md"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "configurationDefaults": {
+      "terminal.integrated.confirmOnKill": "panel",
+      "terminal.integrated.enablePersistentSessions": false
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentsPanel",
+          "title": "Agents",
+          "icon": "assets/agents-activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentsPanel": [
+        {
+          "type": "webview",
+          "id": "agentsPanel.terminal",
+          "name": "Active Terminal"
+        },
+        {
+          "type": "webview",
+          "id": "agentsPanel.issues",
+          "name": "Issues"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agents.open",
+        "title": "Run Agents",
+        "icon": {
+          "light": "assets/agents.png",
+          "dark": "assets/agents.png"
+        }
+      },
+      {
+        "command": "agents.configure",
+        "title": "Agents: Dashboard"
+      },
+      {
+        "command": "agents.dispatchTask",
+        "title": "Agents: Dispatch a Task"
+      },
+      {
+        "command": "agents.focusQuickSpawn",
+        "title": "Agents: New Agent Composer"
+      },
+      {
+        "command": "agents.settings",
+        "title": "Agents: Settings"
+      },
+      {
+        "command": "agents.newAgent",
+        "title": "Agents: New Mix of Agents"
+      },
+      {
+        "command": "agents.newSecondaryAgent",
+        "title": "Agents: New Secondary"
+      },
+      {
+        "command": "agents.newClaude",
+        "title": "Agents: New Claude (CC)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
+        "command": "agents.newCodex",
+        "title": "Agents: New Codex (CX)",
+        "icon": {
+          "light": "assets/chatgpt-light.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
+        "command": "agents.newGemini",
+        "title": "Agents: New Gemini (GX)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravity",
+        "title": "Agents: New Antigravity (AG)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newGrok",
+        "title": "Agents: New Grok (GK)",
+        "icon": {
+          "light": "assets/grok.png",
+          "dark": "assets/grok.png"
+        }
+      },
+      {
+        "command": "agents.newOpenCode",
+        "title": "Agents: New OpenCode (OC)",
+        "icon": {
+          "light": "assets/opencode.png",
+          "dark": "assets/opencode.png"
+        }
+      },
+      {
+        "command": "agents.newCursor",
+        "title": "Agents: New Cursor (CR)",
+        "icon": {
+          "light": "assets/cursor-light.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
+        "command": "agents.newAlias",
+        "title": "Agents: New Alias"
+      },
+      {
+        "command": "agents.newAgentPickVersion",
+        "title": "Agents: New Agent (Pinned)",
+        "icon": {
+          "light": "assets/agents.png",
+          "dark": "assets/agents.png"
+        }
+      },
+      {
+        "command": "agents.newClaudePickVersion",
+        "title": "Agents: New Claude (Pinned)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
+        "command": "agents.newClaudeLatest",
+        "title": "Agents: New Claude (Latest)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
+        "command": "agents.newClaudeBalanced",
+        "title": "Agents: New Claude (Balanced)",
+        "icon": {
+          "light": "assets/claude.png",
+          "dark": "assets/claude.png"
+        }
+      },
+      {
+        "command": "agents.newCodexPickVersion",
+        "title": "Agents: New Codex (Pinned)",
+        "icon": {
+          "light": "assets/chatgpt-light.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
+        "command": "agents.newCodexLatest",
+        "title": "Agents: New Codex (Latest)",
+        "icon": {
+          "light": "assets/chatgpt-light.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
+        "command": "agents.newCodexBalanced",
+        "title": "Agents: New Codex (Balanced)",
+        "icon": {
+          "light": "assets/chatgpt-light.png",
+          "dark": "assets/chatgpt.png"
+        }
+      },
+      {
+        "command": "agents.newGeminiPickVersion",
+        "title": "Agents: New Gemini (Pinned)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newGeminiLatest",
+        "title": "Agents: New Gemini (Latest)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newGeminiBalanced",
+        "title": "Agents: New Gemini (Balanced)",
+        "icon": {
+          "light": "assets/gemini.png",
+          "dark": "assets/gemini.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravityPickVersion",
+        "title": "Agents: New Antigravity (Pinned)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravityLatest",
+        "title": "Agents: New Antigravity (Latest)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newAntigravityBalanced",
+        "title": "Agents: New Antigravity (Balanced)",
+        "icon": {
+          "light": "assets/antigravity.png",
+          "dark": "assets/antigravity.png"
+        }
+      },
+      {
+        "command": "agents.newGrokPickVersion",
+        "title": "Agents: New Grok (Pick Version)",
+        "icon": {
+          "light": "assets/grok.png",
+          "dark": "assets/grok.png"
+        }
+      },
+      {
+        "command": "agents.newCursorPickVersion",
+        "title": "Agents: New Cursor (Pinned)",
+        "icon": {
+          "light": "assets/cursor-light.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
+        "command": "agents.newCursorLatest",
+        "title": "Agents: New Cursor (Latest)",
+        "icon": {
+          "light": "assets/cursor-light.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
+        "command": "agents.newCursorBalanced",
+        "title": "Agents: New Cursor (Balanced)",
+        "icon": {
+          "light": "assets/cursor-light.png",
+          "dark": "assets/cursor.png"
+        }
+      },
+      {
+        "command": "agents.quickLaunch0",
+        "title": "Agents: Quick Launch 0"
+      },
+      {
+        "command": "agents.quickLaunch1",
+        "title": "Agents: Quick Launch 1"
+      },
+      {
+        "command": "agents.quickLaunch2",
+        "title": "Agents: Quick Launch 2"
+      },
+      {
+        "command": "agents.quickLaunch3",
+        "title": "Agents: Quick Launch 3"
+      },
+      {
+        "command": "agents.quickLaunch4",
+        "title": "Agents: Quick Launch 4"
+      },
+      {
+        "command": "agents.quickLaunch5",
+        "title": "Agents: Quick Launch 5"
+      },
+      {
+        "command": "agents.quickLaunch6",
+        "title": "Agents: Quick Launch 6"
+      },
+      {
+        "command": "agents.quickLaunch7",
+        "title": "Agents: Quick Launch 7"
+      },
+      {
+        "command": "agents.quickLaunch8",
+        "title": "Agents: Quick Launch 8"
+      },
+      {
+        "command": "agents.quickLaunch9",
+        "title": "Agents: Quick Launch 9"
+      },
+      {
+        "command": "agents.setTitle",
+        "title": "Agents: Label"
+      },
+      {
+        "command": "agents.relabelTerminal",
+        "title": "Agents: Re-label from Activity"
+      },
+      {
+        "command": "agents.clear",
+        "title": "Agents: Clear"
+      },
+      {
+        "command": "agents.continueFromSelection",
+        "title": "Agents: Continue From Selection"
+      },
+      {
+        "command": "agents.autogit",
+        "title": "Agents: Autogit",
+        "icon": {
+          "light": "assets/agents.png",
+          "dark": "assets/agents.png"
+        }
+      },
+      {
+        "command": "agents.setupClaude",
+        "title": "Agents: Setup Claude"
+      },
+      {
+        "command": "agents.setupCodex",
+        "title": "Agents: Setup Codex"
+      },
+      {
+        "command": "agents.setupGemini",
+        "title": "Agents: Setup Gemini"
+      },
+      {
+        "command": "agents.enableNotifications",
+        "title": "Agents: Enable Notifications"
+      },
+      {
+        "command": "agents.enableTmux",
+        "title": "Agents: Enable Tmux"
+      },
+      {
+        "command": "agents.disableTmux",
+        "title": "Agents: Disable Tmux"
+      },
+      {
+        "command": "agents.newTask",
+        "title": "Agents: New Task"
+      },
+      {
+        "command": "agents.handoff",
+        "title": "Agents: Handoff"
+      },
+      {
+        "command": "agents.closeWithRecap",
+        "title": "Agents: Close Terminal With Recap"
+      },
+      {
+        "command": "agents.askAnotherAgent",
+        "title": "Agents: Start Task"
+      },
+      {
+        "command": "agents.newShell",
+        "title": "Agents: New Shell (SH)",
+        "icon": {
+          "light": "assets/agents.png",
+          "dark": "assets/agents.png"
+        }
+      },
+      {
+        "command": "agents.openAgent",
+        "title": "Agents: Open"
+      },
+      {
+        "command": "agents.cycleNextTerminal",
+        "title": "Agents: Cycle Next Terminal"
+      },
+      {
+        "command": "agents.cyclePrevTerminal",
+        "title": "Agents: Cycle Previous Terminal"
+      },
+      {
+        "command": "agents.enableView",
+        "title": "Agents: Enable View"
+      },
+      {
+        "command": "agents.disableView",
+        "title": "Agents: Disable View"
+      },
+      {
+        "command": "agents.runSetup",
+        "title": "Agents: Run Setup"
+      },
+      {
+        "command": "agents.newAgentHSplit",
+        "title": "Agents: New Split (Below)"
+      },
+      {
+        "command": "agents.newAgentVSplit",
+        "title": "Agents: New Split (Side)"
+      },
+      {
+        "command": "agents.prompts",
+        "title": "Agents: Prompts"
+      },
+      {
+        "command": "agents.enableWarming",
+        "title": "Agents: Enable Warming"
+      },
+      {
+        "command": "agents.disableWarming",
+        "title": "Agents: Disable Warming"
+      },
+      {
+        "command": "agents.enableReader",
+        "title": "Agents: Enable Reader"
+      },
+      {
+        "command": "agents.disableReader",
+        "title": "Agents: Disable Reader"
+      },
+      {
+        "command": "agents.init",
+        "title": "Agents: Init"
+      },
+      {
+        "command": "agents.reload",
+        "title": "Agents: Reload"
+      },
+      {
+        "command": "agents.reopenLastSession",
+        "title": "Agents: Reopen Last Session"
+      },
+      {
+        "command": "agents.continueInNew",
+        "title": "Agents: Continue in New Session"
+      },
+      {
+        "command": "agents.sessionTrace",
+        "title": "Agents: Session Trace"
+      },
+      {
+        "command": "agents.sessionId",
+        "title": "Agents: Session ID"
+      },
+      {
+        "command": "agents.sessionResume",
+        "title": "Agents: Session Resume"
+      },
+      {
+        "command": "agents.resumeCurrentInBestProfile",
+        "title": "Agents: Resume Current Session in Best Profile"
+      },
+      {
+        "command": "agents.watchdog.toggleTerminal",
+        "title": "Agents: Toggle Watchdog for Active Terminal"
+      },
+      {
+        "command": "agents.spawnWithPrompt",
+        "title": "Agents: Spawn with Prompt"
+      },
+      {
+        "command": "agents.spawnWithContext",
+        "title": "Agents: Spawn with Context"
+      }
+    ],
+    "configuration": {
+      "title": "Agents: Autogit",
+      "properties": {
+        "agents.commitMessageExamples": {
+          "type": "array",
+          "default": [
+            "feat: add user authentication with jwt tokens",
+            "fix: resolve null pointer exception in payment handler",
+            "docs: update api reference for v2 endpoints",
+            "build: configure webpack for production optimization",
+            "refactor: extract validation logic into separate module",
+            "fix: correct timezone handling in date formatter",
+            "feat: implement real-time notifications via websockets",
+            "release: bump version to 1.2.0 for stable release",
+            "refactor: simplify error handling in api client",
+            "docs: add examples for configuration options"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Example commit messages to guide the AI style"
+        },
+        "agents.ignoreFiles": {
+          "type": "string",
+          "default": "node_modules,dist,build,out,.git,*.lock,bun.lock,package-lock.json",
+          "description": "Comma-separated patterns of files to ignore in diffs"
+        },
+        "agents.editor.assetFolder": {
+          "type": "string",
+          "default": ".assets",
+          "description": "Folder for storing images and attachments from the markdown editor"
+        },
+        "agents.enableTmux": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable tmux for per-tab splits in agent terminals. When enabled, Cmd+Shift+H/V create tmux panes instead of VS Code editor splits."
+        },
+        "agents.worktreePerTerminal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Each new agent terminal (Cmd+Shift+A/B/H/V/J/K) starts in its own git worktree at <repo>/.history/worktrees/<terminal-id> on branch agent/<terminal-id>. Isolates parallel agents so they cannot see or overwrite each other's uncommitted work. Requires agents-cli with `agents worktree` support. Off by default."
+        },
+        "agents.disableAutopush": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disable auto-push after commit. When enabled, Autogit will stage changes, generate commit message, and commit, but skip pushing to remote."
+        },
+        "agents.disableAutocommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disable auto-commit. When enabled, Autogit will only stage changes and generate a commit message, but not commit or push."
+        },
+        "agents.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API key. Used by the Foreman voice coordinator (gpt-realtime-2). Autogit no longer uses this — commit messages are generated via `agents run claude --model haiku`."
+        },
+        "agents.commitGenTimeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "description": "Timeout (ms) for the `agents run claude --model haiku` call that generates commit messages. Increase if commits are slow to generate."
+        },
+        "agents.watchdog.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Master switch for the agent watchdog. When on, it polls active agent terminals on an interval to auto-rotate exhausted versions and (optionally) nudge stalled ones."
+        },
+        "agents.watchdog.autoRotate": {
+          "type": "boolean",
+          "default": true,
+          "description": "When an agent terminal's pinned version hits its limit (out_of_credits, rate_limited, or >=100% session), automatically spawn a fresh terminal on the best available signed-in version and replay /continue. The old terminal is closed."
+        },
+        "agents.watchdog.rotateCooldownSeconds": {
+          "type": "number",
+          "default": 120,
+          "description": "Minimum seconds between auto-rotate attempts for the same terminal."
+        },
+        "agents.watchdog.stallNudge": {
+          "type": "boolean",
+          "default": true,
+          "description": "When an agent appears truly blocked, call a Claude Haiku headless instance to decide whether to inject a nudge."
+        },
+        "agents.watchdog.stallSeconds": {
+          "type": "number",
+          "default": 300,
+          "description": "Seconds of inactivity before an agent is considered stalled enough for blocked checks."
+        },
+        "agents.watchdog.cooldownSeconds": {
+          "type": "number",
+          "default": 1200,
+          "description": "Minimum seconds between nudges to the same terminal."
+        },
+        "agents.watchdog.tickSeconds": {
+          "type": "number",
+          "default": 120,
+          "description": "How often the watchdog evaluates terminals."
+        },
+        "agents.watchdog.useSmartAgent": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use context-aware watchdog agent with access to mq, linear, and full session history. When enabled, the watchdog can read project conventions and make smarter nudge decisions."
+        }
+      }
+    },
+    "menus": {
+      "editor/title": [
+        {
+          "command": "agents.open",
+          "group": "navigation",
+          "when": "true"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "agents.autogit",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "agents.askAnotherAgent",
+          "group": "agents@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "agents.newGemini",
+          "when": "true",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agents.newAntigravity",
+          "when": "true",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agents.newGrok",
+          "when": "true",
+          "group": "navigation@2"
+        },
+        {
+          "command": "agents.enableTmux",
+          "when": "!agents.tmuxEnabled",
+          "group": "navigation@3"
+        },
+        {
+          "command": "agents.disableTmux",
+          "when": "agents.tmuxEnabled",
+          "group": "navigation@3"
+        },
+        {
+          "command": "agents.enableView",
+          "when": "!agents.viewEnabled",
+          "group": "navigation@4"
+        },
+        {
+          "command": "agents.disableView",
+          "when": "agents.viewEnabled",
+          "group": "navigation@4"
+        },
+        {
+          "command": "agents.enableWarming",
+          "when": "!agents.warmingEnabled",
+          "group": "navigation@5"
+        },
+        {
+          "command": "agents.disableWarming",
+          "when": "agents.warmingEnabled",
+          "group": "navigation@5"
+        },
+        {
+          "command": "agents.enableReader",
+          "when": "!agents.readerEnabled",
+          "group": "navigation@6"
+        },
+        {
+          "command": "agents.disableReader",
+          "when": "agents.readerEnabled",
+          "group": "navigation@6"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "agents.autogit",
+        "key": "ctrl+shift+g",
+        "mac": "cmd+shift+g"
+      },
+      {
+        "command": "agents.newAgent",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "agents.newSecondaryAgent",
+        "key": "ctrl+shift+b",
+        "mac": "cmd+shift+b"
+      },
+      {
+        "command": "agents.setTitle",
+        "key": "ctrl+shift+l",
+        "mac": "cmd+shift+l"
+      },
+      {
+        "command": "agents.continueFromSelection",
+        "key": "ctrl+shift+c",
+        "mac": "cmd+shift+c"
+      },
+      {
+        "command": "agents.clear",
+        "key": "ctrl+shift+x",
+        "mac": "cmd+shift+x"
+      },
+      {
+        "command": "agents.newTask",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n"
+      },
+      {
+        "command": "agents.spawnWithPrompt",
+        "key": "ctrl+shift+j",
+        "mac": "cmd+shift+j"
+      },
+      {
+        "command": "agents.spawnWithContext",
+        "key": "ctrl+shift+k",
+        "mac": "cmd+shift+k"
+      },
+      {
+        "command": "agents.newShell",
+        "key": "ctrl+shift+s",
+        "mac": "cmd+shift+s"
+      },
+      {
+        "command": "agents.openAgent",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i"
+      },
+      {
+        "command": "agents.newAgentHSplit",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h"
+      },
+      {
+        "command": "agents.newAgentVSplit",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v"
+      },
+      {
+        "command": "agents.prompts",
+        "key": "ctrl+shift+'",
+        "mac": "cmd+shift+'"
+      },
+      {
+        "command": "agents.newGemini",
+        "key": "ctrl+shift+m",
+        "mac": "cmd+shift+m"
+      },
+      {
+        "command": "agents.newCursor",
+        "key": "ctrl+shift+u",
+        "mac": "cmd+shift+u"
+      },
+      {
+        "command": "agents.configure",
+        "key": "ctrl+shift+f",
+        "mac": "cmd+shift+f"
+      },
+      {
+        "command": "agents.dispatchTask",
+        "key": "ctrl+shift+d",
+        "mac": "cmd+shift+d"
+      },
+      {
+        "command": "agents.focusQuickSpawn",
+        "key": "ctrl+k",
+        "mac": "cmd+k",
+        "when": "activeWebviewPanelId == 'agentsSettings'"
+      },
+      {
+        "command": "agents.quickLaunch0",
+        "key": "ctrl+shift+0",
+        "mac": "cmd+shift+0"
+      },
+      {
+        "command": "agents.quickLaunch1",
+        "key": "ctrl+shift+1",
+        "mac": "cmd+shift+1"
+      },
+      {
+        "command": "agents.quickLaunch2",
+        "key": "ctrl+shift+2",
+        "mac": "cmd+shift+2"
+      },
+      {
+        "command": "agents.quickLaunch3",
+        "key": "ctrl+shift+3",
+        "mac": "cmd+shift+3"
+      },
+      {
+        "command": "agents.quickLaunch4",
+        "key": "ctrl+shift+4",
+        "mac": "cmd+shift+4"
+      },
+      {
+        "command": "agents.quickLaunch5",
+        "key": "ctrl+shift+5",
+        "mac": "cmd+shift+5"
+      },
+      {
+        "command": "agents.quickLaunch6",
+        "key": "ctrl+shift+6",
+        "mac": "cmd+shift+6"
+      },
+      {
+        "command": "agents.quickLaunch7",
+        "key": "ctrl+shift+7",
+        "mac": "cmd+shift+7"
+      },
+      {
+        "command": "agents.quickLaunch8",
+        "key": "ctrl+shift+8",
+        "mac": "cmd+shift+8"
+      },
+      {
+        "command": "agents.quickLaunch9",
+        "key": "ctrl+shift+9",
+        "mac": "cmd+shift+9"
+      },
+      {
+        "command": "agents.reload",
+        "key": "ctrl+shift+r",
+        "mac": "cmd+shift+r"
+      },
+      {
+        "command": "agents.reopenLastSession",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t"
+      },
+      {
+        "command": "agents.continueInNew",
+        "key": "ctrl+shift+y",
+        "mac": "cmd+shift+y"
+      },
+      {
+        "command": "agents.resumeCurrentInBestProfile",
+        "key": "ctrl+shift+j",
+        "mac": "cmd+shift+j"
+      },
+      {
+        "command": "agents.closeWithRecap",
+        "key": "ctrl+shift+w",
+        "mac": "cmd+shift+w",
+        "when": "terminalFocus && agents.activeIsAgent"
+      },
+      {
+        "command": "agents.cycleNextTerminal",
+        "key": "ctrl+r",
+        "mac": "cmd+r"
+      },
+      {
+        "command": "agents.cyclePrevTerminal",
+        "key": "ctrl+e",
+        "mac": "cmd+e"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./ && cd ui && bun run build",
+    "compile:ext": "tsc -p ./",
+    "compile:ui": "cd ui && bun run build",
+    "watch": "tsc -watch -p ./",
+    "package": "bun run compile && vsce package",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "test": "bun test --timeout 30000"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
+    "@types/node": "^20.x",
+    "@types/sql.js": "^1.4.9",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.3",
+    "@vscode/webview-ui-toolkit": "^1.4.0",
+    "node-pty": "^1.0.0",
+    "sql.js": "^1.13.0",
+    "ws": "^8.20.0",
+    "yaml": "^2.8.2"
+  },
+  "bundledDependencies": [
+    "node-pty",
+    "yaml"
+  ],
+  "bundleDependencies": [
+    "node-pty",
+    "yaml"
+  ]
+}

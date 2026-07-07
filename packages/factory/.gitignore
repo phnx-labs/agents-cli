@@ -1,0 +1,13 @@
+# Build artifacts
+out/
+dist/
+ui/out/
+app/dist/
+app/release/
+*.vsix
+
+# Dependencies
+node_modules/
+
+# Vite standalone bundle for the Electron app
+app-ui/

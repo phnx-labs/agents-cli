@@ -1,0 +1,80 @@
+[
+  {
+    "name": "colima",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "mark",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "mark-aws",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "phoenix",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "pi",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m0",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m1",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m2",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m3",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m4",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m5",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m6",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  },
+  {
+    "name": "yosemite-m7",
+    "provider": "local",
+    "enrolled": false,
+    "source": "ssh-config"
+  }
+]

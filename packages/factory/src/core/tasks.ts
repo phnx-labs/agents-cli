@@ -1,0 +1,221 @@
+// Pure types for unified task management across multiple sources
+// No VS Code dependencies - testable
+
+import { TaskSource } from './settings';
+
+// Unified task interface for aggregating tasks from multiple sources
+export interface UnifiedTask {
+  id: string;                    // Unique identifier
+  source: TaskSource;            // Where this task came from
+  title: string;                 // Task title/summary
+  description?: string;          // Optional description/body
+  status: 'todo' | 'in_progress' | 'done';
+  priority?: 'urgent' | 'high' | 'medium' | 'low';
+  metadata: TaskMetadata;        // Source-specific data
+}
+
+// Source-specific metadata
+export interface TaskMetadata {
+  identifier?: string;           // Linear: PROJ-123, GitHub: #42
+  url?: string;                  // Web URL to task
+  labels?: string[];             // Labels/tags
+  assignee?: string;             // Assigned user
+  assigneeKind?: 'user' | 'agent'; // 'agent' if name matches a known CLI agent
+  state?: string;                // Raw state from source
+  createdAt?: string;            // ISO 8601 creation timestamp
+  dueDate?: string;              // ISO 8601 due date (YYYY-MM-DD from Linear)
+  project?: string;              // Linear project name (undefined for GitHub)
+  repo?: string;                 // "owner/repo" — resolved at fetch time
+  comments?: TaskComment[];      // Linear comments, newest-first when rendered
+}
+
+export interface TaskComment {
+  body: string;
+  createdAt?: string;
+  author?: string;
+}
+
+export interface TaskDispatchPromptInput {
+  title: string;
+  description?: string;
+  identifier?: string;
+  url?: string;
+  extraComments?: string;
+}
+
+function cleanPromptPart(value: string | undefined): string {
+  return value?.trim() ?? '';
+}
+
+export function buildTaskDispatchPrompt(input: TaskDispatchPromptInput): string {
+  const parts: string[] = [];
+  const title = cleanPromptPart(input.title);
+  const description = cleanPromptPart(input.description);
+  const identifier = cleanPromptPart(input.identifier);
+  const url = cleanPromptPart(input.url);
+  const extraComments = cleanPromptPart(input.extraComments);
+
+  if (title) parts.push(title);
+  if (description) parts.push(description);
+  if (identifier) parts.push(`Reference: ${identifier}`);
+  if (url) parts.push(`URL: ${url}`);
+  if (extraComments) parts.push(`Additional instructions:\n${extraComments}`);
+
+  return parts.join('\n\n');
+}
+
+// A Linear user whose name matches one of these is treated as an agent, so the
+// card renders an agent chip rather than a @mention. Case-insensitive match.
+const AGENT_ASSIGNEE_PATTERN = /^(claude|codex|gemini|cursor|opencode)$/i;
+
+export function detectAssigneeKind(name: string | undefined | null): 'user' | 'agent' | undefined {
+  if (!name) return undefined;
+  return AGENT_ASSIGNEE_PATTERN.test(name.trim()) ? 'agent' : 'user';
+}
+
+// Extract the first repo:<name> label value. Pure — does not resolve owner.
+// Callers combine with an owner (resolved in the VS Code layer) to form owner/repo.
+export function extractRepoNameFromLabels(labels: string[] | undefined): string | null {
+  if (!labels) return null;
+  for (const raw of labels) {
+    if (typeof raw !== 'string') continue;
+    const m = raw.trim().match(/^repo:([A-Za-z0-9._-]+)$/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+// Active cycle info from Linear
+export interface CycleInfo {
+  name: string;
+  startsAt: string;              // ISO 8601
+  endsAt: string;                // ISO 8601
+}
+
+// Source badge display info
+export const SOURCE_BADGES: Record<TaskSource, { label: string; color: string }> = {
+  linear: { label: 'LN', color: '#5e6ad2' },    // Linear purple
+  github: { label: 'GH', color: '#238636' }     // GitHub green
+};
+
+// Convert Linear issue to UnifiedTask.
+// `repo` is the pre-resolved "owner/name" string (caller resolves owner), or null.
+export function linearToUnifiedTask(
+  issue: {
+    id: string;
+    identifier: string;
+    title: string;
+    description?: string;
+    state: { name: string; type: string };
+    priority: number;
+    url: string;
+    labels?: { nodes: { name: string }[] };
+    assignee?: { name: string };
+    project?: { name: string } | null;
+    dueDate?: string | null;
+    createdAt?: string;
+    comments?: { nodes: { body: string; createdAt?: string; user?: { name: string } | null }[] };
+  },
+  repo: string | null = null,
+): UnifiedTask {
+  // Map Linear priority (0=none, 1=urgent, 2=high, 3=medium, 4=low)
+  const priorityMap: Record<number, UnifiedTask['priority']> = {
+    1: 'urgent',
+    2: 'high',
+    3: 'medium',
+    4: 'low'
+  };
+
+  // Map Linear state type to our status
+  const statusMap: Record<string, UnifiedTask['status']> = {
+    backlog: 'todo',
+    unstarted: 'todo',
+    started: 'in_progress',
+    completed: 'done',
+    canceled: 'done'
+  };
+
+  const labels = issue.labels?.nodes.map(l => l.name);
+  const assignee = issue.assignee?.name;
+  const comments: TaskComment[] | undefined = issue.comments?.nodes.map(n => ({
+    body: n.body,
+    createdAt: n.createdAt,
+    author: n.user?.name,
+  }));
+
+  return {
+    id: `linear:${issue.id}`,
+    source: 'linear',
+    title: issue.title,
+    description: issue.description,
+    status: statusMap[issue.state.type] || 'todo',
+    priority: priorityMap[issue.priority],
+    metadata: {
+      identifier: issue.identifier,
+      url: issue.url,
+      labels,
+      assignee,
+      assigneeKind: detectAssigneeKind(assignee),
+      state: issue.state.name,
+      createdAt: issue.createdAt,
+      dueDate: issue.dueDate ?? undefined,
+      project: issue.project?.name ?? undefined,
+      repo: repo ?? undefined,
+      comments,
+    }
+  };
+}
+
+// Convert GitHub issue to UnifiedTask. `repo` is the detected "owner/name".
+export function githubToUnifiedTask(
+  issue: {
+    id: number;
+    number: number;
+    title: string;
+    body?: string;
+    state: string;
+    html_url: string;
+    labels?: { name: string }[];
+    assignee?: { login: string };
+    createdAt?: string;
+  },
+  repo: string | null = null,
+): UnifiedTask {
+  const assignee = issue.assignee?.login;
+  return {
+    id: `github:${issue.id}`,
+    source: 'github',
+    title: issue.title,
+    description: issue.body,
+    status: issue.state === 'closed' ? 'done' : 'todo',
+    metadata: {
+      identifier: `#${issue.number}`,
+      url: issue.html_url,
+      labels: issue.labels?.map(l => l.name),
+      assignee,
+      assigneeKind: detectAssigneeKind(assignee),
+      state: issue.state,
+      createdAt: issue.createdAt,
+      repo: repo ?? undefined,
+    }
+  };
+}
+
+// Group tasks by source
+export function groupTasksBySource(tasks: UnifiedTask[]): Map<TaskSource, UnifiedTask[]> {
+  const groups = new Map<TaskSource, UnifiedTask[]>();
+  for (const task of tasks) {
+    const existing = groups.get(task.source) || [];
+    existing.push(task);
+    groups.set(task.source, existing);
+  }
+  return groups;
+}
+
+// Filter tasks by status
+export function filterTasksByStatus(
+  tasks: UnifiedTask[],
+  statuses: UnifiedTask['status'][]
+): UnifiedTask[] {
+  return tasks.filter(t => statuses.includes(t.status));
+}

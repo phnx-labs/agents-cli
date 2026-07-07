@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Layout 7 — Task Staleness (Factory > Bench)</title>
+<style>
+  /* Tokens copied from extension/ui/settings/components/mission-control/design-system.css
+     and bench.css so the prototype lines up with the live UI. */
+  :root {
+    --brand: #a3e635;
+    --brand-700: #65a30d;
+    --brand-ring: rgba(163,230,53,0.25);
+    --led-running: #22C55E;
+    --led-running-glow: rgba(34,197,94,0.5);
+    --led-pending: #D4A72C;
+    --led-pending-glow: rgba(212,167,44,0.4);
+    --led-failed: #EF4444;
+    --led-failed-glow: rgba(239,68,68,0.5);
+    --led-idle: #4B5563;
+
+    --r-sm: 4px;
+    --r-md: 6px;
+
+    --ds-bg: #0a0a0a;
+    --ds-bg-panel: #141414;
+    --ds-bg-sunken: #050505;
+    --ds-bg-inset: #1a1a1a;
+    --ds-bg-recessed: #0f0f0f;
+    --ds-border: rgba(255,255,255,0.08);
+    --ds-border-strong: rgba(255,255,255,0.15);
+    --ds-bevel-light: rgba(255,255,255,0.06);
+    --ds-bevel-dark: rgba(0,0,0,0.6);
+    --ds-text: #E7E5E4;
+    --ds-text-muted: #A8A29E;
+    --ds-text-dim: #6E6A63;
+    --ds-text-faint: #44403C;
+
+    --shadow-emboss: inset 0 1px 0 var(--ds-bevel-light), inset 0 -1px 0 var(--ds-bevel-dark);
+    --shadow-inset: inset 0 2px 6px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(0,0,0,0.3);
+
+    /* Staleness scale — calibrated against the cycle (2 weeks = healthy). */
+    --stale-fresh:   var(--ds-text-faint);     /* < 7d  — invisible-grey, today's normal */
+    --stale-aging:   #C9A24A;                  /*  7–14d — amber, one cycle */
+    --stale-stale:   #E08749;                  /* 14–30d — orange, carried over */
+    --stale-rotten:  #EF4444;                  /* 30d+  — red, urgent */
+    --stale-rotten-glow: rgba(239,68,68,0.35);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--ds-bg);
+    color: var(--ds-text);
+    font-family: Geist, -apple-system, system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    letter-spacing: -0.005em;
+    min-height: 100vh;
+  }
+
+  body {
+    padding: 24px 32px 64px;
+    max-width: 1480px;
+    margin: 0 auto;
+  }
+
+  h1 {
+    font-family: "Geist Mono", "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ds-text-muted);
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    color: var(--ds-text-dim);
+    font-size: 12px;
+    margin-bottom: 28px;
+  }
+
+  /* ----- Side-by-side variant grid ----- */
+  .variants {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+  @media (max-width: 1200px) { .variants { grid-template-columns: repeat(2, 1fr); } }
+
+  .variant {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .variant h2 {
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--brand);
+  }
+  .variant p.note {
+    font-size: 11.5px;
+    color: var(--ds-text-dim);
+    line-height: 1.45;
+    margin-bottom: 6px;
+    min-height: 50px;
+  }
+  .variant .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    background: var(--ds-bg-panel);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--r-md);
+    padding: 8px;
+    box-shadow: var(--shadow-emboss);
+  }
+
+  /* ----- Composed list demo ----- */
+  .demo-frame {
+    border: 1px solid var(--ds-border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    background: var(--ds-bg-panel);
+    box-shadow: var(--shadow-emboss);
+    max-width: 420px;
+  }
+  .demo-frame-head {
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--ds-border);
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--ds-text-muted);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .demo-frame-head .count {
+    background: var(--ds-bg-recessed);
+    border: 1px solid var(--ds-border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    color: var(--ds-text);
+    font-size: 10px;
+  }
+  .demo-frame-body { padding: 6px 8px; max-height: 720px; overflow-y: auto; }
+
+  /* ===== TaskCard — verbatim from bench.css ===== */
+  .sw-task-card {
+    padding: 10px 12px;
+    border-radius: var(--r-md);
+    border: 1px solid var(--ds-border);
+    margin: 3px 0;
+    background: var(--ds-bg-panel);
+    box-shadow: var(--shadow-emboss);
+    position: relative;
+  }
+  .sw-task-card-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .sw-task-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ds-text);
+    line-height: 1.35;
+  }
+  .sw-task-card-desc {
+    font-size: 11.5px;
+    color: var(--ds-text-dim);
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .sw-task-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .sw-task-age {
+    font-family: "Geist Mono", monospace;
+    font-size: 10px;
+    color: var(--ds-text-faint);
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+  .sw-source-badge {
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 3px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .sw-source-badge.ln { background: #5e6ad2; }
+  .sw-source-badge.gh { background: #238636; }
+  .sw-priority-led {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.2);
+  }
+  .sw-priority-led.urgent { background: var(--led-failed); box-shadow: 0 0 6px var(--led-failed-glow); }
+  .sw-priority-led.high   { background: var(--led-pending); box-shadow: 0 0 4px var(--led-pending-glow); }
+  .sw-priority-led.medium { background: var(--led-idle); }
+  .sw-label-chip {
+    font-family: "Geist Mono", monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--ds-bg-recessed);
+    border: 1px solid var(--ds-border);
+    color: var(--ds-text-dim);
+    box-shadow: var(--shadow-inset);
+    letter-spacing: 0.02em;
+  }
+
+  /* ===== Variant A: tiered age coloring ===== */
+  .sw-task-age.tier-aging  { color: var(--stale-aging); }
+  .sw-task-age.tier-stale  { color: var(--stale-stale); font-weight: 600; }
+  .sw-task-age.tier-rotten {
+    color: var(--stale-rotten);
+    font-weight: 700;
+    text-shadow: 0 0 6px var(--stale-rotten-glow);
+  }
+
+  /* ===== Variant B: left edge ribbon by age ===== */
+  .sw-task-card.ribbon-aging  { border-left: 3px solid var(--stale-aging); }
+  .sw-task-card.ribbon-stale  { border-left: 3px solid var(--stale-stale); }
+  .sw-task-card.ribbon-rotten {
+    border-left: 3px solid var(--stale-rotten);
+    box-shadow: var(--shadow-emboss), inset 3px 0 12px -3px var(--stale-rotten-glow);
+  }
+
+  /* ===== Variant C: due-date chip + carryover marker ===== */
+  .sw-due-chip {
+    font-family: "Geist Mono", monospace;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    border: 1px solid var(--ds-border);
+    background: var(--ds-bg-recessed);
+    color: var(--ds-text-dim);
+    box-shadow: var(--shadow-inset);
+    letter-spacing: 0.02em;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .sw-due-chip::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--ds-text-faint);
+  }
+  .sw-due-chip.soon::before  { background: var(--stale-aging); }
+  .sw-due-chip.soon  { color: var(--stale-aging); border-color: rgba(201,162,74,0.4); }
+  .sw-due-chip.late  {
+    color: var(--stale-rotten);
+    border-color: rgba(239,68,68,0.45);
+    background: rgba(239,68,68,0.08);
+  }
+  .sw-due-chip.late::before  { background: var(--stale-rotten); box-shadow: 0 0 4px var(--stale-rotten-glow); }
+
+  .sw-carryover-badge {
+    font-family: "Geist Mono", monospace;
+    font-size: 9.5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--ds-text-muted);
+    background: var(--ds-bg-inset);
+    border: 1px dashed rgba(255,255,255,0.18);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .sw-carryover-badge::before {
+    content: "↺";
+    font-size: 11px;
+    line-height: 1;
+    color: var(--ds-text-dim);
+  }
+  .sw-carryover-badge.cycles-2 { color: var(--stale-aging); border-color: rgba(201,162,74,0.45); }
+  .sw-carryover-badge.cycles-3 {
+    color: var(--stale-rotten);
+    border-color: rgba(239,68,68,0.5);
+    background: rgba(239,68,68,0.06);
+  }
+
+  /* ===== Variant D: combined / age-bar ===== */
+  .sw-age-bar {
+    margin-top: 8px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--ds-bg-recessed);
+    box-shadow: var(--shadow-inset);
+    overflow: hidden;
+    position: relative;
+  }
+  .sw-age-bar > span {
+    position: absolute; inset: 0 auto 0 0;
+    background: linear-gradient(90deg, var(--led-running) 0%, var(--stale-aging) 50%, var(--stale-rotten) 100%);
+    border-radius: 2px;
+  }
+  .sw-age-bar-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: "Geist Mono", monospace;
+    font-size: 9.5px;
+    color: var(--ds-text-faint);
+    margin-top: 6px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .sw-age-bar-row .right { color: var(--stale-stale); font-weight: 600; }
+  .sw-age-bar-row .right.rotten { color: var(--stale-rotten); }
+
+  /* legend */
+  .legend {
+    margin-top: 28px;
+    padding: 12px 14px;
+    background: var(--ds-bg-panel);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-emboss);
+    display: flex; flex-wrap: wrap; gap: 18px;
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    color: var(--ds-text-dim);
+  }
+  .legend strong { color: var(--ds-text); font-weight: 700; margin-right: 6px; }
+  .legend .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    vertical-align: middle; margin-right: 6px;
+  }
+
+  h3.section {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ds-text-muted);
+    margin: 32px 0 12px;
+  }
+</style>
+</head>
+<body>
+
+  <h1>Layout 7 — Task staleness</h1>
+  <p class="subtitle">
+    Four ways to surface task age + delay on the Bench card. Same data on every card so you can A/B them.
+    Calibration assumed: cycle = 14 days. Fresh &lt; 7d · Aging 7–14d · Stale 14–30d · Rotten 30d+.
+  </p>
+
+  <!-- ============== VARIANTS ============== -->
+  <div class="variants">
+
+    <!-- Variant A: tiered age text ------------------------------------ -->
+    <section class="variant">
+      <h2>A · Tiered age text</h2>
+      <p class="note">
+        Smallest change. The existing "15d ago" chip gets a color tier
+        based on how old the task is. Nothing else moves.
+      </p>
+      <div class="stack">
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-1042</span>
+            <span class="sw-priority-led medium"></span>
+            <span class="sw-task-age">3d ago</span>
+          </div>
+          <div class="sw-task-card-title">Add pagination to /agents catalog</div>
+        </div>
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-887</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-task-age tier-aging">12d ago</span>
+          </div>
+          <div class="sw-task-card-title">rush CLI: support user-created agents in 'rush plugin'</div>
+        </div>
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-714</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-task-age tier-stale">22d ago</span>
+          </div>
+          <div class="sw-task-card-title">rush:crm skill: built against pre-2025-09-03 Notion API</div>
+        </div>
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-512</span>
+            <span class="sw-priority-led urgent"></span>
+            <span class="sw-task-age tier-rotten">47d ago</span>
+          </div>
+          <div class="sw-task-card-title">Stripe webhook retries drop on 502</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Variant B: left edge ribbon ----------------------------------- -->
+    <section class="variant">
+      <h2>B · Left edge ribbon</h2>
+      <p class="note">
+        Age tier paints the left border. Scannable down a long list:
+        red bars jump out without the title screaming.
+      </p>
+      <div class="stack">
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-1042</span>
+            <span class="sw-priority-led medium"></span>
+            <span class="sw-task-age">3d ago</span>
+          </div>
+          <div class="sw-task-card-title">Add pagination to /agents catalog</div>
+        </div>
+
+        <div class="sw-task-card ribbon-aging">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-887</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-task-age">12d ago</span>
+          </div>
+          <div class="sw-task-card-title">rush CLI: support user-created agents in 'rush plugin'</div>
+        </div>
+
+        <div class="sw-task-card ribbon-stale">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-714</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-task-age">22d ago</span>
+          </div>
+          <div class="sw-task-card-title">rush:crm skill: built against pre-2025-09-03 Notion API</div>
+        </div>
+
+        <div class="sw-task-card ribbon-rotten">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-512</span>
+            <span class="sw-priority-led urgent"></span>
+            <span class="sw-task-age">47d ago</span>
+          </div>
+          <div class="sw-task-card-title">Stripe webhook retries drop on 502</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Variant C: due date + carryover -------------------------------- -->
+    <section class="variant">
+      <h2>C · Due-date chip + carryover</h2>
+      <p class="note">
+        Surface what actually matters for delay: due date and "carried over N
+        cycles". Creation date stays as the faint right-aligned timestamp.
+      </p>
+      <div class="stack">
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-1042</span>
+            <span class="sw-priority-led medium"></span>
+            <span class="sw-task-age">3d ago</span>
+          </div>
+          <div class="sw-task-card-title">Add pagination to /agents catalog</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip">Due Jun 4</span>
+          </div>
+        </div>
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-887</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-task-age">12d ago</span>
+          </div>
+          <div class="sw-task-card-title">rush CLI: support user-created agents in 'rush plugin'</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip soon">Due in 2d</span>
+            <span class="sw-carryover-badge">Q2W9</span>
+          </div>
+        </div>
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-714</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-task-age">22d ago</span>
+          </div>
+          <div class="sw-task-card-title">rush:crm skill: built against pre-2025-09-03 Notion API</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip late">Overdue 5d</span>
+            <span class="sw-carryover-badge cycles-2">2 cycles</span>
+          </div>
+        </div>
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-512</span>
+            <span class="sw-priority-led urgent"></span>
+            <span class="sw-task-age">47d ago</span>
+          </div>
+          <div class="sw-task-card-title">Stripe webhook retries drop on 502</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip late">Overdue 19d</span>
+            <span class="sw-carryover-badge cycles-3">3 cycles</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Variant D: combined / age-bar ---------------------------------- -->
+    <section class="variant">
+      <h2>D · Combined (recommended)</h2>
+      <p class="note">
+        Ribbon + due chip + tiny age bar. Bar fills from green→amber→red as the
+        task ages past the cycle window. Carryover lives at top-right.
+      </p>
+      <div class="stack">
+
+        <div class="sw-task-card">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-1042</span>
+            <span class="sw-priority-led medium"></span>
+            <span class="sw-task-age">3d ago</span>
+          </div>
+          <div class="sw-task-card-title">Add pagination to /agents catalog</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip">Due Jun 4</span>
+          </div>
+          <div class="sw-age-bar"><span style="width: 22%"></span></div>
+          <div class="sw-age-bar-row"><span>AGE</span><span>3d / 14d cycle</span></div>
+        </div>
+
+        <div class="sw-task-card ribbon-aging">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-887</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-carryover-badge" style="margin-left:auto">Q2W9</span>
+          </div>
+          <div class="sw-task-card-title">rush CLI: support user-created agents in 'rush plugin'</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip soon">Due in 2d</span>
+            <span class="sw-task-age tier-aging">12d ago</span>
+          </div>
+          <div class="sw-age-bar"><span style="width: 85%"></span></div>
+          <div class="sw-age-bar-row"><span>AGE</span><span class="right">12d / 14d cycle</span></div>
+        </div>
+
+        <div class="sw-task-card ribbon-stale">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-714</span>
+            <span class="sw-priority-led high"></span>
+            <span class="sw-carryover-badge cycles-2" style="margin-left:auto">2 cycles</span>
+          </div>
+          <div class="sw-task-card-title">rush:crm skill: built against pre-2025-09-03 Notion API</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip late">Overdue 5d</span>
+            <span class="sw-task-age tier-stale">22d ago</span>
+          </div>
+          <div class="sw-age-bar"><span style="width: 100%"></span></div>
+          <div class="sw-age-bar-row"><span>AGE</span><span class="right">22d / 14d cycle · +8d</span></div>
+        </div>
+
+        <div class="sw-task-card ribbon-rotten">
+          <div class="sw-task-card-top">
+            <span class="sw-source-badge ln">RUSH-512</span>
+            <span class="sw-priority-led urgent"></span>
+            <span class="sw-carryover-badge cycles-3" style="margin-left:auto">3 cycles</span>
+          </div>
+          <div class="sw-task-card-title">Stripe webhook retries drop on 502</div>
+          <div class="sw-task-card-meta">
+            <span class="sw-due-chip late">Overdue 19d</span>
+            <span class="sw-task-age tier-rotten">47d ago</span>
+          </div>
+          <div class="sw-age-bar"><span style="width: 100%"></span></div>
+          <div class="sw-age-bar-row"><span>AGE</span><span class="right rotten">47d / 14d cycle · +33d</span></div>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ============== LEGEND ============== -->
+  <div class="legend">
+    <span><strong>Tiers</strong></span>
+    <span><span class="swatch" style="background: var(--stale-fresh)"></span> Fresh &lt; 7d</span>
+    <span><span class="swatch" style="background: var(--stale-aging)"></span> Aging 7–14d</span>
+    <span><span class="swatch" style="background: var(--stale-stale)"></span> Stale 14–30d</span>
+    <span><span class="swatch" style="background: var(--stale-rotten)"></span> Rotten 30d+</span>
+    <span style="margin-left:auto"><strong>Carryover</strong> shows source cycle (e.g. <em>Q2W9</em>) or count (e.g. <em>2 cycles</em>) when rolled over.</span>
+  </div>
+
+  <!-- ============== COMPOSED LIST DEMO ============== -->
+  <h3 class="section">Composed in the live Bench list (Variant D)</h3>
+
+  <div class="demo-frame">
+    <div class="demo-frame-head">
+      WORK QUEUE
+      <span class="count">12</span>
+      <span style="color: var(--ds-text-faint); margin-left:auto">Priority</span>
+    </div>
+    <div class="demo-frame-body">
+
+      <div class="sw-task-card">
+        <div class="sw-task-card-top">
+          <span class="sw-source-badge ln">RUSH-1042</span>
+          <span class="sw-priority-led medium"></span>
+          <span class="sw-task-age">3d ago</span>
+        </div>
+        <div class="sw-task-card-title">Add pagination to /agents catalog</div>
+        <div class="sw-task-card-desc">Catalog grew past 200 entries. Need offset/limit + Linear-style cursor.</div>
+        <div class="sw-task-card-meta">
+          <span class="sw-due-chip">Due Jun 4</span>
+        </div>
+      </div>
+
+      <div class="sw-task-card ribbon-aging">
+        <div class="sw-task-card-top">
+          <span class="sw-source-badge gh">#412</span>
+          <span class="sw-priority-led high"></span>
+          <span class="sw-carryover-badge" style="margin-left:auto">Q2W9</span>
+        </div>
+        <div class="sw-task-card-title">Codex resource sync hangs on 401</div>
+        <div class="sw-task-card-desc">Refresh path not retried when token expired mid-stream.</div>
+        <div class="sw-task-card-meta">
+          <span class="sw-due-chip soon">Due in 1d</span>
+          <span class="sw-task-age tier-aging">8d ago</span>
+        </div>
+      </div>
+
+      <div class="sw-task-card ribbon-aging">
+        <div class="sw-task-card-top">
+          <span class="sw-source-badge ln">RUSH-887</span>
+          <span class="sw-priority-led high"></span>
+          <span class="sw-carryover-badge" style="margin-left:auto">Q2W9</span>
+        </div>
+        <div class="sw-task-card-title">rush CLI: support user-created agents in 'rush plugin {install,list,uninstall}'</div>
+        <div class="sw-task-card-desc">User-created agents (made via the new-agent wizard or personalize flow in CreateAgentModal) live as plain directories…</div>
+        <div class="sw-task-card-meta">
+          <span class="sw-label-chip">bisma@getrush.ai</span>
+          <span class="sw-due-chip soon">Due in 2d</span>
+          <span class="sw-task-age tier-aging">12d ago</span>
+        </div>
+      </div>
+
+      <div class="sw-task-card ribbon-stale">
+        <div class="sw-task-card-top">
+          <span class="sw-source-badge ln">RUSH-861</span>
+          <span class="sw-priority-led high"></span>
+          <span class="sw-carryover-badge cycles-2" style="margin-left:auto">2 cycles</span>
+        </div>
+        <div class="sw-task-card-title">[CAP-UI] Capability/Skill/Connection detail pages + Skills rail rebuild + Connections rail</div>
+        <div class="sw-task-card-desc">Parent: RUSH-857. Depends on CAP-INFRA (RUSH-859) for catalog data. Scope: three new detail pages…</div>
+        <div class="sw-task-card-meta">
+          <span class="sw-label-chip">Muqsit</span>
+          <span class="sw-label-chip">engineering</span>
+          <span class="sw-due-chip late">Overdue 2d</span>
+          <span class="sw-task-age tier-stale">18d ago</span>
+        </div>
+      </div>
+
+      <div class="sw-task-card ribbon-stale">
+        <div class="sw-task-card-top">
+          <span class="sw-source-badge ln">RUSH-714</span>
+          <span class="sw-priority-led high"></span>
+          <span class="sw-carryover-badge cycles-2" style="margin-left:auto">2 cycles</span>
+        </div>
+        <div class="sw-task-card-title">rush:crm skill: built against pre-2025-09-03 Notion API — 4 bugs found in first run</div>
+        <div class="sw-task-card-desc">The rush:crm skill (just-built ~/.agents/plugins/rush/skills/crm/) was implemented against pre-2025-09-03 Notion API semantics.</div>
+        <div class="sw-task-card-meta">
+          <span class="sw-due-chip late">Overdue 5d</span>
+          <span class="sw-task-age tier-stale">22d ago</span>
+        </div>
+      </div>
+
+      <div class="sw-task-card ribbon-rotten">
+        <div class="sw-task-card-top">
+          <span class="sw-source-badge ln">RUSH-512</span>
+          <span class="sw-priority-led urgent"></span>
+          <span class="sw-carryover-badge cycles-3" style="margin-left:auto">3 cycles</span>
+        </div>
+        <div class="sw-task-card-title">Stripe webhook retries drop on 502</div>
+        <div class="sw-task-card-desc">Retry loop bails after first 5xx instead of exponential backoff. Confirmed via prod log replay on 2026-04-12.</div>
+        <div class="sw-task-card-meta">
+          <span class="sw-label-chip">billing</span>
+          <span class="sw-due-chip late">Overdue 19d</span>
+          <span class="sw-task-age tier-rotten">47d ago</span>
+        </div>
+      </div>
+
+      <div class="sw-task-card ribbon-rotten">
+        <div class="sw-task-card-top">
+          <span class="sw-source-badge gh">#287</span>
+          <span class="sw-priority-led urgent"></span>
+          <span class="sw-carryover-badge cycles-3" style="margin-left:auto">4 cycles</span>
+        </div>
+        <div class="sw-task-card-title">Electron auto-updater silently fails on macOS 15.4 arm64</div>
+        <div class="sw-task-card-desc">Updater downloads zip but never staging. dmg fallback works. Affects all alpha builds &gt;= 0.1.0-alpha.12.</div>
+        <div class="sw-task-card-meta">
+          <span class="sw-due-chip late">Overdue 41d</span>
+          <span class="sw-task-age tier-rotten">62d ago</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <h3 class="section">Notes for picking a direction</h3>
+  <div class="legend" style="flex-direction: column; gap: 8px; align-items: flex-start;">
+    <div>
+      <strong>If creation date is the only signal we trust:</strong> ship Variant A (tiered text) + B (ribbon).
+      Zero new data, biggest visual lift. Two lines of conditional CSS in <code>TaskCard.tsx</code>.
+    </div>
+    <div>
+      <strong>If we pull <code>dueDate</code> through to the webview:</strong> Variant C is the right answer.
+      The data already lives in <code>extension/src/core/tasks.ts</code> line 26 (<code>dueDate</code>) and
+      <code>extension/src/vscode/linear.vscode.ts</code> line 85 — it's just not on the <code>UnifiedTask.metadata</code>
+      shape in <code>extension/ui/settings/types/index.ts</code> yet. Adding it is ~5 lines.
+    </div>
+    <div>
+      <strong>For "carried over N cycles":</strong> requires fetching <code>cycle</code> on each issue from Linear
+      (not just the active cycle). Roughly: extend the GraphQL query in <code>linear.vscode.ts</code>, store
+      the cycle number on metadata, compare against active cycle to compute carryover count.
+    </div>
+    <div>
+      <strong>Recommended ship sequence:</strong> A → B → C → D. Each step is independent and improves the
+      signal without rewriting the card.
+    </div>
+  </div>
+
+</body>
+</html>
