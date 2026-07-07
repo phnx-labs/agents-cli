@@ -409,6 +409,33 @@ export async function runDaemon(): Promise<void> {
   const deviceProbeInterval = setInterval(() => { void runDeviceProbe(); }, 3 * 60_000);
   const deviceProbeKickoff = setTimeout(() => { void runDeviceProbe(); }, 15_000);
 
+  // tmux hook reconcile: retrofit the guarded `pane-died` hook onto managed
+  // `agents run` sessions a pre-fix binary left with the old unconditional hook
+  // (which detached the whole client — kicking the user out of the view — when
+  // they exited a split they'd opened). Non-destructive: set-hook only, never a
+  // kill or detach. A per-session schema marker makes steady-state a no-op, so
+  // this stays cheap at ~every 5 min, plus once ~20s after startup so a
+  // just-upgraded daemon heals still-running sessions without waiting for them to
+  // cycle or the shared server to be recycled.
+  let reconcilingTmux = false;
+  const runTmuxReconcile = async () => {
+    if (reconcilingTmux) return;
+    reconcilingTmux = true;
+    try {
+      const { isTmuxInstalled } = await import('./tmux/binary.js');
+      if (!isTmuxInstalled()) return;
+      const { reconcileSessionHooks } = await import('./tmux/session.js');
+      const r = await reconcileSessionHooks();
+      if (r.reconciled > 0) log('INFO', `tmux: retrofitted pane-died hook on ${r.reconciled} session(s)`);
+    } catch (err) {
+      log('ERROR', `tmux reconcile failed: ${(err as Error).message}`);
+    } finally {
+      reconcilingTmux = false;
+    }
+  };
+  const tmuxReconcileInterval = setInterval(() => { void runTmuxReconcile(); }, 5 * 60_000);
+  const tmuxReconcileKickoff = setTimeout(() => { void runTmuxReconcile(); }, 20_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     scheduler.reloadAll();
@@ -429,6 +456,8 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(healKickoff);
     clearInterval(deviceProbeInterval);
     clearTimeout(deviceProbeKickoff);
+    clearInterval(tmuxReconcileInterval);
+    clearTimeout(tmuxReconcileKickoff);
     removeDaemonPid();
     process.exit(0);
   };

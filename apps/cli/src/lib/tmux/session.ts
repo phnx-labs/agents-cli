@@ -335,6 +335,96 @@ export async function setSessionHook(name: string, hook: string, command: string
 }
 
 /**
+ * Schema version of the `pane-died` hook installed on managed `agents run`
+ * sessions. Bump whenever the hook's SHAPE changes so the daemon reconcile
+ * (reconcileSessionHooks) knows to re-stamp live sessions a prior binary left on
+ * an older shape.
+ *   v1 — the original unconditional `detach-client`: ANY pane death (including a
+ *        user exiting a split they opened) tore down the whole client.
+ *   v2 — `#{hook_pane}`-guarded: only the AGENT pane dying detaches; a user
+ *        split's death runs `kill-pane`, closing just that split.
+ */
+export const AGENT_HOOK_SCHEMA = 2;
+/** Per-session tmux user-option that records which AGENT_HOOK_SCHEMA a session's hook is at. */
+const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
+
+/**
+ * The guarded `pane-died` hook. Detach the client ONLY when the agent pane dies
+ * (so the blocking attach in runInTmux returns and the exit status can be read);
+ * a user split's death falls through to `kill-pane`, which — because the hook
+ * runs in the dead pane's context — closes that split in place. Single source of
+ * truth: both the spawn-wrap (exec.ts) and the daemon reconcile build the hook
+ * here, so the two can never drift.
+ */
+export function agentPaneDiedHook(sessionName: string, agentPane: string): string {
+  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'kill-pane'`;
+}
+
+/** Stamp a session's hook-schema marker to the current version. */
+export async function markSessionHookSchema(name: string, socket?: string): Promise<void> {
+  const sock = socket ?? getDefaultSocketPath();
+  await runTmux({ socket: sock, args: ['set-option', '-t', name, HOOK_SCHEMA_OPTION, String(AGENT_HOOK_SCHEMA)], throwOnError: false }).catch(() => {});
+}
+
+/** Read a session's hook-schema marker; undefined when unset (pre-marker sessions). */
+async function readHookSchema(name: string, socket: string): Promise<string | undefined> {
+  const res = await runTmux({ socket, args: ['show-options', '-v', '-t', name, HOOK_SCHEMA_OPTION], throwOnError: false }).catch(() => null);
+  if (!res || res.code !== 0) return undefined;
+  const v = res.stdout.trim();
+  return v === '' ? undefined : v;
+}
+
+/**
+ * Lowest pane id (`%N`) in a session — the first pane created, i.e. the agent
+ * pane, since user splits are always created later and get higher ids. Fallback
+ * for sessions whose SessionMeta (which records the agent pane) predates meta
+ * persistence. Undefined when the session has no panes (already torn down).
+ */
+async function lowestPaneId(name: string, socket: string): Promise<string | undefined> {
+  const res = await runTmux({ socket, args: ['list-panes', '-t', name, '-F', '#{pane_id}'], throwOnError: false }).catch(() => null);
+  if (!res || res.code !== 0) return undefined;
+  const ids = res.stdout.split('\n').map(l => l.trim()).filter(id => /^%\d+$/.test(id));
+  if (!ids.length) return undefined;
+  return ids.reduce((lo, id) => (parseInt(id.slice(1), 10) < parseInt(lo.slice(1), 10) ? id : lo));
+}
+
+/**
+ * Retrofit the current guarded `pane-died` hook onto every managed `agents run`
+ * session whose hook predates AGENT_HOOK_SCHEMA. Idempotent and NON-DESTRUCTIVE:
+ * it only `set-hook`s (never kills a pane or detaches a client), so a long-lived
+ * shared server started by a pre-fix binary — whose still-running sessions carry
+ * the old unconditional hook that kicked the user out of the whole view when they
+ * exited a split — self-heals in place, without waiting for those agents to exit
+ * or for the server to be recycled.
+ *
+ * The daemon calls this on a light interval. The per-session `@ag_hook_schema`
+ * marker makes steady-state a cheap no-op: a session already at the current
+ * schema is skipped. Only run-wrapped sessions (`ag-` prefix) are touched — an
+ * externally-created session on the socket keeps whatever hook it set.
+ */
+export async function reconcileSessionHooks(socket?: string): Promise<{ scanned: number; reconciled: number }> {
+  const sock = socket ?? getDefaultSocketPath();
+  if (!fs.existsSync(sock)) return { scanned: 0, reconciled: 0 };
+  let sessions: ListedSession[];
+  try {
+    sessions = await listSessions({ socket: sock });
+  } catch {
+    return { scanned: 0, reconciled: 0 };
+  }
+  let reconciled = 0;
+  for (const s of sessions) {
+    if (!s.name.startsWith('ag-')) continue; // only run-wrapped sessions
+    if (await readHookSchema(s.name, sock) === String(AGENT_HOOK_SCHEMA)) continue;
+    const agentPane = s.meta?.pane ?? await lowestPaneId(s.name, sock);
+    if (!agentPane) continue;
+    await setSessionHook(s.name, 'pane-died', agentPaneDiedHook(s.name, agentPane), sock);
+    await markSessionHookSchema(s.name, sock);
+    reconciled++;
+  }
+  return { scanned: sessions.length, reconciled };
+}
+
+/**
  * List live sessions on the socket. Reconciles meta JSONs against tmux's view:
  *  - tmux session with no meta → returned without `meta` (external session)
  *  - meta file with no tmux session → meta deleted (stale)
