@@ -390,9 +390,11 @@ export function formatUsageSummary(
 
 /**
  * Derive an account's real throttle state from its live usage windows — the
- * same signal `agents usage` shows and balanced rotation trusts
- * (`getRoutingUsedPercent` in rotate.ts). A window at 100% utilization means
- * the account is throttled until that window resets.
+ * single signal both the `agents view` badge and run-rotation eligibility share
+ * (`hasUsageAvailable` in rotate.ts treats a `rate_limited` verdict here as
+ * ineligible). A window at 100% utilization means the account is throttled until
+ * that window resets. Rotation *weighting* still ranks eligible accounts by
+ * weekly headroom (`getRoutingUsedPercent`); this function is the yes/no gate.
  *
  * Returns `null` when there is no snapshot, so callers render no badge rather
  * than a misleading one. This deliberately never consults
