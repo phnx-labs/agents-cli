@@ -68,7 +68,16 @@ export function ProjectsPane({ projects, linearProjects, pickedFolder, onSave, o
   const save = () => {
     if (!canSave) return
     const base = editingId ? projects.find((p) => p.id === editingId) ?? null : null
-    const id = editingId ?? (repoSlug.trim() || name.trim()).toLowerCase().replace(/\s+/g, '-')
+    let id = editingId ?? (repoSlug.trim() || name.trim()).toLowerCase().replace(/\s+/g, '-')
+    // New project: never overwrite an existing entry that shares a name/slug (e.g. two
+    // manual projects both named "Agents CLI" with no repo slug). Disambiguate with a
+    // numeric suffix so upsertManagedProject can't silently drop the first one.
+    if (!editingId && projects.some((p) => p.id === id)) {
+      const stem = id
+      let n = 2
+      while (projects.some((p) => p.id === `${stem}-${n}`)) n++
+      id = `${stem}-${n}`
+    }
     const linear = linearProjects.find((l) => l.id === linearProjectId) ?? null
     onSave({
       id,

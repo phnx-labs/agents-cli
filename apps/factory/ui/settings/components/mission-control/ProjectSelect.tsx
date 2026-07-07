@@ -1,6 +1,7 @@
 // Project / Repo picker. Ports the prototype's renderProject() (dispatch.html):
-// ranked-by-usage dropdown, MOST USED badge on the top entry, uses count, and the
-// mono path sub-line for local projects (hidden for cloud repos).
+// renders items in their incoming order (confidence-first for managed projects,
+// usage order for cloud repos), a MOST USED badge on the genuine max-uses entry, a
+// Linear pill + confidence meter, and the mono path sub-line for local projects.
 import React from 'react'
 import { useRef, useState } from 'react'
 import { Icon } from './icons'
@@ -54,10 +55,13 @@ export function ProjectSelect({ items, value, cloud, onChange }: ProjectSelectPr
   const ref = useRef<HTMLDivElement>(null)
   useClickAway(ref, () => setOpen(false), open)
 
-  const ranked = [...items].sort((a, b) => b.uses - a.uses)
-  const sel = ranked.find(i => i.id === value) ?? ranked[0]
+  // Preserve the incoming order: for managed projects that is buildManagedTargets'
+  // confidence-first ranking (so the dropdown matches the sidebar); for cloud repos
+  // it is usage order. The MOST USED badge still marks the genuine max-uses entry,
+  // wherever it lands — never re-flatten confidence back into pure usage order.
+  const sel = items.find(i => i.id === value) ?? items[0]
   if (!sel) return null
-  const top = ranked[0]
+  const top = items.reduce((m, i) => (i.uses > m.uses ? i : m), items[0])
 
   return (
     <>
@@ -67,7 +71,7 @@ export function ProjectSelect({ items, value, cloud, onChange }: ProjectSelectPr
           <span className="caret" style={{ marginLeft: 'auto' }}><Icon name="chevD" size={13} /></span>
         </button>
         <div className="dd-menu">
-          {ranked.map(i => (
+          {items.map(i => (
             <div
               key={i.id}
               className={`opt ${i.id === sel.id ? 'sel' : ''}`}
