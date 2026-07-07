@@ -27,6 +27,7 @@ import {
   SessionAgentType
 } from '../core/utils';
 import { registerTerminal as registerSessionTracker } from './sessionTracker';
+import { relabelTmuxPane } from './tmux';
 
 // getTerminalsByAgentType runs 5x (one per agent type) on every 10s floor poll
 // and again on every terminal open/close. Its per-terminal/per-session debug
@@ -317,6 +318,11 @@ export async function setLabel(
     schedulePersist();
 
     stopAutoLabelPoller(terminal);
+
+    // Keep the tmux pane border in sync with the tab. A manual label wins over
+    // the auto-label; clearing it (label=undefined) falls back to the auto-label.
+    // Fire-and-forget — tmux styling is best-effort, never load-bearing.
+    void relabelTmuxPane(terminal, label ?? entry.autoLabel).catch(() => { /* ignore */ });
   } else {
     console.log(`[DEBUG setLabel] No entry found for terminal - label NOT saved!`);
   }
@@ -331,6 +337,10 @@ export function setAutoLabel(terminal: vscode.Terminal, autoLabel: string | unde
       entry.autoLabelPollerId = undefined;
       console.log(`[TERMINALS] Cleared auto-label poller for terminal "${terminal.name}" - label set: "${autoLabel}"`);
     }
+    // Surface the resolved topic in the tmux pane border (a manual label, if
+    // set, still takes precedence). This fires even when the terminal isn't
+    // focused — unlike the tab rename, which must briefly activate it.
+    void relabelTmuxPane(terminal, entry.label ?? autoLabel).catch(() => { /* ignore */ });
   }
 }
 
