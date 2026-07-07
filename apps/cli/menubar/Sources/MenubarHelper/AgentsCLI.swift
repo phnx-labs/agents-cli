@@ -233,7 +233,9 @@ enum AgentsCLI {
                --description-file -
 
            Pick an HONEST priority. Keep the title short and specific.
-        5. Print ONLY the resulting `Created RUSH-###: <title>` line and nothing else.
+        5. Print the resulting `Created RUSH-###: <title>` line, then on the NEXT line print
+        the ticket's Linear URL as `URL: https://linear.app/…` (the `linear create` output or
+        `\(linear) tasks <id>` gives it). Nothing else — no commentary.
         """
     }
 
@@ -256,8 +258,19 @@ enum AgentsCLI {
                                        : "The ticket agent exited with an error.")
                 return
             }
-            Notifier.post(title: "Created \(id)", body: shortenForNotice(note))
+            // Attach the ticket URL so the notification is clickable → opens it.
+            Notifier.post(title: "Created \(id)", body: shortenForNotice(note),
+                          url: parseTicketURL(output))
         }
+    }
+
+    // The Linear ticket URL the agent printed (so the notification can deep-link).
+    static func parseTicketURL(_ output: String) -> String? {
+        guard let re = try? NSRegularExpression(pattern: "https://linear\\.app/\\S+"),
+              let m = re.matches(in: output, range: NSRange(output.startIndex..., in: output)).last,
+              let r = Range(m.range, in: output) else { return nil }
+        // Trim trailing punctuation the model may append.
+        return String(output[r]).trimmingCharacters(in: CharacterSet(charactersIn: ").,]"))
     }
 
     // Pull the `RUSH-123` / `ENG-45` identifier out of the agent's final line.

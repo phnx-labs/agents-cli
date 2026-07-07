@@ -321,11 +321,41 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 // Local notifications for the ticket flow. NSUserNotification is deprecated but
 // needs no framework link and no authorization prompt — right for a signed
 // menu-bar helper delivering an occasional user-invoked confirmation.
+//
+// Clicking a completion notification opens the created ticket. NSUserNotification
+// carries no click target on its own, so stash the URL in userInfo and open it
+// from the center delegate's didActivate. Also force-present the banner even when
+// this (accessory) app is frontmost, so the "Created RUSH-####" notice never gets
+// swallowed silently.
+final class NotifierDelegate: NSObject, NSUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: NSUserNotificationCenter,
+                                didActivate notification: NSUserNotification) {
+        if let s = notification.userInfo?["url"] as? String, let url = URL(string: s) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+    func userNotificationCenter(_ center: NSUserNotificationCenter,
+                                shouldPresent notification: NSUserNotification) -> Bool { true }
+}
+
 enum Notifier {
-    static func post(title: String, body: String) {
+    private static let delegate = NotifierDelegate()
+    private static var wired = false
+
+    // `url`, when present, is opened on click (the created ticket).
+    static func post(title: String, body: String, url: String? = nil) {
+        if !wired {
+            NSUserNotificationCenter.default.delegate = delegate
+            wired = true
+        }
         let note = NSUserNotification()
         note.title = title
         note.informativeText = body
+        if let url {
+            note.userInfo = ["url": url]
+            note.hasActionButton = true
+            note.actionButtonTitle = "Open"
+        }
         NSUserNotificationCenter.default.deliver(note)
     }
 }

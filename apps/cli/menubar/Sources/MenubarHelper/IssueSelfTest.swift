@@ -62,6 +62,14 @@ enum IssueSelfTest {
         check("no ticket → nil", AgentsCLI.parseCreatedTicketID("could not create the issue") == nil)
         check("takes the final 'Created' over an earlier reasoning mention",
               AgentsCLI.parseCreatedTicketID("I saw Created RUSH-99 referenced.\nCreated RUSH-200: real") == "RUSH-200")
+
+        // parseTicketURL pulls the Linear URL (for the clickable notification).
+        check("parses the ticket URL",
+              AgentsCLI.parseTicketURL("Created RUSH-200: real\nURL: https://linear.app/getrush/issue/RUSH-200/real")
+              == "https://linear.app/getrush/issue/RUSH-200/real")
+        check("trims trailing punctuation on the URL",
+              AgentsCLI.parseTicketURL("see https://linear.app/getrush/issue/RUSH-9).") == "https://linear.app/getrush/issue/RUSH-9")
+        check("no URL → nil", AgentsCLI.parseTicketURL("Created RUSH-200: real") == nil)
     }
 
     // The meta-prompt must carry the user's note and the screenshot path forward
