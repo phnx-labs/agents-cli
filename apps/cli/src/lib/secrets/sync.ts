@@ -28,6 +28,7 @@ import {
 } from './bundles.js';
 import { rushSyncBackend } from './drivers/rush.js';
 import type { SyncBackend, SyncEnvelope, RemoteBundleSummary, EncryptedEnvelope } from './sync-backend.js';
+import { emit } from '../events.js';
 
 // Re-export the envelope + summary types so existing importers of this module
 // keep resolving them from here.
@@ -230,6 +231,18 @@ export interface PushOptions {
 export async function pushBundle(name: string, opts: PushOptions): Promise<{ updated_at: string }> {
   validateBundleName(name);
   const snap = snapshotBundle(name);
+  // Push reads every plaintext value and uploads the (client-side-encrypted)
+  // bundle off-machine — the most sensitive read there is. It bypasses
+  // readAndResolveBundleEnv, so audit it explicitly. Values never enter the
+  // payload; only the bundle name and how many keys were read.
+  emit('secrets.get', {
+    module: 'secrets',
+    bundle: name,
+    caller: 'sync push',
+    source: 'sync-push',
+    status: 'success',
+    keyCount: Object.keys(snap.secrets).length,
+  });
   const envelope = encryptBlob(JSON.stringify(snap), opts.passphrase);
   const updated_at = new Date().toISOString();
   const payload: SyncEnvelope = { envelope, updated_at };
