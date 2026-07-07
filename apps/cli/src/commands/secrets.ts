@@ -76,6 +76,7 @@ import {
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
 import { parseDuration } from '../lib/hooks/cache.js';
+import { emit } from '../lib/events.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { registerSecretsSyncCommands } from './secrets-sync.js';
@@ -706,6 +707,20 @@ export function registerSecretsCommands(program: Command): void {
           } catch {
             // Fall through to masked output on cancellation / batch failure.
           }
+          // Revealing plaintext bypasses readAndResolveBundleEnv (the usual
+          // audit chokepoint), so emit here — a `--reveal` exposes real values
+          // and must show up in `agents events --module secrets`. Values are
+          // never included, only how many keys were exposed.
+          if (revealedValues.size > 0) {
+            emit('secrets.get', {
+              module: 'secrets',
+              bundle: bundle.name,
+              caller: 'view --reveal',
+              source: 'reveal',
+              status: 'success',
+              keyCount: revealedValues.size,
+            });
+          }
         }
         for (const e of entries) {
           if (e.kind === 'keychain') {
@@ -748,6 +763,9 @@ export function registerSecretsCommands(program: Command): void {
         // so `$(agents secrets get NAME)` captures it cleanly); diagnostics go
         // to stderr so they never pollute the captured value.
         const value = getKeychainToken(item);
+        // Raw item reads bypass readAndResolveBundleEnv, so audit here too.
+        // `item` is the keychain service name, never the value.
+        emit('secrets.get', { module: 'secrets', item, source: 'raw-item', status: 'success' });
         process.stdout.write(value.endsWith('\n') ? value : `${value}\n`);
       } catch {
         // Missing item is a normal, quiet outcome for a hook probe: exit 1,
@@ -776,6 +794,8 @@ export function registerSecretsCommands(program: Command): void {
         // so `agents secrets get` can read them back without a password sheet;
         // on Linux it goes through secret-tool / encrypted-file fallback.
         setKeychainToken(item, value);
+        // Raw item writes bypass writeBundle (the usual secrets.set chokepoint).
+        emit('secrets.set', { module: 'secrets', item, source: 'raw-item' });
         console.error(chalk.green(`Stored keychain item '${item}'.`));
       } catch (err) {
         if (isPromptCancelled(err)) return;

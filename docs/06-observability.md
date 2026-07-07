@@ -45,6 +45,19 @@ prefix (`teams` catches `teams create`); `--event` filters a typed event
 (repeatable); `--since` takes `2h`/`7d`/`4w` or an ISO date. `--json` emits the
 raw records for external consumers.
 
+**Secret access is audited at every read, not just at the command.** `agents
+events --module secrets` (or `--event secrets.get`) surfaces every path that
+resolves a secret VALUE — `run --secrets`, `secrets exec`/`export`, the MCP
+`get_secret` tool, `secrets view --reveal`, the raw `secrets get <item>`,
+`secrets push` (which reads the whole bundle to upload it), and remote
+`bundle@host` resolves. Each record carries a `source` telling you HOW it was
+read — `keychain` (real Touch-ID read), `agent` (served from the unlocked
+broker), `reveal`, `raw-item`, `sync-push`, or `remote` (with the `host`) — plus
+the `bundle`, `caller`, `keyCount`, and OS-user/host/transport. The resolved
+**value is never written to the log** — only names and counts. Note the event
+log has a 7-day retention (older daily files are pruned), so export what you need
+for long-term records.
+
 External tools (dashboards, voice assistants, CI runners, monitoring) can read
 fleet state via three canonical `--json` sources. No direct DB access, no re-parsing
 of agent-specific formats, no auth to manage.

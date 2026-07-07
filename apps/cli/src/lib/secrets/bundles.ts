@@ -440,14 +440,14 @@ export function writeBundle(bundle: SecretsBundle): void {
   // of the tier. On an un-updated pinned helper this write fails loudly (the
   // no-ACL command is missing) rather than silently landing an ACL'd item.
   itemStore(backend).set(bundleMetaItem(bundle.name), json, { noAcl: bundle.policy === 'never' });
-  emit('secrets.set', { bundle: bundle.name });
+  emit('secrets.set', { module: 'secrets', bundle: bundle.name });
 }
 
 export function deleteBundle(name: string): boolean {
   validateBundleName(name);
   const deleted = itemStore(bundleBackend(name)).delete(bundleMetaItem(name));
   if (deleted) {
-    emit('secrets.delete', { bundle: name });
+    emit('secrets.delete', { module: 'secrets', bundle: name });
   }
   return deleted;
 }
@@ -847,6 +847,7 @@ export function readAndResolveBundleEnv(
       const filtered = filterAgentHitBySubsetAndExpiry(hit, opts);
       stampLastUsed(filtered.bundle);
       emit('secrets.get', {
+        module: 'secrets',
         bundle: name,
         caller: opts.caller,
         status: 'success',
@@ -940,6 +941,7 @@ export function readAndResolveBundleEnv(
 
   const emitReadAudit = (status: 'success' | 'error', err?: unknown) => {
     emit('secrets.get', {
+      module: 'secrets',
       bundle: bundle.name,
       caller: opts.caller,
       status,
@@ -1122,7 +1124,7 @@ export function renameBundle(oldName: string, newName: string, opts: RenameOptio
   }
   deleteBundle(oldName);
 
-  emit('secrets.rename', { from: oldName, to: newName });
+  emit('secrets.rename', { module: 'secrets', from: oldName, to: newName });
 }
 
 /**
