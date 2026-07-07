@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, formatPaneTail, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -237,6 +237,31 @@ describe('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
 
   it('does not wrap when tmux is not installed', () => {
     expect(shouldWrapInTmux({ ...base, tmuxAvailable: false })).toBe(false);
+  });
+});
+
+describe('formatPaneTail (dead-pane failure recap)', () => {
+  it('keeps the last N non-empty lines, right-stripped, in order', () => {
+    const raw = 'a  \n\n b\nc\t\n\n';
+    expect(formatPaneTail(raw, 2)).toBe(' b\nc');
+  });
+
+  it('surfaces the real ENOENT crash a fast-failing agent leaves in the pane', () => {
+    // The exact class of output that used to be swallowed by the bare [detached].
+    const raw = [
+      'Error: spawn /Users/x/.agents/.history/versions/codex/0.116.0/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/codex/codex ENOENT',
+      "    at ChildProcess._handle.onexit (node:internal/child_process:285:19)",
+      '',
+      'Pane is dead (status 1, Tue Jul  7 07:06:21 2026)',
+    ].join('\n');
+    const out = formatPaneTail(raw);
+    expect(out).toContain('ENOENT');
+    expect(out).toContain('Pane is dead (status 1');
+    expect(out).not.toMatch(/\n\n/); // blank lines dropped
+  });
+
+  it('returns empty string for an all-whitespace capture', () => {
+    expect(formatPaneTail('  \n\n\t\n')).toBe('');
   });
 });
 

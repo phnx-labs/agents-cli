@@ -224,6 +224,28 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(exit.dead).toBe(false);
   });
 
+  it('a fast-failing agent leaves its error readable in the dead pane (runInTmux failure recap)', async () => {
+    // The exact scenario runInTmux now surfaces: an agent that dies the instant
+    // it spawns (e.g. a gutted install crashing with ENOENT). Before the fix the
+    // pane-died hook detached the client and the error vanished; the recap works
+    // only because remain-on-exit keeps the dead pane capturable until teardown.
+    const meta = await createSession({
+      name: 'fastfail',
+      cmd: `sh -c 'echo "spawn .../codex ENOENT" >&2; exit 1'`,
+      socket,
+    });
+    expect(meta.pane).toBeTruthy();
+    await wait(400);
+    const exit = await paneExitStatus(meta.pane!, socket);
+    expect(exit.dead).toBe(true);
+    expect(exit.status).toBe(1);
+    // capture-pane must reach into scrollback (as runInTmux does with -S -200)
+    // to recover the crash output — the dead pane's VISIBLE screen is just the
+    // "Pane is dead" banner, so a history-less capture would miss the error.
+    const screen = await capturePane({ name: 'fastfail', pane: meta.pane!, socket, lines: 200 });
+    expect(screen).toContain('ENOENT');
+  });
+
   it('remain-on-exit keeps the pane around after the launched command finishes', async () => {
     // A short-lived command would normally collapse the pane and the session
     // with it. With remain-on-exit on, the session stays alive.

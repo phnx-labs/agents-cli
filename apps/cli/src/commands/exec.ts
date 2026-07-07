@@ -39,6 +39,10 @@ interface ExecCommandActionOptions {
   sessionId?: string;
   verbose?: boolean;
   raw?: boolean;
+  /** `--no-tmux` → commander sets this false (default true) to bypass the tmux wrapper. */
+  tmux?: boolean;
+  /** `--disable-tmux` → explicit alias of --no-tmux. */
+  disableTmux?: boolean;
   timeout?: string;
   fallback?: string;
   balanced?: boolean;
@@ -319,6 +323,8 @@ export function registerRunCommand(program: Command): void {
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--verbose', 'Show detailed execution logs')
     .option('--raw', 'Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.')
+    .option('--no-tmux', 'Spawn the agent directly instead of wrapping it in the shared tmux session. Same effect as --raw / AGENTS_NO_TMUX=1. Use this to see the agent\'s full startup output when a launch is failing.')
+    .option('--disable-tmux', 'Alias for --no-tmux.')
     .option('--timeout <duration>', 'Kill the agent after this duration (e.g., 30m, 1h, 2h30m)')
     .option(
       '--fallback <agents>',
@@ -670,7 +676,7 @@ export function registerRunCommand(program: Command): void {
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
-        { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias },
+        { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents },
         { resolveRunDefaults },
@@ -1082,6 +1088,32 @@ export function registerRunCommand(program: Command): void {
         }
       }
 
+      // Self-heal the launch target. A gutted install (JS wrapper present,
+      // native binary missing — a partial/raced npm extraction of the optional
+      // per-arch dependency) would otherwise spawn and die with a raw ENOENT
+      // inside the agent's own wrapper. Repair it in place (or fall back to a
+      // runnable version, re-pinning it) BEFORE we build the launch command.
+      // Skipped for headless resume-native/acp/loop paths only if it errored;
+      // here it runs for every normal dispatch. Best-effort log to stderr.
+      {
+        const launchTarget = version ?? resolveVersion(agent, cwd) ?? undefined;
+        if (launchTarget) {
+          const healed = await ensureAgentRunnable(
+            agent,
+            launchTarget,
+            options.quiet ? undefined : (m) => process.stderr.write(chalk.yellow(`[agents] ${m}\n`)),
+          );
+          if (healed === null) {
+            console.error(chalk.red(`agents: ${agent}@${launchTarget} is not runnable and could not be repaired. Try: agents add ${agent}@latest`));
+            process.exit(1);
+          }
+          // Reassign only when we started from an explicit/picked version — a
+          // bare default-strategy run keeps `version` undefined and lets the
+          // shim resolve the (now-repaired or re-pinned) default itself.
+          if (version) version = healed;
+        }
+      }
+
       const defaultVersion = version ?? resolveVersion(agent, cwd);
       const runDefaults: ResolvedRunDefaults = fromProfile
         ? { sources: {} }
@@ -1237,7 +1269,10 @@ export function registerRunCommand(program: Command): void {
         sessionId: resumeSessionId ?? options.sessionId,
         resume: resumeNative,
         verbose: options.verbose,
-        raw: options.raw,
+        // --raw, --no-tmux (commander negation → options.tmux === false), and
+        // --disable-tmux all bypass the interactive tmux wrapper. AGENTS_NO_TMUX=1
+        // does the same via the env check in exec.ts.
+        raw: options.raw || options.tmux === false || options.disableTmux === true,
         timeout: options.timeout,
         env,
         toolsRestrict: workflowToolsRestrict,
