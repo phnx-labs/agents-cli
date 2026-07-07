@@ -7,15 +7,52 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
-import { isSyncConfigured, SYNC_BUNDLE } from '../lib/session/sync/config.js';
+import {
+  isSyncConfigured,
+  isSyncEnabled,
+  setSyncEnabled,
+  SYNC_BUNDLE,
+} from '../lib/session/sync/config.js';
 import { syncSessions } from '../lib/session/sync/sync.js';
 
 interface SyncCmdOptions {
   verbose?: boolean;
   json?: boolean;
+  enable?: boolean;
+  disable?: boolean;
+  status?: boolean;
 }
 
 export async function runSessionsSync(options: SyncCmdOptions): Promise<void> {
+  // Toggle / status actions short-circuit before any network cycle.
+  if (options.disable) {
+    setSyncEnabled(false);
+    console.log(
+      chalk.yellow('Automatic session sync disabled') +
+      chalk.dim(' — the daemon stops pushing/pulling within ~90s. Re-enable: agents sessions sync --enable'),
+    );
+    return;
+  }
+  if (options.enable) {
+    setSyncEnabled(true);
+    console.log(chalk.green('Automatic session sync enabled') + chalk.dim(' — the daemon resumes on its next cycle.'));
+    return;
+  }
+  if (options.status) {
+    const enabled = isSyncEnabled();
+    const configured = isSyncConfigured();
+    if (options.json) {
+      console.log(JSON.stringify({ enabled, configured }, null, 2));
+    } else {
+      console.log(
+        `automatic sync: ${enabled ? chalk.green('enabled') : chalk.yellow('disabled')}` +
+        chalk.dim('  ·  ') +
+        `credentials: ${configured ? chalk.green('configured') : chalk.yellow(`missing (${SYNC_BUNDLE})`)}`,
+      );
+    }
+    return;
+  }
+
   if (!isSyncConfigured()) {
     console.error(
       chalk.red(`Sessions sync is not configured.`) +
@@ -64,7 +101,10 @@ export function registerSessionsSyncCommand(sessionsCmd: Command): void {
     .command('sync')
     .description('Sync session transcripts across machines via R2 (CRDT merge). Claude and Codex.')
     .option('-v, --verbose', 'Log each pushed and pulled session')
-    .option('--json', 'Output the sync result as JSON');
+    .option('--json', 'Output the sync result as JSON')
+    .option('--enable', 'Turn ON automatic background sync on this machine (persisted)')
+    .option('--disable', 'Turn OFF automatic background sync on this machine (persisted)')
+    .option('--status', 'Show whether automatic sync is enabled and configured');
 
   setHelpSections(syncCmd, {
     examples: `
@@ -73,16 +113,28 @@ export function registerSessionsSyncCommand(sessionsCmd: Command): void {
 
       # See exactly what moved
       agents sessions sync --verbose
+
+      # Stop this machine's daemon from auto-syncing (prefer on-demand --host reads)
+      agents sessions sync --disable
+
+      # Check the current switch + credential state
+      agents sessions sync --status
     `,
     notes: `
       - Credentials come from the '${SYNC_BUNDLE}' secrets bundle (R2 S3 API, read+write).
       - Each machine writes only its own prefix; conflicts are impossible by construction.
       - The daemon runs this automatically (~90s); this command forces an immediate cycle.
       - Sessions present locally always win; synced-in copies fill in other machines' sessions.
+      - --disable/--enable persist a machine-local switch (~/.agents/.history) that gates the
+        daemon's automatic sync; a bare 'agents sessions sync' still forces a manual cycle.
+        The AGENTS_SESSIONS_SYNC env var (on/off) overrides the switch for one invocation.
     `,
   });
 
-  syncCmd.action(async (options: SyncCmdOptions) => {
-    await runSessionsSync(options);
+  // `--json` is also declared on the parent `sessions` command, so a bare
+  // `options` arg would miss it (Commander binds the shared flag to the parent).
+  // optsWithGlobals() merges ancestor + local options so --json resolves here.
+  syncCmd.action(async (_options: SyncCmdOptions, cmd: Command) => {
+    await runSessionsSync(cmd.optsWithGlobals() as SyncCmdOptions);
   });
 }

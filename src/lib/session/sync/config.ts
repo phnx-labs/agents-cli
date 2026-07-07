@@ -4,10 +4,68 @@
  * bundle (OS keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { readAndResolveBundleEnv } from '../../secrets/bundles.js';
+import { getHistoryDir } from '../../state.js';
 
 /** Secrets bundle holding the R2 credentials. */
 export const SYNC_BUNDLE = 'r2.backups';
+
+// ── Enable / disable switch ─────────────────────────────────────────────────
+// Whether the daemon's automatic cross-machine sync (and `agents sync
+// --sessions`) may run on THIS machine. Independent of credential presence
+// (isSyncConfigured): a machine can hold valid R2 creds yet still opt out of the
+// background push/pull — e.g. when on-demand `agents sessions --host` is
+// preferred over the ad-hoc R2 mirror. Manual `agents sessions sync` is an
+// explicit user action and is deliberately NOT gated by this switch.
+//
+// Resolution order: the AGENTS_SESSIONS_SYNC env var (a recognized on/off value
+// wins outright, for ad-hoc overrides and tests), then a durable machine-local
+// flag file, then the default (enabled). The flag lives in the durable
+// ~/.agents/.history tree — NOT .cache — so a cache wipe can never silently
+// re-enable a sync the operator turned off.
+
+/** Env var that overrides the persisted enable flag (on/off/true/false/1/0/yes/no). */
+export const SYNC_ENABLED_ENV = 'AGENTS_SESSIONS_SYNC';
+
+const SYNC_ENABLED_FILE = 'sessions-sync.json';
+const OFF_VALUES = new Set(['0', 'off', 'false', 'no', 'disabled']);
+const ON_VALUES = new Set(['1', 'on', 'true', 'yes', 'enabled']);
+
+/** Durable, machine-local path holding the sync enable flag. */
+export function syncStateFilePath(): string {
+  return path.join(getHistoryDir(), SYNC_ENABLED_FILE);
+}
+
+/**
+ * Whether automatic session sync is enabled on this machine. Defaults to true;
+ * an unrecognized env value falls through to the file; an absent/unreadable file
+ * falls through to the default. Read fresh every call (no memoization) so a
+ * `--disable` takes effect on the daemon's next ~90s cycle without a restart.
+ */
+export function isSyncEnabled(): boolean {
+  const envRaw = process.env[SYNC_ENABLED_ENV]?.trim().toLowerCase();
+  if (envRaw) {
+    if (OFF_VALUES.has(envRaw)) return false;
+    if (ON_VALUES.has(envRaw)) return true;
+    // Unrecognized value: ignore and consult the persisted flag.
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(syncStateFilePath(), 'utf-8'));
+    if (parsed && typeof parsed.enabled === 'boolean') return parsed.enabled;
+  } catch {
+    // Absent or unreadable → default enabled.
+  }
+  return true;
+}
+
+/** Persist the machine-local sync enable flag (durable across cache wipes). */
+export function setSyncEnabled(enabled: boolean): void {
+  const p = syncStateFilePath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify({ enabled }, null, 2) + '\n', 'utf-8');
+}
 
 export interface R2Config {
   accountId: string;

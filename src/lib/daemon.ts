@@ -340,8 +340,10 @@ export async function runDaemon(): Promise<void> {
     if (syncing) return;
     syncing = true;
     try {
-      const { isSyncConfigured } = await import('./session/sync/config.js');
-      if (!isSyncConfigured()) return;
+      const { isSyncConfigured, isSyncEnabled } = await import('./session/sync/config.js');
+      // isSyncEnabled() first: a machine the operator turned off must skip the
+      // keychain read entirely, not just the network cycle.
+      if (!isSyncEnabled() || !isSyncConfigured()) return;
       const { syncSessions } = await import('./session/sync/sync.js');
       const r = await syncSessions();
       if (r.pushed || r.pulled || r.errors.length) {

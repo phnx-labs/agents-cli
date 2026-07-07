@@ -149,10 +149,10 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
   }
 
   if (plan.fetchSessions) {
-    // Gate exactly like the daemon: a missing r2.backups bundle is a clean no-op,
-    // not an error that fails the whole sync.
-    const { isSyncConfigured } = await import('./session/sync/config.js');
-    if (isSyncConfigured()) {
+    // Gate exactly like the daemon: an off switch or a missing r2.backups bundle
+    // is a clean no-op, not an error that fails the whole sync.
+    const { isSyncConfigured, isSyncEnabled } = await import('./session/sync/config.js');
+    if (isSyncEnabled() && isSyncConfigured()) {
       const { syncSessions } = await import('./session/sync/sync.js');
       const r = await syncSessions();
       result.sessions = { ran: true, pushed: r.pushed, pulled: r.pulled, merged: r.merged };
