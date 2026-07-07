@@ -49,9 +49,16 @@ export function stripRoutingFlags(args: string[], specs: StripSpec[]): string[] 
   return out;
 }
 
-/** The routing flags every `--host`-capable command shares. */
+/**
+ * The routing flags every `--host`-capable command shares. `--device` is a
+ * first-class alias of `--host` (the device registry is the source of truth for
+ * machine identity — see `agents devices`), mirroring `agents run --device`.
+ * Both are stripped before forwarding so the alias never leaks to the remote
+ * binary (which would re-trigger routing).
+ */
 export const HOST_ROUTING_SPECS: StripSpec[] = [
   { long: 'host', short: 'H', takesValue: true },
+  { long: 'device', takesValue: true },
   { long: 'remote-cwd', takesValue: true },
 ];
 

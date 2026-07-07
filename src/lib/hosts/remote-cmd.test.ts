@@ -60,6 +60,21 @@ describe('stripRoutingFlags', () => {
     ]);
   });
 
+  it('drops the --device alias and its value so it never leaks to the remote binary', () => {
+    // --device is an alias of --host; forwarding it would re-trigger routing on
+    // the remote (which only knows --host). Both space and =value forms go.
+    expect(stripRoutingFlags(['message', 'abc', 'hi', '--device', 'yosemite-s0'], SPECS)).toEqual([
+      'message',
+      'abc',
+      'hi',
+    ]);
+    expect(stripRoutingFlags(['message', 'abc', 'hi', '--device=yosemite-s0'], SPECS)).toEqual([
+      'message',
+      'abc',
+      'hi',
+    ]);
+  });
+
   it('drops the valueless --no-tty without consuming the next token', () => {
     expect(stripRoutingFlags(['view', '--no-tty', 'claude'], SPECS)).toEqual(['view', 'claude']);
   });

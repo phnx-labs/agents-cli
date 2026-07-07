@@ -91,9 +91,9 @@ async function resolveTargetHost(name: string, any: boolean): Promise<Host> {
 
 /**
  * Route `agents <command> … --host <name>` to a remote if the command is
- * host-routable and a `--host` was given. Returns `false` (run locally) when
- * there is no `--host`, the command isn't in the table, or the target is this
- * very machine.
+ * host-routable and a `--host` (or its `--device` alias) was given. Returns
+ * `false` (run locally) when neither flag is present, the command isn't in the
+ * table, or the target is this very machine.
  *
  * @param command the resolved subcommand name (`process.argv`'s first non-flag).
  * @param allArgs `process.argv.slice(2)` — the command name followed by its args.
@@ -102,7 +102,17 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
   const spec = REMOTE_PASSTHROUGH[command];
   if (!spec) return false;
 
-  const hostName = flagValue(allArgs, 'host', 'H');
+  // `--device` is a first-class alias of `--host` (mirrors `agents run`); the
+  // device registry is the source of truth for machine identity. Reject a
+  // conflicting pair rather than silently preferring one — same rule as run.
+  const hostFlag = flagValue(allArgs, 'host', 'H');
+  const deviceFlag = flagValue(allArgs, 'device');
+  if (hostFlag && deviceFlag && hostFlag !== deviceFlag) {
+    console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
+    process.exitCode = 1;
+    return true;
+  }
+  const hostName = hostFlag ?? deviceFlag;
   if (!hostName) return false;
 
   // Running against your own machine is just a local run — skip the SSH round-trip.
