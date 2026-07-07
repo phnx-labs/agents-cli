@@ -15,9 +15,10 @@ by name from a small local registry, over plain SSH, with no central service to
 run or pay for:
 
 ```
-agents run claude "fix the auth bug"   --on mac-mini
-agents run codex  "port this to rust"  --on spark-0
-agents run droid  "triage the inbox"   --on win-mini
+agents run claude "fix the auth bug"   --on mac-mini   # headless: prompt given
+agents run codex  "port this to rust"  --on spark-0    # headless: prompt given
+agents run droid  "triage the inbox"   --on win-mini    # headless: prompt given
+agents run claude                      --on mac-mini   # interactive: TTY forwarded
 ```
 
 It sits next to the vendor clouds (`agents cloud run --provider rush|codex|…`),
@@ -193,33 +194,31 @@ is a fast-follow `HostProvider`, opt-in when logged in — not a v1 dependency.
 ## Architecture
 
 ```
-agents run <agent> "<task>" --host <host>
+agents run <agent> ["<task>"] --host <host>
   │
   ├─ resolveHost(name)         registry lookup in agents.yaml → {address,user,caps} [Phase 1]
   │
   ├─ ensureHostReady(name)     lazy SSH probe (online?) + config + agent + branch  [Phase 1]
   │
-  ├─ ssh <node> 'agents run <agent> --json "<task>"'                        [Phase 1]
-  │     reuse src/lib/browser/drivers/ssh.ts (shellQuote exported; the
-  │     runSSHCommand/tunnel helpers are module-private today — small extract)
-  │     remote agents-cli builds the harness argv (buildExecCommand, exec.ts)
+  ├─ prompt given?             headless detach-and-follow path
+  │     ssh <node> 'agents run <agent> --json "<task>"'
+  │     progress ◀── incrementally tail the REMOTE transcript file        [Phase 1]
+  │          not the live SSH stdout pipe — the transcript on disk is the
+  │          durable log. Offset-tracked reads, parsed by session/parse.ts.
   │
-  ├─ progress  ◀── incrementally tail the REMOTE transcript file           [Phase 1]
-  │     not the live SSH stdout pipe — the transcript on disk is the
-  │     durable log. Offset-tracked reads (like session/active.ts), parsed
-  │     by the existing per-agent parsers (session/parse.ts).
-  │
-  └─ track in a local host-task store (src/lib/hosts/tasks.ts) so          [shipped]
-        agents hosts ps / agents hosts logs <id> — and the top-level
-        agents logs [id] [-f] — list and follow host runs
+  └─ no prompt?                interactive TTY-forwarded path
+        ssh -tt <node> 'agents run <agent>'
+        remote agents-cli launches its normal interactive UI (tmux on the host)
+        local CLI exits when the SSH session ends
 ```
 
-> Shipped surface: dispatch is `agents run <agent> "<task>" --host <name>` (follows
-> live by default; `--no-follow` detaches). Track with `agents hosts ps`; view or
-> `-f` follow a run's log with `agents hosts logs <id>` or the unified
-> `agents logs [id]` (which also resolves session transcripts). Host runs are
-> tracked in a **local** task store, not `agents cloud` (a separate subsystem for
-> Rush/Codex/Factory backends).
+> Shipped surface: dispatch is `agents run <agent> ["<task>"] --host <name>`.
+> With a prompt, the run is headless, follows live by default, and `--no-follow`
+> detaches; track with `agents hosts ps` and `agents hosts logs <id>`. With no
+> prompt, the local TTY is forwarded over SSH and the agent runs interactively on
+> the remote host (`ssh -tt`), using the remote machine's normal tmux wrapper.
+> Host runs are tracked in a **local** task store, not `agents cloud` (a separate
+> subsystem for Rush/Codex/Factory backends).
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
 > opaque id: `agents hosts ps` shows it under a **NAME** column, and
@@ -326,15 +325,25 @@ required and not assumed.)
 
 ### 3. Execution — remote `agents run` (harness-agnostic)
 
-The remote command is literally `agents run <agent> "<task>" --json` (+ `--mode`,
-`--model`, `--quiet`). (`--json`/`--quiet`/`--mode`/`--model` are the real flags on
-`agents run`, registered in `src/commands/exec.ts:155-182`; there is no user-facing
-`--print` — the per-harness headless/`--print` mapping is internal to
-`buildExecCommand`.) `agents run` already produces the right headless argv per
-harness via `buildExecCommand` (`src/lib/exec.ts:522`, covering all 12 harnesses),
-so **every harness, mode, and secret-injection path works remotely for free** —
-provided agents-cli + that agent are installed and authed on the box, which
-`ensureHostReady` / `agents hosts check` guarantee (see Context, below).
+Host dispatch has two shapes, chosen by whether a prompt is present:
+
+- **Headless** (`agents run <agent> "<task>" --host <h>`): the remote command is
+  `agents run <agent> "<task>" --json` (+ `--mode`, `--model`, `--quiet`). The local
+  CLI launches it detached, then incrementally tails the remote transcript.
+- **Interactive** (`agents run <agent> --host <h>`): the remote command is
+  `agents run <agent>` with no prompt and no `--quiet`; the local CLI forwards its
+  TTY over SSH (`ssh -tt`) so the remote agent starts its normal interactive UI.
+  The tmux wrapper runs on the remote machine, exactly as it would if you had
+  SSH'd in and typed `agents run <agent>` yourself.
+
+(`--json`/`--quiet`/`--mode`/`--model` are real flags on `agents run`, registered in
+`src/commands/exec.ts`; there is no user-facing `--print` — the per-harness
+headless/`--print` mapping is internal to `buildExecCommand`.) `agents run` already
+produces the right headless or interactive argv per harness via
+`buildExecCommand` (`src/lib/exec.ts`), so **every harness, mode, and
+secret-injection path works remotely for free** — provided agents-cli + that agent
+are installed and authed on the box, which `ensureHostReady` / `agents hosts check`
+guarantee (see Context, below).
 
 Workspace (where the run executes) is a deliberate scoping choice — see Open
 Questions. Phase 1 default: a caller-specified `--remote-cwd` (or the repo's
@@ -483,8 +492,11 @@ implementation.
 The Resource Report is also a list of things the remote run must NOT do (or it
 just relocates the storm):
 
-- **Headless only** — `agents run --json`, never a remote interactive TTY.
+- **Headless by default** — `agents run --json` when a prompt is supplied.
   Progress is summarized state from the transcript, not a live char stream.
+  Interactive TTY forwarding is supported only when no prompt is given
+  (`agents run <agent> --host <h>`), so the user can drive the remote agent
+  directly; the remote machine still owns the actual session and tmux wrapper.
 - **Bound concurrency** — cap simultaneous agents per host; a host's value is
   finite coordination capacity, not infinite parallelism.
 - **No unbounded recursive scans** — the incident's trigger was `rg --no-ignore
