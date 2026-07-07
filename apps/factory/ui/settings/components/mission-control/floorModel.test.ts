@@ -12,6 +12,7 @@ import {
   sortAgents,
   clusterByQuestion,
   computeHostRows,
+  orderManagedProjects,
   sessionKey,
   toFloorTicket,
   groupTickets,
@@ -22,6 +23,7 @@ import {
   type FloorAgent,
   type FloorPhase,
   type StructuredQuestion,
+  type ManagedProject,
 } from './floorModel'
 
 describe('resolveProject', () => {
@@ -663,5 +665,61 @@ describe('latestTodos -- the checklist from the newest TodoWrite', () => {
       { content: 'd', status: 'pending' },
     ])).toEqual({ done: 2, total: 4 })
     expect(todoProgress([])).toEqual({ done: 0, total: 0 })
+  })
+})
+
+describe('orderManagedProjects', () => {
+  const mk = (name: string, confidence: ManagedProject['confidence']): ManagedProject => ({
+    id: name.toLowerCase(),
+    name,
+    path: `/repos/${name}`,
+    confidence,
+    source: 'manual',
+  })
+
+  test('confidence is the primary sort: high > medium > low', () => {
+    const projects = [mk('low-one', 'low'), mk('high-one', 'high'), mk('med-one', 'medium')]
+    expect(orderManagedProjects(projects, {}).map((p) => p.name)).toEqual([
+      'high-one',
+      'med-one',
+      'low-one',
+    ])
+  })
+
+  test('within one confidence tier, higher active-agent count wins', () => {
+    const projects = [mk('quiet', 'high'), mk('busy', 'high'), mk('mid', 'high')]
+    const counts = { busy: 5, mid: 2, quiet: 0 }
+    expect(orderManagedProjects(projects, counts).map((p) => p.name)).toEqual([
+      'busy',
+      'mid',
+      'quiet',
+    ])
+  })
+
+  test('confidence outranks count: a high project with 0 agents beats a low project with many', () => {
+    const projects = [mk('low-busy', 'low'), mk('high-idle', 'high')]
+    const counts = { 'low-busy': 99, 'high-idle': 0 }
+    expect(orderManagedProjects(projects, counts).map((p) => p.name)).toEqual([
+      'high-idle',
+      'low-busy',
+    ])
+  })
+
+  test('name asc breaks a confidence+count tie', () => {
+    const projects = [mk('zebra', 'medium'), mk('alpha', 'medium'), mk('mango', 'medium')]
+    const counts = { zebra: 3, alpha: 3, mango: 3 }
+    expect(orderManagedProjects(projects, counts).map((p) => p.name)).toEqual([
+      'alpha',
+      'mango',
+      'zebra',
+    ])
+  })
+
+  test('missing count entries are treated as 0 and it does not mutate the input', () => {
+    const projects = [mk('a', 'high'), mk('b', 'high')]
+    const frozen = [...projects]
+    const ordered = orderManagedProjects(projects, { a: 1 })
+    expect(ordered.map((p) => p.name)).toEqual(['a', 'b'])
+    expect(projects).toEqual(frozen)
   })
 })
