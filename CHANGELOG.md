@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **`agents sessions go` is retired as a deprecated alias for `agents sessions focus --attach-only`.** `go` was already a strict subset of `focus` — its only unique behavior was "attach the live terminal or refuse, never fork/resume." That behavior is now a first-class `--attach-only` flag on `focus` (`focus.ts`: `selectFallback()` picks `refuseFallback` under `--attach-only`, else the resume-in-a-new-tab fallback). `go` now prints a one-line deprecation notice and delegates to `focusAction(id, { attachOnly: true })`; the shared reach engine (`jumpTo`/`gatherLiveTargets`/`pickLiveTarget`/`refuseFallback`) still lives in `go.ts` and is imported by `focus.ts`. Source: `src/commands/go.ts`, `src/commands/focus.ts`.
 - **`agents sessions --json --host <h>` now emits a clean JSON array** of recent (non-active) sessions instead of the legacy per-host raw banner stream, so a UI can fetch a remote device's recent sessions when it has no live agents. `serializeSessionsJson()` is shared by the local and remote `--json` paths; `runRemoteSessionsJson()` reuses the existing `gatherRemoteList` SSH fan-out. The non-JSON banner path and `--active` are unchanged (#711).
 
 ## 1.20.36

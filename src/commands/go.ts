@@ -1,17 +1,17 @@
 /**
- * `agents sessions go [id]` — jump to a LIVE agent session's terminal.
+ * `agents sessions go [id]` — DEPRECATED alias for `agents sessions focus --attach-only`.
  *
- * No id  -> the SAME rich interactive picker as `agents sessions` (worktree, PR,
- *           changed files, tools, tests, last response — this-machine first),
- *           filtered to sessions that are running right now.
- * With id -> jump directly.
+ * `go` was "attach or refuse" (never fork/resume). `focus --attach-only` is exactly
+ * that behavior, so `go` now prints a deprecation notice and delegates to `focusAction`.
  *
- * "Jump" is not "resume" (which spawns a new process from the transcript). It walks
- * you to the already-running terminal:
- *   local tmux    -> attach (switch-client when already inside tmux)
- *   local Ghostty -> focus its tab (Cmd+<n> via System Events; tab # from ghostty-tabs)
- *   remote tmux   -> ssh -tt + tmux attach (pane->session resolved on the remote)
- *   otherwise     -> refuse with a reason + resume hint (cloud / no attach rail)
+ * This file still owns the shared reach engine that `focus` imports:
+ *   - `gatherLiveTargets` / `pickLiveTarget` / `buildLivePool` — live-session discovery + picker
+ *   - `jumpTo` — the side-effecting jump: attach the already-running terminal
+ *       local tmux    -> attach (switch-client when already inside tmux)
+ *       local Ghostty -> focus its tab (Cmd+<n> via System Events; tab # from ghostty-tabs)
+ *       remote tmux   -> ssh -tt + tmux attach (pane->session resolved on the remote)
+ *       otherwise     -> hand off to the `UnreachableFallback` (attach-only refuses; focus resumes)
+ *   - `refuseFallback` — the attach-only fallback (remote -> login shell; local -> refuse)
  */
 
 import type { Command } from 'commander';
@@ -24,8 +24,8 @@ import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
 import { dedupeByMachineSession, mergeLocalFirst, pickSessionInteractive } from './sessions.js';
+import { focusAction } from './focus.js';
 import { machineId } from '../lib/session/sync/config.js';
-import { isInteractiveTerminal } from './utils.js';
 import { attachTmux, runTmux } from '../lib/tmux/binary.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 import { sshStream, assertValidSshTarget, shellQuote } from '../lib/ssh-exec.js';
@@ -38,9 +38,10 @@ export function registerGoCommand(program: Command): void {
     .command('go')
     .argument('[id]', 'Short/full session id to jump to; omit for an interactive picker')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
-    .description('Jump to a live agent session — attach its tmux, or focus its terminal tab')
+    .description('Deprecated alias for `sessions focus --attach-only`')
     .action(async (id: string | undefined, opts: { local?: boolean }) => {
-      await goAction(id, opts);
+      console.error(chalk.yellow('`sessions go` is deprecated — use `sessions focus --attach-only`'));
+      await focusAction(id, { local: opts.local, attachOnly: true });
     });
 }
 
@@ -73,43 +74,6 @@ export async function pickLiveTarget(
   const picked = await pickSessionInteractive(pool, message, undefined, 0, enterHint);
   if (!picked) return null;
   return activeById.get(picked.session.id) ?? null;
-}
-
-async function goAction(id: string | undefined, opts: { local?: boolean }): Promise<void> {
-  const { self, activeById } = await gatherLiveTargets(!!opts.local);
-
-  if (activeById.size === 0) {
-    console.log(chalk.gray('No live agent sessions to jump to.'));
-    return;
-  }
-
-  // Direct jump by id — no picker.
-  if (id) {
-    const q = id.toLowerCase();
-    const matches = [...activeById.values()].filter((s) => s.sessionId!.toLowerCase().startsWith(q));
-    if (matches.length === 0) {
-      console.error(chalk.red(`No live session matching "${id}".`));
-      process.exitCode = 1;
-      return;
-    }
-    if (matches.length > 1) {
-      console.error(chalk.red(`"${id}" is ambiguous (${matches.length} matches). Use more of the id.`));
-      process.exitCode = 1;
-      return;
-    }
-    await jumpTo(matches[0], self);
-    return;
-  }
-
-  if (!isInteractiveTerminal()) {
-    console.error(chalk.red('go needs an interactive terminal, or pass a session id.'));
-    process.exitCode = 1;
-    return;
-  }
-
-  const target = await pickLiveTarget(activeById, self, 'Jump to a live session:', 'jump');
-  if (!target) return;
-  await jumpTo(target, self);
 }
 
 /**
@@ -185,8 +149,8 @@ export function describeWhere(s: ActiveSession, self: string): Where {
  */
 export type UnreachableFallback = (s: ActiveSession, remote: string | undefined) => void | Promise<void>;
 
-/** Default (used by `go`): open a login shell on the remote, or refuse locally. */
-async function refuseFallback(s: ActiveSession, remote: string | undefined): Promise<void> {
+/** Default (attach-only): open a login shell on the remote, or refuse locally. */
+export async function refuseFallback(s: ActiveSession, remote: string | undefined): Promise<void> {
   if (remote) {
     console.log(chalk.yellow(`${shortId(s)} on ${remote} isn't inside tmux — opening a shell on ${remote} instead.`));
     assertValidSshTarget(remote);

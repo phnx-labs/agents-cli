@@ -16,7 +16,7 @@
 import type { Command } from 'commander';
 import fs from 'node:fs';
 import chalk from 'chalk';
-import { gatherLiveTargets, pickLiveTarget, jumpTo, type UnreachableFallback } from './go.js';
+import { gatherLiveTargets, pickLiveTarget, jumpTo, refuseFallback, type UnreachableFallback } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta, SessionAgentId } from '../lib/session/types.js';
 import { buildResumeCommand, resumeSessionInPlace } from './sessions.js';
@@ -36,20 +36,31 @@ export function registerFocusCommand(program: Command): void {
     .command('focus')
     .argument('[id]', 'Short/full session id to focus; omit for an interactive picker')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
+    .option('--attach-only', 'Attach only — never open a new tab / resume a copy (the old `go` behavior)')
     .description('Focus a live session — attach its terminal, or open a new tab and resume it')
-    .action(async (id: string | undefined, opts: { local?: boolean }) => {
+    .action(async (id: string | undefined, opts: { local?: boolean; attachOnly?: boolean }) => {
       await focusAction(id, opts);
     });
 }
 
-async function focusAction(id: string | undefined, opts: { local?: boolean }): Promise<void> {
+/**
+ * Which fallback fires when a session has no attach rail. `--attach-only` (the old
+ * `go`) refuses; the default opens a new tab and resumes a copy. Pure so it's testable
+ * without touching `jumpTo`'s side effects.
+ */
+export function selectFallback(attachOnly: boolean | undefined): UnreachableFallback {
+  return attachOnly ? refuseFallback : resumeInNewTab;
+}
+
+export async function focusAction(id: string | undefined, opts: { local?: boolean; attachOnly?: boolean }): Promise<void> {
   const { self, activeById } = await gatherLiveTargets(!!opts.local);
+  const fallback = selectFallback(opts.attachOnly);
 
   if (id) {
     const q = id.toLowerCase();
     const matches = [...activeById.values()].filter((s) => s.sessionId!.toLowerCase().startsWith(q));
     if (matches.length === 1) {
-      await jumpTo(matches[0], self, resumeInNewTab);
+      await jumpTo(matches[0], self, fallback);
       return;
     }
     if (matches.length > 1) {
@@ -77,7 +88,7 @@ async function focusAction(id: string | undefined, opts: { local?: boolean }): P
   }
   const target = await pickLiveTarget(activeById, self, 'Focus a live session:', 'focus');
   if (!target) return;
-  await jumpTo(target, self, resumeInNewTab);
+  await jumpTo(target, self, fallback);
 }
 
 function shortId(s: ActiveSession): string {

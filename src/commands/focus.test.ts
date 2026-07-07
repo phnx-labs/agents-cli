@@ -1,11 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { metaFromActive } from './focus.js';
+import { metaFromActive, selectFallback } from './focus.js';
+import { refuseFallback } from './go.js';
 import { buildResumeCommand } from './sessions.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 function s(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'running', ...over } as ActiveSession;
 }
+
+describe('selectFallback — --attach-only (old `go`) vs default resume', () => {
+  it('--attach-only picks refuseFallback (attach or refuse, never fork)', () => {
+    expect(selectFallback(true)).toBe(refuseFallback);
+  });
+
+  it('default (undefined/false) picks resume-in-new-tab, not refuseFallback', () => {
+    expect(selectFallback(undefined)).not.toBe(refuseFallback);
+    expect(selectFallback(false)).not.toBe(refuseFallback);
+  });
+});
 
 describe('metaFromActive — the resume fallback input', () => {
   it('carries id, short id, agent, and cwd through', () => {
