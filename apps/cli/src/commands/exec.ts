@@ -1120,10 +1120,12 @@ export function registerRunCommand(program: Command): void {
             console.error(chalk.red(`agents: ${agent}@${launchTarget} is not runnable and could not be repaired. Try: agents add ${agent}@latest`));
             process.exit(1);
           }
-          // Reassign only when we started from an explicit/picked version — a
-          // bare default-strategy run keeps `version` undefined and lets the
-          // shim resolve the (now-repaired or re-pinned) default itself.
-          if (version) version = healed;
+          // Always adopt the healed version explicitly. In the version-undefined
+          // path a fallback re-pins the GLOBAL default, but `resolveVersion`
+          // prefers a PROJECT pin — so leaving `version` undefined would let the
+          // shim re-resolve the still-broken project pin and crash anyway. Pinning
+          // the runnable version here is a no-op when nothing changed.
+          version = healed;
         }
       }
 

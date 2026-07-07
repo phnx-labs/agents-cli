@@ -1083,9 +1083,14 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   // already-dead pane — surface its output + status directly and tear down.
   const before = pane ? await paneExitStatus(pane, socket) : { dead: false };
   if (before.dead) {
-    await surfacePaneFailure(before.status, `${options.agent} exited before it could start`);
+    // Only recap a FAILURE. A clean (0) exit before we attached is a successful
+    // quick run, not a crash — a red banner there would be spurious (mirrors the
+    // post-attach guard below).
+    if ((before.status ?? 0) !== 0) {
+      await surfacePaneFailure(before.status, `${options.agent} exited before it could start`);
+    }
     await killSession(name, socket).catch(() => {});
-    return { exitCode: before.status ?? 1, stderr: '' };
+    return { exitCode: before.status ?? 0, stderr: '' };
   }
 
   await attachTmux({ socket, args: ['attach-session', '-t', name] });

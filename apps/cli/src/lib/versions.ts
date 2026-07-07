@@ -1756,6 +1756,13 @@ export async function verifyInstalledBinaryLaunches(
   agent: AgentId,
   version: string,
 ): Promise<{ ok: boolean; detail?: string }> {
+  // Windows: `getBinaryPath` returns the extensionless `.bin/<cli>` (a shell
+  // wrapper), NOT the `.cmd`/`.exe` that actually launches there — `execFile`ing
+  // it would ENOENT on a perfectly healthy install, and the integrity gate would
+  // then WIPE it. The gutted-native-binary failure this guards against is a POSIX
+  // concern in practice; treat win32 as healthy rather than risk destroying a
+  // good install. (isVersionInstalled already validates presence on Windows.)
+  if (process.platform === 'win32') return { ok: true };
   const binary = getBinaryPath(agent, version);
   if (!fs.existsSync(binary)) {
     return { ok: false, detail: `binary not found at ${binary}` };
