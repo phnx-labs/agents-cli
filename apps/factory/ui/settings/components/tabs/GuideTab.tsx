@@ -105,7 +105,7 @@ Task → Plan → Approval → Execution
         <SectionHeader>Learn More</SectionHeader>
         <div className="space-y-2">
           <ExtLink
-            href="https://github.com/muqsitnawaz/swarmify"
+            href="https://github.com/phnx-labs/agents-cli"
             className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--muted)] hover:bg-[var(--muted-foreground)]/10 transition-colors"
           >
             <ExternalLinkIcon className="w-4 h-4 text-[var(--muted-foreground)]" />

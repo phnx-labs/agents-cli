@@ -22,10 +22,12 @@ import {
   listClients,
   listSessions,
   paneExitStatus,
+  reconcileSessionHooks,
   sendKeys,
   setSessionHook,
   slugifyName,
   splitPane,
+  AGENT_HOOK_SCHEMA,
   TmuxSessionError,
 } from './session.js';
 
@@ -306,6 +308,47 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     const exit = await paneExitStatus(agentPane, socket);
     expect(exit.dead).toBe(true);
     expect(exit.status).toBe(7);
+  });
+
+  it('reconcileSessionHooks retrofits the guarded hook onto a session left with the OLD unconditional one', async () => {
+    // A session a pre-fix binary created: the OLD unconditional `detach-client`
+    // hook fired on ANY pane death, so exiting a user split detached the whole
+    // client (and, with no kill-pane, left the split as a dead husk).
+    const meta = await createSession({ name: 'ag-reco-old', cmd: 'sleep 30', socket });
+    const agentPane = meta.pane!;
+    await setSessionHook('ag-reco-old', 'pane-died', 'detach-client -s =ag-reco-old', socket);
+
+    const res = await reconcileSessionHooks(socket);
+    expect(res.reconciled).toBeGreaterThanOrEqual(1);
+    // The schema marker is stamped so a re-run skips this session.
+    const marker = (await runTmux({ socket, args: ['show-options', '-v', '-t', 'ag-reco-old', '@ag_hook_schema'] })).stdout.trim();
+    expect(marker).toBe(String(AGENT_HOOK_SCHEMA));
+
+    // The guarded hook is now in force: open a split and exit it → only that split
+    // closes (kill-pane, no lingering husk), the agent pane survives. Under the OLD
+    // hook this pane would have stayed as a dead second pane.
+    const splitPaneId = await splitPane({ name: 'ag-reco-old', direction: 'v', cmd: '/bin/sh', socket });
+    await wait(200);
+    await runTmux({ socket, args: ['send-keys', '-t', splitPaneId, 'exit', 'Enter'] });
+    await wait(400);
+    expect(await hasSession('ag-reco-old', socket)).toBe(true);
+    const panes = (await runTmux({ socket, args: ['list-panes', '-t', 'ag-reco-old', '-F', '#{pane_id}:#{pane_dead}'] })).stdout.trim().split('\n');
+    expect(panes).toHaveLength(1);
+    expect(panes[0]).toBe(`${agentPane}:0`);
+  });
+
+  it('reconcileSessionHooks is idempotent and leaves non-run sessions alone', async () => {
+    await createSession({ name: 'ag-reco-idem', cmd: 'sleep 30', socket });
+    await createSession({ name: 'user-made', cmd: 'sleep 30', socket }); // no `ag-` prefix
+
+    const first = await reconcileSessionHooks(socket);
+    expect(first.reconciled).toBeGreaterThanOrEqual(1);
+    // Marker present → the second pass is a no-op.
+    const second = await reconcileSessionHooks(socket);
+    expect(second.reconciled).toBe(0);
+    // The non-run session was never touched (no marker stamped).
+    const r = await runTmux({ socket, args: ['show-options', '-v', '-t', 'user-made', '@ag_hook_schema'], throwOnError: false });
+    expect(r.stdout.trim()).toBe('');
   });
 });
 

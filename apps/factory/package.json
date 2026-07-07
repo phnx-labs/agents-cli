@@ -13,8 +13,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/muqsitnawaz/swarmify",
-    "directory": "extension"
+    "url": "https://github.com/phnx-labs/agents-cli",
+    "directory": "apps/factory"
   },
   "homepage": "https://swarmify.co/#agents-ext",
   "engines": {
