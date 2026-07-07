@@ -237,6 +237,7 @@
 .swarmify-root .pill.cipass { background: var(--status-running-bg); color: var(--status-running); }
 .swarmify-root .pill.cifail { background: var(--status-failed-bg); color: var(--status-failed); }
 .swarmify-root .pill.cirun { background: var(--status-pending-bg); color: var(--status-pending); }
+.swarmify-root .pill.bg { background: var(--status-pending-bg); color: var(--status-pending); border: 1px solid color-mix(in srgb, var(--status-pending) 45%, transparent); }
 .swarmify-root .savedviews { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 12px; align-items: center; }
 .swarmify-root .svchip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--ds-border); color: var(--ds-text-muted); background: var(--ds-bg-panel); cursor: pointer; }
 .swarmify-root .svchip:hover { color: var(--ds-text); border-color: var(--ds-text-muted); }

@@ -22,6 +22,10 @@ export type FloorInbound =
   | { type: 'fetchHostSessionDetail'; host: string; sessionId: string }
   | { type: 'fetchDispatchData' }
   | { type: 'dismissTask'; taskId: string }
+  // Focus a session: open/attach a real terminal on it (`agents sessions focus <id>`).
+  | { type: 'focusSession'; sessionId: string; host?: string }
+  // Stop a background (headless) run by killing its pid.
+  | { type: 'stopSession'; sessionId: string; pid?: number }
 
 export type FloorInboundType = FloorInbound['type']
 

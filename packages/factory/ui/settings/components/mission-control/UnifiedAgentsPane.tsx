@@ -1570,6 +1570,18 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             <div className="dhead" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
               <div className="title">{a.project} / {a.name}</div>
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{a.branch ? ` · ${a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}</div>
+              {a.sessionId && (
+                <div className="opts" style={{ marginTop: 8 }}>
+                  <button className="opt primary" onClick={() => postMessage({ type: 'focusSession', sessionId: a.sessionId!, host: a.host })}>
+                    <Icon name="chevR" size={12} /> Focus
+                  </button>
+                  {a.context === 'headless' && a.pid ? (
+                    <button className="opt ghost" onClick={() => postMessage({ type: 'stopSession', sessionId: a.sessionId!, pid: a.pid })}>
+                      Stop
+                    </button>
+                  ) : null}
+                </div>
+              )}
               {a.prUrl && (
                 <ExtLink href={a.prUrl} className="opt ghost" style={{ marginTop: 8, textDecoration: 'none' }}>
                   <Icon name="chevR" size={11} /> Open PR {a.pr ?? ''} on GitHub
