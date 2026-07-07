@@ -675,6 +675,11 @@ describe('paneBorderText', () => {
     // GitHub-style ref keeps its # visually via tmux ## escaping.
     expect(paneBorderText('CC', 'land PR #758')).toBe('CC - land PR ##758');
   });
+
+  test('neutralizes a #{...} format sequence in the label (the real injection threat)', () => {
+    // Without escaping, tmux would expand `#{pane_id}` inside the border.
+    expect(paneBorderText('CC', 'debug #{pane_id} leak')).toBe('CC - debug ##{pane_id} leak');
+  });
 });
 
 describe('prompt utilities', () => {

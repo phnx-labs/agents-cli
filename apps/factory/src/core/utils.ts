@@ -339,11 +339,15 @@ export function paneBorderText(
     .replace(/[\r\n]+/g, ' ')     // flatten newlines — a border is a single line
     .replace(/\s+/g, ' ')
     .trim();
-  if (!clean) return name;
+  // Double `#` so tmux renders it literally rather than as a format escape.
+  // Applied on every return path so `name` is neutralized uniformly, whatever
+  // it holds (agent codes have no `#` today, but don't rely on that here).
+  const escapeHash = (s: string): string => s.replace(/#/g, '##');
+  if (!clean) return escapeHash(name);
   const clipped =
     clean.length > maxLabelLen ? `${clean.slice(0, maxLabelLen - 1).trimEnd()}…` : clean;
-  // Double `#` last so the ellipsis/slice math above operates on the visible text.
-  return `${name} - ${clipped}`.replace(/#/g, '##');
+  // Escape last so the ellipsis/slice math above operates on the visible text.
+  return escapeHash(`${name} - ${clipped}`);
 }
 
 export interface TerminalDisplayInfo {

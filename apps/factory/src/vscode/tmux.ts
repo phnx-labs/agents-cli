@@ -189,11 +189,15 @@ export async function relabelTmuxPane(
   if (!state) return;
   const next = label?.trim() || undefined;
   if (state.borderLabel === next) return;  // already showing this label
-  state.borderLabel = next;
   const format = ` #{pane_index}: ${paneBorderText(state.borderName, next)} `;
-  await hostTmux(state.socket, [
+  const result = await hostTmux(state.socket, [
     'set-option', '-t', state.session, 'pane-border-format', format,
   ]);
+  // Record the applied label only on success. hostTmux returns stdout (an empty
+  // string for set-option) on success and undefined on failure — so a transient
+  // tmux error leaves borderLabel unchanged and a later retry with the same
+  // label still runs, rather than being wedged stale by the idempotence guard.
+  if (result !== undefined) state.borderLabel = next;
 }
 
 // Candidate tmux binary locations. The extension host often lacks tmux on its
