@@ -194,6 +194,26 @@ export function optimisticActivityLabel(p: PendingDispatch): string {
   return `Starting... (${label})`
 }
 
+/**
+ * Resolve which project id the dispatch panel should auto-select for an
+ * attached ticket. A ticket's Linear project name (`metadata.project`) wins:
+ * pick the target whose `linearProject` equals it. With no ticket project, or
+ * no matching target, fall back to the most-used project. Pure (plain objects)
+ * so it's unit-tested without a mock. Returns undefined only when there are no
+ * projects to choose from.
+ */
+export function resolveAutoProject(
+  projects: { id: string; linearProject?: string; uses: number }[],
+  ticketProject: string | undefined,
+): string | undefined {
+  if (projects.length === 0) return undefined
+  if (ticketProject) {
+    const match = projects.find((p) => p.linearProject === ticketProject)
+    if (match) return match.id
+  }
+  return [...projects].sort((a, b) => b.uses - a.uses)[0]?.id
+}
+
 export type CloudProvider = 'rush' | 'codex' | 'factory'
 
 /**

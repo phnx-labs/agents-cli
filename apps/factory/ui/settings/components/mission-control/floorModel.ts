@@ -227,6 +227,57 @@ export function computeHostRows(
   return [...pinned, ...rest]
 }
 
+// ---------- managed projects (curated sidebar list + Projects pane) ----------
+//
+// The floor's PROJECTS list is a CURATED set of repos the user cares about — not
+// whatever happens to be running right now. Persisted host-side; the webview only
+// renders + edits via postMessage. This type is mirrored field-for-field by the
+// host (the two builds can't share an import), so keep the shapes in lockstep.
+
+export interface ManagedProject {
+  id: string                       // stable local id
+  name: string                     // label in sidebar + dispatch
+  path: string                     // absolute local folder
+  repoSlug?: string                // "owner/repo"
+  linearProjectId?: string
+  linearProjectName?: string       // for the Linear pill
+  confidence: 'high' | 'medium' | 'low'
+  source: 'detected' | 'manual'
+}
+
+/** A Linear project reduced to what the picker needs. */
+export interface LinearProjectLite {
+  id: string
+  name: string
+}
+
+/** confidence high>medium>low for the count-independent primary sort. */
+const CONFIDENCE_RANK: Record<ManagedProject['confidence'], number> = {
+  high: 0,
+  medium: 1,
+  low: 2,
+}
+
+/**
+ * Order the curated projects for the sidebar's top-3. Precedence:
+ *   1. confidence: high > medium > low
+ *   2. active-agent count desc (from `agentCountByName`, keyed by project name)
+ *   3. name asc (locale) as the final stable tie-break
+ * Pure so both the sidebar and its unit test agree. Does not mutate the input.
+ */
+export function orderManagedProjects(
+  projects: ManagedProject[],
+  agentCountByName: Record<string, number>,
+): ManagedProject[] {
+  return [...projects].sort((a, b) => {
+    const conf = CONFIDENCE_RANK[a.confidence] - CONFIDENCE_RANK[b.confidence]
+    if (conf !== 0) return conf
+    const countDiff = (agentCountByName[b.name] ?? 0) - (agentCountByName[a.name] ?? 0)
+    if (countDiff !== 0) return countDiff
+    return a.name.localeCompare(b.name)
+  })
+}
+
 // ---------- ticket view-model (Backlog) ----------
 
 export type TicketSource = 'LN' | 'GH'
@@ -248,7 +299,7 @@ export interface FloorTicket {
 
 // ---------- controls state ----------
 
-export type CenterMode = 'agents' | 'backlog' | 'host'
+export type CenterMode = 'agents' | 'backlog' | 'host' | 'projects'
 
 // Host detail pane payloads. Mirror of extension/src/core/hostInventory.ts —
 // the webview can't import from src/*, so the shape is redeclared here and

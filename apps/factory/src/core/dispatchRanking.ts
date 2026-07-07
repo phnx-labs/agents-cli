@@ -13,6 +13,7 @@
 
 import { RemoteSession, HostInfo, HostLoad } from './remoteSessions';
 import { AgentInventory } from './agentInventory';
+import type { ManagedProject } from './managedProjects';
 
 // ---- mirrored contract types (dispatch.types.ts) ---------------------------
 
@@ -43,6 +44,8 @@ export interface DispatchTarget {
   label: string;
   path?: string;
   uses: number;
+  confidence?: 'high' | 'medium' | 'low';
+  linearProject?: string;   // linked Linear project NAME — drives the pill + auto-select match
 }
 
 // ---- installed agents ------------------------------------------------------
@@ -199,6 +202,38 @@ export function rankTargets(sessions: RemoteSession[]): DispatchTarget[] {
   }
   targets.sort((a, b) => (b.uses - a.uses) || a.label.localeCompare(b.label));
   return targets;
+}
+
+const CONFIDENCE_RANK: Record<'high' | 'medium' | 'low', number> = { high: 3, medium: 2, low: 1 };
+
+/**
+ * Build the dispatch targets from the CURATED managed-projects list (not the live
+ * session roster), enriched with `uses` from active sessions and carrying the
+ * confidence band + linked Linear project name. Ordered confidence desc, then
+ * uses desc, then name — so linked/high-confidence repos surface first and the
+ * dropdown reflects the same list the sidebar shows, even with nothing running.
+ */
+export function buildManagedTargets(
+  managed: ManagedProject[],
+  sessions: RemoteSession[]
+): DispatchTarget[] {
+  const usesByName = new Map<string, number>();
+  for (const t of rankTargets(sessions)) usesByName.set(t.label, t.uses);
+  return managed
+    .map((p): DispatchTarget => ({
+      id: p.id,
+      label: p.name,
+      path: p.path,
+      uses: usesByName.get(p.name) ?? 0,
+      confidence: p.confidence,
+      linearProject: p.linearProjectName,
+    }))
+    .sort(
+      (a, b) =>
+        CONFIDENCE_RANK[b.confidence ?? 'low'] - CONFIDENCE_RANK[a.confidence ?? 'low'] ||
+        b.uses - a.uses ||
+        a.label.localeCompare(b.label)
+    );
 }
 
 /**

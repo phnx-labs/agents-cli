@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Icon } from './icons'
 import { Bell, useClickAway } from './dispatchIcons'
 import { DispatchInput, ticketKey } from './dispatchInput'
+import { resolveAutoProject } from './dispatch'
 import { AgentSelect } from './AgentSelect'
 import { HostSelect, suggestedHost } from './HostSelect'
 import { ProjectSelect } from './ProjectSelect'
@@ -245,6 +246,23 @@ export function DispatchPanel(props: DispatchPanelProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftResult?.nonce])
+
+  // Auto-select the local project from the (primary) attached ticket's Linear
+  // project. Fires on attach and on (re)open; a `linearProject` match wins, else
+  // it falls back to the most-used project. Runs ONLY when a ticket is attached,
+  // so a restored draft or manual pick without a ticket is never clobbered; and
+  // because it does not depend on S.project it never fights a manual override the
+  // user makes afterward. (Harmless in cloud mode — dispatch reads effRepo there.)
+  const primaryAttached = S.attached[0]
+  useEffect(() => {
+    if (!open || !primaryAttached) return
+    const localProjects = targets.filter(t => t.path !== undefined)
+    if (localProjects.length === 0) return
+    const ticket = tasks.find(t => ticketKey(t) === primaryAttached)
+    const id = resolveAutoProject(localProjects, ticket?.metadata.project)
+    if (id) patch({ project: id })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primaryAttached, open])
 
   if (!open) return null
 

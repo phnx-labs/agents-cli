@@ -26,7 +26,18 @@ import {
   mapInventoriesToInstalledAgents,
   buildDispatchHosts,
   rankTargets,
+  buildManagedTargets,
 } from '../core/dispatchRanking';
+import {
+  readManagedProjects,
+  upsertManagedProject,
+  deleteManagedProject,
+  projectNameFromPath,
+  type ManagedProject,
+} from '../core/managedProjects';
+import { repoSlugFromPath } from '../core/projectIndex';
+import { matchLinearProject } from '../core/linearProjects';
+import { fetchLinearProjects } from './linear.vscode';
 import { resolveForemanTarget, candidateName } from '../core/foreman.target';
 import { parseEvents } from '../core/watchdogLog';
 import {
@@ -1690,11 +1701,70 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           // status) — keeping remotes out of here avoids a duplicate, stale,
           // all-offline host roster.
           const hosts = buildDispatchHosts(hostResult.hosts, LOCAL_LABEL).filter((h) => h.kind !== 'remote');
-          const targets = rankTargets(hostResult.sessions);
+          // Targets come from the CURATED managed-projects list (enriched with live
+          // session `uses` + confidence + linked Linear name), so the dropdown shows
+          // real repos even with nothing running. Falls back to session-derived
+          // ranking only if the managed list is empty (e.g. detection produced none).
+          const managed = await readManagedProjects();
+          const targets = managed.length
+            ? buildManagedTargets(managed, hostResult.sessions)
+            : rankTargets(hostResult.sessions);
           settingsPanel?.webview.postMessage({ type: 'dispatchData', agents, hosts, targets });
         } catch (err) {
           console.error('[SETTINGS] Error fetching dispatch data:', err);
           settingsPanel?.webview.postMessage({ type: 'dispatchData', agents: [], hosts: [], targets: [] });
+        }
+        break;
+      }
+      // ---- managed projects (curated sidebar/dispatch list) ----
+      case 'fetchManagedProjects': {
+        const projects = await readManagedProjects();
+        settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        break;
+      }
+      case 'fetchLinearProjects': {
+        const projects = await fetchLinearProjects(context);
+        settingsPanel?.webview.postMessage({ type: 'linearProjectsData', projects });
+        break;
+      }
+      case 'saveManagedProject': {
+        const p = message?.project as ManagedProject | undefined;
+        if (p && typeof p.id === 'string' && typeof p.name === 'string' && typeof p.path === 'string') {
+          const projects = await upsertManagedProject(p);
+          settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        }
+        break;
+      }
+      case 'deleteManagedProject': {
+        const id = message?.id;
+        if (typeof id === 'string') {
+          const projects = await deleteManagedProject(id);
+          settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        }
+        break;
+      }
+      case 'pickProjectFolder': {
+        // Native folder picker → derive slug + name + suggest a Linear match by
+        // normalized name, so the add-project form pre-fills.
+        const picked = await vscode.window.showOpenDialog({
+          canSelectFolders: true,
+          canSelectFiles: false,
+          canSelectMany: false,
+          openLabel: 'Add project',
+        });
+        const folder = picked?.[0]?.fsPath;
+        if (folder) {
+          const repoSlug = repoSlugFromPath(folder);
+          const name = projectNameFromPath(folder);
+          const linearProjects = await fetchLinearProjects(context);
+          const suggestedLinear = matchLinearProject(repoSlug ?? name, linearProjects);
+          settingsPanel?.webview.postMessage({
+            type: 'projectFolderPicked',
+            path: folder,
+            repoSlug,
+            name,
+            suggestedLinear,
+          });
         }
         break;
       }
