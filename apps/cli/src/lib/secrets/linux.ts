@@ -27,6 +27,12 @@ import {
   machinePassphraseExists,
   _resetFileStoreForTest,
 } from './filestore.js';
+import {
+  noteNativeShadow,
+  _resetFallbackNoticeForTest,
+  type NativeImportReport,
+  type NativeImportResult,
+} from './fallback.js';
 
 // Re-exported so existing importers (and tests) can keep reaching these via
 // './linux.js'. The implementations live in ./filestore.ts.
@@ -55,6 +61,9 @@ let isAvailable = false;
 
 let useFileFallback = false;
 let warnedFallback = false;
+// Set once the keyring is observed locked/unreachable in this process, so the
+// read-through in get/has stops re-probing it (and stops re-emitting notices).
+let nativeUnreachable = false;
 
 function activateFileFallback(): void {
   if (useFileFallback) return;
@@ -62,7 +71,7 @@ function activateFileFallback(): void {
   if (!warnedFallback) {
     warnedFallback = true;
     process.stderr.write(
-      `[agents] secret-service collection locked, using file-based store at ${fileDir()}\n`
+      `[agents] using the encrypted file store at ${fileDir()}\n`
     );
   }
 }
@@ -138,7 +147,16 @@ export function usesFileFallback(): boolean {
 /** secret-tool lookup attributes:
  *   service=agents-cli account=<user> item=<itemName> */
 export function hasSecretToolToken(item: string): boolean {
-  if (preflight() === 'file') return fileStore.has(item);
+  if (preflight() === 'file') {
+    if (fileStore.has(item)) return true;
+    // The file store is primary under the fallback, but an item can still live
+    // only in an (unlocked) keyring that predates it — read through so it isn't
+    // silently shadowed.
+    const probe = readNativeItemRaw(item);
+    if (probe.value !== undefined) { noteNativeShadow('shadowed', fileDir()); return true; }
+    if (probe.locked) noteNativeShadow('locked', fileDir());
+    return false;
+  }
   const user = os.userInfo().username;
   const result = spawnSync('secret-tool', [
     'lookup',
@@ -151,6 +169,7 @@ export function hasSecretToolToken(item: string): boolean {
   }
   const stderr = result.stderr?.toString() ?? '';
   if (isLockedCollectionError(stderr)) {
+    nativeUnreachable = true;
     activateFileFallback();
     return fileStore.has(item);
   }
@@ -158,7 +177,13 @@ export function hasSecretToolToken(item: string): boolean {
 }
 
 export function getSecretToolToken(item: string): string {
-  if (preflight() === 'file') return fileStore.get(item);
+  if (preflight() === 'file') {
+    if (fileStore.has(item)) return fileStore.get(item);
+    const probe = readNativeItemRaw(item);
+    if (probe.value !== undefined) { noteNativeShadow('shadowed', fileDir()); return probe.value; }
+    if (probe.locked) noteNativeShadow('locked', fileDir());
+    throw new Error(`Secret '${item}' not found in the file store or keyring.`);
+  }
   const user = os.userInfo().username;
   const result = spawnSync('secret-tool', [
     'lookup',
@@ -173,6 +198,7 @@ export function getSecretToolToken(item: string): string {
   }
   const stderr = result.stderr?.toString() ?? '';
   if (isLockedCollectionError(stderr)) {
+    nativeUnreachable = true;
     activateFileFallback();
     return fileStore.get(item);
   }
@@ -198,6 +224,7 @@ export function setSecretToolToken(item: string, value: string): void {
 
   const stderr = result.stderr?.toString().trim() ?? '';
   if (isLockedCollectionError(stderr)) {
+    nativeUnreachable = true;
     activateFileFallback();
     fileStore.set(item, value);
     return;
@@ -221,6 +248,7 @@ export function deleteSecretToolToken(item: string): boolean {
   if (result.status === 0) return true;
   const stderr = result.stderr?.toString() ?? '';
   if (isLockedCollectionError(stderr)) {
+    nativeUnreachable = true;
     activateFileFallback();
     return fileStore.delete(item);
   }
@@ -284,6 +312,76 @@ export function listSecretToolItems(prefix: string): string[] {
   return parseSecretToolItems(output, prefix);
 }
 
+// ---------- native-direct helpers (bypass preflight routing) ----------
+//
+// These always talk to secret-tool regardless of whether the process has fallen
+// back to the file store. They power (a) the read-through that keeps the file
+// store from silently shadowing keyring items, and (b) `import-keyring`.
+
+/**
+ * Read one item straight from the keyring. Returns `{value}` on a hit,
+ * `{locked:true}` when the collection is locked/unreachable, and `{}` on a plain
+ * miss. Never throws and never emits — the caller decides whether to notice.
+ */
+function readNativeItemRaw(item: string): { value?: string; locked?: boolean } {
+  if (nativeUnreachable) return { locked: true };
+  if (!secretToolAvailable()) return {};
+  const user = os.userInfo().username;
+  const r = spawnSync('secret-tool', [
+    'lookup', 'service', SERVICE, 'account', user, 'item', item,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (r.status === 0) {
+    const v = r.stdout?.toString().trim();
+    return v && v.length ? { value: v } : {};
+  }
+  if (isLockedCollectionError(r.stderr?.toString() ?? '')) {
+    nativeUnreachable = true;
+    return { locked: true };
+  }
+  return {};
+}
+
+/**
+ * Enumerate agents-cli items in the keyring whose name starts with `prefix`.
+ * `available` is false when secret-tool isn't installed; `locked` is true when
+ * the collection is locked.
+ */
+function listNativeItemsRaw(prefix: string): { items: string[]; locked: boolean; available: boolean } {
+  if (!secretToolAvailable()) return { items: [], locked: false, available: false };
+  const r = spawnSync('secret-tool', [
+    'search', '--all', 'service', SERVICE,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (r.status !== 0) {
+    const locked = isLockedCollectionError(r.stderr?.toString() ?? '');
+    if (locked) nativeUnreachable = true;
+    return { items: [], locked, available: true };
+  }
+  const output = `${r.stdout?.toString() || ''}\n${r.stderr?.toString() || ''}`;
+  return { items: parseSecretToolItems(output, prefix), locked: false, available: true };
+}
+
+/**
+ * Copy agents-cli items from the keyring into the file store (the `import-keyring`
+ * backend for Linux). Requires an unlocked keyring; items already in the file
+ * store are left untouched. With `commit=false` it reports what it *would* do.
+ */
+export function importNativeSecretToolItems(prefix: string, commit: boolean): NativeImportReport {
+  const { items, locked, available } = listNativeItemsRaw(prefix);
+  if (!available || locked) return { available, locked, results: [] };
+  const results: NativeImportResult[] = [];
+  for (const item of items) {
+    if (fileStore.has(item)) { results.push({ item, status: 'exists' }); continue; }
+    const probe = readNativeItemRaw(item);
+    if (probe.value === undefined) {
+      results.push({ item, status: 'failed', detail: probe.locked ? 'keyring locked' : 'unreadable' });
+      continue;
+    }
+    if (commit) fileStore.set(item, probe.value);
+    results.push({ item, status: commit ? 'imported' : 'would-import' });
+  }
+  return { available, locked, results };
+}
+
 /** KeychainBackend implementation for Linux. Routes through secret-tool
  *  with a transparent encrypted-file fallback when the default Secret
  *  Service collection is locked (or libsecret-tools is not installed but
@@ -317,6 +415,8 @@ export function _resetForTest(opts: {
   _resetFileStoreForTest({ fileDir: opts.fileDir ?? null, passphrase: opts.passphrase ?? null });
   useFileFallback = opts.forceFileFallback ?? false;
   warnedFallback = false;
+  nativeUnreachable = false;
   checkedAvailability = false;
   isAvailable = false;
+  _resetFallbackNoticeForTest();
 }

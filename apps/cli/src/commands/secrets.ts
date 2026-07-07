@@ -84,6 +84,7 @@ import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { registerSecretsSyncCommands } from './secrets-sync.js';
 import { registerSecretsMigrateAclCommand } from './secrets-migrate.js';
+import { registerSecretsImportKeyringCommand } from './secrets-import.js';
 
 /** Prompt the user for a secret value with masked input. Requires an interactive TTY. */
 async function promptForSecret(message: string): Promise<string> {
@@ -1889,6 +1890,7 @@ Examples:
 
   registerSecretsSyncCommands(cmd);
   registerSecretsMigrateAclCommand(cmd);
+  registerSecretsImportKeyringCommand(cmd);
 }
 
 /** Validate a prompt-policy value, throwing a clear message on a bad one (the

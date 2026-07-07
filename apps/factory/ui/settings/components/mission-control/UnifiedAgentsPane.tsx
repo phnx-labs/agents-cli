@@ -22,6 +22,7 @@ import {
 } from './dispatch'
 import { FloorControls, type StatusChip } from './FloorControls'
 import { FloorSidebar } from './FloorSidebar'
+import { FloorRail } from './FloorRail'
 import { BacklogCenter } from './BacklogCenter'
 import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
@@ -173,11 +174,15 @@ function buildUnifiedList(terminals: TerminalInfo[], tasks: TaskSummary[]): Unif
     const isActive = isTerminalActive(t, now)
     const files: string[] = []
     if (t.recentFiles) files.push(...t.recentFiles.slice(0, 5))
+    // Prefer a human label (manual > auto) so a card reads "terminal-race-fix" rather
+    // than "claude-596c4c07"; the hash still identifies the session via the sid chip.
+    const humanLabel = (t.label || t.autoLabel || '').trim()
     items.push({
       kind: 'terminal',
       id: `term-${t.id}`,
       agentType: t.agentType,
-      displayName: `${t.agentType}-${chunk}`,
+      sessionId: t.sessionId ?? undefined,
+      displayName: humanLabel || `${t.agentType}-${chunk}`,
       activity: t.currentActivity || t.label || (justSpawned ? 'Starting...' : t.status === 'idle' ? 'idle' : t.role ?? 'terminal'),
       active: isActive,
       duration: t.firstMessageTimestamp ? relTime(t.firstMessageTimestamp) : '',
@@ -597,6 +602,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('project')
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
+  // Collapsed = the icon rail (mockup default); expanded = the full text sidebar.
+  const [railCollapsed, setRailCollapsed] = useState(true)
   const [rightOpen, setRightOpen] = useState(floorPrefs0.right)
   const [pinned, setPinned] = useState<Set<string>>(() => new Set(floorPrefs0.pinned))
   // Ordered pinned HOSTS names (null = default: pin the local machine).
@@ -1639,6 +1646,22 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             <div className="dhead" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
               <div className="title">{a.project} / {a.name}</div>
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
+              {/* Artifacts row: the agent's outputs at a glance — the PR (click-through),
+                  CI, the team it spawned, and tickets it created. Mirrors the card chips. */}
+              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
+                <div className="arts">
+                  {a.prUrl && (
+                    <ExtLink href={a.prUrl} className="art pr" style={{ textDecoration: 'none' }}>
+                      <Icon name="chevR" size={10} /> PR {a.pr ?? ''}
+                    </ExtLink>
+                  )}
+                  {a.ci && <span className={`art ci ${a.ci}`}>CI {a.ci}</span>}
+                  {a.spawnedTeam && <span className="art team"><Icon name="grip" size={10} /> team · {a.spawnedTeam}</span>}
+                  {(a.createdTickets ?? []).map((t) => (
+                    <span key={t} className="art tk"><Icon name="plus" size={10} /> {t}</span>
+                  ))}
+                </div>
+              )}
               {/* Actions: give a selected agent something to DO (issue: clicking a card
                   offered nothing). Focus opens the session's terminal — local via the
                   live vscode terminal, remote via an ssh + tmux-attach terminal.
@@ -1809,9 +1832,22 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onAttach={onAttachScreenshot}
             />
           ))
-        : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => (
+        : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => {
+            // When grouped by project, enrich the header: "N agents" + a Linear project
+            // link pill (mockup: "agents-cli · 8 agents · RUSH · Agents CLI").
+            const linkedProject = floorGroup === 'project'
+              ? managedProjects.find((p) => p.name === k)?.linearProjectName
+              : undefined
+            const countLabel = floorGroup === 'project'
+              ? `${arr.length} agent${arr.length === 1 ? '' : 's'}`
+              : `${arr.length}`
+            return (
             <React.Fragment key={k}>
-              <div className="feed-sec">{k} · {arr.length}<span className="ln" /></div>
+              <div className="feed-sec">
+                {k} · {countLabel}
+                {linkedProject && <span className="proj-lk">{linkedProject}</span>}
+                <span className="ln" />
+              </div>
               {arr.map((a) => (
                 <FeedItem
                   key={a.id}
@@ -1825,7 +1861,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                 />
               ))}
             </React.Fragment>
-          ))}
+          )})}
 
       {floorGroup === 'none' && doneFeed.length > 0 && (
         <>
@@ -1918,7 +1954,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       />
 
       <div className="page" style={{ flex: 1, minHeight: 0, height: 'auto' }}>
-        {sidebarOpen && (
+        {sidebarOpen && (railCollapsed ? (
+          <FloorRail
+            agents={floorAgents}
+            tickets={floorTickets}
+            scope={projFilter}
+            onScope={onScope}
+            onExpand={() => setRailCollapsed(false)}
+          />
+        ) : (
           <FloorSidebar
             agents={floorAgents}
             tickets={floorTickets}
@@ -1934,6 +1978,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             onToggleHostPin={toggleHostPin}
             onReorderHostPins={reorderHostPins}
             onScope={onScope}
+            onCollapse={() => setRailCollapsed(true)}
             onSelectHost={onSelectHost}
             selectedHost={center === 'host' ? selectedHostId : null}
             hosts={hostRoster}
@@ -1941,7 +1986,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             projects={managedProjects}
             onManageProjects={() => { setCenter('projects'); setRightOpen(true) }}
           />
-        )}
+        ))}
         <div className="feed-col">{centerContent}</div>
         {rightOpen && <div className="detail-col">{rightContent}</div>}
       </div>

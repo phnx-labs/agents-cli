@@ -44,9 +44,11 @@ interface FloorSidebarProps {
   projects?: ManagedProject[]
   /** Open the Projects management pane (gear + "+N more" row). */
   onManageProjects?: () => void
+  /** Collapse back to the icon rail. */
+  onCollapse?: () => void
 }
 
-export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, offlineHosts = [], devices = [], hostPins = [], onToggleHostPin, onReorderHostPins, onScope, localHost, projects = [], onManageProjects }: FloorSidebarProps) {
+export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, offlineHosts = [], devices = [], hostPins = [], onToggleHostPin, onReorderHostPins, onScope, localHost, projects = [], onManageProjects, onCollapse }: FloorSidebarProps) {
   const byProj: Record<string, number> = {}
   const projWait: Record<string, number> = {}
   for (const a of agents) {
@@ -106,7 +108,14 @@ export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, o
 
   return (
     <div className="sidebar">
-      <div className="sb-sec">SMART</div>
+      <div className="sb-sec" style={{ display: 'flex', alignItems: 'center' }}>
+        <span>SMART</span>
+        {onCollapse && (
+          <button type="button" className="sb-collapse" title="Collapse to rail" aria-label="Collapse sidebar" onClick={onCollapse}>
+            <Icon name="chevL" size={13} />
+          </button>
+        )}
+      </div>
       <div className={`sb-item ${projFilter === null ? 'on' : ''}`} onClick={() => onScope('')}>
         <span>All agents</span>
         <span className="c">{agents.length}</span>

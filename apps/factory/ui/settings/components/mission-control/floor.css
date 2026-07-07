@@ -189,12 +189,24 @@
 .swarmify-root .feed { width: 100%; max-width: 820px; padding: 14px 18px 60px; }
 .swarmify-root .detail-col { flex: 0 0 430px; border-left: 1px solid var(--ds-border); overflow: auto; background: var(--ds-bg-panel); }
 .swarmify-root .detail-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--ds-text-faint); font-size: 12px; padding: 20px; text-align: center; }
+/* Detail-pane artifacts row: the selected agent's outputs (PR / CI / team / tickets),
+   color-coded per the mockup — blue PR, green CI, violet team, amber created tickets. */
+.swarmify-root .detail-col .arts { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
+.swarmify-root .detail-col .art { font-family: "Geist Mono", monospace; font-size: 11px; border-radius: 7px; padding: 4px 9px; display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--ds-border); background: var(--ds-bg-recessed); color: var(--ds-text-muted); }
+.swarmify-root .detail-col .art.pr { color: #4a8dff; border-color: rgba(74,141,255,0.35); }
+.swarmify-root .detail-col .art.ci.passed { color: var(--status-running); border-color: rgba(62,207,142,0.3); }
+.swarmify-root .detail-col .art.ci.failed { color: var(--status-failed); border-color: var(--status-failed); }
+.swarmify-root .detail-col .art.ci.running { color: var(--status-pending); border-color: rgba(245,179,1,0.3); }
+.swarmify-root .detail-col .art.team { color: #b98cff; border-color: rgba(185,140,255,0.35); }
+.swarmify-root .detail-col .art.tk { color: var(--brand); border-color: var(--brand-ring); }
 /* decision block at top of the right detail when an agent needs you */
 .swarmify-root .decide { background: var(--status-pending-bg); border: 1px solid var(--status-pending); border-radius: var(--r-lg); padding: 12px 14px; margin-bottom: 14px; }
 .swarmify-root .decide .ql { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--status-pending); margin-bottom: 6px; }
 .swarmify-root .decide .qt { font-size: 13.5px; font-weight: 600; margin-bottom: 10px; }
 .swarmify-root .feed-sec { font-size: 11px; font-weight: 800; letter-spacing: .05em; color: var(--ds-text-dim); margin: 18px 4px 8px; display: flex; align-items: center; gap: 8px; }
 .swarmify-root .feed-sec.attn { color: var(--status-pending); }
+/* Linear project link pill in a project group header (mockup: "RUSH · Agents CLI"). */
+.swarmify-root .feed-sec .proj-lk { font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 600; letter-spacing: 0; color: #4a8dff; border: 1px solid rgba(74,141,255,0.32); border-radius: 20px; padding: 2px 9px; text-transform: none; }
 .swarmify-root .feed-sec .ln { flex: 1; height: 1px; background: var(--ds-border-subtle); }
 .swarmify-root .fitem { background: var(--ds-bg-panel); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-lg); padding: 12px 14px; margin-bottom: 10px; cursor: pointer; }
 .swarmify-root .fitem.selsel { box-shadow: 0 0 0 2px var(--brand); }
@@ -202,6 +214,7 @@
 .swarmify-root .fitem.fail { border-color: var(--status-failed); box-shadow: 0 0 0 1px var(--status-failed-bg); }
 .swarmify-root .fitem .head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
 .swarmify-root .fitem .who { font-weight: 700; font-size: 13px; }
+.swarmify-root .fitem .sid { font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-faint); background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); border-radius: 5px; padding: 1px 6px; flex: none; }
 .swarmify-root .fitem .path { color: var(--ds-text-dim); font-size: 11px; }
 .swarmify-root .fitem .when { margin-left: auto; color: var(--ds-text-dim); font-size: 11px; display: flex; align-items: center; gap: 8px; }
 .swarmify-root .fitem .resp { font-size: 12.5px; color: var(--ds-text); line-height: 1.5; margin: 2px 0 8px; border-left: 2px solid var(--ds-border); padding-left: 10px; }
@@ -267,6 +280,19 @@
 /* page with optional project sidebar */
 .swarmify-root .page { display: flex; height: 100%; min-height: 0; }
 .swarmify-root .sidebar { width: 210px; flex: 0 0 210px; border-right: 1px solid var(--ds-border); overflow: auto; padding: 8px 0; background: var(--ds-bg); }
+/* Icon rail — collapsed left nav (mockup default): a column of 46px rounded icon
+   buttons with count/needs badges, active button lime-outlined. */
+.swarmify-root .floor-rail { flex: 0 0 68px; width: 68px; border-right: 1px solid var(--ds-border); background: var(--ds-bg); padding: 16px 0; overflow: visible; }
+.swarmify-root .floor-rail-col { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.swarmify-root .rail-ib { position: relative; width: 46px; height: 46px; border-radius: 12px; background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); display: flex; align-items: center; justify-content: center; color: var(--ds-text-dim); cursor: pointer; transition: .12s; }
+.swarmify-root .rail-ib:hover { color: var(--ds-text); border-color: var(--ds-text-dim); }
+.swarmify-root .rail-ib.on { border-color: var(--brand); color: var(--brand); box-shadow: 0 0 0 1px var(--brand-ring); }
+.swarmify-root .rail-ib .rail-bdg { position: absolute; top: -6px; right: -6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 9px; background: var(--ds-bg-panel); border: 1px solid var(--ds-border); color: var(--ds-text-dim); font-family: "Geist Mono", monospace; font-size: 9.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.swarmify-root .rail-ib .rail-bdg.attn { background: var(--status-pending); border-color: var(--status-pending); color: #1a1a1a; }
+.swarmify-root .floor-rail .rail-gap { height: 6px; }
+.swarmify-root .rail-ib.rail-expand { color: var(--ds-text-faint); }
+.swarmify-root .sb-sec .sb-collapse { margin-left: auto; background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--ds-text-faint); display: inline-flex; align-items: center; }
+.swarmify-root .sb-sec .sb-collapse:hover { color: var(--ds-text); }
 .swarmify-root .sb-sec { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--ds-text-faint); padding: 12px 14px 4px; }
 .swarmify-root .sb-item { display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12.5px; cursor: pointer; color: var(--ds-text-muted); }
 .swarmify-root .sb-item:hover { background: var(--ds-bg-panel); }

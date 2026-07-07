@@ -37,6 +37,12 @@ import {
   machinePassphraseExists,
   _resetFileStoreForTest,
 } from './filestore.js';
+import {
+  noteNativeShadow,
+  _resetFallbackNoticeForTest,
+  type NativeImportReport,
+  type NativeImportResult,
+} from './fallback.js';
 
 // Re-exported so importers (and tests) can keep reaching these via './windows.js'.
 export {
@@ -285,6 +291,9 @@ let isAvailable = false;
 
 let useFileFallback = false;
 let warnedFallback = false;
+// Set once Credential Manager is observed unreachable in this process, so the
+// read-through in get/has stops re-probing it (and re-emitting notices).
+let nativeUnreachable = false;
 
 function activateFileFallback(): void {
   if (useFileFallback) return;
@@ -292,7 +301,7 @@ function activateFileFallback(): void {
   if (!warnedFallback) {
     warnedFallback = true;
     process.stderr.write(
-      `[agents] Windows Credential Manager unavailable, using file-based store at ${fileDir()}\n`
+      `[agents] using the encrypted file store at ${fileDir()}\n`
     );
   }
 }
@@ -357,11 +366,20 @@ export function usesFileFallback(): boolean {
 // ---------- Credential Manager ops with fallback ----------
 
 export function hasCredManToken(item: string): boolean {
-  if (preflight() === 'file') return fileStore.has(item);
+  if (preflight() === 'file') {
+    if (fileStore.has(item)) return true;
+    // Read through to Credential Manager so an item that predates the fallback
+    // isn't silently shadowed by the file store.
+    const probe = readNativeCredItemRaw(item);
+    if (probe.value !== undefined) { noteNativeShadow('shadowed', fileDir()); return true; }
+    if (probe.unavailable) noteNativeShadow('locked', fileDir());
+    return false;
+  }
   const r = runCred('has', { target: item });
   if (r.status === 0) return true;
   if (r.status === 3) return false;
   if (isCredManUnavailableError(r)) {
+    nativeUnreachable = true;
     activateFileFallback();
     return fileStore.has(item);
   }
@@ -369,7 +387,13 @@ export function hasCredManToken(item: string): boolean {
 }
 
 export function getCredManToken(item: string): string {
-  if (preflight() === 'file') return fileStore.get(item);
+  if (preflight() === 'file') {
+    if (fileStore.has(item)) return fileStore.get(item);
+    const probe = readNativeCredItemRaw(item);
+    if (probe.value !== undefined) { noteNativeShadow('shadowed', fileDir()); return probe.value; }
+    if (probe.unavailable) noteNativeShadow('locked', fileDir());
+    throw new Error(`Secret '${item}' not found in the file store or Credential Manager.`);
+  }
   const r = runCred('get', { target: item });
   if (r.status === 0) {
     // stdout is base64 of the raw UTF-8 blob (dodges PowerShell encoding corruption).
@@ -377,6 +401,7 @@ export function getCredManToken(item: string): string {
   }
   if (r.status === 3) throw new Error(`Secret '${item}' not found in Credential Manager.`);
   if (isCredManUnavailableError(r)) {
+    nativeUnreachable = true;
     activateFileFallback();
     return fileStore.get(item);
   }
@@ -397,6 +422,7 @@ export function setCredManToken(item: string, value: string): void {
   const r = runCred('set', { target: item, input: value });
   if (r.status === 0) return;
   if (isCredManUnavailableError(r)) {
+    nativeUnreachable = true;
     activateFileFallback();
     fileStore.set(item, value);
     return;
@@ -410,6 +436,7 @@ export function deleteCredManToken(item: string): boolean {
   if (r.status === 0) return true;
   if (r.status === 3) return false;
   if (isCredManUnavailableError(r)) {
+    nativeUnreachable = true;
     activateFileFallback();
     return fileStore.delete(item);
   }
@@ -421,6 +448,7 @@ export function listCredManItems(prefix: string): string[] {
   const r = runCred('list', { prefix });
   if (r.status === 0) return parseWindowsCredList(r.stdout, prefix);
   if (isCredManUnavailableError(r)) {
+    nativeUnreachable = true;
     activateFileFallback();
     return fileStore.list(prefix);
   }
@@ -439,6 +467,65 @@ export function parseWindowsCredList(output: string, prefix: string): string[] {
     .filter((s) => s.length > 0)
     .filter((s) => s.startsWith(prefix));
   return [...new Set(items)]; // dedupe
+}
+
+// ---------- native-direct helpers (bypass preflight routing) ----------
+//
+// Always talk to Credential Manager regardless of the file fallback. They power
+// (a) the read-through that keeps the file store from shadowing credman items,
+// and (b) `import-keyring`.
+
+/**
+ * Read one item straight from Credential Manager. `{value}` on hit,
+ * `{unavailable:true}` when the store is unreachable, `{}` on a plain miss.
+ * Never throws, never emits.
+ */
+function readNativeCredItemRaw(item: string): { value?: string; unavailable?: boolean } {
+  if (nativeUnreachable) return { unavailable: true };
+  if (!powershellAvailable()) return {};
+  const r = runCred('get', { target: item });
+  if (r.status === 0) return { value: Buffer.from(r.stdout.trim(), 'base64').toString('utf8') };
+  if (r.status === 3) return {};
+  if (isCredManUnavailableError(r)) { nativeUnreachable = true; return { unavailable: true }; }
+  return {};
+}
+
+/**
+ * Enumerate agents-cli credentials under `prefix`. Windows credentials have no
+ * service scoping — the target IS the identifier — so we NEVER enumerate with an
+ * empty filter (that returns unrelated machine credentials). The filter is
+ * floored to the `agents-cli.` namespace; bare items (unprefixed targets) are
+ * therefore out of scope for auto-discovery on Windows.
+ */
+function listNativeCredItemsRaw(prefix: string): { items: string[]; locked: boolean; available: boolean } {
+  if (!powershellAvailable()) return { items: [], locked: false, available: false };
+  const floor = prefix && prefix.startsWith('agents-cli.') ? prefix : 'agents-cli.';
+  const r = runCred('list', { prefix: floor });
+  if (r.status === 0) return { items: parseWindowsCredList(r.stdout, floor), locked: false, available: true };
+  if (isCredManUnavailableError(r)) { nativeUnreachable = true; return { items: [], locked: true, available: true }; }
+  return { items: [], locked: false, available: true };
+}
+
+/**
+ * Copy agents-cli credentials from Credential Manager into the file store (the
+ * `import-keyring` backend for Windows). Requires a reachable store; items
+ * already in the file store are left untouched.
+ */
+export function importNativeCredManItems(prefix: string, commit: boolean): NativeImportReport {
+  const { items, locked, available } = listNativeCredItemsRaw(prefix);
+  if (!available || locked) return { available, locked, results: [] };
+  const results: NativeImportResult[] = [];
+  for (const item of items) {
+    if (fileStore.has(item)) { results.push({ item, status: 'exists' }); continue; }
+    const probe = readNativeCredItemRaw(item);
+    if (probe.value === undefined) {
+      results.push({ item, status: 'failed', detail: probe.unavailable ? 'credential manager unavailable' : 'unreadable' });
+      continue;
+    }
+    if (commit) fileStore.set(item, probe.value);
+    results.push({ item, status: commit ? 'imported' : 'would-import' });
+  }
+  return { available, locked, results };
 }
 
 /**
@@ -480,6 +567,8 @@ export function _resetForTest(opts: {
   _resetFileStoreForTest({ fileDir: opts.fileDir ?? null, passphrase: opts.passphrase ?? null });
   useFileFallback = opts.forceFileFallback ?? false;
   warnedFallback = false;
+  nativeUnreachable = false;
+  _resetFallbackNoticeForTest();
   if (opts.forceAvailable === undefined || opts.forceAvailable === null) {
     checkedAvailability = false;
     isAvailable = false;

@@ -12,6 +12,7 @@ import '../index.css'
 
 import { Icon } from '../components/mission-control/icons'
 import { FloorSidebar } from '../components/mission-control/FloorSidebar'
+import { FloorRail } from '../components/mission-control/FloorRail'
 import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
@@ -97,7 +98,7 @@ const askAgent = agent({
 // RUNNING lane.
 const running: FloorAgent[] = [
   agent({
-    id: 'r1', abbr: 'CX', name: 'bench-saved-views', project: 'rush', phase: 'running',
+    id: 'r1', abbr: 'CX', name: 'bench-saved-views', sessionId: '4de7b016-2c1a-4f9e-b2d1-7a3c9e10ab55', project: 'rush', phase: 'running',
     pr: '#148', ci: 'running', tok: 41, files: 9, since: '3s', lastActivityMs: Date.now() - 3000,
     pane: '%42', viewingIn: 'Codium tab 3',
     verb: 'Porting', target: 'the group-by control into the shared model',
@@ -273,7 +274,16 @@ function Sidebar() {
     { name: 'yosemite-s0', online: true, agents: 2 },
     { name: 'yosemite-s1', online: false, agents: 1 },
   ]
-  return (
+  const [collapsed, setCollapsed] = useState(true)
+  return collapsed ? (
+    <FloorRail
+      agents={sidebarAgents}
+      tickets={tickets}
+      scope={null}
+      onScope={noop}
+      onExpand={() => setCollapsed(false)}
+    />
+  ) : (
     <FloorSidebar
       agents={sidebarAgents}
       tickets={tickets}
@@ -283,6 +293,7 @@ function Sidebar() {
       hostPins={pins}
       projects={managedProjects}
       onManageProjects={noop}
+      onCollapse={() => setCollapsed(true)}
       onToggleHostPin={(n) => setPins((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))}
       onReorderHostPins={setPins}
       onScope={noop}

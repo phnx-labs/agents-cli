@@ -224,8 +224,8 @@ export function ForemanOrb({ vscode }: ForemanOrbProps) {
       className="foreman-orb-root"
       style={{
         position: 'fixed',
-        bottom: 76,
-        right: 48,
+        bottom: 16,
+        right: 16,
         zIndex: 50,
         display: 'flex',
         flexDirection: 'column',
@@ -425,7 +425,9 @@ function orbTitle(state: VisualState): string {
 
 function OrbBlob({ state }: { state: VisualState }) {
   const big = state === 'listening' || state === 'speaking' || state === 'connecting'
-  const size = big ? 88 : 64
+  // Corner-FAB sizing (mockup): a compact resting orb that still grows while active,
+  // so Foreman reads as a tucked affordance rather than dominating the floor.
+  const size = big ? 56 : 40
   return (
     <svg
       width={size}

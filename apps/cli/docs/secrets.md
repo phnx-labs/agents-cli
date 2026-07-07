@@ -68,6 +68,14 @@ store (`~/.agents/.cache/secrets/<item>.enc`, scrypt-derived key) keyed by
   (Linux keeps the existing locked-keyring auto-provision fallback.)
 - **The passphrase is the one key.** Hold it in a biometry-gated keychain bundle
   on a trusted machine and forward it per run; never commit it.
+- **Migrating off a stale keyring.** On Linux/Windows, secrets written earlier
+  into the OS keyring / Credential Manager (e.g. while a desktop keyring was
+  unlocked) can be shadowed once the file store is in use. Reads transparently
+  fall through to the native store on a file-store miss and warn when that
+  happens; run `agents secrets import-keyring --commit` to copy those items into
+  the file store so they stay readable headless. A locked keyring can't be read —
+  unlock it first. Source: `src/lib/secrets/{linux,windows,fallback}.ts`,
+  `src/commands/secrets-import.ts`.
 
 Recommended custody for a remote release (laptop keeps the key, the remote Mac
 holds only ciphertext): see [Recipe 8](#8-headless-release-on-a-remote-mac).
@@ -224,7 +232,8 @@ See [The secrets-agent](#the-secrets-agent-macos) below for the model and the se
 | `secrets generate --strong` | All character classes | `agents secrets generate 48 --strong` |
 | `secrets generate -c` / `--copy` | Copy to clipboard, do not print | `agents secrets generate --copy` |
 | `secrets migrate` | Interactively migrate legacy YAML bundles into Keychain | `agents secrets migrate` |
-| `secrets migrate-acl` | Upgrade legacy keychain items to the biometry ACL | `agents secrets migrate-acl` |
+| `secrets migrate-acl` | Upgrade legacy keychain items to the biometry ACL (macOS) | `agents secrets migrate-acl` |
+| `secrets import-keyring` | Migrate secrets out of the OS keyring / Credential Manager into the encrypted file store (Linux/Windows). Dry-run by default; `--commit` to write | `agents secrets import-keyring --commit` |
 
 ## Configuration Schema
 

@@ -27,8 +27,11 @@ import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { linuxBackend, usesFileFallback as linuxUsesFileFallback } from './linux.js';
-import { windowsBackend, usesFileFallback as windowsUsesFileFallback } from './windows.js';
+import { linuxBackend, usesFileFallback as linuxUsesFileFallback, importNativeSecretToolItems } from './linux.js';
+import { windowsBackend, usesFileFallback as windowsUsesFileFallback, importNativeCredManItems } from './windows.js';
+import type { NativeImportReport } from './fallback.js';
+
+export type { NativeImportReport, NativeImportResult, NativeImportStatus } from './fallback.js';
 import { getKeychainHelperPath } from './install-helper.js';
 
 const SERVICE_PREFIX = 'agents-cli';
@@ -530,6 +533,22 @@ export function migrateOrphanedKeychainItems(prefix: string): OrphanMigrationRes
     throw new Error(msg || `Failed to migrate orphaned keychain items with prefix '${prefix}'.`);
   }
   return parseOrphanMigrationOutput(result.stdout?.toString() || '');
+}
+
+/**
+ * Import agents-cli secrets from the native store (GNOME Keyring / Windows
+ * Credential Manager) into the encrypted file store — the Linux/Windows
+ * analogue of the macOS orphan/legacy migration, exposed as
+ * `agents secrets import-keyring`. Requires the native store to be
+ * reachable/unlocked; `commit=false` is a dry-run. macOS returns an empty
+ * report (it has no file fallback and uses `migrate-acl` instead).
+ */
+export function importNativeItems(prefix: string, commit: boolean): NativeImportReport {
+  if (backend) return { available: false, locked: false, results: [] };
+  assertSupportedPlatform();
+  if (isLinux()) return importNativeSecretToolItems(prefix, commit);
+  if (isWindows()) return importNativeCredManItems(prefix, commit);
+  return { available: false, locked: false, results: [] };
 }
 
 /** Options controlling how secret refs are resolved. */
