@@ -8,7 +8,10 @@ import path from 'node:path';
 // process.env.HOME at module-eval), so they run in a subprocess against a planted
 // temp HOME — the established doctor-diff.test.ts pattern. Real fs, no mocks.
 
-describe('shim AGENTS_BIN drift + orphan prune', () => {
+// POSIX-only: the fixtures are `#!/bin/sh` shims with `AGENTS_BIN='...'`. On Windows
+// shims are `.cmd` files with different naming + AGENTS_BIN syntax, so these bash-shaped
+// fixtures don't apply (the helpers there are effectively no-ops on Windows .cmd shims).
+describe.skipIf(process.platform === 'win32')('shim AGENTS_BIN drift + orphan prune', () => {
   let home: string;
   let shimsDir: string;
   let liveBin: string;
