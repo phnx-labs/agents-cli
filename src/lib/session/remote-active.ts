@@ -18,9 +18,9 @@ import { spawn } from 'child_process';
 import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
+import { resolveExplicitTargets } from '../devices/resolve-target.js';
 import { loadDevices, type DeviceProfile } from '../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
-import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { machineId, normalizeHost } from './sync/config.js';
 import type { ActiveSession } from './active.js';
 
@@ -120,18 +120,9 @@ export async function gatherRemoteActive(hosts?: string[]): Promise<RemoteActive
   const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
 
   if (hosts && hosts.length > 0) {
-    for (const h of hosts) {
-      try {
-        assertValidSshTarget(h);
-      } catch {
-        process.stderr.write(chalk.gray(`  ${h}: not a valid ssh target — skipped\n`));
-        continue;
-      }
-      const bareHost = h.split('@').pop() || h;
-      // Resolve the OS by the name the user passed (a bare alias like `win-mini`
-      // matches a device-registry entry; a raw `user@host` falls back to POSIX).
-      targets.push({ target: h, machine: normalizeHost(bareHost), name: h, os: resolveRemoteOsSync(h) });
-    }
+    // Resolve each token through the device registry so an explicit --host/--device
+    // dials the exact same address (and machine id) as the auto-discovery sweep.
+    targets.push(...await resolveExplicitTargets(hosts));
   } else {
     let reg: Record<string, DeviceProfile>;
     try {
