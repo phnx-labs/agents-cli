@@ -1711,12 +1711,20 @@ export function getShimPath(agent: AgentId): string {
  * loop because addShimsToPath() only edits the rc file, never the legacy
  * shim file itself.
  */
-export function getPathShadowingExecutable(agent: AgentId): string | null {
-  const pathDirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
-  const shimPath = path.resolve(getShimPath(agent));
+export function getPathShadowingExecutable(
+  agent: AgentId,
+  overrides?: { pathDirs?: string[]; shimPath?: string },
+): string | null {
+  const pathDirs = overrides?.pathDirs ?? (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  const shimPath = path.resolve(overrides?.shimPath ?? getShimPath(agent));
   const cliCommand = AGENTS[agent].cliCommand;
   const legacyUserShim = path.resolve(path.join(os.homedir(), '.agents', 'shims', cliCommand));
   const managedShimExists = fs.existsSync(shimPath);
+
+  // The shim's own realpath — an adopted launcher is a symlink at a DIFFERENT
+  // path that resolves here, so identity must be by resolved target, not the
+  // literal path string.
+  const shimReal = managedShimExists ? canonicalOrNull(shimPath) : null;
 
   for (const dir of pathDirs) {
     const candidate = path.resolve(dir, cliCommand);
@@ -1724,6 +1732,11 @@ export function getPathShadowingExecutable(agent: AgentId): string | null {
       continue;
     }
     if (candidate === shimPath) return null;
+    // Adopted launcher: a symlink we repointed at our shim. Its path differs
+    // from shimPath but it resolves to the same file, so it is NOT a shadow —
+    // otherwise every adopted default would be re-flagged forever, resurfacing
+    // the false "runs a native binary" note this whole feature set out to kill.
+    if (shimReal && canonicalOrNull(candidate) === shimReal) return null;
     if (candidate === legacyUserShim && managedShimExists) {
       // Legacy file from the pre-split layout. Don't treat as shadow — the
       // repair flow deletes it via removeLegacyUserShim instead. Continue
@@ -1820,6 +1833,16 @@ function canonical(p: string): string {
     return fs.realpathSync(p);
   } catch {
     return path.resolve(p);
+  }
+}
+
+/** Like canonical(), but null when the path can't be resolved (broken/racy
+ * symlink) — used where a failed resolve must NOT collapse to the input path. */
+function canonicalOrNull(p: string): string | null {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return null;
   }
 }
 

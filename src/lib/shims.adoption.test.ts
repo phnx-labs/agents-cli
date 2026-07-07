@@ -8,6 +8,7 @@ import {
   releaseAdoptedLauncher,
   findAdoptableLauncher,
   getAdoptedRecordPath,
+  getPathShadowingExecutable,
   generateShimScript,
 } from './shims.js';
 
@@ -132,6 +133,38 @@ describe('findAdoptableLauncher', () => {
     fs.rmSync(local);
     fs.symlinkSync(shimPath, local); // already ours
     expect(findAdoptableLauncher('grok', { homeDir: root, shimsDir })).toBeNull();
+  });
+});
+
+describe('getPathShadowingExecutable — adopted launcher is NOT a shadow', () => {
+  test('a symlink resolving to our shim is not reported as a shadow', () => {
+    const { shimsDir, shimPath, link } = fixture('grok');
+    // Adopt: repoint the ~/.local/bin launcher at our shim.
+    adoptShadowingLauncher('grok', {
+      shadowedBy: link,
+      shimsDir,
+      historyDir: path.join(path.dirname(shimsDir), '.history'),
+    });
+    // link now → shim, and sits AHEAD of the shims dir on PATH.
+    const shadow = getPathShadowingExecutable('grok', {
+      pathDirs: [path.dirname(link), shimsDir],
+      shimPath,
+    });
+    expect(shadow).toBeNull(); // was `link` before the fix — the false "native binary" note
+  });
+
+  test('a real competing binary ahead of the shim IS still a shadow', () => {
+    const { shimsDir, shimPath, root } = fixture('grok');
+    const otherDir = path.join(root, 'other', 'bin');
+    fs.mkdirSync(otherDir, { recursive: true });
+    const realGrok = path.join(otherDir, 'grok');
+    fs.writeFileSync(realGrok, '#!/bin/bash\necho other\n');
+    fs.chmodSync(realGrok, 0o755);
+    const shadow = getPathShadowingExecutable('grok', {
+      pathDirs: [otherDir, shimsDir],
+      shimPath,
+    });
+    expect(shadow).toBe(realGrok);
   });
 });
 
