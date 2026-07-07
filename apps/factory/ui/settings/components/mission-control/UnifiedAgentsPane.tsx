@@ -1934,8 +1934,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   return (
     <div className="sw-floor-dashboard" style={{ padding: 0, overflow: 'hidden' }}>
       <FloorControls
-        runningCount={floorRunning}
-        totalCount={floorAgents.length}
+        needsCount={needsAgents.length}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         rightOpen={rightOpen}
@@ -1946,10 +1945,6 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         onSort={setFloorSort}
         group={floorGroup}
         onGroup={setFloorGroup}
-        activeStatus={statusChips}
-        onToggleStatus={(chip) => setStatusChips((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]))}
-        activeAbbrs={abbrChips}
-        onToggleAbbr={(ab) => setAbbrChips((prev) => (prev.includes(ab) ? prev.filter((c) => c !== ab) : [...prev, ab]))}
         onDispatch={() => openDispatch(selectedTicketId ? { ticketId: selectedTicketId } : undefined)}
       />
 
