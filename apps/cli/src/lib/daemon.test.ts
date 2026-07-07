@@ -383,7 +383,18 @@ describe('daemon single-instance (#414)', () => {
       expect(alive(pidA)).toBe(true);
     } finally {
       for (const p of [pidA, pidB]) { try { if (p) process.kill(p, 'SIGKILL'); } catch { /* already gone */ } }
-      fs.rmSync(tmpHome, { recursive: true, force: true });
+      // SIGKILL is async: the kernel delivers it but the daemon can still be
+      // mid-write into tmpHome/.agents when we start removing it. Reap both PIDs
+      // first, then retry rmSync — otherwise a write landing during the tree walk
+      // makes rmdir throw ENOTEMPTY (flaky teardown, unrelated to the assertions).
+      for (const p of [pidA, pidB]) { if (p) await waitFor(() => !alive(p), 5_000); }
+      for (let attempt = 0; ; attempt++) {
+        try { fs.rmSync(tmpHome, { recursive: true, force: true }); break; }
+        catch (err) {
+          if (attempt >= 10) throw err;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      }
     }
   }, 60_000);
 });
