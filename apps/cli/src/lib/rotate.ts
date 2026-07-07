@@ -16,6 +16,7 @@ import { getProjectRunConfigs } from './run-config.js';
 import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
+  deriveUsageStatusFromSnapshot,
   type UsageSnapshot,
 } from './usage.js';
 
@@ -80,14 +81,16 @@ export function getProjectRunStrategy(agent: AgentId, startPath: string): RunStr
  * Resolve the configured strategy. Lookup order:
  *   1. project-local agents.yaml (nearest to `startPath`)
  *   2. ~/.agents/.system/agents.yaml
- *   3. default: `available` (use the pinned default version when healthy,
- *      otherwise fall through to a healthy account so a single rate-limited
- *      account doesn't block the run).
+ *   3. default: `balanced` (distribute load across healthy accounts by
+ *      remaining capacity, skipping any that are rate-limited or out of
+ *      credits). A bare `agents run <agent>` should spread work over the
+ *      accounts that can actually serve it rather than sticking to a single
+ *      pinned version that may already be throttled.
  */
 export function getConfiguredRunStrategy(agent: AgentId, startPath: string = process.cwd()): RunStrategy {
   return getProjectRunStrategy(agent, startPath)
     ?? normalizeRunStrategy(readMeta().run?.[agent]?.strategy)
-    ?? 'available';
+    ?? 'balanced';
 }
 
 /** Persist the global run strategy used by bare `agents run <agent>`. */
@@ -111,6 +114,17 @@ function isAvailableEligible(candidate: RotateCandidate): boolean {
 }
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
+  // A blocking window at 100% (session OR week) means the account is throttled
+  // right now — it will 429 on the next request until that window resets. Use
+  // the SAME signal `ag view` renders as "rate-limited"
+  // (deriveUsageStatusFromSnapshot, session-inclusive) so the router never
+  // routes to an account the UI is telling the user is throttled. Rotation and
+  // the badge must agree; a single source of truth avoids the drift where the
+  // view says "rate-limited" but the router keeps picking that version anyway.
+  if (deriveUsageStatusFromSnapshot(candidate.usageSnapshot) === 'rate_limited') {
+    return false;
+  }
+
   const usedPercent = getRoutingUsedPercent(candidate.usageSnapshot);
   if (usedPercent !== null) {
     return usedPercent < 100;

@@ -238,10 +238,12 @@ describe('pickBalancedCandidate', () => {
     expect(counts['2.1.112']).toBeGreaterThan(counts['2.1.113'] * 10);
   });
 
-  it('uses the highest non-session window for capacity weighting', () => {
-    // session=100 should NOT exclude the candidate or zero its weight; weekly
-    // is what matters for routing. A high session% with low week% remains a
-    // valid, high-weight pick.
+  it('excludes a session-maxed account — a maxed session window means throttled now', () => {
+    // A session window at 100% means the account will 429 on the next request
+    // until the session resets. `ag view` renders this as "rate-limited", and
+    // the router must agree: a session-maxed account is excluded from routing,
+    // not kept as a high-weight pick. (Reverses the earlier design where a
+    // maxed session was ignored in favor of the weekly window.)
     const sessionMaxed = cand({
       version: '2.1.112',
       email: 'icloud@example.com',
@@ -255,18 +257,39 @@ describe('pickBalancedCandidate', () => {
       lastActive: new Date('2026-04-15T00:00:00Z'),
     });
 
-    // sessionMaxed: routing usage = max(15, 0) = 15 → weight 85
-    // weeklyBusy:    routing usage = max(80, 7) = 80 → weight 20
-    // Expected: sessionMaxed wins ~85/(85+20) = 81% of trials.
+    const result = pickBalancedCandidate([sessionMaxed, weeklyBusy]);
+    // sessionMaxed is excluded (session=100 → rate-limited); only weeklyBusy
+    // remains eligible, so it is picked every time.
+    expect(result!.picked.version).toBe('2.1.110');
+    expect(result!.excluded.map((c) => c.version)).toContain('2.1.112');
+  });
+
+  it('weights healthy candidates by their weekly (non-session) window', () => {
+    // Among accounts that are NOT rate-limited (session < 100), weekly capacity
+    // still drives the weighted-random pick: more weekly headroom → picked more.
+    const weeklyFresh = cand({
+      version: '2.1.112',
+      email: 'icloud@example.com',
+      usageSnapshot: claudeUsage(30, 15, 0), // routing usage = 15 → weight 85
+      lastActive: new Date('2026-04-20T10:00:00Z'),
+    });
+    const weeklyBusy = cand({
+      version: '2.1.110',
+      email: 'trp@example.com',
+      usageSnapshot: claudeUsage(30, 80, 7), // routing usage = 80 → weight 20
+      lastActive: new Date('2026-04-15T00:00:00Z'),
+    });
+
+    // Expected: weeklyFresh wins ~85/(85+20) = 81% of trials.
     const counts: Record<string, number> = { '2.1.112': 0, '2.1.110': 0 };
     const iterations = 2000;
     for (let i = 0; i < iterations; i++) {
-      const result = pickBalancedCandidate([sessionMaxed, weeklyBusy]);
+      const result = pickBalancedCandidate([weeklyFresh, weeklyBusy]);
       counts[result!.picked.version] += 1;
     }
-    const sessionMaxedRatio = counts['2.1.112'] / iterations;
-    expect(sessionMaxedRatio).toBeGreaterThan(0.7);
-    expect(sessionMaxedRatio).toBeLessThan(0.92);
+    const weeklyFreshRatio = counts['2.1.112'] / iterations;
+    expect(weeklyFreshRatio).toBeGreaterThan(0.7);
+    expect(weeklyFreshRatio).toBeLessThan(0.92);
   });
 
   it('dedupes by email — same account on two versions collapses to one candidate', () => {

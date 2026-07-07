@@ -330,7 +330,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--strategy <strategy>',
-      'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then pinned. (Legacy `rotate` accepted as alias for `balanced`.)',
+      'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then balanced. (Legacy `rotate` accepted as alias for `balanced`.)',
     )
     .option(
       '--acp',
@@ -419,9 +419,10 @@ export function registerRunCommand(program: Command): void {
         Legacy 'full' is silently rewritten to 'skip'.
 
       Run strategy (set via --strategy or run.<agent>.strategy in agents.yaml):
-        pinned     use the workspace/global pinned version (default)
+        pinned     use the workspace/global pinned version
         available  use pinned if usage available; otherwise switch to another signed-in version
-        balanced   distribute load across healthy accounts by remaining capacity
+        balanced   distribute load across healthy accounts by remaining capacity (default)
+        A rate-limited or out-of-credits account is skipped by available/balanced.
         --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.
 
       Fallback: --fallback codex,gemini retries on rate-limit failure via /continue handoff. Each entry accepts @version.
