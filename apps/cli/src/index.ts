@@ -585,141 +585,20 @@ async function maybeBootstrapShimIntegration(
     return;
   }
 
-  // Past the documentation/non-TTY guards: only now load the shim + agent
-  // tables this interactive repair flow needs, so fast commands never pay for
-  // them at module-eval time.
-  const { confirm } = await import('@inquirer/prompts');
-  const { AGENTS } = await import('./lib/agents.js');
-  const { getGlobalDefault, listInstalledVersions } = await import('./lib/versions.js');
-  const {
-    addShimsToPath,
-    adoptShadowingLauncher,
-    ensureShimCurrent,
-    ensureVersionedAliasCurrent,
-    getPathShadowingExecutable,
-    getPathSetupInstructions,
-    getShimsDir,
-    isShimsInPath,
-    listAgentsWithInstalledVersions,
-    removeLegacyUserShim,
-  } = await import('./lib/shims.js');
-
-  const installedAgents = listAgentsWithInstalledVersions();
-  if (installedAgents.length === 0) {
-    return;
+  // Past the documentation/non-TTY guards: heal the shim/shadow/PATH conditions
+  // through the unified self-heal registry — the SAME checks the daemon runs, but
+  // driven silently on this interactive invocation so a user who never starts the
+  // daemon still gets healed. Regenerating stale shims, adopting symlink launchers,
+  // and adding the shims dir to PATH now happen without any output. The only thing
+  // that ever prints is a ONE-TIME notice for what a machine can't silently fix
+  // (a real native binary shadowing the shim) or is worth saying once (a PATH entry
+  // just added). Suppression is persistent and keyed to the condition — a new
+  // terminal no longer re-nags (the old per-PPID sentinel did, every shell).
+  const { healShimsInteractive } = await import('./lib/shim-heal.js');
+  const noticeLines = await healShimsInteractive();
+  if (noticeLines) {
+    for (const line of noticeLines) console.log(chalk.gray(line));
   }
-
-  const createdOrUpdated: string[] = [];
-  for (const agent of installedAgents) {
-    const status = ensureShimCurrent(agent);
-    if (status !== 'current') {
-      createdOrUpdated.push(`${status === 'created' ? 'Created' : 'Updated'} ${AGENTS[agent].cliCommand} shim`);
-    }
-    for (const version of listInstalledVersions(agent)) {
-      const aliasStatus = ensureVersionedAliasCurrent(agent, version);
-      if (aliasStatus !== 'current') {
-        createdOrUpdated.push(`${aliasStatus === 'created' ? 'Created' : 'Updated'} ${AGENTS[agent].cliCommand}@${version} alias`);
-      }
-    }
-  }
-  for (const notice of createdOrUpdated) {
-    console.log(chalk.green(notice));
-  }
-
-  // Best-effort: remove leftover ~/.agents/shims/<cli> files from the pre-split
-  // layout BEFORE running detection. These cause false-positive "shadowing"
-  // results that make the repair prompt loop forever (the prompt user said
-  // "yes" to never deletes the file; next invocation finds it again).
-  for (const agent of installedAgents) {
-    removeLegacyUserShim(agent);
-  }
-
-  // The remaining flow is rc-file PATH repair, which is POSIX-only. On Windows
-  // the shims were just regenerated (incl. `.cmd` companions) above; PATH setup
-  // is covered by the install-time guidance, so stop here rather than printing
-  // shell-rc instructions that don't apply.
-  if (IS_WINDOWS) {
-    return;
-  }
-
-  const defaultAgents = installedAgents.filter((agent) => getGlobalDefault(agent));
-
-  // Auto-adopt any harness launcher that shadows our shim. PATH-order repair
-  // (below) cannot win against `~/.local/bin` — it's prepended in .zshenv for
-  // every shell while our prepend only lands in .zshrc — so for symlink
-  // launchers we *become* the launcher instead. Detection keys on the launcher
-  // symlink EXISTING (via adoptShadowingLauncher's own fallback), not on this
-  // shell's PATH order, so it also heals the GUI/non-interactive shadow an
-  // interactive run can't see. Reversible; only ever rewrites a symlink.
-  for (const agent of defaultAgents) {
-    const result = adoptShadowingLauncher(agent);
-    if (result.adopted) {
-      console.log(chalk.green(`Adopted ${AGENTS[agent].cliCommand} launcher (${result.launcher}) — version management now wins regardless of PATH order.`));
-    }
-  }
-
-  // Recompute AFTER adoption so anything we just took over drops out. What
-  // remains is a real binary we deliberately don't touch (adoption is
-  // symlink-only) — those get an honest one-time note, never a looping prompt.
-  const shadowed = defaultAgents
-    .map((agent) => ({ agent, shadowedBy: getPathShadowingExecutable(agent) }))
-    .filter((item): item is { agent: keyof typeof AGENTS; shadowedBy: string } => Boolean(item.shadowedBy));
-
-  // After adoption, the only things left are (a) real-binary shadows we won't
-  // touch, and (b) a genuinely missing PATH entry. Nothing else needs the user.
-  const pathMissing = !isShimsInPath();
-  if (shadowed.length === 0 && !pathMissing) {
-    return;
-  }
-
-  // Suppress repeated notices within the same shell. A successful rc-file edit
-  // doesn't reload the parent shell, so the next invocation re-fires detection.
-  // The sentinel survives only as long as the parent shell process — a new
-  // terminal (new PPID) is allowed to surface it again.
-  const sentinelPath = path.join(os.tmpdir(), `agents-shim-prompted-${process.ppid}`);
-  if (fs.existsSync(sentinelPath)) {
-    return;
-  }
-
-  // Real-binary shadows: adoption is symlink-only (we never rename a real native
-  // binary), and `addShimsToPath` provably can't outrank an early-PATH dir like
-  // ~/.local/bin across zsh's whole sourcing chain. So DON'T offer a "Repair?"
-  // prompt here — that was the infinite-loop bug (Yes was always a no-op).
-  // Inform once and point at the real levers.
-  if (shadowed.length > 0) {
-    const targets = shadowed
-      .map(({ agent, shadowedBy }) => `  ${AGENTS[agent].cliCommand}: ${shadowedBy}`)
-      .join('\n');
-    console.log(chalk.yellow('These agent commands run a native binary instead of the version-managed shim:'));
-    console.log(chalk.gray(targets));
-    console.log(chalk.gray(`It's a real binary (not a symlink), so agents-cli won't move it. To hand it to agents-cli, remove/reorder it, or put ${getShimsDir()} earlier in PATH.`));
-  }
-
-  // Genuinely-missing PATH entry is the one thing addShimsToPath actually fixes,
-  // so it's the only case that still earns an interactive prompt.
-  if (pathMissing) {
-    const shouldRepair = await confirm({
-      message: 'Add the agents-cli shims directory to your PATH now?',
-      default: true,
-    });
-    if (!shouldRepair) {
-      console.log(chalk.gray(getPathSetupInstructions()));
-    } else {
-      const pathResult = addShimsToPath();
-      if (!pathResult.success) {
-        console.log(chalk.yellow('Could not update PATH automatically.'));
-        console.log(chalk.gray(pathResult.error || getPathSetupInstructions()));
-      } else if (pathResult.alreadyPresent) {
-        console.log(chalk.yellow(`Shim PATH entry is already in ~/${pathResult.rcFile} — this shell just needs to reload it.`));
-        console.log(chalk.gray(`Run: source ~/${pathResult.rcFile}   (or open a new terminal)`));
-      } else {
-        console.log(chalk.green(`Added shims to PATH in ~/${pathResult.rcFile}`));
-        console.log(chalk.gray(getPathSetupInstructions()));
-      }
-    }
-  }
-
-  try { fs.writeFileSync(sentinelPath, '1'); } catch { /* best-effort */ }
 }
 
 

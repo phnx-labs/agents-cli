@@ -1698,7 +1698,7 @@ function readShimSchemaVersion(agent: AgentId): number | null {
  * False means either the shim is missing, is pre-v2 (no marker), or is an
  * older version that needs regeneration.
  */
-function isShimCurrent(agent: AgentId): boolean {
+export function isShimCurrent(agent: AgentId): boolean {
   const version = readShimSchemaVersion(agent);
   return version === SHIM_SCHEMA_VERSION;
 }
