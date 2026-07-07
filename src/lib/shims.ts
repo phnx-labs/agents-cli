@@ -397,7 +397,8 @@ parse_agents_default() {
 # MUST stay in sync or the shim reads the wrong device folder.
 machine_id() {
   local raw="\${AGENTS_SYNC_MACHINE_ID:-$(hostname 2>/dev/null)}"
-  raw=$(printf '%s' "$raw" | cut -d. -f1 | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')
+  # first label -> trim -> lowercase -> non-[a-z0-9_-] to '-' (matches normalizeHost order).
+  raw=$(printf '%s' "$raw" | cut -d. -f1 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')
   [ -n "$raw" ] && printf '%s' "$raw" || printf 'unknown'
 }
 
