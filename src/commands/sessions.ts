@@ -615,6 +615,41 @@ export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): 
 }
 
 /**
+ * Serialize a `SessionMeta[]` to the clean JSON shape the `--json` listing
+ * emits: strip the internal-only scoring/provenance fields (`_matchedTerms`,
+ * `_bm25Score`, `_remote`) that are search/fan-out bookkeeping, never part of
+ * the public record, then pretty-print as a 2-space array with a trailing
+ * newline. The single seam shared by the local `--json` path and the
+ * `--json --host` remote fan-out so both emit byte-identical row shapes.
+ */
+export function serializeSessionsJson(sessions: SessionMeta[]): string {
+  const serializable = sessions.map((s) => {
+    const { _matchedTerms, _bm25Score, _remote, ...rest } = s;
+    return rest;
+  });
+  return JSON.stringify(serializable, null, 2) + '\n';
+}
+
+/**
+ * `agents sessions --json --host <h>` — fan the RECENT (non-active) listing out
+ * to the named host(s) and emit ONE clean merged `SessionMeta[]` JSON array,
+ * the same shape the local `--json` path emits. Reuses `gatherRemoteList` (the
+ * exact SSH fan-out the interactive cross-machine listing already uses) and
+ * serializes the merged, machine-tagged rows — instead of `runRemoteSessions`,
+ * which streams each remote's raw stdout under a per-host banner and so can
+ * never be JSON.parsed. A dead host contributes `[]` (with a stderr note from
+ * the fan-out), so stdout is always a valid array and the exit stays 0.
+ */
+async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
+  // Forward the caller's own filters (query, --limit, --since, …) minus --host,
+  // and guarantee --json so each peer answers with a parseable array.
+  const forwarded = buildForwardedArgs(process.argv, new Set(hosts));
+  if (!forwarded.includes('--json')) forwarded.push('--json');
+  const { sessions } = await gatherRemoteList(forwarded, hosts);
+  process.stdout.write(serializeSessionsJson(sessions));
+}
+
+/**
  * `running N · idle N · waiting N · queued N` for a bucket of sessions (zero
  * buckets omitted). Same bucketing as the grand-total summary so per-group
  * counts reconcile with the `(total)` beside the header. Empty when nothing.
@@ -830,10 +865,17 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
     options.host = [...(options.host ?? []), ...options.device];
   }
 
-  // --host WITHOUT --active keeps the legacy per-host stream (each remote's raw
-  // stdout under a `── host ──` banner). With --active, the hosts are folded
-  // into the merged machine-grouped view instead (handled below).
+  // --host WITHOUT --active. `--json` fans the recent listing out and emits ONE
+  // clean merged SessionMeta[] array (same shape as the local --json path), for
+  // scripts/extensions that JSON.parse a remote's history. Without --json it
+  // keeps the legacy per-host stream (each remote's raw stdout under a
+  // `── host ──` banner). With --active, the hosts are folded into the merged
+  // machine-grouped view instead (handled below).
   if (options.host && options.host.length > 0 && !options.active) {
+    if (options.json) {
+      await runRemoteSessionsJson(options.host);
+      return;
+    }
     try {
       runRemoteSessions(options.host);
     } catch (err: any) {
@@ -989,11 +1031,7 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
 
     if (options.json) {
       const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
-      const serializable = filtered.map(s => {
-        const { _matchedTerms, _bm25Score, _remote, ...rest } = s;
-        return rest;
-      });
-      process.stdout.write(JSON.stringify(serializable, null, 2) + '\n');
+      process.stdout.write(serializeSessionsJson(filtered));
       return;
     }
 
