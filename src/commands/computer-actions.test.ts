@@ -383,7 +383,11 @@ describe('shouldRaise', () => {
 describe('appPathIsElectron', () => {
   const framework = 'Contents/Frameworks/Electron Framework.framework';
   it('is true when the .app bundles the Electron framework', () => {
-    const exists = (p: string) => p === `/Applications/VSCodium.app/${framework}`;
+    // appPathIsElectron joins with path.join (platform separators), so build the
+    // expected path the same way — else on Windows ('\\') it never matches the
+    // '/'-joined literal and the test fails.
+    const expected = path.join('/Applications/VSCodium.app', framework);
+    const exists = (p: string) => p === expected;
     expect(appPathIsElectron('/Applications/VSCodium.app', exists)).toBe(true);
   });
 
