@@ -1672,9 +1672,12 @@ Examples:
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can\'t be remote-unlocked.')
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
     .option('--all', 'Unlock every configured bundle')
-    .option('--host <target...>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session); repeatable for multiple machines')
-    .action(async (names: string[], opts: { ttl?: string; all?: boolean; host?: string[] }) => {
-      const hosts = opts.host ?? [];
+    .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
+    .action(async (names: string[], opts: { ttl?: string; all?: boolean; host?: string }) => {
+      // Single-valued (not variadic): a variadic --host greedily consumes the
+      // positional bundle name (`unlock --host mac wztest` -> host=[mac,wztest],
+      // names=[]). Unlock targets one remote at a time anyway.
+      const hosts = opts.host ? [opts.host] : [];
       if (hosts.length > 0) {
         // Remote unlock: the REMOTE enforces its own platform rules, so the
         // local darwin-only guard below does NOT apply. Only file-backed
