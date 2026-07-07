@@ -65,6 +65,7 @@ import { renderSessionLog } from './sessions.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { buildPreview as buildSessionPreview } from './sessions-picker.js';
 import { parseExecEnv } from '../lib/exec.js';
+import { checkRunAccountReadiness, type AccountReadiness } from '../lib/rotate.js';
 import { teamPicker, printTeamTable, type TeamRow } from './teams-picker.js';
 import { itemPicker } from '../lib/picker.js';
 import type { AgentProcess } from '../lib/teams/agents.js';
@@ -272,6 +273,61 @@ export function wireCloudDispatcher(mgr: AgentManager): void {
  * teammate whose CLI may not be signed in. Warn-only — never blocks `start`.
  * Local teammates only; cloud teammates authenticate through their provider.
  */
+/**
+ * Advisory line for a version-pinned teammate whose account can't serve a run
+ * right now. A pinned target (`agents run <agent>@<version>`) bypasses account
+ * rotation — the pin IS the target — so unlike a bare teammate it can't route
+ * around a throttled/expired account; it will launch and likely 429 at once.
+ */
+function throttleWarningLine(
+  agent: AgentType,
+  version: string,
+  r: Extract<AccountReadiness, { ready: false }>,
+): string {
+  const who = `${AGENT_NAMES[agent]} ${version}`;
+  const acct = r.email ? ` (${r.email})` : '';
+  const reason =
+    r.reason === 'out_of_credits' ? 'is out of credits'
+    : r.reason === 'signed_out' ? 'is not signed in'
+    : 'is rate-limited right now';
+  return (
+    chalk.yellow(`⚠ ${who}${acct} ${reason}.`) +
+    chalk.gray(
+      `\n  A pinned version skips account rotation, so it will launch on this account and may immediately hit its limit.` +
+      `\n  Use a bare \`${agent}\` teammate to let the team pick a healthy account, or pass --force to silence this.`,
+    )
+  );
+}
+
+/**
+ * Advisory: for each staged VERSION-PINNED teammate, warn if its account is
+ * rate-limited / out of credits / signed out right now — reusing the router's
+ * own eligibility signal (`checkRunAccountReadiness`) so the warning matches
+ * what the spawn would actually do. Bare teammates (rotation handles them) and
+ * profile/cloud teammates (account not locally checkable) are skipped. Warns,
+ * never blocks. Deduped by agent@version so N teammates on one account warn once.
+ */
+async function warnThrottledTeammates(mgr: AgentManager, team: string): Promise<void> {
+  let pending;
+  try {
+    pending = (await mgr.listByTask(team)).filter(
+      (a) => a.status === 'pending' && !a.cloudProvider && !a.profileName && a.version,
+    );
+  } catch {
+    return; // team not loadable yet — nothing to warn about
+  }
+  const seen = new Set<string>();
+  for (const a of pending) {
+    const agent = a.agentType as AgentType;
+    const version = a.version as string;
+    const key = `${agent}@${version}`;
+    if (seen.has(key) || !AGENT_NAMES[agent]) continue;
+    seen.add(key);
+    const readiness = await checkRunAccountReadiness(agent, version);
+    if (!readiness.ready) console.error(throttleWarningLine(agent, version, readiness));
+  }
+}
+
 async function warnUnsignedTeammates(mgr: AgentManager, team: string): Promise<void> {
   let pending;
   try {
@@ -1141,7 +1197,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--cloud <provider>', `Dispatch to cloud backend instead of local CLI: ${VALID_CLOUD_PROVIDERS.join('|')}`)
     .option('--repo <owner/repo>', 'GitHub repository (required for --cloud rush)')
     .option('--branch <name>', 'Target git branch for cloud dispatch')
-    .option('--force', "Skip the advisory 'may not be signed in' warning (detection is unreliable)")
+    .option('--force', "Skip the advisory 'may not be signed in' / 'account throttled' warnings")
     .option('--json', 'Output machine-readable JSON')
     .action(async (team: string, teammate: string, task: string, opts: {
       name?: string; mode: string; effort: string; model?: string; env: string[];
@@ -1192,6 +1248,16 @@ export function registerTeamsCommands(program: Command): void {
           chalk.yellow(`⚠ ${AGENT_NAMES[agent]} may not be signed in (detection is unreliable). Adding anyway.`) +
             chalk.gray(`\n  If it fails to start, run \`${AGENTS[agent].cliCommand}\` to log in, or pass --force to silence this.`)
         );
+      }
+
+      // Advisory throttle check — only for a version-pinned teammate, which
+      // bypasses account rotation and so can't route around a rate-limited /
+      // out-of-credits / signed-out account (see throttleWarningLine). Skip bare
+      // targets (rotation handles them), profiles (auth-injected account isn't
+      // the version-home one we can read), and cloud dispatch. Warn, never block.
+      if (!opts.force && !cloudProviderId && !profileName && version) {
+        const readiness = await checkRunAccountReadiness(agent, version);
+        if (!readiness.ready) console.error(throttleWarningLine(agent, version, readiness));
       }
 
       if (opts.name !== undefined) {
@@ -1505,7 +1571,7 @@ export function registerTeamsCommands(program: Command): void {
     .option('--watch', 'Keep running: poll every --interval seconds, fire new waves, exit when the DAG drains.')
     .option('--interval <seconds>', 'Seconds between waves in --watch mode (default 8)', '8')
     .option('--max-waves <n>', 'Safety cap on waves in --watch mode (default 1000)', '1000')
-    .option('--force', "Skip the advisory 'may not be signed in' warning for staged teammates (detection is unreliable)")
+    .option('--force', "Skip the advisory 'may not be signed in' / 'account throttled' warnings for staged teammates")
     .action(async (team: string | undefined, opts: { json?: boolean; watch?: boolean; interval: string; maxWaves: string; force?: boolean }) => {
       const mgr = mkManager();
       wireCloudDispatcher(mgr);
@@ -1516,7 +1582,10 @@ export function registerTeamsCommands(program: Command): void {
         team = picked;
       }
 
-      if (!opts.force && !isJsonMode(opts)) await warnUnsignedTeammates(mgr, team);
+      if (!opts.force && !isJsonMode(opts)) {
+        await warnUnsignedTeammates(mgr, team);
+        await warnThrottledTeammates(mgr, team);
+      }
 
       if (!opts.watch) {
         await runOneWave(mgr, team, Boolean(opts.json));

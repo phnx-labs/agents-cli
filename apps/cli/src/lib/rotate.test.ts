@@ -7,11 +7,13 @@ import {
   shouldArmRotationFailover,
   DEFAULT_ROTATION_FAILOVER_LIMIT,
   pickBalancedCandidate,
+  readinessFromCandidate,
   type RotateCandidate,
   type RotateResult,
   type FailoverArmingContext,
 } from './rotate.js';
 import { runWithFallback } from './exec.js';
+import type { UsageSnapshot, UsageWindowKey } from './usage.js';
 
 /**
  * Build a healthy RotateCandidate (email present, auth valid, no live snapshot
@@ -232,5 +234,78 @@ process.exit(0);
     expect(code).toBe(1);
     // Ran the primary exactly once — a plain failure is surfaced, not retried.
     expect(fs.readFileSync(stateFile, 'utf8')).toBe('1');
+  });
+});
+
+/** Build a UsageSnapshot from `[key, usedPercent]` pairs. */
+function snapshot(windows: Array<{ key: UsageWindowKey; usedPercent: number }>): UsageSnapshot {
+  return {
+    source: 'live',
+    sourceLabel: 'live',
+    capturedAt: null,
+    windows: windows.map((w) => ({
+      key: w.key,
+      label: w.key,
+      shortLabel: w.key,
+      usedPercent: w.usedPercent,
+      resetsAt: null,
+      windowMinutes: null,
+    })),
+  };
+}
+
+describe('readinessFromCandidate (pre-flight warning for version-pinned teammates)', () => {
+  it('healthy account (auth ok, no snapshot, cached available) is ready', () => {
+    expect(readinessFromCandidate(candidate({ version: '1.0.0' }))).toEqual({ ready: true });
+  });
+
+  it('no live snapshot + cached rate_limited => not ready, reason rate_limited', () => {
+    expect(
+      readinessFromCandidate(candidate({ version: '1.0.0', usageStatus: 'rate_limited' })),
+    ).toEqual({ ready: false, reason: 'rate_limited', email: '1.0.0@example.com' });
+  });
+
+  it('no live snapshot + cached out_of_credits => not ready, reason out_of_credits', () => {
+    expect(
+      readinessFromCandidate(candidate({ version: '1.0.0', usageStatus: 'out_of_credits' })),
+    ).toEqual({ ready: false, reason: 'out_of_credits', email: '1.0.0@example.com' });
+  });
+
+  it('live snapshot with the 5h session window maxed => not ready (session-inclusive, matches the badge)', () => {
+    // usageStatus stays the default `available`; the live snapshot must still
+    // exclude it — this is the exact drift #757 fixed and the warning must mirror.
+    const c = candidate({ version: '1.0.0', usageSnapshot: snapshot([{ key: 'session', usedPercent: 100 }]) });
+    expect(readinessFromCandidate(c)).toEqual({ ready: false, reason: 'rate_limited', email: '1.0.0@example.com' });
+  });
+
+  it('live snapshot showing capacity WINS over a stale cached out_of_credits => ready', () => {
+    // Mirrors hasUsageAvailable: a present live snapshot overrides the coarse
+    // cache, so we do not warn about an account that is actually serving.
+    const c = candidate({
+      version: '1.0.0',
+      usageStatus: 'out_of_credits',
+      usageSnapshot: snapshot([{ key: 'session', usedPercent: 20 }, { key: 'week', usedPercent: 40 }]),
+    });
+    expect(readinessFromCandidate(c)).toEqual({ ready: true });
+  });
+
+  it('only the Sonnet-weekly window is maxed => ready (sonnet_week never blocks when a real window is present)', () => {
+    const c = candidate({
+      version: '1.0.0',
+      usageSnapshot: snapshot([{ key: 'session', usedPercent: 50 }, { key: 'sonnet_week', usedPercent: 100 }]),
+    });
+    expect(readinessFromCandidate(c)).toEqual({ ready: true });
+  });
+
+  it('no email => not ready, reason signed_out (before any usage check)', () => {
+    expect(
+      readinessFromCandidate(candidate({ version: '1.0.0', email: null })),
+    ).toEqual({ ready: false, reason: 'signed_out', email: null });
+  });
+
+  it('invalid auth => not ready, reason signed_out even with usage headroom', () => {
+    expect(
+      readinessFromCandidate(candidate({ version: '1.0.0', authValid: false })),
+    ).toEqual({ ready: false, reason: 'signed_out', email: '1.0.0@example.com' });
   });
 });
