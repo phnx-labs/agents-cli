@@ -1411,12 +1411,13 @@ function resolveViewMode(options: SessionsOptions, filters: FilterOptions): View
 }
 
 /**
- * Render a session's full transcript to stdout — the non-follow view behind
- * `agents logs <sessionId>`. Reuses the same markdown renderer as
- * `agents sessions <id> --markdown`.
+ * Render a resolved session to stdout — the non-follow view behind
+ * `agents logs <sessionId>`. Defaults to the concise `summary` digest (same as
+ * `agents sessions <id>`); pass `'markdown'` for the full transcript
+ * (`agents logs <id> --full`). Reuses the shared `renderSession` renderer.
  */
-export async function renderSessionLog(session: SessionMeta): Promise<void> {
-  await renderSession(session, 'markdown', {});
+export async function renderSessionLog(session: SessionMeta, mode: ViewMode = 'summary'): Promise<void> {
+  await renderSession(session, mode, {});
 }
 
 async function renderSession(
