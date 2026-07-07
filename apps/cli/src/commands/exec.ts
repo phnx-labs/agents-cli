@@ -550,8 +550,11 @@ export function registerRunCommand(program: Command): void {
           // Decide whether this host run is interactive. No prompt always means
           // interactive (matching local resolveInteractive); --interactive forces
           // interactive even when a prompt is provided; --headless forces headless
-          // and therefore requires a prompt. --interactive and --headless are
-          // mutually exclusive (validated earlier).
+          // and therefore requires a prompt.
+          if (options.interactive && options.headless) {
+            console.error(chalk.red('--interactive and --headless are mutually exclusive. Pass one, or neither (mode is inferred from prompt presence).'));
+            process.exit(1);
+          }
           const interactiveHost = options.interactive === true || (prompt === undefined && options.headless !== true);
 
           if (interactiveHost) {
