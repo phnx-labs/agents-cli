@@ -16,7 +16,8 @@ import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
 import { BacklogCenter } from '../components/mission-control/BacklogCenter'
-import type { FloorAgent, FloorTicket, StructuredQuestion, TicketGroupBy, TicketSort } from '../components/mission-control/floorModel'
+import { ProjectsPane } from '../components/mission-control/ProjectsPane'
+import type { FloorAgent, FloorTicket, StructuredQuestion, TicketGroupBy, TicketSort, ManagedProject, LinearProjectLite } from '../components/mission-control/floorModel'
 import type { UnifiedTask } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
 
@@ -161,8 +162,22 @@ const dHosts: DispatchHost[] = [
   { id: 'rush', label: 'cloud', kind: 'cloud', online: true, agents: 0, load: 'idle', uses: 12, costHint: '~$0.40/run' },
 ]
 const dTargets: DispatchTarget[] = [
-  { id: 'rush', label: 'rush', path: '/Users/muqsit/src/github.com/muqsitnawaz/rush', uses: 30 },
-  { id: 'muqsitnawaz/rush', label: 'muqsitnawaz/rush', uses: 30 },
+  { id: 'phnx-labs/agents-cli', label: 'agents-cli', path: '/Users/muqsit/src/github.com/phnx-labs/agents-cli', uses: 30, confidence: 'high', linearProject: 'Agents CLI' },
+  { id: 'phnx-labs/prix', label: 'prix', path: '/Users/muqsit/src/github.com/phnx-labs/prix', uses: 12, confidence: 'high', linearProject: 'Prix' },
+  { id: 'muqsitnawaz/rush', label: 'rush-app', path: '/Users/muqsit/Rush/app', uses: 6, confidence: 'medium' },
+  { id: 'scratch-tool', label: 'scratch-tool', path: '/Users/muqsit/tmp/scratch-tool', uses: 0, confidence: 'low' },
+]
+
+// Managed-projects mock (5 → the sidebar shows top 3 + a "＋2 more" row).
+const managedProjects: ManagedProject[] = [
+  { id: 'phnx-labs/agents-cli', name: 'agents-cli', path: '/Users/muqsit/src/github.com/phnx-labs/agents-cli', repoSlug: 'phnx-labs/agents-cli', linearProjectId: 'a', linearProjectName: 'Agents CLI', confidence: 'high', source: 'detected' },
+  { id: 'phnx-labs/prix', name: 'prix', path: '/Users/muqsit/src/github.com/phnx-labs/prix', repoSlug: 'phnx-labs/prix', linearProjectId: 'b', linearProjectName: 'Prix', confidence: 'high', source: 'detected' },
+  { id: 'muqsitnawaz/rush', name: 'rush-app', path: '/Users/muqsit/Rush/app', repoSlug: 'muqsitnawaz/rush', linearProjectId: 'c', linearProjectName: 'Rush App', confidence: 'medium', source: 'manual' },
+  { id: 'phnx-labs/rush-cli', name: 'rush-cli', path: '/Users/muqsit/src/github.com/phnx-labs/rush-cli', repoSlug: 'phnx-labs/rush-cli', linearProjectId: 'd', linearProjectName: 'Rush CLI', confidence: 'medium', source: 'detected' },
+  { id: 'scratch-tool', name: 'scratch-tool', path: '/Users/muqsit/tmp/scratch-tool', confidence: 'low', source: 'manual' },
+]
+const linearProjectList: LinearProjectLite[] = [
+  { id: 'a', name: 'Agents CLI' }, { id: 'b', name: 'Prix' }, { id: 'c', name: 'Rush App' }, { id: 'd', name: 'Rush CLI' },
 ]
 
 function Feed() {
@@ -264,10 +279,27 @@ function Sidebar() {
       offlineHosts={['yosemite-s1']}
       devices={devices}
       hostPins={pins}
+      projects={managedProjects}
+      onManageProjects={noop}
       onToggleHostPin={(n) => setPins((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))}
       onReorderHostPins={setPins}
       onScope={noop}
       localHost="zion"
+    />
+  )
+}
+
+// Projects center pane — curated list + add/edit form (the gear target).
+function Projects() {
+  return (
+    <ProjectsPane
+      projects={managedProjects}
+      linearProjects={linearProjectList}
+      pickedFolder={null}
+      onSave={noop}
+      onDelete={noop}
+      onPickFolder={noop}
+      onClose={noop}
     />
   )
 }
@@ -281,7 +313,7 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'sidebar' ? <Sidebar /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel
