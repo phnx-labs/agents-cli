@@ -14,8 +14,12 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as readiness from './terminalReadiness';
 import { runAgents } from '../core/agentsBin';
+
+const pexecFile = promisify(execFile);
 
 interface TmuxTerminal {
   terminal: vscode.Terminal;
@@ -23,6 +27,7 @@ interface TmuxTerminal {
   socket: string;  // Shared agents-cli socket (so direct tmux calls hit the same server)
   agentType: string;
   paneCount: number;
+  pane?: string;   // Cached `%N` pane id, resolved lazily by getTmuxInfo.
 }
 
 const tmuxTerminals = new Map<vscode.Terminal, TmuxTerminal>();
@@ -206,6 +211,47 @@ export function isTmuxTerminal(terminal: vscode.Terminal): boolean {
 
 export function getTmuxState(terminal: vscode.Terminal): TmuxTerminal | undefined {
   return tmuxTerminals.get(terminal);
+}
+
+/**
+ * Read the session's `%N` pane id off the shared socket. Best-effort: the
+ * extension host may not have `tmux` on its PATH (it's the terminal's shell
+ * that runs the styling), so we try the common Homebrew/system locations and
+ * give up quietly. A single-pane agent session has exactly one pane; we take
+ * the first line.
+ */
+async function readPaneId(socket: string, session: string): Promise<string | undefined> {
+  const candidates = ['tmux', '/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'];
+  for (const bin of candidates) {
+    try {
+      const { stdout } = await pexecFile(
+        bin,
+        ['-S', socket, 'list-panes', '-t', session, '-F', '#{pane_id}'],
+        { timeout: 3_000 },
+      );
+      const pane = stdout.split('\n').map((s) => s.trim()).filter(Boolean)[0];
+      if (pane) return pane;
+      return undefined; // tmux ran but reported no pane — don't try other bins
+    } catch {
+      /* binary missing at this path — try the next candidate */
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The tmux coordinates for a terminal we spawned, or undefined for a
+ * non-tmux terminal. `session` + `socket` are known at creation; `pane` is
+ * resolved (and cached) lazily off the shared socket. Consumed by
+ * foreman.registry.snapshotOwnTerminals to publish tmuxSession/tmuxPane.
+ */
+export async function getTmuxInfo(
+  terminal: vscode.Terminal,
+): Promise<{ session: string; socket: string; pane?: string } | undefined> {
+  const state = tmuxTerminals.get(terminal);
+  if (!state) return undefined;
+  if (!state.pane) state.pane = await readPaneId(state.socket, state.session);
+  return { session: state.session, socket: state.socket, pane: state.pane };
 }
 
 export function cleanupTmuxTerminal(terminal: vscode.Terminal): void {

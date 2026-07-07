@@ -21,6 +21,8 @@ import * as vscode from 'vscode';
 import { createHash } from 'crypto';
 import { computeWindowId } from '../core/foreman.windowId';
 import { isPidAlive } from '../core/liveness';
+import { resolveTabIndex, type TabView } from '../core/tabIndex';
+import { getTmuxInfo } from './tmux';
 
 const REGISTRY_DIR = path.join(os.homedir(), '.agents', '.cache', 'terminals');
 const REGISTRY_FILE = path.join(REGISTRY_DIR, 'live-terminals.json');
@@ -38,6 +40,11 @@ export interface LiveTerminal {
   label?: string | null;
   cwd?: string | null;
   startedAtMs: number;
+  // Richer tracking so the CLI can address + display this terminal precisely.
+  // DATA CONTRACT with the CLI (src/lib/session): field names are load-bearing.
+  tmuxSession?: string;      // tmux session name when the agent runs inside tmux.
+  tmuxPane?: string;         // tmux `%N` pane id (unique addressing) when known.
+  tabIndex?: number;         // 1-based editor-tab index within its group ("Codium tab N").
 }
 
 interface RegistryFile {
@@ -105,7 +112,7 @@ function hashEntries(entries: LiveTerminal[]): string {
   // `at` timestamp is excluded — it changes every call and would make every
   // hash unique.
   const stable = entries
-    .map((e) => `${e.sessionId}|${e.pid}|${e.kind}|${e.label ?? ''}|${e.cwd ?? ''}`)
+    .map((e) => `${e.sessionId}|${e.pid}|${e.kind}|${e.label ?? ''}|${e.cwd ?? ''}|${e.tmuxPane ?? ''}|${e.tabIndex ?? ''}`)
     .sort()
     .join('\n');
   return createHash('sha1').update(stable).digest('hex');
@@ -168,6 +175,14 @@ export function readLiveTerminals(): LiveTerminal[] {
 // Returns [] if no agent terminals are open here.
 export async function snapshotOwnTerminals(): Promise<LiveTerminal[]> {
   const out: LiveTerminal[] = [];
+  // Flatten the editor tab groups ONCE per snapshot so resolveTabIndex is a pure
+  // lookup per terminal rather than re-walking the tab tree each time.
+  const tabGroups: TabView[][] = vscode.window.tabGroups.all.map((g) =>
+    g.tabs.map((tab) => ({
+      label: tab.label,
+      isTerminal: tab.input instanceof vscode.TabInputTerminal,
+    })),
+  );
   for (const t of vscode.window.terminals) {
     if (t.exitStatus !== undefined) continue;
     const opts = t.creationOptions as vscode.TerminalOptions;
@@ -178,6 +193,11 @@ export async function snapshotOwnTerminals(): Promise<LiveTerminal[]> {
     const pid = await t.processId;
     if (!pid) continue;
     const kind = tid ? kindFromTerminalId(tid) : kindFromName(t.name);
+    // tmux coordinates (session + %pane) when this terminal was spawned inside
+    // tmux; undefined for the native path. Best-effort pane read off the socket.
+    const tmux = await getTmuxInfo(t);
+    // Editor-tab position, matched by the terminal's name against its tab label.
+    const tabIndex = resolveTabIndex(tabGroups, t.name);
     out.push({
       sessionId: sid,
       pid,
@@ -185,6 +205,9 @@ export async function snapshotOwnTerminals(): Promise<LiveTerminal[]> {
       label: deriveLabel(t.name),
       cwd: env?.AGENT_WORKSPACE_DIR ?? null,
       startedAtMs: Date.now(),
+      tmuxSession: tmux?.session,
+      tmuxPane: tmux?.pane,
+      tabIndex,
     });
   }
   return out;
