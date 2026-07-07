@@ -17,6 +17,7 @@ import {
   windowsBackend,
   getCredManToken,
   setCredManToken,
+  importNativeCredManItems,
   CRED_MAX_CREDENTIAL_BLOB_SIZE,
   _resetForTest,
 } from './windows.js';
@@ -231,5 +232,41 @@ describe.skipIf(process.platform !== 'win32')('real Windows Credential Manager',
     } finally {
       expect(windowsBackend.delete(item)).toBe(true);
     }
+  });
+});
+
+// (f) import-keyring: copy credman items into the file store
+describe('importNativeCredManItems', () => {
+  it('copies credman items missing from the file store, floored to agents-cli.', () => {
+    _resetForTest({ forceFileFallback: true, fileDir: tmpDir, passphrase: 'test-pass' });
+    const store: Record<string, string> = { 'agents-cli.bundles.demo': 'hello' };
+    responder = (op, ctx) => {
+      if (op === 'list') {
+        expect(ctx.env.AGENTS_CRED_PREFIX).toBe('agents-cli.'); // never enumerates all creds
+        return { status: 0, stdout: Object.keys(store).join('\n') + '\n' };
+      }
+      if (op === 'get') {
+        const t = ctx.env.AGENTS_CRED_TARGET as string;
+        return t in store
+          ? { status: 0, stdout: Buffer.from(store[t], 'utf8').toString('base64') }
+          : { status: 3 };
+      }
+      throw new Error(`unexpected op ${op}`);
+    };
+    const report = importNativeCredManItems('', true);
+    expect(report.available).toBe(true);
+    expect(report.locked).toBe(false);
+    expect(report.results).toEqual([{ item: 'agents-cli.bundles.demo', status: 'imported' }]);
+    // resolves from the file store afterwards
+    expect(getCredManToken('agents-cli.bundles.demo')).toBe('hello');
+  });
+
+  it('reports locked (empty results) when Credential Manager is unavailable (1312)', () => {
+    _resetForTest({ forceFileFallback: true, fileDir: tmpDir, passphrase: 'test-pass' });
+    responder = (op) => (op === 'list' ? { status: 1, stderr: 'CredMan error 1312' } : { status: 3 });
+    const report = importNativeCredManItems('', true);
+    expect(report.available).toBe(true);
+    expect(report.locked).toBe(true);
+    expect(report.results).toEqual([]);
   });
 });
