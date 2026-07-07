@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`agents sessions --json --host <h>` now emits a clean JSON array** of recent (non-active) sessions instead of the legacy per-host raw banner stream, so a UI can fetch a remote device's recent sessions when it has no live agents. `serializeSessionsJson()` is shared by the local and remote `--json` paths; `runRemoteSessionsJson()` reuses the existing `gatherRemoteList` SSH fan-out. The non-JSON banner path and `--active` are unchanged (#711).
+
 ## 1.20.36
 
 **[windows] `agents sessions --active` detects sessions on Windows, and shim launches carry cwd + session identity everywhere**

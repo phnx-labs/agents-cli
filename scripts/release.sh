@@ -475,8 +475,13 @@ if ! $MAIN_AT_TARGET; then
       green "Rolled CHANGELOG: ## Unreleased -> ## $TARGET"
       PR_BODY="$(printf '## %s\n\n%s' "$TARGET" "$unrel_content")"
     else
-      gray "CHANGELOG: no Unreleased content to roll"
+      red "CHANGELOG: '## Unreleased' is empty — a release must document itself." >&2
+      red "  Add release notes under '## Unreleased' in CHANGELOG.md before releasing $TARGET." >&2
+      exit 1
     fi
+  else
+    red "CHANGELOG.md not found — a release must document itself." >&2
+    exit 1
   fi
 
   # Build the release commit from the index WITHOUT moving HEAD. The signed +
