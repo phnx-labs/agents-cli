@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { hostSessionMeta, registerHostSession } from './session-index.js';
+import { hostSessionMeta, registerHostSession, registerInteractiveHostSession } from './session-index.js';
 import { findSessionsById, querySessions, closeDB } from '../session/db.js';
 import type { HostTask } from './tasks.js';
 
@@ -54,6 +54,35 @@ describe('hostSessionMeta', () => {
 
   it('returns null for an agent that is not a known session agent', () => {
     expect(hostSessionMeta(task({ agent: 'nonsense' }), { cwd: '/x', prompt: 'p' })).toBeNull();
+  });
+});
+
+describe('registerInteractiveHostSession', () => {
+  it('registers an interactive host run so it is resolvable by id', () => {
+    registerInteractiveHostSession({
+      cwd: '/home/me/proj',
+      host: 'yosemite-s0',
+      agent: 'claude',
+      sessionId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+      name: 'remote-claude',
+    });
+
+    const byId = findSessionsById('bbbbbbbb-cccc-dddd-eeee-ffffffffffff');
+    expect(byId).toHaveLength(1);
+    expect(byId[0].agent).toBe('claude');
+    expect(byId[0].label).toBe('remote-claude');
+    expect(byId[0].filePath).toBe('');
+  });
+
+  it('is a no-op for agents that are not session-tracked', () => {
+    registerInteractiveHostSession({
+      cwd: '/x',
+      host: 'box',
+      agent: 'nonsense',
+      sessionId: 'cccccccc-dddd-eeee-ffff-000000000000',
+    });
+
+    expect(findSessionsById('cccccccc-dddd-eeee-ffff-000000000000')).toHaveLength(0);
   });
 });
 

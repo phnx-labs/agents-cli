@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildRunForwardedArgs } from './dispatch.js';
+import { buildRunForwardedArgs, buildInteractiveRunForwardedArgs } from './dispatch.js';
 
 describe('buildRunForwardedArgs', () => {
   it('forwards --session-id for a fresh run so the remote session gets our id', () => {
@@ -34,5 +34,46 @@ describe('buildRunForwardedArgs', () => {
       sessionId: 'id-1',
     });
     expect(args).toEqual(['run', 'claude', 'p', '--quiet', '--mode', 'plan', '--model', 'opus', '--session-id', 'id-1']);
+  });
+});
+
+describe('buildInteractiveRunForwardedArgs', () => {
+  it('omits prompt and --quiet so the remote agent starts interactively', () => {
+    const args = buildInteractiveRunForwardedArgs({ agent: 'claude' });
+    expect(args).toEqual(['run', 'claude']);
+  });
+
+  it('forwards --session-id for a fresh interactive run', () => {
+    const args = buildInteractiveRunForwardedArgs({ agent: 'claude', sessionId: 'abc-123' });
+    expect(args).toEqual(['run', 'claude', '--session-id', 'abc-123']);
+  });
+
+  it('forwards --resume (not --session-id) when resuming interactively', () => {
+    const args = buildInteractiveRunForwardedArgs({ agent: 'claude', resume: 'abc-123' });
+    expect(args).toEqual(['run', 'claude', '--resume', 'abc-123']);
+  });
+
+  it('threads mode, model, and name through', () => {
+    const args = buildInteractiveRunForwardedArgs({
+      agent: 'claude',
+      mode: 'plan',
+      model: 'opus',
+      name: 'my-run',
+    });
+    expect(args).toEqual(['run', 'claude', '--mode', 'plan', '--model', 'opus', '--name', 'my-run']);
+  });
+
+  it('forwards --raw and passthrough args', () => {
+    const args = buildInteractiveRunForwardedArgs({
+      agent: 'claude',
+      raw: true,
+      passthroughArgs: ['--verbose', '--some-flag'],
+    });
+    expect(args).toEqual(['run', 'claude', '--raw', '--', '--verbose', '--some-flag']);
+  });
+
+  it('omits empty passthrough args', () => {
+    const args = buildInteractiveRunForwardedArgs({ agent: 'claude', passthroughArgs: [] });
+    expect(args).toEqual(['run', 'claude']);
   });
 });
