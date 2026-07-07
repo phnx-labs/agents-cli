@@ -27,29 +27,18 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 import chalk from 'chalk';
 import { getCacheDir } from '../state.js';
-import { SSH_OPTS, controlOpts } from '../ssh-exec.js';
+import { SSH_OPTS, controlOpts, assertValidSshTarget } from '../ssh-exec.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { formatRelativeTime } from './relative-time.js';
 import { terminalWidth } from './width.js';
 
 /**
- * SSH target: a bare ssh-config host alias (e.g. `yosemite-s1`) or `user@host`.
- * The strict allowlist blocks shell metacharacters and a leading `-`, so a target
- * can never be smuggled in as an ssh argv flag.
+ * POSIX single-quote a string for safe interpolation into a remote shell command.
+ * Always wraps (unlike the bare-passthrough variant in `ssh-exec.ts`) — the
+ * forwarded `agents` argv is embedded verbatim inside `bash -lc '<cmd>'`, so
+ * every token is quoted to keep the command boundary unambiguous.
  */
-export const SSH_TARGET_RE = /^[a-zA-Z0-9._-]+(@[a-zA-Z0-9._-]+)?$/;
-
-export function assertValidSshTarget(host: string): void {
-  if (!SSH_TARGET_RE.test(host)) {
-    throw new Error(
-      `Invalid SSH target ${JSON.stringify(host)}. Expected a host alias or user@host ` +
-        `(letters, digits, '.', '_', '-').`,
-    );
-  }
-}
-
-/** POSIX single-quote a string for safe interpolation into a remote shell command. */
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }

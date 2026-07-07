@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Security fix: `agents sessions --host <target>` no longer accepts a leading-dash target (SSH argv-flag smuggling).** `session/remote.ts` carried its own copy of `assertValidSshTarget` that omitted the `host.startsWith('-')` guard every other SSH path enforces, so a bare flag like `-l` or `-F/path` — which passes the character allowlist — was handed straight to `ssh` as an argument (`-oProxyCommand=…`-class injection) before any connection. The duplicate validator (and its `SSH_TARGET_RE`) is deleted; `runRemoteSessions` now routes through the canonical `assertValidSshTarget` in `ssh-exec.ts`, whose dash guard is already regression-tested (`ssh-exec.test.ts`). Source: `apps/cli/src/lib/session/remote.ts`.
+
 ## 1.20.42
 
 - **Fix: exiting a split pane inside an interactive `ag run` session kicked you out of tmux entirely.** When you split the window of an interactive agent session (`ag run claude`) with Ctrl-b `"`/`%` and then `exit`ed *your* split, the whole tmux client detached and dumped you back to the parent shell — even though the agent was still running in the other pane. Cause: `runInTmux` installed a session-wide `pane-died` hook (`detach-client`) meant to fire only when the AGENT pane exits (so the attach returns and the exit status is read), but with no `#{hook_pane}` guard it fired for *any* pane's death. The hook is now scoped to the agent pane; a user split that exits is closed in place (`kill-pane`, no lingering dead husk) and the agent keeps running full-window. Source: `apps/cli/src/lib/exec.ts`, `apps/cli/src/lib/tmux/session.test.ts`.
