@@ -221,11 +221,25 @@ function claudeProjectDirName(cwd: string): string {
  * fall back to the most-recent-mtime .jsonl in the project's folder.
  */
 function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefined {
-  const projectDir = path.join(HOME, '.claude', 'projects', claudeProjectDirName(cwd));
+  return pickSessionFile(path.join(HOME, '.claude', 'projects', claudeProjectDirName(cwd)), sessionId);
+}
 
+/**
+ * Pick a Claude transcript file within a project dir.
+ *
+ * With a CONCRETE session id: return that id's `<id>.jsonl` or undefined — NEVER a
+ * sibling's. Falling back to the newest file here is the bug that made N distinct
+ * co-located sessions (e.g. several editor tabs in one cwd, or two worktree siblings)
+ * all collapse onto ONE file and render identical preview + topic (they look like
+ * duplicate cards). The mtime fallback is only sound when NO id is known.
+ *
+ * With NO id: return the newest `.jsonl` by mtime (the legitimate single-session
+ * heuristic for a directly-launched agent with no registry entry).
+ */
+export function pickSessionFile(projectDir: string, sessionId?: string): string | undefined {
   if (sessionId) {
     const specific = path.join(projectDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(specific)) return specific;
+    return fs.existsSync(specific) ? specific : undefined;
   }
 
   let files: string[];
@@ -247,7 +261,11 @@ function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefi
 }
 
 function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
-  if (!sessionFile) return 'running';
+  // No resolvable transcript is NOT evidence of activity — default to idle. (Before
+  // the no-borrow fix in pickSessionFile this rarely fired because every terminal
+  // borrowed the newest file; now a session with an unresolved id lands here, and
+  // "running" would wrongly light it up.)
+  if (!sessionFile) return 'idle';
   try {
     const mtimeMs = fs.statSync(sessionFile).mtimeMs;
     return Date.now() - mtimeMs < ACTIVE_MTIME_WINDOW_MS ? 'running' : 'idle';
@@ -423,7 +441,14 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   const labelMap = buildClaudeLabelMap();
 
   return entries.map((t): ActiveSession => {
-    const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, t.sessionId);
+    // The id cached in live-terminals.json goes stale when Claude rotates its
+    // transcript uuid on resume/compact, so it often no longer matches any
+    // <id>.jsonl. Prefer the EXACT id this pid was launched with from the pid
+    // registry (written by the shim delegate) — the same source the headless path
+    // uses — so each tab resolves to its OWN current transcript instead of every
+    // co-located tab collapsing onto the newest file. Falls back to the cached id.
+    const resolvedId = readPidSessionEntry(t.pid)?.sessionId ?? t.sessionId;
+    const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, resolvedId);
     // Prefer label from live terminal, fall back to Claude's session label
     const label = t.label ?? (t.sessionId ? labelMap.get(t.sessionId) : undefined) ?? undefined;
     // Extract topic from session file (first meaningful user message)

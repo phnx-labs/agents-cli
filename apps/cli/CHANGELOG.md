@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix: `sessions --active` showed the SAME preview + topic for every co-located session.** Multiple Claude sessions in one cwd (e.g. several editor tabs, or two worktree siblings) all rendered identical activity — they looked like duplicate cards. `findClaudeSessionFile` fell back to the newest `.jsonl` in the cwd whenever a session's `<id>.jsonl` wasn't found, so every distinct session collapsed onto ONE file's preview/topic. The stale-id trigger: an editor caches the launch uuid in `live-terminals.json`, but Claude rotates its transcript uuid on resume/compact, so the cached id no longer matches any file. Now the terminal path resolves each tab's EXACT id from the pid registry (mirroring the headless path), the newest-file fallback is gated to the no-id case (`pickSessionFile`), and an unresolvable file reads as `idle` rather than `running`. Source: `apps/cli/src/lib/session/active.ts`.
+
 ## 1.20.41
 
 - **NEW: `agents sessions focus [id]`** — one command to get back to a session, however it's reachable. It **attaches** a live session in place (tmux `switch-client`/`attach-session`, a remote tmux over `ssh -tt`, or a Ghostty tab — joining the live process without forking); where there's **no live terminal to attach**, it **opens a new tab and resumes** the session — locally, or on the remote peer over SSH (`runOnPeer`, so the peer resolves the version-pinned binary). No id opens the rich live-session picker (this-machine first). Reuses the live-session detection and the terminal launch engine (`openSurfaces`), and folds `go`'s attach paths in. Source: `src/commands/focus.ts`, `src/commands/go.ts`.
