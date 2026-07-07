@@ -391,6 +391,22 @@ export class BrowserService {
       this.connections.set(composite, conn);
     }
 
+    // Browsers launch with --no-startup-window (session-cookie persistence,
+    // see launchBrowser), so a bare `start` with no --url would otherwise
+    // leave the user staring at a process with zero windows. Recreate the
+    // old startup-window affordance: if no page target exists, open a blank
+    // one. Deliberately NOT registered on the task — the startup window
+    // never was either, and tasks track only tabs they created.
+    if (!opts.url && !conn.electron) {
+      const { targetInfos } = (await conn.cdp.send('Target.getTargets')) as {
+        targetInfos: Array<{ type: string }>;
+      };
+      if (!targetInfos.some((t) => t.type === 'page')) {
+        await conn.cdp.send('Target.createTarget', { url: 'about:blank' });
+        this.invalidateTargetCache(conn);
+      }
+    }
+
     const task: Task = {
       id: taskId,
       name: taskName,

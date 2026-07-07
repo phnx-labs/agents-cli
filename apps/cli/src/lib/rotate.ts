@@ -16,6 +16,7 @@ import { getProjectRunConfigs } from './run-config.js';
 import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
+  deriveUsageStatusFromSnapshot,
   type UsageSnapshot,
 } from './usage.js';
 
@@ -80,14 +81,16 @@ export function getProjectRunStrategy(agent: AgentId, startPath: string): RunStr
  * Resolve the configured strategy. Lookup order:
  *   1. project-local agents.yaml (nearest to `startPath`)
  *   2. ~/.agents/.system/agents.yaml
- *   3. default: `available` (use the pinned default version when healthy,
- *      otherwise fall through to a healthy account so a single rate-limited
- *      account doesn't block the run).
+ *   3. default: `balanced` (weighted-random across all healthy accounts by
+ *      remaining headroom, skipping any that are currently rate-limited). A
+ *      bare `agents run <agent>` — e.g. every new terminal the extension spawns
+ *      — should spread load and never launch into a throttled account, rather
+ *      than stick to the pinned default even when it's maxed.
  */
 export function getConfiguredRunStrategy(agent: AgentId, startPath: string = process.cwd()): RunStrategy {
   return getProjectRunStrategy(agent, startPath)
     ?? normalizeRunStrategy(readMeta().run?.[agent]?.strategy)
-    ?? 'available';
+    ?? 'balanced';
 }
 
 /** Persist the global run strategy used by bare `agents run <agent>`. */
@@ -111,11 +114,20 @@ function isAvailableEligible(candidate: RotateCandidate): boolean {
 }
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
-  const usedPercent = getRoutingUsedPercent(candidate.usageSnapshot);
-  if (usedPercent !== null) {
-    return usedPercent < 100;
+  const snapshot = candidate.usageSnapshot;
+  if (snapshot && snapshot.windows.length > 0) {
+    // Eligibility mirrors the `agents view` throttle badge exactly
+    // (deriveUsageStatusFromSnapshot): an account maxed on ANY blocking window —
+    // including the 5-hour session window — cannot serve the next request, so it
+    // must not be picked. Previously this checked only non-session windows
+    // (getRoutingUsedPercent), so a session-maxed account with weekly headroom
+    // stayed "eligible" and the router kept launching into it while `ag view`
+    // showed it rate-limited. Capacity *weighting* still ranks eligible accounts
+    // by weekly headroom; this gate only decides can-it-run-right-now.
+    return deriveUsageStatusFromSnapshot(snapshot) !== 'rate_limited';
   }
 
+  // No live snapshot: fall back to the coarse cached status.
   if (candidate.usageStatus === 'out_of_credits' || candidate.usageStatus === 'rate_limited') {
     return false;
   }
@@ -183,9 +195,12 @@ function dedupeAndSortCandidates(candidates: RotateCandidate[]): RotateCandidate
  * headroom, with no stampede on the lowest-usage one. Stateless — parallel
  * callers naturally fan out via the random roll.
  *
- * Eligibility: signed in (email present), auth valid, and usage available
- * (any non-session window strictly under 100%, or local flag not exhausted
- * when no live snapshot exists).
+ * Eligibility: signed in (email present), auth valid, and not currently
+ * rate-limited — no blocking window (session OR weekly) at 100%, matching the
+ * `agents view` badge; or the local cached status is usable when no live
+ * snapshot exists. Note the split: eligibility considers the session window
+ * (a session-maxed account can't run now), but the capacity *weight* above is
+ * driven by weekly headroom so a brief session spike doesn't distort routing.
  *
  * Dedupe: when multiple versions share an email, collapse to one candidate
  * per email (the least-recently-active version). Prevents two parallel pods
