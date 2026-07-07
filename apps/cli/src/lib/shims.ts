@@ -240,7 +240,10 @@ async function promptConflictStrategy(
 // v22 — export DISABLE_AUTOUPDATER=1 for claude shims so a pinned per-version
 //        install can't self-mutate: Claude Code's background auto-updater would
 //        otherwise rewrite the pinned binary in place. Explicit user value wins.
-export const SHIM_SCHEMA_VERSION = 24;
+// v25 — dispatcher self-recovery: if the baked AGENTS_BIN is gone (a removed/moved
+//        dev build that generated the shim), resolve `agents` on PATH instead of
+//        exiting 127, so a stale/vanished dev build can't brick every launch.
+export const SHIM_SCHEMA_VERSION = 25;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -326,8 +329,19 @@ AGENT="${agent}"
 CLI_COMMAND="${cliCommand}"
 
 if [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then
-  echo "agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN" >&2
-  exit 127
+  # The baked dispatcher is gone — e.g. the build that generated this shim (often
+  # a dev build under ~/.local/agents-cli-dev) was removed, moved, or its version
+  # dir rotated. Self-recover to whatever 'agents' now resolves to on PATH instead
+  # of bricking every managed launch. 'agents' is the CLI itself, never a per-agent
+  # shim, so this cannot re-enter this dispatcher.
+  RECOVERED_BIN="$(command -v agents 2>/dev/null || true)"
+  if [ -n "$RECOVERED_BIN" ] && [ -x "$RECOVERED_BIN" ]; then
+    AGENTS_BIN="$RECOVERED_BIN"
+  else
+    echo "agents: agents-cli entrypoint missing or not executable: $AGENTS_BIN" >&2
+    echo "agents: could not resolve 'agents' on PATH to recover. Reinstall: npm i -g @phnx-labs/agents-cli" >&2
+    exit 127
+  fi
 fi
 
 # When agents-cli "adopts" a harness's own launcher (symlinks the native binary

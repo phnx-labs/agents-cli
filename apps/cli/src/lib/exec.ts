@@ -632,7 +632,13 @@ export function buildExecCommand(options: ExecOptions): string[] {
     } else if (fs.existsSync(absPath)) {
       cmd[0] = absPath;
     } else {
-      cmd[0] = versionedName;
+      // No versioned shim on disk. Prefer the version's REAL launch binary
+      // (node_modules/.bin/<cli>) over the bare `<cli>@<version>` name — that
+      // literal is not on PATH and spawns as ENOENT (the `kimi@0.19.2` failure).
+      // Fall back to the literal only if the binary is absent (the run path's
+      // ensureAgentRunnable normally repairs/creates the alias before we reach here).
+      const realBinary = options.agent ? getBinaryPath(options.agent, options.version) : undefined;
+      cmd[0] = realBinary && fs.existsSync(realBinary) ? realBinary : versionedName;
     }
   }
 

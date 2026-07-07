@@ -52,4 +52,25 @@ describe('checkCliAvailable — shims-dir detection', () => {
     expect(installed).toBe(false);
     expect(err).toMatch(/not found in PATH/);
   });
+
+  // The false-positive that made `teams doctor` say installed:true while the agent
+  // ENOENT'd at spawn: a shim file exists, but the resolved default version has no
+  // real binary (a partial/raced npm extract left a stub version dir). Doctor must
+  // report the truth, not just "a shim file is present".
+  it('reports NOT installed when the shim exists but the default version binary is missing', async () => {
+    process.env.HOME = tmpHome;
+    process.env.PATH = '';
+    const shimsDir = path.join(tmpHome, '.agents', '.cache', 'shims');
+    fs.mkdirSync(shimsDir, { recursive: true });
+    fs.writeFileSync(path.join(shimsDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+
+    vi.resetModules();
+    const versions = await import('../versions.js');
+    versions.setGlobalDefault('claude', '9.9.9'); // pinned default with no installed binary
+    const { checkCliAvailable } = await import('./agents.js');
+    const [installed, err] = checkCliAvailable('claude' as never);
+
+    expect(installed).toBe(false);
+    expect(err).toMatch(/not runnable|binary is missing/i);
+  });
 });

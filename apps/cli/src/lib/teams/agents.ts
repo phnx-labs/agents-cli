@@ -21,6 +21,7 @@ import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from '../gemini-set
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
+import { resolveVersion, isVersionInstalled } from '../versions.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
 
 let lastMemoryWarnAt = 0;
@@ -358,20 +359,28 @@ export async function ensureGeminiPlanMode(): Promise<void> {
  * (for CLIs the user installed outside agents-cli).
  */
 export function checkCliAvailable(agentType: AgentType): [boolean, string | null] {
-  const executable = AGENTS[agentType as AgentId]?.cliCommand;
+  const agent = agentType as AgentId;
+  const executable = AGENTS[agent]?.cliCommand;
   if (!executable) {
     return [false, `Unknown agent type: ${agentType}`];
   }
 
   const shimPath = path.join(getShimsDir(), executable);
-  if (fsSync.existsSync(shimPath)) {
-    return [true, shimPath];
+  const dispatch = fsSync.existsSync(shimPath) ? shimPath : findExecutable(executable);
+  if (!dispatch) {
+    return [false, `CLI tool '${executable}' not found in PATH. Install it first.`];
   }
 
-  const resolved = findExecutable(executable);
-  return resolved
-    ? [true, resolved]
-    : [false, `CLI tool '${executable}' not found in PATH. Install it first.`];
+  // A shim file (or a PATH entry) existing does NOT mean the agent is runnable:
+  // the managed default version's binary can be a stub or gutted (a partial/raced
+  // npm extract leaves the version dir + JS wrapper but no real binary). Verify
+  // the resolved default version is actually installed so `teams doctor` reports
+  // the truth instead of a false `installed: true` that ENOENTs at spawn.
+  const version = resolveVersion(agent);
+  if (version && !isVersionInstalled(agent, version)) {
+    return [false, `${executable}@${version} is not runnable — its binary is missing/incomplete. Repair: agents add ${agent}@${version}`];
+  }
+  return [true, dispatch];
 }
 
 /** Check availability of all known agent CLIs. Returns a map of agent type to install status. */
