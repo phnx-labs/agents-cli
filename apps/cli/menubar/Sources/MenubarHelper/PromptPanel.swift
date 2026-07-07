@@ -23,21 +23,48 @@ private let kAccent = NSColor(red: 0xa3/255.0, green: 0xe6/255.0, blue: 0x35/255
 // text field can edit. resignKey drives click-outside / app-switch dismissal.
 final class PromptPanel: NSPanel {
     var onResignKey: (() -> Void)?
+    var onBecomeKey: (() -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
     override func resignKey() {
         super.resignKey()
         onResignKey?()
     }
+    override func becomeKey() {
+        super.becomeKey()
+        onBecomeKey?()
+    }
+
+    // A borderless .accessory app has NO main menu, so the standard clipboard key
+    // equivalents (Cmd-V/C/X/A) are never dispatched to the field editor and paste
+    // silently does nothing. Route them through the responder chain so the text
+    // field's editor handles them.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+           let key = event.charactersIgnoringModifiers?.lowercased() {
+            let selector: Selector?
+            switch key {
+            case "v": selector = #selector(NSText.paste(_:))
+            case "c": selector = #selector(NSText.copy(_:))
+            case "x": selector = #selector(NSText.cut(_:))
+            case "a": selector = #selector(NSResponder.selectAll(_:))
+            default:  selector = nil
+            }
+            if let selector, NSApp.sendAction(selector, to: nil, from: self) { return true }
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }
 
 // One clickable clip in the history strip. Draws the image aspect-filled into a
 // rounded square; a lime border + full opacity marks it selected, dim + hairline
-// marks it available. Click toggles.
+// marks it available. Single click toggles selection; double click previews the
+// full image (thumbnails are small — this is how you confirm which one it is).
 final class ClipThumbView: NSView {
     let path: String
     var isSelected = false { didSet { updateChrome() } }
     var onToggle: ((ClipThumbView) -> Void)?
+    var onPreview: ((ClipThumbView) -> Void)?
     static let side: CGFloat = 54
 
     init(path: String) {
@@ -60,7 +87,18 @@ final class ClipThumbView: NSView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
-    override func mouseDown(with event: NSEvent) { onToggle?(self) }
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2 {
+            // Double-click: cancel the pending single-click toggle, open the preview.
+            NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(fireToggle), object: nil)
+            onPreview?(self)
+        } else {
+            // Single click: defer the toggle by the double-click interval so a
+            // double-click previews WITHOUT also flipping the selection.
+            perform(#selector(fireToggle), with: nil, afterDelay: NSEvent.doubleClickInterval)
+        }
+    }
+    @objc private func fireToggle() { onToggle?(self) }
 
     private func updateChrome() {
         layer?.borderWidth = isSelected ? 2.5 : 1
@@ -85,6 +123,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // the key/order race while activating an .accessory app fires resignKey once
     // and the panel dismisses itself the instant it appears.
     private var dismissArmed = false
+    // Set while opening a thumbnail in Preview: Preview taking focus fires the
+    // panel's resignKey, which would otherwise dismiss the bar and drop the typed
+    // note. Cleared when the bar regains key focus.
+    private var suppressDismiss = false
 
     // MARK: Summon / dismiss
 
@@ -158,9 +200,19 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
                 selected.append(path)
             }
             thumb.onToggle = { [weak self] t in self?.toggle(t) }
+            thumb.onPreview = { [weak self] t in self?.preview(t) }
             thumbStrip.addArrangedSubview(thumb)
         }
         updateHint()
+    }
+
+    // Open the full screenshot in the default image viewer so the user can confirm
+    // which one it is (thumbnails are small). Suppress the bar's click-outside
+    // dismissal so summoning Preview doesn't close the bar / lose the typed note;
+    // it re-arms when the bar regains key focus (panel.onBecomeKey).
+    private func preview(_ thumb: ClipThumbView) {
+        suppressDismiss = true
+        NSWorkspace.shared.open(URL(fileURLWithPath: thumb.path))
     }
 
     private func toggle(_ thumb: ClipThumbView) {
@@ -186,7 +238,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let count = selected.count
         let attach = count == 0 ? "no image attached"
             : count == 1 ? "1 image attached" : "\(count) images attached"
-        let pickable = thumbStrip.arrangedSubviews.isEmpty ? "" : " · click clips to attach"
+        let pickable = thumbStrip.arrangedSubviews.isEmpty ? "" : " · click attaches · dbl-click previews"
         hint.stringValue = "\(attach)\(pickable)    ↩ file · esc cancel"
     }
 
@@ -205,9 +257,11 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.onResignKey = { [weak self] in
-            guard let self, self.dismissArmed else { return }
+            guard let self, self.dismissArmed, !self.suppressDismiss else { return }
             self.dismiss()
         }
+        // Returning to the bar after a preview re-arms click-outside dismissal.
+        panel.onBecomeKey = { [weak self] in self?.suppressDismiss = false }
 
         let bg = NSVisualEffectView()
         bg.material = .hudWindow
