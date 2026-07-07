@@ -13,7 +13,7 @@
  *   secrets  -> listRemoteBundles + pullBundle (needs a passphrase; skipped
  *               cleanly when none is available — tokenized non-interactive auth
  *               arrives with `agents login`, #366/#367)
- *   sessions -> syncSessions(), gated by isSyncConfigured() exactly like the daemon
+ *   sessions -> syncSessions(), gated by the session-sync beta opt-in + isSyncConfigured(), like the daemon
  *   reconcile-> refresh({ skipPrompts }) — re-materialize resources into homes
  */
 
