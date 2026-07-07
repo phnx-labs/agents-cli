@@ -265,7 +265,7 @@ function warnIfNotFrontmost(res: Record<string, unknown>): void {
 }
 
 function reportMissingHelper(): never {
-  console.error('helper not built. Run: ./packages/computer-helper/scripts/build.sh debug');
+  console.error('helper not built. Run: ./native/computer-mac/scripts/build.sh debug');
   process.exit(1);
 }
 

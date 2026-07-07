@@ -77,9 +77,9 @@ export function detectImageFormat(buf: Buffer): '.png' | '.jpg' | null {
  * Make the screenshot filename honest about its bytes. The two helper backends
  * encode DIFFERENT formats and neither re-encodes to match the requested name:
  * the macOS helper (ScreenCaptureKit) returns JPEG
- * (packages/computer-helper/Sources/ComputerHelper/Screenshot.swift:207,212),
+ * (native/computer-mac/Sources/ComputerHelper/Screenshot.swift:207,212),
  * the Windows helper returns PNG
- * (packages/computer-helper-win/Screenshot.cs:33). So a fixed default extension
+ * (native/computer-win/Screenshot.cs:33). So a fixed default extension
  * cannot be correct for both — the only honest path is to sniff the real format
  * and swap the extension to match. Pure so it's unit-testable.
  *
@@ -408,7 +408,7 @@ function registerSetupCommand(program: Command): void {
 
       const srcApp = resolveHelperApp();
       if (!srcApp || !fs.existsSync(srcApp)) {
-        console.error('helper not built. Run: ./packages/computer-helper/scripts/build.sh debug');
+        console.error('helper not built. Run: ./native/computer-mac/scripts/build.sh debug');
         process.exit(1);
       }
 
@@ -447,7 +447,7 @@ function registerSetupCommand(program: Command): void {
         console.log('codesign verify: OK');
       } catch {
         console.error('codesign verify FAILED. The destination .app is unsigned or its signature was stripped.');
-        console.error('rebuild the helper with a Developer ID cert: ./packages/computer-helper/scripts/build.sh release');
+        console.error('rebuild the helper with a Developer ID cert: ./native/computer-mac/scripts/build.sh release');
         process.exit(1);
       }
 

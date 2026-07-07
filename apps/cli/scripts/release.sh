@@ -363,7 +363,7 @@ echo
 # local commit subjects, so a half-finished release re-runs cleanly.
 RELEASE_BRANCH="release/v$TARGET"
 MAIN_AT_TARGET=false
-if [[ "$(git show "origin/$DEFAULT_BRANCH:package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo '')" == "$TARGET" ]]; then
+if [[ "$(git show "origin/$DEFAULT_BRANCH:apps/cli/package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo '')" == "$TARGET" ]]; then
   MAIN_AT_TARGET=true   # a prior run already merged the chore(release) PR
 fi
 EXISTING_PR="$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
@@ -538,7 +538,7 @@ fi
 # ----- Resolve the merged commit + integrity guards (before any publish) -----
 git fetch --quiet origin "$DEFAULT_BRANCH"
 MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
-MERGED_VER="$(git show "$MERGED_SHA:package.json" | jq -r .version)"
+MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
 [[ "$MERGED_VER" == "$TARGET" ]] || die "merged $DEFAULT_BRANCH is at $MERGED_VER, not $TARGET -- refusing to tag/publish"
 if [[ -n "${BRANCH_TREE:-}" ]]; then
   # A single-commit squash onto an unchanged base yields a tree identical to what

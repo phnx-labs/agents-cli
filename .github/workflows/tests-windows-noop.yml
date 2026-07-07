@@ -12,11 +12,11 @@ on:
   pull_request:
     branches: ['main', 'release/**']
     paths-ignore:
-      - 'src/lib/hooks.ts'
-      - 'src/lib/hooks/**'
-      - 'src/lib/platform/**'
-      - 'src/lib/shims*.ts'
-      - 'hooks/**'
+      - 'apps/cli/src/lib/hooks.ts'
+      - 'apps/cli/src/lib/hooks/**'
+      - 'apps/cli/src/lib/platform/**'
+      - 'apps/cli/src/lib/shims*.ts'
+      - 'apps/cli/hooks/**'
       - '.github/workflows/tests-windows.yml'
 
 concurrency:
