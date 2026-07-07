@@ -281,12 +281,12 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     let panes = (await runTmux({ socket, args: ['list-panes', '-t', 'guardsplit', '-F', '#{pane_id}'] })).stdout.trim().split('\n');
     expect(panes).toHaveLength(2);
     await runTmux({ socket, args: ['send-keys', '-t', splitPaneId, 'exit', 'Enter'] });
-    await wait(400);
 
     // Session is still alive, the split is gone (no lingering dead husk), and the
-    // agent pane is still live — i.e. the user was NOT kicked out.
+    // agent pane is still live — i.e. the user was NOT kicked out. Poll for the
+    // kill-pane to land rather than racing a fixed sleep.
+    panes = await waitForPanes('guardsplit', socket, 1);
     expect(await hasSession('guardsplit', socket)).toBe(true);
-    panes = (await runTmux({ socket, args: ['list-panes', '-t', 'guardsplit', '-F', '#{pane_id}:#{pane_dead}'] })).stdout.trim().split('\n');
     expect(panes).toHaveLength(1);
     expect(panes[0]).toBe(`${agentPane}:0`);
   });
@@ -330,9 +330,8 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     const splitPaneId = await splitPane({ name: 'ag-reco-old', direction: 'v', cmd: '/bin/sh', socket });
     await wait(200);
     await runTmux({ socket, args: ['send-keys', '-t', splitPaneId, 'exit', 'Enter'] });
-    await wait(400);
     expect(await hasSession('ag-reco-old', socket)).toBe(true);
-    const panes = (await runTmux({ socket, args: ['list-panes', '-t', 'ag-reco-old', '-F', '#{pane_id}:#{pane_dead}'] })).stdout.trim().split('\n');
+    const panes = await waitForPanes('ag-reco-old', socket, 1);
     expect(panes).toHaveLength(1);
     expect(panes[0]).toBe(`${agentPane}:0`);
   });
@@ -354,4 +353,30 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
 
 function wait(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+/**
+ * Poll `list-panes` until the session has exactly `expected` panes, or the
+ * timeout elapses. Returns the last observed `#{pane_id}:#{pane_dead}` rows.
+ *
+ * A pane exiting is asynchronous end-to-end: the shell processes `exit`, tmux
+ * fires the `pane-died` hook, and the hook's `kill-pane` then removes the dead
+ * pane — a chain that can exceed any fixed sleep under CI load, leaving the
+ * dead pane transiently listed (the `expected 1, got 2` flake). Polling settles
+ * as soon as the count is right and only fails if it genuinely never converges.
+ */
+async function waitForPanes(
+  name: string,
+  socket: string,
+  expected: number,
+  timeoutMs = 5000,
+): Promise<string[]> {
+  const deadline = Date.now() + timeoutMs;
+  let panes: string[] = [];
+  for (;;) {
+    panes = (await runTmux({ socket, args: ['list-panes', '-t', name, '-F', '#{pane_id}:#{pane_dead}'] }))
+      .stdout.trim().split('\n').filter(Boolean);
+    if (panes.length === expected || Date.now() >= deadline) return panes;
+    await wait(50);
+  }
 }
