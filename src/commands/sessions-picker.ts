@@ -5,6 +5,7 @@
  * Builds a compact preview for each session (prompt, activity summary, last
  * response) and delegates to the generic `itemPicker` for the interactive UI.
  */
+import fs from 'node:fs';
 import chalk from 'chalk';
 import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
 import { parseSession, sanitizeForTerminal } from '../lib/session/parse.js';
@@ -59,6 +60,8 @@ export interface SessionPickerConfig {
   labelFor: (s: SessionMeta, query: string) => string;
   pageSize?: number;
   initialSearch?: string;
+  /** Verb shown on the Enter key in the footer (default 'resume'). */
+  enterHint?: string;
 }
 
 const previewCache = new Map<string, string>();
@@ -79,6 +82,15 @@ export function buildPreview(session: SessionMeta): string {
     const note = '  ' + chalk.gray(`on `) + chalk.bold.white(remote)
       + chalk.gray(` — enter to resume there, or space then enter to read it over SSH`);
     const output = [formatHeader(safe, []), '', note].join('\n');
+    previewCache.set(cacheKey, output);
+    return output;
+  }
+
+  // No transcript on disk — a live session not indexed locally, or a synthesized
+  // entry (e.g. `sessions go`). Show the header + a clean note, not a parse error.
+  if (!session.filePath || !fs.existsSync(session.filePath)) {
+    const note = '  ' + chalk.gray('Live session — full transcript not indexed here.');
+    const output = [formatHeader(safe, []), '', note].filter(Boolean).join('\n');
     previewCache.set(cacheKey, output);
     return output;
   }
@@ -406,7 +418,7 @@ export async function sessionPicker(config: SessionPickerConfig): Promise<Picked
     pageSize: config.pageSize,
     initialSearch: config.initialSearch,
     emptyMessage: 'No sessions match.',
-    enterHint: 'resume',
+    enterHint: config.enterHint ?? 'resume',
   });
   if (!picked) return null;
   return { session: picked.item, action: 'resume' };

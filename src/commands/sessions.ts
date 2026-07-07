@@ -43,6 +43,7 @@ import { setHelpSections } from '../lib/help.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsSyncCommand } from './sessions-sync.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
+import { registerGoCommand } from './go.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
@@ -57,6 +58,7 @@ interface SessionFilterOptions {
 }
 
 interface SessionsOptions extends SessionFilterOptions {
+  query?: string;
   limit?: string;
   sort?: string;
   json?: boolean;
@@ -775,6 +777,10 @@ function printCrossMachineTip(): void {
 
 /** Main action handler for `agents sessions`. Routes to picker, table, or single-session render. */
 async function sessionsAction(query: string | undefined, options: SessionsOptions): Promise<void> {
+  // Explicit --query is interchangeable with the positional; it's how you search
+  // for text that collides with a subcommand name (e.g. `sessions --query go`).
+  query = query ?? options.query;
+
   // Normalize convenience flags before any routing reads them: per-agent
   // shorthands fold into --agent, and --device is an alias for --host (both
   // resolve against the same device registry).
@@ -1569,6 +1575,7 @@ export async function pickSessionInteractive(
   message = 'Search sessions:',
   initialSearch?: string,
   hiddenCount = 0,
+  enterHint?: string,
 ): Promise<PickedSession | null> {
   if (hiddenCount > 0) {
     console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
@@ -1588,6 +1595,7 @@ export async function pickSessionInteractive(
       labelFor: (s: SessionMeta, query: string) => formatPickerLabel(s, query, cols),
       pageSize: PICKER_RECENT_COUNT,
       initialSearch,
+      enterHint,
     });
   } catch (err) {
     if (isPromptCancelled(err)) return null;
@@ -2130,6 +2138,7 @@ export function registerSessionsCommands(program: Command): void {
   const sessionsCmd = program
     .command('sessions')
     .argument('[query]', 'Session ID, search query, or path (., ../, /path) to filter by project')
+    .option('--query <text>', 'Search text — use when the term collides with a subcommand name (e.g. "go")')
     .description('Find, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode.')
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .option('--claude', 'Shorthand for --agent claude')
@@ -2212,6 +2221,7 @@ export function registerSessionsCommands(program: Command): void {
   registerSessionsTailCommand(sessionsCmd);
   registerSessionsSyncCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
+  registerGoCommand(sessionsCmd);
   registerSessionsInjectCommand(sessionsCmd);
 }
 

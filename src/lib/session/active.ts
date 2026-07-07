@@ -261,7 +261,7 @@ function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
  * cwd (+ optional session uuid); Codex files are date-partitioned, so we resolve
  * the newest indexed Codex session for the cwd instead.
  */
-function findSessionFileForKind(kind: string, cwd?: string, sessionId?: string): string | undefined {
+export function findSessionFileForKind(kind: string, cwd?: string, sessionId?: string): string | undefined {
   if (!cwd) return undefined;
   if (kind === 'claude') return findClaudeSessionFile(cwd, sessionId);
   if (kind === 'codex') return latestSessionFileForCwd('codex', cwd);
