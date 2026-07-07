@@ -1934,8 +1934,6 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   return (
     <div className="sw-floor-dashboard" style={{ padding: 0, overflow: 'hidden' }}>
       <FloorControls
-        runningCount={floorRunning}
-        totalCount={floorAgents.length}
         needsCount={needsAgents.length}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((o) => !o)}

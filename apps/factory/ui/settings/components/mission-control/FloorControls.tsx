@@ -29,8 +29,6 @@ const GROUP_OPTS: { value: FloorGroupBy | 'none'; label: string }[] = [
 const SVG = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 } as const
 
 interface FloorControlsProps {
-  runningCount: number
-  totalCount: number
   /** Count of agents that need you — shown as the ⚑ flag pill. */
   needsCount?: number
 
@@ -51,7 +49,7 @@ interface FloorControlsProps {
 }
 
 export function FloorControls({
-  runningCount, totalCount, needsCount = 0,
+  needsCount = 0,
   sidebarOpen, onToggleSidebar, rightOpen, onToggleRight, plain, onTogglePlain,
   sort, onSort, group, onGroup,
   onDispatch,

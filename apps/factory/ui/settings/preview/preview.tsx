@@ -190,7 +190,7 @@ function Feed() {
   return (
     <div className="feed">
       <FloorControls
-        runningCount={8} totalCount={17} needsCount={2}
+        needsCount={2}
         sidebarOpen rightOpen plain={false}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
         sort={srt} onSort={setSrt} group={grp} onGroup={setGrp} onDispatch={noop}
