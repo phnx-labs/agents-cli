@@ -95,8 +95,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 22 (claude auto-updater disabled for managed pinned installs)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(22);
+  it('is 23 (adopted-launcher fall-through when no managed version resolves)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(23);
   });
 });
 

@@ -240,7 +240,7 @@ async function promptConflictStrategy(
 // v22 — export DISABLE_AUTOUPDATER=1 for claude shims so a pinned per-version
 //        install can't self-mutate: Claude Code's background auto-updater would
 //        otherwise rewrite the pinned binary in place. Explicit user value wins.
-export const SHIM_SCHEMA_VERSION = 22;
+export const SHIM_SCHEMA_VERSION = 23;
 
 /** Internal marker string used to embed the schema version in shim scripts. */
 const SHIM_VERSION_MARKER = 'agents-shim-version:';
@@ -330,6 +330,29 @@ if [ -z "$AGENTS_BIN" ] || [ ! -x "$AGENTS_BIN" ]; then
   exit 127
 fi
 
+# When agents-cli "adopts" a harness's own launcher (symlinks the native binary
+# in ~/.local/bin to this dispatcher so version management wins regardless of
+# PATH order), it records the real original at this path. It is the only safe
+# fall-through target: exec it by ABSOLUTE PATH so we never re-resolve through
+# PATH (which now points back at this dispatcher → infinite re-exec loop).
+ADOPTED_ORIGINAL="$AGENTS_USER_DIR/.cache/shims/.adopted/$CLI_COMMAND"
+# Print the recorded original binary iff it is an executable file, else nothing.
+adopted_original_bin() {
+  [ -f "$ADOPTED_ORIGINAL" ] || return 1
+  local orig
+  orig=$(cat "$ADOPTED_ORIGINAL" 2>/dev/null)
+  [ -n "$orig" ] && [ -x "$orig" ] || return 1
+  printf '%s' "$orig"
+}
+# Last-resort fall-through: if a managed version can't be resolved but we've
+# adopted this command's native launcher, run the original so the user's command
+# never breaks. Replaces the process; returns non-zero only when no usable record.
+exec_adopted_original() {
+  local orig
+  orig=$(adopted_original_bin) || return 1
+  exec "$orig" "$@"
+}
+
 # Find project agents.yaml walking up from cwd (skip $HOME/.agents/agents.yaml)
 find_project_version() {
   local dir="$PWD"
@@ -413,15 +436,20 @@ if [ -z "$VERSION" ]; then
           VERSION_SOURCE="default"
           ;;
         *)
+          exec_adopted_original "$@"
           echo "  Run: agents use $AGENT <version>" >&2
           exit 1
           ;;
       esac
     else
+      exec_adopted_original "$@"
       echo "  Run: agents use $AGENT <version>" >&2
       exit 1
     fi
   else
+    # No managed version at all. If we adopted this command's native launcher,
+    # run it so the command keeps working; otherwise report it's unconfigured.
+    exec_adopted_original "$@"
     echo "agents: no version of $AGENT configured" >&2
     echo "  Run: agents add $AGENT@<version>" >&2
     exit 1
@@ -449,16 +477,18 @@ if [ "$AGENT" = "grok" ]; then
     fi
   fi
   if [ -z "$BINARY" ] || [ ! -x "$BINARY" ]; then
-    # Last resort: whatever is on PATH (user may have installed grok globally).
-    # Refuse anything under our own shims dir: the shims dir sits ahead of
-    # ~/.local/bin on PATH, so "command -v grok" resolves to THIS dispatcher.
-    # exec-ing it would re-enter and spin in an infinite re-exec loop (the same
-    # bug the droid branch below guards against). Fall through to the clean
-    # "not installed" error instead.
-    BINARY=$(command -v grok 2>/dev/null || echo "")
-    case "$BINARY" in
-      "$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;
-    esac
+    # Last resort: the adopted native launcher (recorded absolute path) if we
+    # adopted grok, else whatever is on PATH. Prefer the adopted record — after
+    # adoption, "command -v grok" resolves to the ~/.local/bin symlink that now
+    # points at THIS dispatcher, so exec-ing it would re-enter and spin forever.
+    BINARY=$(adopted_original_bin || echo "")
+    if [ -z "$BINARY" ]; then
+      BINARY=$(command -v grok 2>/dev/null || echo "")
+      # Refuse anything that resolves into our own shims dir (the dispatcher).
+      case "$(command -v "$BINARY" 2>/dev/null; readlink -f "$BINARY" 2>/dev/null)" in
+        *"$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;
+      esac
+    fi
   fi
 # Kimi is a normal npm agent: "agents add kimi" npm-installs
 # @moonshot-ai/kimi-code into the version dir and the binary lands at
@@ -475,14 +505,20 @@ if [ "$AGENT" = "grok" ]; then
 # IS this dispatcher, so exec'ing it would re-enter and spin in an infinite
 # re-exec loop (the bug this branch fixes).
 elif [ "$AGENT" = "droid" ]; then
-  DROID_BINARY="$HOME/.local/bin/droid"
-  if [ -x "$DROID_BINARY" ]; then
-    BINARY="$DROID_BINARY"
-  else
-    BINARY=$(command -v droid 2>/dev/null || echo "")
-    case "$BINARY" in
-      "$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;
-    esac
+  # Prefer the adopted record first: if droid's ~/.local/bin/droid launcher was
+  # adopted, that fixed path now points at THIS dispatcher, so using it directly
+  # would infinite-loop. The record holds the real original binary.
+  BINARY=$(adopted_original_bin || echo "")
+  if [ -z "$BINARY" ]; then
+    DROID_BINARY="$HOME/.local/bin/droid"
+    if [ -x "$DROID_BINARY" ] && [ "$(readlink -f "$DROID_BINARY" 2>/dev/null)" != "$(readlink -f "$AGENTS_USER_DIR/.cache/shims/$CLI_COMMAND" 2>/dev/null)" ]; then
+      BINARY="$DROID_BINARY"
+    else
+      BINARY=$(command -v droid 2>/dev/null || echo "")
+      case "$(readlink -f "$BINARY" 2>/dev/null)" in
+        "$AGENTS_USER_DIR/.cache/shims/"*) BINARY="" ;;
+      esac
+    fi
   fi
 else
   BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
@@ -516,6 +552,7 @@ if [ ! -x "$BINARY" ]; then
       echo "  ✔ Installed $AGENT@$VERSION" >&2
     else
       echo "  ✗ Failed to install $AGENT@$VERSION" >&2
+      exec_adopted_original "$@"
       exit 1
     fi
   else
@@ -533,15 +570,18 @@ if [ ! -x "$BINARY" ]; then
             BINARY="$VERSION_DIR/node_modules/.bin/$CLI_COMMAND"
             ;;
           *)
+            exec_adopted_original "$@"
             echo "  Run: agents add $AGENT@$VERSION" >&2
             exit 1
             ;;
         esac
       else
+        exec_adopted_original "$@"
         echo "  Run: agents add $AGENT@$VERSION" >&2
         exit 1
       fi
     else
+      exec_adopted_original "$@"
       echo "agents: $AGENT@$VERSION not installed" >&2
       echo "  Run: agents add $AGENT@$VERSION" >&2
       exit 1
@@ -1720,6 +1760,142 @@ export function removeLegacyUserShim(agent: AgentId, overrides?: { homeDir?: str
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Where the real original target of an adopted launcher is recorded. The shim
+ * reads this at ~/.agents/.cache/shims/.adopted/<cli> to fall through to the
+ * native binary by absolute path when no managed version resolves.
+ */
+export function getAdoptedRecordPath(agent: AgentId, shimsDir: string = getShimsDir()): string {
+  return path.join(shimsDir, '.adopted', AGENTS[agent].cliCommand);
+}
+
+/** Canonical path for identity comparison — realpath when it exists (resolves
+ * symlinks AND platform aliases like macOS /var → /private/var), else resolve. */
+function canonical(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+export type AdoptResult =
+  | { adopted: true; launcher: string; original: string }
+  | { adopted: false; reason: 'no-shadow' | 'already-adopted' | 'not-a-symlink' | 'unsafe-target' | 'error'; launcher?: string };
+
+/**
+ * Adopt the harness's own launcher that shadows our shim on PATH.
+ *
+ * PATH-ordering fixes (editing rc files) can never reliably win: `~/.local/bin`
+ * (where grok/droid/etc. self-install) is prepended in `.zshenv`/`.zprofile`
+ * for *every* shell, while our shims prepend only lands in `.zshrc`
+ * (interactive). No single rc file guarantees "last prepend wins" across zsh's
+ * whole sourcing chain, so the shim loses in non-interactive / GUI-launched
+ * contexts. Instead of fighting PATH order, we *become* the launcher: replace
+ * the shadowing symlink with one pointing at our shim, and record the real
+ * original so the shim falls through to it when no managed version is selected.
+ *
+ * Regression bounds:
+ * - Only ever touches a **symlink** (never renames/deletes a real binary).
+ * - Records the resolved original for lossless restore (`releaseAdoptedLauncher`).
+ * - Idempotent: a no-op once the launcher already points at our shim.
+ * - Never records our own shim as the "original" (would loop).
+ */
+export function adoptShadowingLauncher(
+  agent: AgentId,
+  overrides?: { shadowedBy?: string; shimsDir?: string },
+): AdoptResult {
+  const shimsDir = overrides?.shimsDir ?? getShimsDir();
+  const shimPath = path.join(shimsDir, AGENTS[agent].cliCommand);
+  const shimReal = canonical(shimPath);
+  const shimsDirReal = canonical(shimsDir);
+  const launcher = overrides?.shadowedBy ?? getPathShadowingExecutable(agent);
+  if (!launcher) return { adopted: false, reason: 'no-shadow' };
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(launcher);
+  } catch {
+    return { adopted: false, reason: 'error', launcher };
+  }
+
+  // Only adopt symlinks. A real binary in an early-PATH dir is left untouched —
+  // renaming a multi-hundred-MB native binary is exactly the kind of surprise
+  // this feature must avoid. (Its shim stays reachable via the versioned name.)
+  if (!stat.isSymbolicLink()) {
+    return { adopted: false, reason: 'not-a-symlink', launcher };
+  }
+
+  const resolved = canonical(launcher);
+
+  // Already ours → nothing to do.
+  if (resolved === shimReal) {
+    return { adopted: false, reason: 'already-adopted', launcher };
+  }
+
+  // Never record a target that resolves back into our shims dir: exec-ing it
+  // from the shim would re-enter this dispatcher and spin forever.
+  if (resolved === shimsDirReal || resolved.startsWith(shimsDirReal + path.sep)) {
+    return { adopted: false, reason: 'unsafe-target', launcher };
+  }
+
+  try {
+    const recordPath = getAdoptedRecordPath(agent, shimsDir);
+    fs.mkdirSync(path.dirname(recordPath), { recursive: true });
+    fs.writeFileSync(recordPath, resolved, 'utf-8');
+    // Repoint the launcher at our shim. rm + symlink (not atomic rename) is fine
+    // here: the record is already written, so a crash between the two leaves a
+    // recoverable state and the next run re-adopts idempotently.
+    fs.rmSync(launcher);
+    fs.symlinkSync(shimPath, launcher);
+    return { adopted: true, launcher, original: resolved };
+  } catch {
+    return { adopted: false, reason: 'error', launcher };
+  }
+}
+
+/**
+ * Undo `adoptShadowingLauncher`: repoint the launcher back at the recorded
+ * original and drop the record. Reversible escape hatch for users who want the
+ * native launcher to win. Returns the restored original path, or null if there
+ * was nothing to release.
+ */
+export function releaseAdoptedLauncher(
+  agent: AgentId,
+  overrides?: { shadowedBy?: string; shimsDir?: string },
+): string | null {
+  const shimsDir = overrides?.shimsDir ?? getShimsDir();
+  const recordPath = getAdoptedRecordPath(agent, shimsDir);
+  let original: string;
+  try {
+    original = fs.readFileSync(recordPath, 'utf-8').trim();
+  } catch {
+    return null;
+  }
+  if (!original) return null;
+
+  const shimReal = canonical(path.join(shimsDir, AGENTS[agent].cliCommand));
+  const launcher = overrides?.shadowedBy ?? getPathShadowingExecutable(agent) ?? original;
+  try {
+    // Only rewrite the launcher if it currently points at our shim (i.e. we own
+    // it). If the user has since replaced it themselves, leave it alone.
+    let pointsAtShim = false;
+    try {
+      pointsAtShim = fs.lstatSync(launcher).isSymbolicLink()
+        && canonical(launcher) === shimReal;
+    } catch { /* launcher gone — recreate below */ }
+
+    if (pointsAtShim || !fs.existsSync(launcher)) {
+      try { fs.rmSync(launcher); } catch { /* may not exist */ }
+      fs.symlinkSync(original, launcher);
+    }
+    fs.rmSync(recordPath);
+    return original;
+  } catch {
+    return null;
   }
 }
 

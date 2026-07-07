@@ -61,6 +61,8 @@ interface DoctorOptions {
   kind?: string;
   cwd?: string;
   fix?: boolean;
+  adopt?: string;
+  release?: string;
 }
 
 // ─── overview mode (no target) ────────────────────────────────────────────────
@@ -531,7 +533,9 @@ export function registerDoctorCommand(program: Command): void {
     .option('--diff', 'In target mode, include unified diffs for divergent files')
     .option('--fix', 'Heal gaps: install missing resources, repair invalid plugin manifests, refresh stale plugins, and reconcile drift (all installed versions, or just the target)')
     .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,promptcuts)')
-    .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())');
+    .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
+    .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
+    .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted');
 
   setHelpSections(doctorCmd, {
     examples: `
@@ -560,6 +564,41 @@ export function registerDoctorCommand(program: Command): void {
 
   doctorCmd.action(async (target: string | undefined, opts: DoctorOptions) => {
       const cwd = opts.cwd ? opts.cwd : process.cwd();
+
+      // Launcher adoption escape hatch. `--adopt <agent>` forces the take-over
+      // even for a non-default agent; `--release <agent>` reverses it.
+      if (opts.adopt || opts.release) {
+        const { adoptShadowingLauncher, releaseAdoptedLauncher, getPathShadowingExecutable } = await import('../lib/shims.js');
+        const raw = (opts.adopt || opts.release) as string;
+        const agent = resolveAgentName(raw);
+        if (!agent) {
+          console.error(chalk.red(formatAgentError(raw)));
+          process.exit(1);
+        }
+        if (opts.release) {
+          const restored = releaseAdoptedLauncher(agent);
+          if (restored) {
+            console.log(chalk.green(`Released ${AGENTS[agent].cliCommand}: launcher restored to ${restored}.`));
+          } else {
+            console.log(chalk.gray(`${AGENTS[agent].cliCommand} has no adopted launcher to release.`));
+          }
+          return;
+        }
+        const shadowedBy = getPathShadowingExecutable(agent);
+        const result = adoptShadowingLauncher(agent, shadowedBy ? { shadowedBy } : undefined);
+        if (result.adopted) {
+          console.log(chalk.green(`Adopted ${AGENTS[agent].cliCommand} launcher (${result.launcher} -> shim). Original recorded for --release; version management now wins regardless of PATH order.`));
+        } else if (result.reason === 'already-adopted') {
+          console.log(chalk.gray(`${AGENTS[agent].cliCommand} launcher is already adopted.`));
+        } else if (result.reason === 'no-shadow') {
+          console.log(chalk.gray(`Nothing to adopt — ${AGENTS[agent].cliCommand} is not shadowed on PATH.`));
+        } else if (result.reason === 'not-a-symlink') {
+          console.log(chalk.yellow(`${AGENTS[agent].cliCommand} is shadowed by a real binary (${result.launcher}), not a symlink. agents-cli won't move a real binary — remove/reorder it or reorder PATH.`));
+        } else {
+          console.log(chalk.yellow(`Could not adopt ${AGENTS[agent].cliCommand} (${result.reason}).`));
+        }
+        return;
+      }
 
       // --fix turns the read-only diagnosis into a heal. With no target it heals
       // every installed version; with a target it scopes to that agent.
