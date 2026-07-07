@@ -3243,7 +3243,7 @@ function openGuide(context: vscode.ExtensionContext, guide: string): void {
       ).then(selection => {
         if (selection === 'Open GitHub') {
           vscode.env.openExternal(
-            vscode.Uri.parse('https://github.com/muqsitnawaz/swarmify')
+            vscode.Uri.parse('https://github.com/phnx-labs/agents-cli')
           );
         }
       });

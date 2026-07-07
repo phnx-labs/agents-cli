@@ -8,6 +8,10 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Fixed
 
+- **GitHub links pointed at a retired repo.** `package.json` `repository`, the
+  settings "Open GitHub" action, and the Guide tab's "Learn More" link now all point
+  to `github.com/phnx-labs/agents-cli` (`apps/factory`). Publish identity — publisher
+  `swarmify`, name `swarm-ext`, appId — is unchanged.
 - **Factory Floor feed showed identical, contextless cards for co-located sessions.**
   Ported the swarmify/extension feed fixes: fan-out remote-session enrichment now
   attributes each row to the correct device (`machine`), surfaces the worktree slug,
