@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { sshExec, shellQuote } from '../ssh-exec.js';
+import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { sshTargetFor } from './types.js';
 import { ensureHostReady } from './ready.js';
@@ -158,6 +158,53 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
   return args;
+}
+
+export interface InteractiveDispatchOptions {
+  agent: string;
+  mode?: string;
+  model?: string;
+  remoteCwd?: string;
+  sessionId?: string;
+  name?: string;
+  resume?: string;
+  passthroughArgs?: string[];
+  raw?: boolean;
+}
+
+/**
+ * Build the remote `agents run …` argv for an INTERACTIVE host dispatch. The
+ * remote agent sees a TTY, so we omit both the prompt and `--quiet`; the remote
+ * CLI will launch its normal interactive TUI / tmux wrapper.
+ */
+export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOptions): string[] {
+  const args = ['run', opts.agent];
+  if (opts.mode) args.push('--mode', opts.mode);
+  if (opts.model) args.push('--model', opts.model);
+  if (opts.name) args.push('--name', opts.name);
+  if (opts.resume) args.push('--resume', opts.resume);
+  else if (opts.sessionId) args.push('--session-id', opts.sessionId);
+  if (opts.raw) args.push('--raw');
+  if (opts.passthroughArgs && opts.passthroughArgs.length > 0) {
+    args.push('--', ...opts.passthroughArgs);
+  }
+  return args;
+}
+
+/**
+ * Run an agent interactively on a host, forwarding the local TTY over SSH.
+ * Returns the SSH exit code. The remote `agents` CLI is responsible for its own
+ * tmux wrapping; the local machine is just the transport.
+ */
+export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatchOptions): Promise<number> {
+  const target = sshTargetFor(host);
+  const { warnings } = ensureHostReady(host, { agent: opts.agent });
+  for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
+
+  const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
+  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const remoteCmd = `${cwd}${invocation}`;
+  return sshStream(target, remoteCmd, { tty: process.stdin.isTTY, multiplex: true });
 }
 
 /** Dispatch an `agents run <agent> "<prompt>"` onto a host (the `run --host` path). */
