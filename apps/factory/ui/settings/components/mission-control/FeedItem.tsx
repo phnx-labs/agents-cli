@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Icon } from './icons'
 import { AgentAvatar, agentIdFromPrefix } from './AgentAvatar'
 import { StructuredReply, type ReplyCallbacks } from './StructuredReply'
-import { heartbeatLevel, type FloorAgent, type FloorTicket } from './floorModel'
+import { heartbeatLevel, sessionTaskLine, type FloorAgent, type FloorTicket } from './floorModel'
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
 import { TodoProgressBar } from './TodoChecklist'
@@ -45,7 +45,12 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
 
   const tok = plainTok(a.tok, plain)
   const filesLabel = !plain && a.files > 0 ? ` · ${a.files} ${a.files === 1 ? 'file' : 'files'}` : ''
-  const meta = plain ? a.project : `${a.project} · ${a.hostLabel ?? a.host}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}`
+  // The worktree slug (or branch) sits between project and ticket so two sessions in
+  // the same repo are distinguishable at a glance (the identical-cards bug).
+  const wt = a.worktreeSlug || a.branch
+  const meta = plain
+    ? a.project
+    : `${a.project} · ${a.hostLabel ?? a.host}${wt ? ` · ${wt}` : ''}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}`
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 
@@ -53,12 +58,13 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   // when it just echoes the response block. Suppress the now-line when the summary
   // already says the same thing (summary fell back to the now-line's activity string).
   const nowlineText = `${a.verb} ${a.target}`.trim()
-  const showSummary =
-    !plain &&
-    !!a.summary &&
-    (a.phase === 'running' || a.phase === 'stalled') &&
-    a.summary.trim() !== a.resp.trim()
-  const showNowline = !plain && !!a.verb && !(showSummary && a.summary.trim() === nowlineText)
+  // One canonical task line (summary/preview -> response -> worktree/branch). This is
+  // what fixes the identical, contextless "needs you" cards: a waiting session with no
+  // narrative still shows its worktree slug instead of just "Edit <file>". Shown unless
+  // it merely echoes the response block or the now-line.
+  const taskLine = sessionTaskLine(a)
+  const showSummary = !plain && !!taskLine && taskLine !== a.resp.trim() && taskLine !== nowlineText
+  const showNowline = !plain && !!a.verb && !(showSummary && taskLine === nowlineText)
 
   const marker =
     a.pr ? <span className="pill pr">PR {a.pr}</span> :
@@ -97,7 +103,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
       </div>
       <div className="resp">{destructive ? <span className="q">{a.resp}</span> : a.resp}</div>
       {!plain && a.todos.length > 0 && <TodoProgressBar todos={a.todos} />}
-      {showSummary && <div className="summary">{a.summary}</div>}
+      {showSummary && <div className="summary">{taskLine}</div>}
       {showNowline && (
         <div className={`nowline ${stalled ? 'stall' : ''}`}>
           <Icon name="chevR" size={11} /> <span className="v">{a.verb}</span> {a.target}

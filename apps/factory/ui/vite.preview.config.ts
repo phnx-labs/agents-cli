@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'settings'),
+      '@shared': resolve(__dirname, '../src/shared'),
     },
   },
   build: {
@@ -20,7 +21,13 @@ export default defineConfig({
     rollupOptions: {
       input: resolve(__dirname, 'settings/preview/index.html'),
       onwarn(warning, warn) {
-        if (warning.code === 'MISSING_EXPORT') return
+        if (warning.code === 'MISSING_EXPORT') {
+          const from = `${warning.exporter ?? ''} ${warning.message ?? ''}`
+          if (from.includes('src/shared')) {
+            throw new Error(`Rollup MISSING_EXPORT from shared contract: ${warning.message}`)
+          }
+          return
+        }
         warn(warning)
       },
     },

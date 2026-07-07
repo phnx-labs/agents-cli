@@ -448,6 +448,11 @@ describe('toFloorTicket — field mapping', () => {
     expect(bare.labels).toEqual([])
     expect(bare.desc).toBe('')
   })
+
+  test('owner maps from metadata.assignee, defaults to empty when unassigned', () => {
+    expect(toFloorTicket(makeTask({ metadata: { assignee: 'Muqsit' } })).owner).toBe('Muqsit')
+    expect(toFloorTicket(makeTask({ metadata: {} })).owner).toBe('')
+  })
 })
 
 describe('groupTickets / sortTickets', () => {
@@ -473,6 +478,19 @@ describe('groupTickets / sortTickets', () => {
     const g = groupTickets(tickets, 'project')
     expect(g.get('web')!.map((t) => t.id)).toEqual(['RUSH-2', 'RUSH-3'])
     expect(g.get('swarmify')!.map((t) => t.id)).toEqual(['#1'])
+  })
+
+  test('groupTickets by owner buckets by assignee; unassigned collapses to Unassigned', () => {
+    const owned = [
+      toFloorTicket(makeTask({ id: 'RUSH-10', metadata: { assignee: 'Muqsit' } })),
+      toFloorTicket(makeTask({ id: 'RUSH-11', metadata: { assignee: 'Bisma' } })),
+      toFloorTicket(makeTask({ id: 'RUSH-12', metadata: { assignee: 'Muqsit' } })),
+      toFloorTicket(makeTask({ id: 'RUSH-13', metadata: {} })),
+    ]
+    const g = groupTickets(owned, 'owner')
+    expect(g.get('Muqsit')!.map((t) => t.id)).toEqual(['RUSH-10', 'RUSH-12'])
+    expect(g.get('Bisma')!.map((t) => t.id)).toEqual(['RUSH-11'])
+    expect(g.get('Unassigned')!.map((t) => t.id)).toEqual(['RUSH-13'])
   })
 })
 

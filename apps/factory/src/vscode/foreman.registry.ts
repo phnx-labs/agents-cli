@@ -21,6 +21,7 @@ import * as vscode from 'vscode';
 import { createHash } from 'crypto';
 import { computeWindowId } from '../core/foreman.windowId';
 import { isPidAlive } from '../core/liveness';
+import { resolveStartedAtMs } from '../core/processStartTime';
 
 const REGISTRY_DIR = path.join(os.homedir(), '.agents', '.cache', 'terminals');
 const REGISTRY_FILE = path.join(REGISTRY_DIR, 'live-terminals.json');
@@ -184,7 +185,7 @@ export async function snapshotOwnTerminals(): Promise<LiveTerminal[]> {
       kind,
       label: deriveLabel(t.name),
       cwd: env?.AGENT_WORKSPACE_DIR ?? null,
-      startedAtMs: Date.now(),
+      startedAtMs: await resolveStartedAtMs(pid),
     });
   }
   return out;

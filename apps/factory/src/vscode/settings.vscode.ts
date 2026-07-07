@@ -1942,6 +1942,25 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       }
+      case 'fetchRecentSessions': {
+        // Lazy: the Floor asks for a host's RECENT (historical) sessions only when that
+        // host has 0 live agents, so an empty host filter shows recent work instead of a
+        // blank pane. Rides its own 'recentSessions' message, keyed by host.
+        const recentHost = typeof message.host === 'string' ? message.host : '';
+        try {
+          if (!recentHost) break;
+          const { fetchRecentForHost, LOCAL_LABEL } = await import('./remoteSessions.vscode');
+          const isLocal = recentHost === 'this-mac' || recentHost === LOCAL_LABEL;
+          const sessions = await fetchRecentForHost(
+            recentHost, isLocal, recentHost, 12, getSettings(context).projectRules ?? [],
+          );
+          settingsPanel?.webview.postMessage({ type: 'recentSessions', host: recentHost, sessions });
+        } catch (err) {
+          console.error('[SETTINGS] Error fetching recent sessions:', err);
+          settingsPanel?.webview.postMessage({ type: 'recentSessions', host: recentHost, sessions: [] });
+        }
+        break;
+      }
       case 'fetchHostInventory': {
         // Host detail pane: installed agents/versions/accounts/usage/resources on
         // one host (over SSH for remotes) + registry metadata. Cached per host.
@@ -2670,6 +2689,36 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
       case 'focusTerminal': {
         const entry = terminals.getById(message.terminalId);
         entry?.terminal.show(false);
+        break;
+      }
+      case 'focusRemoteSession': {
+        // Open a terminal attached to a remote (or local-but-tabless) agent's tmux
+        // session, so a cross-host card can be "focused in a new terminal" the same
+        // way a local tab can. Reuses the tmux socket the reply channel already knows
+        // (ReplyTarget.muxSocket); ssh -t for a remote host, direct tmux locally.
+        const host = typeof message.host === 'string' && message.host !== 'this-mac' ? message.host : '';
+        const socket = typeof message.muxSocket === 'string' ? message.muxSocket : '';
+        const label = typeof message.label === 'string' && message.label ? message.label : 'session';
+        if (!socket) { break; }
+        const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+        const attach = `tmux -S ${shq(socket)} attach`;
+        const cmd = host ? `ssh -t ${shq(host)} ${shq(attach)}` : attach;
+        const term = vscode.window.createTerminal({ name: `attach ${label}` });
+        term.sendText(cmd, true);
+        term.show(false);
+        break;
+      }
+      case 'revealWorktree': {
+        // Reveal a local worktree in the Explorer; a remote worktree can't be shown in
+        // this window's file tree, so copy its path (silent, no toast).
+        const p = typeof message.path === 'string' ? message.path : '';
+        const host = typeof message.host === 'string' && message.host !== 'this-mac' ? message.host : '';
+        if (!p) { break; }
+        if (host) {
+          await vscode.env.clipboard.writeText(p);
+        } else {
+          await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(p));
+        }
         break;
       }
       case 'focusRushCloudTerminal': {

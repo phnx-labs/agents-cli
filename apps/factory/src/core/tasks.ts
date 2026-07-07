@@ -1,39 +1,13 @@
 // Pure types for unified task management across multiple sources
 // No VS Code dependencies - testable
 
-import { TaskSource } from './settings';
-
-// Unified task interface for aggregating tasks from multiple sources
-export interface UnifiedTask {
-  id: string;                    // Unique identifier
-  source: TaskSource;            // Where this task came from
-  title: string;                 // Task title/summary
-  description?: string;          // Optional description/body
-  status: 'todo' | 'in_progress' | 'done';
-  priority?: 'urgent' | 'high' | 'medium' | 'low';
-  metadata: TaskMetadata;        // Source-specific data
-}
-
-// Source-specific metadata
-export interface TaskMetadata {
-  identifier?: string;           // Linear: PROJ-123, GitHub: #42
-  url?: string;                  // Web URL to task
-  labels?: string[];             // Labels/tags
-  assignee?: string;             // Assigned user
-  assigneeKind?: 'user' | 'agent'; // 'agent' if name matches a known CLI agent
-  state?: string;                // Raw state from source
-  createdAt?: string;            // ISO 8601 creation timestamp
-  dueDate?: string;              // ISO 8601 due date (YYYY-MM-DD from Linear)
-  project?: string;              // Linear project name (undefined for GitHub)
-  repo?: string;                 // "owner/repo" — resolved at fetch time
-  comments?: TaskComment[];      // Linear comments, newest-first when rendered
-}
-
-export interface TaskComment {
-  body: string;
-  createdAt?: string;
-  author?: string;
-}
+// UnifiedTask / TaskMetadata / TaskComment / TaskSource are canonical in
+// src/shared/tasks.ts — the ONE definition shared with the webview (@shared), so a
+// field (e.g. `project`) can never be present on one side of the postMessage
+// boundary and missing on the other. Imported for local use here + re-exported for
+// existing consumers.
+import type { TaskSource, UnifiedTask, TaskMetadata, TaskComment } from '../shared/tasks';
+export type { UnifiedTask, TaskMetadata, TaskComment, TaskSource };
 
 export interface TaskDispatchPromptInput {
   title: string;

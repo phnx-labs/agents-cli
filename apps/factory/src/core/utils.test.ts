@@ -479,6 +479,13 @@ describe('findTerminalNameByTabLabel', () => {
     expect(findTerminalNameByTabLabel(terminalNames, 'CC - nonexistent')).toBeNull();
   });
 
+  test('is ambiguous across duplicate names — always the first (motivates identity resolution)', () => {
+    const names = ['CC', 'CC', 'CC'];
+    expect(findTerminalNameByTabLabel(names, 'CC')).toBe('CC');
+    // A caller doing `names.indexOf(result)` gets 0 no matter which tab is live.
+    expect(names.indexOf(findTerminalNameByTabLabel(names, 'CC') as string)).toBe(0);
+  });
+
   test('returns null for empty terminal list', () => {
     expect(findTerminalNameByTabLabel([], 'CC')).toBeNull();
   });

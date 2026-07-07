@@ -4,6 +4,7 @@ import * as path from 'path';
 import {
   mapStatusToPhase,
   normalizeHost,
+  resolveSessionHost,
   projectFromCwd,
   resolveProject,
   normalizeActiveSession,
@@ -40,6 +41,39 @@ describe('normalizeHost', () => {
     expect(normalizeHost('zion.tail1a85a1.ts.net')).toBe('zion');
     expect(normalizeHost("Muqsit's Mac mini")).toBe('muqsit-s-mac-mini');
     expect(normalizeHost('')).toBe('');
+  });
+});
+
+describe('resolveSessionHost', () => {
+  // This is the fix for the "all sessions attributed to the local machine" bug: a
+  // bare `sessions --active --json` fans out over the whole fleet, so we must
+  // bucket each row by ITS OWN `machine` id, not the host we queried.
+  const LOCAL_ID = 'zion';
+  const LOCAL_LABEL = 'this-mac';
+
+  test('a remote row buckets under its own machine, not the querying host', () => {
+    expect(resolveSessionHost('yosemite-s0', LOCAL_LABEL, LOCAL_ID, LOCAL_LABEL)).toBe('yosemite-s0');
+    expect(resolveSessionHost('yosemite-s1', LOCAL_LABEL, LOCAL_ID, LOCAL_LABEL)).toBe('yosemite-s1');
+  });
+
+  test("this machine's own rows fold to the local label so this-mac routing works", () => {
+    expect(resolveSessionHost('zion', LOCAL_LABEL, LOCAL_ID, LOCAL_LABEL)).toBe('this-mac');
+    // FQDN / case variants normalize to the same id before the local-fold check.
+    expect(resolveSessionHost('ZION.tail1a85a1.ts.net', LOCAL_LABEL, LOCAL_ID, LOCAL_LABEL)).toBe('this-mac');
+  });
+
+  test('a machine-less row (cloud) falls back to the querying host', () => {
+    expect(resolveSessionHost(undefined, LOCAL_LABEL, LOCAL_ID, LOCAL_LABEL)).toBe('this-mac');
+    expect(resolveSessionHost('', 'yosemite-s0', LOCAL_ID, LOCAL_LABEL)).toBe('yosemite-s0');
+  });
+
+  test('a whole mixed-fleet payload splits across the correct buckets', () => {
+    const rows = ['zion', 'zion', 'yosemite-s0', 'yosemite-s0', 'yosemite-s1', undefined];
+    const buckets = rows.map((m) => resolveSessionHost(m, LOCAL_LABEL, LOCAL_ID, LOCAL_LABEL));
+    const count: Record<string, number> = {};
+    for (const b of buckets) count[b] = (count[b] || 0) + 1;
+    // zion x2 + the machine-less cloud row fold to this-mac; remotes stay split.
+    expect(count).toEqual({ 'this-mac': 3, 'yosemite-s0': 2, 'yosemite-s1': 1 });
   });
 });
 
