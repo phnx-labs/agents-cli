@@ -6,6 +6,7 @@ import { heartbeatLevel, sessionTaskLine, type FloorAgent, type FloorTicket } fr
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
 import { CardChecklist } from './TodoChecklist'
+import { ExtLink } from '../common/ExtLink'
 
 // One agent row in the feed (feedItem: factory-floor.html:608-620) + the Next-Up
 // ticketStrip teaser row (:621-623). Pure presentation; selection + replies raised
@@ -71,7 +72,11 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const showNowline = !plain && !!a.verb && !(showSummary && taskLine === nowlineText)
 
   const marker =
-    a.pr ? <span className="pill pr">PR {a.pr}</span> :
+    a.pr ? (
+      a.prUrl
+        ? <ExtLink href={a.prUrl} className="pill pr" title="Open pull request" style={{ textDecoration: 'none' }}>PR {a.pr}</ExtLink>
+        : <span className="pill pr">PR {a.pr}</span>
+    ) :
     stalled ? <span className="pill stall">stalled</span> :
     a.phase === 'running' ? <span className="pill run">running</span> :
     a.phase === 'done' ? <span className="pill done">done</span> : null

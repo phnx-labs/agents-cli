@@ -83,7 +83,7 @@ const dropQuestion: StructuredQuestion = {
 // NEEDS YOU — a CI-green PR awaiting review, and a destructive question.
 const reviewAgent = agent({
   id: 'a-review', abbr: 'CC', name: 'fix-terminal-race', project: 'rush', phase: 'done',
-  needs: true, pr: '#142', ci: 'passed', ticket: 'RUSH-1302',
+  needs: true, pr: '#142', prUrl: 'https://github.com/phnx-labs/agents-cli/pull/142', ci: 'passed', ticket: 'RUSH-1302',
   resp: 'Refactored task fetch into one model and wired the saved-views flow. Tests added, all green.',
   since: '4m',
 })
