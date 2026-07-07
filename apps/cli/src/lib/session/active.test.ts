@@ -1,5 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { resolveCwds, LSOF_CONCURRENCY } from './active.js';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm } from './active.js';
+
+describe('agentKindFromComm', () => {
+  it('matches a real agent CLI by basename (absolute path or bare name)', () => {
+    expect(agentKindFromComm('/Users/u/.bun/bin/codex')).toBe('codex');
+    expect(agentKindFromComm('claude')).toBe('claude');
+    expect(agentKindFromComm('claude.exe')).toBe('claude');
+  });
+
+  it('does NOT match the Codex desktop app-server bundled inside Codex.app', () => {
+    // The desktop app ships a binary literally named `codex`; without the bundle
+    // guard its `app-server` (cwd '/') surfaces as a phantom agent session.
+    expect(agentKindFromComm('/Applications/Codex.app/Contents/Resources/codex')).toBeUndefined();
+  });
+
+  it('does NOT match the Claude desktop app (named Claude, not the CLI claude)', () => {
+    expect(agentKindFromComm('/Applications/Claude.app/Contents/MacOS/Claude')).toBeUndefined();
+  });
+});
 
 const delay = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 

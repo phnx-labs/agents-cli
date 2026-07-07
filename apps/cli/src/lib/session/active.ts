@@ -165,7 +165,15 @@ const AGENT_CLI_NAMES: Record<string, string> = {
  * absolute path (shim-launched agents), and Windows image names carry an
  * `.exe` suffix (`claude.exe`), so basename + suffix-strip before the lookup.
  */
-function agentKindFromComm(commRaw: string): string | undefined {
+export function agentKindFromComm(commRaw: string): string | undefined {
+  // A GUI desktop app can bundle a binary with the SAME name as an agent CLI: the
+  // Codex desktop app ships `/Applications/Codex.app/Contents/Resources/codex` (its
+  // `app-server`), whose basename `codex` would otherwise match the codex CLI and
+  // surface the app's background server as a phantom agent session — running at cwd
+  // '/', so it shows up unattributed in the feed. A real agent CLI is never inside a
+  // `.app` bundle, so exclude those. (The Claude desktop app is a separate case,
+  // already excluded by name below: its process is 'Claude', not the CLI's 'claude'.)
+  if (commRaw.includes('.app/Contents/')) return undefined;
   const base = path.basename(commRaw);
   const stripped = base.replace(/\.exe$/i, '');
   // Windows image names compare case-insensitively; POSIX comms stay exact —
