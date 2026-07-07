@@ -112,6 +112,10 @@ export interface RemoteSession {
   lastResponse: string;
   prUrl: string | null;
   ticket: string | null;
+  /** Tracker refs this session CREATED (Linear create_issue / gh issue create). */
+  createdTickets: string[];
+  /** Team name this session SPAWNED via `agents teams create/add`; '' when none. */
+  spawnedTeam: string;
   branch: string;
   /** The `<slug>` under `.agents/worktrees/<slug>/` — the strong per-session
    *  disambiguator (two agents in sibling worktrees of one repo differ only here).
@@ -234,6 +238,9 @@ export interface RawActiveSession {
   pr?: { url?: string; number?: number } | null;
   worktree?: { slug?: string; path?: string; branch?: string } | null;
   ticket?: string | { id?: string; url?: string } | null;
+  /** Tracker refs the session CREATED + team it SPAWNED, from the CLI session scan. */
+  createdTickets?: string[];
+  spawnedTeam?: string;
   /** Normalized device id the CLI attributes this session to (machineId() form,
    *  e.g. 'zion', 'yosemite-s0'). Present on every row of a fanned-out
    *  `sessions --active --json` — the load-bearing signal for which physical
@@ -363,6 +370,8 @@ export function normalizeActiveSession(
     // fallback for older shapes.
     prUrl: asStr(raw.prUrl) || asStr(raw.pr?.url) || null,
     ticket: ticketMatch,
+    createdTickets: Array.isArray(raw.createdTickets) ? raw.createdTickets.map((t: unknown) => String(t)) : [],
+    spawnedTeam: asStr(raw.spawnedTeam),
     // The remote branch lives at worktree.branch; the top-level `branch` is usually
     // absent, which is why remote branch was always empty.
     branch: asStr(raw.branch) || asStr(raw.worktree?.branch),
@@ -409,6 +418,8 @@ export interface RawRecentSession {
   gitBranch?: string;
   worktreeSlug?: string;
   ticketId?: string;
+  createdTickets?: string[];
+  spawnedTeam?: string;
   prUrl?: string;
   prNumber?: number;
   topic?: string;
@@ -441,6 +452,8 @@ export function normalizeRecentSession(
     lastResponse: '',
     prUrl: asStr(raw.prUrl) || null,
     ticket: asStr(raw.ticketId) || null,
+    createdTickets: Array.isArray(raw.createdTickets) ? raw.createdTickets.map((t: unknown) => String(t)) : [],
+    spawnedTeam: asStr(raw.spawnedTeam),
     branch: asStr(raw.gitBranch),
     worktreeSlug,
     worktreePath: worktreeSlug ? cwd : '',

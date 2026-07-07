@@ -66,3 +66,38 @@ export function registerHostSession(task: HostTask, ctx: HostSessionContext): vo
     /* index write is best-effort; the run is already live on the host */
   }
 }
+
+export interface InteractiveHostSessionContext {
+  cwd: string;
+  host: string;
+  agent: string;
+  sessionId: string;
+  name?: string;
+  createdAt?: string;
+}
+
+/**
+ * Register an interactive host run (no prompt, TTY forwarded over SSH) in the
+ * local session index. Unlike detached host runs, there is no remote log/exit
+ * file and no HostTask; we only need the session id so `agents sessions` can
+ * surface and resume it by id.
+ */
+export function registerInteractiveHostSession(ctx: InteractiveHostSessionContext): void {
+  if (!SESSION_AGENTS.includes(ctx.agent as SessionAgentId)) return;
+  try {
+    upsertSession(
+      {
+        id: ctx.sessionId,
+        shortId: ctx.sessionId.slice(0, 8),
+        agent: ctx.agent as SessionAgentId,
+        timestamp: ctx.createdAt ?? new Date().toISOString(),
+        cwd: ctx.cwd,
+        filePath: '',
+        label: ctx.name || `[host/${ctx.host}]`,
+      },
+      '',
+    );
+  } catch {
+    /* index write is best-effort; the run is already live on the host */
+  }
+}
