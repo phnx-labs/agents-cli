@@ -3,11 +3,12 @@
  * session id of the run it named.
  *
  * `agents run` records `<sessionId>.json` here at launch whenever both a name
- * and a session id are known up front (Claude pre-mints its id — see
- * spawnAgent). The session-discovery pass reads these sidecars and applies the
- * names onto the SQLite index by id (via syncNames), the same idempotent,
- * re-applied-every-scan pattern as Claude `/rename` labels. Names therefore
- * survive transcript rescans without being parsed out of the transcript itself.
+ * and a session id are known up front (Claude pre-mints its id — see spawnAgent;
+ * a teams teammate's Claude session id is its agent id). The session-discovery
+ * pass reads these sidecars and SEEDS the session label by id (via
+ * seedLabelsFromNames) — the launch handle becomes the label, refined later by an
+ * agent-generated title. Idempotent and re-applied every scan, so seeds survive
+ * transcript rescans without being parsed out of the transcript itself.
  *
  * Mirrors the host-task sidecar convention (`~/.agents/.cache/hosts/<id>.json`),
  * one small JSON per run under `~/.agents/.cache/run-names/`.
@@ -48,8 +49,9 @@ export function recordRunName(rec: Omit<RunNameRecord, 'ts'>): void {
 }
 
 /**
- * Build the sessionId → name map from every run-name sidecar, for syncNames to
- * apply onto the index. Returns an empty map when the dir doesn't exist yet.
+ * Build the sessionId → name map from every run-name sidecar, for
+ * seedLabelsFromNames to apply onto the index as label seeds. Returns an empty
+ * map when the dir doesn't exist yet.
  */
 export function buildRunNameMap(): Map<string, string | null> {
   const map = new Map<string, string | null>();

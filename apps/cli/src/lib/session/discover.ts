@@ -35,7 +35,7 @@ import {
   getScanStampsForPaths,
   recordScans,
   syncLabels,
-  syncNames,
+  seedLabelsFromNames,
   syncTopics,
   upsertSessionsBatch,
   querySessions,
@@ -178,9 +178,11 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
       // reads to behavioral EDR (CrowdStrike Falcon) as a ransomware-style bulk
       // file-enumeration sweep. Same dirs, same results — just not all at once.
       await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, onProgress));
-      // Apply `agents run --name` handles onto the freshly-scanned rows by id —
-      // the same idempotent, re-applied-every-scan pattern as /rename labels.
-      syncNames(buildRunNameMap());
+      // Seed labels from `agents run --name` handles onto the freshly-scanned
+      // rows by id. Runs AFTER the per-agent scans (which applied agent-generated
+      // titles via syncLabels), so a real title always wins and the seed only
+      // backfills sessions that would otherwise be unnamed.
+      seedLabelsFromNames(buildRunNameMap());
     } finally {
       releaseScan(process.pid);
     }
