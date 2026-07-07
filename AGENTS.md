@@ -178,6 +178,7 @@ scripts/release.sh <version> --apply  # commits chore(release), tags v<version>,
 - `AGENTS.md` is canonical; `CLAUDE.md` / `GEMINI.md` are symlinks. **Edit `AGENTS.md` only.**
 - `agents repo push` / `pull` operates on `~/.agents/` only. System updates ride `npm update -g @phnx-labs/agents-cli`.
 - Real services only — no mocking. Tests must exercise the actual critical path (see [CLAUDE.md](CLAUDE.md) testing rules).
+- **PRs are auto-reviewed by `prix/code-reviewer`** ([`.github/rush.yml`](.github/rush.yml)) — it reviews every PR to `main` and posts its verdict as the **`prix-cloud`** comment. That is the non-author review: rely on it and merge on green, don't spawn a redundant subagent reviewer. Review manually only if `prix-cloud` hasn't posted after CI settles or flags something to dig into. (It's a Rush Cloud app, not a `.github/workflows/` Action.)
 
 ## Security
 
