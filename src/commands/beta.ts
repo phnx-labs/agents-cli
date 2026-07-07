@@ -11,6 +11,7 @@ import type { BetaFeatureName } from '../lib/types.js';
 const BETA_DESCRIPTIONS: Record<BetaFeatureName, string> = {
   drive: 'Google Drive integration for reading and writing files',
   factory: 'Cloud-based agent dispatch via Rush Factory',
+  'session-sync': 'Cross-machine session transcript sync via R2 (daemon push/pull)',
 };
 
 function parseFeatures(values: string[]): BetaFeatureName[] {
