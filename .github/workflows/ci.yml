@@ -20,6 +20,9 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     permissions: {}
+    defaults:
+      run:
+        working-directory: apps/cli
     strategy:
       # Run every OS x node combo to completion so a single platform failure
       # doesn't mask the others — we want the full cross-platform picture.
