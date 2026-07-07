@@ -2751,6 +2751,9 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
     }
   }
 
+  // Parse wire.jsonl to extract message count and token usage
+  const { messageCount, tokenCount } = parseKimiWireMetrics(sessionDir);
+
   const meta: SessionMeta = {
     id: sessionId,
     shortId,
@@ -2759,9 +2762,45 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
     project,
     filePath,
     topic,
+    messageCount,
+    tokenCount: tokenCount > 0 ? tokenCount : undefined,
   };
 
   return { meta, content: lastPrompt || '' };
+}
+
+/** Parse Kimi's wire.jsonl to extract message count and token usage. */
+function parseKimiWireMetrics(sessionDir: string): { messageCount: number; tokenCount: number } {
+  const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
+  let messageCount = 0;
+  let tokenCount = 0;
+
+  if (!fs.existsSync(wirePath)) {
+    return { messageCount: 0, tokenCount: 0 };
+  }
+
+  try {
+    const lines = fs.readFileSync(wirePath, 'utf-8').split('\n');
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        if (event.type === 'context.append_message') {
+          messageCount++;
+        } else if (event.type === 'usage.record' && event.usage) {
+          // Kimi usage structure: inputOther + output + inputCacheRead + inputCacheCreation
+          const u = event.usage;
+          tokenCount += (u.inputOther || 0) + (u.output || 0) + (u.inputCacheRead || 0) + (u.inputCacheCreation || 0);
+        }
+      } catch {
+        // Malformed line, skip
+      }
+    }
+  } catch {
+    // If wire.jsonl can't be read, return 0s (graceful degradation)
+  }
+
+  return { messageCount, tokenCount };
 }
 
 /** Parse a time filter string (relative like '7d' or ISO timestamp) into epoch milliseconds. */
