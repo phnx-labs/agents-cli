@@ -19,7 +19,9 @@ import {
   hasSession,
   killAll,
   killSession,
+  listClients,
   listSessions,
+  paneExitStatus,
   sendKeys,
   slugifyName,
   splitPane,
@@ -187,6 +189,38 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
       cwd: '/this/path/should/never/exist/anywhere',
       socket,
     })).rejects.toThrow(/cwd does not exist/);
+  });
+
+  it('createSession captures the first pane id and records it on the meta', async () => {
+    const meta = await createSession({ name: 'paneid', cmd: 'sleep 30', socket });
+    expect(meta.pane).toMatch(/^%\d+$/);
+    // The captured pane is a real, addressable pane in the session.
+    const screen = await capturePane({ name: 'paneid', pane: meta.pane, socket });
+    expect(typeof screen).toBe('string');
+  });
+
+  it('listClients returns [] for a detached session (no terminal attached)', async () => {
+    await createSession({ name: 'noclients', cmd: 'sleep 30', socket });
+    // A detached tmux session has no attached clients — the "detached" state the
+    // viewing-in resolver keys off.
+    expect(await listClients(socket)).toEqual([]);
+  });
+
+  it('paneExitStatus reports the dead pane exit code once the process finishes', async () => {
+    // remain-on-exit (set globally by createSession) keeps the pane around dead,
+    // so we can read the wrapped command's exit status — the spawn-wrap's exit-code path.
+    const meta = await createSession({ name: 'exitcode', cmd: 'sh -c "exit 3"', socket });
+    expect(meta.pane).toBeTruthy();
+    await wait(400);
+    const exit = await paneExitStatus(meta.pane!, socket);
+    expect(exit.dead).toBe(true);
+    expect(exit.status).toBe(3);
+  });
+
+  it('paneExitStatus reports a live pane as not dead', async () => {
+    const meta = await createSession({ name: 'stillalive', cmd: 'sleep 30', socket });
+    const exit = await paneExitStatus(meta.pane!, socket);
+    expect(exit.dead).toBe(false);
   });
 
   it('remain-on-exit keeps the pane around after the launched command finishes', async () => {

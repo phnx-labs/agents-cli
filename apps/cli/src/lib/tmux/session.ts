@@ -30,6 +30,13 @@ export interface SessionMeta {
   source: 'cli' | 'extension' | 'teams' | 'external';
   /** Free-form labels callers can stamp (e.g. `{ agent: 'claude', vscodePid: 1234 }`). */
   labels?: Record<string, string>;
+  /**
+   * The first pane's id (`%N`) captured at creation. The exact send-keys /
+   * attach handle for the agent that runs in this session — recorded so
+   * `agents sessions --active` and the spawn-wrap path (src/lib/exec.ts) don't
+   * have to re-query it. Absent for pre-existing/`attach-existing` sessions.
+   */
+  pane?: string;
 }
 
 export interface CreateSessionOptions {
@@ -130,7 +137,9 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   // exit the server, and the follow-up `set-option` would race with "no
   // server running". Server-wide (`-g`) is applied in the same tmux
   // invocation as new-session so they share one server lifetime.
-  const args = ['set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', opts.name];
+  // `-P -F '#{pane_id}'` prints the new session's first pane id on stdout so we
+  // can record the exact `%N` handle without a follow-up `list-panes`.
+  const args = ['set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', opts.name, '-P', '-F', '#{pane_id}'];
   if (opts.width)  args.push('-x', String(opts.width));
   if (opts.height) args.push('-y', String(opts.height));
   if (opts.cwd)    args.push('-c', opts.cwd);
@@ -140,7 +149,9 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
     args.push('--', 'sh', '-c', opts.cmd);
   }
 
-  await runTmux({ socket, args, env: opts.env });
+  const res = await runTmux({ socket, args, env: opts.env });
+  // Only the new-session command in the `;`-chained invocation emits output.
+  const pane = /^%\d+$/.test(res.stdout.trim()) ? res.stdout.trim() : undefined;
 
   const meta: SessionMeta = {
     name: opts.name,
@@ -150,6 +161,7 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
     cwd: opts.cwd,
     source: opts.source ?? 'cli',
     labels: opts.labels,
+    pane,
   };
   writeSessionMeta(meta);
   return meta;
@@ -230,6 +242,96 @@ export async function mapPanesToTargets(socket?: string): Promise<Map<string, st
     if (sp > 0) out.set(line.slice(0, sp), line.slice(sp + 1).trim());
   }
   return out;
+}
+
+/** One tmux client attached to the shared server. */
+export interface TmuxClient {
+  /** Controlling TTY of the terminal running `tmux attach` (e.g. '/dev/ttys004'). */
+  tty: string;
+  /** PID of the `tmux attach` client process — the leaf whose ancestry names the host app. */
+  pid: number;
+  /** The `session:window.pane` the client is currently displaying. */
+  target: string;
+}
+
+/**
+ * List every client attached to the shared server, with the terminal PID and
+ * the session/window/pane it's viewing. This is how "viewing in <app> tab N"
+ * resolves: a client's `pid` walks the process ancestry to name the host app,
+ * and its `target` says which session it's attached to. Best-effort — returns
+ * an empty list on any failure (no server, foreign socket) so the renderer
+ * degrades to "detached".
+ */
+export async function listClients(socket?: string): Promise<TmuxClient[]> {
+  let res;
+  try {
+    res = await runTmux({
+      socket,
+      args: ['list-clients', '-F', '#{client_tty} #{client_pid} #{session_name}:#{window_index}.#{pane_index}'],
+      throwOnError: false,
+    });
+  } catch {
+    return [];
+  }
+  if (res.code !== 0) return [];
+  const out: TmuxClient[] = [];
+  for (const line of res.stdout.split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    const sp1 = t.indexOf(' ');
+    if (sp1 < 0) continue;
+    const sp2 = t.indexOf(' ', sp1 + 1);
+    if (sp2 < 0) continue;
+    const tty = t.slice(0, sp1);
+    const pid = parseInt(t.slice(sp1 + 1, sp2), 10);
+    const target = t.slice(sp2 + 1).trim();
+    if (!Number.isFinite(pid) || !target) continue;
+    out.push({ tty, pid, target });
+  }
+  return out;
+}
+
+/** A dead pane's exit status, read from tmux while the pane lingers under remain-on-exit. */
+export interface PaneExit {
+  /** True once the process that ran in the pane has exited (pane is dead). */
+  dead: boolean;
+  /** Exit status of the dead pane's process, when tmux reports it. */
+  status?: number;
+}
+
+/**
+ * Read whether a pane's process has exited and, if so, its exit status. Used by
+ * the spawn-wrap path to recover the wrapped agent's exit code after the attach
+ * client returns. Returns `{ dead: false }` when tmux can't answer (session gone,
+ * pane missing) so the caller treats an unreadable pane as "still alive / detach".
+ */
+export async function paneExitStatus(pane: string, socket?: string): Promise<PaneExit> {
+  let res;
+  try {
+    res = await runTmux({
+      socket,
+      args: ['display-message', '-pt', pane, '-p', '#{pane_dead} #{pane_dead_status}'],
+      throwOnError: false,
+    });
+  } catch {
+    return { dead: false };
+  }
+  if (res.code !== 0) return { dead: false };
+  const [deadRaw, statusRaw] = res.stdout.trim().split(/\s+/);
+  const status = statusRaw !== undefined && statusRaw !== '' ? parseInt(statusRaw, 10) : undefined;
+  return { dead: deadRaw === '1', status: Number.isFinite(status) ? status : undefined };
+}
+
+/**
+ * Bind a per-session hook. Used by the spawn-wrap path to install a `pane-died`
+ * hook that detaches the attach client the instant the wrapped agent exits (the
+ * global `remain-on-exit on` otherwise leaves the client staring at a dead pane).
+ * Best-effort — a failed hook just means the user Ctrl-b d's out manually.
+ */
+export async function setSessionHook(name: string, hook: string, command: string, socket?: string): Promise<void> {
+  assertValidSessionName(name);
+  const sock = socket ?? getDefaultSocketPath();
+  await runTmux({ socket: sock, args: ['set-hook', '-t', name, hook, command], throwOnError: false }).catch(() => {});
 }
 
 /**
