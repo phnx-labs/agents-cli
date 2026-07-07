@@ -38,6 +38,7 @@ interface ExecCommandActionOptions {
   resume?: string | boolean;
   sessionId?: string;
   verbose?: boolean;
+  raw?: boolean;
   timeout?: string;
   fallback?: string;
   balanced?: boolean;
@@ -317,6 +318,7 @@ export function registerRunCommand(program: Command): void {
     .option('--resume [id]', 'Resume a previous conversation. Accepts a full or partial session id (prefix-matched against the index); omit the id to pick from recent sessions interactively. Resumes under the version that started the session. claude/codex resume natively; other agents replay via a /continue first message. Pair with a prompt to continue headlessly.')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.')
     .option('--verbose', 'Show detailed execution logs')
+    .option('--raw', 'Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.')
     .option('--timeout <duration>', 'Kill the agent after this duration (e.g., 30m, 1h, 2h30m)')
     .option(
       '--fallback <agents>',
@@ -1235,6 +1237,7 @@ export function registerRunCommand(program: Command): void {
         sessionId: resumeSessionId ?? options.sessionId,
         resume: resumeNative,
         verbose: options.verbose,
+        raw: options.raw,
         timeout: options.timeout,
         env,
         toolsRestrict: workflowToolsRestrict,
