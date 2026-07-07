@@ -639,6 +639,14 @@ export function upsertSessionsBatch(
 
     for (const { meta, content, scan } of items) {
       if (alreadyIndexed.has(meta.id)) continue;
+      // Per-row guard: one malformed session (e.g. a required field that resolves to
+      // NULL) must not abort the whole batch and take down the entire `agents sessions`
+      // listing. A constraint error uses SQLite's ABORT resolution — it reverts only the
+      // failing statement, not the transaction — and the db.transaction wrapper only rolls
+      // back when the error escapes `fn`, so catching + skipping here leaves the txn valid
+      // and committable. We deliberately do NOT stamp the ledger for a skipped row, so the
+      // next scan re-tries it (self-healing once the underlying parser is fixed).
+      try {
       upsert.run({
         id: meta.id,
         short_id: meta.shortId,
@@ -676,6 +684,11 @@ export function upsertSessionsBatch(
       );
       if (scan && meta.filePath) {
         ledger.run(canonicalLedgerKey(meta.filePath), scan.fileMtimeMs, scan.fileSize, now);
+      }
+      } catch (err) {
+        if (process.stderr.isTTY) {
+          console.error(`Warning: skipped unindexable session ${meta.id}: ${(err as Error).message}`);
+        }
       }
     }
   });

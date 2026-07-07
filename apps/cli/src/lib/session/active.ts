@@ -122,6 +122,14 @@ export interface ActiveSession {
    * (after the --json/--waiting gates) — NOT emitted on the discovery path.
    */
   tmuxTarget?: string;
+  /**
+   * Which host app + tab a tmux-hosted session is currently being VIEWED in,
+   * resolved from the attached tmux client (its terminal PID -> app via
+   * HOST_MATCHERS, its tab via the per-app resolver). `undefined` means no
+   * client is attached — the session is running detached. Transient,
+   * renderer-set (see src/lib/session/viewing-in.ts) — NOT on the discovery path.
+   */
+  viewingIn?: { app: string; tab?: number };
 }
 
 export interface ActiveQueryOptions {
@@ -221,11 +229,25 @@ function claudeProjectDirName(cwd: string): string {
  * fall back to the most-recent-mtime .jsonl in the project's folder.
  */
 function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefined {
-  const projectDir = path.join(HOME, '.claude', 'projects', claudeProjectDirName(cwd));
+  return pickSessionFile(path.join(HOME, '.claude', 'projects', claudeProjectDirName(cwd)), sessionId);
+}
 
+/**
+ * Pick a Claude transcript file within a project dir.
+ *
+ * With a CONCRETE session id: return that id's `<id>.jsonl` or undefined — NEVER a
+ * sibling's. Falling back to the newest file here is the bug that made N distinct
+ * co-located sessions (e.g. several editor tabs in one cwd, or two worktree siblings)
+ * all collapse onto ONE file and render identical preview + topic (they look like
+ * duplicate cards). The mtime fallback is only sound when NO id is known.
+ *
+ * With NO id: return the newest `.jsonl` by mtime (the legitimate single-session
+ * heuristic for a directly-launched agent with no registry entry).
+ */
+export function pickSessionFile(projectDir: string, sessionId?: string): string | undefined {
   if (sessionId) {
     const specific = path.join(projectDir, `${sessionId}.jsonl`);
-    if (fs.existsSync(specific)) return specific;
+    return fs.existsSync(specific) ? specific : undefined;
   }
 
   let files: string[];
@@ -247,7 +269,11 @@ function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefi
 }
 
 function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
-  if (!sessionFile) return 'running';
+  // No resolvable transcript is NOT evidence of activity — default to idle. (Before
+  // the no-borrow fix in pickSessionFile this rarely fired because every terminal
+  // borrowed the newest file; now a session with an unresolved id lands here, and
+  // "running" would wrongly light it up.)
+  if (!sessionFile) return 'idle';
   try {
     const mtimeMs = fs.statSync(sessionFile).mtimeMs;
     return Date.now() - mtimeMs < ACTIVE_MTIME_WINDOW_MS ? 'running' : 'idle';
@@ -423,7 +449,17 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   const labelMap = buildClaudeLabelMap();
 
   return entries.map((t): ActiveSession => {
-    const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, t.sessionId);
+    // The id cached in live-terminals.json goes stale when Claude rotates its
+    // transcript uuid on resume/compact, so it often no longer matches any
+    // <id>.jsonl. When the pid registry knows this pid's current id, prefer it —
+    // the same source the headless path uses. NOTE: live-terminals.json stores the
+    // SHELL pid, while the by-pid registry is keyed by the AGENT pid, so for
+    // editor-launched terminals this lookup returns undefined today and we fall
+    // back to the stale cached id — the duplicate-card fix comes from
+    // pickSessionFile no longer borrowing a sibling, not from this lookup. Kept as
+    // a forward-looking hook for the cases where the pid does line up.
+    const resolvedId = readPidSessionEntry(t.pid)?.sessionId ?? t.sessionId;
+    const sessionFile = findSessionFileForKind(t.kind, t.cwd ?? undefined, resolvedId);
     // Prefer label from live terminal, fall back to Claude's session label
     const label = t.label ?? (t.sessionId ? labelMap.get(t.sessionId) : undefined) ?? undefined;
     // Extract topic from session file (first meaningful user message)
@@ -638,6 +674,20 @@ function detectHost(pid: number, procByPid: Map<number, ProcRow>): string | unde
   return undefined;
 }
 
+/**
+ * Resolve the host app for a single pid by walking its process ancestry with the
+ * same HOST_MATCHERS logic `detectHost` uses. Reads the whole process table per
+ * call, so it's for the low-cardinality renderer path (one tmux client per
+ * session), not a hot loop. Returns undefined when nothing above the pid is a
+ * recognised UI. Exported for the "viewing in <app>" resolver.
+ */
+export async function hostFromPid(pid: number): Promise<string | undefined> {
+  if (!pid || pid < 1) return undefined;
+  const procByPid = new Map<number, ProcRow>();
+  for (const r of await readProcessTable()) procByPid.set(r.pid, r);
+  return detectHost(pid, procByPid);
+}
+
 /** IDE / terminal / multiplexer hosts all count as UI-hosted. Absence = truly headless. */
 const UI_HOSTS = new Set<string>([
   'code', 'cursor', 'codium', 'windsurf',
@@ -812,24 +862,98 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
 }
 
 /**
- * Union of all four sources. Teams and terminals spawn actual CLI processes
- * that also show up in `ps`, so headless attribution runs last with the
- * already-attributed PIDs removed.
+ * Agents hosted in the shared-socket tmux server — the authoritative source for
+ * tmux-wrapped interactive spawns (see src/lib/exec.ts `runInTmux`). Enumerates
+ * every pane on the shared socket and keeps those whose session meta was stamped
+ * with `labels.agent` + `labels.sessionId` by the spawn-wrap. Because tmux (not a
+ * per-window `live-terminals.json`) is the source of truth, a tmux-hosted agent is
+ * ALWAYS captured with its exact `%pane` even when the extension registry is stale
+ * or absent. `source: 'teams'` is skipped — teammates are surfaced by listTeamsActive.
+ */
+export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
+  const { getDefaultSocketPath } = await import('../tmux/paths.js');
+  const { readSessionMeta } = await import('../tmux/session.js');
+  const { runTmux } = await import('../tmux/binary.js');
+  const socket = getDefaultSocketPath();
+  if (!fs.existsSync(socket)) return [];
+
+  let res;
+  try {
+    res = await runTmux({
+      socket,
+      args: ['list-panes', '-a', '-F', '#{pane_id}\t#{session_name}\t#{pane_pid}\t#{pane_current_path}'],
+      throwOnError: false,
+    });
+  } catch {
+    return [];
+  }
+  if (res.code !== 0) return [];
+
+  const out: ActiveSession[] = [];
+  const seen = new Set<string>();
+  for (const line of res.stdout.split('\n')) {
+    if (!line.trim()) continue;
+    const [pane, sessName, pidRaw, curPath] = line.split('\t');
+    if (!pane || !sessName) continue;
+    const meta = readSessionMeta(sessName);
+    const agent = meta?.labels?.agent;
+    const sessionId = meta?.labels?.sessionId;
+    if (!agent || !sessionId) continue;      // only our stamped agent sessions
+    if (meta?.source === 'teams') continue;  // teammates come from listTeamsActive
+    if (seen.has(sessionId)) continue;       // first pane per session wins
+    seen.add(sessionId);
+
+    const pid = parseInt(pidRaw, 10) || undefined;
+    const cwd = meta?.cwd ?? (curPath || undefined);
+    const sessionFile = findSessionFileForKind(agent, cwd, sessionId);
+    const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
+    const state = computeLiveState(agent, sessionFile, cwd, pid ? isPidAlive(pid) : true);
+    // Provenance is known exactly here (the pane IS a tmux pane) — set it so
+    // enrichProvenance skips it and the locator/reply rails resolve off the pane.
+    const provenance: SessionProvenance = {
+      host: os.hostname(),
+      transport: 'local',
+      mux: { kind: 'tmux', socket, pane },
+      reply: { rail: 'tmux', target: pane, socket },
+    };
+    out.push(applyState({
+      context: 'terminal',
+      kind: agent,
+      host: 'tmux',
+      pid,
+      sessionId,
+      cwd,
+      topic,
+      sessionFile,
+      provenance,
+    }, state, sessionFile));
+  }
+  return out;
+}
+
+/**
+ * Union of all sources. Teams and terminals spawn actual CLI processes that
+ * also show up in `ps`, so headless attribution runs last with the already-
+ * attributed PIDs removed. The tmux source goes FIRST into the dedupe so a
+ * tmux-hosted agent's row (which carries the exact `%pane`) wins over a staler
+ * terminal/headless row for the same session id.
  */
 export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<ActiveSession[]> {
-  const [teams, terminals, cloud] = await Promise.all([
+  const [tmuxAgents, teams, terminals, cloud] = await Promise.all([
+    listTmuxAgentSessions().catch(() => [] as ActiveSession[]),
     listTeamsActive().catch(() => [] as ActiveSession[]),
     listTerminalsActive().catch(() => [] as ActiveSession[]),
     Promise.resolve(listCloudActive()),
   ]);
 
   const knownPids = new Set<number>();
+  for (const s of tmuxAgents) if (s.pid) knownPids.add(s.pid);
   for (const s of teams) if (s.pid) knownPids.add(s.pid);
   for (const s of terminals) if (s.pid) knownPids.add(s.pid);
 
   const unattributed = opts.skipHeadless ? [] : await listUnattributedActive(knownPids);
 
-  const merged = dedupeBySession([...teams, ...terminals, ...cloud, ...unattributed]);
+  const merged = dedupeBySession([...tmuxAgents, ...teams, ...terminals, ...cloud, ...unattributed]);
   await enrichProvenance(merged);
   return merged;
 }

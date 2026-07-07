@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv } from './exec.js';
+import { shouldTapStdout, resolveInteractive, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { mailboxDir } from './mailbox.js';
 
@@ -199,5 +199,80 @@ describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
     expect(r.command).toBe('C:\\bin\\claude.cmd -p "review my code & ship"');
     expect(r.args).toEqual([]);
     expect(r.shell).toBe(true);
+  });
+});
+
+describe('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
+  /** The wrap-eligible baseline: interactive, macOS, not nested, no opt-out, tmux present. */
+  const base: TmuxWrapContext = {
+    interactive: true,
+    platform: 'darwin',
+    inTmux: false,
+    raw: false,
+    noTmuxEnv: false,
+    tmuxAvailable: true,
+  };
+
+  it('wraps an interactive macOS/Linux run when tmux is available and nothing opts out', () => {
+    expect(shouldWrapInTmux(base)).toBe(true);
+    expect(shouldWrapInTmux({ ...base, platform: 'linux' })).toBe(true);
+  });
+
+  it('never wraps a headless run (no TTY to attach)', () => {
+    expect(shouldWrapInTmux({ ...base, interactive: false })).toBe(false);
+  });
+
+  it('never wraps on Windows', () => {
+    expect(shouldWrapInTmux({ ...base, platform: 'win32' })).toBe(false);
+  });
+
+  it('never double-wraps when already inside tmux', () => {
+    expect(shouldWrapInTmux({ ...base, inTmux: true })).toBe(false);
+  });
+
+  it('respects the --raw and AGENTS_NO_TMUX escape hatches', () => {
+    expect(shouldWrapInTmux({ ...base, raw: true })).toBe(false);
+    expect(shouldWrapInTmux({ ...base, noTmuxEnv: true })).toBe(false);
+  });
+
+  it('does not wrap when tmux is not installed', () => {
+    expect(shouldWrapInTmux({ ...base, tmuxAvailable: false })).toBe(false);
+  });
+});
+
+describe('buildTmuxAgentCommand (env-preserving pane command)', () => {
+  it('execs the agent with a full env prefix (bare values need no quoting)', () => {
+    const cmd = buildTmuxAgentCommand('claude', ['--permission-mode', 'plan'], {
+      CLAUDE_CONFIG_DIR: '/home/me/.agents/versions/claude/2.1/home/.claude',
+      PATH: '/usr/bin:/bin',
+    });
+    expect(cmd.startsWith('exec env ')).toBe(true);
+    // Safe values (only [A-Za-z0-9_./:=@%+-]) pass through shellQuote unquoted.
+    expect(cmd).toContain('CLAUDE_CONFIG_DIR=/home/me/.agents/versions/claude/2.1/home/.claude');
+    expect(cmd).toContain('PATH=/usr/bin:/bin');
+    // The agent + its args land after the env prefix.
+    expect(cmd).toMatch(/ claude --permission-mode plan$/);
+  });
+
+  it('quotes a value containing spaces and single quotes safely', () => {
+    const cmd = buildTmuxAgentCommand('claude', ["it's a test"], { FOO: "a b'c" });
+    // shellQuote wraps in single quotes and escapes embedded ones — no unquoted breakout.
+    expect(cmd).toContain("FOO='a b'\\''c'");
+    expect(cmd).toContain("'it'\\''s a test'");
+  });
+
+  it('drops non-identifier keys so `env` does not choke on exported shell functions', () => {
+    const cmd = buildTmuxAgentCommand('claude', [], {
+      GOOD_KEY: '1',
+      'BASH_FUNC_foo%%': '() { echo hi; }',
+    });
+    expect(cmd).toContain('GOOD_KEY=');
+    expect(cmd).not.toContain('BASH_FUNC_foo');
+  });
+
+  it('does not forward undefined env values', () => {
+    const cmd = buildTmuxAgentCommand('claude', [], { SET: 'x', UNSET: undefined });
+    expect(cmd).toContain('SET=');
+    expect(cmd).not.toContain('UNSET');
   });
 });

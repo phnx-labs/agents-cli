@@ -20,6 +20,8 @@ import { getShimsDir } from './state.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
+import { isTmuxInstalled } from './tmux/binary.js';
+import { shellQuote } from './ssh-exec.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -168,6 +170,12 @@ export interface ExecOptions {
   mcpConfigPath?: string;
   /** Raw args captured after `--` on the command line, forwarded verbatim to the underlying agent CLI. */
   passthroughArgs?: string[];
+  /**
+   * Escape hatch for the interactive tmux spawn-wrap (see shouldWrapInTmux):
+   * when true, spawn the agent directly instead of inside a shared-socket tmux
+   * session. Also forced off by AGENTS_NO_TMUX=1. No effect on headless runs.
+   */
+  raw?: boolean;
 }
 
 /**
@@ -885,6 +893,140 @@ interface SpawnResult {
   stderr: string;
 }
 
+/** Inputs that decide whether an interactive spawn is wrapped in a shared-socket tmux session. */
+export interface TmuxWrapContext {
+  /** resolveInteractive() result — only interactive REPL launches are wrapped. */
+  interactive: boolean;
+  /** process.platform — Windows has no tmux path, always spawns bare. */
+  platform: NodeJS.Platform;
+  /** True when the launcher itself already runs inside tmux ($TMUX set) — never double-wrap. */
+  inTmux: boolean;
+  /** The `--raw` escape hatch. */
+  raw: boolean;
+  /** The AGENTS_NO_TMUX=1 escape hatch. */
+  noTmuxEnv: boolean;
+  /** Whether a tmux binary is on PATH. */
+  tmuxAvailable: boolean;
+}
+
+/**
+ * Decide whether to run an interactive agent INSIDE a detached tmux session on
+ * the shared socket (then attach the current TTY) instead of a bare spawn.
+ *
+ * tmux-wrapping gives every interactive agent an exact, unique `%pane` handle so
+ * `agents sessions --active` can tell co-located agents apart, and lets `agents
+ * focus` re-attach a live session without forking it. Pure so the gate is unit-
+ * tested independently of the (side-effecting) spawn.
+ *
+ * All five guards must pass:
+ *   - interactive     — a headless `-p` run has no TTY to attach; keep bare spawn.
+ *   - not Windows     — no tmux path on win32.
+ *   - not already in tmux — nesting tmux-in-tmux is pointless and confusing.
+ *   - not --raw       — explicit opt-out.
+ *   - not AGENTS_NO_TMUX=1 — env opt-out (CI, scripts, the shim passthrough path).
+ *   - tmux installed  — otherwise there is nothing to wrap with.
+ */
+export function shouldWrapInTmux(ctx: TmuxWrapContext): boolean {
+  if (!ctx.interactive) return false;
+  if (ctx.platform === 'win32') return false;
+  if (ctx.inTmux) return false;
+  if (ctx.raw) return false;
+  if (ctx.noTmuxEnv) return false;
+  if (!ctx.tmuxAvailable) return false;
+  return true;
+}
+
+/**
+ * Build the shell command that runs an agent inside a tmux pane with the exact
+ * env the bare spawn would use. tmux runs it via `sh -c <cmd>`; we `exec env
+ * K=V … <agent> <args…>` so:
+ *   - `env` materializes the full agent env INTO the pane, independent of the
+ *     (possibly stale, shared) tmux server environment — additive, so tmux's own
+ *     $TMUX / $TMUX_PANE still reach the agent for provenance detection;
+ *   - `exec` replaces the shell so the agent is the pane's leaf process (clean
+ *     `#{pane_pid}`, clean signal delivery on detach/kill).
+ * Keys are filtered to valid identifiers so exported shell functions
+ * (`BASH_FUNC_*%%`) can't make `env` choke.
+ */
+export function buildTmuxAgentCommand(executable: string, args: string[], env: NodeJS.ProcessEnv): string {
+  const envPrefix = Object.entries(env)
+    .filter(([k, v]) => v !== undefined && EXEC_ENV_KEY_PATTERN.test(k))
+    .map(([k, v]) => `${k}=${shellQuote(String(v))}`)
+    .join(' ');
+  const agentCmd = [executable, ...args].map(shellQuote).join(' ');
+  return `exec env ${envPrefix} ${agentCmd}`;
+}
+
+/**
+ * Run an interactive agent inside a detached tmux session on the shared socket,
+ * attach the current TTY, and propagate the wrapped agent's exit code.
+ *
+ * Lifecycle:
+ *   1. createSession() launches `sh -c 'exec env … agent'` detached, remain-on-exit
+ *      on (global), and returns the pane id.
+ *   2. A per-session `pane-died` hook detaches the attach client the instant the
+ *      agent exits, so attach returns instead of parking on a dead pane.
+ *   3. We record the agent pane's pid → session mapping (WITH the tmux pane) so the
+ *      headless active-scan attributes it, then attach the TTY (blocking).
+ *   4. On return: if the pane is dead the agent exited — read its status, tear the
+ *      session down, return that code. If the pane is still alive the user detached
+ *      (Ctrl-b d) — return 0 and LEAVE the session for `agents focus` to re-attach.
+ */
+async function runInTmux(options: ExecOptions, executable: string, args: string[]): Promise<SpawnResult> {
+  const { createSession, killSession, paneExitStatus, setSessionHook, slugifyName } = await import('./tmux/session.js');
+  const { getDefaultSocketPath } = await import('./tmux/paths.js');
+  const { attachTmux, runTmux } = await import('./tmux/binary.js');
+
+  const socket = getDefaultSocketPath();
+  const cwd = options.cwd || process.cwd();
+  const idSeed = (options.sessionId ?? randomUUID()).slice(0, 8);
+  const name = slugifyName(`ag-${options.agent}-${idSeed}`);
+  const cmd = buildTmuxAgentCommand(executable, args, buildExecEnv(options));
+
+  const labels: Record<string, string> = { agent: options.agent };
+  if (options.sessionId) labels.sessionId = options.sessionId;
+
+  const meta = await createSession({ name, cmd, cwd, socket, source: 'cli', labels });
+  const pane = meta.pane;
+
+  if (pane) {
+    // Detach the client (don't kill) when the agent exits so the session survives
+    // just long enough to read the dead pane's exit status below.
+    await setSessionHook(name, 'pane-died', `detach-client -s =${name}`, socket);
+
+    // Record the agent's OS pid (the pane leaf, thanks to `exec`) WITH its tmux
+    // pane so the active-scan attributes it exactly and shows the %pane.
+    let panePid = 0;
+    try {
+      const r = await runTmux({ socket, args: ['display-message', '-pt', pane, '-p', '#{pane_pid}'], throwOnError: false });
+      panePid = parseInt(r.stdout.trim(), 10) || 0;
+    } catch { /* best-effort */ }
+    writePidSessionEntry({
+      pid: panePid,
+      agent: options.agent,
+      sessionId: options.sessionId,
+      cwd,
+      tmuxPane: pane,
+      startedAtMs: Date.now(),
+    });
+  }
+
+  // The agent could exit before we attach (fast failure). Don't attach to an
+  // already-dead pane — read its status directly and tear down.
+  const before = pane ? await paneExitStatus(pane, socket) : { dead: false };
+  if (!before.dead) {
+    await attachTmux({ socket, args: ['attach-session', '-t', name] });
+  }
+
+  const after = pane ? await paneExitStatus(pane, socket) : { dead: false };
+  if (after.dead) {
+    await killSession(name, socket).catch(() => {});
+    return { exitCode: after.status ?? 0, stderr: '' };
+  }
+  // Pane still alive → the user detached; keep the session for `agents focus`.
+  return { exitCode: 0, stderr: '' };
+}
+
 /**
  * Spawn an agent process and return its exit code plus a tee'd copy of stderr.
  *
@@ -935,6 +1077,29 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     command: executable,
     args: redactArgs(args.slice(0, 10)),
   });
+
+  // Interactive spawn-wrap: on macOS/Linux, run the agent INSIDE a shared-socket
+  // tmux session (then attach this TTY) so it gets a unique, addressable %pane.
+  // Headless runs, Windows, already-in-tmux, --raw, and AGENTS_NO_TMUX=1 keep the
+  // bare spawn below. See shouldWrapInTmux / runInTmux.
+  if (shouldWrapInTmux({
+    interactive,
+    platform: process.platform,
+    inTmux: !!process.env.TMUX,
+    raw: options.raw === true,
+    noTmuxEnv: process.env.AGENTS_NO_TMUX === '1',
+    tmuxAvailable: isTmuxInstalled(),
+  })) {
+    timer.mark('startup');
+    try {
+      const result = await runInTmux(options, executable, args);
+      timer.end({ exitCode: result.exitCode, status: result.exitCode === 0 ? 'success' : 'failed' });
+      return result;
+    } catch (err) {
+      timer.end({ error: (err as Error).message, exitCode: -1, status: 'error' });
+      throw err;
+    }
+  }
 
   return new Promise((resolve, reject) => {
     // Interactive mode inherits all stdio so the CLI owns the TTY (TUI

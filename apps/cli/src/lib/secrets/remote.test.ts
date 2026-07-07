@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SshExecResult } from '../ssh-exec.js';
 
-const { sshExecMock, resolveHostMock } = vi.hoisted(() => ({
+const { sshExecMock, resolveHostMock, emitMock } = vi.hoisted(() => ({
   sshExecMock: vi.fn(),
   resolveHostMock: vi.fn(),
+  emitMock: vi.fn(),
 }));
 
 // Keep the real assertValidSshTarget / shellQuote (so injection guarding and
@@ -16,6 +17,10 @@ vi.mock('../ssh-exec.js', async () => {
 vi.mock('../hosts/registry.js', () => ({
   resolveHost: resolveHostMock,
 }));
+
+// Spy on the audit emit so we can assert remote resolves are audited on the
+// initiating host (remote.ts only imports `emit`).
+vi.mock('../events.js', () => ({ emit: emitMock }));
 
 import {
   parseHostsOption,
@@ -30,6 +35,7 @@ const ok = (stdout: string): SshExecResult => ({ code: 0, stdout, stderr: '', ti
 beforeEach(() => {
   sshExecMock.mockReset();
   resolveHostMock.mockReset();
+  emitMock.mockReset();
   delete process.env.AGENTS_SECRETS_PASSPHRASE;
 });
 
@@ -122,6 +128,31 @@ describe('remoteResolveEnv', () => {
     const [, remoteCmd, opts] = sshExecMock.mock.calls[0];
     expect(remoteCmd).toBe(`bash -lc 'agents secrets export r2.backups --plaintext --format json'`);
     expect(opts.input).toBeUndefined();
+  });
+
+  it('audits the resolve on the initiating host (secrets.get, source=remote, no value)', async () => {
+    sshExecMock.mockReturnValue(ok('{"FOO":"bar","BAZ":"qux"}'));
+    await remoteResolveEnv('yosemite-s1', 'r2.backups');
+    expect(emitMock).toHaveBeenCalledTimes(1);
+    const [event, payload] = emitMock.mock.calls[0];
+    expect(event).toBe('secrets.get');
+    expect(payload).toMatchObject({
+      module: 'secrets',
+      bundle: 'r2.backups',
+      source: 'remote',
+      host: 'yosemite-s1',
+      status: 'success',
+      keyCount: 2,
+    });
+    // The audit record must never carry the resolved values.
+    expect(JSON.stringify(payload)).not.toContain('bar');
+    expect(JSON.stringify(payload)).not.toContain('qux');
+  });
+
+  it('does not emit an audit event when the remote resolve fails', async () => {
+    sshExecMock.mockReturnValue({ code: 1, stdout: '', stderr: 'no such bundle', timedOut: false });
+    await expect(remoteResolveEnv('host', 'b')).rejects.toThrow();
+    expect(emitMock).not.toHaveBeenCalled();
   });
 
   it('does NOT forward the local passphrase — the remote unlocks with its own', async () => {

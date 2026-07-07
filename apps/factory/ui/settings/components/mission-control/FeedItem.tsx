@@ -45,12 +45,16 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
 
   const tok = plainTok(a.tok, plain)
   const filesLabel = !plain && a.files > 0 ? ` · ${a.files} ${a.files === 1 ? 'file' : 'files'}` : ''
+  // tmux pane handle (unique addressing) + where the session is being viewed, appended
+  // to the meta line. Both only show in full (non-plain) mode when the CLI supplies them.
+  const paneLabel = !plain && a.pane ? ` · ${a.pane}` : ''
+  const viewingLabel = !plain && a.viewingIn ? ` · viewing in ${a.viewingIn}` : ''
   // The worktree slug (or branch) sits between project and ticket so two sessions in
   // the same repo are distinguishable at a glance (the identical-cards bug).
   const wt = a.worktreeSlug || a.branch
   const meta = plain
     ? a.project
-    : `${a.project} · ${a.hostLabel ?? a.host}${wt ? ` · ${wt}` : ''}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}`
+    : `${a.project} · ${a.hostLabel ?? a.host}${wt ? ` · ${wt}` : ''}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 

@@ -8,6 +8,29 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { parseKimi, detectAgent, parseSession } from '../parse.js';
+import { readKimiMeta } from '../discover.js';
+
+/** A Kimi session dir whose state.json omits BOTH createdAt and updatedAt. */
+function makeKimiStateNoTimestamps(): string {
+  const sessionDir = path.join(
+    os.tmpdir(), '.kimi-code', 'sessions', `kimi-nots-${Date.now()}-${Math.random()}`,
+    'session_test-no-timestamps-11111111-1111-1111-1111-111111111111',
+  );
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(path.join(sessionDir, 'state.json'), JSON.stringify({ title: 'no timestamps' }));
+  return path.join(sessionDir, 'state.json');
+}
+
+describe('readKimiMeta timestamp coercion', () => {
+  test('never emits an undefined timestamp when state.json omits createdAt/updatedAt', () => {
+    const statePath = makeKimiStateNoTimestamps();
+    const result = readKimiMeta(statePath);
+    expect(result).not.toBeNull();
+    // Would be `undefined` before the fix → binds NULL into `timestamp TEXT NOT NULL`.
+    expect(typeof result!.meta.timestamp).toBe('string');
+    expect(result!.meta.timestamp.length).toBeGreaterThan(0);
+  });
+});
 
 function makeKimiSession(wireContent: string): string {
   const base = path.join(os.tmpdir(), `.kimi-code`, 'sessions', `kimi-parse-${Date.now()}-${Math.random()}`);
