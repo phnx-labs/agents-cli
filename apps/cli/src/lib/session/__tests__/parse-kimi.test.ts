@@ -45,6 +45,58 @@ function makeKimiSession(wireContent: string): string {
   return path.join(sessionDir, 'state.json');
 }
 
+describe('readKimiMeta message + token counting', () => {
+  test('counts context.append_message events and sums usage.record tokens from wire.jsonl', () => {
+    const jsonl = [
+      { type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'Q1' }] }, time: 1 },
+      { type: 'usage.record', usage: { inputOther: 100, output: 50, inputCacheRead: 200, inputCacheCreation: 10 }, time: 2 },
+      { type: 'context.append_message', message: { role: 'assistant', content: [{ type: 'text', text: 'A1' }] }, time: 3 },
+      { type: 'usage.record', usage: { inputOther: 5, output: 5 }, time: 4 },
+      // Non-counted events must be ignored:
+      { type: 'context.append_loop_event', event: { type: 'content.part', part: { type: 'text', text: 'x' } }, time: 5 },
+      { type: 'turn.prompt', time: 6 },
+    ].map(o => JSON.stringify(o)).join('\n');
+
+    const statePath = makeKimiSession(jsonl);
+    const result = readKimiMeta(statePath);
+    expect(result).not.toBeNull();
+    // 2 append_message events -> messageCount 2
+    expect(result!.meta.messageCount).toBe(2);
+    // (100+50+200+10) + (5+5) = 370
+    expect(result!.meta.tokenCount).toBe(370);
+  });
+
+  test('tokenCount is undefined (not zero) when there are no usage records', () => {
+    const jsonl = [
+      { type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] }, time: 1 },
+    ].map(o => JSON.stringify(o)).join('\n');
+
+    const statePath = makeKimiSession(jsonl);
+    const result = readKimiMeta(statePath);
+    expect(result!.meta.messageCount).toBe(1);
+    expect(result!.meta.tokenCount).toBeUndefined();
+  });
+
+  test('skips malformed lines without aborting the count', () => {
+    const jsonl = [
+      JSON.stringify({ type: 'context.append_message', message: { role: 'user', content: [] }, time: 1 }),
+      '{ this is not valid json',
+      JSON.stringify({ type: 'context.append_message', message: { role: 'assistant', content: [] }, time: 2 }),
+    ].join('\n');
+
+    const statePath = makeKimiSession(jsonl);
+    const result = readKimiMeta(statePath);
+    expect(result!.meta.messageCount).toBe(2);
+  });
+
+  test('messageCount is 0 when wire.jsonl is absent', () => {
+    const statePath = makeKimiStateNoTimestamps(); // no agents/main/wire.jsonl
+    const result = readKimiMeta(statePath);
+    expect(result!.meta.messageCount).toBe(0);
+    expect(result!.meta.tokenCount).toBeUndefined();
+  });
+});
+
 describe('parseKimi', () => {
   test('maps user append_message to message event', () => {
     const statePath = makeKimiSession(JSON.stringify({

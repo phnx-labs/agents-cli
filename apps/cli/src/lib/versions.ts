@@ -37,7 +37,7 @@ import { installMcpServers, parseMcpServerConfig } from './mcp.js';
 import { markdownToToml } from './convert.js';
 import { createVersionedAlias, removeVersionedAlias, switchConfigSymlink, getConfigSymlinkVersion, ensureClaudeInsideSymlink } from './shims.js';
 import { importInstallScriptBinary } from './import.js';
-import { IS_WINDOWS } from './platform/index.js';
+import { IS_WINDOWS, composeWin32CommandLine } from './platform/index.js';
 import { listInstalledSubagents, transformSubagentForClaude, syncSubagentToOpenclaw } from './subagents.js';
 import { listInstalledWorkflows, syncWorkflowToVersion } from './workflows.js';
 import { parseHookManifest, registerHooksToSettings, pruneVersionHomeHookEntriesFromSettings } from './hooks.js';
@@ -1752,24 +1752,51 @@ export function isMissingBinarySignature(output: string): boolean {
  * missing-binary signature (see isMissingBinarySignature) fails the check; a
  * plain nonzero exit or a timeout is treated as healthy so we never false-fail.
  */
+/**
+ * Compose the spawn spec for a `<binary> --version` launch probe. On Windows the
+ * `.cmd` wrapper runs through cmd.exe, so the path is fully quoted into ONE
+ * command line and the args array is emptied (composeWin32CommandLine) — the
+ * DEP0190-safe pattern the real launch uses. Critically this keeps a spaced
+ * Windows profile path (`C:\Users\John Doe\…\claude.cmd`) intact; passing the raw
+ * path to a shell would split it at the space and false-fail a HEALTHY install.
+ * On POSIX no shell is involved and the binary is exec'd directly. Pure/exported
+ * so the quoting is unit-testable without spawning.
+ */
+export function probeSpawnSpec(binary: string, isWin: boolean): { command: string; args: string[]; shell: boolean } {
+  if (isWin) return { command: composeWin32CommandLine(binary, ['--version']), args: [], shell: true };
+  return { command: binary, args: ['--version'], shell: false };
+}
+
 export async function verifyInstalledBinaryLaunches(
   agent: AgentId,
   version: string,
 ): Promise<{ ok: boolean; detail?: string }> {
-  // Windows: `getBinaryPath` returns the extensionless `.bin/<cli>` (a shell
-  // wrapper), NOT the `.cmd`/`.exe` that actually launches there — `execFile`ing
-  // it would ENOENT on a perfectly healthy install, and the integrity gate would
-  // then WIPE it. The gutted-native-binary failure this guards against is a POSIX
-  // concern in practice; treat win32 as healthy rather than risk destroying a
-  // good install. (isVersionInstalled already validates presence on Windows.)
-  if (process.platform === 'win32') return { ok: true };
-  const binary = getBinaryPath(agent, version);
+  // The real launch target differs by platform, so probe whatever `agents run`
+  // actually execs. On Windows that's the npm `.cmd` wrapper (exec.ts uses
+  // `absPath + '.cmd'`), which chains to the native `.exe`; a gutted install
+  // (renamed/missing `.exe`) makes that wrapper emit "is not recognized" — the
+  // exact win-mini failure a vendor auto-update leaves behind. Probing the
+  // extensionless `.bin/<cli>` instead would ENOENT even on a HEALTHY Windows
+  // install, so we DON'T. On POSIX the `.bin/<cli>` binary is the launch target
+  // and is probed directly.
+  const isWin = process.platform === 'win32';
+  const binary = isWin ? getBinaryPath(agent, version) + '.cmd' : getBinaryPath(agent, version);
   if (!fs.existsSync(binary)) {
-    return { ok: false, detail: `binary not found at ${binary}` };
+    // Windows: a missing `.cmd` means a non-npm/global agent (droid.exe) we can't
+    // safely probe — treat as healthy (isVersionInstalled validates presence).
+    // POSIX: a missing launch binary is a genuine gutted install.
+    return isWin ? { ok: true } : { ok: false, detail: `binary not found at ${binary}` };
   }
   try {
-    await execFileAsync(binary, ['--version'], {
+    // On Windows the `.cmd` runs via cmd.exe (shell). Pass a single FULLY-QUOTED
+    // command line + EMPTY args (composeWin32CommandLine) — the same DEP0190-safe
+    // pattern the real launch uses (exec.ts) — so a space in the Windows profile
+    // path (`C:\Users\John Doe\…`) can't split the path and false-fail a healthy
+    // install into a destructive reinstall.
+    const spec = probeSpawnSpec(binary, isWin);
+    await execFileAsync(spec.command, spec.args, {
       timeout: 15000,
+      shell: spec.shell,
       env: { ...process.env, HOME: getVersionHomePath(agent, version) },
     });
     return { ok: true };
@@ -1841,6 +1868,49 @@ export async function ensureAgentRunnable(
     return latest.installedVersion;
   }
   return null;
+}
+
+/**
+ * Proactive launch-health pass for the daemon. Probe the DEFAULT version of
+ * every npm-package agent and repair any that won't launch (via
+ * ensureAgentRunnable), so a gutted install is healed BEFORE the user's next
+ * `agents run` hits a raw ENOENT — the run-time heal (ensureAgentRunnable) only
+ * fires once a run is already starting; this catches it in the background.
+ *
+ * Returns a label (`agent@broken→healed`) for each version actually repaired, so
+ * the daemon can log/notify. A version that already launches costs one cheap
+ * `--version` probe and is left untouched.
+ */
+const failedRepairAt = new Map<string, number>();
+const REPAIR_COOLDOWN_MS = 24 * 60 * 60_000;
+
+export async function healBrokenDefaultLaunches(log?: (m: string) => void): Promise<string[]> {
+  const repaired: string[] = [];
+  for (const agent of Object.keys(AGENTS) as AgentId[]) {
+    if (!AGENTS[agent].npmPackage) continue; // native/global agents have no gutted-tarball failure mode
+    const version = getGlobalDefault(agent);
+    if (!version) continue;
+    if ((await verifyInstalledBinaryLaunches(agent, version)).ok) continue;
+    // Backoff: a version whose repair just failed (offline, npm 404, an arch the
+    // registry can't serve) must NOT re-trigger a full clean-reinstall +
+    // install-latest on every 6h pass. Skip it for a day; a daemon restart clears
+    // the memo, giving a fresh attempt.
+    const key = `${agent}@${version}`;
+    const last = failedRepairAt.get(key);
+    if (last !== undefined && Date.now() - last < REPAIR_COOLDOWN_MS) {
+      log?.(`${AGENTS[agent].name}@${version} still won't launch — repair attempted recently, skipping until cooldown elapses.`);
+      continue;
+    }
+    log?.(`${AGENTS[agent].name}@${version} won't launch — repairing…`);
+    const healed = await ensureAgentRunnable(agent, version, log);
+    if (healed) {
+      failedRepairAt.delete(key);
+      repaired.push(`${agent}@${version}${healed === version ? '' : `→${healed}`}`);
+    } else {
+      failedRepairAt.set(key, Date.now());
+    }
+  }
+  return repaired;
 }
 
 async function getCliVersionFromPath(agent: AgentId): Promise<string | null> {

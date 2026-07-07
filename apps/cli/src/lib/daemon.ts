@@ -440,6 +440,32 @@ export async function runDaemon(): Promise<void> {
   const tmuxReconcileInterval = setInterval(() => { void runTmuxReconcile(); }, 5 * 60_000);
   const tmuxReconcileKickoff = setTimeout(() => { void runTmuxReconcile(); }, 20_000);
 
+  // Launch-health self-heal: probe that each agent's DEFAULT version actually
+  // LAUNCHES (not just that its files exist), and repair a gutted install — the
+  // JS wrapper present but its native binary renamed/missing (a vendor
+  // auto-update that never landed its replacement, or a partially-extracted
+  // tarball) — BEFORE the user's next `agents run` dies with a raw ENOENT. This
+  // is the proactive companion to the run-time heal (ensureAgentRunnable), which
+  // only fires once a run is already starting. Cheap steady-state: one
+  // `--version` probe per default version; a clean reinstall runs only on a real
+  // launch failure. ~every 6h, plus once ~90s after startup (staggered off launch).
+  let checkingLaunchHealth = false;
+  const runLaunchHealthCheck = async () => {
+    if (checkingLaunchHealth) return;
+    checkingLaunchHealth = true;
+    try {
+      const { healBrokenDefaultLaunches } = await import('./versions.js');
+      const repaired = await healBrokenDefaultLaunches((m) => log('INFO', `launch-health: ${m}`));
+      if (repaired.length) log('INFO', `launch-health: repaired ${repaired.join(', ')}`);
+    } catch (err) {
+      log('ERROR', `launch-health check failed: ${(err as Error).message}`);
+    } finally {
+      checkingLaunchHealth = false;
+    }
+  };
+  const launchHealthInterval = setInterval(() => { void runLaunchHealthCheck(); }, 6 * 60 * 60_000);
+  const launchHealthKickoff = setTimeout(() => { void runLaunchHealthCheck(); }, 90_000);
+
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
     scheduler.reloadAll();
@@ -462,6 +488,8 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(deviceProbeKickoff);
     clearInterval(tmuxReconcileInterval);
     clearTimeout(tmuxReconcileKickoff);
+    clearInterval(launchHealthInterval);
+    clearTimeout(launchHealthKickoff);
     removeDaemonPid();
     process.exit(0);
   };
