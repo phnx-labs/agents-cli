@@ -6,6 +6,22 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Factory Floor redesign — the card now shows the agent's outputs at a glance.**
+  A cohesive pass over the live feed:
+  - **Checklist expanded by default** on each card (still collapsible), with the
+    current step highlighted so progress reads without a click.
+  - **Feed grouped by project by default** (NEEDS YOU stays pinned above the groups).
+  - **One-click PR link** — the `PR #N` pill is now a real link to the pull request.
+  - **One unified search** — the TopBar center is the single live-feed filter; the
+    duplicate search box in the Floor controls bar is gone (⌘K still opens the palette).
+  - **Artifact chips** — cards surface the tracker refs the agent *created* (Linear
+    `create_issue` / `gh issue create`) and any team it *spawned* (`agents teams
+    create/add`), distinct from the injected/worked-on ticket. Backed by new session
+    scanning (`createdTickets` / `spawnedTeam` on both the indexed scan and live
+    session state).
+
 ### Fixed
 
 - **Editor "Send to Agent" (slash-command + keyboard shortcut) silently did nothing.** The markdown editor webview may call VS Code's one-shot `acquireVsCodeApi()` only once per load, but `App.tsx` consumed it at startup while the Tiptap `KeyboardShortcuts` (`Mod-Shift-a` / `Mod-Shift-i`) and `SlashCommands` ("Send to Agent" / "Ask Agent") extensions each re-called `acquireVsCodeApi()` on use — a second acquisition that throws / yields `undefined`, so their `if (vscode)` guard fell through and the `postMessage` never fired. All four call sites plus `App.tsx` now share a single cached handle via a new `ui/editor/vscodeApi.ts` (`getVsCodeApi()`), acquired at most once. Regression test (`vscodeApi.test.ts`) simulates the single-acquire contract. Source: `apps/factory/ui/editor/vscodeApi.ts`, `App.tsx`, `extensions/KeyboardShortcuts.ts`, `extensions/SlashCommands.ts`.
