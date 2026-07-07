@@ -96,6 +96,26 @@ describe('groupSessionsByMachine', () => {
     expect(layout.machines[0].total).toBe(2);
     expect(layout.machines[0].layout.workspaces).toHaveLength(2);
   });
+
+  it('lifts cloud tasks into their own top-level "cloud" group, off the querier machine, sorted last', () => {
+    const layout = groupSessionsByMachine(
+      [
+        // A cloud task is attributed to the querier ('zion') for reply routing, but
+        // it runs in a provider sandbox — it must not fold under the local device.
+        mk({ context: 'cloud', machine: 'zion', sessionId: 'task_e', kind: 'codex', status: 'queued' }),
+        mk({ context: 'cloud', machine: 'zion', sessionId: 'vclfel94', status: 'waiting' }),
+        mk({ machine: 'zion', cwd: '/repo/a', sessionId: 'local1' }),
+      ],
+      'zion',
+    );
+    // 'zion' (local, real session only) first; the synthetic 'cloud' category last.
+    expect(layout.machines.map((m) => m.machine)).toEqual(['zion', 'cloud']);
+    const zion = layout.machines.find((m) => m.machine === 'zion')!;
+    const cloud = layout.machines.find((m) => m.machine === 'cloud')!;
+    expect(zion.total).toBe(1); // the two cloud tasks are NOT counted here
+    expect(cloud.total).toBe(2);
+    expect(cloud.isLocal).toBe(false);
+  });
 });
 
 describe('dedupeByMachineSession', () => {

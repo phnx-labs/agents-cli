@@ -540,7 +540,14 @@ export interface MachineGroupedLayout {
  * to the same id form); else the local machine. Never keys off `ActiveSession.host`
  * — that is the terminal *app* (code/tmux), not the computer.
  */
+/** Synthetic top-level group key for provider-sandboxed cloud tasks. */
+const CLOUD_MACHINE_KEY = 'cloud';
+
 function machineKeyFor(s: ActiveSession, localMachine: string): string {
+  // Cloud tasks run in a provider sandbox, not on the machine they're attributed
+  // to for reply routing (s.machine = the querier). Surface them as their own
+  // top-level "cloud" group instead of nested under the local device.
+  if (s.context === 'cloud') return CLOUD_MACHINE_KEY;
   if (s.machine) return s.machine;
   if (s.provenance?.host) return normalizeHost(s.provenance.host);
   return localMachine;
@@ -561,6 +568,9 @@ export function groupSessionsByMachine(sessions: ActiveSession[], localMachine: 
   const keys = Array.from(byMachine.keys()).sort((a, b) => {
     if (a === localMachine) return -1;
     if (b === localMachine) return 1;
+    // The synthetic "cloud" category sorts after all real machines.
+    if (a === CLOUD_MACHINE_KEY) return 1;
+    if (b === CLOUD_MACHINE_KEY) return -1;
     const ac = byMachine.get(a)!.length, bc = byMachine.get(b)!.length;
     if (ac !== bc) return bc - ac;
     return a.localeCompare(b);
@@ -679,39 +689,49 @@ function groupTally(sessions: ActiveSession[]): string {
 }
 
 /** Print one machine's workspace tree, indented under its machine header. */
-function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string): void {
+function renderWorkspaceLayout(layout: ActiveSessionsLayout, base: string, machineKey?: string): void {
   let first = true;
   for (const ws of layout.workspaces) {
     if (!first) console.log();
     first = false;
 
-    const header = ws.key === '__cloud__'
-      ? chalk.magenta.bold('cloud')
-      : ws.key === '__unknown__'
-        ? chalk.gray.bold('unknown')
-        : chalk.cyan.bold(shortCwd(ws.key));
-    const wsSessions = [...ws.windows.flatMap(w => w.sessions), ...ws.flat];
-    const tally = groupTally(wsSessions);
-    console.log(`${base}${header} ${chalk.gray(`(${ws.total})`)}${tally ? chalk.gray(`  ${tally}`) : ''}`);
+    // Under the top-level "cloud" machine group the __cloud__ workspace header is
+    // redundant ("▸ cloud" then "cloud") — render its rows flat under the machine
+    // header instead. Row indent collapses by one level to match.
+    const redundantCloud = ws.key === '__cloud__' && machineKey === CLOUD_MACHINE_KEY;
+    const rowBase = redundantCloud ? base : base + '  ';
+    if (!redundantCloud) {
+      const header = ws.key === '__cloud__'
+        ? chalk.magenta.bold('cloud')
+        : ws.key === '__unknown__'
+          ? chalk.gray.bold('unknown')
+          : chalk.cyan.bold(shortCwd(ws.key));
+      const wsSessions = [...ws.windows.flatMap(w => w.sessions), ...ws.flat];
+      const tally = groupTally(wsSessions);
+      console.log(`${base}${header} ${chalk.gray(`(${ws.total})`)}${tally ? chalk.gray(`  ${tally}`) : ''}`);
+    }
 
     for (const win of ws.windows) {
       // Host is per-process, but every terminal in the same IDE window shares
       // an ancestor — take the first non-empty host as the window's label.
       const host = win.sessions.find((s) => s.host)?.host ?? 'terminal';
       const winHeader = `${chalk.gray(host)} ${chalk.gray('·')} ${chalk.gray(shortWindowLabel(win.windowId))} ${chalk.gray(`(${win.sessions.length})`)}`;
-      console.log(base + '  ' + winHeader);
-      for (const s of win.sessions) printActiveRow(s, base + '    ');
+      console.log(rowBase + winHeader);
+      for (const s of win.sessions) printActiveRow(s, rowBase + '  ');
     }
 
-    for (const s of ws.flat) printActiveRow(s, base + '  ');
+    for (const s of ws.flat) printActiveRow(s, rowBase);
   }
 }
 
 /** Machine header: `▸ <name> ← this machine` for the local box (cyan), matching
  * the `ag devices list` treatment; a plain `▸ <name>` for remotes. */
 function printMachineHeader(mg: MachineGroup): void {
-  const marker = mg.isLocal ? chalk.cyan('▸ ') : chalk.gray('▸ ');
-  const name = mg.isLocal ? chalk.bold.cyan(mg.machine) : chalk.bold(mg.machine);
+  // The synthetic "cloud" group isn't a device — tint it magenta (matching the
+  // cloud row/label styling) so it reads as a category, not a machine.
+  const isCloud = mg.machine === CLOUD_MACHINE_KEY;
+  const marker = mg.isLocal ? chalk.cyan('▸ ') : isCloud ? chalk.magenta('▸ ') : chalk.gray('▸ ');
+  const name = mg.isLocal ? chalk.bold.cyan(mg.machine) : isCloud ? chalk.bold.magenta(mg.machine) : chalk.bold(mg.machine);
   const here = mg.isLocal ? chalk.cyan('  ← this machine') : '';
   console.log(`${marker}${name} ${chalk.gray(`(${mg.total})`)}${here}`);
 }
@@ -848,12 +868,17 @@ async function renderActiveSessions(
     if (!firstMachine) console.log();
     firstMachine = false;
     printMachineHeader(mg);
-    renderWorkspaceLayout(mg.layout, '  ');
+    renderWorkspaceLayout(mg.layout, '  ', mg.machine);
   }
 
   const parts = groupTally(sessions).split(' · ').filter(Boolean);
-  const machineWord = grouped.machines.length === 1 ? 'machine' : 'machines';
-  console.log(chalk.gray(`\n${sessions.length} active (${parts.join(', ')}) across ${grouped.machines.length} ${machineWord}.`));
+  // The synthetic "cloud" group is a category, not a machine — exclude it from the
+  // machine count and note it separately so the tally stays truthful.
+  const realMachines = grouped.machines.filter((m) => m.machine !== CLOUD_MACHINE_KEY).length;
+  const hasCloud = grouped.machines.some((m) => m.machine === CLOUD_MACHINE_KEY);
+  const machineWord = realMachines === 1 ? 'machine' : 'machines';
+  const cloudNote = hasCloud ? ' + cloud' : '';
+  console.log(chalk.gray(`\n${sessions.length} active (${parts.join(', ')}) across ${realMachines} ${machineWord}${cloudNote}.`));
 
   // Tip only when nothing else could be included and the user didn't opt out.
   if (!opts.local && !opts.hosts?.length && remoteDeviceCount === 0) printCrossMachineTip();
