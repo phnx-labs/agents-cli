@@ -25,7 +25,9 @@ describe('shim resolves the PER-DEVICE default pin', () => {
     expect(script).toContain('parse_agents_default "$AGENTS_USER_DIR/agents.yaml"');
   });
 
-  test('runs the device-pinned version WITHOUT the "no default set" prompt', () => {
+  // POSIX-only: the bash shim mechanism doesn't apply on Windows (which uses
+  // .cmd shims), and the CI runner has no `bash`.
+  test.skipIf(process.platform === 'win32')('runs the device-pinned version WITHOUT the "no default set" prompt', () => {
     const work = tmp();
     const userDir = path.join(work, '.agents');
     const mid = deviceId();
