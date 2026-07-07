@@ -171,8 +171,8 @@ Nothing from `apps/`, `native/`, or sibling `packages/` can leak into the tarbal
 
 ## Releasing
 
-**Releases are cut locally on macOS — there is no CI publish.** Run from a clean,
-in-sync `main`:
+**Releases can be cut locally on macOS, or driven from Linux by offloading the
+Mac-only signing to a remote sign host.** Run from a clean, in-sync `main`:
 
 ```bash
 scripts/release.sh <version>          # dry-run: bump, type-check, build, test, tarball preview
@@ -182,6 +182,25 @@ scripts/release.sh <version> --apply  # commits chore(release), tags v<version>,
 `release.sh` reads the npm token from the `npmjs.com` secrets bundle (`agents
 secrets`) — no 2FA prompt, no token on disk. The script's git-scope reads use
 `<ref>:apps/cli/package.json` (not root) since the package moved under `apps/cli`.
+
+**Linux-driven release (`SIGN_HOST`).** The two signed macOS helpers (below) are
+the only reason publishing was macOS-pinned. `release.sh` now offloads producing
+them: when it runs on a **non-macOS** host and `bin/Agents CLI.app` /
+`bin/MenubarHelper.app` are absent (or when `FORCE_REMOTE_SIGN=1` on any host), it
+invokes [`scripts/remote-sign-mac.sh`](scripts/remote-sign-mac.sh), which rsyncs
+the build inputs (keychain-helper.swift, entitlements, `build-keychain-helper.sh`,
+the `menubar/` Swift package, and — if present — `bin/embedded.provisionprofile`)
+to `${SIGN_HOST:-mac-mini}`, runs both Mac build scripts there under the appliance's
+headless signing creds (unlock `rush-signing.keychain-db`; Apple notary creds via
+the `apple.com` secrets bundle), then pulls the signed `bin/*.app` back and
+re-verifies the keychain sha locally. `bun run build` copies the helpers into
+`dist/` on a **presence** gate now (`[ -d bin/… ]`), not `[ "$(uname)" = Darwin ]`,
+so a Linux box that has pulled the pre-signed bundles packages them; `prepack`'s
+sha gate is sha-tool-portable (`shasum` or `sha256sum`). The sign host needs a
+Developer ID identity in `rush-signing.keychain-db`, the `kcpass` + `secrets.pass`
+files under `~/Library/Application Support/rush/`, the `apple.com` secrets bundle,
+and `bin/embedded.provisionprofile` (for the notarized keychain helper). Override
+the checkout with `SIGN_HOST_REPO` (`$HOME` resolves on the remote side).
 
 **Why not CI?** The tarball bundles `dist/lib/secrets/Agents CLI.app` — a native
 keychain helper compiled with `swiftc`, codesigned (Developer ID), and notarized

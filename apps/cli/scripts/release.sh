@@ -262,6 +262,26 @@ fi
 rm -f "$TSC_LOG"
 green "Type check clean."
 
+# ----- Offload the macOS helper build + sign to a remote sign host (opt-in) -----
+# The tarball bundles two signed macOS .app helpers (bin/Agents CLI.app +
+# bin/MenubarHelper.app) that a Linux box can't produce. When releasing off a
+# non-macOS host (or when FORCE_REMOTE_SIGN=1), offload the Swift build + codesign
+# + notarize to ${SIGN_HOST:-mac-mini} over ssh and pull the signed bundles back,
+# so `bun run build` (now presence-gated, not uname-gated) can package them.
+# On macOS the signed helpers are expected to be staged locally already, so this
+# is skipped unless FORCE_REMOTE_SIGN=1.
+NEED_REMOTE_SIGN=false
+if [[ "${FORCE_REMOTE_SIGN:-}" == "1" ]]; then
+  NEED_REMOTE_SIGN=true
+elif [[ "$(uname)" != "Darwin" ]] && { [[ ! -d "bin/Agents CLI.app" ]] || [[ ! -d "bin/MenubarHelper.app" ]]; }; then
+  NEED_REMOTE_SIGN=true
+fi
+if $NEED_REMOTE_SIGN; then
+  bold "Offloading macOS helper build + sign to ${SIGN_HOST:-mac-mini}..."
+  scripts/remote-sign-mac.sh || die "remote sign failed -- cannot package signed helpers"
+  green "Signed helpers pulled back into bin/."
+fi
+
 # ----- Build (real artifacts) -----
 bold "Building (bun run build)..."
 rm -rf dist
