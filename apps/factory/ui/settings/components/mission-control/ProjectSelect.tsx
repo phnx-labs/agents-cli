@@ -14,6 +14,41 @@ export interface ProjectSelectProps {
   onChange: (id: string) => void
 }
 
+// Small violet chip naming the linked Linear project. Inline-styled (dispatch.css
+// is owned by another surface) — violet #8b8ce8 per the managed-projects spec.
+function LinearPill({ name }: { name: string }) {
+  return (
+    <span
+      title={`Linear · ${name}`}
+      style={{
+        fontSize: 9, fontWeight: 700, lineHeight: '14px', color: '#8b8ce8',
+        border: '1px solid #8b8ce8', borderRadius: 4, padding: '0 4px',
+        maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}
+    >
+      {name}
+    </span>
+  )
+}
+
+// Tiny confidence meter: high = full lime, medium = ~60% cyan, low = ~25% dim.
+function ConfMeter({ level }: { level: 'high' | 'medium' | 'low' }) {
+  const pct = level === 'high' ? 100 : level === 'medium' ? 60 : 25
+  const color = level === 'high' ? '#a3e635' : level === 'medium' ? '#5ad6c0' : 'var(--ds-text-dim)'
+  return (
+    <span
+      title={`${level} confidence`}
+      aria-label={`${level} confidence`}
+      style={{
+        display: 'inline-block', width: 28, height: 4, borderRadius: 2,
+        background: 'var(--ds-bg-inset)', overflow: 'hidden',
+      }}
+    >
+      <span style={{ display: 'block', width: `${pct}%`, height: '100%', background: color }} />
+    </span>
+  )
+}
+
 export function ProjectSelect({ items, value, cloud, onChange }: ProjectSelectProps) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -40,6 +75,8 @@ export function ProjectSelect({ items, value, cloud, onChange }: ProjectSelectPr
             >
               <span className="nm">{i.label}</span>
               {top && i.id === top.id ? <span className="badge used">MOST USED</span> : null}
+              {i.linearProject ? <LinearPill name={i.linearProject} /> : null}
+              {i.confidence ? <ConfMeter level={i.confidence} /> : null}
               <span className="right"><span className="use">{i.uses}×</span></span>
             </div>
           ))}

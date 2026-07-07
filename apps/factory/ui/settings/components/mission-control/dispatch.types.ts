@@ -46,6 +46,8 @@ export interface DispatchTarget {
   label: string
   path?: string       // local dir (absolute-ish); omitted for cloud repos
   uses: number
+  confidence?: 'high' | 'medium' | 'low'
+  linearProject?: string   // linked Linear project NAME — drives the pill + auto-select match
 }
 
 export interface DispatchAttachment {

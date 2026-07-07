@@ -155,6 +155,7 @@ export interface UnifiedTask {
     createdAt?: string
     dueDate?: string
     repo?: string
+    project?: string   // Linear project name (already populated by the backend; the UI type just didn't declare it)
     comments?: TaskComment[]
   }
 }
