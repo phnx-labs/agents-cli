@@ -97,6 +97,10 @@ export default function App() {
   const [openDetailTaskId, setOpenDetailTaskId] = useState<string | null>(null)
   const [openBenchTaskId, setOpenBenchTaskId] = useState<string | null>(null)
   const [floorThroughput, setFloorThroughput] = useState(0)
+  // Single live-feed filter. Lifted here (out of UnifiedAgentsPane) so the TopBar
+  // search input and the feed share one source of truth — the Floor no longer has
+  // a second search box in FloorControls.
+  const [floorSearch, setFloorSearch] = useState('')
   const [tasks, setTasks] = useState<TaskSummary[]>([])
   const [tasksLoading, setTasksLoading] = useState(false)
   const [tasksLoaded, setTasksLoaded] = useState(false)
@@ -751,6 +755,8 @@ export default function App() {
         onOpenSearch={() => setCmdKOpen(true)}
         onOpenSettings={() => setActiveTab('panel')}
         onToggleTheme={() => vscode.postMessage({ type: 'executeCommand', command: 'workbench.action.toggleLightDarkThemes' })}
+        search={activeTab === 'floor' ? floorSearch : undefined}
+        onSearch={activeTab === 'floor' ? setFloorSearch : undefined}
         throughputTokensPerSec={activeTab === 'floor' ? floorThroughput : 0}
         watchdogEnabled={watchdogEnabled}
         onToggleWatchdog={() => vscode.postMessage({ type: 'setWatchdogEnabled', value: !watchdogEnabled })}
@@ -787,6 +793,8 @@ export default function App() {
           openDetailTaskId={openDetailTaskId}
           onDetailTaskConsumed={() => setOpenDetailTaskId(null)}
           onThroughputChange={setFloorThroughput}
+          search={floorSearch}
+          onSearch={setFloorSearch}
           githubRepo={githubRepo}
           watchdogEnabled={watchdogEnabled}
           watchdogEvents={watchdogEvents}

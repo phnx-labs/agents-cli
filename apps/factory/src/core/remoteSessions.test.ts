@@ -201,6 +201,26 @@ describe('normalizeActiveSession', () => {
     }
   });
 
+  test('normalizes createdTickets to a string[] and spawnedTeam to a string', () => {
+    const base = ACTIVE.find((r) => r.context === 'terminal')!;
+    // Well-formed input passes through.
+    const ok = normalizeActiveSession(
+      { ...base, createdTickets: ['RUSH-1519', 'RUSH-1520'], spawnedTeam: 'redesign' } as unknown as RawActiveSession,
+      'this-mac', FETCHED_AT,
+    );
+    expect(ok.createdTickets).toEqual(['RUSH-1519', 'RUSH-1520']);
+    expect(ok.spawnedTeam).toBe('redesign');
+    // Malformed input (object where an array/string is expected) must not leak through
+    // as a non-array/non-string — these render as React children on the card.
+    const bad = normalizeActiveSession(
+      { ...base, createdTickets: { id: 'x' }, spawnedTeam: { name: 'foo' } } as unknown as RawActiveSession,
+      'this-mac', FETCHED_AT,
+    );
+    expect(Array.isArray(bad.createdTickets)).toBe(true);
+    expect(bad.createdTickets).toEqual([]);
+    expect(typeof bad.spawnedTeam).toBe('string');
+  });
+
   test('input_required becomes waiting + waitingForInput', () => {
     const terminal = ACTIVE.find((r) => r.status === 'input_required')!;
     const s = normalizeActiveSession(terminal, 'this-mac', FETCHED_AT);

@@ -43,6 +43,8 @@ export interface UnifiedAgentLike {
   prUrl?: string | null
   ci?: CiStatus | null
   linearIssue?: string | null
+  createdTickets?: string[]
+  spawnedTeam?: string
   terminal?: {
     id?: string
     cwd?: string | null
@@ -77,6 +79,10 @@ export interface RemoteSessionLike {
   prUrl: string | null
   ci?: CiStatus | null
   ticket: string | null
+  /** Tracker refs this session CREATED (from the CLI session scan). */
+  createdTickets?: string[]
+  /** Team name this session SPAWNED (from the CLI session scan). */
+  spawnedTeam?: string
   branch: string
   /** `<slug>` under `.agents/worktrees/<slug>/` — disambiguates sibling worktree
    *  sessions and gives the card a task label when topic/preview are empty. */
@@ -275,6 +281,8 @@ export function toFloorAgentFromUnified(
     prUrl: u.prUrl ?? null,
     ci,
     ticket: u.linearIssue ?? null,
+    createdTickets: u.createdTickets ?? [],
+    spawnedTeam: u.spawnedTeam || undefined,
     branch: u.terminal?.branch ?? u.agent?.branch ?? '',
     worktreeSlug: worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd),
     worktreePath: worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd) ? (u.terminal?.cwd ?? u.agent?.cwd ?? '') : '',
@@ -343,6 +351,8 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     prUrl: r.prUrl ?? null,
     ci,
     ticket: r.ticket,
+    createdTickets: r.createdTickets ?? [],
+    spawnedTeam: r.spawnedTeam || undefined,
     branch: r.branch,
     worktreeSlug: r.worktreeSlug ?? worktreeSlugOf(r.cwd),
     worktreePath: r.worktreePath ?? (worktreeSlugOf(r.cwd) ? r.cwd : ''),

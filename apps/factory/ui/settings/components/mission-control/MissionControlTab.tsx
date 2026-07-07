@@ -16,13 +16,16 @@ interface MissionControlTabProps {
   openDetailTaskId?: string | null
   onDetailTaskConsumed?: () => void
   onThroughputChange?: (tokensPerSec: number) => void
+  /** The single live-feed filter, threaded from App down to UnifiedAgentsPane. */
+  search: string
+  onSearch: (q: string) => void
   githubRepo?: string | null
   watchdogEnabled?: boolean
   watchdogEvents?: WatchdogEventUI[]
   projectRules?: ProjectRule[]
 }
 
-export function MissionControlTab({ tasks, tasksLoading, terminals, unifiedTasks, unifiedTasksLoading, onDispatch, onNavigate, onOpenInBench, openDispatchTrigger, quickSpawnTrigger, openDetailTaskId, onDetailTaskConsumed, onThroughputChange, githubRepo, watchdogEnabled, watchdogEvents, projectRules }: MissionControlTabProps) {
+export function MissionControlTab({ tasks, tasksLoading, terminals, unifiedTasks, unifiedTasksLoading, onDispatch, onNavigate, onOpenInBench, openDispatchTrigger, quickSpawnTrigger, openDetailTaskId, onDetailTaskConsumed, onThroughputChange, search, onSearch, githubRepo, watchdogEnabled, watchdogEvents, projectRules }: MissionControlTabProps) {
   return (
     <UnifiedAgentsPane
       terminals={terminals}
@@ -38,6 +41,8 @@ export function MissionControlTab({ tasks, tasksLoading, terminals, unifiedTasks
       openDetailTaskId={openDetailTaskId}
       onDetailTaskConsumed={onDetailTaskConsumed}
       onThroughputChange={onThroughputChange}
+      search={search}
+      onSearch={onSearch}
       githubRepo={githubRepo}
       watchdogEnabled={watchdogEnabled}
       watchdogEvents={watchdogEvents}

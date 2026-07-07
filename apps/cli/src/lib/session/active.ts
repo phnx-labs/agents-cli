@@ -75,6 +75,10 @@ export interface ActiveSession {
   worktree?: DetectedWorktree;
   /** Tracker ticket the session is tied to. */
   ticket?: DetectedTicket;
+  /** Tracker refs the session CREATED (Linear create_issue / gh issue create). */
+  createdTickets?: string[];
+  /** Team name the session SPAWNED via `agents teams create/add`. */
+  spawnedTeam?: string;
   sessionFile?: string;
   startedAtMs?: number;
   status: ActiveStatus;
@@ -345,6 +349,8 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     pr: state.pr,
     worktree: state.worktree,
     ticket: state.ticket,
+    createdTickets: state.createdTickets,
+    spawnedTeam: state.spawnedTeam,
   };
 }
 

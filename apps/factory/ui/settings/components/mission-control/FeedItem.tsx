@@ -118,6 +118,20 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         </span>
       </div>
       <div className="resp">{destructive ? <span className="q">{a.resp}</span> : a.resp}</div>
+      {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
+        <div className="artifacts" onClick={(e) => e.stopPropagation()}>
+          {a.spawnedTeam && (
+            <span className="artifact team" title={`Spawned a team: ${a.spawnedTeam}`}>
+              <Icon name="grip" size={10} /> team · {a.spawnedTeam}
+            </span>
+          )}
+          {(a.createdTickets ?? []).map((t) => (
+            <span key={t} className="artifact ticket" title={`Created ticket ${t}`}>
+              <Icon name="plus" size={10} /> {t}
+            </span>
+          ))}
+        </div>
+      )}
       {!plain && a.todos.length > 0 && <CardChecklist todos={a.todos} />}
       {showSummary && <div className="summary">{taskLine}</div>}
       {showNowline && (

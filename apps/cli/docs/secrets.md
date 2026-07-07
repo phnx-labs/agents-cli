@@ -102,9 +102,40 @@ agents run claude "ship it" --secrets r2.backups@yosemite-s1   # bundle@host suf
   `view --reveal` from an interactive terminal (it forces an SSH TTY so the prompt
   can surface). This machine's passphrase is never forwarded.
 
+### Push to a Windows host
+
+`secrets export --host` targets Windows machines as well as POSIX ones — the push
+detects the remote's platform (device registry) and drives the remote
+`agents secrets import` under PowerShell instead of `bash -lc`. The `.env` still
+only ever crosses the wire over ssh stdin. Because the npm `agents.ps1` shim
+doesn't forward that stdin to node, on Windows the push bridges it through
+PowerShell into a temp file and imports `--from <file>` (deleted afterwards);
+you don't do anything different — `agents secrets export <bundle> --host <win-host>`
+just works. (The `--remote-backend file` variant is POSIX-only for now and is
+refused cleanly against a Windows target.)
+
+### Unlock a bundle on a remote Mac from the road (`unlock --host`)
+
+```bash
+# Traveling, away from the Mac Mini — unlock its FILE-backed bundle by typing its
+# passphrase into your own terminal (the prompt surfaces over an ssh -tt session):
+agents secrets unlock linear.app --host mac-mini
+```
+
+`unlock --host <machine> <bundle>` runs the unlock ON the remote over `ssh -tt`,
+so the remote's passphrase prompt appears on your terminal — you type the
+password there, the remote holds the bundle in its own secrets-agent (default TTL
+7d), and later sessions read it silently. This works only for **file-backed**
+bundles (their passphrase is a CLI prompt); a keychain/biometry bundle would pop
+a **local** Touch-ID/passcode sheet on the remote's screen, which can't cross
+SSH — so those can't be remote-unlocked. `--host` is single-valued so it never
+swallows the positional bundle name: `unlock <bundle> --host <machine>`.
+
 Source: `src/lib/secrets/remote.ts` (transport + resolve), wired into `list` /
 `view` / `exec` in `src/commands/secrets.ts` and the `--secrets` loop in
 `src/commands/exec.ts`. The lossless wire format is `secrets export --format json`.
+The Windows push bridge is `buildWindowsStdinImportCommand` in
+`src/lib/hosts/remote-cmd.ts`.
 
 ## Command Reference
 

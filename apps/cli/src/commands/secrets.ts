@@ -17,8 +17,11 @@ import {
   parseHostsOption,
   remoteResolveEnv,
   remoteSecretsRaw,
+  remoteSecretsStream,
   resolveSshTarget,
 } from '../lib/secrets/remote.js';
+import { remoteShellFor, buildWindowsStdinImportCommand } from '../lib/hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import {
   bundleBackend,
   bundleExists,
@@ -196,6 +199,31 @@ function readStdinSync(): string {
     chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
   }
   return Buffer.concat(chunks).toString('utf-8').trim();
+}
+
+/**
+ * Read the raw `.env` text for `import --from <path|->`. A `-` reads the .env
+ * from stdin (the SSH push path: `export --host` pipes the resolved dotenv over
+ * ssh stdin, which has no `/dev/stdin` on a Windows remote); any other value is
+ * a filesystem path.
+ */
+export function readImportDotenv(from: string): string {
+  return from === '-' ? readStdinSync() : fs.readFileSync(from, 'utf-8');
+}
+
+/**
+ * Build the remote `agents secrets unlock` argv for `unlock --host`. `--all`
+ * forwards verbatim; otherwise the explicit bundle names. A `--ttl` is passed
+ * through as-is so the REMOTE parses its own duration (its platform rules, its
+ * defaults). Shared with the command action so the wiring is unit-testable
+ * without a live SSH session.
+ */
+export function buildRemoteUnlockArgs(names: string[], opts: { all?: boolean; ttl?: string }): string[] {
+  return [
+    'unlock',
+    ...(opts.all ? ['--all'] : names),
+    ...(opts.ttl ? ['--ttl', opts.ttl] : []),
+  ];
 }
 
 // SSH target validation is defined canonically in src/lib/ssh-exec.ts and
@@ -1209,7 +1237,7 @@ Examples:
   cmd
     .command('import [bundle]')
     .description('Import keys from a .env file or a 1Password vault into a bundle. The bundle is created if it does not exist. Values are stored in the bundle\'s backend (keychain by default).')
-    .option('--from <path>', 'Path to a .env file')
+    .option('--from <path>', 'Path to a .env file (use - to read the .env from stdin)')
     .option('--from-1password', 'Import secrets from a 1Password vault (requires the op CLI)')
     .option('--vault <name>', '1Password vault name (used with --from-1password)')
     .option('--all-plaintext', 'Store every imported value as a literal in the bundle metadata (skip keychain item creation)')
@@ -1282,7 +1310,7 @@ Examples:
           }
           console.log(chalk.green(`Imported ${added} key(s) from 1Password vault '${vault}'${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
         } else {
-          const raw = fs.readFileSync(opts.from!, 'utf-8');
+          const raw = readImportDotenv(opts.from!);
           const pairs = parseDotenv(raw);
           for (const [key, value] of Object.entries(pairs)) {
             if (!opts.force && key in bundle.vars) {
@@ -1357,33 +1385,50 @@ Examples:
           const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export` });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
-          // Drive the remote's own `agents secrets` CLI so values land in its
-          // chosen backend. `bash -lc` so the login PATH resolves `agents`; the
-          // .env (and, for file, the passphrase) flow over ssh stdin and are
-          // never parsed by a remote shell.
-          const force = opts.force ? ' --force' : '';
-          const backendFlag = remoteBackend === 'file' ? ' --backend file' : '';
-          let remoteAgents: string;
-          let input: string;
-          if (remoteBackend === 'file') {
-            // import --backend file auto-creates the file-backed bundle; no
-            // separate `create` needed.
-            remoteAgents =
-              `IFS= read -r AGENTS_SECRETS_PASSPHRASE; export AGENTS_SECRETS_PASSPHRASE; ` +
-              `agents secrets import ${shellQuote(resolvedBundleName)} --from /dev/stdin${backendFlag}${force}`;
-            input = `${remotePassphrase}\n${dotenv}`;
-          } else {
-            remoteAgents =
-              `agents secrets create ${shellQuote(resolvedBundleName)} >/dev/null 2>&1 || true; ` +
-              `agents secrets import ${shellQuote(resolvedBundleName)} --from /dev/stdin${force}`;
-            input = dotenv;
-          }
-          const remoteCmd = `bash -lc ${shellQuote(remoteAgents)}`;
+          // Drive the remote's own `agents secrets import --from -` so the values
+          // land in its chosen backend, reading the .env off ssh stdin (never
+          // parsed by a remote shell — `--from -` replaces the POSIX-only
+          // `/dev/stdin`). The keychain path is built OS-aware via
+          // `remoteSecretsRaw` (bash -lc on POSIX, PowerShell on Windows), so it
+          // works on macOS, Linux AND Windows targets. `import` auto-creates the
+          // bundle, so no separate `create` (the old `|| true` was a POSIXism
+          // that broke on PowerShell: `'true' is not recognized`).
           let failures = 0;
           for (const host of hosts) {
-            // Routed through the shared ssh engine: full hardened options
-            // (BatchMode, ConnectTimeout, keepalive) + control-socket reuse.
-            const res = sshExec(host, remoteCmd, { input });
+            let res: SshExecResult;
+            if (remoteBackend === 'file') {
+              // File backend forwards AGENTS_SECRETS_PASSPHRASE as the FIRST stdin
+              // line (consumed by `read`, so it never lands in argv / `ps` /
+              // remote history), then the .env. That `read`/`export` prologue is
+              // POSIX shell — refuse a Windows target cleanly rather than emit
+              // broken PowerShell.
+              if (remoteShellFor(resolveRemoteOsSync(host.split('@').pop() ?? host)) === 'powershell') {
+                failures++;
+                console.error(chalk.red(`${host}: file backend export to a Windows target is not yet supported.`));
+                continue;
+              }
+              const remoteAgents =
+                `IFS= read -r AGENTS_SECRETS_PASSPHRASE; export AGENTS_SECRETS_PASSPHRASE; ` +
+                `agents secrets import ${shellQuote(resolvedBundleName)} --from - --backend file${opts.force ? ' --force' : ''}`;
+              res = sshExec(host, `bash -lc ${shellQuote(remoteAgents)}`, { input: `${remotePassphrase}\n${dotenv}` });
+            } else if (remoteShellFor(resolveRemoteOsSync(host.split('@').pop() ?? host)) === 'powershell') {
+              // Keychain on a Windows target: the `agents.ps1` shim doesn't
+              // forward ssh-piped stdin to node, so `--from -` would hang.
+              // Bridge the piped .env through PowerShell into a temp file and
+              // import `--from <file>` (deleted afterwards). Same hardened ssh
+              // engine, .env still only ever crosses the wire over ssh stdin.
+              res = sshExec(host, buildWindowsStdinImportCommand(resolvedBundleName, { force: opts.force }), { input: dotenv });
+            } else {
+              // Keychain on a POSIX target: OS-aware wrapping + hardened ssh
+              // engine (BatchMode, ConnectTimeout, keepalive, control-socket
+              // reuse) via the same path the READ inverse (`remoteResolveEnv`)
+              // uses. `--from -` reads the .env off ssh stdin.
+              res = remoteSecretsRaw(
+                host,
+                ['import', resolvedBundleName, '--from', '-', ...(opts.force ? ['--force'] : [])],
+                { input: dotenv },
+              );
+            }
             if (res.code === null) {
               failures++;
               console.error(chalk.red(`${host}: ${res.stderr.trim() || (res.timedOut ? 'ssh timed out' : 'ssh failed')}`));
@@ -1625,10 +1670,45 @@ Examples:
 
   cmd
     .command('unlock [names...]')
-    .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS).')
+    .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS). With --host, unlock FILE-backed bundle(s) on a remote (the passphrase prompt surfaces over the SSH TTY); keychain/biometry bundles are GUI-only and can\'t be remote-unlocked.')
     .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
     .option('--all', 'Unlock every configured bundle')
-    .action(async (names: string[], opts: { ttl?: string; all?: boolean }) => {
+    .option('--host <target>', 'Unlock the bundle(s) on this remote machine over SSH instead of locally (file-backed bundles only — the remote\'s passphrase prompt surfaces on your terminal over a -tt session). Single-valued (NOT variadic) so it never swallows the bundle name: `unlock <name> --host <machine>`.')
+    .action(async (names: string[], opts: { ttl?: string; all?: boolean; host?: string }) => {
+      // Single-valued (not variadic): a variadic --host greedily consumes the
+      // positional bundle name (`unlock --host mac wztest` -> host=[mac,wztest],
+      // names=[]). Unlock targets one remote at a time anyway.
+      const hosts = opts.host ? [opts.host] : [];
+      if (hosts.length > 0) {
+        // Remote unlock: the REMOTE enforces its own platform rules, so the
+        // local darwin-only guard below does NOT apply. Only file-backed
+        // bundles are remote-unlockable — their passphrase prompt surfaces over
+        // the -tt SSH TTY; a keychain/biometry bundle would trigger a local GUI
+        // Touch-ID sheet that can't cross SSH.
+        if (!opts.all && (!names || names.length === 0)) {
+          console.error(chalk.red('Specify one or more bundle names, or --all.'));
+          process.exit(1);
+        }
+        const unlockArgs = buildRemoteUnlockArgs(names, opts);
+        let failures = 0;
+        for (const h of hosts) {
+          const target = await resolveSshTarget(h);
+          // FOREGROUND stream (stdio inherited), NOT the piped remoteSecretsRaw:
+          // the remote's passphrase prompt only surfaces if the remote process
+          // sees a real TTY, which requires our local terminal to pass straight
+          // through. The remote's prompt + output stream to this terminal; we get
+          // back only the exit code.
+          const code = remoteSecretsStream(target, unlockArgs);
+          if (code === 0) {
+            console.log(chalk.green(`${h}: unlocked`));
+          } else {
+            failures++;
+            console.error(chalk.red(`${h}: unlock failed (exit ${code})`));
+          }
+        }
+        if (failures > 0) process.exit(1);
+        return;
+      }
       if (process.platform !== 'darwin') {
         console.error(chalk.red('secrets-agent is macOS-only (no biometry prompt to deduplicate elsewhere).'));
         process.exit(1);

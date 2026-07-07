@@ -49,6 +49,10 @@ export interface SessionState {
   pr?: DetectedPr;
   worktree?: DetectedWorktree;
   ticket?: DetectedTicket;
+  /** Tracker refs this session CREATED (Linear create_issue / gh issue create). */
+  createdTickets?: string[];
+  /** Team name this session SPAWNED via `agents teams create/add`. */
+  spawnedTeam?: string;
 }
 
 export interface StateContext {
@@ -89,6 +93,16 @@ const PR_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/pull\/(\d+)/;
 const WORKTREE_RE = /\/\.agents\/worktrees\/([^/]+)/;
 /** gh invocations that create/open a PR. */
 const GH_PR_CREATE_RE = /\bgh\s+pr\s+(?:create|new)\b/;
+/** gh invocation that opens an issue — the created number is read from its result. */
+const GH_ISSUE_CREATE_RE = /\bgh\s+issue\s+create\b/;
+/** A created GitHub issue URL (…/issues/123) in tool-result output. */
+const GH_ISSUE_URL_RE = /https:\/\/github\.com\/[^\s"'()<>]+\/issues\/(\d+)/;
+/**
+ * `agents teams create <name>` / `agents teams add <team> …` (also the `ag` alias).
+ * The team NAME is the first bareword after the sub-verb, skipping any flags. This
+ * is the structural signal that a session SPAWNED a team (vs. was spawned by one).
+ */
+const TEAMS_SPAWN_RE = /\bag(?:ents)?\s+teams?\s+(?:create|add)\s+(?:--?[a-z][\w-]*(?:[= ]\S+)?\s+)*([A-Za-z0-9][\w-]*)/;
 
 /** Collapse to a single trimmed line for a one-row preview cell. */
 function oneLine(s: string): string {
@@ -130,6 +144,43 @@ export function extractPrUrl(output?: string): DetectedPr | undefined {
 /** True when a Bash/exec command string is a `gh pr create`. */
 export function isPrCreateCommand(command?: string): boolean {
   return !!command && GH_PR_CREATE_RE.test(command);
+}
+
+/**
+ * The team a session SPAWNED, from an `agents teams create/add <name>` command.
+ * Returns the team name, or undefined if the command isn't a team spawn. Note this
+ * is the opposite of `isTeamOrigin` (which marks sessions spawned BY a team).
+ */
+export function detectSpawnedTeam(command?: string): string | undefined {
+  if (!command) return undefined;
+  const m = command.match(TEAMS_SPAWN_RE);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * True when a tool_use call CREATES a tracker ticket — a Linear MCP `create_issue`
+ * tool, or a Bash `gh issue create`. The created id is then read from the matching
+ * tool_result via {@link extractCreatedTicket}.
+ */
+export function isTicketCreateTool(name?: string, command?: string): boolean {
+  if (typeof name === 'string' && /linear/i.test(name) && /create[_-]?issue/i.test(name)) return true;
+  // Any shell tool (Bash / shell / local_shell) running `gh issue create`.
+  if (!!command && GH_ISSUE_CREATE_RE.test(command)) return true;
+  return false;
+}
+
+/**
+ * Pull a created ticket ref out of a create-issue tool_result. Linear returns a
+ * key like `RUSH-1234`; `gh issue create` returns the issue URL, from which we
+ * take `#<number>`. Returns undefined when neither shape is present.
+ */
+export function extractCreatedTicket(text?: string): string | undefined {
+  if (!text) return undefined;
+  const lin = text.match(TICKET_RE);
+  if (lin && !TICKET_DENYLIST.has(lin[1].split('-')[0])) return lin[1];
+  const gh = text.match(GH_ISSUE_URL_RE);
+  if (gh) return `#${gh[1]}`;
+  return undefined;
 }
 
 /** Does an assistant message read as a question directed at the user? */
@@ -240,14 +291,24 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
 }
 
 /**
- * Scan an event slice for the durable signals (PR opened, ticket) that aren't
- * about the cwd. Correlates each `gh pr create` with the nearest following
- * tool_result URL; keeps the last PR found.
+ * Scan an event slice for the durable signals that aren't about the cwd: the PR
+ * opened, the injected ticket, plus the artifacts the session PRODUCED — tracker
+ * refs it created and any team it spawned. Each `gh pr create` / create-issue tool
+ * call is correlated with the nearest following tool_result; the team name comes
+ * straight off the `agents teams create/add` command.
  */
-export function detectDurableSignals(events: SessionEvent[]): { pr?: DetectedPr; ticket?: DetectedTicket } {
+export function detectDurableSignals(events: SessionEvent[]): {
+  pr?: DetectedPr;
+  ticket?: DetectedTicket;
+  createdTickets?: string[];
+  spawnedTeam?: string;
+} {
   let pr: DetectedPr | undefined;
   let sawPrCreate = false;
   let ticket: DetectedTicket | undefined;
+  let sawTicketCreate = false;
+  let spawnedTeam: string | undefined;
+  const createdTickets = new Set<string>();
 
   for (const e of events) {
     // Structural PR signal: a real `gh pr create` tool call, then the pull URL
@@ -257,22 +318,43 @@ export function detectDurableSignals(events: SessionEvent[]): { pr?: DetectedPr;
       const found = extractPrUrl(e.output);
       if (found) { pr = found; sawPrCreate = false; }
     }
+    // Produced artifacts: a team spawn is read off the command; a created ticket
+    // is a create-issue tool call whose following tool_result carries the new ref.
+    if (e.type === 'tool_use') {
+      if (!spawnedTeam) {
+        const team = detectSpawnedTeam(e.command);
+        if (team) spawnedTeam = team;
+      }
+      if (isTicketCreateTool(e.tool, e.command)) sawTicketCreate = true;
+    }
+    if (sawTicketCreate && e.type === 'tool_result') {
+      const t = extractCreatedTicket(e.output);
+      if (t) createdTickets.add(t);
+      sawTicketCreate = false;
+    }
     if (!ticket && e.type === 'message' && e.role === 'user') {
       ticket = detectTicket(e.content);
     }
   }
-  return { pr, ticket };
+  return {
+    pr,
+    ticket,
+    createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
+    spawnedTeam,
+  };
 }
 
 /** Full inference: activity + preview + durable signals + worktree/ticket from ctx. */
 export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}): SessionState {
   const state = inferActivity(events, ctx);
-  const { pr, ticket } = detectDurableSignals(events);
+  const { pr, ticket, createdTickets, spawnedTeam } = detectDurableSignals(events);
   const worktree = detectWorktree(ctx.cwd, ctx.gitBranch);
   return {
     ...state,
     pr: pr ?? state.pr,
     worktree: worktree ?? state.worktree,
     ticket: ticket ?? detectTicket(undefined, ctx.gitBranch) ?? state.ticket,
+    createdTickets,
+    spawnedTeam,
   };
 }

@@ -1,11 +1,18 @@
 import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   assertValidSshTarget,
   assertNeverPolicyAcknowledged,
+  buildRemoteUnlockArgs,
   buildSecretsExecEnv,
   bundleEnvToDotenv,
   parsePolicyOpt,
   quoteWin32ExecArg,
+  readImportDotenv,
   renderPolicyCol,
 } from './secrets.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
@@ -193,5 +200,55 @@ describe('quoteWin32ExecArg', () => {
 
   it('turns an empty arg into an explicit ""', () => {
     expect(quoteWin32ExecArg('')).toBe('""');
+  });
+});
+
+describe('readImportDotenv', () => {
+  it('reads a .env from a filesystem path', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-import-'));
+    const p = path.join(dir, '.env');
+    fs.writeFileSync(p, 'A="1"\nB="two words"\n');
+    try {
+      expect(readImportDotenv(p)).toBe('A="1"\nB="two words"\n');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the .env from stdin when passed "-"', () => {
+    // The in-process fd 0 can't be swapped, so exercise the real helper end to
+    // end in a child process with piped stdin — the exact path `export --host`
+    // drives when it pipes the resolved dotenv into `import --from -`.
+    const src = fileURLToPath(new URL('./secrets.ts', import.meta.url));
+    const res = spawnSync(
+      process.execPath,
+      [
+        '--import', 'tsx', '--input-type=module', '-e',
+        `import { readImportDotenv } from ${JSON.stringify(src)}; process.stdout.write(JSON.stringify(readImportDotenv('-')));`,
+      ],
+      { input: 'A="1"\nB="two words"\n', encoding: 'utf-8' },
+    );
+    expect(res.status, res.stderr).toBe(0);
+    // readStdinSync trims trailing whitespace; parseDotenv is line-based so a
+    // single trailing newline is immaterial — the KEY="VALUE" lines round-trip.
+    expect(JSON.parse(res.stdout)).toBe('A="1"\nB="two words"');
+  });
+});
+
+describe('buildRemoteUnlockArgs (unlock --host wiring)', () => {
+  it('forwards explicit bundle names', () => {
+    expect(buildRemoteUnlockArgs(['a', 'b'], {})).toEqual(['unlock', 'a', 'b']);
+  });
+
+  it('passes --ttl through verbatim for the remote to parse', () => {
+    expect(buildRemoteUnlockArgs(['a'], { ttl: '8h' })).toEqual(['unlock', 'a', '--ttl', '8h']);
+  });
+
+  it('forwards --all instead of the (empty) name list', () => {
+    expect(buildRemoteUnlockArgs([], { all: true, ttl: '30m' })).toEqual(['unlock', '--all', '--ttl', '30m']);
+  });
+
+  it('--all wins over any stray names', () => {
+    expect(buildRemoteUnlockArgs(['x'], { all: true })).toEqual(['unlock', '--all']);
   });
 });

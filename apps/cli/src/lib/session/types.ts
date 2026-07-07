@@ -72,16 +72,16 @@ export interface SessionMeta {
   version?: string;
   account?: string;
   topic?: string;
-  /** Custom name the user gave the session (e.g. Claude Code /rename). */
-  label?: string;
   /**
-   * Durable launch handle from `agents run --name <slug>` — an alias chosen at
-   * launch (not derived from the session id), used to resolve the run in
-   * `agents sessions <name>`. Distinct from `label` (post-hoc /rename): a run's
-   * name is immutable; both are searchable. Absent for runs launched without
-   * `--name`.
+   * The session's human-readable name — one field, several sources with a plain
+   * priority: an agent-generated title / Claude `/rename` wins; else the launch
+   * handle seeded from `agents run --name <slug>` (interactive, headless, remote
+   * host, or a teams teammate); else it stays unset and the listing falls back to
+   * `topic`. Searchable via `agents sessions <label>`. (Before v10 the launch
+   * handle lived in a separate immutable `name` column; `--name` now just seeds
+   * this label.)
    */
-  name?: string;
+  label?: string;
   /** Set when this session was spawned by `agents teams`. */
   teamOrigin?: TeamOrigin;
   /** Durable state signals extracted at scan time by the session-state engine. */
@@ -93,6 +93,17 @@ export interface SessionMeta {
   worktreeSlug?: string;
   /** Tracker ticket ref (e.g. RUSH-1234) from the prompt or branch. */
   ticketId?: string;
+  /**
+   * Tracker refs the session CREATED during its run — Linear `create_issue` MCP
+   * calls or `gh issue create` shell commands — read from the tool result. Distinct
+   * from `ticketId` (the injected/worked-on ticket from the prompt or branch).
+   */
+  createdTickets?: string[];
+  /**
+   * Team name this session SPAWNED via `agents teams create/add`. The inverse of
+   * `isTeamOrigin` (which marks sessions spawned BY a team).
+   */
+  spawnedTeam?: string;
   /**
    * True when the session was spawned programmatically (SDK entrypoint) rather
    * than by a human at the Claude CLI. Captured at scan time from the JSONL

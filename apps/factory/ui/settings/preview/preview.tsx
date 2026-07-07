@@ -102,6 +102,7 @@ const running: FloorAgent[] = [
     pane: '%42', viewingIn: 'Codium tab 3',
     verb: 'Porting', target: 'the group-by control into the shared model',
     summary: 'Collapsed the three ticket surfaces into one list; now porting the group-by control into the shared model.',
+    createdTickets: ['RUSH-1519', 'RUSH-1520'],
     todos: [
       { content: 'Merge ticket surfaces', status: 'completed' },
       { content: 'Port group-by control', status: 'in_progress' },
@@ -120,6 +121,7 @@ const running: FloorAgent[] = [
     tok: 33, since: '8s', lastActivityMs: Date.now() - 8000,
     verb: 'Mapping', target: 'the two half-wired dispatch paths',
     summary: 'Mapping the two half-wired dispatch paths; will propose a single reply handler before touching code.',
+    spawnedTeam: 'dispatch-refactor',
   }),
 ]
 

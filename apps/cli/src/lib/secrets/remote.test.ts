@@ -118,6 +118,21 @@ describe('remoteSecretsRaw', () => {
     remoteSecretsRaw('host', ['view', 'b', '--reveal'], { tty: true });
     expect(sshExecMock.mock.calls[0][2].extraSshArgs).toEqual(['-tt']);
   });
+
+  it('drives the keychain export push as `import --from -` and forwards the .env over stdin', () => {
+    // This is the transport the `secrets export --host` keychain push uses: it
+    // pipes the resolved dotenv over ssh stdin to `import --from -` (never the
+    // POSIX-only `/dev/stdin`; no `create … || true`, which broke on Windows).
+    sshExecMock.mockReturnValue(ok('Imported 2 key(s).'));
+    const res = remoteSecretsRaw('mac-mini', ['import', 'mybundle', '--from', '-', '--force'], { input: 'A="1"\n' });
+    expect(res.stdout).toBe('Imported 2 key(s).');
+    const [target, remoteCmd, opts] = sshExecMock.mock.calls[0];
+    expect(target).toBe('mac-mini');
+    expect(remoteCmd).toBe(`bash -lc 'agents secrets import mybundle --from - --force'`);
+    expect(remoteCmd).not.toContain('/dev/stdin');
+    expect(remoteCmd).not.toContain('|| true');
+    expect(opts.input).toBe('A="1"\n');
+  });
 });
 
 describe('remoteResolveEnv', () => {

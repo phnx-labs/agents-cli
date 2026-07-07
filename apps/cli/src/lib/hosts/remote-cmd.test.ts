@@ -4,6 +4,7 @@ import {
   stripRoutingFlags,
   buildRemoteAgentsInvocation,
   buildWindowsAgentsCommand,
+  buildWindowsStdinImportCommand,
   remoteShellFor,
   powershellQuote,
   decodePowershell,
@@ -119,6 +120,33 @@ describe('buildRemoteAgentsInvocation (two-layer quoting is injection-safe)', ()
   });
 });
 
+describe('secrets export --host push command (cross-platform)', () => {
+  // The keychain export push drives `agents secrets import --from -` on the
+  // remote (`--from -` reads the .env off ssh stdin — the cross-platform
+  // replacement for the POSIX-only `/dev/stdin`; `import` auto-creates the
+  // bundle so there is no `create … || true`, the POSIXism that broke on
+  // PowerShell with `'true' is not recognized`).
+  const importArgs = ['secrets', 'import', 'mybundle', '--from', '-'];
+
+  it('POSIX target: bash -lc agents secrets import --from - (no /dev/stdin, no || true)', () => {
+    // The remote actually receives these exact argv entries (shim round-trip).
+    expect(decodeRemoteArgv(importArgs)).toEqual(['secrets', 'import', 'mybundle', '--from', '-']);
+    const cmd = buildRemoteAgentsInvocation(importArgs, undefined, 'linux');
+    expect(cmd).toBe(`bash -lc 'agents secrets import mybundle --from -'`);
+    expect(cmd).not.toContain('/dev/stdin');
+    expect(cmd).not.toContain('|| true');
+  });
+
+  it('Windows target: PowerShell EncodedCommand runs the same import (no bash, no /dev/stdin)', () => {
+    const cmd = buildRemoteAgentsInvocation(importArgs, undefined, 'windows');
+    const script = decodeWindows(cmd);
+    expect(script).toBe(`& 'agents' 'secrets' 'import' 'mybundle' '--from' '-'; exit $LASTEXITCODE`);
+    expect(script).not.toContain('/dev/stdin');
+    expect(script).not.toContain('|| true');
+    expect(script).not.toContain('bash');
+  });
+});
+
 describe('remoteShellFor', () => {
   it('maps Windows platform/OS strings to PowerShell', () => {
     for (const os of ['windows', 'Windows', 'win32', 'WIN32']) {
@@ -191,5 +219,26 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
   it('can drop the exit-code propagation for sentinel-based probes', () => {
     const cmd = buildWindowsAgentsCommand({ args: ['--version'], propagateExit: false });
     expect(decodeWindows(cmd)).toBe("& 'agents' '--version'");
+  });
+});
+
+describe('buildWindowsStdinImportCommand', () => {
+  it('bridges ssh stdin through a temp file (never a hanging --from -)', () => {
+    const script = decodeWindows(buildWindowsStdinImportCommand('linear.app', { force: true }));
+    // Reads the piped .env in PowerShell (the shim can't forward stdin to node).
+    expect(script).toContain('[Console]::In.ReadToEnd()');
+    expect(script).toContain('[System.IO.Path]::GetTempFileName()');
+    // Imports from the temp FILE, not stdin — a plain file read the shim handles.
+    expect(script).toContain('agents secrets import \'linear.app\' --from $tmp --force');
+    expect(script).not.toContain('--from -');
+    // Temp file is always cleaned up, and the import's exit code propagates.
+    expect(script).toContain('Remove-Item -LiteralPath $tmp -Force');
+    expect(script).toContain('exit $code');
+  });
+
+  it('omits --force when not requested', () => {
+    const script = decodeWindows(buildWindowsStdinImportCommand('linear.app'));
+    expect(script).toContain('agents secrets import \'linear.app\' --from $tmp;');
+    expect(script).not.toContain('--force');
   });
 });

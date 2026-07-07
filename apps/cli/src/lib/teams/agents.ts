@@ -23,6 +23,7 @@ import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
 import { resolveVersion, isVersionInstalled } from '../versions.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
+import { recordRunName } from '../session/run-names.js';
 
 let lastMemoryWarnAt = 0;
 
@@ -1317,6 +1318,15 @@ export class AgentManager {
       throw new Error(`Failed to create agent directory: ${err.message}`);
     }
     this.agents.set(agentId, agent);
+
+    // Seed the teammate's session label with its friendly team name, so the run
+    // shows up as `<name>` in `agents sessions` and resolves by it — consistent
+    // with `agents run --name`. For Claude the agent id IS the session id (passed
+    // via --session-id in buildCommand); other agents don't expose a launch-time
+    // id, so they're seeded once discovery captures one. Best-effort.
+    if (agentType === 'claude' && name && !isCloudBacked) {
+      recordRunName({ sessionId: agentId, name, agent: agentType, cwd: resolvedCwd ?? undefined });
+    }
 
     if (isStaged) {
       await agent.saveMeta();
