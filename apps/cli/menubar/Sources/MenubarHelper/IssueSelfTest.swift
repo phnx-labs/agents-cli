@@ -12,7 +12,7 @@ enum IssueSelfTest {
 
     static func run() -> Never {
         print("menubar issue-capture self-test")
-        testNewestFilePick()
+        testImageFilePick()
         testTicketIDParse()
         testPromptContract()
         if failures == 0 {
@@ -23,32 +23,33 @@ enum IssueSelfTest {
         exit(1)
     }
 
-    // newestRegularFile must return the most-recently-modified regular file and
-    // skip `.json` sidecars (a screenshot's own path must win over its sidecar).
-    private static func testNewestFilePick() {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("menubar-issue-test-\(ProcessInfo.processInfo.processIdentifier)",
+    // imageFiles must return images newest-first ACROSS dirs, skip non-images and
+    // `.json` sidecars, honor the limit, and collapse duplicate paths.
+    private static func testImageFilePick() {
+        let base = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("menubar-img-test-\(ProcessInfo.processInfo.processIdentifier)",
                                     isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dirA = base.appendingPathComponent("a"), dirB = base.appendingPathComponent("b")
+        defer { try? FileManager.default.removeItem(at: base) }
+        for d in [dirA, dirB] { try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
 
-        // older.png (t-100), newest.png (t-10), newest.png.json (t-1 — must be ignored).
-        write(dir, "older.png", modified: -100)
-        write(dir, "newest.png", modified: -10)
-        write(dir, "newest.png.json", modified: -1)
+        // dirA: an older png + a non-image + a sidecar (both must be skipped).
+        write(dirA, "old.png", modified: -300)
+        write(dirA, "notes.txt", modified: -1)      // non-image
+        write(dirA, "old.png.json", modified: -1)   // sidecar
+        // dirB holds the newest image, and a mid-age one.
+        write(dirB, "newest.png", modified: -10)
+        write(dirB, "mid.jpg", modified: -120)
 
-        let got = AgentsCLI.newestRegularFile(in: dir)
-        check("newest regular file is newest.png",
-              (got as NSString?)?.lastPathComponent == "newest.png",
-              detail: got ?? "nil")
-
-        // Empty dir → nil, no crash.
-        let empty = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("menubar-issue-empty-\(ProcessInfo.processInfo.processIdentifier)",
-                                    isDirectory: true)
-        try? FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: empty) }
-        check("empty dir yields nil", AgentsCLI.newestRegularFile(in: empty) == nil)
+        let got = AgentsCLI.imageFiles(inDirs: [dirA, dirB], limit: 6)
+        check("newest image across dirs is first",
+              (got.first as NSString?)?.lastPathComponent == "newest.png", detail: got.first ?? "nil")
+        check("only the 3 images returned (txt + sidecar skipped)",
+              got.count == 3 &&
+              got.allSatisfy { AgentsCLI.imageExtensions.contains(($0 as NSString).pathExtension.lowercased()) },
+              detail: got.map { ($0 as NSString).lastPathComponent }.joined(separator: ","))
+        check("limit is honored", AgentsCLI.imageFiles(inDirs: [dirA, dirB], limit: 1).count == 1)
+        check("no dirs yields empty", AgentsCLI.imageFiles(inDirs: [], limit: 6).isEmpty)
     }
 
     // parseCreatedTicketID pulls the identifier from the linear CLI success line,
@@ -59,6 +60,8 @@ enum IssueSelfTest {
         check("parses id from a noisy multi-line tail",
               AgentsCLI.parseCreatedTicketID("thinking...\nCreated ENG-42: Add retry [proj | me]\n") == "ENG-42")
         check("no ticket → nil", AgentsCLI.parseCreatedTicketID("could not create the issue") == nil)
+        check("takes the final 'Created' over an earlier reasoning mention",
+              AgentsCLI.parseCreatedTicketID("I saw Created RUSH-99 referenced.\nCreated RUSH-200: real") == "RUSH-200")
     }
 
     // The meta-prompt must carry the user's note and the screenshot path forward

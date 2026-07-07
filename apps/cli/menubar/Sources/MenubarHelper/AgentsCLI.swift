@@ -133,54 +133,63 @@ enum AgentsCLI {
 
     // MARK: Quick issue capture (Cmd-Shift-O)
 
-    // Newest file in the clip attachments dir, by modification time. The prompt
-    // panel offers this as the screenshot to attach — it's exactly what the clip
-    // hotkey (Cmd-Shift-V) just produced.
-    static func latestAttachmentPath() -> String? {
-        newestRegularFile(in: Clip.attachmentsDir)
-    }
-
-    // Image extensions the clip hotkey produces / that the panel can thumbnail.
+    // Image extensions the clip hotkey / screenshot tools produce.
     static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "tiff", "webp", "bmp"]
 
-    // The most-recent image clips (newest first) for the panel's thumbnail strip
-    // — the "clipboard history" the user attaches from. Reads the same dir the
-    // clip hotkey writes to; sidecars and non-images are excluded.
-    static func recentImageAttachments(limit: Int = 6) -> [String] {
-        let dir = Clip.attachmentsDir
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return [] }
-        return entries
-            .filter { imageExtensions.contains($0.pathExtension.lowercased()) }
-            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile ?? false }
-            .compactMap { url -> (URL, Date)? in
-                guard let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate else { return nil }
-                return (url, d)
-            }
-            .sorted { $0.1 > $1.1 }
-            .prefix(limit)
-            .map { $0.0.path }
+    // Where the user's recent screenshots ACTUALLY live. A shot taken with the
+    // system tool or CleanShot does not land in the clip attachments dir (that
+    // only fills on Cmd-Shift-V), so the panel must look where screenshots are
+    // really saved or a shot the user just took won't appear:
+    //   • the system screencapture location (`com.apple.screencapture location`,
+    //     unset => ~/Desktop),
+    //   • CleanShot X's export path (`pl.maketheweb.cleanshotx exportPath`),
+    //   • the clip attachments dir (Cmd-Shift-V history).
+    // Deduped, existing directories only.
+    static func screenshotSourceDirs() -> [URL] {
+        var raw: [String] = []
+        let sys = UserDefaults(suiteName: "com.apple.screencapture")?.string(forKey: "location")
+        raw.append((sys?.isEmpty == false) ? sys! : "~/Desktop")
+        if let cs = UserDefaults(suiteName: "pl.maketheweb.cleanshotx")?.string(forKey: "exportPath"),
+           !cs.isEmpty {
+            raw.append(cs)
+        }
+        var urls = raw.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+        urls.append(Clip.attachmentsDir)
+        var seen = Set<String>()
+        return urls.filter { url in
+            let p = url.standardizedFileURL.path
+            guard seen.insert(p).inserted else { return false }
+            var isDir: ObjCBool = false
+            return FileManager.default.fileExists(atPath: p, isDirectory: &isDir) && isDir.boolValue
+        }
     }
 
-    // Pure newest-by-mtime selection over a directory. Sidecar `.json` metadata
-    // files are skipped so a screenshot's own path wins over its sidecar. Split
-    // out from latestAttachmentPath so it can be driven over a fixture dir in the
-    // MENUBAR_ISSUE_TEST self-test.
-    static func newestRegularFile(in dir: URL) -> String? {
+    // The most-recent screenshots (newest first) for the panel's thumbnail strip
+    // — the "recent screenshots" the user attaches from, across every source dir.
+    static func recentImageAttachments(limit: Int = 6) -> [String] {
+        imageFiles(inDirs: screenshotSourceDirs(), limit: limit)
+    }
+
+    // Pure newest-first image selection across directories; non-images and JSON
+    // sidecars are excluded, duplicate paths collapsed. Split out so it can be
+    // driven over fixture dirs in the MENUBAR_ISSUE_TEST self-test.
+    static func imageFiles(inDirs dirs: [URL], limit: Int) -> [String] {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
-        guard let entries = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return nil }
-        return entries
-            .filter { $0.pathExtension.lowercased() != "json" }
-            .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile ?? false }
-            .compactMap { url -> (URL, Date)? in
-                guard let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
-                    .contentModificationDate else { return nil }
-                return (url, d)
+        var found: [(path: String, mtime: Date)] = []
+        var seen = Set<String>()
+        for dir in dirs {
+            guard let entries = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { continue }
+            for url in entries {
+                guard imageExtensions.contains(url.pathExtension.lowercased()),
+                      (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile ?? false,
+                      let d = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+                          .contentModificationDate else { continue }
+                let p = url.standardizedFileURL.path
+                if seen.insert(p).inserted { found.append((p, d)) }
             }
-            .max { $0.1 < $1.1 }?.0.path
+        }
+        return found.sorted { $0.mtime > $1.mtime }.prefix(limit).map { $0.path }
     }
 
     // The standing brief handed to the ticket agent. It embeds the user's note
@@ -255,11 +264,13 @@ enum AgentsCLI {
     static func parseCreatedTicketID(_ output: String) -> String? {
         // Match "Created ABC-123:" (the linear CLI's create success line), else
         // any bare TEAM-123 token as a fallback for a paraphrased final line.
+        // Take the LAST match: if the agent mentioned an existing ticket id in its
+        // reasoning, the real "Created …" result line still comes after it.
         let patterns = ["Created ([A-Z][A-Z0-9]+-[0-9]+)", "\\b([A-Z][A-Z0-9]+-[0-9]+)\\b"]
         for pat in patterns {
-            if let re = try? NSRegularExpression(pattern: pat),
-               let m = re.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-               let r = Range(m.range(at: 1), in: output) {
+            guard let re = try? NSRegularExpression(pattern: pat) else { continue }
+            let matches = re.matches(in: output, range: NSRange(output.startIndex..., in: output))
+            if let last = matches.last, let r = Range(last.range(at: 1), in: output) {
                 return String(output[r])
             }
         }

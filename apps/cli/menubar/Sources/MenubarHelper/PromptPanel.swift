@@ -70,9 +70,9 @@ final class ClipThumbView: NSView {
 }
 
 final class PromptPanelController: NSObject, NSTextFieldDelegate {
-    // A clip older than this isn't pre-selected — but it still shows in the strip
-    // for manual attach, since the user can see exactly what they're picking.
-    private static let recentClipWindow: TimeInterval = 5 * 60
+    // A screenshot older than this isn't pre-selected — but it still shows in the
+    // strip for manual attach, since the user can see exactly what they're picking.
+    private static let recentClipWindow: TimeInterval = 10 * 60
     private static let panelWidth: CGFloat = 640
 
     private var panel: PromptPanel?
