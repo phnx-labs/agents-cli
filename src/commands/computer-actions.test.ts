@@ -11,6 +11,8 @@ import {
   clampCharDelay,
   focusStealNotes,
   shouldRaise,
+  appPathIsElectron,
+  electronWebviewTip,
   resolveTargetPidDecision,
   CHAR_DELAY_MIN_MS,
   CHAR_DELAY_MAX_MS,
@@ -375,6 +377,32 @@ describe('shouldRaise', () => {
     expect(shouldRaise({ raise: true, id: '@e1' })).toBe(false);
     expect(shouldRaise({ id: '@e1' })).toBe(false);
     expect(shouldRaise({})).toBe(false);
+  });
+});
+
+describe('appPathIsElectron', () => {
+  const framework = 'Contents/Frameworks/Electron Framework.framework';
+  it('is true when the .app bundles the Electron framework', () => {
+    const exists = (p: string) => p === `/Applications/VSCodium.app/${framework}`;
+    expect(appPathIsElectron('/Applications/VSCodium.app', exists)).toBe(true);
+  });
+
+  it('is false for a native .app with no Electron framework', () => {
+    expect(appPathIsElectron('/System/Applications/Utilities/Terminal.app', () => false)).toBe(false);
+  });
+
+  it('is false when the app path could not be resolved', () => {
+    expect(appPathIsElectron(null, () => true)).toBe(false);
+  });
+});
+
+describe('electronWebviewTip', () => {
+  it('names the app and steers to CDP with the relaunch flag', () => {
+    const tip = electronWebviewTip('com.vscodium');
+    expect(tip).toContain('com.vscodium');
+    expect(tip).toContain('Electron');
+    expect(tip).toContain('--remote-debugging-port');
+    expect(tip).toContain('agents browser --electron');
   });
 });
 

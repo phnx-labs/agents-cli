@@ -8,6 +8,7 @@
 // space and never hand-manage pids.
 
 import { Command } from 'commander';
+import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -372,6 +373,63 @@ async function applyFocusPolicy(
   if (shouldRaise(opts)) unwrap(await client.call('focus_window', { pid }));
 }
 
+// Electron/webview steering. macOS accepts an AX action (AXPress / set-AXValue)
+// on an Electron/Chromium window, but it does NOT run the web app's real DOM
+// handlers — React ignores it — so a reported `clicked`/`typed` on a webview can
+// be a silent no-op. Detect Electron targets and steer the caller to CDP
+// (`agents browser --electron`), which drives the webview for real. We warn, not
+// block: the caller may still want the raw action (e.g. to focus + coordinate).
+
+const electronCache = new Map<string, boolean>();
+
+// Resolve a bundle id to its .app path via Spotlight. Best-effort; null on miss.
+function appPathForBundle(bundleId: string): string | null {
+  try {
+    const out = execFileSync('mdfind', [`kMDItemCFBundleIdentifier == '${bundleId}'`], {
+      encoding: 'utf-8',
+      timeout: 3000,
+    });
+    return out.split('\n').map((s) => s.trim()).find((s) => s.endsWith('.app')) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// Pure + unit-tested: does the .app at this path bundle the Electron framework?
+export function appPathIsElectron(
+  appPath: string | null,
+  exists: (p: string) => boolean = fs.existsSync,
+): boolean {
+  if (!appPath) return false;
+  return exists(path.join(appPath, 'Contents', 'Frameworks', 'Electron Framework.framework'));
+}
+
+// Is the app for this bundle id an Electron/webview app? macOS-only; memoized so
+// the mdfind lookup runs at most once per bundle id per process.
+function isElectronApp(bundleId: string | undefined): boolean {
+  if (!bundleId || process.platform !== 'darwin') return false;
+  const cached = electronCache.get(bundleId);
+  if (cached !== undefined) return cached;
+  const result = appPathIsElectron(appPathForBundle(bundleId));
+  electronCache.set(bundleId, result);
+  return result;
+}
+
+// Pure + unit-tested: the CDP-steer note printed for a webview target.
+export function electronWebviewTip(appLabel: string): string {
+  return `note: ${appLabel} is an Electron/web UI — an AX click/type may not reach the webview `
+    + `(a reported success can be a no-op). To drive it reliably, relaunch it with `
+    + '`--remote-debugging-port=9222` and use `agents browser --electron` (CDP).';
+}
+
+// Print the CDP steer when the target is a known Electron app. Keyed off --bundle
+// (the recommended way to target); a frontmost-resolved target without --bundle is
+// left alone to avoid a second RPC on the hot path. Skipped for remote --host.
+function warnIfElectronWebview(opts: { bundle?: string; host?: string }): void {
+  if (opts.host) return;
+  if (opts.bundle && isElectronApp(opts.bundle)) console.error(electronWebviewTip(opts.bundle));
+}
+
 function emit(result: Record<string, unknown>, json: boolean, human: () => string): void {
   if (json) {
     console.log(JSON.stringify(result, null, 2));
@@ -455,6 +513,7 @@ export function registerActionCommands(program: Command): void {
   ).action(async (opts: ElemOpts & { count?: number; background?: boolean; raise?: boolean }) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'click' });
+      warnIfElectronWebview(opts);
       const spec = buildElementOrCoords(opts);
       if (!spec.ok) {
         console.error(spec.error);
@@ -480,6 +539,7 @@ export function registerActionCommands(program: Command): void {
   ).action(async (opts: ElemOpts) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'right-click' });
+      warnIfElectronWebview(opts);
       const spec = buildElementOrCoords(opts);
       if (!spec.ok) {
         console.error(spec.error);
@@ -505,6 +565,7 @@ export function registerActionCommands(program: Command): void {
   ).action(async (opts: ElemOpts & { text: string; commit?: boolean; allowSecureField?: boolean }) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'type' });
+      warnIfElectronWebview(opts);
       const spec = buildElementOrCoords(opts);
       if (!spec.ok) {
         console.error(spec.error);
@@ -533,6 +594,7 @@ export function registerActionCommands(program: Command): void {
   ).action(async (opts: TargetOpts & { text: string; commit?: boolean; raise?: boolean; requireFrontmost?: boolean; charDelay?: number }) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'type-text' });
+      warnIfElectronWebview(opts);
       await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = { pid, text: opts.text };
       if (opts.commit) params.commit = true;
@@ -557,6 +619,7 @@ export function registerActionCommands(program: Command): void {
   ).action(async (opts: TargetOpts & { keys: string; raise?: boolean; requireFrontmost?: boolean }) => {
     await withClient(async (client) => {
       const pid = await resolveTargetPid(client, opts, { verb: 'key' });
+      warnIfElectronWebview(opts);
       await applyFocusPolicy(client, pid, opts);
       const params: Record<string, unknown> = { pid, keys: opts.keys };
       if (opts.requireFrontmost) params.require_frontmost = true;
