@@ -44,14 +44,13 @@ export function registerGoCommand(program: Command): void {
     });
 }
 
-async function goAction(id: string | undefined, opts: { local?: boolean }): Promise<void> {
+/** Live jump targets (local + remote), keyed by session id. Cloud excluded (no pid). */
+export async function gatherLiveTargets(local: boolean): Promise<{ self: string; activeById: Map<string, ActiveSession> }> {
   const self = machineId();
-
-  // Live jump targets (local + remote), keyed by session id.
   const localActive = await getActiveSessions();
   for (const s of localActive) if (!s.machine) s.machine = self;
   let active = localActive;
-  if (!opts.local) {
+  if (!local) {
     try {
       const remote = await gatherRemoteActive();
       active = dedupeByMachineSession([...localActive, ...remote.sessions]);
@@ -59,6 +58,25 @@ async function goAction(id: string | undefined, opts: { local?: boolean }): Prom
   }
   const activeById = new Map<string, ActiveSession>();
   for (const s of active) if (s.context !== 'cloud' && s.sessionId) activeById.set(s.sessionId, s);
+  return { self, activeById };
+}
+
+/** Interactive pick over the live sessions' rich SessionMeta; returns the chosen live session. */
+export async function pickLiveTarget(
+  activeById: Map<string, ActiveSession>,
+  self: string,
+  message: string,
+  enterHint: string,
+): Promise<ActiveSession | null> {
+  const pool = await buildLivePool(activeById, self);
+  if (pool.length === 0) return null;
+  const picked = await pickSessionInteractive(pool, message, undefined, 0, enterHint);
+  if (!picked) return null;
+  return activeById.get(picked.session.id) ?? null;
+}
+
+async function goAction(id: string | undefined, opts: { local?: boolean }): Promise<void> {
+  const { self, activeById } = await gatherLiveTargets(!!opts.local);
 
   if (activeById.size === 0) {
     console.log(chalk.gray('No live agent sessions to jump to.'));
@@ -89,19 +107,8 @@ async function goAction(id: string | undefined, opts: { local?: boolean }): Prom
     return;
   }
 
-  // Reuse the rich `sessions` picker over the live sessions' full SessionMeta.
-  const pool = await buildLivePool(activeById, self);
-  if (pool.length === 0) {
-    console.log(chalk.gray('No live sessions to jump to.'));
-    return;
-  }
-  const picked = await pickSessionInteractive(pool, 'Jump to a live session:', undefined, 0, 'jump');
-  if (!picked) return;
-  const target = activeById.get(picked.session.id);
-  if (!target) {
-    console.log(chalk.yellow(`${picked.session.shortId} is no longer live — try: `) + chalk.gray(`agents sessions resume ${picked.session.shortId}`));
-    return;
-  }
+  const target = await pickLiveTarget(activeById, self, 'Jump to a live session:', 'jump');
+  if (!target) return;
   await jumpTo(target, self);
 }
 
@@ -110,7 +117,7 @@ async function goAction(id: string | undefined, opts: { local?: boolean }): Prom
  * via the shared picker), reusing `discoverSessions`. Remote or unindexed live
  * sessions get a minimal synthesized meta so they still appear and jump.
  */
-async function buildLivePool(activeById: Map<string, ActiveSession>, self: string): Promise<SessionMeta[]> {
+export async function buildLivePool(activeById: Map<string, ActiveSession>, self: string): Promise<SessionMeta[]> {
   let metas: SessionMeta[] = [];
   try {
     metas = await discoverSessions({ all: true, since: '30d', limit: 1000 });
@@ -171,7 +178,27 @@ export function describeWhere(s: ActiveSession, self: string): Where {
   return { label: s.host ?? 'unknown terminal', action: 'resume it (no live attach rail)' };
 }
 
-async function jumpTo(s: ActiveSession, self: string): Promise<void> {
+/**
+ * What to do when a session can't be *attached* (no tmux/Ghostty rail). `go`
+ * refuses; `focus` opens a new tab and resumes. `remote` is the peer name when
+ * the session lives on another machine, else undefined.
+ */
+export type UnreachableFallback = (s: ActiveSession, remote: string | undefined) => void | Promise<void>;
+
+/** Default (used by `go`): open a login shell on the remote, or refuse locally. */
+async function refuseFallback(s: ActiveSession, remote: string | undefined): Promise<void> {
+  if (remote) {
+    console.log(chalk.yellow(`${shortId(s)} on ${remote} isn't inside tmux — opening a shell on ${remote} instead.`));
+    assertValidSshTarget(remote);
+    process.exit(sshStream(remote, 'exec "${SHELL:-/bin/sh}" -l', { tty: true }));
+  }
+  console.log(
+    chalk.yellow(`Can't jump to ${shortId(s)} — it's in ${s.host ?? 'an unknown terminal'} with no attach rail (not tmux/Ghostty).`) +
+      chalk.gray(`\nTry: agents sessions resume ${shortId(s)}`),
+  );
+}
+
+export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback): Promise<void> {
   const remote = s.machine && s.machine !== self ? s.machine : undefined;
   const mux = s.provenance?.mux;
 
@@ -189,9 +216,9 @@ async function jumpTo(s: ActiveSession, self: string): Promise<void> {
       console.log(chalk.gray(`Attaching ${shortId(s)} on ${remote} over SSH — Ctrl-b d to detach.`));
       process.exit(sshStream(remote, remoteCmd, { tty: true }));
     }
-    console.log(chalk.yellow(`${shortId(s)} on ${remote} isn't inside tmux — opening a shell on ${remote} instead.`));
-    assertValidSshTarget(remote);
-    process.exit(sshStream(remote, 'exec "${SHELL:-/bin/sh}" -l', { tty: true }));
+    // Remote, not in tmux → hand off to the fallback (go: shell; focus: resume in a tab).
+    await fallback(s, remote);
+    return;
   }
 
   // Path B: local tmux — attach (or switch-client if we're already inside tmux).
@@ -235,11 +262,8 @@ async function jumpTo(s: ActiveSession, self: string): Promise<void> {
     return;
   }
 
-  // Path D: refuse with a reason.
-  console.log(
-    chalk.yellow(`Can't jump to ${shortId(s)} — it's in ${s.host ?? 'an unknown terminal'} with no attach rail (not tmux/Ghostty).`) +
-      chalk.gray(`\nTry: agents sessions resume ${shortId(s)}`),
-  );
+  // Path D: no attach rail (headless / plain terminal) → hand off to the fallback.
+  await fallback(s, undefined);
 }
 
 /** Resolve a local tmux pane id to its session name + window index. */
