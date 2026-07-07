@@ -294,6 +294,25 @@ describe('pickBalancedCandidate', () => {
     expect(result!.excluded.map((c) => c.version)).toContain('2.1.187');
   });
 
+  it('keeps a sonnet-week-maxed account eligible (router mirrors the `ag view` badge)', () => {
+    // Deliberate design choice — router eligibility == the badge's signal
+    // (deriveUsageStatusFromSnapshot), which EXCLUDES the model-specific
+    // sonnet_week sub-limit: hitting it throttles one model, not the account, so
+    // the row stays "available" and the account can still serve Opus/Haiku. This
+    // locks in the behavior: a sonnet_week=100 / session,week-healthy account must
+    // NOT be excluded (the earlier design that also gated on getRoutingUsedPercent
+    // would wrongly exclude it, reintroducing router-vs-badge disagreement).
+    const sonnetMaxed = cand({
+      version: '2.1.187',
+      email: 'getrush@example.com',
+      usageSnapshot: claudeUsage(30, 40, 100), // sonnet_week=100, session/week healthy
+      lastActive: new Date('2026-04-20T10:00:00Z'),
+    });
+    const result = pickBalancedCandidate([sonnetMaxed]);
+    expect(result!.picked.version).toBe('2.1.187');
+    expect(result!.excluded.map((c) => c.version)).not.toContain('2.1.187');
+  });
+
   it('dedupes by email — same account on two versions collapses to one candidate', () => {
     // user-a@example.com installed under 2.1.118 and 2.1.110. Without dedup,
     // weighted random could pick 2.1.118 OR 2.1.110 even though they're the
