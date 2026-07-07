@@ -1,14 +1,14 @@
 name: Tests
 
-# Per-PR test gate: build + run the suite on a GitHub-hosted Linux runner. One
-# of the two required checks (with gitleaks). The full cross-platform matrix
-# (ubuntu/macOS/Windows × Node 22/24) lives in ci.yml and is cost-gated to
-# release/** branches and v* tags, so it runs before a release, not on every PR.
-# The `test` job name is a required-check context (branch protection) and is
-# matched by scripts/release.sh EXPECTED_CHECKS -- don't rename it.
+# Per-PR test gate on GitHub-hosted Linux runners. One of the two required checks
+# (with gitleaks). The suite is split three ways with `vitest --shard` and run in
+# parallel, with type-checking as its own parallel job; a small aggregate `test`
+# job gates on all of them so the required-check context stays named `test`
+# (branch protection + scripts/release.sh EXPECTED_CHECKS depend on that name --
+# don't rename it). The full cross-platform matrix lives in ci.yml, cost-gated to
+# release/** branches and v* tags.
 #
-# Tool versions are NOT pinned here — setup-bun and any future setup-* steps
-# read the source of truth out of package.json / go.mod / etc.
+# Tool versions are NOT pinned here -- setup-bun reads them from package.json.
 
 on:
   pull_request:
@@ -19,18 +19,69 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # Type-check (via build) in parallel with the test shards. No test imports from
+  # dist/, so the build never needed to precede the suite -- pulling it onto its
+  # own lane takes it off the test critical path while still gating types.
+  typecheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: apps/cli
-
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('apps/cli/bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bun run test
+
+  # The suite, split three ways. Each shard runs a disjoint third of the test
+  # files on its own runner; fail-fast is off so one failing shard doesn't cancel
+  # the others (you see every failure in one run).
+  test-shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: apps/cli
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('apps/cli/bun.lock') }}
+          restore-keys: bun-cache-${{ runner.os }}-
+      - run: bun install --frozen-lockfile
+      - run: node ./node_modules/vitest/vitest.mjs run --shard=${{ matrix.shard }}/3
+
+  # Aggregate gate: the ONLY required-check context here. Runs after typecheck and
+  # every shard regardless of their outcome (`if: always()`) and fails unless ALL
+  # succeeded -- so a type error or any shard failure still blocks the merge
+  # through this single `test` check. A matrix job's `result` is `success` only
+  # when every leg passed.
+  test:
+    needs: [typecheck, test-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Gate on typecheck + all test shards
+        run: |
+          echo "typecheck:  ${{ needs.typecheck.result }}"
+          echo "test-shard: ${{ needs.test-shard.result }}"
+          if [ "${{ needs.typecheck.result }}" != "success" ]; then
+            echo "::error::typecheck failed"; exit 1
+          fi
+          if [ "${{ needs.test-shard.result }}" != "success" ]; then
+            echo "::error::one or more test shards failed"; exit 1
+          fi
+          echo "typecheck + all shards green"
