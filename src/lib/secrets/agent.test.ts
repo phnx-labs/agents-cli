@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, realBundleCount, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, realBundleCount, shouldWipeOnWatchEvent, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -169,5 +169,28 @@ describe('shouldSelfHealForUpgrade (#435: never wipe a hot cache on upgrade)', (
   it('does not restart on an unknown version on either side (no spurious flap)', () => {
     expect(shouldSelfHealForUpgrade(true, 0, 'unknown', '1.20.22')).toBe(false);
     expect(shouldSelfHealForUpgrade(true, 0, '1.20.22', 'unknown')).toBe(false);
+  });
+});
+
+describe('shouldWipeOnWatchEvent (screen-lock survives, sleep wipes)', () => {
+  it('wipes on SLEEP', () => {
+    expect(shouldWipeOnWatchEvent('SLEEP')).toBe(true);
+    expect(shouldWipeOnWatchEvent('SLEEP\n')).toBe(true);
+  });
+
+  it('does NOT wipe on a bare screen-lock', () => {
+    // The whole point of the ~7d hold: locking the screen must not re-prompt.
+    expect(shouldWipeOnWatchEvent('LOCK')).toBe(false);
+    expect(shouldWipeOnWatchEvent('LOCK\n')).toBe(false);
+  });
+
+  it('ignores unrelated / empty helper chatter', () => {
+    expect(shouldWipeOnWatchEvent('')).toBe(false);
+    expect(shouldWipeOnWatchEvent('UNLOCK')).toBe(false);
+    expect(shouldWipeOnWatchEvent('ASLEEPING')).toBe(false); // word-boundary guarded
+  });
+
+  it('still wipes when SLEEP arrives batched with a LOCK line', () => {
+    expect(shouldWipeOnWatchEvent('LOCK\nSLEEP\n')).toBe(true);
   });
 });

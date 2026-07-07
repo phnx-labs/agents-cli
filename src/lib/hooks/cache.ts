@@ -51,15 +51,16 @@ function parseShorthand(s: string): HookCacheConfig | null {
   return { ttl: ttlSec, key: 'global', prefetch };
 }
 
-/** Parse "30s" | "5m" | "1h" | plain seconds. Returns seconds, or null on failure. */
+/** Parse "30s" | "5m" | "1h" | "7d" | plain seconds. Returns seconds, or null on failure. */
 export function parseDuration(d: number | string | undefined): number | null {
   if (d == null) return null;
   if (typeof d === 'number') return Number.isFinite(d) && d > 0 ? Math.floor(d) : null;
-  const m = d.trim().match(/^(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs)?$/i);
+  const m = d.trim().match(/^(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days)?$/i);
   if (!m) return null;
   const value = parseInt(m[1], 10);
   if (!Number.isFinite(value) || value <= 0) return null;
   const unit = (m[2] || 's').toLowerCase();
+  if (unit.startsWith('d')) return value * 86400;
   if (unit.startsWith('h')) return value * 3600;
   if (unit.startsWith('m')) return value * 60;
   return value;

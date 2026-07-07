@@ -164,7 +164,7 @@ Source: `src/lib/secrets/remote.ts` (transport + resolve), wired into `list` /
 | `secrets stop` | Stop + remove the persistent service and wipe what it held | `agents secrets stop` |
 | `secrets unlock [names...]` | Read a bundle once (one Touch ID) and hold it in the secrets-agent so later runs read it silently | `agents secrets unlock prod` |
 | `secrets unlock --all` | Unlock every configured bundle | `agents secrets unlock --all` |
-| `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 24h) | `agents secrets unlock prod --ttl 30m` |
+| `secrets unlock <name> --ttl <dur>` | Hold for a custom lifetime (default 7d) | `agents secrets unlock prod --ttl 30m` |
 | `secrets lock [names...]` | Wipe held bundles from the agent (default: all) — next read re-prompts | `agents secrets lock` |
 | `secrets status` | Show which bundles the agent holds and when they lock | `agents secrets status` |
 | `secrets policy <bundle> [policy]` | Show or set a bundle's prompt policy: `daily` (default), `always`, or `never` (silent, no biometry ACL — needs `--i-understand`) | `agents secrets policy signing always` |
@@ -412,7 +412,7 @@ The secrets-agent is the ssh-agent answer:
 
 - `agents secrets unlock <bundle>` reads the bundle from the keychain **once** (one Touch ID) and hands the resolved env to a small local broker that holds it in memory.
 - Every later resolution of that bundle — by any `agents run`, teammate, browser profile, or the routines daemon — is served from the broker over a user-only Unix socket (dir `~/.agents/.cache/helpers/secrets-agent/`, mode `0700`). No prompt.
-- The hold ends when its TTL expires (default 24h, `--ttl` to change), you run `agents secrets lock`, or the screen locks / the machine sleeps. Nothing is ever written to disk.
+- The hold ends when its TTL expires (default 7d, `--ttl` to change), you run `agents secrets lock`, the machine sleeps, or you log out. A bare screen-lock does **not** drop it — the login password already gates a locked screen, and re-prompting after every lock would defeat the ~7-day window. Nothing is ever written to disk.
 
 It is **opt-in by construction**: if you never run `unlock`, resolution is byte-for-byte today's keychain path. Audit events tag broker-served reads with `"source":"agent"` so you can tell them apart from real keychain reads.
 
@@ -431,7 +431,7 @@ A long-running daemon or broker keeps running the code it started with; an in-pl
 
 Each bundle has a **prompt policy** that controls how often macOS asks for Touch ID, shown in the `POLICY` column of `agents secrets list` and set with `agents secrets policy <bundle> [daily|always]` (also `--policy` on `create`):
 
-- **`daily`** (default): ask once, then hold it silently. The **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all — one Touch ID per ~24h. Held from that unlock (not refreshed on use) — re-asks sooner after screen-lock, sleep, logout, or `lock`. Despite the name, it is **not** tied to one calendar day or one login session; it's the rolling ~24h hold.
+- **`daily`** (default): ask once, then hold it silently. The **first real keychain read auto-loads it** into the broker (in the background, no added latency), so the next concurrent run reads it silently without you running `unlock` at all — one Touch ID per ~7 days. Held from that unlock (not refreshed on use) — re-asks sooner after sleep, logout, or `lock`. A bare screen-lock does **not** drop it. Despite the name, it is **not** tied to one calendar day or one login session; it's the rolling ~7-day (1 week) hold — the name is historical, from when the window was ~24h.
 - **`always`**: ask every time. Only an explicit `unlock` ever puts it in the agent; every other read pops Touch ID. Opt high-value bundles (signing keys, etc.) into this when you want to confirm every single read.
 - **`never`**: stored **without** the biometry access control — reads are fully silent (no Touch ID, no broker, no user-presence check). This is the least-safe tier and is [documented in the security model](#security-model) as an on-disk-plaintext-equivalent downgrade: any code running as your user reads it with zero interaction. It is marked loudly (`never · NO ACL`, in red) in `agents secrets list` and `view`, and creating or switching to it requires an explicit confirmation — an interactive "are you sure" prompt, or `--i-understand` in a headless shell. Reserve it for low-sensitivity, automation-only credentials. Writing a `never` item needs a signed helper that carries the `set-no-acl` path; an older pinned helper rejects the write loudly rather than silently storing an `always`-style ACL'd item.
 

@@ -155,11 +155,13 @@ export interface VarMeta {
 
 /**
  * A bundle's prompt policy — how often macOS asks for Touch ID to read it:
- * - `daily` (default): ask once, then hold it silently for up to ~24h. Eligible
- *   for the secrets-agent — the first real keychain read auto-loads it (auto-cache
- *   is on by default) so concurrent runs read it silently, or `unlock` it
- *   explicitly. Held from that unlock (not refreshed on use); re-asks sooner
- *   after screen-lock, sleep, logout, or `agents secrets lock`.
+ * - `daily` (default): ask once, then hold it silently for up to ~7 days.
+ *   (Historical name — the window is now a rolling ~1 week, not one calendar day.)
+ *   Eligible for the secrets-agent — the first real keychain read auto-loads it
+ *   (auto-cache is on by default) so concurrent runs read it silently, or `unlock`
+ *   it explicitly. Held from that unlock (not refreshed on use); re-asks sooner
+ *   after sleep, logout, or `agents secrets lock`. A bare screen-lock does NOT
+ *   drop it (the login password already gates a locked screen).
  * - `always`: asks every time. Never auto-held — only an explicit `agents
  *   secrets unlock` ever holds it; every other read pops Touch ID. Opt a
  *   high-value bundle into this when you want to confirm every single read.
@@ -370,7 +372,7 @@ function parsePolicy(raw: unknown): SecretsPolicy | undefined {
 
 /** The default prompt policy applied to bundles without an explicit per-bundle
  * policy. Configurable via `secrets.policy` in agents.yaml; `daily` (one Touch
- * ID per ~24h) unless the user explicitly opts back into prompt-every-time with
+ * ID per ~7d) unless the user explicitly opts back into prompt-every-time with
  * `always`. Best-effort: an unreadable config falls back to the `daily` default. */
 export function secretsDefaultPolicy(): SecretsPolicy {
   try {
@@ -512,7 +514,7 @@ export function listBundles(): SecretsBundle[] {
       // so the getKeychainTokens batch below pops Touch ID on every `secrets
       // list` — the broker/`daily` mechanism only ever covered value reads, not
       // this listing. Serve a broker-cached metadata snapshot when one is held,
-      // so only the first list per ~24h prompts. The cache key is a hash of the
+      // so only the first list per ~7d prompts. The cache key is a hash of the
       // current keychain name-set (enumerated silently above): add / remove /
       // rename a bundle and the key changes, so the stale snapshot is never
       // served — no active invalidation needed. Values are never cached here;
@@ -538,7 +540,7 @@ export function listBundles(): SecretsBundle[] {
           if (bundle) keychainBundles.push(bundle);
         }
         for (const bundle of keychainBundles) out.push(bundle);
-        // Populate the broker for the rest of the daily window (fire-and-forget).
+        // Populate the broker for the rest of the hold window (fire-and-forget).
         if (useAgent && keychainBundles.length > 0) {
           agentAutoLoadMetaSync(nameSetHash, keychainBundles, DEFAULT_TTL_MS);
         }

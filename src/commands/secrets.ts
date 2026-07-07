@@ -545,7 +545,7 @@ export function registerSecretsCommands(program: Command): void {
       # See what's in the bundle (values masked); shows its prompt policy
       agents secrets view prod
 
-      # Stop a noisy automation bundle from prompting every run: ask once a day
+      # Stop a noisy automation bundle from prompting every run: ask once a week
       agents secrets policy prod daily
 
       # Eval the bundle into your current shell
@@ -565,15 +565,16 @@ export function registerSecretsCommands(program: Command): void {
       Touch ID noise: macOS pops a prompt per bundle per process. Each bundle has
       a prompt policy, shown in the POLICY column of 'agents secrets list':
         daily (default)   ask once, then hold it silently in the local agent up
-                          to ~24h, until screen-lock / sleep / logout or 'lock'.
+                          to ~7 days, until sleep / logout or 'lock' (a bare
+                          screen-lock does NOT drop it). Name is historical.
         always            ask for Touch ID every time — never auto-held.
-      The default is 'daily' (one Touch ID per ~24h); change it globally with
+      The default is 'daily' (one Touch ID per ~7 days); change it globally with
       'secrets.policy' in agents.yaml, or per bundle with 'agents secrets policy
       <bundle> always'. 'agents secrets unlock <bundle>' holds any bundle after one
       prompt regardless of policy. Nothing on disk.
 
       See also:
-        agents secrets policy <bundle> daily           ask once a day, not every run
+        agents secrets policy <bundle> daily           ask once a week, not every run
         agents secrets unlock <bundle>                 hold a bundle after one Touch ID
         agents secrets lock                            wipe held bundles (re-prompt next read)
         agents secrets status                          show held bundles + when they lock
@@ -675,7 +676,7 @@ export function registerSecretsCommands(program: Command): void {
         } else {
           console.log(
             bundlePolicy(bundle) === 'daily'
-              ? chalk.gray('policy: daily (ask once, then held ~24h until screen-lock / sleep / logout)')
+              ? chalk.gray('policy: daily (ask once, then held ~7 days until sleep / logout — screen-lock does not drop it)')
               : chalk.gray('policy: always (asks for Touch ID every time — never auto-held)'),
           );
         }
@@ -788,7 +789,7 @@ export function registerSecretsCommands(program: Command): void {
     .description('Create an empty bundle')
     .option('--description <text>', 'Free-form description')
     .option('--allow-exec', 'Allow exec: refs in this bundle (off by default)')
-    .option('--policy <policy>', 'prompt policy: daily (default, ask once a day), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand)')
+    .option('--policy <policy>', 'prompt policy: daily (default, ask once a week), always (ask every time), or never (silent, NO biometry ACL — needs --i-understand)')
     .addOption(new Option('--tier <policy>', 'deprecated alias for --policy').hideHelp())
     .option('--i-understand', 'Confirm creating a "never"-policy bundle (no biometry ACL) without an interactive prompt')
     .option('--backend <backend>', 'storage backend: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
@@ -1599,7 +1600,7 @@ Examples:
   cmd
     .command('unlock [names...]')
     .description('Hold a bundle in the secrets-agent after one Touch ID, so concurrent runs read it without re-prompting (macOS).')
-    .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h). Default 24h.')
+    .option('--ttl <duration>', 'How long to hold it (e.g. 30m, 8h, 3d). Default 7d.')
     .option('--all', 'Unlock every configured bundle')
     .action(async (names: string[], opts: { ttl?: string; all?: boolean }) => {
       if (process.platform !== 'darwin') {
@@ -1615,7 +1616,7 @@ Examples:
       if (opts.ttl) {
         const secs = parseDuration(opts.ttl);
         if (!secs) {
-          console.error(chalk.red(`Invalid --ttl '${opts.ttl}'. Use e.g. 30m, 2h, 8h.`));
+          console.error(chalk.red(`Invalid --ttl '${opts.ttl}'. Use e.g. 30m, 2h, 8h, 3d.`));
           process.exit(1);
         }
         ttlMs = secs * 1000;
@@ -1698,7 +1699,7 @@ Examples:
   cmd
     .command('policy <bundle> [policy]')
     .alias('tier')
-    .description("Show or set a bundle's prompt policy: daily (default, ask once a day), always (ask every time), or never (silent, NO biometry ACL).")
+    .description("Show or set a bundle's prompt policy: daily (default, ask once a week), always (ask every time), or never (silent, NO biometry ACL).")
     .option('--i-understand', 'Confirm switching to the "never" policy (no biometry ACL) without an interactive prompt')
     .action(async (bundleName: string, policyArg: string | undefined, opts: { iUnderstand?: boolean }) => {
       try {
@@ -1718,7 +1719,7 @@ Examples:
         writeBundle(bundle);
         console.log(chalk.green(`${bundle.name} policy set to ${next}.`));
         if (next === 'daily') {
-          console.log(chalk.gray('Held by the secrets-agent for ~24h after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));
+          console.log(chalk.gray('Held by the secrets-agent for ~7 days after one unlock (auto-cache is on by default; disable with `secrets.agent.auto: false` in agents.yaml).'));
         } else if (next === 'always') {
           console.log(chalk.gray('Asks for Touch ID every time — never auto-held.'));
         } else {

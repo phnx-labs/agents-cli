@@ -16,8 +16,9 @@
  * trust boundary the keychain already concedes (docs/secrets.md: the ACL is
  * user-presence, not code-identity — any same-user process can pop the prompt
  * and read), minus the visible prompt. We bound it with: explicit per-bundle
- * opt-in (nothing is held unless you `unlock` it), an absolute TTL, auto-lock
- * on screen-lock / sleep, and `agents secrets lock`. Nothing ever touches disk.
+ * opt-in (nothing is held unless you `unlock` it), an absolute TTL (~7d), an
+ * auto-wipe on sleep / logout, and `agents secrets lock`. A bare screen-lock is
+ * NOT a wipe (the login password already gates it). Nothing ever touches disk.
  *
  * macOS only: Linux libsecret has no biometry prompt, so there's nothing to
  * deduplicate — every entry point here no-ops off darwin.
@@ -39,14 +40,14 @@ import type { SecretsBundle } from './bundles.js';
 const PROTOCOL_VERSION = 1;
 
 /** Default lifetime of an unlocked bundle when `--ttl` is not given. */
-export const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+export const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
 
 /**
  * Reserved store-key prefix for the `secrets list` metadata snapshot cache.
  * The broker holds the resolved bundle-metadata array (names/policy/timestamps,
  * NO resolved secret values beyond the literals already in metadata) keyed by a
  * hash of the current keychain bundle name-set, so the second and later
- * `secrets list` within the daily window read metadata without a Touch ID
+ * `secrets list` within the hold window read metadata without a Touch ID
  * prompt. Keyed by the name-set hash so adding/removing/renaming a bundle
  * changes the key and misses the cache automatically — no active invalidation.
  * The '!' sentinel can never collide with a real bundle name
@@ -67,7 +68,7 @@ const SWEEP_INTERVAL_MS = 30 * 1000;
  * code (exit so launchd relaunches it). Only when the store is EMPTY: exiting
  * with bundles still unlocked wipes them from memory, so the next reader falls
  * back to a direct keychain read and re-prompts for Touch ID. Deferring the
- * restart until the cache is idle (TTL-expired / screen-locked) means an
+ * restart until the cache is idle (TTL-expired / slept) means an
  * in-place `npm i -g` never wipes a hot cache — the new code is adopted at the
  * next quiet moment instead. See #435: rapid repeated upgrades wiped a hot
  * cache on every bump and produced a recurring Touch ID storm.
@@ -333,9 +334,22 @@ export function handleAgentRequest(
 }
 
 /**
+ * Decide whether a `watch-lock` helper line should wipe the in-memory store.
+ * The helper emits `LOCK` on screen-lock / screensaver and `SLEEP` on system
+ * sleep. We wipe on SLEEP only: a bare screen-lock is already gated by the login
+ * password, and with the ~7d hold, re-authing after every lock would defeat the
+ * point. Logout needs no line — it tears down the launchd session and kills the
+ * broker outright. Pure + exported so the LOCK-survives / SLEEP-wipes contract
+ * has direct regression coverage (the inline stdout handler isn't unit-testable).
+ */
+export function shouldWipeOnWatchEvent(chunk: string): boolean {
+  return /\bSLEEP\b/.test(chunk);
+}
+
+/**
  * Run the broker in the foreground. Spawned detached by ensureAgentRunning via
  * `agents secrets _agent-run`. Holds the store in memory, serves the socket,
- * sweeps expired entries, wipes on screen-lock/sleep, and self-exits when idle.
+ * sweeps expired entries, wipes on sleep, and self-exits when idle.
  */
 export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise<void> {
   if (!onDarwin()) return; // nothing to broker without biometry prompts
@@ -376,9 +390,9 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   const runningVersion = getCliVersion();
 
   // "Warmth" for self-heal / idle-exit counts only real unlocked bundles, NOT
-  // the internal `secrets list` metadata cache (#524). Otherwise a 24h-TTL list
+  // the internal `secrets list` metadata cache (#524). Otherwise a 7d-TTL list
   // cache would keep the store non-empty and (a) block the persistent broker
-  // from self-healing onto a freshly-installed version for up to a day (#435's
+  // from self-healing onto a freshly-installed version for up to a week (#435's
   // gate is size===0), and (b) stop a one-off broker from ever idle-exiting. The
   // metadata cache is a disposable list snapshot — wiping it on upgrade/idle
   // costs at most one extra prompt on the next `secrets list`.
@@ -457,15 +471,19 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
 
   sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
 
-  // Auto-lock on screen-lock / sleep. The signed helper emits LOCK / SLEEP
-  // lines; on any of them we wipe everything. If the installed helper predates
-  // watch-lock (exits non-zero immediately), we fall back to TTL-only and log
-  // nothing — the unlock already warned when lock_on_sleep couldn't be armed.
+  // Auto-lock on sleep. The signed helper emits LOCK / SLEEP lines; we wipe
+  // everything on SLEEP (and, implicitly, logout — that tears down the launchd
+  // session and kills this in-memory broker). A bare screen-lock is deliberately
+  // NOT a wipe: with the ~7d hold, re-prompting after every lock would defeat the
+  // point, and a locked screen is already gated by the login password. If the
+  // installed helper predates watch-lock (exits non-zero immediately), we fall
+  // back to TTL-only and log nothing — the unlock already warned when
+  // lock_on_sleep couldn't be armed.
   try {
     watcher = spawn(getKeychainHelperPath(), ['watch-lock'], { stdio: ['ignore', 'pipe', 'ignore'] });
     watcher.stdout?.setEncoding('utf-8');
     watcher.stdout?.on('data', (chunk: string) => {
-      if (/\b(LOCK|SLEEP)\b/.test(chunk)) {
+      if (shouldWipeOnWatchEvent(chunk)) {
         store.clear();
         emptySince = Date.now();
       }
@@ -588,7 +606,7 @@ export function agentGetMetaSync(nameSetHash: string): SecretsBundle[] | null {
 
 /**
  * Fire-and-forget: populate the broker with a freshly-read metadata snapshot so
- * the next `secrets list` within the daily window renders without a prompt.
+ * the next `secrets list` within the hold window renders without a prompt.
  * Stored as an ordinary entry (placeholder bundle, snapshot in env) under the
  * reserved META_CACHE_PREFIX key; the snapshot travels over stdin to the
  * detached worker (never argv/disk), same as value caching. macOS only.
@@ -602,7 +620,7 @@ export function agentAutoLoadMetaSync(nameSetHash: string, bundles: SecretsBundl
 
 /** True unless `secrets.agent.auto` is explicitly disabled in agents.yaml. The
  * broker is the mechanism that delivers the `daily` default policy (one Touch ID
- * per ~24h), so auto-caching is ON by default; opt out with
+ * per ~7d), so auto-caching is ON by default; opt out with
  * `secrets.agent.auto: false`. Best-effort; an unreadable meta reads as on. */
 export function secretsAgentAutoEnabled(): boolean {
   try {
