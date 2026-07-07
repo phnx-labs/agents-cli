@@ -82,6 +82,18 @@ describe('buildForwardedArgs', () => {
     ).toEqual(['sessions', 'auth bug']);
   });
 
+  it('drops --device (the --host alias) and its value, keeping the rest', () => {
+    // --device merges into the host set in the handler, so its tokens must be
+    // stripped too — else the peer would try to re-fan-out to that device.
+    expect(
+      buildForwardedArgs(argv('sessions', 'auth bug', '--device', 'yosemite-s0', '--json'), new Set(['yosemite-s0'])),
+    ).toEqual(['sessions', 'auth bug', '--json']);
+  });
+
+  it('drops the --device=value form', () => {
+    expect(buildForwardedArgs(argv('sessions', '--device=yosemite-s0', 'query'))).toEqual(['sessions', 'query']);
+  });
+
   it('stops consuming at the first token that is not a known host', () => {
     // The scan only swallows consecutive tokens present in the host set; a
     // trailing non-host token ('auth') is preserved rather than over-consumed.
