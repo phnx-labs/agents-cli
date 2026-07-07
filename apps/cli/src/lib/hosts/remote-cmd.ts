@@ -163,3 +163,31 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
 export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(windowsAgentsScript(cmd))}`;
 }
+
+/**
+ * Build the `ssh <target> <cmd>` string for `agents secrets import` on a Windows
+ * remote where the `.env` is piped over ssh stdin.
+ *
+ * We can't just run `agents secrets import <bundle> --from -`: the npm
+ * `agents.ps1` shim does NOT forward the ssh-piped stdin down to the underlying
+ * node process, so a raw fd-0 read (`--from -`) hangs forever (observed: the
+ * push to a Windows host times out). PowerShell ITSELF can read the pipe, so we
+ * read stdin into a temp file in PowerShell, import `--from <file>` (a plain
+ * file read, which the shim handles fine), and delete the temp file afterwards
+ * — success or failure. Backend defaults to the platform native store
+ * (Credential Manager, or the headless file store when there's no logon
+ * session), matching a local `agents secrets import`.
+ */
+export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: boolean } = {}): string {
+  const force = opts.force ? ' --force' : '';
+  const script = [
+    '$in = [Console]::In.ReadToEnd()',
+    '$tmp = [System.IO.Path]::GetTempFileName()',
+    '[System.IO.File]::WriteAllText($tmp, $in)',
+    `try { & agents secrets import ${powershellQuote(bundle)} --from $tmp${force}; $code = $LASTEXITCODE } ` +
+      `finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }`,
+    'if ($null -eq $code) { $code = 1 }',
+    'exit $code',
+  ].join('; ');
+  return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
+}
