@@ -89,7 +89,7 @@ export function menubarServiceInstalled(): boolean {
  * Locate the source `.app` shipped alongside the compiled JS.
  *   1. dist/lib/menubar/MenubarHelper.app — npm install layout (sibling of this file)
  *   2. <repo>/bin/MenubarHelper.app       — raw working tree (tsx/dev)
- *   3. <repo>/packages/menubar-helper/dist/MenubarHelper.app — fresh local build
+ *   3. apps/cli/menubar/dist/MenubarHelper.app — fresh local build
  */
 function sourceAppPath(): string | null {
   const candidates: string[] = [];
@@ -98,7 +98,7 @@ function sourceAppPath(): string | null {
     candidates.push(path.join(here, APP_BUNDLE_NAME));
     candidates.push(path.resolve(here, '..', '..', '..', 'bin', APP_BUNDLE_NAME));
     candidates.push(
-      path.resolve(here, '..', '..', '..', 'packages', 'menubar-helper', 'dist', APP_BUNDLE_NAME)
+      path.resolve(here, '..', '..', '..', 'menubar', 'dist', APP_BUNDLE_NAME)
     );
   } catch {
     /* import.meta.url unavailable */

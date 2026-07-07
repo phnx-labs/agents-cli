@@ -187,8 +187,8 @@ export function writeComputerPeers(allowedExecPaths: string[]): void {
 export function resolveHelperExec(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    // Local build (running from the agents-cli checkout).
-    path.resolve(here, '..', '..', 'packages', 'computer-helper', 'dist', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
+    // Local build (running from the agents-cli checkout). apps/cli/dist/lib -> repo root (4 up) -> native/computer-mac.
+    path.resolve(here, '..', '..', '..', '..', 'native', 'computer-mac', 'dist', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
     // Bundled with the npm package (later: CDN download lands here).
     path.resolve(here, '..', 'computer-helper', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
   ];
@@ -236,7 +236,7 @@ export function openComputerClient(): ComputerClient {
   }
   const helperExec = resolveHelperExec();
   if (!helperExec) {
-    throw new Error('helper not built. Run: ./packages/computer-helper/scripts/build.sh debug');
+    throw new Error('helper not built. Run: ./native/computer-mac/scripts/build.sh debug');
   }
   return new StdioClient(helperExec);
 }

@@ -121,7 +121,7 @@ export const REMOTE_HELPER_PORT = 8765;
 /** Task Scheduler task name for the daemon. Stable so setup/stop pair up. */
 export const REMOTE_TASK_NAME = 'AgentsComputerHelper';
 
-/** Basename of the cross-published exe under packages/computer-helper-win/dist. */
+/** Basename of the cross-published exe under native/computer-win/dist. */
 export const WIN_HELPER_EXE = 'computer-helper-win.exe';
 
 /**
@@ -131,8 +131,8 @@ export const WIN_HELPER_EXE = 'computer-helper-win.exe';
 export function resolveWinHelperExe(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    // Running from the agents-cli checkout (src/lib -> repo root).
-    path.resolve(here, '..', '..', 'packages', 'computer-helper-win', 'dist', WIN_HELPER_EXE),
+    // Running from the agents-cli checkout. apps/cli/dist/lib -> repo root (4 up) -> native/computer-win.
+    path.resolve(here, '..', '..', '..', '..', 'native', 'computer-win', 'dist', WIN_HELPER_EXE),
     // Bundled with the npm package (dist/lib -> package root).
     path.resolve(here, '..', 'computer-helper-win', WIN_HELPER_EXE),
   ];

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Cross-publish the Windows computer-use daemon (packages/computer-helper-win)
+# Cross-publish the Windows computer-use daemon (native/computer-win)
 # into a single self-contained win-x64 exe — from a macOS or Linux build host.
 #
 # The csproj already sets EnableWindowsTargeting=true, so `dotnet publish` for a
@@ -39,7 +39,7 @@ if [[ -z "$DOTNET" && -x "$HOME/.dotnet/dotnet" ]]; then
 fi
 [[ -n "$DOTNET" ]] || die "dotnet not found. Install the .NET 10 SDK: curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0"
 
-PROJECT="packages/computer-helper-win"
+PROJECT="native/computer-win"
 OUT="$PROJECT/dist"
 
 bold "Build (win-x64)"; echo "  $("$DOTNET" --version) — $PROJECT"

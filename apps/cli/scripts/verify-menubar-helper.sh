@@ -27,15 +27,15 @@ APP="bin/MenubarHelper.app"
 if [ ! -d "$APP" ]; then
   echo "menubar helper missing: $APP not found" >&2
   echo "Build and stage it before releasing:" >&2
-  echo "  packages/menubar-helper/scripts/build.sh release" >&2
-  echo "  cp -R packages/menubar-helper/dist/MenubarHelper.app bin/MenubarHelper.app" >&2
+  echo "  menubar/scripts/build.sh release" >&2
+  echo "  cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app" >&2
   exit 1
 fi
 
 if command -v codesign >/dev/null 2>&1; then
   if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
     echo "menubar helper failed codesign --verify --deep --strict: $APP" >&2
-    echo "Rebuild it: packages/menubar-helper/scripts/build.sh release" >&2
+    echo "Rebuild it: menubar/scripts/build.sh release" >&2
     exit 1
   fi
 fi
