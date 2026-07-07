@@ -495,6 +495,9 @@ interface UnifiedAgentsPaneProps {
   openDetailTaskId?: string | null
   onDetailTaskConsumed?: () => void
   onThroughputChange?: (tokensPerSec: number) => void
+  /** The single live-feed filter, lifted to App so the TopBar search drives it. */
+  search: string
+  onSearch: (q: string) => void
   githubRepo?: string | null
   watchdogEnabled?: boolean
   watchdogEvents?: WatchdogEventUI[]
@@ -521,7 +524,7 @@ function useStableList(items: UnifiedAgent[]): UnifiedAgent[] {
   }, [items])
 }
 
-export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks, unifiedTasksLoading, onDispatch, onNavigate, onOpenInBench, openDispatchTrigger, quickSpawnTrigger, openDetailTaskId, onDetailTaskConsumed, onThroughputChange, githubRepo, watchdogEnabled = false, watchdogEvents = [], projectRules = [] }: UnifiedAgentsPaneProps) {
+export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks, unifiedTasksLoading, onDispatch, onNavigate, onOpenInBench, openDispatchTrigger, quickSpawnTrigger, openDetailTaskId, onDetailTaskConsumed, onThroughputChange, search: floorSearch, onSearch: setFloorSearch, githubRepo, watchdogEnabled = false, watchdogEvents = [], projectRules = [] }: UnifiedAgentsPaneProps) {
   const panelVisible = usePanelVisibility()
   const [newMenuOpen, setNewMenuOpen] = useState(false)
   const [statPopover, setStatPopover] = useState<'shipped' | 'open' | 'running' | 'nextup' | 'files' | null>(null)
@@ -600,7 +603,6 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [hostPins, setHostPins] = useState<string[] | null>(floorPrefs0.hostPins)
   const [statusChips, setStatusChips] = useState<StatusChip[]>([])
   const [abbrChips, setAbbrChips] = useState<AgentAbbr[]>([])
-  const [floorSearch, setFloorSearch] = useState('')
   const [savedViews, setSavedViews] = useState<SavedView[]>(() => loadSavedViews())
 
   const activeViewName = useMemo(() => {
@@ -1912,8 +1914,6 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         onToggleStatus={(chip) => setStatusChips((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]))}
         activeAbbrs={abbrChips}
         onToggleAbbr={(ab) => setAbbrChips((prev) => (prev.includes(ab) ? prev.filter((c) => c !== ab) : [...prev, ab]))}
-        search={floorSearch}
-        onSearch={setFloorSearch}
         onDispatch={() => openDispatch(selectedTicketId ? { ticketId: selectedTicketId } : undefined)}
       />
 

@@ -13,6 +13,13 @@ interface TopBarProps {
   onToggleTheme?: () => void
   onOpenSettings?: () => void
   onOpenSearch?: () => void
+  /**
+   * The single live feed filter. When provided, the center becomes a real search
+   * input that filters agents/branches/activity as you type; ⌘K still opens the
+   * command palette (onOpenSearch). Omit both to keep the plain command-hint button.
+   */
+  search?: string
+  onSearch?: (q: string) => void
   throughputTokensPerSec?: number
   watchdogEnabled?: boolean
   onToggleWatchdog?: () => void
@@ -27,6 +34,8 @@ export function TopBar({
   onToggleTheme,
   onOpenSettings,
   onOpenSearch,
+  search,
+  onSearch,
   throughputTokensPerSec = 0,
   watchdogEnabled = false,
   onToggleWatchdog,
@@ -70,11 +79,31 @@ export function TopBar({
         </button>
       </div>
       <div className="sw-topbar-center">
-        <button className="sw-cmd-hint" onClick={onOpenSearch}>
-          <Icon name="search" size={12} />
-          <span>Search or run command…</span>
-          <div className="spacer" />
-        </button>
+        {onSearch ? (
+          <div className="sw-cmd-hint sw-cmd-search">
+            <Icon name="search" size={12} />
+            <input
+              className="sw-cmd-input"
+              placeholder="Search agents, branches, activity…"
+              value={search ?? ''}
+              onChange={(e) => onSearch(e.target.value)}
+            />
+            <button
+              type="button"
+              className="sw-cmd-kbd"
+              title="Open command palette"
+              onClick={onOpenSearch}
+            >
+              ⌘K
+            </button>
+          </div>
+        ) : (
+          <button className="sw-cmd-hint" onClick={onOpenSearch}>
+            <Icon name="search" size={12} />
+            <span>Search or run command…</span>
+            <div className="spacer" />
+          </button>
+        )}
       </div>
       <div className="sw-topbar-right">
         {throughputTokensPerSec > 0 && (

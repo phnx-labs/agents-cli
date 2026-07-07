@@ -55,8 +55,6 @@ interface FloorControlsProps {
   activeAbbrs: AgentAbbr[]
   onToggleAbbr: (abbr: AgentAbbr) => void
 
-  search: string
-  onSearch: (q: string) => void
   onDispatch: () => void
 }
 
@@ -64,7 +62,7 @@ export function FloorControls({
   runningCount, totalCount,
   sidebarOpen, onToggleSidebar, rightOpen, onToggleRight, plain, onTogglePlain,
   sort, onSort, group, onGroup, activeStatus, onToggleStatus, agentChips = DEFAULT_AGENT_CHIPS, activeAbbrs, onToggleAbbr,
-  search, onSearch, onDispatch,
+  onDispatch,
 }: FloorControlsProps) {
   const statusOn = new Set(activeStatus)
   const abbrOn = new Set(activeAbbrs)
@@ -117,15 +115,6 @@ export function FloorControls({
           ))}
         </select>
       </div>
-
-      <div className="fsep" />
-
-      <input
-        className="search"
-        placeholder="search agents, branches, activity…"
-        value={search}
-        onChange={(e) => onSearch(e.target.value)}
-      />
 
       <div className="grow" />
 
