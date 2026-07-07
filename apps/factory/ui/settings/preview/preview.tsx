@@ -13,6 +13,7 @@ import '../index.css'
 import { Icon } from '../components/mission-control/icons'
 import { FloorSidebar } from '../components/mission-control/FloorSidebar'
 import { FloorRail } from '../components/mission-control/FloorRail'
+import { FloorControls } from '../components/mission-control/FloorControls'
 import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
@@ -184,8 +185,16 @@ const linearProjectList: LinearProjectLite[] = [
 ]
 
 function Feed() {
+  const [grp, setGrp] = useState<'none' | 'project' | 'host' | 'status' | 'agent'>('project')
+  const [srt, setSrt] = useState<'needs' | 'recent' | 'tok' | 'name'>('needs')
   return (
     <div className="feed">
+      <FloorControls
+        runningCount={8} totalCount={17} needsCount={2}
+        sidebarOpen rightOpen plain={false}
+        onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
+        sort={srt} onSort={setSrt} group={grp} onGroup={setGrp} onDispatch={noop}
+      />
       <SavedViews
         views={[
           { name: 'Today', sort: 'needs', status: [], abbrs: [], search: '' },

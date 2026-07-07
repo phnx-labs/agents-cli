@@ -1,6 +1,6 @@
 import React from 'react'
 import { Icon } from './icons'
-import type { AgentAbbr, FloorSort, FloorGroupBy } from './floorModel'
+import type { FloorSort, FloorGroupBy } from './floorModel'
 
 // Single Floor filter bar (Sort · Status · Agent · search · stats · toggles · Dispatch).
 // The old duplicate ".top" header (second FACTORY logo + theme toggle) was removed —
@@ -15,8 +15,6 @@ const SORT_OPTS: { value: FloorSort; label: string }[] = [
   { value: 'tok', label: 'tok/s' },
   { value: 'name', label: 'Name' },
 ]
-
-const DEFAULT_AGENT_CHIPS: AgentAbbr[] = ['CC', 'CX', 'GX']
 
 // Group the live feed by an axis; 'none' keeps the default phase sections. Same axes
 // as the Backlog's group control (BacklogCenter GROUP_OPTS) so the two bars match.
@@ -33,6 +31,8 @@ const SVG = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 } as const
 interface FloorControlsProps {
   runningCount: number
   totalCount: number
+  /** Count of agents that need you — shown as the ⚑ flag pill. */
+  needsCount?: number
 
   sidebarOpen: boolean
   onToggleSidebar: () => void
@@ -46,83 +46,52 @@ interface FloorControlsProps {
   /** How the live feed is grouped ('none' = default phase sections). */
   group: FloorGroupBy | 'none'
   onGroup: (g: FloorGroupBy | 'none') => void
-  /** Which status chips are active. */
-  activeStatus: StatusChip[]
-  onToggleStatus: (chip: StatusChip) => void
-  /** Which agent-type chips to show (defaults to CC/CX/GX like the prototype). */
-  agentChips?: AgentAbbr[]
-  /** Which agent-type chips are active. */
-  activeAbbrs: AgentAbbr[]
-  onToggleAbbr: (abbr: AgentAbbr) => void
 
   onDispatch: () => void
 }
 
 export function FloorControls({
-  runningCount, totalCount,
+  runningCount, totalCount, needsCount = 0,
   sidebarOpen, onToggleSidebar, rightOpen, onToggleRight, plain, onTogglePlain,
-  sort, onSort, group, onGroup, activeStatus, onToggleStatus, agentChips = DEFAULT_AGENT_CHIPS, activeAbbrs, onToggleAbbr,
+  sort, onSort, group, onGroup,
   onDispatch,
 }: FloorControlsProps) {
-  const statusOn = new Set(activeStatus)
-  const abbrOn = new Set(activeAbbrs)
+  const groupLabel = (GROUP_OPTS.find((o) => o.value === group) ?? GROUP_OPTS[0]).label
+  const sortLabel = (SORT_OPTS.find((o) => o.value === sort) ?? SORT_OPTS[0]).label
 
+  // Clean pill bar (mockup): the ad-hoc Status/Agent chips and the running tally are
+  // gone — filtering lives in saved views + search. What remains reads as calm pills:
+  // Group ▾ · Sort ▾ · ⚑needs, then the panel toggles + Dispatch.
   return (
-    <div className="fbar">
-      <div className="fgroup">
-        <span className="fgroup-label">Sort</span>
-        <select className="sel" value={sort} onChange={(e) => onSort(e.target.value as FloorSort)}>
-          {SORT_OPTS.map((o) => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
-        </select>
-      </div>
+    <div className="fbar clean">
+      <div className="grow" />
 
-      <div className="fsep" />
-
-      <div className="fgroup">
-        <span className="fgroup-label">Status</span>
-        <span className={`chip needs ${statusOn.has('needs') ? 'on' : ''}`} onClick={() => onToggleStatus('needs')}>
-          <Icon name="alert" size={11} /> Needs you
-        </span>
-        <span className={`chip ${statusOn.has('running') ? 'on' : ''}`} onClick={() => onToggleStatus('running')}>
-          <span className="dot running" /> Running
-        </span>
-        <span className={`chip ${statusOn.has('idle') ? 'on' : ''}`} onClick={() => onToggleStatus('idle')}>
-          <span className="dot idle" /> Idle
-        </span>
-        <span className={`chip ${statusOn.has('failed') ? 'on' : ''}`} onClick={() => onToggleStatus('failed')}>
-          <span className="dot failed" /> Failed
-        </span>
-      </div>
-
-      <div className="fsep" />
-
-      <div className="fgroup">
-        <span className="fgroup-label">Agent</span>
-        {agentChips.map((ab) => (
-          <span key={ab} className={`chip ${abbrOn.has(ab) ? 'on' : ''}`} onClick={() => onToggleAbbr(ab)}>{ab}</span>
-        ))}
-      </div>
-
-      <div className="fsep" />
-
-      <div className="fgroup">
-        <span className="fgroup-label">Group</span>
-        <select className="sel" value={group} onChange={(e) => onGroup(e.target.value as FloorGroupBy | 'none')}>
+      <label className="fpill fpill-sel" title="Group the feed">
+        Group: <b>{groupLabel}</b>
+        <select value={group} onChange={(e) => onGroup(e.target.value as FloorGroupBy | 'none')}>
           {GROUP_OPTS.map((o) => (
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
-      </div>
+      </label>
 
-      <div className="grow" />
+      <label className="fpill fpill-sel" title="Sort the feed">
+        <b>{sortLabel}</b>
+        <select value={sort} onChange={(e) => onSort(e.target.value as FloorSort)}>
+          {SORT_OPTS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </label>
 
-      <div className="stat"><span className="dot running" /><b>{runningCount}</b>/<span>{totalCount}</span> running</div>
-      <button className="themebtn" onClick={onTogglePlain}>Plain language: {plain ? 'on' : 'off'}</button>
+      {needsCount > 0 && (
+        <span className="fpill fpill-flag" title={`${needsCount} need you`}><Icon name="alert" size={11} /> {needsCount}</span>
+      )}
+
+      <button className="iconbtn plainbtn" title={`Plain language: ${plain ? 'on' : 'off'}`} onClick={onTogglePlain}>Aa</button>
       <button
         className={`iconbtn ${sidebarOpen ? 'on' : ''}`}
-        title="Show / hide projects sidebar"
+        title="Show / hide the left rail"
         onClick={onToggleSidebar}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" {...SVG}>
