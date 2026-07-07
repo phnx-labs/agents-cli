@@ -965,7 +965,11 @@ export function buildTmuxAgentCommand(executable: string, args: string[], env: N
  *   1. createSession() launches `sh -c 'exec env … agent'` detached, remain-on-exit
  *      on (global), and returns the pane id.
  *   2. A per-session `pane-died` hook detaches the attach client the instant the
- *      agent exits, so attach returns instead of parking on a dead pane.
+ *      AGENT pane exits, so attach returns instead of parking on a dead pane. The
+ *      hook is guarded on `#{hook_pane}` so it fires ONLY for the agent pane —
+ *      user-created splits (Ctrl-b " / %) that the user exits are closed in place
+ *      (`kill-pane`) instead of tearing down the whole client, so exiting one
+ *      split leaves the agent running full-window rather than kicking you out.
  *   3. We record the agent pane's pid → session mapping (WITH the tmux pane) so the
  *      headless active-scan attributes it, then attach the TTY (blocking).
  *   4. On return: if the pane is dead the agent exited — read its status, tear the
@@ -990,9 +994,19 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const pane = meta.pane;
 
   if (pane) {
-    // Detach the client (don't kill) when the agent exits so the session survives
-    // just long enough to read the dead pane's exit status below.
-    await setSessionHook(name, 'pane-died', `detach-client -s =${name}`, socket);
+    // When the AGENT pane dies, detach the client (don't kill) so the session
+    // survives just long enough to read the dead pane's exit status below. The
+    // `#{hook_pane}` guard scopes this to the agent pane only: if the user splits
+    // the window and exits one of THEIR panes, the else-branch `kill-pane` closes
+    // that split in place instead of detaching everyone (the pane-died hook runs
+    // in the dead pane's context, so bare `kill-pane` targets it). Without the
+    // guard, exiting any split kicked the user clean out of tmux.
+    await setSessionHook(
+      name,
+      'pane-died',
+      `if -F '#{==:#{hook_pane},${pane}}' 'detach-client -s =${name}' 'kill-pane'`,
+      socket,
+    );
 
     // Record the agent's OS pid (the pane leaf, thanks to `exec`) WITH its tmux
     // pane so the active-scan attributes it exactly and shows the %pane.

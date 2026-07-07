@@ -25,6 +25,7 @@ import { FloorSidebar } from './FloorSidebar'
 import { BacklogCenter } from './BacklogCenter'
 import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
+import { ProjectsPane } from './ProjectsPane'
 import { FeedItem, FollowUpBox } from './FeedItem'
 import { TodoChecklist } from './TodoChecklist'
 import { NeedsYouClusters } from './NeedsYouClusters'
@@ -32,7 +33,9 @@ import { StructuredReply } from './StructuredReply'
 import {
   clusterByQuestion,
   sortAgents,
+  groupAgents,
   latestTodos,
+  sessionTaskLine,
   type FloorAgent,
   type CenterMode,
   type HostInventory,
@@ -43,6 +46,8 @@ import {
   type TicketSource,
   type AgentAbbr,
   type CiStatus,
+  type ManagedProject,
+  type LinearProjectLite,
 } from './floorModel'
 import { SavedViews } from './SavedViewsBar'
 import { loadSavedViews, persistSavedViews, upsertView, removeView, viewMatches, type SavedView } from './savedViews'
@@ -577,7 +582,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [projFilter, setProjFilter] = useState<string | null>(null)
   // Host scope: click a HOSTS row to filter the feed to that machine; click again to clear.
   const [hostFilter, setHostFilter] = useState<string | null>(null)
+  // Recent (historical) sessions per host, fetched lazily only when a host filter has
+  // 0 live agents — so an empty host shows recent work instead of a blank pane.
+  const [recentByHost, setRecentByHost] = useState<Record<string, RemoteSessionLike[]>>({})
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
+  // Group the live feed by an axis (project/host/status/agent). 'none' keeps the
+  // default phase sections (NEEDS YOU -> RUNNING -> DONE). Reuses the same
+  // groupAgents() the Backlog's group control uses, so the two bars behave alike.
+  const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('none')
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
   const [rightOpen, setRightOpen] = useState(floorPrefs0.right)
@@ -633,6 +645,11 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
   const [hostInventories, setHostInventories] = useState<Record<string, HostInventory>>({})
   const [hostConfigError, setHostConfigError] = useState<string | null>(null)
+  // Curated managed projects (sidebar top-3 + Projects pane), the Linear projects
+  // available to link, and the most recent host folder-picker result (prefills the form).
+  const [managedProjects, setManagedProjects] = useState<ManagedProject[]>([])
+  const [linearProjects, setLinearProjects] = useState<LinearProjectLite[]>([])
+  const [pickedFolder, setPickedFolder] = useState<{ path: string; repoSlug?: string; name: string; suggestedLinear?: LinearProjectLite } | null>(null)
 
   // Persist the durable Floor prefs (pinned set, plain/sidebar/right toggles, group-by, host pins).
   useEffect(() => {
@@ -689,6 +706,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       } else if (msg?.type === 'localSessions') {
         const local = Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : []
         setRemoteSessions((prev) => [...prev.filter((s) => s.host !== 'this-mac'), ...local])
+      } else if (msg?.type === 'recentSessions') {
+        const rh = typeof msg.host === 'string' ? msg.host : ''
+        const recent = Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : []
+        setRecentByHost((p) => ({ ...p, [rh]: recent }))
       }
     }
     window.addEventListener('message', onMsg)
@@ -725,6 +746,32 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         setHostConfigError(null)
       } else if (msg?.type === 'hostConfigError' && typeof msg.error === 'string') {
         setHostConfigError(msg.error)
+      }
+    }
+    window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
+
+  // Managed projects + linkable Linear projects for the sidebar top-3 and the
+  // Projects pane. Fetch on mount; the host re-sends managedProjectsData after any
+  // save/delete, so no optimistic update is needed. projectFolderPicked answers the
+  // pane's Browse… button and prefills its add form.
+  useEffect(() => {
+    postMessage({ type: 'fetchManagedProjects' })
+    postMessage({ type: 'fetchLinearProjects' })
+    const onMsg = (event: MessageEvent) => {
+      const msg = event.data
+      if (msg?.type === 'managedProjectsData' && Array.isArray(msg.projects)) {
+        setManagedProjects(msg.projects as ManagedProject[])
+      } else if (msg?.type === 'linearProjectsData' && Array.isArray(msg.projects)) {
+        setLinearProjects(msg.projects as LinearProjectLite[])
+      } else if (msg?.type === 'projectFolderPicked' && typeof msg.path === 'string') {
+        setPickedFolder({
+          path: msg.path,
+          repoSlug: typeof msg.repoSlug === 'string' ? msg.repoSlug : undefined,
+          name: typeof msg.name === 'string' ? msg.name : '',
+          suggestedLinear: msg.suggestedLinear as LinearProjectLite | undefined,
+        })
       }
     }
     window.addEventListener('message', onMsg)
@@ -1370,6 +1417,19 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     return list
   }, [floorAgents, projFilter, hostFilter, statusChips, abbrChips, floorSearch])
 
+  // Empty host filter -> show that host's recent sessions instead of a blank pane.
+  // Fetch once per host (lazily), then adapt through the SAME card path as live agents.
+  const hostHasNoActive = !!hostFilter && scopedAgents.length === 0
+  useEffect(() => {
+    if (hostHasNoActive && hostFilter && recentByHost[hostFilter] === undefined) {
+      postMessage({ type: 'fetchRecentSessions', host: hostFilter })
+    }
+  }, [hostHasNoActive, hostFilter, recentByHost])
+  const recentAgents = useMemo(
+    () => (hostFilter && hostHasNoActive ? adaptRemote(recentByHost[hostFilter] ?? [], pinned, localHostName, projectRules) : []),
+    [hostFilter, hostHasNoActive, recentByHost, pinned, localHostName, projectRules]
+  )
+
   const needsAgents = useMemo(() => scopedAgents.filter((a) => a.needs), [scopedAgents])
   const waitingAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'waiting'), [needsAgents])
   const failedAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'failed'), [needsAgents])
@@ -1496,9 +1556,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     setProjFilter(value || null)
   }, [])
 
+  // Selecting an agent opens its detail rail — the SAME setRightOpen(true) that
+  // onSelectHost does. These two were the drifted pair: this one omitted it, so
+  // clicking an agent card silently did nothing (the rail only renders when
+  // rightOpen). Keep them symmetric.
   const selectFloorAgent = useCallback((id: string) => {
     setCenter('agents')
     setSelectedAgentId(id)
+    setRightOpen(true)
   }, [])
 
   // Host detail pane: clicking a host in the sidebar opens its detail/config on
@@ -1569,13 +1634,33 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'auto' }}>
             <div className="dhead" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
               <div className="title">{a.project} / {a.name}</div>
-              <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{a.branch ? ` · ${a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}</div>
-              {a.prUrl && (
-                <ExtLink href={a.prUrl} className="opt ghost" style={{ marginTop: 8, textDecoration: 'none' }}>
-                  <Icon name="chevR" size={11} /> Open PR {a.pr ?? ''} on GitHub
-                </ExtLink>
-              )}
-              {a.summary && <div className="resp" style={{ marginTop: 8 }}>{a.summary}</div>}
+              <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
+              {/* Actions: give a selected agent something to DO (issue: clicking a card
+                  offered nothing). Focus opens the session's terminal — local via the
+                  live vscode terminal, remote via an ssh + tmux-attach terminal. */}
+              <div className="opts" style={{ marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
+                {a.reply.kind === 'terminal' && a.reply.terminalId && (
+                  <button className="opt" onClick={() => postMessage({ type: 'focusTerminal', terminalId: a.reply.terminalId })}>
+                    <Icon name="chevR" size={11} /> Focus terminal
+                  </button>
+                )}
+                {a.reply.kind === 'tmux' && a.reply.muxTarget && (
+                  <button className="opt" onClick={() => postMessage({ type: 'focusRemoteSession', host: a.reply.host, muxSocket: a.reply.muxSocket, muxTarget: a.reply.muxTarget, sessionId: a.reply.sessionId, label: a.name })}>
+                    <Icon name="chevR" size={11} /> Focus in terminal
+                  </button>
+                )}
+                {a.worktreePath && (
+                  <button className="opt" onClick={() => postMessage({ type: 'revealWorktree', path: a.worktreePath, host: a.host })}>
+                    <Icon name="chevR" size={11} /> Reveal worktree
+                  </button>
+                )}
+                {a.prUrl && (
+                  <ExtLink href={a.prUrl} className="opt ghost" style={{ textDecoration: 'none' }}>
+                    <Icon name="chevR" size={11} /> Open PR {a.pr ?? ''}
+                  </ExtLink>
+                )}
+              </div>
+              {(() => { const task = sessionTaskLine(a); return task && task !== a.resp.trim() ? <div className="resp" style={{ marginTop: 8 }}>{task}</div> : null })()}
               {a.resp && a.resp !== a.summary && <div className="resp" style={{ marginTop: 8 }}>{a.resp}</div>}
               {(a.verb || a.target) && <div className="nowline" style={{ marginTop: 8 }}><Icon name="chevR" size={11} /> <span className="v">{a.verb}</span> {a.target}</div>}
             </div>
@@ -1680,7 +1765,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         </>
       )}
 
-      <div className="feed-sec">RUNNING · {runningFeed.length}<span className="ln" />
+      <div className="feed-sec">{floorGroup === 'none' ? `RUNNING · ${runningFeed.length}` : `GROUPED BY ${floorGroup.toUpperCase()} · ${runningFeed.length + doneFeed.length}`}<span className="ln" />
         <span
           className={`fresh${syncingHosts ? ' syncing' : ''}${!syncingHosts && lastRemoteSync > 0 && nowMs - lastRemoteSync > 2 * REMOTE_POLL_MS ? ' stale' : ''}`}
           title="Last cross-host sync. Click to refresh now."
@@ -1694,20 +1779,38 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               : 'not synced yet'}
         </span>
       </div>
-      {runningFeed.map((a) => (
-        <FeedItem
-          key={a.id}
-          agent={a}
-          selected={selectedFloorAgent?.id === a.id}
-          plain={plain}
-          onSelect={selectFloorAgent}
-          onOption={onAgentOption}
-          onFreeText={replyToAgent}
-          onAttach={onAttachScreenshot}
-        />
-      ))}
+      {floorGroup === 'none'
+        ? runningFeed.map((a) => (
+            <FeedItem
+              key={a.id}
+              agent={a}
+              selected={selectedFloorAgent?.id === a.id}
+              plain={plain}
+              onSelect={selectFloorAgent}
+              onOption={onAgentOption}
+              onFreeText={replyToAgent}
+              onAttach={onAttachScreenshot}
+            />
+          ))
+        : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => (
+            <React.Fragment key={k}>
+              <div className="feed-sec">{k} · {arr.length}<span className="ln" /></div>
+              {arr.map((a) => (
+                <FeedItem
+                  key={a.id}
+                  agent={a}
+                  selected={selectedFloorAgent?.id === a.id}
+                  plain={plain}
+                  onSelect={selectFloorAgent}
+                  onOption={onAgentOption}
+                  onFreeText={replyToAgent}
+                  onAttach={onAttachScreenshot}
+                />
+              ))}
+            </React.Fragment>
+          ))}
 
-      {doneFeed.length > 0 && (
+      {floorGroup === 'none' && doneFeed.length > 0 && (
         <>
           <div className="feed-sec">DONE TODAY · {doneFeed.length}<span className="ln" /></div>
           {doneFeed.map((a) => (
@@ -1724,10 +1827,40 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           ))}
         </>
       )}
+
+      {hostHasNoActive && (
+        <>
+          <div className="feed-sec">RECENT · {recentAgents.length}{hostFilter ? ` · ${hostFilter}` : ''}<span className="ln" /></div>
+          {recentAgents.length === 0 ? (
+            <div className="detail-empty" style={{ padding: '10px 16px' }}>No recent sessions for this host.</div>
+          ) : recentAgents.map((a) => (
+            <FeedItem
+              key={a.id}
+              agent={a}
+              selected={selectedFloorAgent?.id === a.id}
+              plain={plain}
+              onSelect={selectFloorAgent}
+              onOption={onAgentOption}
+              onFreeText={replyToAgent}
+              onAttach={onAttachScreenshot}
+            />
+          ))}
+        </>
+      )}
     </div>
   )
 
-  const rightContent = center === 'host'
+  const rightContent = center === 'projects'
+    ? <ProjectsPane
+        projects={managedProjects}
+        linearProjects={linearProjects}
+        pickedFolder={pickedFolder}
+        onSave={(p) => postMessage({ type: 'saveManagedProject', project: p })}
+        onDelete={(id) => postMessage({ type: 'deleteManagedProject', id })}
+        onPickFolder={() => postMessage({ type: 'pickProjectFolder' })}
+        onClose={() => setCenter('agents')}
+      />
+    : center === 'host'
     ? (selectedHostId
       ? <HostDetail
           host={selectedHostId}
@@ -1758,6 +1891,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         onTogglePlain={() => setPlain((o) => !o)}
         sort={floorSort}
         onSort={setFloorSort}
+        group={floorGroup}
+        onGroup={setFloorGroup}
         activeStatus={statusChips}
         onToggleStatus={(chip) => setStatusChips((prev) => (prev.includes(chip) ? prev.filter((c) => c !== chip) : [...prev, chip]))}
         activeAbbrs={abbrChips}
@@ -1788,6 +1923,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             selectedHost={center === 'host' ? selectedHostId : null}
             hosts={hostRoster}
             localHost={localHostName || undefined}
+            projects={managedProjects}
+            onManageProjects={() => { setCenter('projects'); setRightOpen(true) }}
           />
         )}
         <div className="feed-col">{centerContent}</div>

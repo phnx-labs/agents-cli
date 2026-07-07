@@ -112,14 +112,11 @@ export type SwarmAgentType = 'claude' | 'codex' | 'gemini';
 export const ALL_SWARM_AGENTS: SwarmAgentType[] = ['claude', 'codex', 'gemini'];
 
 // User-defined mapping from a session cwd to a Factory Floor project group.
-// Ordered: the first rule whose pattern matches a session's cwd wins. `pattern`
-// is a glob (`**` spans path separators, `*` does not) or a plain path prefix;
-// `project` is the display name cards group under. Consumed by resolveProject in
-// remoteSessions.ts (mirrored in ui/.../floorModel.ts across the webview boundary).
-export interface ProjectRule {
-  pattern: string;
-  project: string;
-}
+// Canonical definition + resolveProject live in src/shared/project.ts (imported by
+// both the host and the webview); imported for local use + re-exported so existing
+// consumers keep their `from './settings'` path.
+import type { ProjectRule } from '../shared/project';
+export type { ProjectRule };
 
 // Full agent settings structure
 export interface AgentSettings {
@@ -165,8 +162,9 @@ export interface NotificationSettings {
   enabledAgents: string[];
 }
 
-// Task source settings for multi-source Tasks tab
-export type TaskSource = 'linear' | 'github';
+// Task source settings for multi-source Tasks tab.
+// TaskSource is canonical in src/shared/tasks.ts (shared with the webview).
+export type { TaskSource } from '../shared/tasks';
 
 export interface TaskSourceSettings {
   linear: boolean;    // default: false (auto-enable if Linear MCP detected)

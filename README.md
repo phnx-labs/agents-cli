@@ -32,4 +32,4 @@ cd apps/factory && bun install && bun run compile
 ```
 
 The full contributor/design guide lives in [`apps/cli/README.md`](apps/cli/README.md) and
-[`docs/`](docs/README.md); repo memory is in [`AGENTS.md`](AGENTS.md).
+[`docs/`](apps/cli/docs/README.md); repo memory is in [`AGENTS.md`](AGENTS.md).

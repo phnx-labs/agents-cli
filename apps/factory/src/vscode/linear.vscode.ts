@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import { UnifiedTask, CycleInfo, linearToUnifiedTask, extractRepoNameFromLabels } from '../core/tasks';
+import type { LinearProjectLite } from '../core/linearProjects';
 import { getSettings, resolveGithubOwner } from './settings.vscode';
 
 const execFileAsync = promisify(execFile);
@@ -92,6 +93,30 @@ export async function fetchLinearTasks(context: vscode.ExtensionContext): Promis
   } catch (err) {
     console.error('[LINEAR] Error fetching tasks:', err);
     return { tasks: [], cycleInfo: null };
+  }
+}
+
+/**
+ * Fetch the workspace's Linear projects via `linear projects --json`. Returns a
+ * lightweight {id, name}[] to populate the add-project Linear dropdown. Degrades
+ * to [] when the CLI is missing/unavailable — the UI shows "unavailable" and the
+ * feature still works history-only.
+ */
+export async function fetchLinearProjects(context: vscode.ExtensionContext): Promise<LinearProjectLite[]> {
+  if (!(await isLinearAvailable(context))) return [];
+  try {
+    const linearPath = await findLinearCli();
+    if (!linearPath) return [];
+    const { stdout } = await execFileAsync(linearPath, ['projects', '--json'], { timeout: 15000 });
+    const parsed = JSON.parse(stdout);
+    // `linear projects --json` returns a bare array; tolerate a {projects:[...]} wrapper too.
+    const rows: any[] = Array.isArray(parsed) ? parsed : (parsed?.projects ?? []);
+    return rows
+      .filter((p) => p && typeof p.id === 'string' && typeof p.name === 'string')
+      .map((p) => ({ id: p.id, name: p.name }));
+  } catch (err) {
+    console.error('[LINEAR] Error fetching projects:', err);
+    return [];
   }
 }
 

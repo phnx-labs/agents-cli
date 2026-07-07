@@ -18,8 +18,8 @@ ENV PATH="/root/.bun/bin:$PATH"
 # Set up D-Bus and keyring for testing
 ENV DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus"
 
-WORKDIR /app
-COPY . .
+WORKDIR /app/apps/cli
+COPY . /app
 
 # Install deps and build
 RUN bun install

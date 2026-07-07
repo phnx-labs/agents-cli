@@ -1488,6 +1488,17 @@ export async function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Prefer activeTerminal (identity) over a tab-label name match: same-agent
+  // terminals share a name ("CC"), so name matching always returns the first.
+  const terminalForActiveTab = (tabLabel: string | undefined): vscode.Terminal | undefined => {
+    const active = vscode.window.activeTerminal;
+    if (active) return active;
+    if (!tabLabel) return undefined;
+    const names = vscode.window.terminals.map((t) => t.name);
+    const matchedName = findTerminalNameByTabLabel(names, tabLabel);
+    return matchedName ? vscode.window.terminals.find((t) => t.name === matchedName) : undefined;
+  };
+
   // Update status bar when active editor changes
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -1503,14 +1514,10 @@ export async function activate(context: vscode.ExtensionContext) {
         const activeTab = activeGroup?.activeTab;
 
         if (activeTab?.input instanceof vscode.TabInputTerminal) {
-          const terminalNames = vscode.window.terminals.map(t => t.name);
-          const matchedName = findTerminalNameByTabLabel(terminalNames, activeTab.label);
-          if (matchedName) {
-            const matchedTerminal = vscode.window.terminals.find(t => t.name === matchedName);
-            if (matchedTerminal) {
-              updateStatusBarForTerminal(matchedTerminal, context.extensionPath);
-              return;
-            }
+          const matchedTerminal = terminalForActiveTab(activeTab.label);
+          if (matchedTerminal) {
+            updateStatusBarForTerminal(matchedTerminal, context.extensionPath);
+            return;
           }
         }
       }
@@ -1535,10 +1542,7 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
 
-        const terminalNames = vscode.window.terminals.map(t => t.name);
-        const matchedName = findTerminalNameByTabLabel(terminalNames, activeTab.label);
-        if (!matchedName) return;
-        const matchedTerminal = vscode.window.terminals.find(t => t.name === matchedName);
+        const matchedTerminal = terminalForActiveTab(activeTab.label);
         if (!matchedTerminal) return;
 
         tryFetchLabelOnFocus(matchedTerminal, context);

@@ -15,6 +15,7 @@ import {
   PENDING_DISPATCH_TTL_MS,
   TIMED_OUT_RETENTION_MS,
   JUST_SPAWNED_WINDOW_MS,
+  resolveAutoProject,
   type PendingDispatch,
 } from './dispatch'
 
@@ -549,6 +550,39 @@ describe('isLinearSourcedTask', () => {
   test('rejects null/undefined', () => {
     expect(isLinearSourcedTask(null)).toBe(false)
     expect(isLinearSourcedTask(undefined)).toBe(false)
+  })
+})
+
+describe('resolveAutoProject', () => {
+  const projects = [
+    { id: 'web', linearProject: 'Web App', uses: 3 },
+    { id: 'api', linearProject: 'Backend', uses: 9 },
+    { id: 'infra', uses: 1 }, // unlinked project
+  ]
+
+  test('matches the target whose linearProject equals the ticket project', () => {
+    // The ticket is for "Web App" — must pick `web`, NOT the most-used `api`.
+    expect(resolveAutoProject(projects, 'Web App')).toBe('web')
+  })
+
+  test('falls back to most-used when the ticket project has no matching target', () => {
+    expect(resolveAutoProject(projects, 'Marketing')).toBe('api')
+  })
+
+  test('falls back to most-used when the ticket has no project', () => {
+    expect(resolveAutoProject(projects, undefined)).toBe('api')
+  })
+
+  test('a linked match wins even when it is the least-used project', () => {
+    const p = [
+      { id: 'busy', linearProject: 'Busy', uses: 100 },
+      { id: 'rare', linearProject: 'Rare', uses: 1 },
+    ]
+    expect(resolveAutoProject(p, 'Rare')).toBe('rare')
+  })
+
+  test('returns undefined when there are no projects', () => {
+    expect(resolveAutoProject([], 'Web App')).toBeUndefined()
   })
 })
 

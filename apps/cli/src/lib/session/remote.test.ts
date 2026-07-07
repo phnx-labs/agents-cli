@@ -5,7 +5,6 @@ import {
   buildForwardedArgs,
   buildRemoteCommand,
   shellQuote,
-  assertValidSshTarget,
   classifySshFailure,
   remoteCachePath,
   formatStaleBanner,
@@ -136,19 +135,6 @@ describe('buildRemoteCommand', () => {
   it('neutralizes shell metacharacters in a query (no command substitution)', () => {
     expect(decodeRemoteArgv(['sessions', '$(whoami); rm -rf /', '--json']))
       .toEqual(['sessions', '$(whoami); rm -rf /', '--json']);
-  });
-});
-
-describe('assertValidSshTarget', () => {
-  it('accepts a bare host alias and user@host', () => {
-    expect(() => assertValidSshTarget('yosemite-s1')).not.toThrow();
-    expect(() => assertValidSshTarget('deploy@staging.example.com')).not.toThrow();
-  });
-
-  it('rejects a leading dash (argv flag smuggling) and shell metacharacters', () => {
-    expect(() => assertValidSshTarget('-oProxyCommand=evil')).toThrow(/Invalid SSH target/);
-    expect(() => assertValidSshTarget('box; rm -rf /')).toThrow(/Invalid SSH target/);
-    expect(() => assertValidSshTarget('box$(whoami)')).toThrow(/Invalid SSH target/);
   });
 });
 

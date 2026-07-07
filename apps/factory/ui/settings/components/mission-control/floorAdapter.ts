@@ -18,6 +18,7 @@ import {
   toFloorTicket,
   latestTodos,
   resolveProject,
+  worktreeSlugOf,
   type FloorAgent,
   type FloorTicket,
   type AgentAbbr,
@@ -77,6 +78,11 @@ export interface RemoteSessionLike {
   ci?: CiStatus | null
   ticket: string | null
   branch: string
+  /** `<slug>` under `.agents/worktrees/<slug>/` — disambiguates sibling worktree
+   *  sessions and gives the card a task label when topic/preview are empty. */
+  worktreeSlug?: string
+  /** Absolute worktree path, for the Reveal-worktree action. */
+  worktreePath?: string
   sinceMs: number
   startedAtMs: number
   topic: string
@@ -268,6 +274,8 @@ export function toFloorAgentFromUnified(
     ci,
     ticket: u.linearIssue ?? null,
     branch: u.terminal?.branch ?? u.agent?.branch ?? '',
+    worktreeSlug: worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd),
+    worktreePath: worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd) ? (u.terminal?.cwd ?? u.agent?.cwd ?? '') : '',
     resp,
     question: parseStructuredQuestion(resp, phase),
     reply,
@@ -325,6 +333,8 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     ci,
     ticket: r.ticket,
     branch: r.branch,
+    worktreeSlug: r.worktreeSlug ?? worktreeSlugOf(r.cwd),
+    worktreePath: r.worktreePath ?? (worktreeSlugOf(r.cwd) ? r.cwd : ''),
     resp,
     question: parseStructuredQuestion(resp, phase),
     reply: deriveReplyTargetFromRemote(r),

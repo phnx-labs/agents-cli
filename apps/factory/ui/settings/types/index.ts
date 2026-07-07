@@ -128,41 +128,16 @@ export interface PromptEntry {
   accessedAt: number
 }
 
-// Task types
-export type TaskSource = 'linear' | 'github'
+// Task types. UnifiedTask / TaskMetadata / TaskComment / TaskSource are canonical
+// in src/shared/tasks.ts and imported here via @shared — the SAME definition the
+// extension host uses, so a field (e.g. Linear `project`) can never be present on
+// one side of the postMessage boundary and missing on the other.
+export type { TaskSource, UnifiedTask, TaskMetadata, TaskComment } from '@shared/tasks'
 
 export interface TaskSourceSettings {
   linear: boolean
   github: boolean
   githubAssignedOnly: boolean
-}
-
-export interface UnifiedTask {
-  id: string
-  source: TaskSource
-  title: string
-  description?: string
-  status: 'todo' | 'in_progress' | 'done'
-  priority?: 'urgent' | 'high' | 'medium' | 'low'
-  metadata: {
-    file?: string
-    line?: number
-    identifier?: string
-    url?: string
-    labels?: string[]
-    assignee?: string
-    state?: string
-    createdAt?: string
-    dueDate?: string
-    repo?: string
-    comments?: TaskComment[]
-  }
-}
-
-export interface TaskComment {
-  body: string
-  createdAt?: string
-  author?: string
 }
 
 export interface CycleInfo {
@@ -191,12 +166,11 @@ export interface NotificationSettings {
   enabledAgents: string[]
 }
 
-// Ordered cwd->project mapping for Factory Floor grouping. Mirror of
-// src/core/settings.ts ProjectRule (hand-kept; crosses the postMessage boundary).
-export interface ProjectRule {
-  pattern: string
-  project: string
-}
+// Ordered cwd->project mapping for Factory Floor grouping.
+// Canonical in src/shared/project.ts (shared with the host via @shared) — imported
+// for local use (AgentSettings.projectRules below) + re-exported for consumers.
+import type { ProjectRule } from '@shared/project'
+export type { ProjectRule }
 
 export interface AgentSettings {
   builtIn: {

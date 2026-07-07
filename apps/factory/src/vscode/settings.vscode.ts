@@ -26,7 +26,18 @@ import {
   mapInventoriesToInstalledAgents,
   buildDispatchHosts,
   rankTargets,
+  buildManagedTargets,
 } from '../core/dispatchRanking';
+import {
+  readManagedProjects,
+  upsertManagedProject,
+  deleteManagedProject,
+  projectNameFromPath,
+  type ManagedProject,
+} from '../core/managedProjects';
+import { repoSlugFromPath } from '../core/projectIndex';
+import { matchLinearProject } from '../core/linearProjects';
+import { fetchLinearProjects } from './linear.vscode';
 import { resolveForemanTarget, candidateName } from '../core/foreman.target';
 import { parseEvents } from '../core/watchdogLog';
 import {
@@ -1690,11 +1701,70 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           // status) — keeping remotes out of here avoids a duplicate, stale,
           // all-offline host roster.
           const hosts = buildDispatchHosts(hostResult.hosts, LOCAL_LABEL).filter((h) => h.kind !== 'remote');
-          const targets = rankTargets(hostResult.sessions);
+          // Targets come from the CURATED managed-projects list (enriched with live
+          // session `uses` + confidence + linked Linear name), so the dropdown shows
+          // real repos even with nothing running. Falls back to session-derived
+          // ranking only if the managed list is empty (e.g. detection produced none).
+          const managed = await readManagedProjects();
+          const targets = managed.length
+            ? buildManagedTargets(managed, hostResult.sessions)
+            : rankTargets(hostResult.sessions);
           settingsPanel?.webview.postMessage({ type: 'dispatchData', agents, hosts, targets });
         } catch (err) {
           console.error('[SETTINGS] Error fetching dispatch data:', err);
           settingsPanel?.webview.postMessage({ type: 'dispatchData', agents: [], hosts: [], targets: [] });
+        }
+        break;
+      }
+      // ---- managed projects (curated sidebar/dispatch list) ----
+      case 'fetchManagedProjects': {
+        const projects = await readManagedProjects();
+        settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        break;
+      }
+      case 'fetchLinearProjects': {
+        const projects = await fetchLinearProjects(context);
+        settingsPanel?.webview.postMessage({ type: 'linearProjectsData', projects });
+        break;
+      }
+      case 'saveManagedProject': {
+        const p = message?.project as ManagedProject | undefined;
+        if (p && typeof p.id === 'string' && typeof p.name === 'string' && typeof p.path === 'string') {
+          const projects = await upsertManagedProject(p);
+          settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        }
+        break;
+      }
+      case 'deleteManagedProject': {
+        const id = message?.id;
+        if (typeof id === 'string') {
+          const projects = await deleteManagedProject(id);
+          settingsPanel?.webview.postMessage({ type: 'managedProjectsData', projects });
+        }
+        break;
+      }
+      case 'pickProjectFolder': {
+        // Native folder picker → derive slug + name + suggest a Linear match by
+        // normalized name, so the add-project form pre-fills.
+        const picked = await vscode.window.showOpenDialog({
+          canSelectFolders: true,
+          canSelectFiles: false,
+          canSelectMany: false,
+          openLabel: 'Add project',
+        });
+        const folder = picked?.[0]?.fsPath;
+        if (folder) {
+          const repoSlug = repoSlugFromPath(folder);
+          const name = projectNameFromPath(folder);
+          const linearProjects = await fetchLinearProjects(context);
+          const suggestedLinear = matchLinearProject(repoSlug ?? name, linearProjects);
+          settingsPanel?.webview.postMessage({
+            type: 'projectFolderPicked',
+            path: folder,
+            repoSlug,
+            name,
+            suggestedLinear,
+          });
         }
         break;
       }
@@ -1939,6 +2009,25 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           });
         } catch (err) {
           console.error('[SETTINGS] Error fetching local sessions:', err);
+        }
+        break;
+      }
+      case 'fetchRecentSessions': {
+        // Lazy: the Floor asks for a host's RECENT (historical) sessions only when that
+        // host has 0 live agents, so an empty host filter shows recent work instead of a
+        // blank pane. Rides its own 'recentSessions' message, keyed by host.
+        const recentHost = typeof message.host === 'string' ? message.host : '';
+        try {
+          if (!recentHost) break;
+          const { fetchRecentForHost, LOCAL_LABEL } = await import('./remoteSessions.vscode');
+          const isLocal = recentHost === 'this-mac' || recentHost === LOCAL_LABEL;
+          const sessions = await fetchRecentForHost(
+            recentHost, isLocal, recentHost, 12, getSettings(context).projectRules ?? [],
+          );
+          settingsPanel?.webview.postMessage({ type: 'recentSessions', host: recentHost, sessions });
+        } catch (err) {
+          console.error('[SETTINGS] Error fetching recent sessions:', err);
+          settingsPanel?.webview.postMessage({ type: 'recentSessions', host: recentHost, sessions: [] });
         }
         break;
       }
@@ -2670,6 +2759,36 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
       case 'focusTerminal': {
         const entry = terminals.getById(message.terminalId);
         entry?.terminal.show(false);
+        break;
+      }
+      case 'focusRemoteSession': {
+        // Open a terminal attached to a remote (or local-but-tabless) agent's tmux
+        // session, so a cross-host card can be "focused in a new terminal" the same
+        // way a local tab can. Reuses the tmux socket the reply channel already knows
+        // (ReplyTarget.muxSocket); ssh -t for a remote host, direct tmux locally.
+        const host = typeof message.host === 'string' && message.host !== 'this-mac' ? message.host : '';
+        const socket = typeof message.muxSocket === 'string' ? message.muxSocket : '';
+        const label = typeof message.label === 'string' && message.label ? message.label : 'session';
+        if (!socket) { break; }
+        const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+        const attach = `tmux -S ${shq(socket)} attach`;
+        const cmd = host ? `ssh -t ${shq(host)} ${shq(attach)}` : attach;
+        const term = vscode.window.createTerminal({ name: `attach ${label}` });
+        term.sendText(cmd, true);
+        term.show(false);
+        break;
+      }
+      case 'revealWorktree': {
+        // Reveal a local worktree in the Explorer; a remote worktree can't be shown in
+        // this window's file tree, so copy its path (silent, no toast).
+        const p = typeof message.path === 'string' ? message.path : '';
+        const host = typeof message.host === 'string' && message.host !== 'this-mac' ? message.host : '';
+        if (!p) { break; }
+        if (host) {
+          await vscode.env.clipboard.writeText(p);
+        } else {
+          await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(p));
+        }
         break;
       }
       case 'focusRushCloudTerminal': {
