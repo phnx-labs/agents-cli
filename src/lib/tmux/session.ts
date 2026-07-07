@@ -204,6 +204,35 @@ export async function killAll(socket?: string): Promise<number> {
 }
 
 /**
+ * Map every pane id (`%N`) on a socket to its `session:window.pane` attach
+ * target, in one batched `tmux list-panes -a` call. `%116 -> main:2.0` is a
+ * valid `tmux attach -t main:2` / `tmux select-window -t main:2` target — a
+ * human jump target, unlike the bare `%pane` send-keys id. Because it walks
+ * every pane (not just one-per-session), it also surfaces multiple agents that
+ * share a session across windows. Best-effort: returns an empty map on any
+ * failure (tmux gone, foreign socket) so callers fall back to the raw pane id.
+ */
+export async function mapPanesToTargets(socket?: string): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  let res;
+  try {
+    res = await runTmux({
+      socket,
+      args: ['list-panes', '-a', '-F', '#{pane_id} #{session_name}:#{window_index}.#{pane_index}'],
+      throwOnError: false,
+    });
+  } catch {
+    return out;
+  }
+  if (res.code !== 0) return out;
+  for (const line of res.stdout.split('\n')) {
+    const sp = line.indexOf(' ');
+    if (sp > 0) out.set(line.slice(0, sp), line.slice(sp + 1).trim());
+  }
+  return out;
+}
+
+/**
  * List live sessions on the socket. Reconciles meta JSONs against tmux's view:
  *  - tmux session with no meta → returned without `meta` (external session)
  *  - meta file with no tmux session → meta deleted (stale)

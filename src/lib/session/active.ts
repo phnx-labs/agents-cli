@@ -104,6 +104,24 @@ export interface ActiveSession {
    * two windows have the same cwd open. Only populated for `terminal` context.
    */
   windowId?: string;
+  /**
+   * Controlling TTY of the agent process (e.g. 'ttys003'), from the `ps -A`
+   * read. macOS/Linux terminal sessions only; '??'/none normalized to undefined.
+   * A disambiguation bridge (and the basis for future terminal addressing).
+   */
+  tty?: string;
+  /**
+   * Ghostty tab index (1-based) the session is shown in, when it can be matched
+   * to a Ghostty surface by working directory (+ title). Transient, populated by
+   * the renderer just before printing — NOT part of the pure discovery path.
+   */
+  ghosttyTab?: number;
+  /**
+   * Resolved tmux attach target (`session:window.pane`) for a tmux-hosted local
+   * session, from the pane id via `mapPanesToTargets`. Transient, renderer-set
+   * (after the --json/--waiting gates) — NOT emitted on the discovery path.
+   */
+  tmuxTarget?: string;
 }
 
 export interface ActiveQueryOptions {
@@ -415,6 +433,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       context: 'terminal',
       kind: t.kind,
       host: detectHost(t.pid, procByPid),
+      tty: procByPid.get(t.pid)?.tty,
       pid: t.pid,
       sessionId: t.sessionId ?? sessionIdFromFile(sessionFile),
       cwd: t.cwd ?? undefined,
@@ -451,7 +470,7 @@ export function listCloudActive(): ActiveSession[] {
   }));
 }
 
-interface ProcRow { pid: number; ppid: number; comm: string; kind?: string; }
+interface ProcRow { pid: number; ppid: number; tty?: string; comm: string; kind?: string; }
 
 /**
  * Ordered ancestor-process matchers. First match wins (most specific to least),
@@ -488,19 +507,23 @@ async function readProcessTable(): Promise<ProcRow[]> {
   if (process.platform === 'win32') return readProcessTableWin32();
   let out: string;
   try {
-    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
+    ({ stdout: out } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=,tty=,comm='], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }));
   } catch {
     return [];
   }
   const rows: ProcRow[] = [];
   for (const line of out.split('\n')) {
-    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+    // pid ppid tty comm — tty is a single token ('ttys003', 's003', or '??'/'?'
+    // for none); comm stays last so it may contain spaces.
+    const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
     if (!m) continue;
     const pid = parseInt(m[1], 10);
     const ppid = parseInt(m[2], 10);
     if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
-    const commRaw = m[3].trim();
-    rows.push({ pid, ppid, comm: commRaw, kind: agentKindFromComm(commRaw) });
+    const ttyRaw = m[3];
+    const tty = ttyRaw === '??' || ttyRaw === '?' || ttyRaw === '-' ? undefined : ttyRaw;
+    const commRaw = m[4].trim();
+    rows.push({ pid, ppid, tty, comm: commRaw, kind: agentKindFromComm(commRaw) });
   }
   return rows;
 }
@@ -774,6 +797,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       context,
       kind,
       host,
+      tty: procByPid.get(pid)?.tty,
       pid,
       cwd,
       sessionId: entry?.sessionId ?? sessionIdFromFile(sessionFile),
