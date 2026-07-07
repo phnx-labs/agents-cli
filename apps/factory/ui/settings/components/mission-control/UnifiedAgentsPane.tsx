@@ -1637,7 +1637,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
               {/* Actions: give a selected agent something to DO (issue: clicking a card
                   offered nothing). Focus opens the session's terminal — local via the
-                  live vscode terminal, remote via an ssh + tmux-attach terminal. */}
+                  live vscode terminal, remote via an ssh + tmux-attach terminal.
+                  Headless (background) runs have no reply terminal/tmux, so they get a
+                  dedicated Focus (attach a fresh terminal via `agents sessions focus`)
+                  plus a Stop that kills the run's pid. */}
               <div className="opts" style={{ marginTop: 8, flexWrap: 'wrap', gap: 6 }}>
                 {a.reply.kind === 'terminal' && a.reply.terminalId && (
                   <button className="opt" onClick={() => postMessage({ type: 'focusTerminal', terminalId: a.reply.terminalId })}>
@@ -1649,6 +1652,16 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                     <Icon name="chevR" size={11} /> Focus in terminal
                   </button>
                 )}
+                {a.context === 'headless' && a.sessionId && (
+                  <button className="opt" onClick={() => postMessage({ type: 'focusSession', sessionId: a.sessionId!, host: a.host })}>
+                    <Icon name="chevR" size={11} /> Focus
+                  </button>
+                )}
+                {a.context === 'headless' && a.pid ? (
+                  <button className="opt ghost" onClick={() => postMessage({ type: 'stopSession', sessionId: a.sessionId!, pid: a.pid })}>
+                    Stop
+                  </button>
+                ) : null}
                 {a.worktreePath && (
                   <button className="opt" onClick={() => postMessage({ type: 'revealWorktree', path: a.worktreePath, host: a.host })}>
                     <Icon name="chevR" size={11} /> Reveal worktree
