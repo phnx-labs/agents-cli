@@ -8,6 +8,7 @@ const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\bsk-[A-Za-z0-9]{20,}\b/g, '[REDACTED_API_KEY]'],
   [/\bnpm_[A-Za-z0-9]{36}\b/g, '[REDACTED_NPM_TOKEN]'],
   [/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, '[REDACTED_JWT]'],
+  [/Bearer\s+\S+/gi, 'Bearer [REDACTED]'],
   [/\b([A-Z0-9_]*(?:TOKEN|KEY|SECRET|PASSWORD)[A-Z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi, '$1=[REDACTED]'],
 ];
 

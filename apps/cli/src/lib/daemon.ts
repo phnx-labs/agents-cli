@@ -20,6 +20,7 @@ import { detectOverdueJobs, notifyOverdue } from './overdue.js';
 import { BrowserService } from './browser/service.js';
 import { BrowserIPCServer } from './browser/ipc.js';
 import { readAndResolveBundleEnv } from './secrets/bundles.js';
+import { redactSecrets } from './redact.js';
 
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
@@ -206,16 +207,6 @@ export function reapStrayDaemons(keepPid: number = process.pid): { reaped: numbe
     } catch { /* already gone */ }
   }
   return { reaped, details };
-}
-
-/** Redact values that look like tokens or credentials in a log message. */
-function redactSecrets(message: string): string {
-  let safe = message;
-  safe = safe.replace(/eyJ[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]');
-  safe = safe.replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
-  safe = safe.replace(/(sk-[a-zA-Z0-9]{20,})/g, '[REDACTED_KEY]');
-  safe = safe.replace(/(ANTHROPIC_API_KEY|OPENAI_API_KEY|API_KEY|SECRET|TOKEN|PASSWORD)=\S+/gi, '$1=[REDACTED]');
-  return safe;
 }
 
 function rotateLogsIfNeeded(logPath: string): void {
