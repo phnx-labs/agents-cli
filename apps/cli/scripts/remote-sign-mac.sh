@@ -104,6 +104,10 @@ agents secrets exec apple.com -- bash -c '
   set -euo pipefail
   echo "== menu-bar helper: swift build + codesign =="
   menubar/scripts/build.sh release
+  # rm -rf first so a re-run does not nest the new .app INSIDE a stale
+  # bin/MenubarHelper.app (cp -R into an existing dir), which corrupts the
+  # signature ("unsealed contents present in the bundle root").
+  rm -rf bin/MenubarHelper.app
   cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
   codesign --verify --deep --strict "bin/MenubarHelper.app"
   echo "== keychain helper: swiftc + codesign + notarize =="
