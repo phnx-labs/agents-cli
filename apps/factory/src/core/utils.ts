@@ -316,6 +316,36 @@ export function formatTerminalTitle(prefix: string, options?: TerminalTitleOptio
   return `${base} - ${label}`;
 }
 
+/** Max characters of the session label shown in a tmux pane border before we ellipsize. */
+export const PANE_BORDER_LABEL_MAX = 48;
+
+/**
+ * Build the text shown inside a tmux pane border (the ` #{pane_index}: <text> `
+ * label). Mirrors the VS Code tab: bare agent code (e.g. "CC") until a session
+ * label resolves, then "CC - <topic>". The label arrives asynchronously (the
+ * auto-label poller / focus fetch), so this is re-run live whenever it changes.
+ *
+ * The result is embedded in a tmux `pane-border-format`, which re-expands
+ * `#{...}` / `#[...]` sequences and treats a lone `#` as an escape — so any `#`
+ * in the label is doubled to render literally, and newlines are flattened.
+ */
+export function paneBorderText(
+  name: string,
+  label?: string | null,
+  maxLabelLen: number = PANE_BORDER_LABEL_MAX
+): string {
+  const clean = (label ?? '')
+    .replace(/<[^>]*>/g, '')      // drop any stray markup, matching formatTerminalTitle
+    .replace(/[\r\n]+/g, ' ')     // flatten newlines — a border is a single line
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return name;
+  const clipped =
+    clean.length > maxLabelLen ? `${clean.slice(0, maxLabelLen - 1).trimEnd()}…` : clean;
+  // Double `#` last so the ellipsis/slice math above operates on the visible text.
+  return `${name} - ${clipped}`.replace(/#/g, '##');
+}
+
 export interface TerminalDisplayInfo {
   isAgent: boolean;
   prefix: string | null;

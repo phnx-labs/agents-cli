@@ -8,6 +8,8 @@ import {
   getTerminalDisplayInfo,
   findTerminalNameByTabLabel,
   formatTerminalTitle,
+  paneBorderText,
+  PANE_BORDER_LABEL_MAX,
   getSessionChunk,
   extractFirstNWords,
   extractLinearTicketId,
@@ -630,6 +632,48 @@ describe('formatTerminalTitle', () => {
       display: { showFullAgentNames: true, showLabelsInTitles: true, showSessionIdInTitles: false, labelReplacesTitle: true, showLabelOnlyOnFocus: true },
       isFocused: false
     })).toBe('Claude');
+  });
+});
+
+describe('paneBorderText', () => {
+  test('returns the bare agent code when there is no label', () => {
+    expect(paneBorderText('CC')).toBe('CC');
+    expect(paneBorderText('CC', undefined)).toBe('CC');
+    expect(paneBorderText('CC', null)).toBe('CC');
+    expect(paneBorderText('CC', '')).toBe('CC');
+    expect(paneBorderText('CC', '   ')).toBe('CC');
+  });
+
+  test('appends the resolved label like the VS Code tab', () => {
+    expect(paneBorderText('CC', 'Incomplete refactor upgrades audit'))
+      .toBe('CC - Incomplete refactor upgrades audit');
+  });
+
+  test('flattens newlines and collapses whitespace', () => {
+    expect(paneBorderText('CX', 'fix\n the  daemon\trace')).toBe('CX - fix the daemon race');
+  });
+
+  test('strips stray markup, matching formatTerminalTitle', () => {
+    expect(paneBorderText('CC', 'wire <b>the</b> label')).toBe('CC - wire the label');
+  });
+
+  test('ellipsizes labels longer than the cap', () => {
+    const long = 'a'.repeat(PANE_BORDER_LABEL_MAX + 20);
+    const out = paneBorderText('CC', long);
+    // "CC - " + PANE_BORDER_LABEL_MAX chars (last char is the … ellipsis).
+    expect(out.startsWith('CC - ')).toBe(true);
+    expect(out.endsWith('…')).toBe(true);
+    expect(out.length).toBe('CC - '.length + PANE_BORDER_LABEL_MAX);
+  });
+
+  test('does not ellipsize a label exactly at the cap', () => {
+    const exact = 'b'.repeat(PANE_BORDER_LABEL_MAX);
+    expect(paneBorderText('CC', exact)).toBe(`CC - ${exact}`);
+  });
+
+  test('doubles a literal # so tmux renders it instead of treating it as an escape', () => {
+    // GitHub-style ref keeps its # visually via tmux ## escaping.
+    expect(paneBorderText('CC', 'land PR #758')).toBe('CC - land PR ##758');
   });
 });
 

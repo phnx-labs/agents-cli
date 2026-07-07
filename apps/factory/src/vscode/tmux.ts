@@ -18,6 +18,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as readiness from './terminalReadiness';
 import { runAgents } from '../core/agentsBin';
+import { paneBorderText } from '../core/utils';
 
 const pexecFile = promisify(execFile);
 
@@ -28,6 +29,9 @@ interface TmuxTerminal {
   agentType: string;
   paneCount: number;
   pane?: string;   // Cached `%N` pane id, resolved lazily by getTmuxInfo.
+  borderName: string;   // Static agent code shown in the pane border (e.g. "CC"); the
+                        // session label is appended once it resolves (relabelTmuxPane).
+  borderLabel?: string; // Last label rendered into the border — skip redundant re-sets.
 }
 
 const tmuxTerminals = new Map<vscode.Terminal, TmuxTerminal>();
@@ -136,7 +140,7 @@ export function createTmuxTerminal(
   const styling = [
     `tmux -S ${shq(socket)} set-option -t ${shq(session)} mouse on`,
     `set-option -t ${shq(session)} pane-border-status top`,
-    `set-option -t ${shq(session)} pane-border-format ${shq(` #{pane_index}: ${name} `)}`,
+    `set-option -t ${shq(session)} pane-border-format ${shq(` #{pane_index}: ${paneBorderText(name)} `)}`,
   ].join(' \\; ');
   parts.push(`{ ${styling} || true; }`);
 
@@ -159,9 +163,63 @@ export function createTmuxTerminal(
     socket,
     agentType,
     paneCount: 1,
+    borderName: name,
   });
 
   return terminal;
+}
+
+/**
+ * Re-render an already-created tmux terminal's pane border to carry the
+ * session's resolved auto-label. The border is seeded at creation with the bare
+ * agent code (e.g. "CC"); the label pipeline (auto-label poller / focus fetch /
+ * manual rename) resolves the topic seconds later, and this swaps it in live —
+ * mirroring the VS Code tab ("CC - Incomplete refactor upgrades audit").
+ *
+ * Runs off the shared socket from the extension host (which may not have tmux
+ * on PATH — see hostTmux). No-op for non-tmux terminals, and idempotent: a
+ * repeat call with the same label is skipped. Fire-and-forget by contract — a
+ * styling failure must never disrupt the live agent session.
+ */
+export async function relabelTmuxPane(
+  terminal: vscode.Terminal,
+  label: string | undefined,
+): Promise<void> {
+  const state = tmuxTerminals.get(terminal);
+  if (!state) return;
+  const next = label?.trim() || undefined;
+  if (state.borderLabel === next) return;  // already showing this label
+  state.borderLabel = next;
+  const format = ` #{pane_index}: ${paneBorderText(state.borderName, next)} `;
+  await hostTmux(state.socket, [
+    'set-option', '-t', state.session, 'pane-border-format', format,
+  ]);
+}
+
+// Candidate tmux binary locations. The extension host often lacks tmux on its
+// own PATH (the terminal's login shell is what runs the CLI), so we probe the
+// common Homebrew/system spots the same way for every host-side tmux call.
+const TMUX_BIN_CANDIDATES = ['tmux', '/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'] as const;
+
+/**
+ * Run a tmux command on the shared socket from the extension host, trying each
+ * candidate binary until one exists. Returns stdout on success, or undefined if
+ * no tmux binary was found or the command errored — callers treat tmux styling
+ * as best-effort, never load-bearing.
+ */
+async function hostTmux(socket: string, args: string[]): Promise<string | undefined> {
+  for (const bin of TMUX_BIN_CANDIDATES) {
+    try {
+      const { stdout } = await pexecFile(bin, ['-S', socket, ...args], { timeout: 3_000 });
+      return stdout;
+    } catch (err) {
+      // ENOENT → this binary path doesn't exist; try the next candidate.
+      // Any other error → tmux ran but the command failed; don't keep probing.
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -221,22 +279,9 @@ export function getTmuxState(terminal: vscode.Terminal): TmuxTerminal | undefine
  * the first line.
  */
 async function readPaneId(socket: string, session: string): Promise<string | undefined> {
-  const candidates = ['tmux', '/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'];
-  for (const bin of candidates) {
-    try {
-      const { stdout } = await pexecFile(
-        bin,
-        ['-S', socket, 'list-panes', '-t', session, '-F', '#{pane_id}'],
-        { timeout: 3_000 },
-      );
-      const pane = stdout.split('\n').map((s) => s.trim()).filter(Boolean)[0];
-      if (pane) return pane;
-      return undefined; // tmux ran but reported no pane — don't try other bins
-    } catch {
-      /* binary missing at this path — try the next candidate */
-    }
-  }
-  return undefined;
+  const stdout = await hostTmux(socket, ['list-panes', '-t', session, '-F', '#{pane_id}']);
+  if (stdout === undefined) return undefined;
+  return stdout.split('\n').map((s) => s.trim()).filter(Boolean)[0];
 }
 
 /**
