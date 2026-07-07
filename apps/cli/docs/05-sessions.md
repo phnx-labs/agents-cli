@@ -61,6 +61,7 @@ active sessions get refreshed each call because their mtime keeps advancing.
   "gitBranch": "main",
   "topic": "We integrated gpt-image-2 with quality-tiered pricing. Check the image-studio agent",
   "label": null,
+  "name": null,
   "messageCount": 9,
   "tokenCount": 537397,
   "costUsd": 2.81,
@@ -83,6 +84,7 @@ Fields:
 | `gitBranch` | Recorded at spawn | `null` outside a repo |
 | `topic` | First user prompt (truncated) | Best headline for a session |
 | `label` | User-set name | Claude's `/rename` command only |
+| `name` | `agents run --name <slug>` at launch | Durable run handle; `agents sessions <ref>` resolves against both `name` and `label`. `null` when the run wasn't named. |
 | `tokenCount` | Parsed from usage events | `null` for agents that don't log it |
 | `costUsd` | Σ tokens × per-model price, at scan time | `null` when the model is unknown/unpriced; see `agents cost` |
 | `durationMs` | `lastTs − firstTs` over timestamped events | `null` for single-event sessions |

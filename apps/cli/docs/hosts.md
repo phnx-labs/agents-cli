@@ -220,6 +220,12 @@ agents run <agent> "<task>" --host <host>
 > `agents logs [id]` (which also resolves session transcripts). Host runs are
 > tracked in a **local** task store, not `agents cloud` (a separate subsystem for
 > Rush/Codex/Factory backends).
+>
+> Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
+> opaque id: `agents hosts ps` shows it under a **NAME** column, and
+> `agents hosts logs <name>` resolves by name (case-insensitive, newest-wins).
+> Omitting `--name` is a no-op — unnamed runs stay id-only and render `-` in the
+> NAME column.
 
 ### Host sources — owned (registered) + leased on demand (crabbox)
 

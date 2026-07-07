@@ -59,4 +59,17 @@ describe('run-name resolution in the session index', () => {
     // A content/name search for a non-existent handle finds nothing spurious.
     expect(ftsSearch('run-plain').some(h => h.score >= 800_000)).toBe(false);
   });
+
+  it('a discovery rescan never nulls an existing name', () => {
+    // Load-bearing invariant: `name` is in the INSERT column list but deliberately
+    // absent from the ON CONFLICT(id) DO UPDATE SET clause, so a later discovery
+    // re-upsert (which carries no name) must PRESERVE the name already on the row.
+    // If someone adds `name = excluded.name` to the SET clause this test fails.
+    upsertSession(meta('run-persist', { name: 'keep-me' }), '');
+    expect(getSessionById('run-persist')?.name).toBe('keep-me');
+    // Re-upsert the same id as a bare rescan would — no name field.
+    upsertSession(meta('run-persist'), 'rescanned preview');
+    expect(getSessionById('run-persist')?.name).toBe('keep-me');
+    expect(ftsSearch('keep-me')[0]?.sessionId).toBe('run-persist');
+  });
 });
