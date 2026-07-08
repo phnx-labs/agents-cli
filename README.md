@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agents-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagents--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**The missing toolchain for CLI coding agents.** Run any agent on your existing subscription. Spawn parallel teams in isolated terminals. Schedule routines, drive browsers and Electron apps, and store secrets behind Touch ID — all from one CLI.
+**The missing toolchain for CLI coding agents.** Run any agent on your existing subscription. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Schedule routines, drive browsers and Electron apps, store secrets behind Touch ID, and file tickets from a menu-bar bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -51,14 +51,17 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [One config, every agent](#one-config-every-agent)
 - [Run any agent](#run-any-agent)
 - [Sessions across agents](#sessions-across-agents)
+- [Control the fleet](#control-the-fleet)
 - [Run open models through Claude Code](#run-open-models-through-claude-code)
 - [Teams](#teams)
+- [Cloud](#cloud)
 - [Workflows](#workflows)
 - [Browser](#browser)
 - [Secrets](#secrets)
 - [Routines](#routines)
 - [PTY](#pty)
 - [Portable setup](#portable-setup)
+- [Menu bar](#menu-bar)
 - [Private skills](#private-skills)
 - [Security & Privacy](#security--privacy)
 - [Compatibility](#compatibility)
@@ -190,6 +193,61 @@ Interactive picker when you're in a terminal. Structured output (`--json`, `--ma
 
 Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. External tools can consume `--json` output as a programmatic observability layer; see [docs/05-sessions.md](apps/cli/docs/05-sessions.md) for the schema and [docs/06-observability.md](apps/cli/docs/06-observability.md) for the consumption patterns.
 
+### Live state, and catching up fast
+
+Search is the past tense. `--active` is the present -- it infers what each running session is *doing right now* from the tail of its transcript.
+
+```bash
+agents sessions --active            # every live run across the fleet, with state
+agents sessions focus a1b2c3d4      # jump back into one — attach in place, or resume
+```
+
+Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), or `idle`, alongside badges for the PR it opened, the worktree it sits in, and the ticket it's working. `agents sessions focus [id]` attaches the live pane in place -- the tmux split locally or over SSH, or its Ghostty tab -- and falls back to a fresh tab + resume when the terminal is gone.
+
+Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work, and the last test verdict -- the signals to reload a task in seconds.
+
+### Resume anywhere — and stay resumed
+
+Pick up any past conversation and drop it back into a terminal:
+
+```bash
+agents sessions resume                     # multi-select; packs two sessions per tab
+agents sessions resume "auth middleware"   # pre-filter the pool, then choose
+agents sessions resume --tmux              # into persistent tmux — survives editor restarts
+agents sessions resume --host zion --tmux  # resume on another machine over SSH
+```
+
+`agents sessions resume` reopens sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
+
+---
+
+## Control the fleet
+
+Running agents aren't fire-and-forget. Steer them mid-run without opening their terminals.
+
+<p align="center">
+  <img src="assets/fleet-control.svg" alt="agents sessions infers live state (working, waiting, idle); watchdog injects Continue into the exact stalled split; message reaches a running agent at its next tool call" width="100%" />
+</p>
+
+### Message a running agent
+
+```bash
+# Delivered at the agent's next tool call — no restart, no lost context.
+agents message tester "also cover the null case"
+```
+
+`agents message <target> <text>` reaches any running agent by name or id -- a live local run, a teammate, a loop agent, or a cloud task -- and the text lands at its next tool call. Tag the sender with `--from <who>`.
+
+### Auto-nudge stalls
+
+```bash
+agents watchdog            # one tick, dry run — reports what it WOULD nudge and why
+agents watchdog --nudge    # actually inject "Continue." into the stalled split
+agents watchdog --watch    # daemon loop: a tick every --interval
+```
+
+`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick, and `agents watchdog enable` flips global auto-nudge on so `--watch` injects on its own. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+
 ---
 
 ## Run open models through Claude Code (experimental)
@@ -242,7 +300,8 @@ agents hosts add gpu-box
 agents hosts check gpu-box              # reachable? which agents-cli version?
 
 # Run there instead of locally
-agents run claude --host gpu-box "profile this build"   # follows live by default
+agents run claude --host gpu-box "profile this build"   # headless: follows live by default
+agents run claude --host gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
 agents logs --host gpu-box              # pick a dispatched run — concise summary by default
 agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
 agents logs <id> -f                     # re-attach to a running one and follow
@@ -278,6 +337,38 @@ agents teams status auth-feature    # Who's working, what they changed, what the
 Teammates run detached -- close your terminal, they keep working. Check in with `teams status`, glance at a teammate's summary with `teams logs <name>` (add `--full` for the raw output), clean up with `teams disband`.
 
 Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/06-observability.md](apps/cli/docs/06-observability.md).
+
+---
+
+## Cloud
+
+Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free.
+
+<p align="center">
+  <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Factory, or Antigravity) that clones, plans, tests, and opens a pull request while you keep working" width="100%" />
+</p>
+
+```bash
+# Dispatch and detach — streams to the cloud, not your terminal.
+agents cloud run "fix the flaky test in the payments suite" \
+  --provider rush --repo acme/api --branch main
+
+agents cloud list                                      # what's running, queued, or needs review
+agents cloud logs <id>                                 # re-attach and stream
+agents cloud message <id> "also update the changelog"  # steer it mid-run
+agents cloud cancel <id>
+```
+
+Four managed backends behind one interface (`agents cloud providers`):
+
+| Provider | What runs | Notes |
+|---|---|---|
+| `rush` | Claude against a GitHub repo + branch | Opens a PR. Multi-repo via repeatable `--repo`; attach screenshots with `--image` for vision dispatch. |
+| `codex` | A pre-built Codex Cloud environment | Target it with `--env`. |
+| `factory` | `droid exec` on a cloud VM | Computer-use; pick the box with `--computer`. |
+| `antigravity` | Gemini managed agents | Antigravity harness in a remote sandbox. |
+
+Auto-routes each `--agent` to its native cloud, or pin the backend with `--provider`. Instead of dispatching now, register a run as an **event trigger** with `--on pull_request` (also `push`, `issue_comment`, `workflow_run`) -- it persists as a trigger-bound routine that fires on the event. `--json` on every subcommand for scripting.
 
 ---
 
@@ -585,6 +676,27 @@ Two repos with the same shape, different roles:
 See [docs/00-concepts.md](apps/cli/docs/00-concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
 Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents usage` shows available quota/rate-limit data for installed agents, `agents budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/06-observability.md](apps/cli/docs/06-observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+
+---
+
+## Menu bar
+
+On macOS, `agents-cli` puts a status item in your menu bar -- a live glance at what your agents are doing, plus a Spotlight-style bar for filing work without breaking focus.
+
+```bash
+agents menubar enable      # install + launch at login
+agents menubar status      # is it installed and running?
+```
+
+The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a plan review, or a permission prompt), the running roster, and a routines summary -- the same live state as `agents sessions --active`, one click away.
+
+### Quick-issue bar (⌘⇧O)
+
+Press `Cmd-Shift-O` anywhere for a thin capture surface: type a one-line note, `Cmd-V` to paste, and attach one or more recent screenshots (double-click a thumbnail to preview it in full). Submit, and a headless agent picks the right project from your recent sessions, investigates, and files the Linear ticket itself -- you never leave what you were doing.
+
+<p align="center">
+  <img src="assets/menubar-quickissue.svg" alt="The Cmd-Shift-O quick-issue bar: a one-line note with attached screenshot thumbnails that a headless agent turns into a filed Linear ticket" width="100%" />
+</p>
 
 ---
 
