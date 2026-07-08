@@ -59,6 +59,35 @@ export function extractRepoNameFromLabels(labels: string[] | undefined): string 
   return null;
 }
 
+// Markdown image: ![alt](url) or ![alt](url "title")
+const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\(\s*([^)\s]+)(?:\s+["'][^"']*["'])?\s*\)/g;
+// HTML image: <img src="url"> / <img src='url'>
+const HTML_IMAGE_RE = /<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi;
+
+// Extract embedded image URLs from a markdown/HTML body. Pure. Returns deduped,
+// order-preserving http(s) URLs only. Linear uploads and GitHub issue images both
+// embed as markdown `![](…)` or raw `<img>` in the body, so scanning the body is
+// the source of image URLs available at fetch time.
+export function extractImageUrls(...bodies: (string | undefined | null)[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const body of bodies) {
+    if (!body) continue;
+    for (const re of [MARKDOWN_IMAGE_RE, HTML_IMAGE_RE]) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(body)) !== null) {
+        const url = m[1].trim();
+        if (!/^https?:\/\//i.test(url)) continue; // sanitize: no data:/javascript: URLs
+        if (seen.has(url)) continue;
+        seen.add(url);
+        out.push(url);
+      }
+    }
+  }
+  return out;
+}
+
 // Active cycle info from Linear
 export interface CycleInfo {
   name: string;
@@ -117,6 +146,8 @@ export function linearToUnifiedTask(
     author: n.user?.name,
   }));
 
+  const images = extractImageUrls(issue.description, ...(comments?.map(c => c.body) ?? []));
+
   return {
     id: `linear:${issue.id}`,
     source: 'linear',
@@ -136,6 +167,7 @@ export function linearToUnifiedTask(
       project: issue.project?.name ?? undefined,
       repo: repo ?? undefined,
       comments,
+      images: images.length > 0 ? images : undefined,
     }
   };
 }
@@ -156,6 +188,7 @@ export function githubToUnifiedTask(
   repo: string | null = null,
 ): UnifiedTask {
   const assignee = issue.assignee?.login;
+  const images = extractImageUrls(issue.body);
   return {
     id: `github:${issue.id}`,
     source: 'github',
@@ -171,6 +204,7 @@ export function githubToUnifiedTask(
       state: issue.state,
       createdAt: issue.createdAt,
       repo: repo ?? undefined,
+      images: images.length > 0 ? images : undefined,
     }
   };
 }
