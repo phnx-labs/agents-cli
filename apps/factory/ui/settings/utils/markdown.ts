@@ -42,13 +42,20 @@ marked.setOptions({
 })
 
 /**
- * Render markdown description with sanitization
- * @param desc - The markdown description
- * @param clamp - Whether to clamp the content (default: true)
+ * Render an arbitrary markdown string to a sanitized React element. This is the
+ * general renderer used everywhere a card / detail surface shows agent prose that
+ * may contain markdown (the last message, the original task/prompt) — a plain
+ * string still renders fine (it's just markdown with no markup). Uses the SAME
+ * marked + DOMPurify allowlist as the todo renderer, so no new sanitization path
+ * is introduced.
+ *
+ * @param text  - The markdown (or plain) text
+ * @param opts.clamp - Line-clamp the block for compact surfaces (default: false)
  * @returns React element with rendered markdown
  */
-export function renderTodoDescription(desc: string, clamp: boolean = true): React.ReactElement {
-  const raw = marked.parse(desc)
+export function renderMarkdown(text: string, opts: { clamp?: boolean } = {}): React.ReactElement {
+  const clamp = opts.clamp ?? false
+  const raw = marked.parse(text)
   const safe = DOMPurify.sanitize(raw, {
     ALLOWED_TAGS: TODO_MARKDOWN_ALLOWED_TAGS,
     ALLOWED_ATTR: TODO_MARKDOWN_ALLOWED_ATTRS
@@ -73,4 +80,16 @@ export function renderTodoDescription(desc: string, clamp: boolean = true): Reac
     onClick,
     dangerouslySetInnerHTML: { __html: safe }
   })
+}
+
+/**
+ * Render a todo description with sanitization. Thin wrapper over renderMarkdown
+ * kept for existing callers; the `clamp` default stays `true` (a checklist item
+ * clamps by default).
+ * @param desc - The markdown description
+ * @param clamp - Whether to clamp the content (default: true)
+ * @returns React element with rendered markdown
+ */
+export function renderTodoDescription(desc: string, clamp: boolean = true): React.ReactElement {
+  return renderMarkdown(desc, { clamp })
 }
