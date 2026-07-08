@@ -23,8 +23,14 @@
  */
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
+import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
+import { loadDevices } from '../lib/devices/registry.js';
+import { resolveHost } from '../lib/hosts/registry.js';
+import { sshExec } from '../lib/ssh-exec.js';
+import { sshTargetFor } from '../lib/hosts/types.js';
+import { machineId } from '../lib/session/sync/config.js';
 import chalk from 'chalk';
-import { checkAllClis } from '../lib/teams/agents.js';
+import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../lib/teams/agents.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName, formatAgentError } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
@@ -63,6 +69,10 @@ interface DoctorOptions {
   fix?: boolean;
   adopt?: string;
   release?: string;
+  host?: string;
+  device?: string;
+  devices?: boolean;
+  hosts?: boolean;
 }
 
 // ─── overview mode (no target) ────────────────────────────────────────────────
@@ -251,6 +261,153 @@ function renderExecPolicyAdvisory(): void {
   for (const line of rest) {
     console.log(chalk.gray(`           ${line}`));
   }
+}
+
+// ─── devices / fleet mode ─────────────────────────────────────────────────────
+
+interface DeviceDoctorResult {
+  name: string;
+  online: boolean;
+  error?: string;
+  agents: Record<string, TeamsDoctorEntry>;
+}
+
+interface FleetTarget {
+  name: string;
+  sshTarget: string;
+  os?: string;
+}
+
+const AGENT_ORDER = ['claude', 'codex', 'kimi', 'grok', 'antigravity', 'opencode', 'cursor', 'gemini', 'droid'];
+
+function shortAgentHeader(name: string): string {
+  return name.slice(0, 4).padEnd(4);
+}
+
+function agentCell(entry: TeamsDoctorEntry | undefined): string {
+  if (!entry) return chalk.gray('-   ');
+  if (entry.installed) {
+    const signedInHint = entry.signedIn ? '*' : ' ';
+    return chalk.green(`rdy${signedInHint}`.padEnd(4));
+  }
+  if (entry.error) return chalk.red('err '.padEnd(4));
+  return chalk.gray('no  '.padEnd(4));
+}
+
+async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> {
+  const singleName = opts.host || opts.device;
+  if (singleName) {
+    // --device / --host as a single-device filter: resolve through the device
+    // registry first, then the general host registry, then ad-hoc user@host.
+    const registry = await loadDevices();
+    const deviceProfile = registry[singleName];
+    if (deviceProfile) {
+      return [{
+        name: deviceProfile.name,
+        sshTarget: deviceProfile.name,
+        os: deviceProfile.platform !== 'unknown' ? deviceProfile.platform : undefined,
+      }];
+    }
+    const host = await resolveHost(singleName);
+    if (host) {
+      return [{ name: singleName, sshTarget: sshTargetFor(host), os: host.os }];
+    }
+    console.error(chalk.red(`Unknown host or device '${singleName}'.`));
+    process.exit(1);
+  }
+
+  const registry = await loadDevices();
+  const localName = machineId();
+  return Object.values(registry)
+    .filter((d) => d.name.toLowerCase() !== localName)
+    .map((d) => ({
+      name: d.name,
+      sshTarget: d.name,
+      os: d.platform !== 'unknown' ? d.platform : undefined,
+    }));
+}
+
+async function probeFleetTarget(target: FleetTarget): Promise<DeviceDoctorResult> {
+  const forwarded = ['teams', 'doctor', '--json'];
+  const isWin = /^win/i.test((target.os ?? '').trim());
+  const remoteCmd = buildRemoteAgentsInvocation(
+    forwarded,
+    undefined,
+    isWin ? 'windows' : undefined,
+    // POSIX login shells often lack the shims dir; Windows PowerShell usually
+    // has it via the install profile, and our single-quote escaping would
+    // prevent $HOME expansion there, so skip the bootstrap on Windows.
+    isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
+  );
+  const res = sshExec(target.sshTarget, remoteCmd, { timeoutMs: 30000, multiplex: true });
+  if (res.code !== 0) {
+    return {
+      name: target.name,
+      online: false,
+      error: res.timedOut ? 'timed out' : (res.stderr || `exit ${res.code ?? 'unknown'}`),
+      agents: {},
+    };
+  }
+  try {
+    const agents = JSON.parse(res.stdout) as Record<string, TeamsDoctorEntry>;
+    return { name: target.name, online: true, agents };
+  } catch (err: any) {
+    const stderrHint = res.stderr ? ` stderr: ${res.stderr.trim()}` : '';
+    return {
+      name: target.name,
+      online: true,
+      error: `invalid JSON (${err?.message ?? 'parse error'})${stderrHint}`,
+      agents: {},
+    };
+  }
+}
+
+async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
+  const singleName = opts.host || opts.device;
+  const targets = await resolveFleetTargets(opts);
+  const localName = machineId();
+  const results: DeviceDoctorResult[] = [];
+
+  // Local machine first, directly.
+  if (!singleName) {
+    results.push({ name: localName, online: true, agents: await collectTeamsDoctorData() });
+  }
+
+  // Remote targets in parallel.
+  const remoteResults = await Promise.all(targets.map(probeFleetTarget));
+  results.push(...remoteResults);
+
+  if (opts.json) {
+    console.log(JSON.stringify({ devices: results }, null, 2));
+    return;
+  }
+
+  if (results.length === 0) {
+    console.log(chalk.gray('No registered devices. Run `agents devices` to register some.'));
+    return;
+  }
+
+  const agentsToShow = AGENT_ORDER.filter((a) =>
+    results.some((r) => r.agents[a] !== undefined),
+  );
+
+  console.log(chalk.bold('Agent readiness by device'));
+  if (agentsToShow.length === 0) {
+    console.log(chalk.gray('  (no agent data collected)'));
+    return;
+  }
+
+  const nameWidth = Math.max(...results.map((r) => r.name.length));
+  const header = `  ${'Device'.padEnd(nameWidth)}  ${agentsToShow.map(shortAgentHeader).join('  ')}`;
+  console.log(chalk.gray(header));
+  for (const row of results) {
+    const status = row.online ? chalk.green('online ') : chalk.red('offline');
+    const errorSuffix = row.error ? `  ${chalk.gray(row.error)}` : '';
+    const cells = agentsToShow.map((a) => agentCell(row.agents[a])).join('  ');
+    console.log(`  ${row.name.padEnd(nameWidth)}  ${status}  ${cells}${errorSuffix}`);
+  }
+  console.log();
+  console.log(chalk.gray('  rdy* = installed and signed in · rdy = installed · no = not installed · err = probe failed · - = offline'));
 }
 
 // ─── target mode ──────────────────────────────────────────────────────────────
@@ -535,7 +692,9 @@ export function registerDoctorCommand(program: Command): void {
     .option('--kind <kinds>', 'Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,promptcuts)')
     .option('--cwd <path>', 'Resolution cwd for project layer detection (default: process.cwd())')
     .option('--adopt <agent>', "Take over the agent's native launcher that shadows the shim (symlink it to the version-managed shim; reversible with --release)")
-    .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted');
+    .option('--release <agent>', 'Undo --adopt: restore the native launcher agents-cli previously adopted')
+    .option('--devices', 'Check agent readiness on every registered device (alias --hosts)')
+    .option('--hosts', 'Alias of --devices');
 
   setHelpSections(doctorCmd, {
     examples: `
@@ -564,6 +723,15 @@ export function registerDoctorCommand(program: Command): void {
 
   doctorCmd.action(async (target: string | undefined, opts: DoctorOptions) => {
       const cwd = opts.cwd ? opts.cwd : process.cwd();
+
+      if (opts.devices || opts.hosts) {
+        if (target) {
+          console.error(chalk.red('Cannot combine --devices with a target argument.'));
+          process.exit(1);
+        }
+        await runDevicesDoctor(opts);
+        return;
+      }
 
       // Launcher adoption escape hatch. `--adopt <agent>` forces the take-over
       // even for a non-default agent; `--release <agent>` reverses it.
