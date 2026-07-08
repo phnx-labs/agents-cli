@@ -76,15 +76,7 @@ jobs:
         run: bun run build
 
       - name: Test
-        # Run the suite serially in the release matrix. Several resource/timing-
-        # sensitive tests race under the fork pool's parallelism on loaded CI
-        # runners — the real-tmux integration teardown (`waitForPanes` sees the
-        # split pane briefly survive) and the scheduler-timer window (a 1300ms
-        # fire missed under CPU load) — flaking the release gate. This matrix is
-        # release-only and infrequent, so reliability beats the parallel speedup.
-        # (The per-PR gate keeps its fast sharded run plus a dedicated serial
-        # tmux job — see tests.yml.) One flag, cross-platform-safe.
-        run: bun run test -- --no-file-parallelism
+        run: bun run test
 
   # No CI publish job — publishing happens locally on macOS via
   # `scripts/release.sh <version> --apply`.
