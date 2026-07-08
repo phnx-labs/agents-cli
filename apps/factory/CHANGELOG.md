@@ -6,6 +6,38 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.286] - 2026-07-08
+
+### Added
+
+- **Factory Floor redesign — matches the approved prototype.** A cohesive pass over
+  the whole dashboard:
+  - **Icon rail** — compact left nav of icon buttons with count/needs badges
+    (Agents · Needs · Backlog · Projects · Hosts); expands to the full text sidebar.
+  - **Proper sub-tab strip** — the Floor's views (Agents / Backlog / Projects / Hosts)
+    are now first-class tabs with count/needs badges, active-lime; Dispatch lives on the
+    strip.
+  - **One contextual controls bar** — the Group/Sort/filter controls swap to the active
+    tab's set (agents Group/Sort vs backlog Group/Sort/LN/GH), so there's no more
+    duplicated control bar. The old cluttered Status/Agent chip strip is gone — filtering
+    lives in saved views + search.
+  - **Double-click a task → its own closeable tab** — opens the full detail (rendered
+    markdown, comments, images) with Dispatch right there; multiple task tabs at once.
+  - **Human session labels** (`terminal-race-fix`, not `claude-596c4c07`) + a compact
+    `<agent>·<id>` provenance chip; **project-link group headers** (`N agents` + Linear
+    project pill).
+  - **Detail-pane artifacts row** — the selected agent's PR / CI / spawned-team / created
+    tickets as color-coded chips.
+  - **Foreman corner FAB** — the voice orb is smaller and tucked into the corner.
+  - **Grouped by project by default**, **checklist expanded by default** with the current
+    step highlighted, **one-click PR link**, **created-ticket / spawned-team chips** on
+    cards (backed by session scanning).
+
+### Fixed
+
+- **Markdown now renders in the ticket/task detail** instead of showing raw `##` /
+  code-fences / `**bold**` (reuses the shared `renderTodoDescription` renderer).
+
 ## [0.9.284] - 2026-07-07
 
 ### Added
