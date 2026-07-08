@@ -82,6 +82,13 @@ export async function runSupervisor(
       // `agents teams add` calls). Without this the supervisor only ever
       // sees teammates it created itself.
       await mgr.rescanFromDisk();
+      // Distributed teammates: one ssh-per-host liveness/exit pre-pass BEFORE any
+      // polling this wave, so every subsequent per-teammate status read
+      // (startReady's roster scan + listByTask below) consumes a cached snapshot
+      // instead of each opening its own SSH handshake — no N-round-trips-per-wave
+      // blowup at 10+ remote teammates. No-op for all-local teams. Reads the
+      // in-memory roster directly, so it doesn't itself trigger a poll.
+      await mgr.prefetchRemoteStatus(team);
       const launched = await mgr.startReady(team);
       const all = await mgr.listByTask(team);
       let pending = 0, running = 0, completed = 0, failed = 0;

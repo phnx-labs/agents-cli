@@ -83,6 +83,8 @@ export interface SpawnResult {
   task_type?: TaskType | null;
   cloud_provider?: string | null;
   cloud_session_id?: string | null;
+  /** Device name the teammate runs on for a distributed (--on) teammate; null for local. */
+  host?: string | null;
 }
 
 /** Detailed status of a single teammate, including file ops, commands, and a cursor for delta polling. */
@@ -114,6 +116,8 @@ export interface AgentStatusDetail {
   name?: string | null;
   after?: string[];
   task_type?: TaskType | null;
+  /** Device name the teammate runs on for a distributed (--on) teammate; null for local. */
+  host?: string | null;
 }
 
 /** Aggregated status of all teammates in a task, with per-status counts and a global cursor. */
@@ -156,6 +160,8 @@ export interface AgentStatusSummary {
   bash_commands: string[];
   /** Last 3 messages, each body trimmed to ~400 chars. */
   last_messages: string[];
+  /** Device name for a distributed (--on) teammate; null for local. */
+  host: string | null;
   /** ISO timestamp — feed back via --since for delta polling. */
   cursor: string;
 }
@@ -235,6 +241,7 @@ export function toAgentStatusSummary(detail: AgentStatusDetail): AgentStatusSumm
     last_messages: detail.last_messages
       .slice(-SUMMARY_MAX_MESSAGES)
       .map((m) => trimMessage(m)),
+    host: detail.host ?? null,
     cursor: detail.cursor,
   };
 }
@@ -300,6 +307,9 @@ export async function handleSpawn(
   worktreeName: string | null = null,
   worktreePath: string | null = null,
   profileName: string | null = null,
+  hostName: string | null = null,
+  hostTarget: string | null = null,
+  repoPath: string | null = null,
 ): Promise<SpawnResult> {
   const defaultMode = manager.getDefaultMode();
   const resolvedMode = resolveMode(mode, defaultMode);
@@ -352,6 +362,9 @@ export async function handleSpawn(
     worktreeName,
     worktreePath,
     profileName,
+    hostName,
+    hostTarget,
+    repoPath,
   );
 
   debug(`[spawn] Spawned ${agentType} agent ${agent.agentId} for task "${taskName}"`);
@@ -370,6 +383,7 @@ export async function handleSpawn(
     task_type: agent.taskType,
     cloud_provider: agent.cloudProvider,
     cloud_session_id: agent.cloudSessionId,
+    host: agent.hostName,
   };
 }
 
@@ -459,6 +473,7 @@ export async function handleStatus(
       name: agent.name,
       after: agent.after,
       task_type: agent.taskType,
+      host: agent.hostName,
       mode: agent.mode,
       cloud_session_id: agent.cloudSessionId,
       cloud_provider: agent.cloudProvider,

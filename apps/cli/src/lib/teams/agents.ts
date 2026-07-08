@@ -24,6 +24,17 @@ import { AGENTS, getAccountInfo } from '../agents.js';
 import { resolveVersion, isVersionInstalled } from '../versions.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
 import { recordRunName } from '../session/run-names.js';
+import { sshExec, shellQuote } from '../ssh-exec.js';
+import { resolveHost } from '../hosts/registry.js';
+import { sshTargetFor } from '../hosts/types.js';
+import { dispatchAgentsCommand } from '../hosts/dispatch.js';
+import { ensureHostReady } from '../hosts/ready.js';
+import { remoteShellFor } from '../hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../hosts/remote-os.js';
+import { pullRemoteLogDelta, REMOTE_MIRROR_MAX_BYTES } from '../hosts/progress.js';
+import { createRemoteWorktree, ensureRemoteRepo } from './remoteWorktree.js';
+import { getTeam } from './registry.js';
+import { resolvePlacement } from './scheduler.js';
 
 let lastMemoryWarnAt = 0;
 
@@ -505,6 +516,29 @@ export class AgentProcess {
   // Worktree isolation: when non-null, this teammate runs in its own git worktree.
   worktreeName: string | null = null;
   worktreePath: string | null = null;
+  // Distributed teams: when hostName is non-null, this teammate runs on another
+  // machine over SSH (the "remote-host" backend), not as a local process. These
+  // are set post-construction (like startTime/pid) — placement config at add
+  // time (hostName/hostTarget/repoPath) and runtime handles at launch time
+  // (remotePid/remoteLog/remoteExit) — so the giant constructor stays untouched.
+  hostName: string | null = null;
+  hostTarget: string | null = null;
+  repoPath: string | null = null;
+  remotePid: number | null = null;
+  remoteLog: string | null = null;
+  remoteExit: string | null = null;
+  // Offset-tail cursor into the REMOTE log (bytes already pulled). Distinct from
+  // lastReadPos, which tracks the LOCAL mirror the parser consumes.
+  remoteLogOffset: number = 0;
+  // Per-wave batched-poll snapshot, refreshed each wave by the supervisor's
+  // one-ssh-per-host pre-pass (AgentManager.prefetchRemoteStatus) and read by
+  // isProcessAlive()/readNewEvents() so they skip their own SSH round-trip. It is
+  // set anew (and cleared for uncovered teammates) at the START of every prefetch,
+  // so it persists across BOTH poll passes within one wave (startReady's roster
+  // scan + the supervisor's listByTask) yet never carries into the next wave. Null
+  // outside a batched wave (e.g. a bare `teams status`), where a direct per-teammate
+  // SSH probe is the correctness fallback.
+  remotePollSnapshot: { alive: boolean; exit: string | null } | null = null;
   private eventsCache: any[] = [];
   private lastReadPos: number = 0;
   private baseDir: string | null = null;
@@ -713,7 +747,71 @@ export class AgentProcess {
     return latest;
   }
 
+  /**
+   * For a distributed (remote-host) teammate, pull NEW bytes of the host's log
+   * into the LOCAL mirror the parser consumes, advance the remote offset, and
+   * resolve terminal status from the remote `.exit` sentinel. Runs BEFORE the
+   * local read in readNewEvents(), so the existing stream-json parse path then
+   * runs unchanged over the freshly-mirrored bytes.
+   *
+   * Uses a per-wave batched snapshot (remotePollSnapshot) when the supervisor's
+   * one-ssh-per-host pre-pass populated it; otherwise falls back to its own
+   * round-trips so a bare `teams status`/`teams logs` is still correct.
+   */
+  private async syncRemoteMirror(): Promise<void> {
+    if (!this.hostName || !this.hostTarget || !this.remoteLog) return;
+
+    // Pull the new remote bytes and append them to the local mirror the parser
+    // reads. One offset-tail round-trip; nothing to write when the log is quiet.
+    const delta = pullRemoteLogDelta(this.hostTarget, {
+      remoteLog: this.remoteLog,
+      offset: this.remoteLogOffset,
+    });
+    if (delta && delta.bytes.length > 0) {
+      const stdoutPath = await this.getStdoutPath();
+      try {
+        await fs.appendFile(stdoutPath, delta.bytes);
+        this.remoteLogOffset = delta.newOffset;
+      } catch {
+        // best-effort mirror — leave the offset unadvanced so we retry next poll
+      }
+    }
+
+    // Resolve terminal status from the remote `.exit` sentinel (mirror
+    // reapProcess). Prefer this wave's batched snapshot; else fetch the exit file
+    // directly. The snapshot is left in place (refreshed each wave by prefetch),
+    // so a second poll pass within the same wave reuses it.
+    let exit: string | null = null;
+    const snap = this.remotePollSnapshot;
+    if (snap) {
+      exit = snap.exit;
+    } else if (this.remoteExit) {
+      // UNQUOTED so `$HOME` in the dispatch exit path expands on the remote shell.
+      const res = sshExec(this.hostTarget, `cat ${this.remoteExit} 2>/dev/null`, {
+        timeoutMs: 8000,
+        multiplex: true,
+      });
+      exit = res.code === 0 && res.stdout.trim() !== '' ? res.stdout.trim() : null;
+    }
+    // Only latch terminal on a PARSEABLE exit code. A `.exit` that exists but is
+    // momentarily empty (created, not yet written) or garbage must NOT force a
+    // spurious FAILED — leave the teammate RUNNING and let the next poll resolve
+    // it once the code lands. Matches the direct-cat guard above.
+    if (exit !== null && exit.trim() !== '' && this.status === AgentStatus.RUNNING) {
+      const code = Number.parseInt(exit.trim(), 10);
+      if (Number.isFinite(code)) {
+        this.status = code === 0 ? AgentStatus.COMPLETED : AgentStatus.FAILED;
+        if (!this.completedAt) this.completedAt = new Date();
+      }
+    }
+  }
+
   async readNewEvents(): Promise<void> {
+    // Distributed teammate: mirror the host's new log bytes locally first, then
+    // fall through to the identical local read+parse below.
+    if (this.hostName) {
+      await this.syncRemoteMirror();
+    }
     const stdoutPath = await this.getStdoutPath();
     try {
       const stats = await fs.stat(stdoutPath).catch(() => null);
@@ -770,6 +868,57 @@ export class AgentProcess {
     } catch (err) {
       console.error(`Error reading events for agent ${this.agentId}:`, err);
     }
+
+    // Distributed teammate: keep the orchestrator bounded across 10+ remote
+    // teammates. The parser has already consumed everything up to lastReadPos
+    // (status/digest updated), so both the on-disk mirror tail and the in-memory
+    // event backlog are safe to trim. The host keeps the full log.
+    if (this.hostName) {
+      await this.capMirrorToTail();
+      this.capEventsCache();
+    }
+  }
+
+  /**
+   * Truncate the local mirror to its trailing REMOTE_MIRROR_MAX_BYTES and reset
+   * lastReadPos to the new (smaller) size so the parser doesn't re-read the kept
+   * tail. Only trims when over the cap — a normal-length log is untouched.
+   */
+  private async capMirrorToTail(): Promise<void> {
+    const stdoutPath = await this.getStdoutPath();
+    try {
+      const stats = await fs.stat(stdoutPath).catch(() => null);
+      if (!stats || stats.size <= REMOTE_MIRROR_MAX_BYTES) return;
+      const keep = REMOTE_MIRROR_MAX_BYTES;
+      const fd = await fs.open(stdoutPath, 'r');
+      const buf = Buffer.alloc(keep);
+      const { bytesRead } = await fd.read(buf, 0, keep, stats.size - keep);
+      await fd.close();
+      await fs.writeFile(stdoutPath, buf.subarray(0, bytesRead));
+      // The parser consumed up to lastReadPos already; after truncation the file
+      // is `bytesRead` long, so clamp the cursor to the new EOF. It never needs
+      // to re-read the retained tail (events already cached).
+      this.lastReadPos = Math.min(this.lastReadPos, bytesRead);
+    } catch {
+      // best-effort — a failed cap just leaves the mirror larger this wave
+    }
+  }
+
+  /** Cap on the in-memory event backlog kept per remote teammate. */
+  private static readonly REMOTE_EVENTS_MAX = 200;
+
+  /**
+   * Drop the oldest cached events for a remote teammate once past the cap. The
+   * status path only needs recent events (last N messages, recentToolCalls,
+   * terminal status) and the getDelta cursor filters by timestamp, so a bounded
+   * recent window preserves the digest while bounding the heap. Terminal status
+   * is already latched onto `this.status`, so trimming can't lose it.
+   */
+  private capEventsCache(): void {
+    const max = AgentProcess.REMOTE_EVENTS_MAX;
+    if (this.eventsCache.length > max) {
+      this.eventsCache = this.eventsCache.slice(-max);
+    }
   }
 
   async saveMeta(): Promise<void> {
@@ -805,6 +954,13 @@ export class AgentProcess {
       cloud_branch: this.cloudBranch,
       worktree_name: this.worktreeName,
       worktree_path: this.worktreePath,
+      host_name: this.hostName,
+      host_target: this.hostTarget,
+      repo_path: this.repoPath,
+      remote_pid: this.remotePid,
+      remote_log: this.remoteLog,
+      remote_exit: this.remoteExit,
+      remote_log_offset: this.remoteLogOffset,
     };
     const metaPath = await this.getMetaPath();
     await fs.writeFile(metaPath, JSON.stringify(meta, null, 2));
@@ -881,6 +1037,15 @@ export class AgentProcess {
         meta.profile_name || null,
       );
       agent.startTime = typeof meta.start_time === 'string' ? meta.start_time : null;
+      // Distributed-team fields: set post-construction (like startTime) so the
+      // constructor signature stays fixed. Null on every pre-existing teammate.
+      agent.hostName = meta.host_name || null;
+      agent.hostTarget = meta.host_target || null;
+      agent.repoPath = meta.repo_path || null;
+      agent.remotePid = typeof meta.remote_pid === 'number' ? meta.remote_pid : null;
+      agent.remoteLog = meta.remote_log || null;
+      agent.remoteExit = meta.remote_exit || null;
+      agent.remoteLogOffset = typeof meta.remote_log_offset === 'number' ? meta.remote_log_offset : 0;
       return agent;
     } catch {
       return null;
@@ -888,6 +1053,26 @@ export class AgentProcess {
   }
 
   isProcessAlive(): boolean {
+    // Distributed teammate: a local PID is meaningless. Alive = the remote `.exit`
+    // sentinel is absent AND `kill -0 <remotePid>` succeeds on the host, resolved
+    // in a single ssh round-trip. Prefer the supervisor's batched snapshot when
+    // present (consume it once so it can't go stale); otherwise probe directly.
+    if (this.hostName) {
+      // Prefer this wave's batched snapshot (persists across the wave's poll
+      // passes; the supervisor refreshes it each wave). Fall back to a direct
+      // probe outside a wave.
+      if (this.remotePollSnapshot) return this.remotePollSnapshot.alive;
+      if (!this.hostTarget || !this.remotePid || !this.remoteExit) return false;
+      // remoteExit is a dispatch `$HOME/.agents/.cache/hosts/<hex>.exit` path —
+      // interpolate UNQUOTED so `$HOME` expands (shellQuote would defeat it).
+      const probe =
+        `test -f ${this.remoteExit} && echo DEAD || ` +
+        `(kill -0 ${this.remotePid} 2>/dev/null && echo ALIVE || echo DEAD)`;
+      const res = sshExec(this.hostTarget, probe, { timeoutMs: 8000, multiplex: true });
+      if (res.code === null) return true; // transient ssh failure — don't reap early
+      return res.stdout.trim().endsWith('ALIVE');
+    }
+
     if (!this.pid) return false;
     try {
       process.kill(this.pid, 0);
@@ -910,6 +1095,20 @@ export class AgentProcess {
 
   async updateStatusFromProcess(): Promise<void> {
     if (!this.pid) {
+      // Distributed (remote-host) teammates have no local PID by design; their
+      // lifecycle lives on the host. readNewEvents() mirrors the remote log and
+      // resolves terminal status from the remote `.exit` sentinel (see
+      // syncRemoteMirror), so we just persist and return — never the local
+      // "RUNNING without a PID is impossible" fail path below.
+      if (this.hostName) {
+        await this.readNewEvents();
+        if (this.status !== AgentStatus.RUNNING && !this.completedAt) {
+          this.completedAt = this.getLatestEventTime() || this.startedAt || new Date();
+        }
+        await this.saveMeta();
+        return;
+      }
+
       await this.readNewEvents();
 
       // Cloud-backed teammates have no local PID by design; their lifecycle
@@ -1202,6 +1401,9 @@ export class AgentManager {
     worktreeName: string | null = null,
     worktreePath: string | null = null,
     profileName: string | null = null,
+    hostName: string | null = null,
+    hostTarget: string | null = null,
+    repoPath: string | null = null,
   ): Promise<AgentProcess> {
     await this.initialize();
     const resolvedMode = resolveMode(mode, this.defaultMode);
@@ -1260,7 +1462,11 @@ export class AgentManager {
     // local CLI for them (the pod has its own). The caller has already
     // dispatched via the cloud provider and passed us the provider + session.
     const isCloudBacked = Boolean(cloudProvider);
-    if (!isCloudBacked) {
+    // Distributed teammates run on another machine over SSH — the agent CLI must
+    // be present on the HOST (checked via ensureHostReady in the command), not
+    // locally. So skip the local availability check for both remote backends.
+    const isRemoteBacked = Boolean(hostName);
+    if (!isCloudBacked && !isRemoteBacked) {
       // Profile-backed teammates still spawn through `agents run`, which
       // resolves the profile to its host harness — so the CLI we need to be
       // present is the underlying agentType, not the profile name.
@@ -1311,6 +1517,13 @@ export class AgentManager {
       profileName,
     );
 
+    // Distributed-team placement: set post-construction (like startTime), so the
+    // giant constructor stays fixed. launchRemoteProcess() reads these to dispatch
+    // over SSH and fills in the runtime handles (remotePid/remoteLog/remoteExit).
+    agent.hostName = hostName;
+    agent.hostTarget = hostTarget;
+    agent.repoPath = repoPath;
+
     const agentDir = await agent.getAgentDir();
     try {
       await fs.mkdir(agentDir, { recursive: true });
@@ -1336,8 +1549,17 @@ export class AgentManager {
       // No local process to launch; status polling walks the provider instead.
       await agent.saveMeta();
       debug(`Cloud-backed ${agentType} teammate via ${cloudProvider} (session=${cloudSessionId})`);
+    } else if (isRemoteBacked) {
+      // Distributed teammate that can run now (no unmet --after deps): dispatch
+      // it onto its host over SSH instead of a local spawn.
+      await this.launchRemoteProcess(agent);
     } else {
-      await this.launchProcess(agent);
+      // Unpinned + launching now: consult the pool scheduler before defaulting to
+      // local, so an unpinned teammate on a --devices team auto-schedules even when
+      // added without --after (it wouldn't pass through startReady otherwise).
+      await this.maybeSchedulePlacement(agent, taskName);
+      if (agent.hostName) await this.launchRemoteProcess(agent);
+      else await this.launchProcess(agent);
     }
 
     await this.cleanupOldAgents();
@@ -1420,6 +1642,204 @@ export class AgentManager {
   }
 
   /**
+   * Dispatch a distributed teammate onto its host over SSH — the remote-host
+   * analog of launchProcess(). Symmetric to the cloud path: no local process; the
+   * lifecycle lives on the host and is polled (isProcessAlive/readNewEvents over
+   * SSH via the remote `.exit` sentinel + offset-tailed log).
+   *
+   * When the team uses worktrees (agent.worktreeName set), a git worktree is first
+   * created ON THE HOST off the freshly-fetched default branch; the teammate runs
+   * there. Otherwise it runs in the host repo path directly.
+   */
+  private async launchRemoteProcess(agent: AgentProcess): Promise<void> {
+    if (!agent.hostName || !agent.hostTarget || !agent.repoPath) {
+      throw new Error(`Remote teammate ${agent.agentId} is missing host placement (host/target/repo).`);
+    }
+
+    // Re-resolve the device → Host at launch time (it may have moved / changed
+    // address since `add` staged the teammate), matching how the command resolved
+    // it. The target string on the agent stays the launch-time source of truth for
+    // subsequent polling.
+    const host = await resolveHost(agent.hostName);
+    if (!host) {
+      throw new Error(`Cannot launch remote teammate ${agent.agentId}: device "${agent.hostName}" no longer resolves.`);
+    }
+
+    // Ensure agents-cli is present + version-matched on the host; surface (not
+    // fail on) an agent-not-installed warning like dispatch.ts does.
+    try {
+      const { warnings } = ensureHostReady(host, { agent: agent.agentType });
+      for (const w of warnings) process.stderr.write(`[teams] warning: ${w}\n`);
+    } catch (err) {
+      throw new Error(`Host "${agent.hostName}" not ready for teammate ${agent.agentId}: ${(err as Error).message}`);
+    }
+
+    // Worktree isolation on the host, if the team enables it. createRemoteWorktree
+    // fetches origin and branches off origin/<default>, returning the host path.
+    let remoteCwd = agent.repoPath;
+    if (agent.worktreeName) {
+      const worktreePath = createRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
+      agent.worktreePath = worktreePath;
+      remoteCwd = worktreePath;
+    }
+
+    // Same run argv the local path builds (shared buildRunArgv keeps the prompt
+    // scaffolding + flags from drifting); dispatched non-blocking (follow:false)
+    // — the supervisor polls the host, we don't block here.
+    const effort = agent.effort ?? 'medium';
+    const forwardedArgs = this.buildRunArgv(
+      agent.agentType,
+      agent.prompt,
+      agent.mode,
+      agent.model ?? null,
+      effort,
+      agent.version,
+      agent.profileName,
+    );
+
+    try {
+      const { task } = await dispatchAgentsCommand(host, {
+        forwardedArgs,
+        remoteCwd,
+        follow: false,
+      });
+      agent.remotePid = task.pid ?? null;
+      agent.remoteLog = task.remoteLog ?? null;
+      agent.remoteExit = task.remoteExit ?? null;
+      agent.remoteLogOffset = 0;
+      agent.status = AgentStatus.RUNNING;
+      agent.startedAt = new Date();
+      await agent.saveMeta();
+    } catch (err: any) {
+      console.error(`Failed to launch remote teammate ${agent.agentId} on ${agent.hostName}:`, err);
+      throw new Error(`Failed to launch remote teammate: ${err.message}`);
+    }
+
+    debug(`Launched remote agent ${agent.agentId} on ${agent.hostName} (remote pid ${agent.remotePid})`);
+  }
+
+  /**
+   * Resolve a scheduler-picked device to host placement fields on an unpinned
+   * teammate at LAUNCH time (the same resolution `teams add --device` runs, minus
+   * the fatal `die()` — a scheduling failure here is per-teammate, not per-add).
+   * Sets hostName/hostTarget/repoPath + persists, so the subsequent
+   * launchRemoteProcess dispatches over SSH. Mirrors the `add`-time pin path:
+   * resolve device → reject Windows (POSIX-only) → ssh target → ensure the repo
+   * is present on the host from the team's --repo (ensureRemoteRepo).
+   */
+  private async resolveScheduledPlacement(
+    agent: AgentProcess,
+    device: string,
+    taskName: string,
+  ): Promise<void> {
+    const host = await resolveHost(device);
+    if (!host) {
+      throw new Error(`Scheduler picked device "${device}" but it no longer resolves.`);
+    }
+    if (remoteShellFor(host.os ?? resolveRemoteOsSync(host.name)) === 'powershell') {
+      throw new Error(
+        `Scheduler picked Windows device "${host.name}", but distributed teammates are POSIX-only in v1.`,
+      );
+    }
+    const target = sshTargetFor(host);
+    const teamMeta = await getTeam(taskName);
+    const repoRoot = ensureRemoteRepo(target, teamMeta?.repo ?? '', taskName);
+    agent.hostName = host.name;
+    agent.hostTarget = target;
+    agent.repoPath = repoRoot;
+    await agent.saveMeta();
+  }
+
+  /**
+   * Place an UNPINNED, non-cloud teammate onto the team pool via the cascade
+   * (least-loaded), if the team declares one. A no-op for a pinned teammate
+   * (hostName already set from `--device`), a cloud teammate, or a poolless team —
+   * leaving hostName null so the local spawn runs unchanged. Shared by spawn()
+   * (immediate add-launch) and startReady() (staged launch) so an unpinned pool
+   * teammate schedules identically no matter how it was fired.
+   */
+  private async maybeSchedulePlacement(agent: AgentProcess, taskName: string): Promise<void> {
+    if (agent.hostName || agent.cloudProvider) return;
+    const teamMeta = await getTeam(taskName);
+    if (!teamMeta) return;
+    const roster = await this.listByTask(taskName);
+    const { device } = resolvePlacement(teamMeta, null, roster);
+    if (device) await this.resolveScheduledPlacement(agent, device, taskName);
+  }
+
+  /**
+   * One-ssh-per-host batched liveness/exit pre-pass for a team's remote teammates.
+   * The supervisor calls this each wave BEFORE listByTask() so the per-teammate
+   * isProcessAlive()/readNewEvents() consume a cached snapshot instead of each
+   * issuing its own SSH handshake — avoiding N round-trips per wave at 10+ remote
+   * teammates. Groups by hostTarget and, for each host, checks every teammate's
+   * `.exit` + `kill -0` in a single ssh call over the shared ControlMaster socket.
+   */
+  async prefetchRemoteStatus(taskName: string): Promise<void> {
+    await this.initialize();
+    // Read the in-memory roster directly — going through listByTask()/listAll()
+    // would poll each teammate first (an SSH round-trip apiece), defeating the
+    // batch. The caller (supervisor) has already rescanned from disk this wave.
+    const remotes = Array.from(this.agents.values()).filter(
+      (a) => a.taskName === taskName && a.hostName,
+    );
+    // Fresh snapshots each wave: clear stale ones first so a teammate that has
+    // since finished (dropped from the RUNNING filter below) can't carry an old
+    // ALIVE reading into this wave's poll.
+    for (const a of remotes) a.remotePollSnapshot = null;
+
+    const teammates = remotes.filter(
+      (a) =>
+        a.hostTarget && a.remotePid && a.remoteExit &&
+        a.status === AgentStatus.RUNNING,
+    );
+    if (teammates.length === 0) return;
+
+    const byTarget = new Map<string, AgentProcess[]>();
+    for (const a of teammates) {
+      const arr = byTarget.get(a.hostTarget!) || [];
+      arr.push(a);
+      byTarget.set(a.hostTarget!, arr);
+    }
+
+    for (const [target, agents] of byTarget) {
+      // Emit one line per teammate: "<agentId> ALIVE|DEAD <exitOrEmpty>". A single
+      // round-trip over the multiplexed socket, regardless of teammate count.
+      const parts = agents.map((a) => {
+        const id = a.agentId;
+        // remoteExit is a dispatch `$HOME/.agents/.cache/hosts/<hex>.exit` path —
+        // interpolate UNQUOTED so `$HOME` expands (shellQuote would make `[ -f ]`
+        // always miss, so a finished teammate would never resolve terminal).
+        const exitFile = a.remoteExit!;
+        // exit code (if the sentinel exists) OR empty, then liveness.
+        return (
+          `printf '%s ' ${shellQuote(id)}; ` +
+          `if [ -f ${exitFile} ]; then printf 'DEAD '; cat ${exitFile} 2>/dev/null | tr -d '\\n'; printf '\\n'; ` +
+          `elif kill -0 ${a.remotePid} 2>/dev/null; then printf 'ALIVE\\n'; ` +
+          `else printf 'DEAD\\n'; fi`
+        );
+      });
+      const res = sshExec(target, parts.join('; '), { timeoutMs: 12000, multiplex: true });
+      if (res.code === null) continue; // transient ssh failure — skip this wave, no snapshot
+      const snapshots = new Map<string, { alive: boolean; exit: string | null }>();
+      for (const line of res.stdout.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const [id, state, exit] = trimmed.split(/\s+/);
+        if (!id) continue;
+        snapshots.set(id, {
+          alive: state === 'ALIVE',
+          exit: state === 'DEAD' ? (exit ?? '') : null,
+        });
+      }
+      for (const a of agents) {
+        const snap = snapshots.get(a.agentId);
+        if (snap) a.remotePollSnapshot = snap;
+      }
+    }
+  }
+
+  /**
    * Fire any pending teammates in the given team whose `after` deps have all
    * completed. Returns the list of teammates just launched. Repeatable:
    * call it once per DAG wave. Safe to call on teams with no pending work
@@ -1440,8 +1860,24 @@ export class AgentManager {
         return dep && dep.status === AgentStatus.COMPLETED;
       });
       if (!depsReady) continue;
+
+      // Auto-scheduling: an UNPINNED teammate (no explicit --device at add time)
+      // gets placed now via the pool cascade — same helper spawn() uses so the
+      // immediate-add and staged paths agree. A null pick keeps hostName null →
+      // local spawn, unchanged. Cloud teammates never schedule.
       try {
-        if (agent.cloudProvider) {
+        await this.maybeSchedulePlacement(agent, taskName);
+      } catch (err) {
+        console.error(`Could not schedule ${agent.agentId} onto the team pool:`, err);
+        continue;
+      }
+
+      try {
+        if (agent.hostName) {
+          // Distributed teammate: dispatch onto its host over SSH.
+          await this.launchRemoteProcess(agent);
+          launched.push(agent);
+        } else if (agent.cloudProvider) {
           if (!this.cloudDispatcher) {
             console.error(
               `Cannot start cloud-backed teammate ${agent.agentId}: no dispatcher registered.`
@@ -1472,16 +1908,27 @@ export class AgentManager {
    * exec path (src/lib/exec.ts). The team runner just supplies prompt + mode
    * and reads stream-json events off stdout.
    */
-  private buildCommand(
+  /**
+   * Build the `agents run …` argv AFTER the `agents` binary — the flags + prompt
+   * scaffolding shared by the LOCAL launch (buildCommand, which prefixes
+   * process.execPath + the agents CLI path) and the REMOTE launch
+   * (launchRemoteProcess, which prefixes `agents` on the host via dispatch). Kept
+   * in one place so the PROMPT_SUFFIX / CLAUDE_PLAN_MODE_PREFIX scaffolding and the
+   * flag set can never drift between the two backends.
+   *
+   * `cwd` is intentionally NOT emitted here: the local path passes it as
+   * `--cwd`/`--add-dir` (below), while the remote path `cd`s into the host cwd
+   * before invoking `agents`. `sessionId` is likewise local-only (the remote run
+   * mints its own session on the host).
+   */
+  private buildRunArgv(
     agentType: AgentType,
     prompt: string,
     mode: Mode,
     model: string | null,
-    cwd: string | null = null,
-    sessionId: string | null = null,
-    effort: EffortLevel = 'medium',
-    version: string | null = null,
-    profileName: string | null = null,
+    effort: EffortLevel,
+    version: string | null,
+    profileName: string | null,
   ): string[] {
     // Compose the prompt: a plan-mode prefix for Claude (clarifying headless
     // plan-mode restrictions) and a universal summary suffix. These are
@@ -1495,11 +1942,8 @@ export class AgentManager {
     // host harness, version pin, and env injection in one place. Plain
     // version pins only apply when no profile is selected.
     const target = profileName ?? (version ? `${agentType}@${version}` : agentType);
-    const agentsCli = process.argv[1];
 
-    const cmd: string[] = [
-      process.execPath,
-      agentsCli,
+    const args: string[] = [
       'run',
       target,
       fullPrompt,
@@ -1509,8 +1953,28 @@ export class AgentManager {
       '--headless',
       '--quiet',
     ];
+    if (model) args.push('--model', model);
+    return args;
+  }
 
-    if (model) cmd.push('--model', model);
+  private buildCommand(
+    agentType: AgentType,
+    prompt: string,
+    mode: Mode,
+    model: string | null,
+    cwd: string | null = null,
+    sessionId: string | null = null,
+    effort: EffortLevel = 'medium',
+    version: string | null = null,
+    profileName: string | null = null,
+  ): string[] {
+    const agentsCli = process.argv[1];
+    const cmd: string[] = [
+      process.execPath,
+      agentsCli,
+      ...this.buildRunArgv(agentType, prompt, mode, model, effort, version, profileName),
+    ];
+
     if (cwd) cmd.push('--cwd', cwd);
 
     // Pin Claude's session UUID to our agent_id so its session file lands at
@@ -1640,6 +2104,27 @@ export class AgentManager {
     const agent = this.agents.get(agentId);
     if (!agent) {
       return false;
+    }
+
+    // Distributed teammate: no local PID — signal the remote process GROUP over
+    // SSH (negative pid, matching the local `kill(-pid)` semantics), so the
+    // detached `agents run` and its children all get SIGTERM on the host.
+    if (agent.hostName && agent.status === AgentStatus.RUNNING) {
+      if (agent.hostTarget && agent.remotePid) {
+        try {
+          sshExec(agent.hostTarget, `kill -TERM -- -${agent.remotePid} 2>/dev/null || kill -TERM ${agent.remotePid} 2>/dev/null`, {
+            timeoutMs: 10000,
+            multiplex: true,
+          });
+        } catch {
+          // best-effort — record the stop regardless
+        }
+      }
+      agent.status = AgentStatus.STOPPED;
+      agent.completedAt = new Date();
+      await agent.saveMeta();
+      debug(`Stopped remote agent ${agentId} on ${agent.hostName}`);
+      return true;
     }
 
     if (agent.pid && agent.status === AgentStatus.RUNNING) {

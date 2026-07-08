@@ -15,11 +15,50 @@
  */
 
 import * as fs from 'fs';
-import { sshExec, sshExecRaw } from '../ssh-exec.js';
+import { sshExec, sshExecRaw, shellQuote } from '../ssh-exec.js';
 import { localLogPath } from './tasks.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Cap for the LOCAL mirror of a distributed teammate's remote log. `followHostTask`
+ * appends remote bytes into the local mirror forever; a team can spin 10+ chatty
+ * remote teammates, so the orchestrator must keep a bounded window (the full log
+ * always lives on the host). The teams remote path (agents.ts readNewEvents) writes
+ * its own append into each teammate's `stdout.log`, then truncates that file to its
+ * trailing `REMOTE_MIRROR_MAX_BYTES` — the parser has already consumed the bytes
+ * (status/digest updated via lastReadPos), so trailing-tail history is dead weight.
+ */
+export const REMOTE_MIRROR_MAX_BYTES = 512 * 1024;
+
+/**
+ * Pull the new bytes of a remote log since `offset` in ONE ssh round-trip.
+ *
+ * The teams remote-teammate monitor calls this each poll to advance its offset-tail
+ * cursor into the host's log, mirroring only the delta into the local `stdout.log`
+ * the stream-json parser consumes. Byte-exact (raw Buffer, no UTF-8 decode) so a
+ * multibyte character split at the `tail -c` boundary neither drifts the offset nor
+ * renders as U+FFFD — the same discipline `fetchProgress` uses. `bytes.length` is
+ * the exact wire count; `newOffset` is `offset + bytes.length`.
+ *
+ * Returns null on a transient ssh failure (the caller retries next poll without
+ * advancing). `remoteLog` is a $HOME-prefixed path with a safe basename; it's
+ * shell-quoted defensively even so.
+ */
+export function pullRemoteLogDelta(
+  target: string,
+  opts: { remoteLog: string; offset: number },
+): { bytes: Buffer; newOffset: number } | null {
+  // remoteLog is a dispatch-generated `$HOME/.agents/.cache/hosts/<hex>.log` path —
+  // interpolate UNQUOTED so the remote shell expands `$HOME` (shellQuote would
+  // single-quote it into a literal `$HOME`, and the tail would find nothing). The
+  // hex basename is injection-safe, matching fetchProgress below.
+  const remote = `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null`;
+  const res = sshExecRaw(target, remote, { timeoutMs: 20000, multiplex: true });
+  if (res.code === null) return null; // ssh itself failed / timed out
+  return { bytes: res.stdout, newOffset: opts.offset + res.stdout.length };
 }
 
 export interface FollowOptions {
