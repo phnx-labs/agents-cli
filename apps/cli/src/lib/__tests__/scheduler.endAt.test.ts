@@ -75,7 +75,14 @@ describe('JobScheduler endAt enforcement', () => {
     });
     scheduler.schedule(config);
 
-    await new Promise((r) => setTimeout(r, 1300));
+    // Poll until the job fires rather than sleeping a fixed 1300ms then asserting:
+    // on a loaded CI runner the scheduler's fire can land later than a short fixed
+    // window, so the fixed sleep flaked ("expected 0 to be >= 1"). We stop the
+    // instant it fires, so the ceiling only bounds a genuinely non-firing job.
+    const deadline = Date.now() + 8000;
+    while (fired < 1 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     scheduler.stopAll();
 
     expect(fired).toBeGreaterThanOrEqual(1);

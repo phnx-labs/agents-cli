@@ -369,7 +369,13 @@ async function waitForPanes(
   name: string,
   socket: string,
   expected: number,
-  timeoutMs = 5000,
+  // The pane teardown this waits on (the guarded pane-died hook killing the dead
+  // split) is a real async tmux operation whose latency balloons on a loaded CI
+  // runner. 5s was too tight under the full parallel suite; give it generous
+  // headroom (still well under the 30s vitest testTimeout). The loop still
+  // returns the instant the count converges, so the ceiling only bites on a
+  // genuinely stuck teardown.
+  timeoutMs = 20000,
 ): Promise<string[]> {
   const deadline = Date.now() + timeoutMs;
   let panes: string[] = [];
