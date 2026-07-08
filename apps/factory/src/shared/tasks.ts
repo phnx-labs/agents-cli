@@ -30,6 +30,7 @@ export interface TaskMetadata {
   project?: string;              // Linear project name (undefined for GitHub)
   repo?: string;                 // "owner/repo" — resolved at fetch time
   comments?: TaskComment[];      // Linear comments, newest-first when rendered
+  images?: string[];             // Image URLs embedded in the body/comments (deduped, http(s) only)
 }
 
 // Unified task interface for aggregating tasks from multiple sources.

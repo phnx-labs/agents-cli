@@ -53,6 +53,9 @@ export function TaskDetail({ task, cycleInfo, onDispatch, onDismiss, onOpenExter
   const url = task.metadata?.url
   const state = task.metadata?.state
   const comments = task.metadata?.comments ?? []
+  const images = (task.metadata?.images ?? []).filter(
+    (src): src is string => typeof src === 'string' && /^https?:\/\//i.test(src)
+  )
 
   return (
     <>
@@ -154,6 +157,37 @@ export function TaskDetail({ task, cycleInfo, onDispatch, onDismiss, onOpenExter
                   </div>
                   <div className="sw-detail-comment-body">{renderTodoDescription(c.body, false)}</div>
                 </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {images.length > 0 && (
+          <>
+            <div className="sw-panel-section-head">Images ({images.length})</div>
+            <div
+              className="sw-detail-images"
+              style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}
+            >
+              {images.map((src, i) => (
+                <img
+                  key={i}
+                  src={src}
+                  className="sw-detail-image"
+                  loading="lazy"
+                  alt=""
+                  title="Open image externally"
+                  onClick={() => onOpenExternal(src)}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: 240,
+                    height: 'auto',
+                    borderRadius: 6,
+                    border: '1px solid var(--sw-border, rgba(255,255,255,0.1))',
+                    cursor: 'pointer',
+                    display: 'block',
+                  }}
+                />
               ))}
             </div>
           </>
