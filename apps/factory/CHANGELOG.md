@@ -6,6 +6,18 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Shell (`SH`) tabs now load your full interactive shell environment.** Every
+  tracked terminal — agent CLIs *and* bare shell tabs — carries `AGENT_TERMINAL_ID`,
+  which rc files commonly use to take a minimal fast-path (skip oh-my-zsh, themes,
+  plugins) for agent terminals no human types in. That mis-fired on the `SH` tab,
+  which *is* an interactive shell you drive: it came up with a bare prompt, no theme,
+  and missing aliases/tools. Factory now also exports **`AGENT_TERMINAL_KIND`**
+  (`shell` for a bare shell tab, `agent` for an agent CLI terminal) so your rc file
+  can tell them apart. Gate your fast-path on it, e.g. `zsh`:
+  `if [[ -n "$AGENT_TERMINAL_ID" && "$AGENT_TERMINAL_KIND" != "shell" ]]; then …`.
+
 ## [0.9.286] - 2026-07-08
 
 ### Added

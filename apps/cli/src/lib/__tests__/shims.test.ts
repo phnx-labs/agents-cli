@@ -8,6 +8,7 @@ import {
   generateShimScript,
   generateVersionedAliasScript,
   hasAliasShadowingShim,
+  readCodexConfiguredModel,
   removeLegacyUserShim,
   SHIM_SCHEMA_VERSION,
   VERSIONED_ALIAS_SCHEMA_VERSION,
@@ -591,5 +592,43 @@ describe('versioned alias — platform on-disk artifacts', () => {
     expect(mod.versionedAliasOnDiskFile('claude', '2.1.201', 'win32')).toBe('claude@2.1.201.cmd');
     expect(mod.versionedAliasOnDiskFile('claude', '2.1.201', 'linux')).toBe('claude@2.1.201');
     expect(mod.versionedAliasOnDiskFile('codex', '0.125.0', 'darwin')).toBe('codex@0.125.0');
+  });
+});
+
+describe('readCodexConfiguredModel', () => {
+  let tmpHome: string;
+  const originalRealHome = process.env.AGENTS_REAL_HOME;
+
+  beforeEach(() => {
+    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-cfg-'));
+    process.env.AGENTS_REAL_HOME = tmpHome;
+  });
+
+  afterEach(() => {
+    if (originalRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = originalRealHome;
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  const writeConfig = (contents: string): void => {
+    const dir = path.join(tmpHome, '.codex');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.toml'), contents);
+  };
+
+  it('returns the top-level model the user configured', () => {
+    writeConfig('model = "gpt-5.5"\nmodel_reasoning_effort = "high"\n');
+    expect(readCodexConfiguredModel()).toBe('gpt-5.5');
+  });
+
+  it('ignores a model set only inside a [profile.*] table', () => {
+    // The CLI uses the top-level model as its default; a profile model must not
+    // masquerade as the default, or we would forward a model the run never uses.
+    writeConfig('model_reasoning_effort = "high"\n\n[profiles.fast]\nmodel = "gpt-5.3-codex"\n');
+    expect(readCodexConfiguredModel()).toBeUndefined();
+  });
+
+  it('returns undefined when the config is missing (keeps prior behaviour)', () => {
+    expect(readCodexConfiguredModel()).toBeUndefined();
   });
 });

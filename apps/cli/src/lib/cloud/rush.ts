@@ -653,7 +653,11 @@ export class RushCloudProvider implements CloudProvider {
 
   async cancel(taskId: string): Promise<void> {
     const token = readToken();
-    const res = await api('DELETE', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}`, token);
+    // The cancel ACTION endpoint (POST .../cancel) is what the backend implements;
+    // it works on paused runs too (queued / needs_review / input_required). A bare
+    // DELETE on the run 404s, so `agents cloud cancel` silently failed on anything
+    // that wasn't actively running.
+    const res = await api('POST', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}/cancel`, token);
     if (!res.ok) {
       throw new Error(`Failed to cancel task (${res.status}).`);
     }

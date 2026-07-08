@@ -1705,7 +1705,7 @@ async function openSingleAgent(
       command,
       {
         iconPath: agentConfig.iconPath as vscode.Uri,
-        env: buildAgentTerminalEnv(terminalId, sessionId, cwd, undefined, { scrubSensitive: agentKey !== 'shell' }),
+        env: buildAgentTerminalEnv(terminalId, sessionId, cwd, undefined, { scrubSensitive: agentKey !== 'shell', kind: agentKey === 'shell' ? 'shell' : 'agent' }),
         viewColumn: vscode.ViewColumn.Active,
         cwd: worktreeIsolated ? cwd : undefined,
       }
@@ -1756,7 +1756,7 @@ async function openSingleAgent(
     iconPath: agentConfig.iconPath,
     location: editorLocation,
     name: title,
-    env: buildAgentTerminalEnv(terminalId, sessionId, cwd, undefined, { scrubSensitive: agentKey !== 'shell' }),
+    env: buildAgentTerminalEnv(terminalId, sessionId, cwd, undefined, { scrubSensitive: agentKey !== 'shell', kind: agentKey === 'shell' ? 'shell' : 'agent' }),
     cwd: worktreeIsolated ? cwd : undefined,
     isTransient: true
   });
@@ -4155,7 +4155,7 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
       iconPath: agentConfig.iconPath,
       location: { viewColumn: vscode.ViewColumn.Active },
       name: title,
-      env: buildAgentTerminalEnv(session.terminalId, session.sessionId || null, workspacePath, session.version, { scrubSensitive: session.prefix.toLowerCase() !== 'sh' }),
+      env: buildAgentTerminalEnv(session.terminalId, session.sessionId || null, workspacePath, session.version, { scrubSensitive: session.prefix.toLowerCase() !== 'sh', kind: session.prefix.toLowerCase() === 'sh' ? 'shell' : 'agent' }),
       isTransient: true
     });
 

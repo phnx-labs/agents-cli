@@ -17,6 +17,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
+import { readCodexConfiguredModel } from './shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { recordRunName } from './session/run-names.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
@@ -84,10 +85,16 @@ export function headlessPlanStallCommand(args: {
  *
  * - `auto` on an agent without auto support silently degrades to `edit`
  *   (every agent supports edit-like behavior as its default).
+ * - `plan` on an agent without a read-only mode degrades to the agent's
+ *   safest native mode (`capabilities.modes[0]`, typically `edit`). Agents
+ *   like antigravity/cursor/kiro have no plan flag; hard-failing made
+ *   multi-agent scripts (`--mode plan` for everyone) unusable and diverged
+ *   from `agents teams add`, which already defaults to `edit`. Callers that
+ *   care (the `agents run` CLI) must surface a warning when requested ≠
+ *   resolved so the elevation is not silent.
  * - `skip` on an agent without skip support throws with a clear message
  *   naming the agent's supported modes. No silent fallback — the user
  *   explicitly asked to bypass permissions; pretending we did is unsafe.
- * - `plan` on an agent without plan support throws the same way.
  */
 export function resolveMode(agent: AgentId, requested: Mode): Mode {
   const supported = AGENTS[agent].capabilities.modes;
@@ -97,6 +104,13 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
     // Fall back to edit — guaranteed to exist on every agent (every agent has
     // at least 'edit' in its modes table, since that's the default behavior).
     return 'edit';
+  }
+
+  if (requested === 'plan') {
+    // No read-only mode on this agent. modes[0] is the declared safest mode
+    // (edit for antigravity/cursor/kiro/…). Prefer that over hard-fail so
+    // uniform multi-agent `--mode plan` dispatches still run.
+    return supported[0];
   }
 
   throw new Error(
@@ -112,10 +126,8 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
  * supports." Agents that include `plan` list it first; agents like
  * antigravity that have no read-only mode list `edit` first.
  *
- * Use this when the user did not pass `--mode` explicitly. When the user
- * *did* pass `--mode plan` and the agent doesn't support it, call
- * `resolveMode` instead so the user sees a loud error rather than a silent
- * elevation from read-only to writable.
+ * Prefer this over a hard-coded `'plan'` when the agent is known. `resolveMode`
+ * also maps an unsupported `'plan'` request onto this same value.
  */
 export function defaultModeFor(agent: AgentId): Mode {
   return AGENTS[agent].capabilities.modes[0];
@@ -659,7 +671,8 @@ export function buildExecCommand(options: ExecOptions): string[] {
 
   // Resolve the requested mode against the agent's capability table.
   // - `auto` on an agent without auto support → silently degrades to `edit`
-  // - `skip`/`plan` on an unsupported agent → throws a clear error
+  // - `plan` on an agent without a read-only mode → degrades to modes[0]
+  // - `skip` on an unsupported agent → throws a clear error
   // After resolveMode, the chosen mode is guaranteed to be in template.modeFlags.
   const resolvedMode = resolveMode(options.agent, normalizeMode(options.mode));
   const modeFlags = template.modeFlags[resolvedMode];
@@ -720,17 +733,24 @@ export function buildExecCommand(options: ExecOptions): string[] {
     cmd.push('--session-id', options.sessionId);
   }
 
-  // Add model (only if explicitly provided by user)
-  if (options.model && template.modelFlag) {
+  // Add model. Prefer the user's explicit --model. Otherwise, for Codex, fall
+  // back to the model configured in the user's active ~/.codex/config.toml:
+  // Codex runs under a per-version CODEX_HOME (see buildExecEnv) that may not
+  // carry that setting, so without this it silently defaults to gpt-5.3-codex,
+  // which a ChatGPT-tier account can't use (HTTP 400). Forwarding keeps the
+  // user's default model setup for both `agents run` and `agents teams`.
+  const effectiveModel = options.model
+    ?? (options.agent === 'codex' ? readCodexConfiguredModel() : undefined);
+  if (effectiveModel && template.modelFlag) {
     const effectiveVersion = options.version || resolveVersion(options.agent, options.cwd || process.cwd());
     if (effectiveVersion) {
-      const resolved = resolveModel(options.agent, effectiveVersion, options.model);
+      const resolved = resolveModel(options.agent, effectiveVersion, effectiveModel);
       if (resolved.warning) {
         process.stderr.write(`[agents] ${resolved.warning}\n`);
       }
       cmd.push(template.modelFlag, resolved.forwarded);
     } else {
-      cmd.push(template.modelFlag, options.model);
+      cmd.push(template.modelFlag, effectiveModel);
     }
   }
 

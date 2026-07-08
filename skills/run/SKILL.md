@@ -52,6 +52,12 @@ action command (e.g. `/code:commit`) run headless would otherwise stall forever 
 an explicit `--mode` is rejected up front with a fix; pick `--mode auto` (recommended),
 `edit`, or `skip`. Pass `--mode plan` explicitly only when you genuinely want a read-only run.
 
+**Agents without a read-only mode** (antigravity, cursor, kiro, …) cannot honor `plan`.
+`agents run` degrades unsupported `plan` to the agent's safest native mode (usually
+`edit`) and prints a warning — same idea as `auto` → `edit` on agents without a
+classifier. Prefer an explicit `--mode edit` to silence the warning. `skip` still
+hard-fails when the agent has no skip-permissions flag.
+
 Note: `auto` and `skip` cannot be scoped to a directory — they are per-run modes, not
 per-repo. To restrict no-prompt behavior to one repository, use that repo's
 `.claude/settings.json` `permissions.allow`/`deny` rules (file rules are path-anchored;

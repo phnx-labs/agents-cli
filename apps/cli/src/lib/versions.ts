@@ -1337,6 +1337,40 @@ export async function installVersion(
       }
     }
 
+    // The `npm install` above ran with `--ignore-scripts` — the right posture for
+    // the dependency TREE (never run arbitrary transitive postinstalls), but it
+    // also skips the agent package's OWN postinstall, which for some agents is a
+    // required install step. @anthropic-ai/claude-code ships a ~500-byte stub at
+    // `bin/claude.exe` plus per-arch native binaries as optional deps; its
+    // `postinstall` (`node install.cjs`) is what copies the correct native binary
+    // over the stub. Skip it and every launch dies with "native binary not
+    // installed". So run the first-party package's declared postinstall here —
+    // scoped to that one package, never `prepare` (claude-code's `prepare` is an
+    // unconditional `exit 1` publish guard). Same precedent as the keychain-helper
+    // postinstall re-run after a `--ignore-scripts` upgrade (see index.ts).
+    // Best-effort: the integrity gate below is the real backstop — a still-broken
+    // binary (postinstall failed, or a platform with no published native dep)
+    // fails there with the correct message rather than throwing here.
+    if (agentConfig.npmPackage) {
+      // Recompute from installedVersion, not the (possibly renamed) `versionDir`:
+      // the `latest` branch above may have renamed the dir to its concrete version.
+      const pkgRoot = path.join(getVersionDir(agent, installedVersion), 'node_modules', agentConfig.npmPackage);
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf-8'));
+        const postinstall = pkg?.scripts?.postinstall;
+        if (typeof postinstall === 'string' && postinstall.trim()) {
+          onProgress?.(`Running ${agentConfig.name} postinstall...`);
+          // The declared postinstall is a shell command string (e.g. `node
+          // install.cjs`), so it must run through a shell on ALL platforms —
+          // shell:true, empty args. cwd is the package root; install.cjs anchors
+          // its paths to __dirname, so that is correct and sufficient.
+          await execFileAsync(postinstall, [], { cwd: pkgRoot, shell: true });
+        }
+      } catch {
+        /* non-fatal; the integrity gate below catches a still-broken binary */
+      }
+    }
+
     // Integrity gate: confirm the install actually launches, not just that the
     // JS wrapper landed. A gutted install (wrapper present, native platform
     // binary missing) otherwise gets silently pinned as the default and crashes
@@ -1733,9 +1767,16 @@ export async function getInstalledVersion(agent: AgentId, version: string): Prom
  * Deliberately narrow: only the missing-file signature counts. An agent that
  * merely dislikes `--version` (nonzero exit, ordinary error text) or ignores it
  * (times out) must NOT match, so a healthy install is never falsely condemned.
+ *
+ * The trailing phrases catch a gutted install that reports its own breakage
+ * *politely* rather than with a raw ENOENT: @anthropic-ai/claude-code's stub
+ * (run when its postinstall never copied the native binary in) prints "native
+ * binary not installed / postinstall did not run / … optional dependency was not
+ * downloaded" and exits nonzero — which the generic patterns above miss. Anchored
+ * tightly so a healthy `--version` can never emit them.
  */
 export function isMissingBinarySignature(output: string): boolean {
-  return /\bENOENT\b|no such file|cannot find|command not found|is not recognized/i.test(output);
+  return /\bENOENT\b|no such file|cannot find|command not found|is not recognized|native binary not installed|postinstall did not run|optional dependency was not downloaded/i.test(output);
 }
 
 /**

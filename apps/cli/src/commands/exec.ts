@@ -729,7 +729,7 @@ export function registerRunCommand(program: Command): void {
       }
 
       const [
-        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, defaultModeFor, headlessPlanStallCommand, nativeResume, resolveInteractive },
+        { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive },
         { ALL_AGENT_IDS },
         { profileExists, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
@@ -1193,26 +1193,41 @@ export function registerRunCommand(program: Command): void {
         process.exit(1);
       }
 
-      // When the user did not pass --mode explicitly, the default is the
-      // generic 'plan'. Some agents (antigravity: edit/skip only, grok in some
-      // configurations) do not support plan. For implicit defaults, degrade
-      // silently to the agent's first listed mode rather than throwing — the
-      // user did not ask for read-only, they asked for "just run it." An
-      // explicit --mode plan still throws (see resolveMode), because silently
-      // elevating an explicit read-only request to edit is unsafe.
+      // Default CLI mode is the generic 'plan'. Agents without a read-only
+      // mode (antigravity, cursor, kiro, …) degrade via resolveMode to their
+      // safest native mode (modes[0], typically edit). That covers both the
+      // implicit default and an explicit `--mode plan`, so multi-agent
+      // scripts can pass a uniform plan flag without per-agent branching.
+      // Elevation is never silent: we warn on stderr (yellow when the user
+      // explicitly asked for plan; gray for the implicit default / auto).
+      // `skip` still hard-fails when unsupported — pretending we bypassed
+      // permissions would be unsafe.
       const modeIsDefault = modeSource === 'default';
+      const requestedMode = normalizeMode(mode);
+      let resolvedMode: ReturnType<typeof resolveMode>;
       try {
-        resolveMode(agent, normalizeMode(mode));
+        resolvedMode = resolveMode(agent, requestedMode);
       } catch (err) {
-        if (modeIsDefault && !modeFromRunDefault) {
-          mode = defaultModeFor(agent) as ExecMode;
-          if (!options.quiet) {
-            process.stderr.write(chalk.gray(`[agents] ${agent} has no '${options.mode}' mode; using '${mode}'\n`));
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+      if (resolvedMode !== requestedMode) {
+        mode = resolvedMode as ExecMode;
+        if (!options.quiet) {
+          if (requestedMode === 'plan' && !modeIsDefault) {
+            process.stderr.write(
+              chalk.yellow(
+                `[agents] ${agent} has no read-only 'plan' mode; using '${mode}' (writable) instead. Pass --mode ${mode} to silence this.\n`,
+              ),
+            );
+          } else {
+            process.stderr.write(
+              chalk.gray(`[agents] ${agent} has no '${requestedMode}' mode; using '${mode}'\n`),
+            );
           }
-        } else {
-          console.error(chalk.red((err as Error).message));
-          process.exit(1);
         }
+      } else {
+        mode = resolvedMode as ExecMode;
       }
 
       // Fail fast on the headless-plan stall footgun: a slash command run
