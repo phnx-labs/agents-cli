@@ -1597,16 +1597,13 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const selectTaskTab = useCallback((id: string) => setActiveTaskTab(id), [])
 
   const handleCloseTaskTab = useCallback((id: string) => {
-    setActiveTaskTab((curActive) => {
-      let nextActive = curActive
-      setOpenTaskTabs((prev) => {
-        const res = closeTaskTab(prev, curActive, id)
-        nextActive = res.activeId
-        return res.tabs
-      })
-      return nextActive
-    })
-  }, [])
+    // Compute both next states from current state in one pass — no nested setState
+    // (an updater must be pure; nesting one inside another ran the reducer twice
+    // under StrictMode and lost the next active id). Deps keep the reads fresh.
+    const res = closeTaskTab(openTaskTabs, activeTaskTab, id)
+    setOpenTaskTabs(res.tabs)
+    setActiveTaskTab(res.activeId)
+  }, [openTaskTabs, activeTaskTab])
 
   const onScope = useCallback((value: string) => {
     if (value === '__queue') { setCenter('backlog'); return }
