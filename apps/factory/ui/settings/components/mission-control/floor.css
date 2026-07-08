@@ -89,6 +89,24 @@
 .swarmify-root .search { flex: 1 1 160px; min-width: 120px; max-width: 340px; background: var(--ds-bg-panel); border: 1px solid var(--ds-border); border-radius: var(--r-md); padding: 5px 10px; color: var(--ds-text); font-size: 12px; }
 .swarmify-root .disp { display: inline-flex; align-items: center; gap: 6px; background: var(--brand); color: #1a1a1a; border: none; font-weight: 700; padding: 6px 12px; border-radius: var(--r-md); font-size: 12px; white-space: nowrap; flex: 0 0 auto; }
 
+/* ---- FLOOR sub-tab strip (primary nav): fixed center pills + dynamic task tabs ---- */
+.swarmify-root .fsubtabs { display: flex; align-items: center; gap: 6px; padding: 7px 16px; background: var(--ds-bg); border-bottom: 1px solid var(--ds-border-subtle); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
+.swarmify-root .fsubtabs .grow { flex: 1; }
+.swarmify-root .fsubtab { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--ds-border); background: var(--ds-bg-recessed); border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 600; color: var(--ds-text-muted); flex: 0 0 auto; white-space: nowrap; cursor: pointer; line-height: 1; }
+.swarmify-root .fsubtab:hover { border-color: var(--ds-text-dim); color: var(--ds-text); }
+.swarmify-root .fsubtab.on { background: var(--brand); border-color: var(--brand); color: #1a1a1a; }
+.swarmify-root .fsubtab-label { font-weight: 700; }
+.swarmify-root .fsubtab-cnt { font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 700; color: var(--ds-text-dim); background: var(--ds-bg); border-radius: 999px; padding: 1px 6px; font-variant-numeric: tabular-nums; }
+.swarmify-root .fsubtab.on .fsubtab-cnt { color: #1a1a1a; background: rgba(26, 26, 26, 0.14); }
+.swarmify-root .fsubtab-needs { font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 700; color: #1a1a1a; background: var(--status-pending); border-radius: 999px; padding: 1px 6px; font-variant-numeric: tabular-nums; }
+.swarmify-root .tasktab { padding-right: 7px; }
+.swarmify-root .tasktab-src { font-size: 9px; font-weight: 800; letter-spacing: .03em; color: var(--ds-text-dim); }
+.swarmify-root .tasktab.on .tasktab-src { color: #1a1a1a; }
+.swarmify-root .tasktab .fsubtab-label { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarmify-root .tasktab-x { display: inline-flex; align-items: center; justify-content: center; opacity: .55; border-radius: 999px; padding: 1px; cursor: pointer; }
+.swarmify-root .tasktab-x:hover { opacity: 1; background: rgba(0, 0, 0, 0.18); }
+.swarmify-root .sw-tasktab-pane { display: block; padding: 0; }
+
 /* ---- generic dot / badges ---- */
 .swarmify-root .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; display: inline-block; }
 .swarmify-root .dot.running { background: var(--status-running); box-shadow: 0 0 0 3px var(--status-running-bg); }
@@ -341,11 +359,8 @@
 .swarmify-root .dispatch-sm { border: 1px solid var(--brand); background: transparent; color: var(--brand-600); font-weight: 700; font-size: 11px; padding: 3px 9px; border-radius: var(--r-md); }
 .swarmify-root .seeall { color: var(--brand-600); cursor: pointer; font-weight: 700; font-size: 11px; }
 
-/* backlog (tickets) view */
-.swarmify-root .bktoolbar { display: flex; align-items: center; gap: 10px; padding: 2px 2px 10px; border-bottom: 1px solid var(--ds-border-subtle); margin-bottom: 6px; }
-.swarmify-root .bh2 { font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--ds-text-muted); }
-.swarmify-root .bksel { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ds-text-dim); }
-.swarmify-root .bksel select { background: var(--ds-bg-panel); border: 1px solid var(--ds-border); border-radius: var(--r-md); padding: 3px 6px; font-size: 11px; color: var(--ds-text); font-weight: 600; }
+/* backlog (tickets) view — group/sort/source controls moved to the shared FloorControls
+   bar (mode='backlog'); the old .bktoolbar was removed with them. */
 .swarmify-root .trow2 { display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-bottom: 1px solid var(--ds-border-subtle); cursor: pointer; border-radius: var(--r-sm); }
 .swarmify-root .trow2:hover { background: var(--ds-bg-panel); }
 .swarmify-root .trow2.selsel { background: var(--ds-bg-panel); box-shadow: inset 3px 0 0 var(--brand); }

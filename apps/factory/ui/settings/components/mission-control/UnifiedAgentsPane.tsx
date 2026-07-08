@@ -20,10 +20,13 @@ import {
   PENDING_DISPATCH_TTL_MS,
   type PendingDispatch,
 } from './dispatch'
-import { FloorControls, type StatusChip } from './FloorControls'
+import { FloorControls, floorControlsMode, type StatusChip } from './FloorControls'
 import { FloorSidebar } from './FloorSidebar'
 import { FloorRail } from './FloorRail'
+import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from './FloorSubtabs'
 import { BacklogCenter } from './BacklogCenter'
+import { TaskDetail } from '../bench/TaskDetail'
+import type { FlatTask } from '../bench/TaskCard'
 import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
 import { ProjectsPane } from './ProjectsPane'
@@ -38,6 +41,7 @@ import {
   latestTodos,
   sessionTaskLine,
   type FloorAgent,
+  type FloorTicket,
   type CenterMode,
   type HostInventory,
   type FloorGroupBy,
@@ -529,6 +533,17 @@ function useStableList(items: UnifiedAgent[]): UnifiedAgent[] {
   }, [items])
 }
 
+// Wrap a FeedItem so double-clicking the card opens it as a closeable task tab.
+// display:contents keeps the parent grid layout intact — the span box vanishes and the
+// card stays the real grid child — while still catching the dblclick that bubbles up.
+function FeedRow({ onOpenTask, ...props }: React.ComponentProps<typeof FeedItem> & { onOpenTask: (a: FloorAgent) => void }) {
+  return (
+    <span style={{ display: 'contents' }} onDoubleClick={() => onOpenTask(props.agent)}>
+      <FeedItem {...props} />
+    </span>
+  )
+}
+
 export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks, unifiedTasksLoading, onDispatch, onNavigate, onOpenInBench, openDispatchTrigger, quickSpawnTrigger, openDetailTaskId, onDetailTaskConsumed, onThroughputChange, search: floorSearch, onSearch: setFloorSearch, githubRepo, watchdogEnabled = false, watchdogEvents = [], projectRules = [] }: UnifiedAgentsPaneProps) {
   const panelVisible = usePanelVisibility()
   const [newMenuOpen, setNewMenuOpen] = useState(false)
@@ -585,6 +600,11 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // ---------- Floor 3-pane shell state ----------
   const floorPrefs0 = useRef(loadFloorPrefs()).current
   const [center, setCenter] = useState<CenterMode>('agents')
+  // Dynamic task tabs: double-clicking a backlog ticket or an agent card opens a
+  // closeable tab in the sub-tab strip. activeTaskTab === null means a fixed center
+  // tab is showing; otherwise the named task tab owns the center pane.
+  const [openTaskTabs, setOpenTaskTabs] = useState<TaskTab[]>([])
+  const [activeTaskTab, setActiveTaskTab] = useState<string | null>(null)
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
   const [projFilter, setProjFilter] = useState<string | null>(null)
@@ -1553,6 +1573,41 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     setPendingPlans((prev) => prev.filter((p) => p.sessionId !== sessionId))
   }, [])
 
+  // ---------- Sub-tab strip: fixed-center selection + dynamic task tabs ----------
+  // Selecting a fixed center clears any active task tab so the center pane returns.
+  const selectCenter = useCallback((c: CenterMode) => {
+    setActiveTaskTab(null)
+    setCenter(c)
+  }, [])
+
+  const openTaskFromTicket = useCallback((ticket: FloorTicket) => {
+    setOpenTaskTabs((prev) => openTaskTab(prev, { id: ticket.id, title: ticket.title, source: ticket.source }))
+    setActiveTaskTab(ticket.id)
+  }, [])
+
+  // Open (or focus) a task tab from an agent card. Keys off the agent's linked ticket
+  // when it has one (so it collapses with the ticket's own tab); otherwise the agent id.
+  const openTaskFromAgent = useCallback((a: FloorAgent) => {
+    const id = a.ticket ?? a.id
+    const source: TicketSource = a.ticket?.startsWith('#') ? 'GH' : 'LN'
+    setOpenTaskTabs((prev) => openTaskTab(prev, { id, title: a.ticket ?? a.name, source }))
+    setActiveTaskTab(id)
+  }, [])
+
+  const selectTaskTab = useCallback((id: string) => setActiveTaskTab(id), [])
+
+  const handleCloseTaskTab = useCallback((id: string) => {
+    setActiveTaskTab((curActive) => {
+      let nextActive = curActive
+      setOpenTaskTabs((prev) => {
+        const res = closeTaskTab(prev, curActive, id)
+        nextActive = res.activeId
+        return res.tabs
+      })
+      return nextActive
+    })
+  }, [])
+
   const onScope = useCallback((value: string) => {
     if (value === '__queue') { setCenter('backlog'); return }
     if (value === '__needs') { setCenter('agents'); setProjFilter(null); setHostFilter(null); return }
@@ -1726,7 +1781,48 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     )
   }
 
-  const centerContent = center === 'backlog' ? (
+  // The fixed sub-tabs: one per CenterMode, with a live count + (agents) needs badge.
+  const fixedTabs: FixedTab[] = useMemo(() => [
+    { center: 'agents', label: 'Agents', count: floorAgents.length, needs: needsAgents.length },
+    { center: 'backlog', label: 'Backlog', count: floorTickets.length },
+    { center: 'projects', label: 'Projects', count: managedProjects.length },
+    { center: 'host', label: 'Hosts', count: fleetDevices.length },
+  ], [floorAgents.length, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length])
+
+  // Resolve the active task tab (if any) back to a bench FlatTask so its detail renders.
+  const activeTab = activeTaskTab ? openTaskTabs.find((t) => t.id === activeTaskTab) ?? null : null
+  const activeTabTask: FlatTask | null = activeTab
+    ? (() => {
+        const ut = unifiedTasks.find((t) => t.id === activeTab.id || t.metadata.identifier === activeTab.id)
+        return ut
+          ? { id: ut.id, source: ut.source, title: ut.title, description: ut.description, status: ut.status, priority: ut.priority, metadata: ut.metadata }
+          : null
+      })()
+    : null
+  // Only render a bar for centers that HAVE one (agents/backlog); a task tab suppresses it.
+  const controlsMode = activeTaskTab ? null : floorControlsMode(center)
+
+  const centerContent = activeTab ? (
+    <div className="feed sw-tasktab-pane">
+      <div className="sw-bench-detail">
+        {activeTabTask ? (
+          <TaskDetail
+            task={activeTabTask}
+            onDispatch={(t) => openDispatch({ ticketId: t.id })}
+            onDismiss={() => handleCloseTaskTab(activeTab.id)}
+            onOpenExternal={(url) => postMessage({ type: 'openExternal', url })}
+          />
+        ) : (
+          <div className="detail-empty" style={{ flexDirection: 'column', gap: 12 }}>
+            <span>{activeTab.title}</span>
+            <button className="disp" onClick={() => openDispatch({ ticketId: activeTab.id })}>
+              <Icon name="zap" size={12} /> Dispatch
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  ) : center === 'backlog' ? (
     <BacklogCenter
       tickets={floorTickets}
       group={ticketGroup}
@@ -1735,11 +1831,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       projFilter={projFilter}
       search={floorSearch}
       selectedTicketId={selectedTicketId}
-      onGroup={setTicketGroup}
-      onSort={setTicketSort}
-      onToggleSrc={(src) => setTicketSrc((p) => ({ ...p, [src]: !p[src] }))}
       onSelectTicket={(id) => setSelectedTicketId(id)}
-      onBackToAgents={() => setCenter('agents')}
+      onOpenTask={openTaskFromTicket}
     />
   ) : (
     <div className="feed">
@@ -1770,7 +1863,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             onReplyOne={selectFloorAgent}
           />
           {questionClusters.filter((c) => c.length === 1).map((c) => (
-            <FeedItem
+            <FeedRow onOpenTask={openTaskFromAgent}
               key={c[0].id}
               agent={c[0]}
               selected={selectedFloorAgent?.id === c[0].id}
@@ -1791,7 +1884,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             />
           ))}
           {reviewNeedsAgents.map((a) => (
-            <FeedItem
+            <FeedRow onOpenTask={openTaskFromAgent}
               key={a.id}
               agent={a}
               selected={selectedFloorAgent?.id === a.id}
@@ -1821,7 +1914,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       </div>
       {floorGroup === 'none'
         ? runningFeed.map((a) => (
-            <FeedItem
+            <FeedRow onOpenTask={openTaskFromAgent}
               key={a.id}
               agent={a}
               selected={selectedFloorAgent?.id === a.id}
@@ -1849,7 +1942,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                 <span className="ln" />
               </div>
               {arr.map((a) => (
-                <FeedItem
+                <FeedRow onOpenTask={openTaskFromAgent}
                   key={a.id}
                   agent={a}
                   selected={selectedFloorAgent?.id === a.id}
@@ -1867,7 +1960,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         <>
           <div className="feed-sec">DONE TODAY · {doneFeed.length}<span className="ln" /></div>
           {doneFeed.map((a) => (
-            <FeedItem
+            <FeedRow onOpenTask={openTaskFromAgent}
               key={a.id}
               agent={a}
               selected={selectedFloorAgent?.id === a.id}
@@ -1887,7 +1980,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           {recentAgents.length === 0 ? (
             <div className="detail-empty" style={{ padding: '10px 16px' }}>No recent sessions for this host.</div>
           ) : recentAgents.map((a) => (
-            <FeedItem
+            <FeedRow onOpenTask={openTaskFromAgent}
               key={a.id}
               agent={a}
               selected={selectedFloorAgent?.id === a.id}
@@ -1933,20 +2026,39 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   return (
     <div className="sw-floor-dashboard" style={{ padding: 0, overflow: 'hidden' }}>
-      <FloorControls
-        needsCount={needsAgents.length}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((o) => !o)}
-        rightOpen={rightOpen}
-        onToggleRight={() => setRightOpen((o) => !o)}
-        plain={plain}
-        onTogglePlain={() => setPlain((o) => !o)}
-        sort={floorSort}
-        onSort={setFloorSort}
-        group={floorGroup}
-        onGroup={setFloorGroup}
+      <FloorSubtabs
+        fixed={fixedTabs}
+        center={center}
+        taskTabs={openTaskTabs}
+        activeTaskTab={activeTaskTab}
+        onSelectCenter={selectCenter}
+        onSelectTaskTab={selectTaskTab}
+        onCloseTaskTab={handleCloseTaskTab}
         onDispatch={() => openDispatch(selectedTicketId ? { ticketId: selectedTicketId } : undefined)}
       />
+
+      {controlsMode && (
+        <FloorControls
+          mode={controlsMode}
+          needsCount={needsAgents.length}
+          sidebarOpen={sidebarOpen}
+          onToggleSidebar={() => setSidebarOpen((o) => !o)}
+          rightOpen={rightOpen}
+          onToggleRight={() => setRightOpen((o) => !o)}
+          plain={plain}
+          onTogglePlain={() => setPlain((o) => !o)}
+          sort={floorSort}
+          onSort={setFloorSort}
+          group={floorGroup}
+          onGroup={setFloorGroup}
+          ticketGroup={ticketGroup}
+          onTicketGroup={setTicketGroup}
+          ticketSort={ticketSort}
+          onTicketSort={setTicketSort}
+          srcFilter={ticketSrc}
+          onToggleSrc={(src) => setTicketSrc((p) => ({ ...p, [src]: !p[src] }))}
+        />
+      )}
 
       <div className="page" style={{ flex: 1, minHeight: 0, height: 'auto' }}>
         {sidebarOpen && (railCollapsed ? (

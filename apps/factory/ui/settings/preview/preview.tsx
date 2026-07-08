@@ -13,13 +13,14 @@ import '../index.css'
 import { Icon } from '../components/mission-control/icons'
 import { FloorSidebar } from '../components/mission-control/FloorSidebar'
 import { FloorRail } from '../components/mission-control/FloorRail'
-import { FloorControls } from '../components/mission-control/FloorControls'
+import { FloorControls, floorControlsMode } from '../components/mission-control/FloorControls'
+import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from '../components/mission-control/FloorSubtabs'
 import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
 import { BacklogCenter } from '../components/mission-control/BacklogCenter'
 import { ProjectsPane } from '../components/mission-control/ProjectsPane'
-import type { FloorAgent, FloorTicket, StructuredQuestion, TicketGroupBy, TicketSort, ManagedProject, LinearProjectLite } from '../components/mission-control/floorModel'
+import type { FloorAgent, FloorTicket, StructuredQuestion, FloorSort, TicketGroupBy, TicketSort, CenterMode, ManagedProject, LinearProjectLite } from '../components/mission-control/floorModel'
 import type { UnifiedTask } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
 
@@ -190,10 +191,14 @@ function Feed() {
   return (
     <div className="feed">
       <FloorControls
+        mode="agents"
         needsCount={2}
         sidebarOpen rightOpen plain={false}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
-        sort={srt} onSort={setSrt} group={grp} onGroup={setGrp} onDispatch={noop}
+        sort={srt} onSort={setSrt} group={grp} onGroup={setGrp}
+        ticketGroup="project" onTicketGroup={noop}
+        ticketSort="priority" onTicketSort={noop}
+        srcFilter={{ LN: true, GH: true }} onToggleSrc={noop}
       />
       <SavedViews
         views={[
@@ -241,28 +246,110 @@ function Feed() {
   )
 }
 
-// Backlog center with the group/sort/filter toolbar. Defaults to grouping by
-// Owner so the preview shows tickets bucketed by assignee (incl. Unassigned).
+// Backlog center + its contextual controls bar (FloorControls mode='backlog'). The
+// group/sort/source controls live in the shared bar now, not a per-view toolbar.
 function Backlog() {
   const [group, setGroup] = useState<TicketGroupBy>('project')
   const [sort, setSort] = useState<TicketSort>('priority')
   const [srcFilter, setSrcFilter] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
   const [selected, setSelected] = useState<string | null>(null)
   return (
-    <BacklogCenter
-      tickets={tickets}
-      group={group}
-      sort={sort}
-      srcFilter={srcFilter}
-      projFilter={null}
-      search=""
-      selectedTicketId={selected}
-      onGroup={setGroup}
-      onSort={setSort}
-      onToggleSrc={(s) => setSrcFilter((f) => ({ ...f, [s]: !f[s] }))}
-      onSelectTicket={setSelected}
-      onBackToAgents={noop}
-    />
+    <>
+      <FloorControls
+        mode="backlog"
+        sidebarOpen rightOpen plain={false}
+        onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
+        sort="needs" onSort={noop} group="project" onGroup={noop}
+        ticketGroup={group} onTicketGroup={setGroup}
+        ticketSort={sort} onTicketSort={setSort}
+        srcFilter={srcFilter} onToggleSrc={(s) => setSrcFilter((f) => ({ ...f, [s]: !f[s] }))}
+      />
+      <BacklogCenter
+        tickets={tickets}
+        group={group}
+        sort={sort}
+        srcFilter={srcFilter}
+        projFilter={null}
+        search=""
+        selectedTicketId={selected}
+        onSelectTicket={setSelected}
+        onOpenTask={noop}
+      />
+    </>
+  )
+}
+
+// Sub-tab strip + contextual controls bar — the full Option A nav. Fixed center pills
+// (Agents/Backlog/Projects/Hosts) with count+needs badges, two pre-opened task tabs, and
+// the one contextual bar that swaps its control set per active center (or hides for a
+// task tab / projects / hosts). URL: ?view=subtabs (&center=agents|backlog|projects|host).
+function Subtabs() {
+  const params = new URLSearchParams(location.search)
+  const [center, setCenter] = useState<CenterMode>((params.get('center') as CenterMode) || 'agents')
+  const [activeTaskTab, setActiveTaskTab] = useState<string | null>(null)
+  const [taskTabs, setTaskTabs] = useState<TaskTab[]>([
+    { id: 'RUSH-1262', title: 'PKCE token exchange uses unpinned http client', source: 'LN' },
+    { id: '#418', title: 'Kanban / Deadline feed views are stubs', source: 'GH' },
+  ])
+  const [grp, setGrp] = useState<'none' | 'project' | 'host' | 'status' | 'agent'>('project')
+  const [srt, setSrt] = useState<FloorSort>('needs')
+  const [tg, setTg] = useState<TicketGroupBy>('project')
+  const [ts, setTs] = useState<TicketSort>('priority')
+  const [src, setSrc] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
+  const [selected, setSelected] = useState<string | null>(null)
+
+  const fixed: FixedTab[] = [
+    { center: 'agents', label: 'Agents', count: running.length + 2, needs: 2 },
+    { center: 'backlog', label: 'Backlog', count: tickets.length },
+    { center: 'projects', label: 'Projects', count: managedProjects.length },
+    { center: 'host', label: 'Hosts', count: 5 },
+  ]
+  const controlsMode = activeTaskTab ? null : floorControlsMode(center)
+  return (
+    <div className="feed-col">
+      <FloorSubtabs
+        fixed={fixed}
+        center={center}
+        taskTabs={taskTabs}
+        activeTaskTab={activeTaskTab}
+        onSelectCenter={(c) => { setActiveTaskTab(null); setCenter(c) }}
+        onSelectTaskTab={setActiveTaskTab}
+        onCloseTaskTab={(id) => {
+          const r = closeTaskTab(taskTabs, activeTaskTab, id)
+          setTaskTabs(r.tabs)
+          setActiveTaskTab(r.activeId)
+        }}
+        onDispatch={noop}
+      />
+      {controlsMode && (
+        <FloorControls
+          mode={controlsMode}
+          needsCount={2}
+          sidebarOpen rightOpen plain={false}
+          onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
+          sort={srt} onSort={setSrt} group={grp} onGroup={setGrp}
+          ticketGroup={tg} onTicketGroup={setTg}
+          ticketSort={ts} onTicketSort={setTs}
+          srcFilter={src} onToggleSrc={(s) => setSrc((f) => ({ ...f, [s]: !f[s] }))}
+        />
+      )}
+      {!activeTaskTab && center === 'backlog' && (
+        <BacklogCenter
+          tickets={tickets}
+          group={tg}
+          sort={ts}
+          srcFilter={src}
+          projFilter={null}
+          search=""
+          selectedTicketId={selected}
+          onSelectTicket={setSelected}
+          onOpenTask={(t) => {
+            setTaskTabs((prev) => openTaskTab(prev, { id: t.id, title: t.title, source: t.source }))
+            setActiveTaskTab(t.id)
+          }}
+        />
+      )}
+    </div>
   )
 }
 
@@ -335,7 +422,7 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel
