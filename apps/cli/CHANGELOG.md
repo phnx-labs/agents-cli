@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`agents cloud cancel` now actually cancels paused runs.** `RushProvider.cancel()` issued `DELETE /api/v1/cloud-runs/{id}`, which the backend doesn't implement — it 404s — so `agents cloud cancel` (and the Factory Floor's cancel affordance) silently failed on any run that wasn't actively running: `queued`, `needs_review`, and `input_required` runs stayed stuck (e.g. a 14-day-old input-required run lingering in the Floor's "NEEDS YOU" bucket forever). Switched to the cancel action endpoint `POST /api/v1/cloud-runs/{id}/cancel`, which the backend implements and which cancels paused runs too. Verified live against `api.prix.dev` (the POST returned `{"ok":true,"status":"cancelled"}` and the stuck run transitioned `needs_review` → `cancelled`). Source: `apps/cli/src/lib/cloud/rush.ts`.
+
 ## 1.20.48
 
 - **Menu-bar helper: a RECENT TICKETS section shows the issues you filed via the quick-issue bar, each clickable to open in Linear.** The completion notification is transient, so the tickets the `Cmd-Shift-O` bar creates now also persist to a small local ledger (`~/.agents/.history/menubar/recent-tickets.json`, newest-first, deduped by id, capped at 10) that the menu-bar dropdown surfaces below RECENT sessions — click a row to open the ticket. The dispatch records the id + note + Linear URL on a successful create; the section renders nothing when the ledger is empty. Source: `apps/cli/menubar/Sources/MenubarHelper/{RecentTickets,StatusItemController,AgentsCLI,IssueSelfTest}.swift`.
