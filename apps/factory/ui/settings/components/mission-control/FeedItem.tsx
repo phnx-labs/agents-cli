@@ -10,9 +10,16 @@ import { MiniTimeline } from './Timeline'
 import { renderMarkdown } from '../../utils/markdown'
 import { ExtLink } from '../common/ExtLink'
 
-/** First line of a block of text, trimmed — a title reads best as a single clause. */
+/** First line of a block of text as a plain-text title — strips leading markdown
+ *  (ATX headings, list bullets) and inline markers so a prompt like "## Problem"
+ *  or "**Fix** the bug" reads cleanly in the title chip. */
 function firstLine(text: string): string {
-  const line = text.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''
+  const raw = text.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''
+  const line = raw
+    .replace(/^#+\s+/, '') // ATX heading
+    .replace(/^[-*+]\s+/, '') // list bullet
+    .replace(/[*_`]/g, '') // inline emphasis / code
+    .trim()
   return line.length > 72 ? line.slice(0, 72) + '…' : line
 }
 
