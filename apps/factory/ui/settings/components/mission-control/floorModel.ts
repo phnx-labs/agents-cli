@@ -139,6 +139,8 @@ export interface FloorAgent {
   worktreeSlug: string   // "<slug>" under .agents/worktrees/; '' when not a worktree. Disambiguates sibling sessions + labels the card when topic/preview are empty.
   worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree
   resp: string           // last response text (Anthropic Agent-view style)
+  prompt?: string        // the ORIGINAL task (first user message / dispatch prompt / topic); anchors the card, distinct from the last message
+  messages: string[]     // the last few assistant messages (from the CLI's last_messages window); [] when none. Drives the detail-pane Activity feed.
   question: StructuredQuestion | null
   reply: ReplyTarget     // how a user reply reaches this agent (host dispatches on kind)
   todos: TodoItem[]      // task checklist from the latest TodoWrite; empty when none
@@ -418,14 +420,31 @@ function firstNonEmpty(...values: Array<string | null | undefined>): string | un
 
 /**
  * The one "what is this session doing" line, used by BOTH the card and the detail
- * rail so no surface re-derives it or renders blank. Fallback chain: the CLI summary
- * / live preview, then the last response, then the worktree slug or branch (a task
+ * rail so no surface re-derives it or renders blank. Fallback chain: the ORIGINAL
+ * task (prompt / first user message — the durable anchor), then the CLI summary /
+ * live preview, then the last response, then the worktree slug or branch (a task
  * label when there's no narrative — e.g. "headless-secrets-shadow"). Returns '' when
  * the agent carries no task signal at all; callers that need an absolute fallback add
  * `|| a.name` (the card already shows the name separately, so it omits that).
+ *
+ * prompt is preferred first so a card anchors to what the agent was ASKED to do, not
+ * whatever it last said — the last message drifts as work progresses, the task doesn't.
  */
 export function sessionTaskLine(a: FloorAgent): string {
-  return firstNonEmpty(a.summary, a.resp, a.worktreeSlug, a.branch) ?? ''
+  return firstNonEmpty(a.prompt, a.summary, a.resp, a.worktreeSlug, a.branch) ?? ''
+}
+
+/**
+ * Persist-last-non-empty for a session's todo checklist. The tool-call window that
+ * `latestTodos` parses is capped (session.summary.ts keeps only the last 24 calls),
+ * so once >24 tool calls follow the last TodoWrite the checklist silently vanishes.
+ * Callers thread through the last KNOWN non-empty set (remembered per session id) and
+ * fall back to it when the fresh parse is empty — so a still-running agent keeps
+ * showing its progress instead of dropping to a blank card. Pure so it's unit-tested.
+ */
+export function todosWithFallback(fresh: TodoItem[], remembered: TodoItem[] | undefined): TodoItem[] {
+  if (fresh.length > 0) return fresh
+  return remembered && remembered.length > 0 ? remembered : []
 }
 
 /**

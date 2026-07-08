@@ -9,6 +9,7 @@ import {
   toFloorAgentFromUnified,
   toFloorAgentFromRemote,
   adaptTickets,
+  cleanWorktreeSlug,
   type UnifiedAgentLike,
   type RemoteSessionLike,
 } from './floorAdapter'
@@ -199,6 +200,70 @@ describe('toFloorAgentFromUnified', () => {
     expect(a.branch).toBe('feat-rl')
     expect(a.question?.kind).toBe('choice')
     expect(a.question?.options.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('maps the ORIGINAL task (terminal firstUserMessage) into prompt, distinct from the last message', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        activity: 'Editing FeedItem.tsx',
+        terminal: { id: 't1', firstUserMessage: 'Surface the original prompt on cards' },
+        agent: { last_messages: ['Done — wired renderMarkdown into the resp line'] },
+      }),
+      { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
+    )
+    expect(a.prompt).toBe('Surface the original prompt on cards')
+    // resp is the LAST message, not the prompt — the two are independent.
+    expect(a.resp).toBe('Done — wired renderMarkdown into the resp line')
+  })
+
+  test('a headless run maps its dispatch prompt into prompt', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        terminal: null,
+        agent: { prompt: 'Fix the rate limiter', last_messages: [] },
+      }),
+      { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
+    )
+    expect(a.prompt).toBe('Fix the rate limiter')
+  })
+
+  test('carries the full last_messages window into messages (Activity feed), not just the last one', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        agent: { last_messages: ['first', '', '  ', 'second', 'third'] },
+      }),
+      { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
+    )
+    // blank entries are dropped; order preserved; resp is still the last non-blank one.
+    expect(a.messages).toEqual(['first', 'second', 'third'])
+    expect(a.resp).toBe('third')
+  })
+
+  test('renders a clean worktree slug from a real worktree cwd (never a raw path)', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        terminal: { id: 't1', cwd: '/Users/x/src/github.com/o/agents-cli/.agents/worktrees/rush-1531' },
+      }),
+      { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
+    )
+    expect(a.worktreeSlug).toBe('rush-1531')
+    expect(a.worktreeSlug).not.toContain('/')
+    expect(a.worktreeSlug).not.toContain('WT=')
+  })
+})
+
+describe('cleanWorktreeSlug — kills the WT=<path> leak', () => {
+  test('a real worktree path yields the trailing slug', () => {
+    expect(cleanWorktreeSlug('/Users/x/repo/.agents/worktrees/rush-1531')).toBe('rush-1531')
+  })
+  test('strips a WT= prefix and any surviving path down to the slug', () => {
+    expect(cleanWorktreeSlug('WT=/Users/x/repo/.agents/worktrees/card-ux')).toBe('card-ux')
+  })
+  test('a non-worktree cwd resolves to empty (no chip)', () => {
+    expect(cleanWorktreeSlug('/Users/x/src/repo')).toBe('')
+    expect(cleanWorktreeSlug('')).toBe('')
+    expect(cleanWorktreeSlug(null)).toBe('')
+    expect(cleanWorktreeSlug(undefined)).toBe('')
   })
 })
 

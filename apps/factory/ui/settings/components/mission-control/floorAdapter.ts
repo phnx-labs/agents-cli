@@ -17,6 +17,7 @@ import {
   parseStructuredQuestion,
   toFloorTicket,
   latestTodos,
+  todosWithFallback,
   resolveProject,
   worktreeSlugOf,
   type FloorAgent,
@@ -24,8 +25,41 @@ import {
   type AgentAbbr,
   type ReplyTarget,
   type CiStatus,
+  type TodoItem,
 } from './floorModel'
 import type { UnifiedTask, RecentToolCall, ProjectRule } from '../../types'
+
+// Last non-empty todo set per session, so the checklist survives the recent-tool
+// window cap (see floorModel.todosWithFallback). Keyed by the FloorAgent id, which is
+// stable across polls for a given session (local: u.id; remote: `remote-<host>-<id>`).
+// Module-level (not React state) so it persists across the pane's 3s re-derives without
+// threading a store through every adapter call. Empty parses fall back to the remembered
+// set; a fresh non-empty parse overwrites it.
+const lastTodosById = new Map<string, TodoItem[]>()
+
+/** Parse fresh todos, remembering the last non-empty set so the checklist doesn't vanish. */
+function stickyTodos(id: string, toolCalls: RecentToolCall[] | undefined): TodoItem[] {
+  const fresh = latestTodos(toolCalls)
+  const merged = todosWithFallback(fresh, lastTodosById.get(id))
+  if (fresh.length > 0) lastTodosById.set(id, fresh)
+  return merged
+}
+
+/**
+ * A clean worktree slug — never a raw path. worktreeSlugOf already returns a slug for a
+ * real .agents/worktrees/<slug> path, but a raw source string can leak a `WT=<abs path>`
+ * marker (the reported `WT=/Users/.../worktrees/rush-1531` bug). Strip a `WT=` prefix and
+ * collapse any surviving absolute path down to its final path segment so the card renders
+ * a chip, not a filesystem path.
+ */
+export function cleanWorktreeSlug(raw: string | null | undefined): string {
+  const s = worktreeSlugOf(raw)
+  if (!s) return ''
+  const stripped = s.replace(/^WT=/, '')
+  // If a whole path survived, keep only the last segment (the slug).
+  const seg = stripped.split('/').filter(Boolean).pop() ?? stripped
+  return seg.trim()
+}
 
 // ---------- structural inputs ----------
 
@@ -52,6 +86,8 @@ export interface UnifiedAgentLike {
     cwd?: string | null
     branch?: string | null
     waitingForInput?: boolean
+    /** The ORIGINAL task the session opened with — anchors the card. */
+    firstUserMessage?: string
     lastUserMessage?: string
     currentActivity?: string
     narrative?: string
@@ -62,6 +98,8 @@ export interface UnifiedAgentLike {
     branch?: string | null
     repo_name?: string | null
     status?: string
+    /** Original dispatch prompt for a headless/background agent. */
+    prompt?: string
     last_messages?: string[]
   } | null
 }
@@ -124,6 +162,14 @@ const ABBR_BY_TYPE: Record<string, AgentAbbr> = {
 /** agentType string -> terminal-tab prefix. Unknown types fall back to Shell. */
 export function abbrFor(agentType: string): AgentAbbr {
   return ABBR_BY_TYPE[(agentType || '').toLowerCase()] ?? 'SH'
+}
+
+/** First non-blank string, trimmed; undefined when none. */
+function firstNonEmptyStr(...values: Array<string | null | undefined>): string | undefined {
+  for (const v of values) {
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return undefined
 }
 
 /**
@@ -248,7 +294,13 @@ export function toFloorAgentFromUnified(
   })
   const needs = deriveNeeds(phase, prOpenUnreviewed, ci)
   const lastMsgs = u.agent?.last_messages
-  const resp = (lastMsgs && lastMsgs.length ? lastMsgs[lastMsgs.length - 1] : '') || u.activity || ''
+  // The full recent-messages window (up to the CLI's last N) drives the detail Activity
+  // feed; the single last one still feeds `resp` (card body / question parsing).
+  const messages = (lastMsgs ?? []).filter((m) => typeof m === 'string' && m.trim().length > 0)
+  const resp = (messages.length ? messages[messages.length - 1] ?? '' : '') || u.activity || ''
+  // Original task anchor: a terminal session's first user message, else a headless run's
+  // dispatch prompt. Distinct from `resp` (the last message), which drifts as work goes.
+  const prompt = firstNonEmptyStr(u.terminal?.firstUserMessage, u.agent?.prompt)
   const { verb, target } = splitActivity(u.activity)
   const project = deriveProject(u.terminal?.cwd ?? u.agent?.cwd, u.agent?.repo_name, opts.workspaceRepo || '—', opts.projectRules ?? [])
   // Local unified agents ARE this window's terminal tabs, so sendText into the live
@@ -287,12 +339,15 @@ export function toFloorAgentFromUnified(
     createdTickets: u.createdTickets ?? [],
     spawnedTeam: u.spawnedTeam || undefined,
     branch: u.terminal?.branch ?? u.agent?.branch ?? '',
-    worktreeSlug: worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd),
+    worktreeSlug: cleanWorktreeSlug(u.terminal?.cwd ?? u.agent?.cwd),
     worktreePath: worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd) ? (u.terminal?.cwd ?? u.agent?.cwd ?? '') : '',
     resp,
+    prompt,
+    messages,
     question: parseStructuredQuestion(resp, phase),
     reply,
-    todos: latestTodos(u.terminal?.recentToolCalls),
+    // Persist the last non-empty checklist so it survives the recent-tool window cap.
+    todos: stickyTodos(u.id, u.terminal?.recentToolCalls),
     // The rolling summary line + recent tool calls already flow over the wire on the
     // terminal. Prefer the agent's own prose (narrative); fall back to the now-line
     // (currentActivity) when it hasn't spoken between tool calls yet.
@@ -357,9 +412,15 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     createdTickets: r.createdTickets ?? [],
     spawnedTeam: r.spawnedTeam || undefined,
     branch: r.branch,
-    worktreeSlug: r.worktreeSlug ?? worktreeSlugOf(r.cwd),
+    // Prefer the CLI-provided slug; strip any WT= / path leak from either source.
+    worktreeSlug: r.worktreeSlug ? cleanWorktreeSlug(r.worktreeSlug) : cleanWorktreeSlug(r.cwd),
     worktreePath: r.worktreePath ?? (worktreeSlugOf(r.cwd) ? r.cwd : ''),
     resp,
+    // Remote (Tier-1) has no first-user-message enrichment yet — the session's task line
+    // (topic) is the closest durable anchor for the original task.
+    prompt: r.topic || undefined,
+    // Only the last response is carried for remote; surface it as the single-entry feed.
+    messages: r.lastResponse ? [r.lastResponse] : [],
     question: parseStructuredQuestion(resp, phase),
     reply: deriveReplyTargetFromRemote(r),
     // Remote (Tier-1) sessions are status-only; no tool calls to parse todos from yet.

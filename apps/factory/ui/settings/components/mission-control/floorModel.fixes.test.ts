@@ -20,7 +20,7 @@ function agent(over: Partial<FloorAgent>): FloorAgent {
     id: 'x', host: 'this-mac', hostLabel: undefined, project: '', name: 'a', abbr: 'CC',
     phase: 'running', verb: '', target: '', tok: 0, since: '', lastActivityMs: 0,
     files: 0, tools: 0, needs: false, pinned: false, pr: null, prUrl: null, ci: null,
-    ticket: null, branch: '', worktreeSlug: '', worktreePath: '', resp: '',
+    ticket: null, branch: '', worktreeSlug: '', worktreePath: '', resp: '', messages: [],
     question: null, reply: { kind: 'none', host: 'this-mac' }, todos: [], summary: '',
     recent: [], ...over,
   }

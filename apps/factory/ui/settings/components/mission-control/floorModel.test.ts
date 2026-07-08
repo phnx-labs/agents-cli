@@ -18,12 +18,15 @@ import {
   groupTickets,
   sortTickets,
   resolveProject,
+  sessionTaskLine,
+  todosWithFallback,
   PHASE_RANK,
   STALL_THRESHOLD_MS,
   type FloorAgent,
   type FloorPhase,
   type StructuredQuestion,
   type ManagedProject,
+  type TodoItem,
 } from './floorModel'
 
 describe('resolveProject', () => {
@@ -93,6 +96,7 @@ function makeAgent(overrides: Partial<FloorAgent> = {}): FloorAgent {
     ticket: null,
     branch: 'feat-auth',
     resp: '',
+    messages: [],
     question: null,
     reply: { kind: 'terminal', host: 'this-mac', terminalId: 'CC-1' },
     todos: [],
@@ -721,5 +725,52 @@ describe('orderManagedProjects', () => {
     const ordered = orderManagedProjects(projects, { a: 1 })
     expect(ordered.map((p) => p.name)).toEqual(['a', 'b'])
     expect(projects).toEqual(frozen)
+  })
+})
+
+describe('sessionTaskLine — prompt anchors the card ahead of the drifting last message', () => {
+  test('prompt wins over summary and resp when present (the task, not the last message)', () => {
+    const a = makeAgent({
+      prompt: 'Add markdown to card bodies',
+      summary: 'Editing FeedItem.tsx',
+      resp: 'All 3 remaining hits are intentional',
+      worktreeSlug: 'card-ux',
+    })
+    expect(sessionTaskLine(a)).toBe('Add markdown to card bodies')
+  })
+
+  test('falls back to summary -> resp -> worktreeSlug -> branch when there is no prompt', () => {
+    expect(sessionTaskLine(makeAgent({ prompt: undefined, summary: 'live preview' }))).toBe('live preview')
+    expect(sessionTaskLine(makeAgent({ prompt: undefined, summary: '', resp: 'last msg' }))).toBe('last msg')
+    expect(sessionTaskLine(makeAgent({ prompt: undefined, summary: '', resp: '', worktreeSlug: 'rush-1531' }))).toBe('rush-1531')
+    expect(sessionTaskLine(makeAgent({ prompt: undefined, summary: '', resp: '', worktreeSlug: '', branch: 'feat-x' }))).toBe('feat-x')
+  })
+
+  test('a blank/whitespace prompt is skipped so it does not blank the task line', () => {
+    expect(sessionTaskLine(makeAgent({ prompt: '   ', summary: 'real work' }))).toBe('real work')
+  })
+
+  test('returns empty string when the agent carries no task signal at all', () => {
+    expect(sessionTaskLine(makeAgent({ prompt: undefined, summary: '', resp: '', worktreeSlug: '', branch: '' }))).toBe('')
+  })
+})
+
+describe('todosWithFallback — the checklist survives the recent-tool window cap', () => {
+  const set = (n: number): TodoItem[] =>
+    Array.from({ length: n }, (_, i) => ({ content: `t${i}`, status: 'pending' as const }))
+
+  test('a fresh non-empty parse is used as-is', () => {
+    const fresh = set(3)
+    expect(todosWithFallback(fresh, set(1))).toBe(fresh)
+  })
+
+  test('an empty fresh parse falls back to the remembered set (checklist does not vanish)', () => {
+    const remembered = set(2)
+    expect(todosWithFallback([], remembered)).toBe(remembered)
+  })
+
+  test('empty fresh + no remembered set yields empty (no phantom checklist)', () => {
+    expect(todosWithFallback([], undefined)).toEqual([])
+    expect(todosWithFallback([], [])).toEqual([])
   })
 })
