@@ -186,6 +186,20 @@ describe('buildRemoteAgentsInvocation — POSIX targets stay byte-identical', ()
   it('still round-trips through a real bash login shell (no OS = POSIX)', () => {
     expect(decodeRemoteArgv(['view', 'claude'])).toEqual(['view', 'claude']);
   });
+
+  it('prepends env exports before the command when env is given', () => {
+    const cmd = buildRemoteAgentsInvocation(['teams', 'doctor', '--json'], undefined, 'linux', {
+      PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH',
+    });
+    expect(cmd).toBe(
+      "bash -lc 'export PATH=\"$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH\"; agents teams doctor --json'",
+    );
+  });
+
+  it('omits env prelude when env is empty', () => {
+    const base = buildRemoteAgentsInvocation(['teams', 'doctor', '--json']);
+    expect(buildRemoteAgentsInvocation(['teams', 'doctor', '--json'], undefined, 'linux', {})).toBe(base);
+  });
 });
 
 describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () => {
@@ -204,6 +218,18 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
   it('neutralizes injection — metacharacters are literal inside single quotes', () => {
     const cmd = buildRemoteAgentsInvocation(['view', '$(whoami); rm -rf /', '--json'], undefined, 'windows');
     expect(decodeWindows(cmd)).toBe("& 'agents' 'view' '$(whoami); rm -rf /' '--json'; exit $LASTEXITCODE");
+  });
+
+  it('carries env vars through buildRemoteAgentsInvocation on Windows', () => {
+    const cmd = buildRemoteAgentsInvocation(
+      ['teams', 'doctor', '--json'],
+      undefined,
+      'windows',
+      { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' },
+    );
+    expect(decodeWindows(cmd)).toBe(
+      "$env:PATH = '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH'; & 'agents' 'teams' 'doctor' '--json'; exit $LASTEXITCODE",
+    );
   });
 
   it('carries env vars as $env: assignments (buildWindowsAgentsCommand)', () => {

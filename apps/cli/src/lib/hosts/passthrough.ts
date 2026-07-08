@@ -112,6 +112,12 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
     process.exitCode = 1;
     return true;
   }
+
+  // `--devices` / `--hosts` fan out to every registered device locally; don't
+  // let a per-host passthrough turn it into a cascading remote fan-out.
+  const fleetFlag = allArgs.includes('--devices') || allArgs.includes('--hosts');
+  if (fleetFlag) return false;
+
   const hostName = hostFlag ?? deviceFlag;
   if (!hostName) return false;
 
@@ -155,7 +161,18 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
     return true;
   }
 
-  const remoteCmd = buildRemoteAgentsInvocation(forwarded, remoteCwd, resolveRemoteOsSync(host.name));
+  // Doctor commands probe the agent CLIs; remote POSIX login shells often don't
+  // have the agents shims on PATH, which produces false "not installed" negatives.
+  // Bootstrap PATH with the canonical shim locations before the remote command.
+  // Windows is skipped: PowerShell usually has the shim dir via the install
+  // profile, and single-quoted env values would not expand $HOME/$PATH.
+  const isDoctorCommand =
+    command === 'doctor' || (command === 'teams' && forwarded[1] === 'doctor');
+  const remoteOs = resolveRemoteOsSync(host.name);
+  const env = isDoctorCommand && !/^win/i.test((remoteOs ?? '').trim())
+    ? { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' }
+    : undefined;
+  const remoteCmd = buildRemoteAgentsInvocation(forwarded, remoteCwd, remoteOs, env);
   const code = sshStream(target, remoteCmd, { tty: interactive, multiplex: true });
   if (code === 255) {
     console.error(

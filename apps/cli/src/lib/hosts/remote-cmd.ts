@@ -73,13 +73,28 @@ export const HOST_ROUTING_SPECS: StripSpec[] = [
  * does not exist). Anything else — including an unknown/absent OS — keeps the
  * POSIX form, so linux/macos are byte-for-byte unchanged.
  */
-export function buildRemoteAgentsInvocation(forwardedArgs: string[], remoteCwd?: string, os?: string): string {
+export function buildRemoteAgentsInvocation(
+  forwardedArgs: string[],
+  remoteCwd?: string,
+  os?: string,
+  env?: Record<string, string>,
+): string {
   if (remoteShellFor(os) === 'powershell') {
-    return buildWindowsAgentsCommand({ args: forwardedArgs, cwd: remoteCwd });
+    return buildWindowsAgentsCommand({ args: forwardedArgs, cwd: remoteCwd, env });
   }
   const inner = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
   const withCwd = remoteCwd ? `cd ${shellQuote(remoteCwd)} && ${inner}` : inner;
-  return `bash -lc ${shellQuote(withCwd)}`;
+  if (!env || Object.keys(env).length === 0) {
+    return `bash -lc ${shellQuote(withCwd)}`;
+  }
+  // Prepend env exports so the remote command sees the shims dir even when the
+  // login shell hasn't sourced the interactive rc files that usually add it.
+  // Values are double-quoted (not single-quoted) so remote variables like
+  // $HOME and $PATH are expanded by the login shell.
+  const exports = Object.entries(env)
+    .map(([k, v]) => `export ${shellQuote(k)}="${v.replace(/[\\"]/g, '\\$&')}"`)
+    .join('; ');
+  return `bash -lc ${shellQuote(`${exports}; ${withCwd}`)}`;
 }
 
 /** The two remote shell dialects we build commands for. */
