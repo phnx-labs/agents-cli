@@ -85,6 +85,8 @@ PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0─�
 | `-d, --description <text>` | One-line summary of what this team is working on |
 | `--enable-worktrees` | Each teammate works in its own git worktree |
 | `--use-worktree <path>` | All teammates share this existing worktree path |
+| `--devices <a,b,c>` | Distributed teams: pool of machines the team may run teammates on (alias `--hosts`). See [Distributed teams](#distributed-teams). |
+| `--repo <url\|path>` | How each device gets the code (git URL to clone, or a path). Defaults to the local checkout's `origin`. |
 | `--json` | Machine-readable JSON |
 
 ### `teams add` options
@@ -98,6 +100,7 @@ PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0─�
 | `--env <key=value>` | Set an env var for this teammate (repeatable) |
 | `--cwd <dir>` | Working directory (default: current directory) |
 | `--worktree <name>` | Run in a dedicated git worktree (requires `--enable-worktrees` on the team) |
+| `--device <host>` | Distributed teams: run THIS teammate on `<host>` (alias `--host`). Works with or without a team pool. See [Distributed teams](#distributed-teams). |
 | `--after <names>` | Comma-separated teammate names to wait for before starting |
 | `--task-type <type>` | Factory label: `plan` \| `implement` \| `test` \| `review` \| `bugfix` \| `docs` |
 | `--cloud <provider>` | Dispatch to cloud backend: `rush` \| `codex` \| `factory` |
@@ -191,6 +194,54 @@ agents teams add my-feature codex  "..." --name bob   --worktree feature-bob
 Each teammate gets its own checkout of the branch. Worktrees are cleaned up on
 `teams stop` or `teams disband` unless uncommitted changes are present, in
 which case the worktree is kept and reported.
+
+## Distributed teams
+
+Teammates can run on **different machines** across your fleet, not just the box
+running `teams start`. One orchestrator still drives the DAG, polls status, and
+cleans up — teammates just execute over SSH on their assigned host (via the same
+device registry as `agents devices` / `agents ssh`).
+
+There is one vocabulary — `--device` / `--devices` (aliases `--host` / `--hosts`) —
+and everything is optional; omit it all and teams behave exactly as before (every
+teammate local).
+
+**Send one teammate elsewhere** — no pool needed:
+
+```bash
+agents teams create feat
+agents teams add feat claude "build the API"  --name backend --device yosemite-s0
+agents teams add feat claude "build the UI"   --name ui         # stays local
+agents teams start feat --watch
+```
+
+**A distributed team with a device pool** — unpinned teammates auto-schedule:
+
+```bash
+agents teams create feat --devices zion,yosemite-s0,yosemite-s1 \
+  --repo https://github.com/you/your-repo.git
+agents teams add feat claude "..." --name w1                    # auto-scheduled (least-loaded)
+agents teams add feat claude "..." --name w2 --device yosemite-s1   # or pin
+agents teams start feat --watch
+```
+
+**Where a teammate runs** — resolved at launch, top-down:
+
+1. teammate has `--device X` → **X** (explicit pin — no pool required)
+2. else the team pool is a **single** device → that device (whole team there)
+3. else the team pool has **many** devices → **auto-scheduled** (least-loaded)
+4. else (no pin, no pool) → **local**, exactly like today
+
+**Repo provisioning.** The team's `--repo` (defaulting to the local checkout's
+`origin`) is used to ensure the code is present on each device — an existing
+checkout is reused, otherwise it is cloned into `~/.agents/repos/<team>`. With
+`--enable-worktrees`, each remote teammate also gets its own worktree on the host,
+branched off the freshly-fetched default branch, and cleaned up on stop/disband.
+
+`teams status` and `teams logs` show which host each teammate is on and stream its
+output back (the local log mirror is capped so a large fleet can't blow up the
+orchestrator). **v1 note:** remote teammates require a POSIX host (Linux/macOS);
+Windows hosts are rejected with a clear message.
 
 ## Recipes
 
