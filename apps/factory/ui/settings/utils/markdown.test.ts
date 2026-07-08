@@ -6,7 +6,10 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
 // time. The real app runs in a VS Code webview / Electron host, so register a DOM
 // BEFORE importing markdown.ts — then the full marked -> DOMPurify pipeline runs
 // exactly as it does in production.
-GlobalRegistrator.register()
+// Guard: another UI test file in the same process (e.g. bench/TaskDetail.test.tsx)
+// may have already registered happy-dom globally — register() throws on a double
+// register, which fails the whole suite. Only register when no DOM exists yet.
+if (typeof (globalThis as { document?: unknown }).document === 'undefined') GlobalRegistrator.register()
 const { renderTodoDescription, escapeHtml } = await import('./markdown')
 
 // renderTodoDescription returns a <div> whose sanitized HTML is carried on

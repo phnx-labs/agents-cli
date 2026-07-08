@@ -5,7 +5,10 @@ import { GlobalRegistrator } from '@happy-dom/global-registrator'
 // export binds to `window` at import time. Register happy-dom BEFORE requiring
 // the component so DOMPurify.sanitize is a real function. The production surface
 // is a VS Code webview, which has a window.
-GlobalRegistrator.register()
+// Guard: another UI test file in the same process (e.g. utils/markdown.test.ts)
+// may have already registered happy-dom globally — register() throws on a double
+// register, which fails the whole suite. Only register when no DOM exists yet.
+if (typeof (globalThis as { document?: unknown }).document === 'undefined') GlobalRegistrator.register()
 
 const React = require('react')
 const { renderToStaticMarkup } = require('react-dom/server')
