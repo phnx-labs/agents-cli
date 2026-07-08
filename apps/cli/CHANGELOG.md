@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.49
+
 - **`agents run --mode plan` no longer hard-fails on agents without a read-only mode (antigravity, cursor, kiro, …).** Those agents have no plan flag, so an explicit or default `--mode plan` used to abort with `does not support 'plan' mode` — breaking multi-agent scripts that pass a uniform plan flag, and diverging from `agents teams add` (default mode `edit`). `resolveMode` now degrades unsupported `plan` to the agent's safest native mode (`capabilities.modes[0]`, typically `edit`), matching the existing `auto` → `edit` degrade. The CLI prints a yellow warning when the user explicitly asked for plan (gray for the implicit default) so the elevation is never silent. `skip` still hard-fails when unsupported. Source: `apps/cli/src/lib/exec.ts`, `apps/cli/src/commands/exec.ts`.
 - **`agents cloud cancel` now actually cancels paused runs.** `RushProvider.cancel()` issued `DELETE /api/v1/cloud-runs/{id}`, which the backend doesn't implement — it 404s — so `agents cloud cancel` (and the Factory Floor's cancel affordance) silently failed on any run that wasn't actively running: `queued`, `needs_review`, and `input_required` runs stayed stuck (e.g. a 14-day-old input-required run lingering in the Floor's "NEEDS YOU" bucket forever). Switched to the cancel action endpoint `POST /api/v1/cloud-runs/{id}/cancel`, which the backend implements and which cancels paused runs too. Verified live against `api.prix.dev` (the POST returned `{"ok":true,"status":"cancelled"}` and the stuck run transitioned `needs_review` → `cancelled`). Source: `apps/cli/src/lib/cloud/rush.ts`.
 
