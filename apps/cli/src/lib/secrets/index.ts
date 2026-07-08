@@ -1,0 +1,616 @@
+/**
+ * Cross-platform secure credential storage.
+ *
+ * macOS: every keychain operation goes through the signed `Agents CLI.app`
+ * helper. The helper attaches a biometry-or-passcode access control to every
+ * item it writes, so the OS itself gates decryption with Touch ID. A single
+ * LAContext lives for the helper's process lifetime, so a batch read pops
+ * Touch ID once and reuses the assertion for every item in the same batch.
+ * No /usr/bin/security fast path: that path bypasses the helper's ACL,
+ * exposes items to the legacy password sheet, and would defeat the model.
+ *
+ * Linux: libsecret (GNOME Keyring) via the `secret-tool` CLI. No biometry —
+ * items are unlocked when the keyring is open.
+ *
+ * Windows: Windows Credential Manager (CRED_TYPE_GENERIC,
+ * CRED_PERSIST_LOCAL_MACHINE) via a PowerShell P/Invoke shim, with the same
+ * AES-256-GCM encrypted-file fallback used on Linux when the credential store
+ * is unreachable (no logon session / no powershell.exe). No biometry.
+ *
+ * Items are device-local: the biometry access control requires the OS to
+ * treat them as bound to this device, so cross-machine propagation goes
+ * through the explicit export/import flow in src/lib/secrets/sync.ts
+ * rather than the system's cloud-keychain path.
+ */
+
+import { execFileSync, spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { linuxBackend, usesFileFallback as linuxUsesFileFallback, importNativeSecretToolItems } from './linux.js';
+import { windowsBackend, usesFileFallback as windowsUsesFileFallback, importNativeCredManItems } from './windows.js';
+import type { NativeImportReport } from './fallback.js';
+
+export type { NativeImportReport, NativeImportResult, NativeImportStatus } from './fallback.js';
+import { getKeychainHelperPath } from './install-helper.js';
+
+const SERVICE_PREFIX = 'agents-cli';
+const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
+const BUNDLES_ITEM_PREFIX = `${SERVICE_PREFIX}.bundles.`;
+
+/** Supported secret resolution backends. */
+export type SecretProvider = 'keychain' | 'env' | 'file' | 'exec';
+
+/** A typed reference to a secret, consisting of a provider and a provider-specific value. */
+export interface SecretRef {
+  provider: SecretProvider;
+  value: string;
+}
+
+const REF_PATTERN = /^(keychain|env|file|exec):(.+)$/s;
+
+/**
+ * A bundle value: either a string (literal or provider-prefixed ref) or
+ * an object `{value: string}` used to escape a literal that would otherwise
+ * be parsed as a ref (e.g. a URL that happens to start with 'env:').
+ */
+export type BundleValue = string | { value: string };
+
+/** Parse a bundle value into either a literal string or a typed secret ref. */
+export function parseBundleValue(raw: BundleValue): { literal: string } | { ref: SecretRef } {
+  if (typeof raw === 'object' && raw !== null && typeof (raw as any).value === 'string') {
+    return { literal: (raw as { value: string }).value };
+  }
+  if (typeof raw !== 'string') {
+    throw new Error(`Invalid bundle value (expected string or {value: string}): ${JSON.stringify(raw)}`);
+  }
+  const match = REF_PATTERN.exec(raw);
+  if (!match) return { literal: raw };
+  return { ref: { provider: match[1] as SecretProvider, value: match[2] } };
+}
+
+/** Serialize a secret ref back to its `provider:value` string form. */
+export function serializeRef(ref: SecretRef): string {
+  return `${ref.provider}:${ref.value}`;
+}
+
+function assertSupportedPlatform(): void {
+  if (process.platform !== 'darwin' && process.platform !== 'linux' && process.platform !== 'win32') {
+    throw new Error(
+      'agents secrets requires macOS Keychain, Linux libsecret, or Windows Credential Manager.\n' +
+      'Use environment variables or a .env file on unsupported platforms.'
+    );
+  }
+}
+
+function isLinux(): boolean {
+  return process.platform === 'linux';
+}
+
+function isWindows(): boolean {
+  return process.platform === 'win32';
+}
+
+/**
+ * Guard a secret value before it is written to the current platform's primary
+ * backend.
+ *
+ * A value is empty on every platform → always rejected. Embedded newlines are
+ * rejected ONLY on darwin: the macOS batch read path (`get-batch`, see
+ * getKeychainTokens) is newline-delimited, so a value with a newline would
+ * corrupt record framing on read. Linux (secret-tool), Windows (Credential
+ * Manager stores the raw UTF-8 blob and emits base64), and the encrypted-file
+ * fallback all store raw bytes and round-trip multiline values (PEM / SSH keys)
+ * faithfully, so they accept newlines. `platform` is injectable for tests.
+ */
+export function assertValueStorable(value: string, platform: NodeJS.Platform = process.platform): void {
+  if (!value || !value.trim()) throw new Error('Secret value is empty.');
+  if (platform === 'darwin' && /[\r\n]/.test(value)) {
+    throw new Error('Secret value contains newlines, which are not supported.');
+  }
+}
+
+/** Build the keychain item name for a profile provider token. */
+export function profileKeychainItem(provider: string): string {
+  return `${SERVICE_PREFIX}.${provider}.token`;
+}
+
+/** Build the keychain item name for a secrets-bundle key. */
+export function secretsKeychainItem(bundle: string, key: string): string {
+  return `${SECRETS_ITEM_PREFIX}${bundle}.${key}`;
+}
+
+function keychainItemRequiresUserPresence(item: string): boolean {
+  return item.startsWith(SECRETS_ITEM_PREFIX) || item.startsWith(BUNDLES_ITEM_PREFIX);
+}
+
+/**
+ * Test seam: lets bundle storage tests swap the keychain backend for an
+ * in-memory map without touching the user's real keychain. Mocking is
+ * justified here because the alternative (touching real keychain in unit
+ * tests) is destructive and would require an interactive Keychain unlock.
+ */
+export interface KeychainBackend {
+  has(item: string): boolean;
+  get(item: string): string;
+  set(item: string, value: string): void;
+  delete(item: string): boolean;
+  list(prefix: string): string[];
+}
+
+let backend: KeychainBackend | null = null;
+
+/** Install a custom keychain backend (test only). Returns the previous backend so callers can restore. */
+export function setKeychainBackendForTest(b: KeychainBackend | null): KeychainBackend | null {
+  const prev = backend;
+  backend = b;
+  return prev;
+}
+
+/** True when a test backend is installed (real keychain / biometry bypassed).
+ * Callers that gate on the live secrets-agent broker use this to stay hermetic —
+ * with an in-memory backend there is no real keychain to dedup, so the broker
+ * fast-path must not engage. Always false in production (`backend` is null). */
+export function isKeychainBackendOverridden(): boolean {
+  return backend !== null;
+}
+
+/**
+ * Items whose name does NOT start with `agents-cli.` belong to another
+ * application (e.g. Anthropic's `Claude Code-credentials-*`). Their ACL
+ * trusts THEIR writer, not our signed helper, so routing them through our
+ * helper produces a legacy password sheet. `/usr/bin/security` reads them
+ * silently because it's in the default trusted-app list on most user-owned
+ * keychain items. And we MUST NOT JIT-migrate them — the owning app
+ * expects to re-write the item with its own ACL design.
+ */
+function isOurItem(item: string): boolean {
+  return item.startsWith('agents-cli.');
+}
+
+/** Check if a keychain/keyring item exists. Never prompts for biometry. */
+export function hasKeychainToken(item: string): boolean {
+  if (backend) return backend.has(item);
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.has(item);
+  if (isWindows()) return windowsBackend.has(item);
+  if (!isOurItem(item)) {
+    return spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    }).status === 0;
+  }
+  const bin = getKeychainHelperPath();
+  return spawnSync(bin, ['has', item, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).status === 0;
+}
+
+/**
+ * Retrieve a secret value from the keychain/keyring. Throws if not found.
+ *
+ * On macOS this triggers Touch ID (or reuses an assertion held by an earlier
+ * call in the same process). For bundles, prefer getKeychainTokens() so a
+ * single biometric prompt covers every key in the batch.
+ */
+export function getKeychainToken(item: string): string {
+  if (backend) return backend.get(item);
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.get(item);
+  if (isWindows()) return windowsBackend.get(item);
+  if (!isOurItem(item)) {
+    const sec = spawnSync('/usr/bin/security', ['find-generic-password', '-a', os.userInfo().username, '-s', item, '-w'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    if (sec.status === 0) {
+      const token = sec.stdout?.toString().trim();
+      if (token) return token;
+    }
+    throw new Error(`Keychain item '${item}' not found.`);
+  }
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['get', item, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 1) throw new Error(`Keychain item '${item}' not found.`);
+  if (result.status === 4) throw new Error(`Touch ID cancelled while reading '${item}'.`);
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to read keychain item '${item}'.`);
+  }
+  const token = result.stdout?.toString();
+  if (!token) throw new Error(`Keychain item '${item}' exists but is empty.`);
+  return token;
+}
+
+/**
+ * Batch-read multiple keychain items behind a single Touch ID prompt. The
+ * macOS helper holds one LAContext for its whole process: the first protected
+ * item triggers Touch ID, every later item in the same invocation reuses the
+ * assertion. Missing items are absent from the returned map (caller decides
+ * whether that's an error).
+ *
+ * On Linux or when a test backend is installed, falls back to individual
+ * lookups — no biometric prompt path on those platforms.
+ */
+export function getKeychainTokens(items: string[]): Map<string, string> {
+  const result = new Map<string, string>();
+  if (items.length === 0) return result;
+  if (backend) {
+    for (const item of items) {
+      try { result.set(item, backend.get(item)); } catch { /* missing — skip */ }
+    }
+    return result;
+  }
+  assertSupportedPlatform();
+  if (isLinux()) {
+    for (const item of items) {
+      try { result.set(item, linuxBackend.get(item)); } catch { /* missing — skip */ }
+    }
+    return result;
+  }
+  if (isWindows()) {
+    for (const item of items) {
+      try { result.set(item, windowsBackend.get(item)); } catch { /* missing — skip */ }
+    }
+    return result;
+  }
+  const bin = getKeychainHelperPath();
+  const child = spawnSync(bin, ['get-batch', os.userInfo().username, ...items], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (child.status === 4) {
+    throw new Error(`Touch ID cancelled while reading ${items.length} keychain item(s).`);
+  }
+  if (child.status !== 0) {
+    const msg = child.stderr?.toString().trim();
+    throw new Error(msg || `Failed to batch-read ${items.length} keychain items.`);
+  }
+  const out = child.stdout?.toString() ?? '';
+  // Output is a sequence of records, one per service in input order:
+  //   "V <service>\n<value>\n"   (present)
+  //   "M <service>\n"            (missing)
+  // Service names are validated newline/'='-free by setKeychainToken below
+  // and values are rejected if they contain newlines — so splitting on '\n'
+  // and walking line-by-line is unambiguous.
+  const lines = out.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line === '' && i === lines.length - 1) break;
+    if (line.startsWith('V ')) {
+      const service = line.slice(2);
+      const value = lines[i + 1] ?? '';
+      result.set(service, value);
+      i += 2;
+    } else if (line.startsWith('M ')) {
+      i += 1;
+    } else if (line === '') {
+      i += 1;
+    } else {
+      throw new Error(`Malformed get-batch output line: ${JSON.stringify(line)}`);
+    }
+  }
+  return result;
+}
+
+/** Store or update a secret value in the keychain/keyring. Device-local;
+ * biometry-gated on macOS. `opts.noAcl` (the `never` prompt-policy) writes our
+ * item WITHOUT the biometry access control so later reads are fully silent — it
+ * routes through the signed helper's `set-no-acl` path. A pinned helper that
+ * predates that path rejects the unknown command (exit 2) and this throws,
+ * rather than silently falling back to an ACL'd `set` (which would behave like
+ * `always`). Ignored by the Linux/Windows/test backends, which have no ACL. */
+export function setKeychainToken(item: string, value: string, opts?: { noAcl?: boolean }): void {
+  if (backend) { backend.set(item, value); return; }
+  assertSupportedPlatform();
+  assertValueStorable(value);
+  if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
+
+  if (isLinux()) { linuxBackend.set(item, value); return; }
+  if (isWindows()) { windowsBackend.set(item, value); return; }
+
+  // Bare (non-`agents-cli.`) items are written WITHOUT the biometry ACL so
+  // they round-trip with the no-prompt read path in getKeychainToken (which
+  // also uses /usr/bin/security for non-our items). This is what lets a
+  // SessionStart hook read e.g. `linear-api-key` silently on every launch.
+  // Routing these through the helper would attach a Touch ID ACL that the
+  // /usr/bin/security read can't satisfy without popping the legacy password
+  // sheet. -U upserts so repeated sets overwrite in place.
+  if (!isOurItem(item)) {
+    const sec = spawnSync('/usr/bin/security', [
+      'add-generic-password', '-U',
+      '-a', os.userInfo().username,
+      '-s', item,
+      '-w', value,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    if (sec.status !== 0) {
+      const msg = sec.stderr?.toString().trim();
+      throw new Error(msg || `Failed to write keychain item '${item}'.`);
+    }
+    return;
+  }
+
+  const bin = getKeychainHelperPath();
+  // `never` policy → no-ACL write. The `set-no-acl` subcommand exists only in a
+  // re-notarized helper; an older pinned helper dies with "Unknown command:
+  // set-no-acl" (exit 2), surfaced below — never a silent ACL'd downgrade.
+  const helperCmd = opts?.noAcl ? 'set-no-acl' : 'set';
+  const result = spawnSync(bin, [helperCmd, item, os.userInfo().username], {
+    input: value,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    if (opts?.noAcl && /unknown command/i.test(msg ?? '')) {
+      throw new Error(
+        `The 'never' prompt-policy needs a Keychain helper with the no-ACL write path, ` +
+        `but the installed helper does not support it. Rebuild + re-notarize the signed ` +
+        `helper (scripts/build-keychain-helper.sh) and re-pin its sha, then retry. ` +
+        `(helper said: ${msg})`,
+      );
+    }
+    throw new Error(msg || `Failed to write keychain item '${item}'.`);
+  }
+}
+
+/** Delete a keychain/keyring item. Returns true if it existed. Never prompts for biometry. */
+export function deleteKeychainToken(item: string): boolean {
+  if (backend) return backend.delete(item);
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.delete(item);
+  if (isWindows()) return windowsBackend.delete(item);
+  const bin = getKeychainHelperPath();
+  return spawnSync(bin, ['delete', item, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).status === 0;
+}
+
+/**
+ * True when the active keychain backend transparently routes reads/writes to
+ * the encrypted-file store instead of the OS credential store. This only
+ * happens on Linux under the headless / locked-collection fallback
+ * (src/lib/secrets/linux.ts); macOS and the test backend always return false.
+ *
+ * Callers that ALSO enumerate the file store directly (e.g. `listBundles`)
+ * use this to avoid double-counting: under the fallback `listKeychainItems`
+ * and the direct file enumeration return the same items.
+ */
+export function keychainUsesFileFallback(): boolean {
+  if (backend) return false;
+  if (isLinux()) return linuxUsesFileFallback();
+  if (isWindows()) return windowsUsesFileFallback();
+  return false;
+}
+
+/** Enumerate keychain/keyring item names starting with the given prefix. */
+export function listKeychainItems(prefix: string): string[] {
+  if (backend) return backend.list(prefix);
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.list(prefix);
+  if (isWindows()) return windowsBackend.list(prefix);
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['list', prefix], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to enumerate keychain items with prefix '${prefix}'.`);
+  }
+  const out = result.stdout?.toString() || '';
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Enumerate ONLY legacy file-based-keychain item names with the given prefix —
+ * the items that still carry a pre-migration (trusted-app) ACL and pop a
+ * separate auth sheet on read. Items already in the data-protection keychain are
+ * excluded (they need no migration). Silent (attributes only, never decrypts).
+ *
+ * macOS only: on Linux / the test backend there is no separate legacy keychain,
+ * so this returns []. Used by `agents secrets migrate-acl` to rewrite only the
+ * stragglers instead of every item (which would be a Touch ID storm).
+ */
+export function listLegacyKeychainItems(prefix: string): string[] {
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['list-legacy', prefix], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to enumerate legacy keychain items with prefix '${prefix}'.`);
+  }
+  const out = result.stdout?.toString() || '';
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * One-time upgrade for a keychain item that was written by a previous helper
+ * generation with a trusted-app ACL. The helper reads the legacy item
+ * (which may pop the password sheet once), then deletes and re-adds it with
+ * the biometry access control. Returns true if the item was rewritten, false
+ * if no item by that name exists. macOS only — Linux backends have no ACL
+ * concept, so the call is a no-op there.
+ */
+export function migrateKeychainItem(item: string): boolean {
+  if (backend) return backend.has(item);
+  assertSupportedPlatform();
+  if (isLinux()) return linuxBackend.has(item);
+  if (isWindows()) return windowsBackend.has(item);
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['migrate-acl', item, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  const msg = result.stderr?.toString().trim();
+  throw new Error(msg || `Failed to migrate keychain item '${item}'.`);
+}
+
+/**
+ * Enumerate data-protection items whose service starts with `prefix` that live
+ * under a NON-concrete access group — pre-#279 "orphans" filed under the implicit
+ * default group (the literal `2HTP252L87.*`) that the pinned-group queries can't
+ * see. Attributes only: never decrypts, never prompts. macOS only — Linux/Windows
+ * and the test backend have no access-group concept, so this returns [].
+ */
+export function listOrphanedKeychainItems(prefix: string): string[] {
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux() || isWindows()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['list-orphans', prefix, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to enumerate orphaned keychain items with prefix '${prefix}'.`);
+  }
+  const out = result.stdout?.toString() || '';
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/** Outcome of re-homing one orphaned keychain item. */
+export interface OrphanMigrationResult {
+  item: string;
+  status: 'ok' | 'warn' | 'fail';
+  detail?: string;
+}
+
+/**
+ * Parse the `migrate-orphans` helper summary (one record per line):
+ *   OK <service>               re-homed
+ *   WARN <service> <detail>    pinned copy written but orphan not removed
+ *   FAIL <service> <detail>    could not re-home (orphan left intact)
+ * Unknown lines are ignored. Exported for unit testing without a keychain.
+ */
+export function parseOrphanMigrationOutput(stdout: string): OrphanMigrationResult[] {
+  const results: OrphanMigrationResult[] = [];
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const sep = trimmed.indexOf(' ');
+    const tag = sep === -1 ? trimmed : trimmed.slice(0, sep);
+    const rest = sep === -1 ? '' : trimmed.slice(sep + 1);
+    if (tag === 'OK') {
+      // OK carries only the service name (no trailing detail).
+      results.push({ item: rest, status: 'ok' });
+    } else if (tag === 'WARN' || tag === 'FAIL') {
+      // WARN/FAIL are 'TAG <service> <detail>'. Service names are space-free
+      // (validateBundleName / validateEnvKey), so the first token IS the exact
+      // service — this stays consistent with listOrphanedKeychainItems for the
+      // healed-set reconciliation in migrate-acl.
+      const item = rest.split(' ')[0] ?? rest;
+      results.push({ item, status: tag === 'WARN' ? 'warn' : 'fail', detail: rest });
+    }
+  }
+  return results;
+}
+
+/**
+ * Re-home every pre-#279 orphaned data-protection item under `prefix` into the
+ * concrete access group, behind a SINGLE Touch ID prompt for the whole batch.
+ * The helper reads each orphan by its exact persistent ref, adds the pinned copy
+ * (add-before-delete: a failed add leaves the orphan intact), then deletes the
+ * orphan by ref. Returns one result per item. macOS only — no-op elsewhere.
+ *
+ * Throws on Touch ID cancellation (exit 4) so callers can distinguish "user
+ * aborted" from "nothing to do" (empty array).
+ */
+export function migrateOrphanedKeychainItems(prefix: string): OrphanMigrationResult[] {
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux() || isWindows()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['migrate-orphans', prefix, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status === 4) throw new Error('Touch ID cancelled during orphan migration.');
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to migrate orphaned keychain items with prefix '${prefix}'.`);
+  }
+  return parseOrphanMigrationOutput(result.stdout?.toString() || '');
+}
+
+/**
+ * Import agents-cli secrets from the native store (GNOME Keyring / Windows
+ * Credential Manager) into the encrypted file store — the Linux/Windows
+ * analogue of the macOS orphan/legacy migration, exposed as
+ * `agents secrets import-keyring`. Requires the native store to be
+ * reachable/unlocked; `commit=false` is a dry-run. macOS returns an empty
+ * report (it has no file fallback and uses `migrate-acl` instead).
+ */
+export function importNativeItems(prefix: string, commit: boolean): NativeImportReport {
+  if (backend) return { available: false, locked: false, results: [] };
+  assertSupportedPlatform();
+  if (isLinux()) return importNativeSecretToolItems(prefix, commit);
+  if (isWindows()) return importNativeCredManItems(prefix, commit);
+  return { available: false, locked: false, results: [] };
+}
+
+/** Options controlling how secret refs are resolved. */
+export interface ResolveOptions {
+  /** Translate a short keychain ID to a fully namespaced item name. */
+  keychainItemFor?: (shortId: string) => string;
+  /** Allow exec: refs. When false (default), exec refs throw. */
+  allowExec?: boolean;
+  /** Restrict env: refs to this allowlist. When undefined, any env var may be read. */
+  envAllowlist?: string[];
+}
+
+function expandHome(p: string): string {
+  if (p.startsWith('~/') || p === '~') {
+    return path.join(os.homedir(), p.slice(1));
+  }
+  return p;
+}
+
+/** Resolve a secret ref to its plaintext value using the appropriate provider. */
+export function resolveRef(ref: SecretRef, opts: ResolveOptions = {}): string {
+  switch (ref.provider) {
+    case 'keychain': {
+      const item = opts.keychainItemFor ? opts.keychainItemFor(ref.value) : ref.value;
+      return getKeychainToken(item);
+    }
+    case 'env': {
+      const name = ref.value;
+      if (opts.envAllowlist && !opts.envAllowlist.includes(name)) {
+        throw new Error(`env: ref '${name}' not in allowlist.`);
+      }
+      const val = process.env[name];
+      if (val === undefined) {
+        throw new Error(`env: ref '${name}' not set in parent environment.`);
+      }
+      return val;
+    }
+    case 'file': {
+      const target = expandHome(ref.value);
+      if (!fs.existsSync(target)) {
+        throw new Error(`file: ref '${ref.value}' does not exist.`);
+      }
+      return fs.readFileSync(target, 'utf-8').trim();
+    }
+    case 'exec': {
+      if (!opts.allowExec) {
+        throw new Error(
+          `exec: ref '${ref.value}' blocked. Set 'allow_exec: true' in the bundle to enable.`
+        );
+      }
+      // shell: false — the bundle author controls the command; no injection
+      // from secret identifiers. Parse a simple space-separated command.
+      const parts = ref.value.match(/(?:[^\s"]+|"[^"]*")+/g)?.map((p) => p.replace(/^"|"$/g, '')) || [];
+      if (parts.length === 0) {
+        throw new Error(`exec: ref '${ref.value}' is empty.`);
+      }
+      const [cmd, ...args] = parts;
+      try {
+        return execFileSync(cmd, args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      } catch (err: any) {
+        throw new Error(`exec: ref '${ref.value}' failed: ${err.message}`);
+      }
+    }
+  }
+}

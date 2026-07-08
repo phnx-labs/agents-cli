@@ -21,11 +21,11 @@ on:
   pull_request:
     branches: ['main', 'release/**']
     paths:
-      - 'src/lib/hooks.ts'
-      - 'src/lib/hooks/**'
-      - 'src/lib/platform/**'
-      - 'src/lib/shims*.ts'
-      - 'hooks/**'
+      - 'apps/cli/src/lib/hooks.ts'
+      - 'apps/cli/src/lib/hooks/**'
+      - 'apps/cli/src/lib/platform/**'
+      - 'apps/cli/src/lib/shims*.ts'
+      - 'apps/cli/hooks/**'
       - '.github/workflows/tests-windows.yml'
 
 concurrency:
@@ -36,6 +36,9 @@ jobs:
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/cli
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
