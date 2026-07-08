@@ -12,14 +12,13 @@ import { addHostOption } from '../lib/hosts/option.js';
 import * as path from 'path';
 import {
   AgentManager,
-  checkAllClis,
   checkCliSignedIn,
+  collectTeamsDoctorData,
   getAgentsDir,
-  resolveSignInAdvisory,
   VALID_TASK_TYPES,
   type AgentType,
-  type SignInAdvisory,
   type TaskType,
+  type TeamsDoctorEntry,
 } from '../lib/teams/agents.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
@@ -57,7 +56,7 @@ import {
   hasUncommittedChanges,
   removeWorktree,
 } from '../lib/teams/worktree.js';
-import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose, verifyInstalledBinaryLaunches } from '../lib/versions.js';
+import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose } from '../lib/versions.js';
 import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { discoverSessions, parseTimeFilter, resolveSessionById } from '../lib/session/discover.js';
@@ -2055,61 +2054,17 @@ export function registerTeamsCommands(program: Command): void {
     .description('Check which agents are installed and available to join a team. Verifies CLI paths and shows an advisory sign-in hint.')
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts: { json?: boolean }) => {
-      const info = checkAllClis();
-
-      // Deep integrity probe. `checkAllClis` reports presence (shim + stub guard),
-      // but a GUTTED native binary (JS wrapper present, platform binary missing —
-      // the codex/kimi optional-dep partial-extract failure) still passes that. So
-      // actually launch the resolved default version and, if it won't run, flip the
-      // agent to not-installed with a repair hint — otherwise doctor says "ready"
-      // and the teammate ENOENTs at spawn. Parallel; win32 is treated as healthy by
-      // verifyInstalledBinaryLaunches.
-      await Promise.all(
-        Object.entries(info).map(async ([name, entry]) => {
-          if (!entry.installed) return;
-          const agent = name as AgentId;
-          const version = resolveVersion(agent);
-          if (!version) return;
-          const health = await verifyInstalledBinaryLaunches(agent, version);
-          if (!health.ok) {
-            entry.installed = false;
-            entry.path = null;
-            entry.error = `${AGENTS[agent]?.cliCommand ?? name}@${version} is installed but its binary won't launch`
-              + `${health.detail ? ` (${health.detail})` : ''}. Repair: agents add ${agent}@${version}`;
-          }
-        })
-      );
-
-      // Advisory enrichment only. Sign-in detection is UNRELIABLE, so it never
-      // changes the authoritative installed/ready column — it annotates. And an
-      // agent that is actually running in a team is treated as signed in
-      // regardless of the probe, so doctor never reports a working agent as
-      // logged out ("don't show wrong stuff").
-      const running = new Set<string>();
-      try {
-        for (const a of await mkManager().listRunning()) running.add(a.agentType);
-      } catch { /* no teams yet — leave running empty */ }
-
-      const auth: Record<string, SignInAdvisory> = {};
-      await Promise.all(
-        Object.entries(info).map(async ([name, entry]) => {
-          const isRunning = running.has(name);
-          const probe = entry.installed && !isRunning ? await checkCliSignedIn(name as AgentType) : false;
-          auth[name] = resolveSignInAdvisory(entry.installed, isRunning, probe);
-        })
-      );
+      const data = await collectTeamsDoctorData();
 
       if (isJsonMode(opts)) {
-        const merged: Record<string, unknown> = {};
-        for (const [name, entry] of Object.entries(info)) merged[name] = { ...entry, ...auth[name] };
-        console.log(JSON.stringify(merged, null, 2));
+        console.log(JSON.stringify(data, null, 2));
         return;
       }
       console.log(chalk.bold('Who can join a team:'));
-      for (const [name, entry] of Object.entries(info)) {
+      for (const [name, entry] of Object.entries(data)) {
         const pretty = AGENT_NAMES[name as AgentType] || name;
         if (entry.installed) {
-          const { signedIn, running: isRunning } = auth[name];
+          const { signedIn, running: isRunning } = entry;
           const hint = isRunning
             ? chalk.gray('in use')
             : signedIn

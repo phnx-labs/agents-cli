@@ -21,7 +21,7 @@ import { setGeminiAutoUpdateDisabled, updateGeminiSettings } from '../gemini-set
 import type { AgentId } from '../types.js';
 import { getAgentsDir as getSystemAgentsDir, getShimsDir } from '../state.js';
 import { AGENTS, getAccountInfo } from '../agents.js';
-import { resolveVersion, isVersionInstalled } from '../versions.js';
+import { resolveVersion, isVersionInstalled, verifyInstalledBinaryLaunches } from '../versions.js';
 import { sanitizeProcessEnv } from '../secrets/bundles.js';
 import { recordRunName } from '../session/run-names.js';
 
@@ -437,6 +437,63 @@ export function resolveSignInAdvisory(
 ): SignInAdvisory {
   if (!installed) return { signedIn: null, running: false };
   return { signedIn: running ? true : probeSignedIn, running };
+}
+
+/** One row of `agents teams doctor --json` output. */
+export interface TeamsDoctorEntry {
+  installed: boolean;
+  path: string | null;
+  error: string | null;
+  signedIn: boolean | null;
+  running: boolean;
+}
+
+/**
+ * Collect the same data `agents teams doctor` prints: per-agent install status,
+ * launch health, and advisory sign-in state. Kept in one place so `agents doctor
+ * --devices` can run it locally or compare it against remote JSON without
+ * duplicating the probe logic.
+ */
+export async function collectTeamsDoctorData(): Promise<Record<string, TeamsDoctorEntry>> {
+  const info = checkAllClis();
+
+  // Deep integrity probe. `checkAllClis` reports presence (shim + stub guard),
+  // but a gutted native binary still passes that, so actually launch the default
+  // version and flip the agent to not-installed if it won't run.
+  await Promise.all(
+    Object.entries(info).map(async ([name, entry]) => {
+      if (!entry.installed) return;
+      const agent = name as AgentId;
+      const version = resolveVersion(agent);
+      if (!version) return;
+      const health = await verifyInstalledBinaryLaunches(agent, version);
+      if (!health.ok) {
+        entry.installed = false;
+        entry.path = null;
+        entry.error = `${AGENTS[agent]?.cliCommand ?? name}@${version} is installed but its binary won't launch`
+          + `${health.detail ? ` (${health.detail})` : ''}. Repair: agents add ${agent}@${version}`;
+      }
+    })
+  );
+
+  // Advisory enrichment only. Sign-in detection is unreliable, so it never
+  // changes the authoritative installed/ready column — it annotates. A running
+  // teammate overrides a negative probe.
+  const running = new Set<string>();
+  try {
+    for (const a of await new AgentManager().listRunning()) running.add(a.agentType);
+  } catch { /* no teams yet — leave running empty */ }
+
+  const result: Record<string, TeamsDoctorEntry> = {};
+  await Promise.all(
+    Object.entries(info).map(async ([name, entry]) => {
+      const isRunning = running.has(name);
+      const probe = entry.installed && !isRunning ? await checkCliSignedIn(name as AgentType) : false;
+      const auth = resolveSignInAdvisory(entry.installed, isRunning, probe);
+      result[name] = { ...entry, ...auth };
+    })
+  );
+  return result;
 }
 
 let AGENTS_DIR: string | null = null;
