@@ -533,3 +533,77 @@
 .swarmify-root .host-ver-drift { justify-self: end; font-size: 10px; }
 .swarmify-root .host-drift-warn { color: #8a6d16; background: var(--status-pending-bg); padding: 1px 6px; border-radius: var(--r-sm); font-weight: 600; }
 .swarmify-root .host-drift-ok { color: var(--ds-text-faint); }
+
+/* ============================================================================
+ * Card + detail redesign (factory-card-ux). Ported from the mockup
+ * (/tmp/factory-card-redesign.html) with every local color remapped to the
+ * locked design tokens. Adds: a TASK anchor block, a clean worktree chip, a mini
+ * progress timeline on the card + a vertical one in the detail, and a streaming
+ * Activity feed. All scoped under .swarmify-root; light + dark both work via the
+ * theme-swapped --ds-* / status tokens.
+ * ========================================================================== */
+
+/* Markdown body inside the card .resp — the todo-md wrapper renders block elements,
+ * so tame their default margins to sit inside the compact card row. */
+.swarmify-root .fitem .resp .todo-md { margin: 0; }
+.swarmify-root .fitem .resp .todo-md > :first-child { margin-top: 0; }
+.swarmify-root .fitem .resp .todo-md > :last-child { margin-bottom: 0; }
+.swarmify-root .fitem .resp.q { color: var(--status-pending); font-weight: 600; border-left-color: var(--status-pending); }
+
+/* Clean worktree chip in the card head — replaces the WT=<path> leak in the meta line. */
+.swarmify-root .fitem .wtchip { font-size: 10px; color: var(--ds-text-muted); background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); border-radius: 5px; padding: 1px 6px; flex: none; white-space: nowrap; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+
+/* TASK anchor — the original prompt, rendered as markdown, brand-edged. */
+.swarmify-root .fitem .task { font-size: 12.5px; color: var(--ds-text); line-height: 1.5; margin: 2px 0 10px; background: var(--ds-bg-recessed); border-left: 2px solid var(--brand); border-radius: 0 var(--r-md) var(--r-md) 0; padding: 7px 11px; }
+.swarmify-root .fitem .task .lab { font-family: "Geist Mono", monospace; font-size: 9px; letter-spacing: .12em; color: var(--ds-text-dim); text-transform: uppercase; display: block; margin-bottom: 3px; }
+.swarmify-root .fitem .task .todo-md { margin: 0; }
+.swarmify-root .fitem .task .todo-md > :first-child { margin-top: 0; }
+.swarmify-root .fitem .task .todo-md > :last-child { margin-bottom: 0; }
+
+/* Mini progress timeline on the card — last N tool steps, current one pulsing. */
+.swarmify-root .fitem .mtl { margin-top: 8px; padding-top: 9px; border-top: 1px dashed var(--ds-border); }
+.swarmify-root .fitem .mtl-cap { font-family: "Geist Mono", monospace; font-size: 9px; letter-spacing: .12em; color: var(--ds-text-dim); text-transform: uppercase; margin-bottom: 6px; }
+.swarmify-root .fitem .mtl .step { display: flex; align-items: center; gap: 8px; font-family: "Geist Mono", monospace; font-size: 11px; color: var(--ds-text-muted); padding: 1.5px 0; }
+.swarmify-root .fitem .mtl .step .mk { width: 7px; height: 7px; border-radius: 50%; background: var(--ds-border); flex: none; }
+.swarmify-root .fitem .mtl .step.done .mk { background: var(--brand-600); }
+.swarmify-root .fitem .mtl .step.now .mk { background: var(--brand-600); box-shadow: 0 0 0 3px var(--brand-ring); animation: sw-tlpulse 1.3s infinite; }
+.swarmify-root .fitem .mtl .step.now { color: var(--ds-text); }
+.swarmify-root .fitem .mtl .step .nm { font-weight: 600; color: var(--ds-text); }
+.swarmify-root .fitem .mtl .step.done .nm { font-weight: 500; color: var(--ds-text-muted); }
+.swarmify-root .fitem .mtl .step .tt { color: var(--status-running); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .fitem .mtl .step .ago { margin-left: auto; color: var(--ds-text-faint); font-size: 10px; flex: none; }
+
+@keyframes sw-tlpulse { 0%, 100% { box-shadow: 0 0 0 2px var(--brand-ring); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--brand) 8%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .swarmify-root .fitem .mtl .step.now .mk, .swarmify-root .vtl li.now .mk { animation: none; }
+}
+
+/* Detail-pane vertical timeline (Progress section). */
+.swarmify-root .sw-section-count { margin-left: auto; color: var(--ds-text-faint); font-family: "Geist Mono", monospace; font-size: 9.5px; font-weight: 500; }
+.swarmify-root .vtl { position: relative; margin: 0; padding: 2px 0 0 4px; list-style: none; }
+.swarmify-root .vtl li { position: relative; padding: 0 0 12px 20px; border-left: 1.5px solid var(--ds-border); display: flex; align-items: baseline; gap: 6px; }
+.swarmify-root .vtl li:last-child { border-left-color: transparent; padding-bottom: 2px; }
+.swarmify-root .vtl li .mk { position: absolute; left: -5.5px; top: 3px; width: 9px; height: 9px; border-radius: 50%; background: var(--brand-600); border: 2px solid var(--ds-bg-panel); }
+.swarmify-root .vtl li.now .mk { box-shadow: 0 0 0 3px var(--brand-ring); animation: sw-tlpulse 1.3s infinite; }
+.swarmify-root .vtl li .nm { font-family: "Geist Mono", monospace; font-size: 11.5px; color: var(--ds-text); }
+.swarmify-root .vtl li .nm .t { color: var(--status-running); }
+.swarmify-root .vtl li .ago { font-family: "Geist Mono", monospace; font-size: 10px; color: var(--ds-text-faint); margin-left: auto; flex: none; }
+.swarmify-root .vtl li.now .nm { font-weight: 650; }
+
+/* Streaming Activity feed (recent assistant messages + a live now indicator). */
+.swarmify-root .sw-activity-feed { display: flex; flex-direction: column; gap: 8px; }
+.swarmify-root .sw-activity-msg { font-size: 12.5px; color: var(--ds-text); line-height: 1.55; padding: 8px 10px; background: var(--ds-bg-recessed); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-md); }
+.swarmify-root .sw-activity-msg .todo-md { margin: 0; }
+.swarmify-root .sw-activity-msg .todo-md > :first-child { margin-top: 0; }
+.swarmify-root .sw-activity-msg .todo-md > :last-child { margin-bottom: 0; }
+.swarmify-root .sw-activity-now { display: flex; align-items: center; gap: 7px; font-family: "Geist Mono", monospace; font-size: 11px; color: var(--ds-text-muted); }
+.swarmify-root .sw-activity-now .v { color: var(--brand-600); font-weight: 600; }
+.swarmify-root .sw-activity-now.stall .v { color: var(--status-pending); }
+.swarmify-root .sw-activity-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand-600); flex: none; box-shadow: 0 0 0 3px var(--brand-ring); animation: sw-tlpulse 1.3s infinite; }
+.swarmify-root .sw-activity-now.stall .sw-activity-dot { background: var(--status-pending); }
+
+/* Markdown blocks in the detail (Task / Activity). */
+.swarmify-root .sw-unified-detail-section .md { font-size: 12.5px; color: var(--ds-text); line-height: 1.55; }
+.swarmify-root .sw-unified-detail-section .md .todo-md { margin: 0; }
+.swarmify-root .sw-unified-detail-section .md .todo-md > :first-child { margin-top: 0; }
+.swarmify-root .sw-unified-detail-section .md .todo-md > :last-child { margin-bottom: 0; }

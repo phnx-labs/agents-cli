@@ -6,7 +6,15 @@ import { heartbeatLevel, sessionTaskLine, type FloorAgent, type FloorTicket } fr
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
 import { CardChecklist } from './TodoChecklist'
+import { MiniTimeline } from './Timeline'
+import { renderMarkdown } from '../../utils/markdown'
 import { ExtLink } from '../common/ExtLink'
+
+/** First line of a block of text, trimmed — a title reads best as a single clause. */
+function firstLine(text: string): string {
+  const line = text.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''
+  return line.length > 72 ? line.slice(0, 72) + '…' : line
+}
 
 // One agent row in the feed (feedItem: factory-floor.html:608-620) + the Next-Up
 // ticketStrip teaser row (:621-623). Pure presentation; selection + replies raised
@@ -50,12 +58,14 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   // to the meta line. Both only show in full (non-plain) mode when the CLI supplies them.
   const paneLabel = !plain && a.pane ? ` · ${a.pane}` : ''
   const viewingLabel = !plain && a.viewingIn ? ` · viewing in ${a.viewingIn}` : ''
-  // The worktree slug (or branch) sits between project and ticket so two sessions in
-  // the same repo are distinguishable at a glance (the identical-cards bug).
+  // The worktree slug (or branch) disambiguates two sessions in the same repo (the
+  // identical-cards bug). It now renders as its own clean chip (below) rather than being
+  // concatenated into the meta string — so a stray `WT=<path>` can never leak into the
+  // meta line. The meta line keeps project · host · ticket · files.
   const wt = a.worktreeSlug || a.branch
   const meta = plain
     ? a.project
-    : `${a.project} · ${a.hostLabel ?? a.host}${wt ? ` · ${wt}` : ''}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
+    : `${a.project} · ${a.hostLabel ?? a.host}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
   // Compact provenance chip next to the name: "<agent>·<short session id>", e.g.
   // "claude·4de7b016" — so a human label ("terminal-race-fix") reads as the title
   // while the session stays identifiable. Only when the id differs from the shown name.
@@ -76,7 +86,18 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   // narrative still shows its worktree slug instead of just "Edit <file>". Shown unless
   // it merely echoes the response block or the now-line.
   const taskLine = sessionTaskLine(a)
-  const showSummary = !plain && !!taskLine && taskLine !== a.resp.trim() && taskLine !== nowlineText
+  // The ORIGINAL task anchors the card. When the session carries a prompt, the title
+  // reads the task (its first line) and the prompt gets its own TASK block below; the
+  // agent name stays as context in the title's tooltip + the provenance chip. Without a
+  // prompt, the title stays the agent's own display name (prior behavior).
+  const prompt = (a.prompt ?? '').trim()
+  const title = !plain && prompt ? firstLine(prompt) : a.name
+  const showTask = !plain && !!prompt
+  // Only show the rolling summary line when it adds signal beyond the task block, the
+  // response body, and the now-line (it merely echoes the prompt when they match).
+  const showSummary =
+    !plain && !!taskLine && taskLine !== a.resp.trim() && taskLine !== nowlineText &&
+    !(showTask && taskLine === prompt)
   const showNowline = !plain && !!a.verb && !(showSummary && taskLine === nowlineText)
 
   const marker =
@@ -111,9 +132,10 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
       <div className="head">
         <span className={`dot ${a.phase}`} />
         <AgentAvatar id={agentIdFromPrefix(a.abbr) ?? a.abbr.toLowerCase()} size={20} title={a.abbr} />
-        <span className="who">{a.name}</span>
+        <span className="who" title={prompt ? `${a.name} — ${prompt}` : a.name}>{title}</span>
         {!plain && sid && <span className="sid" title={a.sessionId}>{sid}</span>}
         <span className="path">{meta}</span>
+        {!plain && wt && <span className="wtchip mono" title={a.worktreePath || wt}>{wt}</span>}
         <span className="when">
           {marker}
           {bgBadge}
@@ -126,7 +148,13 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
           </span>
         </span>
       </div>
-      <div className="resp">{destructive ? <span className="q">{a.resp}</span> : a.resp}</div>
+      {showTask && (
+        <div className="task">
+          <span className="lab">Task</span>
+          {renderMarkdown(prompt, { clamp: true })}
+        </div>
+      )}
+      {a.resp && <div className={`resp${destructive ? ' q' : ''}`}>{renderMarkdown(a.resp, { clamp: true })}</div>}
       {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
         <div className="artifacts" onClick={(e) => e.stopPropagation()}>
           {a.spawnedTeam && (
@@ -148,6 +176,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
           <Icon name="chevR" size={11} /> <span className="v">{a.verb}</span> {a.target}
         </div>
       )}
+      {!plain && a.recent.length > 0 && <MiniTimeline recent={a.recent} nowMs={now} />}
       {a.needs && (
         <div onClick={(e) => e.stopPropagation()}>
           <StructuredReply
