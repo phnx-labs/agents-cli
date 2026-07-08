@@ -51,6 +51,8 @@ function agent(p: Partial<FloorAgent>): FloorAgent {
     worktreeSlug: '',
     worktreePath: '',
     resp: '',
+    prompt: undefined,
+    messages: [],
     question: null,
     reply: { kind: 'terminal', host: 'this-mac' },
     todos: [],
@@ -102,9 +104,22 @@ const running: FloorAgent[] = [
   agent({
     id: 'r1', abbr: 'CX', name: 'bench-saved-views', sessionId: '4de7b016-2c1a-4f9e-b2d1-7a3c9e10ab55', project: 'rush', phase: 'running',
     pr: '#148', ci: 'running', tok: 41, files: 9, since: '3s', lastActivityMs: Date.now() - 3000,
-    pane: '%42', viewingIn: 'Codium tab 3',
+    pane: '%42', viewingIn: 'Codium tab 3', worktreeSlug: 'bench-saved-views',
     verb: 'Porting', target: 'the group-by control into the shared model',
+    prompt: 'Collapse the **three** ticket surfaces into one list and add saved views, wiring the group-by control through the shared `floorModel`.',
     summary: 'Collapsed the three ticket surfaces into one list; now porting the group-by control into the shared model.',
+    resp: 'Merged the three surfaces into one `BacklogCenter`. Group-by now reads `groupAgents()` from the shared model — porting the last dead view next.',
+    messages: [
+      'Read `floorModel.ts` — `groupAgents()` already covers host/project/status/agent, so I can drop the local copy.',
+      'Collapsed the three ticket surfaces into one `BacklogCenter` list.',
+      'Merged the three surfaces into one `BacklogCenter`. Group-by now reads `groupAgents()` from the shared model — porting the last dead view next.',
+    ],
+    recent: [
+      { name: 'Bash', input: { command: 'bun run test bench' }, timestamp: new Date(Date.now() - 3000).toISOString() },
+      { name: 'Edit', input: { file_path: '/repo/ui/settings/components/mission-control/BacklogCenter.tsx' }, timestamp: new Date(Date.now() - 40_000).toISOString() },
+      { name: 'Edit', input: { file_path: '/repo/ui/settings/components/mission-control/floorAdapter.ts' }, timestamp: new Date(Date.now() - 80_000).toISOString() },
+      { name: 'Read', input: { file_path: '/repo/ui/settings/components/mission-control/floorModel.ts' }, timestamp: new Date(Date.now() - 130_000).toISOString() },
+    ],
     createdTickets: ['RUSH-1519', 'RUSH-1520'],
     todos: [
       { content: 'Merge ticket surfaces', status: 'completed' },

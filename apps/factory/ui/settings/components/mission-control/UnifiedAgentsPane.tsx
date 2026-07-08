@@ -5,9 +5,10 @@ import { Icon } from './icons'
 import { relTime, taskNameToTitle, swarmOverallStatus, shortDuration } from './types'
 import { postMessage, usePanelVisibility } from '../../hooks'
 import { ExtLink } from '../common'
-import { renderTodoDescription } from '../../utils/markdown'
+import { renderTodoDescription, renderMarkdown } from '../../utils/markdown'
 import { CMD_PALETTE_EVENTS } from './CommandPalette'
 import { CloudActivityFeed } from './CloudActivityFeed'
+import { VerticalTimeline } from './Timeline'
 import {
   isTerminalActive,
   isTerminalJustSpawned,
@@ -1752,17 +1753,43 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                   </ExtLink>
                 )}
               </div>
-              {(() => { const task = sessionTaskLine(a); return task && task !== a.resp.trim() ? <div className="resp" style={{ marginTop: 8 }}>{task}</div> : null })()}
-              {a.resp && a.resp !== a.summary && <div className="resp" style={{ marginTop: 8 }}>{a.resp}</div>}
-              {(a.verb || a.target) && <div className="nowline" style={{ marginTop: 8 }}><Icon name="chevR" size={11} /> <span className="v">{a.verb}</span> {a.target}</div>}
             </div>
+            {/* Task anchor: the ORIGINAL prompt (markdown), distinct from the last message.
+                Falls back through sessionTaskLine (prompt -> summary -> resp -> slug/branch)
+                so the detail rail always shows a task, even for a promptless session. */}
+            {(() => {
+              const task = a.prompt?.trim() || sessionTaskLine(a)
+              return task ? (
+                <div className="sw-unified-detail-section">
+                  <div className="sw-section-label">Task</div>
+                  <div className="md">{renderMarkdown(task)}</div>
+                </div>
+              ) : null
+            })()}
+            {/* Progress timeline: the recent tool calls as a vertical rail, oldest -> now.
+                For cloud rows the existing CloudActivityFeed still drives the AgentDetailView. */}
             {a.recent.length > 0 && (
               <div className="sw-unified-detail-section">
-                <div className="sw-section-label">Recent tools</div>
-                <div className="sw-floor-detail-tools">
-                  {a.recent.slice(0, 8).map((call, i) => (
-                    <RecentToolCallRow key={`${call.name}-${i}`} call={call} />
+                <div className="sw-section-label">Progress <span className="sw-section-count">{Math.min(a.recent.length, 8)} recent</span></div>
+                <VerticalTimeline recent={a.recent} nowMs={nowMs} />
+              </div>
+            )}
+            {/* Streaming Activity feed: the recent assistant messages (markdown), newest at
+                the bottom, capped by a live "now" verb/target indicator that updates on the
+                3s poll. Falls back to the single last response when only `resp` is carried. */}
+            {(a.messages.length > 0 || a.resp || a.verb || a.target) && (
+              <div className="sw-unified-detail-section">
+                <div className="sw-section-label">Activity</div>
+                <div className="sw-activity-feed">
+                  {(a.messages.length > 0 ? a.messages : (a.resp ? [a.resp] : [])).map((m, i) => (
+                    <div key={i} className="sw-activity-msg md">{renderMarkdown(m)}</div>
                   ))}
+                  {(a.verb || a.target) && (
+                    <div className={`sw-activity-now nowline ${a.phase === 'stalled' ? 'stall' : ''}`}>
+                      <span className="sw-activity-dot" />
+                      <span className="v">{a.verb}</span> {a.target}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -3053,9 +3080,13 @@ function AgentDetailView({ agent, swarm, onRetry, onKill }: { agent: AgentDetail
       )}
       {agent.last_messages && agent.last_messages.length > 0 && (
         <div className="sw-unified-detail-section">
-          <div className="sw-section-label">Latest</div>
-          <div className="sw-unified-detail-text mono" style={{ fontSize: 11 }}>
-            {agent.last_messages[agent.last_messages.length - 1]?.slice(0, 300)}
+          <div className="sw-section-label">Activity</div>
+          <div className="sw-activity-feed">
+            {agent.last_messages
+              .filter((m) => typeof m === 'string' && m.trim().length > 0)
+              .map((m, i) => (
+                <div key={i} className="sw-activity-msg md">{renderMarkdown(m)}</div>
+              ))}
           </div>
         </div>
       )}
