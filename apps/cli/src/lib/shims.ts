@@ -1070,6 +1070,35 @@ function getAgentConfigPath(agent: AgentId): string {
 }
 
 /**
+ * Read the user's configured Codex model from their active `~/.codex/config.toml`.
+ *
+ * Codex runs under a per-version `CODEX_HOME` (see `buildExecEnv`). A dispatch
+ * pinned to a version whose home config lacks a top-level `model` key silently
+ * falls back to Codex's built-in default (currently `gpt-5.3-codex`), which a
+ * ChatGPT-tier account is not entitled to use — the run dies with HTTP 400
+ * before doing any work. The user's model preference lives in whichever
+ * version-home was active when they set it (`~/.codex` symlinks to it), so it is
+ * NOT visible to a run pinned to a different version. Forwarding it via `--model`
+ * keeps the user's "default model setup" regardless of the active version-home,
+ * and is concurrency-safe (no file writes) when fanning out many parallel runs.
+ *
+ * Returns the top-level `model` only (ignores `[profile.*]` tables). Best-effort:
+ * a missing/unreadable/unset config yields `undefined` (caller keeps prior behaviour).
+ */
+export function readCodexConfiguredModel(): string | undefined {
+  try {
+    const cfg = path.join(getAgentConfigPath('codex'), 'config.toml');
+    const text = fs.readFileSync(cfg, 'utf-8');
+    // Only trust keys before the first [table]; a `model` under [profile.x] is
+    // not the default the CLI uses at top level.
+    const topLevel = text.split(/^\s*\[/m)[0];
+    return topLevel.match(/^\s*model\s*=\s*["']([^"']+)["']/m)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Get the path to the version's config directory.
  * e.g., ~/.agents/versions/claude/2.0.65/home/.claude/
  */

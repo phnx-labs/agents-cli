@@ -17,6 +17,7 @@ import { resolveModel, buildReasoningFlags } from './models.js';
 import { emitStart, maybeRotate, createTimer, redactPrompt, redactArgs } from './events.js';
 import { sanitizeProcessEnv } from './secrets/bundles.js';
 import { getShimsDir } from './state.js';
+import { readCodexConfiguredModel } from './shims.js';
 import { writePidSessionEntry, extractSessionIdArg } from './session/pid-registry.js';
 import { recordRunName } from './session/run-names.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
@@ -732,17 +733,24 @@ export function buildExecCommand(options: ExecOptions): string[] {
     cmd.push('--session-id', options.sessionId);
   }
 
-  // Add model (only if explicitly provided by user)
-  if (options.model && template.modelFlag) {
+  // Add model. Prefer the user's explicit --model. Otherwise, for Codex, fall
+  // back to the model configured in the user's active ~/.codex/config.toml:
+  // Codex runs under a per-version CODEX_HOME (see buildExecEnv) that may not
+  // carry that setting, so without this it silently defaults to gpt-5.3-codex,
+  // which a ChatGPT-tier account can't use (HTTP 400). Forwarding keeps the
+  // user's default model setup for both `agents run` and `agents teams`.
+  const effectiveModel = options.model
+    ?? (options.agent === 'codex' ? readCodexConfiguredModel() : undefined);
+  if (effectiveModel && template.modelFlag) {
     const effectiveVersion = options.version || resolveVersion(options.agent, options.cwd || process.cwd());
     if (effectiveVersion) {
-      const resolved = resolveModel(options.agent, effectiveVersion, options.model);
+      const resolved = resolveModel(options.agent, effectiveVersion, effectiveModel);
       if (resolved.warning) {
         process.stderr.write(`[agents] ${resolved.warning}\n`);
       }
       cmd.push(template.modelFlag, resolved.forwarded);
     } else {
-      cmd.push(template.modelFlag, options.model);
+      cmd.push(template.modelFlag, effectiveModel);
     }
   }
 
