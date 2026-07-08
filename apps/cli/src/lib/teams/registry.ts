@@ -22,6 +22,19 @@ export interface TeamMeta {
   enable_worktrees?: boolean;
   /** Shared worktree path for all teammates (mutually exclusive with enable_worktrees). */
   use_worktree?: string;
+  /**
+   * Distributed teams: the pool of devices this team may auto-schedule teammates
+   * onto (from `agents devices`). One device → the whole team runs there; many →
+   * unpinned teammates are least-loaded-scheduled across them; empty/absent →
+   * every teammate runs locally (today's behavior).
+   */
+  devices?: string[];
+  /**
+   * Distributed teams: how each device gets the code — a git URL to clone or a
+   * path that already exists on the host. Defaults to the local checkout's
+   * `origin` at create time. Used by `ensureRemoteRepo` to provision the repo.
+   */
+  repo?: string;
 }
 
 /** Map of team name to team metadata. */
@@ -111,6 +124,10 @@ export interface CreateTeamOptions {
   enableWorktrees?: boolean;
   /** Path to an existing worktree for all teammates to share. */
   useWorktree?: string;
+  /** Distributed pool of devices this team may auto-schedule teammates onto. */
+  devices?: string[];
+  /** How each device gets the code (git URL to clone, or a path on the host). */
+  repo?: string;
 }
 
 /** Create a new team. Throws if a team with the same name already exists. */
@@ -129,6 +146,8 @@ export async function createTeam(name: string, options?: CreateTeamOptions): Pro
       ...(options?.description ? { description: options.description } : {}),
       ...(options?.enableWorktrees ? { enable_worktrees: true } : {}),
       ...(options?.useWorktree ? { use_worktree: options.useWorktree } : {}),
+      ...(options?.devices && options.devices.length ? { devices: options.devices } : {}),
+      ...(options?.repo ? { repo: options.repo } : {}),
     };
     reg[name] = m;
     await saveTeams(reg);
