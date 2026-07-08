@@ -10,6 +10,7 @@
  * branch, mirroring the local git-workflow.
  */
 import { sshExec, shellQuote, assertValidSshTarget } from '../ssh-exec.js';
+import { assertSafeGitTransport } from '../git.js';
 
 // Same allowlist as the local helper — worktree names land in a branch name and
 // a path, so keep them injection-safe (no shell metacharacters).
@@ -181,10 +182,16 @@ export function ensureRemoteRepo(target: string, repo: string, slug: string): st
         `or run this teammate from a git checkout so origin can be inferred.`,
     );
   }
+  // A `--repo` is a git-transport source that clones ON THE REMOTE HOST — guard it
+  // like the local clone path (plugins.ts) does: reject remote-helper transports
+  // (`ext::sh -c …` runs arbitrary commands at clone time) and a leading `-`, then
+  // pass `--` so a leftover `-` can't be parsed as a git option. shellQuote only
+  // blocks *shell* injection and is orthogonal to *git-transport* injection.
+  assertSafeGitTransport(repo);
   const clone = sshExec(
     target,
     `mkdir -p ${remotePathExpr('~/.agents/repos')} && ` +
-      `git clone ${shellQuote(repo)} ${remotePathExpr(canonical)}`,
+      `git clone -- ${shellQuote(repo)} ${remotePathExpr(canonical)}`,
     { timeoutMs: 600000, multiplex: true },
   );
   if (clone.code !== 0) {

@@ -2106,9 +2106,13 @@ export class AgentManager {
       return false;
     }
 
-    // Distributed teammate: no local PID — signal the remote process GROUP over
-    // SSH (negative pid, matching the local `kill(-pid)` semantics), so the
-    // detached `agents run` and its children all get SIGTERM on the host.
+    // Distributed teammate: no local PID — signal it over SSH. Try the process
+    // GROUP first (negative pid, matching local `kill(-pid)`) to catch the
+    // detached `agents run` and its children; but the remote launcher is
+    // `nohup bash -lc … &` under a non-interactive shell where job control is off,
+    // so `&` may NOT open a new group — fall back to signalling the wrapper pid
+    // directly. Best-effort either way; the `.exit` sentinel is the durable
+    // terminal-status source if a grandchild lingers.
     if (agent.hostName && agent.status === AgentStatus.RUNNING) {
       if (agent.hostTarget && agent.remotePid) {
         try {
