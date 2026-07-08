@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Icon } from './icons'
 import type { FloorTicket } from './floorModel'
+import { renderTodoDescription } from '../../utils/markdown'
 
 // Right-pane ticket detail + Dispatch panel. Prototype ticketDetail():666-680.
 // Backlog -> Dispatch -> running -> Needs-You -> Done is one closed loop; this is the
@@ -45,7 +46,7 @@ export function TicketDetail({ ticket: t, hosts = ['this-mac'], onDispatch }: Ti
       <div className="dbody">
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>{t.title}</div>
-          <div style={{ fontSize: 12.5, color: 'var(--tx-mut)', lineHeight: 1.5 }}>{t.desc}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--tx-mut)', lineHeight: 1.5 }}>{renderTodoDescription(t.desc, false)}</div>
           <div style={{ marginTop: 8 }}>
             {(t.labels || []).map((l) => (
               <span key={l} className="tlbl">{l}</span>

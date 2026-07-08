@@ -9,6 +9,7 @@
     "build": "bun run build:settings && bun run build:editor"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.10.6",
     "@tailwindcss/vite": "^4.1.18",
     "@types/bun": "latest",
     "@types/react": "^19.2.7",
