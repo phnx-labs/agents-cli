@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" role="img" aria-label="How agents cloud run works: one command dispatches a task to a managed provider (Rush, Codex, Factory, Antigravity) that clones, plans, tests, and opens a pull request while you keep working">
+  <defs>
+    <radialGradient id="bgVignette" cx="50%" cy="42%" r="80%">
+      <stop offset="0%"  stop-color="#0d0d0d"/>
+      <stop offset="100%" stop-color="#040404"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#0f0f0f" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="cardFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#131313"/>
+      <stop offset="100%" stop-color="#0a0a0a"/>
+    </linearGradient>
+    <linearGradient id="cardRim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2e2e2e"/>
+      <stop offset="50%" stop-color="#242424"/>
+      <stop offset="100%" stop-color="#1c1c1c"/>
+    </linearGradient>
+    <linearGradient id="limeLine" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"  stop-color="#B6E84A" stop-opacity="0.3"/>
+      <stop offset="50%" stop-color="#B6E84A" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#B6E84A" stop-opacity="1"/>
+    </linearGradient>
+    <filter id="limeGlow" x="-40%" y="-60%" width="180%" height="220%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feOffset dy="10" result="offset"/>
+      <feColorMatrix in="offset" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0" result="shadow"/>
+      <feMerge>
+        <feMergeNode in="shadow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <marker id="arrowLime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B6E84A"/>
+    </marker>
+    <marker id="arrowMuted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5a5a5a"/>
+    </marker>
+    <marker id="dotLime" viewBox="0 0 6 6" refX="3" refY="3" markerWidth="6" markerHeight="6">
+      <circle cx="3" cy="3" r="2.5" fill="#B6E84A"/>
+    </marker>
+    <style><![CDATA[
+      .title       { font: 500 32px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #f0f0f0; letter-spacing: -0.015em; }
+      .subtitle    { font: 400 18px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #808080; letter-spacing: 0; }
+      .section     { font: 600 12px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.32em; fill: #555555; }
+      .cardtitle   { font: 600 22px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #f0f0f0; letter-spacing: -0.005em; }
+      .cardmeta    { font: 500 11px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.20em; fill: #606060; }
+      .mono        { font: 500 19px ui-monospace, "SF Mono", Menlo, monospace; fill: #ebebeb; }
+      .mono-muted  { font: 500 19px ui-monospace, "SF Mono", Menlo, monospace; fill: #808080; }
+      .mono-accent { font: 500 19px ui-monospace, "SF Mono", Menlo, monospace; fill: #B6E84A; }
+      .mono-sm     { font: 500 16px ui-monospace, "SF Mono", Menlo, monospace; fill: #ebebeb; }
+      .mono-sm-muted { font: 500 16px ui-monospace, "SF Mono", Menlo, monospace; fill: #808080; }
+      .mono-sm-accent { font: 500 16px ui-monospace, "SF Mono", Menlo, monospace; fill: #B6E84A; }
+      .note        { font: 400 15px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #606060; }
+      .edge        { font: 600 11px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.22em; fill: #B6E84A; }
+      .stage       { font: 600 11px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.18em; fill: #808080; }
+      .stage-accent{ font: 600 11px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.18em; fill: #B6E84A; }
+      .steplabel   { font: 500 17px ui-monospace, "SF Mono", Menlo, monospace; fill: #ebebeb; }
+      .steplabel-accent { font: 500 17px ui-monospace, "SF Mono", Menlo, monospace; fill: #B6E84A; }
+      .provider    { font: 600 18px ui-monospace, "SF Mono", Menlo, monospace; fill: #B6E84A; }
+      .nodedesc    { font: 400 15px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #909090; }
+    ]]></style>
+  </defs>
+
+  <rect width="1600" height="1080" fill="url(#bgVignette)"/>
+  <rect width="1600" height="1080" fill="url(#grid)" opacity="0.55"/>
+
+  <text x="80" y="72" class="title">One command to the cloud — a pull request comes back</text>
+  <text x="80" y="104" class="subtitle">agents cloud run hands the task to a managed provider that clones, plans, tests, and opens a PR.  You keep working.</text>
+
+  <text x="80" y="172" class="section">DISPATCH — ONE COMMAND, FOUR PROVIDERS</text>
+
+  <!-- command card -->
+  <g filter="url(#softShadow)">
+    <rect x="80" y="204" width="660" height="360" rx="18" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/>
+  </g>
+  <rect x="80.5" y="204.5" width="659" height="1" fill="#3a3a3a" opacity="0.6"/>
+  <text x="110" y="250" class="cardtitle">agents cloud run</text>
+  <text x="716" y="250" text-anchor="end" class="cardmeta">DISPATCH &amp; DETACH</text>
+  <line x1="110" y1="272" x2="716" y2="272" stroke="#1e1e1e" stroke-width="1"/>
+  <text x="110" y="322" class="mono-sm-muted">$</text>
+  <text x="132" y="322" class="mono-sm">agents cloud run</text>
+  <text x="330" y="322" class="mono-sm-accent" filter="url(#limeGlow)">&quot;fix the flaky test&quot;</text>
+  <text x="132" y="356" class="mono-sm-accent">--provider rush</text>
+  <text x="330" y="356" class="mono-sm-muted">--repo acme/api --branch main</text>
+  <text x="110" y="430" class="note">Detach immediately — the run streams to the cloud, not your</text>
+  <text x="110" y="454" class="note">terminal. Re-attach later with cloud logs, or steer it mid-run</text>
+  <text x="110" y="478" class="note">with cloud message. Auto-routes by --agent, or pin --provider.</text>
+  <text x="110" y="528" class="mono-sm-muted">→ opens a PR when it lands · list / status / cancel any time</text>
+
+  <!-- providers card -->
+  <g filter="url(#softShadow)">
+    <rect x="860" y="204" width="660" height="360" rx="18" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/>
+  </g>
+  <rect x="860.5" y="204.5" width="659" height="1" fill="#3a3a3a" opacity="0.6"/>
+  <text x="890" y="250" class="cardtitle">Four managed backends</text>
+  <text x="1496" y="250" text-anchor="end" class="cardmeta">agents cloud providers</text>
+  <line x1="890" y1="272" x2="1496" y2="272" stroke="#1e1e1e" stroke-width="1"/>
+
+  <text x="890" y="322" class="provider" filter="url(#limeGlow)">rush</text>
+  <text x="1030" y="322" class="nodedesc">Claude on a GitHub repo + branch → PR</text>
+  <line x1="890" y1="342" x2="1496" y2="342" stroke="#161616" stroke-width="1"/>
+
+  <text x="890" y="384" class="provider" filter="url(#limeGlow)">codex</text>
+  <text x="1030" y="384" class="nodedesc">runs in a pre-built Codex environment</text>
+  <line x1="890" y1="404" x2="1496" y2="404" stroke="#161616" stroke-width="1"/>
+
+  <text x="890" y="446" class="provider" filter="url(#limeGlow)">factory</text>
+  <text x="1030" y="446" class="nodedesc">droid exec on a cloud VM (computer-use)</text>
+  <line x1="890" y1="466" x2="1496" y2="466" stroke="#161616" stroke-width="1"/>
+
+  <text x="890" y="508" class="provider" filter="url(#limeGlow)">antigravity</text>
+  <text x="1030" y="508" class="nodedesc">Antigravity harness in a remote sandbox</text>
+
+  <!-- routes-to arrow between the two cards -->
+  <path d="M 740 384 C 790 384, 810 384, 860 384" stroke="url(#limeLine)" stroke-dasharray="6 5" fill="none" stroke-width="2" marker-end="url(#arrowLime)" marker-start="url(#dotLime)" filter="url(#limeGlow)"/>
+
+  <!-- bottom: cloud pipeline -->
+  <line x1="80" y1="662" x2="1520" y2="662" stroke="#1a1a1a" stroke-width="1" stroke-dasharray="2 5"/>
+  <text x="80" y="648" class="section">IN THE CLOUD — WHILE YOU KEEP WORKING</text>
+
+  <!-- 5 pipeline stages -->
+  <!-- stage 1 -->
+  <g filter="url(#softShadow)"><rect x="120" y="784" width="232" height="96" rx="16" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/></g>
+  <text x="150" y="828" class="stage">01</text>
+  <text x="150" y="856" class="steplabel">git clone</text>
+  <!-- stage 2 -->
+  <g filter="url(#softShadow)"><rect x="402" y="784" width="232" height="96" rx="16" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/></g>
+  <text x="432" y="828" class="stage">02</text>
+  <text x="432" y="856" class="steplabel">plan</text>
+  <!-- stage 3 -->
+  <g filter="url(#softShadow)"><rect x="684" y="784" width="232" height="96" rx="16" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/></g>
+  <text x="714" y="828" class="stage">03</text>
+  <text x="714" y="856" class="steplabel">implement</text>
+  <!-- stage 4 -->
+  <g filter="url(#softShadow)"><rect x="966" y="784" width="232" height="96" rx="16" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/></g>
+  <text x="996" y="828" class="stage">04</text>
+  <text x="996" y="856" class="steplabel">test</text>
+  <!-- stage 5 (outcome, lime) -->
+  <g filter="url(#softShadow)"><rect x="1248" y="784" width="232" height="96" rx="16" fill="#12160b" stroke="#B6E84A" stroke-width="1.5"/></g>
+  <text x="1278" y="828" class="stage-accent">05</text>
+  <text x="1278" y="856" class="steplabel-accent" filter="url(#limeGlow)">open PR</text>
+
+  <!-- pipeline arrows -->
+  <path d="M 352 832 L 402 832" stroke="#5a5a5a" fill="none" stroke-width="1.5" marker-end="url(#arrowMuted)"/>
+  <path d="M 634 832 L 684 832" stroke="#5a5a5a" fill="none" stroke-width="1.5" marker-end="url(#arrowMuted)"/>
+  <path d="M 916 832 L 966 832" stroke="#5a5a5a" fill="none" stroke-width="1.5" marker-end="url(#arrowMuted)"/>
+  <path d="M 1198 832 L 1248 832" stroke="#B6E84A" fill="none" stroke-width="2" marker-end="url(#arrowLime)" filter="url(#limeGlow)"/>
+
+  <text x="120" y="950" class="note">Your terminal is free the whole time.  Follow with</text>
+  <text x="120" y="974" class="mono-sm-accent">agents cloud logs &lt;id&gt;</text>
+  <text x="120" y="1010" class="note">or nudge a running task with</text>
+  <text x="120" y="1034" class="mono-sm-accent">agents cloud message &lt;id&gt; &quot;also update the changelog&quot;</text>
+</svg>

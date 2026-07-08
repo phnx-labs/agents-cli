@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" role="img" aria-label="The Cmd-Shift-O quick-issue bar: type a one-line note and attach recent screenshots; a headless agent picks the project, investigates, and files the Linear ticket itself">
+  <defs>
+    <radialGradient id="bgVignette" cx="50%" cy="38%" r="80%">
+      <stop offset="0%"  stop-color="#0d0d0d"/>
+      <stop offset="100%" stop-color="#040404"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#0f0f0f" stroke-width="1"/>
+    </pattern>
+    <linearGradient id="cardFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#131313"/>
+      <stop offset="100%" stop-color="#0a0a0a"/>
+    </linearGradient>
+    <linearGradient id="barFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#242426"/>
+      <stop offset="100%" stop-color="#161618"/>
+    </linearGradient>
+    <linearGradient id="cardRim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2e2e2e"/>
+      <stop offset="50%" stop-color="#242424"/>
+      <stop offset="100%" stop-color="#1c1c1c"/>
+    </linearGradient>
+    <linearGradient id="shotA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2b2f36"/>
+      <stop offset="100%" stop-color="#15171b"/>
+    </linearGradient>
+    <linearGradient id="shotB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#332b2b"/>
+      <stop offset="100%" stop-color="#1a1515"/>
+    </linearGradient>
+    <filter id="limeGlow" x="-40%" y="-60%" width="180%" height="220%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feGaussianBlur stdDeviation="26" result="blur"/>
+      <feOffset dy="18" result="offset"/>
+      <feColorMatrix in="offset" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.7 0" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feGaussianBlur stdDeviation="14" result="blur"/>
+      <feOffset dy="10" result="offset"/>
+      <feColorMatrix in="offset" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrowLime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#B6E84A"/>
+    </marker>
+    <style><![CDATA[
+      .title       { font: 500 32px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #f0f0f0; letter-spacing: -0.015em; }
+      .subtitle    { font: 400 18px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #808080; }
+      .section     { font: 600 12px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.32em; fill: #555555; }
+      .field       { font: 400 30px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #f2f2f2; }
+      .hint        { font: 500 15px ui-monospace, "SF Mono", Menlo, monospace; fill: #6a6a6a; }
+      .hintkey     { font: 600 15px ui-monospace, "SF Mono", Menlo, monospace; fill: #B6E84A; }
+      .kbd         { font: 600 15px ui-monospace, "SF Mono", Menlo, monospace; fill: #9a9a9a; letter-spacing: 0.06em; }
+      .shotcap     { font: 500 13px ui-monospace, "SF Mono", Menlo, monospace; fill: #808080; }
+      .cardmeta    { font: 500 11px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.20em; fill: #606060; }
+      .tid         { font: 600 22px ui-monospace, "SF Mono", Menlo, monospace; fill: #B6E84A; }
+      .ttitle      { font: 500 24px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #f0f0f0; letter-spacing: -0.005em; }
+      .tmeta       { font: 400 16px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #808080; }
+      .status      { font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0.14em; fill: #B6E84A; }
+      .edge        { font: 600 11px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; letter-spacing: 0.22em; fill: #B6E84A; }
+      .note        { font: 400 15px -apple-system, "SF Pro Display", "Inter", system-ui, sans-serif; fill: #606060; }
+    ]]></style>
+  </defs>
+
+  <rect width="1600" height="1080" fill="url(#bgVignette)"/>
+  <rect width="1600" height="1080" fill="url(#grid)" opacity="0.55"/>
+
+  <text x="80" y="72" class="title">File a ticket without breaking focus</text>
+  <text x="80" y="104" class="subtitle">Cmd-Shift-O anywhere — jot a line, attach a shot, hit return. A headless agent files the Linear ticket itself.</text>
+
+  <text x="80" y="176" class="section">⌘⇧O — THE QUICK-ISSUE BAR</text>
+
+  <!-- floating spotlight-style bar -->
+  <g filter="url(#panelShadow)">
+    <rect x="150" y="204" width="1300" height="248" rx="26" fill="url(#barFill)" stroke="#3a3a3c" stroke-width="1"/>
+  </g>
+  <rect x="150.5" y="204.5" width="1299" height="1" rx="1" fill="#4a4a4c" opacity="0.5"/>
+
+  <!-- prompt spark -->
+  <circle cx="204" cy="270" r="9" fill="#B6E84A" filter="url(#limeGlow)"/>
+  <!-- typed note + cursor -->
+  <text x="238" y="282" class="field">Login button overlaps the logo on mobile Safari</text>
+  <rect x="930" y="252" width="3" height="34" rx="1.5" fill="#B6E84A" filter="url(#limeGlow)"/>
+  <!-- ⌘⇧O pill -->
+  <rect x="1300" y="238" width="118" height="34" rx="17" fill="#0e0e0e" stroke="#3a3a3c"/>
+  <text x="1359" y="261" text-anchor="middle" class="kbd">⌘⇧O</text>
+
+  <line x1="204" y1="316" x2="1396" y2="316" stroke="#2a2a2c" stroke-width="1"/>
+
+  <!-- attached screenshot thumbnails -->
+  <g>
+    <rect x="204" y="344" width="150" height="86" rx="10" fill="url(#shotA)" stroke="#B6E84A" stroke-width="2"/>
+    <path d="M 224 414 L 256 384 L 282 410 L 300 392 L 334 414 Z" fill="#3a4048"/>
+    <circle cx="316" cy="366" r="8" fill="#4a525c"/>
+  </g>
+  <g>
+    <rect x="368" y="344" width="150" height="86" rx="10" fill="url(#shotB)" stroke="#B6E84A" stroke-width="2"/>
+    <path d="M 388 414 L 420 384 L 446 410 L 464 392 L 498 414 Z" fill="#48403a"/>
+    <circle cx="480" cy="366" r="8" fill="#5c524a"/>
+  </g>
+  <text x="540" y="394" class="shotcap">2 recent screenshots attached</text>
+  <text x="540" y="418" class="note" style="font-size:13px">double-click a thumbnail to preview it full-size</text>
+
+  <!-- hints right -->
+  <text x="1352" y="386" text-anchor="end" class="hint">file ticket</text>
+  <text x="1396" y="386" text-anchor="end" class="hintkey">⏎</text>
+  <text x="1352" y="414" text-anchor="end" class="hint">paste</text>
+  <text x="1396" y="414" text-anchor="end" class="hintkey">⌘V</text>
+
+  <!-- arrow to outcome -->
+  <path d="M 800 452 L 800 512" stroke="#B6E84A" fill="none" stroke-width="2" marker-end="url(#arrowLime)" filter="url(#limeGlow)"/>
+  <text x="820" y="490" class="edge">A HEADLESS AGENT INVESTIGATES &amp; FILES</text>
+
+  <!-- filed ticket card -->
+  <g filter="url(#softShadow)">
+    <rect x="150" y="540" width="1300" height="316" rx="20" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/>
+  </g>
+  <rect x="150.5" y="540.5" width="1299" height="1" fill="#3a3a3a" opacity="0.6"/>
+  <text x="190" y="588" class="cardmeta">LINEAR</text>
+  <text x="1410" y="588" text-anchor="end" class="cardmeta">FILED BY AGENT</text>
+  <line x1="190" y1="606" x2="1410" y2="606" stroke="#1e1e1e" stroke-width="1"/>
+
+  <text x="190" y="662" class="tid" filter="url(#limeGlow)">RUSH-1487</text>
+  <rect x="360" y="642" width="92" height="26" rx="13" fill="#12160b" stroke="#2f3a1c"/>
+  <text x="406" y="660" text-anchor="middle" class="status">TRIAGE</text>
+
+  <text x="190" y="712" class="ttitle">Login button overlaps the logo on mobile Safari</text>
+  <text x="190" y="752" class="tmeta">project: acme-web  ·  inferred from your recent sessions</text>
+  <text x="190" y="784" class="tmeta">2 screenshots attached  ·  repro noted on iOS Safari  ·  labeled bug</text>
+
+  <line x1="190" y1="812" x2="1410" y2="812" stroke="#161616" stroke-width="1"/>
+  <text x="190" y="842" class="note">You never left your editor. The agent chose the project, wrote it up, and filed it.</text>
+</svg>
