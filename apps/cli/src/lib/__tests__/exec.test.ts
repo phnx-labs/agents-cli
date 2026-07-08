@@ -548,9 +548,41 @@ describe('buildExecCommand', () => {
       expect(cmd).not.toContain('--model');
     });
 
-    it('no --model flag for codex without explicit model', () => {
-      const cmd = buildExecCommand(opts({ agent: 'codex' }));
-      expect(cmd).not.toContain('--model');
+    it('no --model flag for codex when neither --model nor a configured model exists', () => {
+      // Point config resolution at an empty home so the result is deterministic
+      // regardless of the CI box's real ~/.codex/config.toml.
+      const prev = process.env.AGENTS_REAL_HOME;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-exec-empty-'));
+      try {
+        process.env.AGENTS_REAL_HOME = tmp;
+        const cmd = buildExecCommand(opts({ agent: 'codex' }));
+        expect(cmd).not.toContain('--model');
+      } finally {
+        if (prev === undefined) delete process.env.AGENTS_REAL_HOME;
+        else process.env.AGENTS_REAL_HOME = prev;
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it('codex forwards the model configured in ~/.codex/config.toml when no explicit --model', () => {
+      // Codex runs under a per-version CODEX_HOME that may lack the user's model,
+      // so buildExecCommand falls back to the active ~/.codex/config.toml model —
+      // otherwise Codex defaults to gpt-5.3-codex and 400s on a ChatGPT account.
+      const prev = process.env.AGENTS_REAL_HOME;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-exec-model-'));
+      try {
+        fs.mkdirSync(path.join(tmp, '.codex'), { recursive: true });
+        fs.writeFileSync(path.join(tmp, '.codex', 'config.toml'), 'model = "gpt-5.5"\n');
+        process.env.AGENTS_REAL_HOME = tmp;
+        const cmd = buildExecCommand(opts({ agent: 'codex' }));
+        const idx = cmd.indexOf('--model');
+        expect(idx).toBeGreaterThan(-1);
+        expect(cmd[idx + 1]).toBe('gpt-5.5');
+      } finally {
+        if (prev === undefined) delete process.env.AGENTS_REAL_HOME;
+        else process.env.AGENTS_REAL_HOME = prev;
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
     });
   });
 
