@@ -57,6 +57,14 @@ import {
   hasUncommittedChanges,
   removeWorktree,
 } from '../lib/teams/worktree.js';
+import { resolveHost } from '../lib/hosts/registry.js';
+import { sshTargetFor } from '../lib/hosts/types.js';
+import { ensureHostReady } from '../lib/hosts/ready.js';
+import { remoteShellFor } from '../lib/hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
+import { remoteWorktreeDirty, removeRemoteWorktree, ensureRemoteRepo } from '../lib/teams/remoteWorktree.js';
+import { getRemoteUrl } from '../lib/git.js';
+import { machineId } from '../lib/session/sync/config.js';
 import { isVersionInstalled, resolveVersion, resolveVersionAlias, resolveVersionAliasLoose, verifyInstalledBinaryLaunches } from '../lib/versions.js';
 import { AGENTS, warnAgentDeprecated } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
@@ -637,6 +645,9 @@ function printAgentDetail(a: AgentStatusDetail, session: SessionMeta | null): vo
   if (a.after && a.after.length) {
     console.log(`    ${chalk.gray('after   ')} ${a.after.join(', ')}`);
   }
+  if (a.host) {
+    console.log(`    ${chalk.gray('host    ')} ${chalk.cyan(a.host)}`);
+  }
   // If the agent's internal session id differs from ours (non-Claude), show
   // it as a hint for `agents sessions <id>`.
   if (a.remote_session_id && a.remote_session_id !== a.agent_id) {
@@ -714,8 +725,9 @@ function printAgentSummary(s: AgentStatusSummary): void {
   const duration = s.duration ? `${chalk.gray(' · ')}${chalk.white(s.duration)}` : '';
   const errBadge = s.has_errors ? chalk.red(' !') : '';
   const tools = chalk.gray(` · ${s.tool_count} tools`);
+  const hostBadge = s.host ? chalk.gray(' · on ') + chalk.cyan(s.host) : '';
   console.log(
-    `  ${chalk.cyan(handle.padEnd(14))} ${ident.padEnd(11)} ${label}${duration}${tools}${errBadge}`
+    `  ${chalk.cyan(handle.padEnd(14))} ${ident.padEnd(11)} ${label}${duration}${tools}${hostBadge}${errBadge}`
   );
 
   // Files: counts + basenames. Read is count only.
@@ -1148,13 +1160,59 @@ export function registerTeamsCommands(program: Command): void {
     .option('-d, --description <text>', 'One-line summary of what this team is working on')
     .option('--enable-worktrees', 'Each teammate works in its own git worktree (requires --worktree on add)')
     .option('--use-worktree <path>', 'All teammates share this existing worktree path (mutually exclusive with --enable-worktrees)')
+    .option('--devices <list>', 'Pool of machines this team may run teammates on (comma-separated). Enables distributed auto-scheduling.')
+    .option('--hosts <list>', 'Alias for --devices.')
+    .option('--repo <urlOrPath>', 'How each device gets the code (git URL to clone, or a path). Defaults to the local checkout origin.')
     .option('--json', 'Output machine-readable JSON')
-    .action(async (team: string, opts: { description?: string; enableWorktrees?: boolean; useWorktree?: string; json?: boolean }) => {
+    .action(async (team: string, opts: { description?: string; enableWorktrees?: boolean; useWorktree?: string; devices?: string; hosts?: string; repo?: string; json?: boolean }) => {
       try {
+        // --devices / --hosts are aliases; commander can't express a two-name
+        // option that isn't a short flag, so merge them here. Split on comma,
+        // trim, drop blanks, dedupe (preserving first-seen order).
+        const rawPool = [opts.devices, opts.hosts].filter(Boolean).join(',');
+        const devices: string[] = [];
+        for (const d of rawPool.split(',').map((s) => s.trim()).filter(Boolean)) {
+          if (!devices.includes(d)) devices.push(d);
+        }
+
+        // Validate every pooled device resolves + is POSIX (v1 remote monitor is
+        // POSIX-only). A device equal to the local machine is fine (runs local),
+        // so skip the resolve/POSIX check for it.
+        for (const name of devices) {
+          if (name.toLowerCase() === machineId()) continue;
+          const host = await resolveHost(name);
+          if (!host) {
+            die(
+              `Couldn't resolve pool device "${name}". Register it with \`agents devices\`, ` +
+                `enroll it with \`agents hosts add ${name}\`, or pass user@host.`,
+            );
+          }
+          if (remoteShellFor(host.os ?? resolveRemoteOsSync(host.name)) === 'powershell') {
+            die(
+              `Distributed teams on Windows device "${host.name}" are not supported yet — ` +
+                `the teams remote monitor is POSIX-only. Use a Linux/macOS device.`,
+            );
+          }
+        }
+
+        // --repo: how each device gets the code. Default to the local checkout's
+        // origin when a pool is declared and we're inside a git repo, so the user
+        // never hand-manages a path per box. A poolless team leaves repo unset.
+        let repo = opts.repo;
+        if (!repo && devices.length > 0) {
+          const cwd = process.cwd();
+          if (await isGitRepo(cwd)) {
+            const origin = await getRemoteUrl(cwd);
+            if (origin) repo = origin;
+          }
+        }
+
         const meta = await createTeam(team, {
           description: opts.description,
           enableWorktrees: opts.enableWorktrees,
           useWorktree: opts.useWorktree,
+          devices,
+          repo,
         });
         if (isJsonMode(opts)) {
           console.log(JSON.stringify({ team, ...meta }, null, 2));
@@ -1164,6 +1222,8 @@ export function registerTeamsCommands(program: Command): void {
         if (meta.description) console.log(chalk.gray(`  ${meta.description}`));
         if (meta.enable_worktrees) console.log(chalk.gray(`  worktrees: per-teammate`));
         if (meta.use_worktree) console.log(chalk.gray(`  worktree: ${meta.use_worktree}`));
+        if (meta.devices && meta.devices.length) console.log(chalk.gray(`  devices: ${meta.devices.join(', ')}`));
+        if (meta.repo) console.log(chalk.gray(`  repo: ${meta.repo}`));
         console.log();
         console.log(chalk.gray('Add your first teammate:'));
         if (meta.enable_worktrees) {
@@ -1202,7 +1262,7 @@ export function registerTeamsCommands(program: Command): void {
     .action(async (team: string, teammate: string, task: string, opts: {
       name?: string; mode: string; effort: string; model?: string; env: string[];
       cwd?: string; worktree?: string; after?: string; json?: boolean;
-      taskType?: string; cloud?: string; repo?: string; branch?: string; force?: boolean;
+      taskType?: string; cloud?: string; host?: string; device?: string; repo?: string; branch?: string; force?: boolean;
     }) => {
       if (!(VALID_MODES as readonly string[]).includes(opts.mode)) {
         die(`Invalid mode '${opts.mode}'. Use one of: ${VALID_MODES.join(', ')}`);
@@ -1230,9 +1290,93 @@ export function registerTeamsCommands(program: Command): void {
         }
       }
 
+      // Auto-create the team if it doesn't exist yet (friendlier UX than erroring),
+      // then load its metadata — needed here for the distributed --repo (how each
+      // device gets the code) before we resolve a per-teammate --device pin.
+      await ensureTeam(team);
+      const teamMeta = await getTeam(team);
+
+      // `--device`/`--host` are aliases (addHostOption registers both). For `teams
+      // add` the passthrough special-cases them as PLACEMENT, not routing, so the
+      // local action reads them here. Reject a conflicting pair.
+      const explicitDevice = (() => {
+        const h = opts.host;
+        const d = opts.device;
+        if (h && d && h !== d) {
+          die('Conflicting --host/--device values — pass just one.');
+        }
+        return h ?? d ?? null;
+      })();
+
+      // Distributed teams: --device <name> PINS this teammate to a machine over
+      // SSH. Resolve + validate the placement here so a bad target fails at `add`
+      // time, not silently at launch. Persisted (hostName/hostTarget/repoPath) so
+      // startReady()/launchRemoteProcess dispatch over SSH. Unpinned teammates
+      // leave these null — the launch-time scheduler resolves the pool cascade.
+      let hostName: string | null = null;
+      let hostTarget: string | null = null;
+      let hostRepoPath: string | null = null;
+      if (explicitDevice && explicitDevice.toLowerCase() !== machineId()) {
+        if (cloudProviderId) {
+          die(`--device and --cloud are mutually exclusive (two different remote backends). Pick one.`);
+        }
+        const host = await resolveHost(explicitDevice);
+        if (!host) {
+          die(
+            `Couldn't resolve --device "${explicitDevice}". Register it with \`agents devices\`, ` +
+              `enroll it with \`agents hosts add ${explicitDevice}\`, or pass user@host.`,
+          );
+        }
+        // POSIX-only in v1: the remote follow/monitor layer offset-tails the log
+        // with tail/cat/kill, which don't exist under PowerShell. Refuse Windows
+        // up front, mirroring dispatch.ts launchDetached.
+        if (remoteShellFor(host.os ?? resolveRemoteOsSync(host.name)) === 'powershell') {
+          die(
+            `Distributed teammates on Windows host "${host.name}" are not supported yet — ` +
+              `the teams remote monitor is POSIX-only (offset-tails the remote log with tail/cat/kill). ` +
+              `Use a Linux/macOS host, or run this teammate locally.`,
+          );
+        }
+        try {
+          hostTarget = sshTargetFor(host);
+        } catch (err) {
+          die(`Can't resolve an ssh target for "${host.name}": ${(err as Error).message}`);
+        }
+        // Ensure agents-cli is present + version-matched on the host; surface
+        // (not fail on) an agent-not-installed warning, like the run --host path.
+        try {
+          const { warnings } = ensureHostReady(host, { agent: parseTeammate(teammate).agent });
+          for (const w of warnings) process.stderr.write(chalk.yellow(`[teams] warning: ${w}\n`));
+        } catch (err) {
+          die(`Host "${host.name}" is not ready: ${(err as Error).message}`);
+        }
+        // Provision the repo on the host from the team's --repo (clone into
+        // ~/.agents/repos/<team> or reuse an existing checkout), resolving to the
+        // ABSOLUTE git root so every later remote command works from an absolute
+        // path (dispatch `cd`, worktree create, polling). When the team has no
+        // --repo (the common "just send one teammate elsewhere" case, created
+        // without a pool), fall back to THIS checkout's origin so the headline case
+        // works with zero extra flags whenever you run `add` inside a git repo.
+        let effectiveRepo = teamMeta?.repo ?? '';
+        if (!effectiveRepo && (await isGitRepo(process.cwd()))) {
+          effectiveRepo = (await getRemoteUrl(process.cwd())) ?? '';
+        }
+        try {
+          hostRepoPath = ensureRemoteRepo(hostTarget!, effectiveRepo, team);
+        } catch (err) {
+          die(
+            `Couldn't provision the repo on "${host.name}": ${(err as Error).message}\n` +
+              `  Set how each device gets the code with: agents teams create ${team} --repo <url|path>`,
+          );
+        }
+        hostName = host.name;
+      }
+
       const { agent, version, profileName } = parseTeammate(teammate);
       warnAgentDeprecated(agent);
-      if (version && !isVersionInstalled(agent, version)) {
+      // Version-installed check is about the LOCAL machine — a distributed (--on)
+      // teammate's agent/version lives on the host, verified by ensureHostReady.
+      if (version && !hostName && !isVersionInstalled(agent, version)) {
         die(
           `${AGENT_NAMES[agent]} ${version} isn't installed.\n` +
             `  Install it:  agents add ${agent}@${version}\n` +
@@ -1243,7 +1387,8 @@ export function registerTeamsCommands(program: Command): void {
       // Advisory sign-in check: warn but NEVER block. Detection is unreliable
       // for opaque-cred agents, so a false negative must not stop a team. Cloud
       // dispatch authenticates through the provider, not the local CLI — skip it.
-      if (!opts.force && !cloudProviderId && !(await checkCliSignedIn(agent))) {
+      // Distributed (--on) teammates authenticate on the host, not locally — skip.
+      if (!opts.force && !cloudProviderId && !hostName && !(await checkCliSignedIn(agent))) {
         console.error(
           chalk.yellow(`⚠ ${AGENT_NAMES[agent]} may not be signed in (detection is unreliable). Adding anyway.`) +
             chalk.gray(`\n  If it fails to start, run \`${AGENTS[agent].cliCommand}\` to log in, or pass --force to silence this.`)
@@ -1255,7 +1400,7 @@ export function registerTeamsCommands(program: Command): void {
       // out-of-credits / signed-out account (see throttleWarningLine). Skip bare
       // targets (rotation handles them), profiles (auth-injected account isn't
       // the version-home one we can read), and cloud dispatch. Warn, never block.
-      if (!opts.force && !cloudProviderId && !profileName && version) {
+      if (!opts.force && !cloudProviderId && !hostName && !profileName && version) {
         const readiness = await checkRunAccountReadiness(agent, version);
         if (!readiness.ready) console.error(throttleWarningLine(agent, version, readiness));
       }
@@ -1286,17 +1431,33 @@ export function registerTeamsCommands(program: Command): void {
         die((err as Error).message);
       }
 
-      // Auto-create the team if it doesn't exist yet (friendlier UX than erroring).
-      await ensureTeam(team);
-
-      // Check if team has worktrees enabled or a shared worktree
-      const teamMeta = await getTeam(team);
+      // Team already ensured + loaded above (teamMeta) for the --repo provisioning.
       const worktreesEnabled = teamMeta?.enable_worktrees ?? false;
       const sharedWorktree = teamMeta?.use_worktree ?? null;
       let worktreeName: string | null = null;
       let worktreePath: string | null = null;
 
-      if (sharedWorktree) {
+      if (hostName) {
+        // Distributed teammate: the checkout lives on the host, so we NEVER touch
+        // the local filesystem here. A shared local worktree makes no sense for a
+        // remote teammate; a per-teammate worktree is created ON THE HOST at launch
+        // (createRemoteWorktree in launchRemoteProcess) — we just capture its name.
+        if (sharedWorktree) {
+          die(`Team '${team}' uses a shared local --use-worktree, which can't apply to a --device (remote) teammate.`);
+        }
+        if (worktreesEnabled) {
+          if (!opts.worktree) {
+            die(`Team '${team}' has worktrees enabled. Use --worktree <name> for the remote teammate (created on ${hostName}).`);
+          }
+          if (!opts.name) {
+            die(`Team '${team}' has worktrees enabled. Use --name <name> to identify this teammate.`);
+          }
+          worktreeName = opts.worktree;
+        } else if (opts.worktree) {
+          die(`--worktree requires --enable-worktrees on the team. Recreate the team with: agents teams create ${team} --enable-worktrees`);
+        }
+        // Local cwd stays null — the remote cwd is repoPath / the remote worktree.
+      } else if (sharedWorktree) {
         // Team uses a shared worktree for all teammates
         const fsp = await import('fs/promises');
         try {
@@ -1332,7 +1493,10 @@ export function registerTeamsCommands(program: Command): void {
         die(`--worktree requires --enable-worktrees on the team. Recreate the team with: agents teams create ${team} --enable-worktrees`);
       }
 
-      const cwd = worktreePath ?? opts.cwd ?? process.cwd();
+      // Distributed teammates have no LOCAL cwd — their working dir lives on the
+      // host (repoPath / the remote worktree). Local teammates default to the
+      // worktree path, then --cwd, then the current directory.
+      const cwd = hostName ? null : (worktreePath ?? opts.cwd ?? process.cwd());
       const mgr = mkManager();
 
       // Factory teammates: prepend the worker-skill preamble to every task
@@ -1407,6 +1571,9 @@ export function registerTeamsCommands(program: Command): void {
           worktreeName,
           worktreePath,
           profileName,
+          hostName,
+          hostTarget,
+          hostRepoPath,
         );
 
         if (isJsonMode(opts)) {
@@ -1426,7 +1593,10 @@ export function registerTeamsCommands(program: Command): void {
         console.log(`  ${chalk.gray('agent_id')}  ${chalk.cyan(shortId(result.agent_id))} ${chalk.gray(`(${result.agent_id})`)}`);
         console.log(`  ${chalk.gray('status  ')}  ${statusColor(result.status)(result.status)}`);
         console.log(`  ${chalk.gray('mode    ')}  ${opts.mode}`);
-        console.log(`  ${chalk.gray('working ')}  ${cwd}`);
+        console.log(`  ${chalk.gray('working ')}  ${hostName ? hostRepoPath : cwd}`);
+        if (hostName) {
+          console.log(`  ${chalk.gray('host    ')}  ${chalk.cyan(hostName)}${chalk.gray(` (${hostTarget})`)}`);
+        }
         if (worktreeName) {
           console.log(`  ${chalk.gray('worktree')}  ${chalk.cyan(worktreeName)}`);
         }
@@ -1535,6 +1705,7 @@ export function registerTeamsCommands(program: Command): void {
           started_at: a.startedAt.toISOString(),
           cwd: a.cwd,
           version: a.version,
+          host: a.hostName,
         })) }, null, 2));
         return;
       }
@@ -1555,7 +1726,10 @@ export function registerTeamsCommands(program: Command): void {
         console.log(chalk.bold(`Team ${chalk.cyan(team)}  ${chalk.gray(`(${agents.length} working)`)}`));
         for (const a of agents) {
           const ident = a.name || shortId(a.agentId);
-          const pidStr = a.pid ? chalk.yellow(`pid ${a.pid}`) : chalk.gray('pid ?');
+          // A distributed teammate has no local pid; show its host + remote pid.
+          const pidStr = a.hostName
+            ? chalk.cyan(`on ${a.hostName}`) + (a.remotePid ? chalk.gray(` (pid ${a.remotePid})`) : '')
+            : a.pid ? chalk.yellow(`pid ${a.pid}`) : chalk.gray('pid ?');
           const started = chalk.gray(relTime(a.startedAt.toISOString()));
           console.log(`  ${chalk.magenta(padRight(fullName(a.agentType, a.version), 18))}  ${chalk.white(padRight(ident, 20))}  ${pidStr}  ${started}`);
         }
@@ -1807,12 +1981,21 @@ export function registerTeamsCommands(program: Command): void {
       let worktreeKept = false;
       if (agent?.worktreeName && agent?.worktreePath) {
         try {
-          const dirty = await hasUncommittedChanges(agent.worktreePath);
-          if (dirty) {
-            worktreeKept = true;
+          if (agent.hostName && agent.hostTarget && agent.repoPath) {
+            // Distributed teammate: guard + remove the worktree ON THE HOST.
+            if (remoteWorktreeDirty(agent.hostTarget, agent.worktreePath)) {
+              worktreeKept = true;
+            } else {
+              removeRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
+            }
           } else {
-            const baseCwd = process.cwd();
-            await removeWorktree(baseCwd, agent.worktreeName);
+            const dirty = await hasUncommittedChanges(agent.worktreePath);
+            if (dirty) {
+              worktreeKept = true;
+            } else {
+              const baseCwd = process.cwd();
+              await removeWorktree(baseCwd, agent.worktreeName);
+            }
           }
         } catch {
           // best-effort cleanup
@@ -1940,11 +2123,20 @@ export function registerTeamsCommands(program: Command): void {
         const agent = await mgr.get(a.agent_id);
         if (agent?.worktreeName && agent?.worktreePath) {
           try {
-            const dirty = await hasUncommittedChanges(agent.worktreePath);
-            if (dirty) {
-              keptWorktrees.push(agent.worktreeName);
+            if (agent.hostName && agent.hostTarget && agent.repoPath) {
+              // Distributed teammate: guard + remove the worktree ON THE HOST.
+              if (remoteWorktreeDirty(agent.hostTarget, agent.worktreePath)) {
+                keptWorktrees.push(agent.worktreeName);
+              } else {
+                removeRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
+              }
             } else {
-              await removeWorktree(baseCwd, agent.worktreeName);
+              const dirty = await hasUncommittedChanges(agent.worktreePath);
+              if (dirty) {
+                keptWorktrees.push(agent.worktreeName);
+              } else {
+                await removeWorktree(baseCwd, agent.worktreeName);
+              }
             }
           } catch { /* best-effort */ }
         }

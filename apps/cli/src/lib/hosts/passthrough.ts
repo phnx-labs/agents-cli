@@ -102,6 +102,21 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
   const spec = REMOTE_PASSTHROUGH[command];
   if (!spec) return false;
 
+  // Placement, not routing: `teams add`/`teams create` read `--device`/`--devices`
+  // (and `--host`/`--hosts`) as WHERE to place a teammate / the team pool — the
+  // command itself always runs locally on the orchestrator. Bail before the
+  // generic teams routing below so those flags reach the local action. Every
+  // other teams subcommand (`status`/`logs`/`stop`/…) keeps `--host` routing.
+  // Find the subcommand = the first non-flag token AFTER `teams` (robust to any
+  // leading global flags), then bail for the add/create aliases.
+  if (command === 'teams') {
+    const teamsIdx = allArgs.indexOf('teams');
+    const sub = teamsIdx >= 0 ? allArgs.slice(teamsIdx + 1).find((a) => !a.startsWith('-')) : undefined;
+    if (sub === 'add' || sub === 'a' || sub === 'create' || sub === 'c' || sub === 'new') {
+      return false;
+    }
+  }
+
   // `--device` is a first-class alias of `--host` (mirrors `agents run`); the
   // device registry is the source of truth for machine identity. Reject a
   // conflicting pair rather than silently preferring one — same rule as run.
