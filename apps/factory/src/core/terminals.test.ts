@@ -262,6 +262,21 @@ describe('buildAgentTerminalEnv', () => {
       else process.env.GITHUB_TOKEN = original;
     }
   });
+
+  test('AGENT_TERMINAL_KIND defaults to "agent"', () => {
+    const env = buildAgentTerminalEnv('CC-123', 'session-abc');
+    expect(env.AGENT_TERMINAL_KIND).toBe('agent');
+  });
+
+  test('AGENT_TERMINAL_KIND is "shell" for a user shell tab', () => {
+    // The signal a user rc file gates its agent fast-path on: a bare shell tab
+    // must load the full interactive environment (prompt theme, aliases,
+    // autojump, PATH), unlike an agent CLI terminal no human types in.
+    const env = buildAgentTerminalEnv('SH-123', null, '/ws', undefined, { scrubSensitive: false, kind: 'shell' });
+    expect(env.AGENT_TERMINAL_KIND).toBe('shell');
+    // Both markers coexist: KIND distinguishes shell-vs-agent, ID stays for tracking.
+    expect(env.AGENT_TERMINAL_ID).toBe('SH-123');
+  });
 });
 
 // Regression guard for the "Cmd+Shift+J loses version pin across reload" bug.

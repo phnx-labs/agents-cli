@@ -153,18 +153,27 @@ export function isSensitiveEnvKey(key: string): boolean {
  *   prompt-injected agent could shell out and read them. Set to `false` for a
  *   user-opened shell tab: the user drives it directly (no agent), so it should
  *   load their normal environment, credentials included.
+ * @param options.kind - `'agent'` (default) for an agent CLI terminal, `'shell'`
+ *   for a bare user-driven shell tab. Exported as `AGENT_TERMINAL_KIND` so a
+ *   user's rc file can tell the two apart: agent terminals often take a minimal
+ *   fast-path (skip oh-my-zsh, themes, plugins) since no human types in them,
+ *   but a `'shell'` tab is an interactive shell the user drives and must load
+ *   their full environment (prompt theme, aliases, autojump, PATH). `AGENT_TERMINAL_ID`
+ *   alone can't distinguish them — every tracked terminal carries it — so this
+ *   is the signal an rc file should gate its fast-path on.
  */
 export function buildAgentTerminalEnv(
   terminalId: string,
   sessionId: string | null | undefined,
   workspacePath: string | null | undefined = undefined,
   version: string | null | undefined = undefined,
-  options: { scrubSensitive?: boolean } = {}
+  options: { scrubSensitive?: boolean; kind?: 'agent' | 'shell' } = {}
 ): Record<string, string | null> {
-  const { scrubSensitive = true } = options;
+  const { scrubSensitive = true, kind = 'agent' } = options;
 
   const env: Record<string, string | null> = {
     AGENT_TERMINAL_ID: terminalId,
+    AGENT_TERMINAL_KIND: kind,
     AGENT_SESSION_ID: sessionId ?? '',
     AGENT_WORKSPACE_DIR: workspacePath ?? '',
     AGENT_VERSION: version ?? '',
