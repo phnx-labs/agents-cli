@@ -6,6 +6,18 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.288] - 2026-07-08
+
+### Added
+
+- **Readable agent cards on the Factory Floor.** Cards now lead with the agent's
+  original **task** (not its last message), render **markdown** in message bodies,
+  add a live **progress timeline** of recent tool calls plus a **streaming activity
+  feed** of the agent's messages, keep the **todo checklist** from silently
+  vanishing, and show a clean **worktree chip** instead of a raw `WT=/…/path`. The
+  detail pane is reordered for legibility: Task → Progress timeline → Todos →
+  Activity → PR/CI.
+
 ### Fixed
 
 - **Shell (`SH`) tabs now load your full interactive shell environment.** Every
