@@ -28,6 +28,29 @@ export type { ProjectRule } from '../shared/project';
 /** Mirror of floorModel.FloorPhase (kept in sync by hand; not imported). */
 export type RemotePhase = 'running' | 'idle' | 'waiting' | 'failed' | 'done';
 
+/** Why an agent handed control back — mirrors the CLI AwaitingReason. */
+export type RemoteAwaitReason = 'question' | 'plan_review' | 'permission';
+
+/** One discrete choice the agent offered (mirror of the CLI QuestionOption). */
+export interface RemoteQuestionOption {
+  label: string;
+  description: string;
+  /** Selection keystroke for a TUI prompt ('1' … or 'esc'); '' for a free-text choice. */
+  key: string;
+}
+
+/**
+ * The structured decision an agent is waiting on, carried verbatim from the CLI
+ * state engine (`agents sessions --active --json` → ActiveSession.question). This
+ * is the load-bearing "what does it want from me" signal the NEEDS-YOU card renders
+ * — the UI no longer has to regex it back out of a truncated preview line.
+ */
+export interface RemoteQuestion {
+  text: string;
+  reason: RemoteAwaitReason;
+  options: RemoteQuestionOption[];
+}
+
 /** Agent types whose session files session.activity.ts knows how to parse. */
 type ParsableAgentType = 'claude' | 'codex' | 'gemini';
 
@@ -110,6 +133,12 @@ export interface RemoteSession {
   tokPerSec: number;
   waitingForInput: boolean;
   lastResponse: string;
+  /** The structured decision the agent is waiting on (question/plan/permission +
+   *  options), from the CLI state engine. null when the CLI supplied none — the UI
+   *  then falls back to parsing lastResponse for options. */
+  question: RemoteQuestion | null;
+  /** Last few assistant turns (most-recent last), one line each — panel context. [] when none. */
+  tail: string[];
   prUrl: string | null;
   ticket: string | null;
   /** Tracker refs this session CREATED (Linear create_issue / gh issue create). */
@@ -235,6 +264,12 @@ export interface RawActiveSession {
    *  live preview (activity line), the structured ticket id, and the real branch —
    *  which is why remote/worktree cards showed only "Edit <file>" + a status word. */
   preview?: string;
+  /** Structured decision the agent is waiting on (CLI ActiveSession.question). Present
+   *  only for waiting_input sessions; the options are the real choices (AskUserQuestion
+   *  options, or canonical Approve/Deny for plan/permission). */
+  question?: { text?: string; reason?: string; options?: Array<{ label?: string; description?: string; key?: string } | null> } | null;
+  /** Last few assistant turns (most-recent last), from the CLI state engine. */
+  tail?: string[];
   pr?: { url?: string; number?: number } | null;
   worktree?: { slug?: string; path?: string; branch?: string } | null;
   ticket?: string | { id?: string; url?: string } | null;
@@ -269,6 +304,27 @@ const TICKET_RE = /\b[A-Z][A-Z0-9]*-\d+\b/;
  */
 function asStr(v: unknown): string {
   return typeof v === 'string' ? v : '';
+}
+
+/**
+ * Normalize the CLI's `question` object across the postMessage boundary. Returns
+ * null when there is no usable question (no text), so the webview falls back to
+ * parsing `lastResponse`. `reason` is clamped to the known set; options with no
+ * label are dropped.
+ */
+export function normalizeQuestion(raw: RawActiveSession['question']): RemoteQuestion | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const text = asStr(raw.text);
+  if (!text) return null;
+  const reason: RemoteAwaitReason =
+    raw.reason === 'plan_review' || raw.reason === 'permission' ? raw.reason : 'question';
+  const options: RemoteQuestionOption[] = Array.isArray(raw.options)
+    ? raw.options
+        .filter((o): o is { label?: string; description?: string; key?: string } => !!o && typeof o === 'object')
+        .map((o) => ({ label: asStr(o.label), description: asStr(o.description), key: asStr(o.key) }))
+        .filter((o) => o.label)
+    : [];
+  return { text, reason, options };
 }
 
 /**
@@ -366,6 +422,8 @@ export function normalizeActiveSession(
     tokPerSec: 0,
     waitingForInput: phase === 'waiting',
     lastResponse: preview,
+    question: normalizeQuestion(raw.question),
+    tail: Array.isArray(raw.tail) ? raw.tail.map((t) => asStr(t)).filter(Boolean) : [],
     // pr is a { url, number } object on the CLI payload; keep top-level prUrl as a
     // fallback for older shapes.
     prUrl: asStr(raw.prUrl) || asStr(raw.pr?.url) || null,
@@ -450,6 +508,9 @@ export function normalizeRecentSession(
     tokPerSec: 0,
     waitingForInput: false,
     lastResponse: '',
+    // Recent (historical) sessions are idle — no live decision to surface.
+    question: null,
+    tail: [],
     prUrl: asStr(raw.prUrl) || null,
     ticket: asStr(raw.ticketId) || null,
     createdTickets: Array.isArray(raw.createdTickets) ? raw.createdTickets.map((t: unknown) => String(t)) : [],

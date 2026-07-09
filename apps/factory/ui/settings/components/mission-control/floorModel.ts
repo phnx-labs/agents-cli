@@ -60,6 +60,20 @@ export interface StructuredQuestion {
   options: string[]
   /** Stable key so identical questions across agents cluster for batch triage. */
   clusterKey: string
+  /**
+   * Why the agent handed control back, when known from the CLI state engine
+   * (question / plan_review / permission). Absent for text-heuristic questions.
+   * Drives the "why blocked" chip on the decision panel.
+   */
+  reason?: 'question' | 'plan_review' | 'permission'
+  /**
+   * Per-option selection keystroke for an interactive TUI prompt, parallel to
+   * `options`: a digit ('1'…) for AskUserQuestion/plan, or 'esc' to cancel/deny.
+   * '' for a free-text choice. Absent entirely for text-parsed questions (which take
+   * a free-text reply). The reply layer sends the keystroke instead of the label when
+   * present, so a select-list prompt is actually driven, not fed a label it ignores.
+   */
+  optionKeys?: string[]
 }
 
 export type TodoStatus = 'pending' | 'in_progress' | 'completed'
@@ -637,6 +651,42 @@ export function structuredQuestionFromToolCalls(
     }
   }
   return null
+}
+
+/** The CLI's authoritative decision object (ActiveSession.question), as it crosses postMessage. */
+export interface RemoteQuestionInput {
+  text: string
+  reason: 'question' | 'plan_review' | 'permission'
+  options: Array<{ label: string; description?: string; key?: string }>
+}
+
+/**
+ * Build a StructuredQuestion from the CLI's authoritative decision object. This
+ * takes precedence over the text/tool-call heuristics because the CLI extracted it
+ * at the SOURCE — the AskUserQuestion tool input, or the plan/permission dialog — so
+ * the options + their select keys are exact, not regexed back out of prose. `kind`
+ * drives chip styling (permission → destructive, so Deny reads as the safe default).
+ *
+ * Returns null for a bare prose question (reason 'question' with no options): the
+ * text heuristic (parseStructuredQuestion) derives choices / Confirm-Hold better, so
+ * we defer to it rather than render a chip-less confirm.
+ */
+export function structuredQuestionFromRemote(q: RemoteQuestionInput | null | undefined): StructuredQuestion | null {
+  if (!q || !q.text?.trim()) return null
+  const text = q.text.trim()
+  const options = q.options.map((o) => o.label).filter(Boolean)
+  if (q.reason === 'question' && options.length === 0) return null
+  const optionKeys = q.options.map((o) => (o.key ?? '').trim())
+  const kind: StructuredQuestionKind =
+    q.reason === 'permission' ? 'destructive' : options.length >= 2 ? 'choice' : 'confirm'
+  return {
+    kind,
+    text,
+    options,
+    clusterKey: slugifyQuestion(text),
+    reason: q.reason,
+    optionKeys: optionKeys.some(Boolean) ? optionKeys : undefined,
+  }
 }
 
 /** Normalized slug of the question intent so identical questions across agents collide. */

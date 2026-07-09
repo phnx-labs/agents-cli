@@ -9,6 +9,7 @@ import {
   todoProgress,
   parseStructuredQuestion,
   structuredQuestionFromToolCalls,
+  structuredQuestionFromRemote,
   groupAgents,
   sortAgents,
   clusterByQuestion,
@@ -290,6 +291,41 @@ describe('parseStructuredQuestion — one kind per shape', () => {
     expect(a.clusterKey).toBe(b.clusterKey)
     expect(a.clusterKey).not.toBe(c.clusterKey)
     expect(a.clusterKey.length).toBeGreaterThan(0)
+  })
+})
+
+describe('structuredQuestionFromRemote — prefer the CLI decision (options + keys)', () => {
+  test('carries labels, keys, and reason for an AskUserQuestion decision', () => {
+    const q = structuredQuestionFromRemote({
+      text: 'Ship v0.9.290 now?',
+      reason: 'question',
+      options: [{ label: 'Build now', description: 'two follow-ups', key: '1' }, { label: 'Pull backlog', key: '2' }],
+    })
+    expect(q!.kind).toBe('choice')
+    expect(q!.text).toBe('Ship v0.9.290 now?')
+    expect(q!.options).toEqual(['Build now', 'Pull backlog'])
+    expect(q!.optionKeys).toEqual(['1', '2'])
+    expect(q!.reason).toBe('question')
+  })
+
+  test('a permission decision is destructive-styled with Approve(1)/Deny(esc)', () => {
+    const q = structuredQuestionFromRemote({
+      text: 'Permission — Bash: rm -rf build',
+      reason: 'permission',
+      options: [{ label: 'Approve', key: '1' }, { label: 'Deny', key: 'esc' }],
+    })
+    expect(q!.kind).toBe('destructive')
+    expect(q!.reason).toBe('permission')
+    expect(q!.optionKeys).toEqual(['1', 'esc'])
+  })
+
+  test('a bare prose question (no options) defers to the text parser', () => {
+    expect(structuredQuestionFromRemote({ text: 'Should I merge?', reason: 'question', options: [] })).toBeNull()
+  })
+
+  test('returns null for an empty/absent decision', () => {
+    expect(structuredQuestionFromRemote(null)).toBeNull()
+    expect(structuredQuestionFromRemote({ text: '  ', reason: 'question', options: [] })).toBeNull()
   })
 })
 

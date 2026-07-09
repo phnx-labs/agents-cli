@@ -16,6 +16,7 @@ import {
   deriveNeeds,
   parseStructuredQuestion,
   structuredQuestionFromToolCalls,
+  structuredQuestionFromRemote,
   toFloorTicket,
   latestTodos,
   todosWithFallback,
@@ -117,6 +118,12 @@ export interface RemoteSessionLike {
   tokPerSec: number
   waitingForInput: boolean
   lastResponse: string
+  /** The structured decision the agent is waiting on (question/plan/permission +
+   *  options + select keys), from the CLI state engine. null when the CLI supplied
+   *  none — the adapter then falls back to parsing lastResponse. */
+  question?: { text: string; reason: 'question' | 'plan_review' | 'permission'; options: Array<{ label: string; description?: string; key?: string }> } | null
+  /** Last few assistant turns (most-recent last) — panel context. */
+  tail?: string[]
   prUrl: string | null
   ci?: CiStatus | null
   ticket: string | null
@@ -422,9 +429,12 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // Remote (Tier-1) has no first-user-message enrichment yet — the session's task line
     // (topic) is the closest durable anchor for the original task.
     prompt: r.topic || undefined,
-    // Only the last response is carried for remote; surface it as the single-entry feed.
-    messages: r.lastResponse ? [r.lastResponse] : [],
-    question: parseStructuredQuestion(resp, phase),
+    // Prefer the last few assistant turns from the CLI (context feed); fall back to the
+    // single last response when the CLI supplied no tail.
+    messages: r.tail && r.tail.length ? r.tail : r.lastResponse ? [r.lastResponse] : [],
+    // Prefer the CLI's authoritative decision (real options + select keys, extracted at
+    // the source); fall back to parsing the last response for a plain prose question.
+    question: structuredQuestionFromRemote(r.question) ?? parseStructuredQuestion(resp, phase),
     reply: deriveReplyTargetFromRemote(r),
     // Remote (Tier-1) sessions are status-only; no tool calls to parse todos from yet.
     todos: [],

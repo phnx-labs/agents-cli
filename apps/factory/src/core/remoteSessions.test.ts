@@ -9,6 +9,7 @@ import {
   resolveProject,
   normalizeActiveSession,
   normalizeActiveSessions,
+  normalizeQuestion,
   dedupeSessions,
   enrichWithSessionContent,
   groupByHost,
@@ -164,6 +165,56 @@ describe('resolveProject', () => {
       RULES
     );
     expect(s.project).toBe('Prix API');
+  });
+});
+
+describe('normalizeQuestion — carry the CLI decision across postMessage', () => {
+  test('keeps text, clamps reason, drops label-less options', () => {
+    const q = normalizeQuestion({
+      text: 'Ship v0.9.290 now?',
+      reason: 'question',
+      options: [{ label: 'Build now', description: 'the two follow-ups', key: '1' }, { key: '2' } as any, { label: 'Pull backlog', key: '2' }],
+    });
+    expect(q).toEqual({
+      text: 'Ship v0.9.290 now?',
+      reason: 'question',
+      options: [
+        { label: 'Build now', description: 'the two follow-ups', key: '1' },
+        { label: 'Pull backlog', description: '', key: '2' },
+      ],
+    });
+  });
+  test('an unknown reason falls back to "question"; permission/plan pass through', () => {
+    expect(normalizeQuestion({ text: 'x', reason: 'weird' as any, options: [] })?.reason).toBe('question');
+    expect(normalizeQuestion({ text: 'x', reason: 'permission', options: [] })?.reason).toBe('permission');
+    expect(normalizeQuestion({ text: 'x', reason: 'plan_review', options: [] })?.reason).toBe('plan_review');
+  });
+  test('returns null for a missing/textless question', () => {
+    expect(normalizeQuestion(null)).toBeNull();
+    expect(normalizeQuestion({ text: '', reason: 'question', options: [] })).toBeNull();
+    expect(normalizeQuestion(undefined as any)).toBeNull();
+  });
+});
+
+describe('normalizeActiveSession — question + tail passthrough', () => {
+  test('carries the CLI question object and assistant tail onto the RemoteSession', () => {
+    const base = ACTIVE.find((r) => r.context === 'terminal')!;
+    const raw = {
+      ...base,
+      status: 'input_required',
+      question: { text: 'Approve?', reason: 'permission', options: [{ label: 'Approve', key: '1' }, { label: 'Deny', key: 'esc' }] },
+      tail: ['earlier turn', 'Approve rm -rf build?'],
+    } as unknown as RawActiveSession;
+    const s = normalizeActiveSession(raw, 'this-mac', FETCHED_AT);
+    expect(s.waitingForInput).toBe(true);
+    expect(s.question).toEqual({ text: 'Approve?', reason: 'permission', options: [{ label: 'Approve', description: '', key: '1' }, { label: 'Deny', description: '', key: 'esc' }] });
+    expect(s.tail).toEqual(['earlier turn', 'Approve rm -rf build?']);
+  });
+  test('question is null and tail is [] when the CLI supplied none', () => {
+    const base = ACTIVE.find((r) => r.context === 'terminal')!;
+    const s = normalizeActiveSession(base, 'this-mac', FETCHED_AT);
+    expect(s.question).toBeNull();
+    expect(s.tail).toEqual([]);
   });
 });
 
