@@ -6,6 +6,24 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The NEEDS-YOU detail panel now shows why an agent is blocked, the task, and the real
+  question with one-click answers.** A blocked card used to surface only a status word and
+  a "Thinking…" line — you had to open the terminal to find out what it wanted. The
+  decision block at the top of the right pane now renders a **why-blocked chip** (Question
+  / Plan review / Permission — permission in red), the **original task** for context, and
+  the **real question with its option chips**, sourced from the CLI's structured decision
+  (`sessions --json` `question`) rather than a regex over prose. Extracted into
+  `<AgentDecision>` so the preview harness renders the exact markup (`?view=decision`).
+  (RUSH-1521, RUSH-1546)
+- **Inline approve/deny for interactive prompts.** When an option maps to a select-list
+  keystroke — a permission prompt (Approve=`1` / Deny=`esc`), a plan review, or an
+  `AskUserQuestion` — clicking it now sends that **keystroke** through the existing
+  terminal/tmux reply rail (the proven Ink text-then-CR and `tmux send-keys` paths)
+  instead of a label the TUI would ignore, so you can unblock without opening the
+  terminal. Cloud/team replies stay label-based (semantic-message APIs). (RUSH-453)
+
 ## [0.9.290] - 2026-07-08
 
 ### Added
