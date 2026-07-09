@@ -596,6 +596,47 @@ export function parseStructuredQuestion(resp: string, phase: FloorPhase): Struct
   return { kind: 'confirm', text, options: ['Confirm', 'Hold'], clusterKey: slugifyQuestion(text) }
 }
 
+/**
+ * Lift a structured question out of the agent's recent TOOL CALLS. When an agent
+ * calls the AskUserQuestion tool, the question text + options live in the tool
+ * INPUT — not in any assistant prose — so parseStructuredQuestion(resp) never sees
+ * them and the card renders a bare "needs you" with no options. This reads the most
+ * recent AskUserQuestion call and lifts its first question into the reply model.
+ * `toolCalls` is newest-first (session.summary.ts unshifts each call), so the first
+ * match is the live question. Returns null when there's no such call or it's malformed.
+ * Pure so it's unit-tested. Takes precedence over the text heuristic in the adapter.
+ */
+export function structuredQuestionFromToolCalls(
+  toolCalls: ReadonlyArray<ToolCallLike> | undefined,
+): StructuredQuestion | null {
+  if (!toolCalls || toolCalls.length === 0) return null
+  for (const call of toolCalls) {
+    if (call?.name !== 'AskUserQuestion') continue
+    const input = call.input
+    const questions = input && typeof input === 'object' ? (input as Record<string, unknown>).questions : undefined
+    if (!Array.isArray(questions) || questions.length === 0) return null
+    const first = questions[0]
+    if (!first || typeof first !== 'object') return null
+    const rec = first as Record<string, unknown>
+    const text = typeof rec.question === 'string' ? rec.question.trim() : ''
+    if (!text) return null
+    const options: string[] = []
+    for (const o of Array.isArray(rec.options) ? rec.options : []) {
+      if (typeof o === 'string' && o.trim()) { options.push(o.trim()); continue }
+      const label = o && typeof o === 'object' ? (o as Record<string, unknown>).label : undefined
+      if (typeof label === 'string' && label.trim()) options.push(label.trim())
+    }
+    const destructive = /\b(DROP|DELETE|destructive|prod(uction)?|overwrite|force)\b/.test(text)
+    return {
+      kind: destructive ? 'destructive' : 'choice',
+      text,
+      options,
+      clusterKey: slugifyQuestion(text),
+    }
+  }
+  return null
+}
+
 /** Normalized slug of the question intent so identical questions across agents collide. */
 function slugifyQuestion(text: string): string {
   return text

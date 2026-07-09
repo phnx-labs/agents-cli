@@ -38,8 +38,14 @@ export function StructuredReply({ question, phase, onOption, onFreeText, onAttac
     setText('')
   }
 
+  // The question text itself (from an AskUserQuestion tool call or the parsed last
+  // message). Shown right above the options so the choice has its prompt attached —
+  // skipped for 'retry', where the failure message is already the card body.
+  const questionText = question && question.kind !== 'retry' ? question.text.trim() : ''
+
   return (
     <>
+      {questionText && <div className="qtext">{questionText}</div>}
       <div className="opts">
         {options.map((o, i) => (
           <button

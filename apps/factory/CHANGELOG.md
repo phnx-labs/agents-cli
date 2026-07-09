@@ -6,6 +6,24 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.290] - 2026-07-08
+
+### Added
+
+- **Structured questions render on the card** — when an agent calls `AskUserQuestion`,
+  the question text and its option labels now surface on the NEEDS-YOU card as clickable
+  reply buttons. The data lived in the tool-call input all along; the card only read the
+  agent's prose, so the question was invisible. Clicking an option delivers the answer
+  back to the agent over its existing reply channel (terminal / tmux / cloud / team).
+  (RUSH-453, RUSH-1521)
+
+### Changed
+
+- **Terminal detail pane now matches the headless/cloud panes** — the flat "Recent tools"
+  list is replaced by the vertical progress timeline (oldest → now) plus a streaming
+  "Latest" message rendered as markdown, so every agent's detail pane reads identically.
+  Recent files span the full width. (RUSH-1519, RUSH-1546)
+
 ## [0.9.289] - 2026-07-08
 
 ### Fixed

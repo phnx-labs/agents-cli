@@ -15,6 +15,7 @@ import {
   derivePhase,
   deriveNeeds,
   parseStructuredQuestion,
+  structuredQuestionFromToolCalls,
   toFloorTicket,
   latestTodos,
   todosWithFallback,
@@ -344,7 +345,9 @@ export function toFloorAgentFromUnified(
     resp,
     prompt,
     messages,
-    question: parseStructuredQuestion(resp, phase),
+    // Prefer the AskUserQuestion tool-call's own question + options (they live in the
+    // tool INPUT, invisible to the text heuristic); fall back to parsing the last message.
+    question: structuredQuestionFromToolCalls(u.terminal?.recentToolCalls) ?? parseStructuredQuestion(resp, phase),
     reply,
     // Persist the last non-empty checklist so it survives the recent-tool window cap.
     todos: stickyTodos(u.id, u.terminal?.recentToolCalls),

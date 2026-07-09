@@ -8,6 +8,7 @@ import {
   latestTodos,
   todoProgress,
   parseStructuredQuestion,
+  structuredQuestionFromToolCalls,
   groupAgents,
   sortAgents,
   clusterByQuestion,
@@ -289,6 +290,57 @@ describe('parseStructuredQuestion — one kind per shape', () => {
     expect(a.clusterKey).toBe(b.clusterKey)
     expect(a.clusterKey).not.toBe(c.clusterKey)
     expect(a.clusterKey.length).toBeGreaterThan(0)
+  })
+})
+
+describe('structuredQuestionFromToolCalls — lift the AskUserQuestion tool input', () => {
+  const ask = (question: string, options: unknown) => ({
+    name: 'AskUserQuestion',
+    input: { questions: [{ question, header: 'H', options }] },
+  })
+
+  test('extracts question text + option labels from the tool call', () => {
+    const q = structuredQuestionFromToolCalls([
+      ask('Which store — Redux or Zustand?', [
+        { label: 'Zustand', description: 'lighter' },
+        { label: 'Redux', description: 'batteries' },
+      ]),
+    ])
+    expect(q).not.toBeNull()
+    expect(q!.kind).toBe('choice')
+    expect(q!.text).toBe('Which store — Redux or Zustand?')
+    expect(q!.options).toEqual(['Zustand', 'Redux'])
+    expect(q!.clusterKey.length).toBeGreaterThan(0)
+  })
+
+  test('accepts plain-string options too', () => {
+    const q = structuredQuestionFromToolCalls([ask('Merge now?', ['Merge', 'Hold'])])
+    expect(q!.options).toEqual(['Merge', 'Hold'])
+  })
+
+  test('destructive keywords force the destructive kind', () => {
+    const q = structuredQuestionFromToolCalls([ask('This will DELETE prod rows. Proceed?', [{ label: 'Yes' }])])
+    expect(q!.kind).toBe('destructive')
+  })
+
+  test('picks the most recent AskUserQuestion (newest-first array)', () => {
+    const q = structuredQuestionFromToolCalls([
+      ask('Newest?', [{ label: 'A' }]),
+      { name: 'Edit', input: { file_path: '/x.ts' } },
+      ask('Older?', [{ label: 'B' }]),
+    ])
+    expect(q!.text).toBe('Newest?')
+  })
+
+  test('returns null when there is no AskUserQuestion call', () => {
+    expect(structuredQuestionFromToolCalls([{ name: 'Edit', input: {} }])).toBeNull()
+    expect(structuredQuestionFromToolCalls([])).toBeNull()
+    expect(structuredQuestionFromToolCalls(undefined)).toBeNull()
+  })
+
+  test('returns null on a malformed call (no questions / empty text)', () => {
+    expect(structuredQuestionFromToolCalls([{ name: 'AskUserQuestion', input: {} }])).toBeNull()
+    expect(structuredQuestionFromToolCalls([ask('', [{ label: 'A' }])])).toBeNull()
   })
 })
 

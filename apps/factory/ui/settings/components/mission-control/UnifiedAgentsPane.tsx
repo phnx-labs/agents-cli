@@ -3,12 +3,13 @@ import type { TaskSummary, TerminalDetail as TerminalInfo, AgentDetail, UnifiedT
 import { AgentAvatar, agentShortChunk } from './AgentAvatar'
 import { Icon } from './icons'
 import { relTime, taskNameToTitle, swarmOverallStatus, shortDuration } from './types'
-import { postMessage, usePanelVisibility } from '../../hooks'
+import { postMessage, usePanelVisibility, useNow } from '../../hooks'
 import { ExtLink } from '../common'
 import { renderTodoDescription, renderMarkdown } from '../../utils/markdown'
 import { CMD_PALETTE_EVENTS } from './CommandPalette'
 import { CloudActivityFeed } from './CloudActivityFeed'
 import { VerticalTimeline } from './Timeline'
+import { TerminalExpandedDetail } from './TerminalDetail'
 import {
   isTerminalActive,
   isTerminalJustSpawned,
@@ -32,14 +33,12 @@ import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
 import { ProjectsPane } from './ProjectsPane'
 import { FeedItem, FollowUpBox } from './FeedItem'
-import { TodoChecklist } from './TodoChecklist'
 import { NeedsYouClusters } from './NeedsYouClusters'
 import { StructuredReply } from './StructuredReply'
 import {
   clusterByQuestion,
   sortAgents,
   groupAgents,
-  latestTodos,
   sessionTaskLine,
   type FloorAgent,
   type FloorTicket,
@@ -2738,235 +2737,6 @@ function DetailPane({ item, onClose, onFocusTerminal, onRetry, onKill }: {
   )
 }
 
-function useNow(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(id)
-  }, [intervalMs])
-  return now
-}
-
-function filePillColor(touchedAtMs: number | undefined, now: number): string {
-  if (touchedAtMs === undefined) return 'var(--ds-text-muted)'
-  const elapsed = now - touchedAtMs
-  if (elapsed <= 1000) return '#3b82f6'
-  const t = Math.min((elapsed - 1000) / (179000), 1)
-  const r = Math.round(59 + t * (156 - 59))
-  const g = Math.round(130 + t * (163 - 130))
-  const b = Math.round(246 + t * (175 - 246))
-  return `rgb(${r},${g},${b})`
-}
-
-function TerminalExpandedDetail({ terminal }: { terminal: TerminalInfo }) {
-  const now = useNow(5000)
-  const todos = latestTodos(terminal.recentToolCalls)
-  const cwdDisplay = terminal.cwd ? terminal.cwd.replace(/^\/Users\/[^/]+/, '~') : null
-  const linkStyle: React.CSSProperties = {
-    background: 'transparent',
-    border: 'none',
-    padding: 0,
-    color: 'inherit',
-    cursor: 'pointer',
-    font: 'inherit',
-    textDecoration: 'underline',
-    textUnderlineOffset: 2,
-  }
-  return (
-    <div className="sw-unified-detail-content">
-      {(cwdDisplay || terminal.branch) && (
-        <div className="sw-unified-detail-section">
-          <div className="mono" style={{ fontSize: 11, color: 'var(--ds-text-dim)' }}>
-            {cwdDisplay && terminal.cwd && (
-              <button
-                type="button"
-                style={linkStyle}
-                title="Reveal folder"
-                onClick={() => postMessage({ type: 'revealFolder', path: terminal.cwd })}
-              >
-                {cwdDisplay}
-              </button>
-            )}
-            {cwdDisplay && terminal.branch && <span>{' \u00b7 branch: '}</span>}
-            {terminal.branch && (
-              <button
-                type="button"
-                style={linkStyle}
-                title="Open Source Control"
-                onClick={() => postMessage({ type: 'openSourceControl' })}
-              >
-                {terminal.branch}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-      {terminal.firstUserMessage && (
-        <div className="sw-unified-detail-section">
-          <div className="sw-section-label">Task</div>
-          <div className="sw-unified-detail-text">
-            {renderTodoDescription(terminal.firstUserMessage, false)}
-          </div>
-        </div>
-      )}
-      {todos.length > 0 && (
-        <div className="sw-unified-detail-section">
-          <div className="sw-section-label">Checklist</div>
-          <TodoChecklist todos={todos} />
-        </div>
-      )}
-      {(terminal.quickSummary || terminal.messageCount) && (
-        <div className="sw-unified-detail-section">
-          <div className="sw-section-label">Activity</div>
-          <div className="sw-unified-detail-stats">
-            {terminal.messageCount && terminal.messageCount > 0 && <span>{terminal.messageCount} msgs</span>}
-            {terminal.quickSummary && terminal.quickSummary.filesEdited > 0 && <span>{terminal.quickSummary.filesEdited} files edited</span>}
-            {terminal.quickSummary && terminal.quickSummary.toolCalls > 0 && <span>{terminal.quickSummary.toolCalls} tool calls</span>}
-            {terminal.quickSummary && terminal.quickSummary.webSearches > 0 && <span>{terminal.quickSummary.webSearches} web searches</span>}
-          </div>
-        </div>
-      )}
-      {((terminal.recentFiles && terminal.recentFiles.length > 0) || (terminal.recentTools && terminal.recentTools.length > 0)) && (
-        <div className="sw-unified-detail-section">
-          <div className="sw-unified-detail-split">
-            <div className="sw-unified-detail-split-col">
-              <div className="sw-section-label">Recent files</div>
-              {terminal.recentFiles && terminal.recentFiles.length > 0 ? (
-                <div className="sw-unified-detail-files">
-                  {[...terminal.recentFiles]
-                    .sort((a, b) => {
-                      const ta = terminal.recentFileTimes?.[a]
-                      const tb = terminal.recentFileTimes?.[b]
-                      if (ta !== undefined && tb !== undefined) return tb - ta
-                      if (ta !== undefined) return -1
-                      if (tb !== undefined) return 1
-                      return 0
-                    })
-                    .slice(0, 12)
-                    .map((f) => {
-                      const stat = terminal.recentFileStats?.[f]
-                      const touchedAt = terminal.recentFileTimes?.[f]
-                      const color = filePillColor(touchedAt, now)
-                      return (
-                        <button
-                          key={f}
-                          type="button"
-                          className="mono sw-unified-file-pill sw-unified-file-pill-btn"
-                          title={f}
-                          style={{ borderColor: color, color }}
-                          onClick={() => postMessage({ type: 'openTerminalFile', path: f })}
-                        >
-                          {f.split('/').pop()}
-                          {stat && (
-                            <span className="sw-unified-file-pill-stat">
-                              {stat.added > 0 && <span style={{ color: 'var(--ds-diff-added, #4ade80)' }}>+{stat.added}</span>}
-                              {stat.added > 0 && stat.removed > 0 && ' '}
-                              {stat.removed > 0 && <span style={{ color: 'var(--ds-diff-removed, #f87171)' }}>-{stat.removed}</span>}
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })}
-                </div>
-              ) : (
-                <div className="sw-unified-detail-empty">No files yet.</div>
-              )}
-            </div>
-            <div className="sw-unified-detail-split-col">
-              <div className="sw-section-label">Recent tools</div>
-              {terminal.recentToolCalls && terminal.recentToolCalls.length > 0 ? (
-                <div className="sw-floor-detail-tools">
-                  {terminal.recentToolCalls.slice(0, 16).map((call, i) => (
-                    <RecentToolCallRow key={`${call.name}-${i}`} call={call} />
-                  ))}
-                </div>
-              ) : terminal.recentTools && terminal.recentTools.length > 0 ? (
-                <div className="sw-floor-detail-tools">
-                  {terminal.recentTools.slice(0, 12).map((tool, i) => (
-                    <div key={`${tool}-${i}`} className="sw-floor-detail-tool-row">
-                      <span className="sw-floor-detail-tool-name">{tool}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="sw-unified-detail-empty">No tools yet.</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function toolHeadlineSummary(call: RecentToolCall): string {
-  const input = call.input
-  if (!input || typeof input !== 'object') return ''
-  const rec = input as Record<string, unknown>
-  const candidateKeys = [
-    'command',
-    'file_path',
-    'path',
-    'target_file',
-    'query',
-    'pattern',
-    'url',
-    'description',
-    'prompt',
-  ]
-  for (const key of candidateKeys) {
-    const value = rec[key]
-    if (typeof value === 'string' && value.trim()) {
-      return value.length > 80 ? value.slice(0, 80) + '...' : value
-    }
-  }
-  return ''
-}
-
-function RecentToolCallRow({ call }: { call: RecentToolCall }) {
-  const [expanded, setExpanded] = useState(false)
-  const headline = toolHeadlineSummary(call)
-  const inputJson = useMemo(() => {
-    if (!expanded) return ''
-    try {
-      return JSON.stringify(call.input, null, 2)
-    } catch {
-      return String(call.input)
-    }
-  }, [expanded, call.input])
-  return (
-    <div className="sw-floor-detail-tool-item">
-      <button
-        type="button"
-        className="sw-floor-detail-tool-row sw-floor-detail-tool-row-btn"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-      >
-        <span className="sw-floor-detail-tool-name">{call.name}</span>
-        {headline && <span className="sw-floor-detail-tool-arg mono">{headline}</span>}
-        <span className="sw-floor-detail-tool-toggle">{expanded ? '-' : '+'}</span>
-      </button>
-      {expanded && (
-        <div className="sw-floor-detail-tool-details">
-          <div className="sw-floor-detail-tool-detail-section">
-            <div className="sw-floor-detail-tool-detail-label">Input</div>
-            <pre className="sw-floor-detail-tool-detail-pre mono">{inputJson || '(none)'}</pre>
-          </div>
-          {call.output !== undefined && (
-            <div className="sw-floor-detail-tool-detail-section">
-              <div className={`sw-floor-detail-tool-detail-label${call.isError ? ' err' : ''}`}>
-                {call.isError ? 'Error' : 'Result'}
-              </div>
-              <pre className={`sw-floor-detail-tool-detail-pre mono${call.isError ? ' err' : ''}`}>
-                {call.output || '(empty)'}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 function TeamDetail({ swarm, onRetry, onKill }: { swarm: TaskSummary; onRetry: (n: string) => void; onKill: (n: string) => void }) {
   const isActive = swarm.status_counts.running > 0

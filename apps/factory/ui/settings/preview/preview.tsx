@@ -20,8 +20,9 @@ import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
 import { BacklogCenter } from '../components/mission-control/BacklogCenter'
 import { ProjectsPane } from '../components/mission-control/ProjectsPane'
+import { TerminalExpandedDetail } from '../components/mission-control/TerminalDetail'
 import type { FloorAgent, FloorTicket, StructuredQuestion, FloorSort, TicketGroupBy, TicketSort, CenterMode, ManagedProject, LinearProjectLite } from '../components/mission-control/floorModel'
-import type { UnifiedTask } from '../types'
+import type { UnifiedTask, TerminalDetail } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
 
 const noop = () => {}
@@ -428,6 +429,67 @@ function Projects() {
   )
 }
 
+// Representative terminal session for the detail-pane preview (?view=detail): a mix of
+// tool calls (incl. a TodoWrite so the checklist shows), narrative prose, and edited
+// files with diff stats — exercises the redesigned TerminalExpandedDetail end to end.
+const detailTerminal: TerminalDetail = {
+  id: 't-detail',
+  agentType: 'claude',
+  label: 'supabase-rls-migration',
+  autoLabel: null,
+  createdAt: Date.now() - 600_000,
+  index: 2,
+  sessionId: '9f1c0e22-5b7a-4c3d-9e10-2a4b6c8d0e12',
+  cwd: '/Users/muqsit/src/github.com/muqsitnawaz/rush',
+  branch: 'muqsit/rls-migration',
+  firstUserMessage: 'Migrate the **policy_v1** RLS rules to the new `policy` table and add a regression test.',
+  messageCount: 34,
+  currentActivity: 'Editing the migration',
+  quickSummary: {
+    filesEdited: 3,
+    toolCalls: 22,
+    webSearches: 1,
+    narrative: 'Ported the `policy_v1` rules onto the new table and wired the down-migration. Running the RLS regression suite now — one policy for `service_role` still needs a rewrite.',
+  } as TerminalDetail['quickSummary'],
+  recentFiles: [
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/supabase/migrations/20260708_policy.sql',
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/tests/rls_policy.test.ts',
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/src/db/policy.ts',
+  ],
+  recentFileTimes: {
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/supabase/migrations/20260708_policy.sql': Date.now() - 8_000,
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/tests/rls_policy.test.ts': Date.now() - 60_000,
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/src/db/policy.ts': Date.now() - 180_000,
+  },
+  recentFileStats: {
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/supabase/migrations/20260708_policy.sql': { added: 48, removed: 2 },
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/tests/rls_policy.test.ts': { added: 31, removed: 0 },
+    '/Users/muqsit/src/github.com/muqsitnawaz/rush/src/db/policy.ts': { added: 12, removed: 7 },
+  },
+  recentToolCalls: [
+    { name: 'Bash', input: { command: 'bun test tests/rls_policy.test.ts' }, timestamp: new Date(Date.now() - 8_000).toISOString() },
+    { name: 'Edit', input: { file_path: '/rush/supabase/migrations/20260708_policy.sql' }, timestamp: new Date(Date.now() - 30_000).toISOString() },
+    { name: 'TodoWrite', input: { todos: [
+      { content: 'Port policy_v1 rules to policy table', status: 'completed' },
+      { content: 'Write the down-migration', status: 'completed' },
+      { content: 'Rewrite the service_role policy', status: 'in_progress' },
+      { content: 'Add RLS regression test', status: 'pending' },
+    ] }, timestamp: new Date(Date.now() - 60_000).toISOString() },
+    { name: 'Read', input: { file_path: '/rush/src/db/policy.ts' }, timestamp: new Date(Date.now() - 120_000).toISOString() },
+    { name: 'Grep', input: { pattern: 'policy_v1' }, timestamp: new Date(Date.now() - 200_000).toISOString() },
+  ],
+} as TerminalDetail
+
+function Detail() {
+  return (
+    <div className="feed-col" style={{ maxWidth: 420 }}>
+      <div className="sw-unified-detail">
+        <TerminalExpandedDetail terminal={detailTerminal} />
+      </div>
+    </div>
+  )
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
@@ -437,7 +499,7 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel

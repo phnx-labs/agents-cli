@@ -161,7 +161,11 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
           {renderMarkdown(prompt, { clamp: true })}
         </div>
       )}
-      {a.resp && <div className={`resp${destructive ? ' q' : ''}`}>{renderMarkdown(a.resp, { clamp: true })}</div>}
+      {/* Suppress the body when it just repeats the question the reply block already
+          shows (the text-parse path sets question.text = resp), so it isn't printed twice. */}
+      {a.resp && !(a.needs && a.question && a.question.kind !== 'retry' && a.question.text.trim() === a.resp.trim()) && (
+        <div className={`resp${destructive ? ' q' : ''}`}>{renderMarkdown(a.resp, { clamp: true })}</div>
+      )}
       {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
         <div className="artifacts" onClick={(e) => e.stopPropagation()}>
           {a.spawnedTeam && (

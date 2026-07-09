@@ -384,6 +384,7 @@
 .swarmify-root .cluster .avs { display: flex; margin-right: 4px; }
 .swarmify-root .cluster .avs .av { margin-left: -6px; border: 1.5px solid var(--ds-bg-panel); }
 .swarmify-root .cluster .batchline { font-size: 11px; color: var(--ds-text-dim); margin-bottom: 8px; }
+.swarmify-root .qtext { font-size: 12.5px; line-height: 1.45; color: var(--ds-text); font-weight: 600; margin: 2px 0 9px; padding-left: 10px; border-left: 2px solid var(--status-pending); }
 .swarmify-root .opts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .swarmify-root .opt { border: 1px solid var(--ds-border-strong); background: var(--ds-bg); border-radius: var(--r-md); padding: 6px 14px; font-weight: 600; font-size: 12px; }
 .swarmify-root .opt.primary { background: var(--brand); border-color: var(--brand); color: #1a1a1a; }
