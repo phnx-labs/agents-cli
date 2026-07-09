@@ -21,6 +21,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import * as yaml from 'yaml';
 import { listResources, resolveResource } from './resources.js';
+import { composeWin32CommandLine } from './platform/index.js';
 
 // ─── Validation primitives ───────────────────────────────────────────────────
 
@@ -331,18 +332,25 @@ export function resolveCliManifest(name: string, cwd?: string): CliManifest | nu
 
 /**
  * Return true if a command resolves on the current PATH. Uses POSIX `command -v`
- * via spawn argv (no shell); results are cached for the lifetime of the process.
+ * (or `where` on Windows) via spawn argv (no shell); results are cached for the
+ * lifetime of the process.
  */
 const cmdExistsCache = new Map<string, boolean>();
 export function hasCommand(cmd: string): boolean {
   if (cmdExistsCache.has(cmd)) return cmdExistsCache.get(cmd)!;
-  // `command` is a shell builtin on most POSIX shells; invoking `sh -c 'command -v X'`
-  // with X as an *argument* (not interpolated) is the safe path. `cmd` may be passed
-  // by callers that haven't validated it, so we route via argv to neutralize metas.
-  const result = spawnSync('sh', ['-c', 'command -v "$1" >/dev/null 2>&1', '_', cmd], {
-    stdio: 'ignore',
-  });
-  const ok = result.status === 0;
+  let ok: boolean;
+  if (process.platform === 'win32') {
+    // `sh` only exists when Git Bash is installed; `where` is the native PATH
+    // probe (resolves .exe/.cmd/.bat via PATHEXT). Argv keeps `cmd` uninterpolated.
+    ok = spawnSync('where', [cmd], { stdio: 'ignore' }).status === 0;
+  } else {
+    // `command` is a shell builtin on most POSIX shells; invoking `sh -c 'command -v X'`
+    // with X as an *argument* (not interpolated) is the safe path. `cmd` may be passed
+    // by callers that haven't validated it, so we route via argv to neutralize metas.
+    ok = spawnSync('sh', ['-c', 'command -v "$1" >/dev/null 2>&1', '_', cmd], {
+      stdio: 'ignore',
+    }).status === 0;
+  }
   cmdExistsCache.set(cmd, ok);
   return ok;
 }
@@ -358,7 +366,18 @@ export function isCliInstalled(manifest: CliManifest): boolean {
     return hasCommand(c.cmd);
   }
   const result = spawnSync(c.cmd, c.args, { stdio: 'ignore', timeout: 10_000 });
-  return result.status === 0;
+  if (result.status === 0) return true;
+  // On Windows the PATH entry point is often a `.cmd`/`.bat` shim (npm installs,
+  // script installers), which Node refuses to spawn without a shell (ENOENT /
+  // EINVAL). A failed *spawn* — not a failed run — gets one retry through the
+  // shell, as a single pre-composed line (DEP0190-safe). Check tokens are
+  // SAFE_CHECK_TOKEN-validated at parse time, so the line cannot inject.
+  if (process.platform === 'win32' && result.error) {
+    const line = composeWin32CommandLine(c.cmd, c.args);
+    const retry = spawnSync(line, { stdio: 'ignore', timeout: 10_000, shell: true });
+    return retry.status === 0;
+  }
+  return false;
 }
 
 // ─── Method selection ────────────────────────────────────────────────────────
