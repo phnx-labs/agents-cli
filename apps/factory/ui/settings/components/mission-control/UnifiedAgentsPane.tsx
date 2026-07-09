@@ -35,7 +35,7 @@ import { HostDetail } from './HostDetail'
 import { ProjectsPane } from './ProjectsPane'
 import { FeedItem, FollowUpBox } from './FeedItem'
 import { NeedsYouClusters } from './NeedsYouClusters'
-import { StructuredReply } from './StructuredReply'
+import { AgentDecision } from './AgentDecision'
 import {
   clusterByQuestion,
   sortAgents,
@@ -1522,7 +1522,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // adapter from the agent's source. Local tabs also get focused so the user sees the
   // answer land in the terminal; cloud/team deliver headlessly via the CLI. The host
   // replies with a 'replyResult' we surface inline on failure — no toast, no fake success.
-  const replyToAgent = useCallback((a: FloorAgent, text: string) => {
+  // `keystroke` (a digit or 'esc') is set when the reply must drive an interactive
+  // select-list prompt (permission / plan / AskUserQuestion) rather than type free text;
+  // the extension host sends it through the terminal/tmux rail instead of the label.
+  const replyToAgent = useCallback((a: FloorAgent, text: string, keystroke?: string) => {
     if (a.reply.kind === 'none') {
       setReplyErrors((prev) => new Map(prev).set(a.id, a.reply.reason || 'No reply channel for this agent'))
       return
@@ -1531,7 +1534,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       postMessage({ type: 'focusTerminal', terminalId: a.reply.terminalId })
     }
     setReplyErrors((prev) => { const n = new Map(prev); n.delete(a.id); return n })
-    postMessage({ type: 'replyToAgent', agentId: a.id, reply: a.reply, text })
+    postMessage({ type: 'replyToAgent', agentId: a.id, reply: a.reply, text, keystroke })
   }, [])
 
   const retryFloorAgent = useCallback((a: FloorAgent) => {
@@ -1543,7 +1546,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const onAgentOption = useCallback((a: FloorAgent, option: string) => {
     if (option === 'Retry') retryFloorAgent(a)
     else if (option === 'View error') { const u = unifiedById.get(a.id); if (u?.terminal) postMessage({ type: 'focusTerminal', terminalId: u.terminal.id }) }
-    else replyToAgent(a, option)
+    else {
+      // If this option maps to an interactive select-list keystroke (permission Approve=1
+      // / Deny=esc, plan, AskUserQuestion), send that keystroke so the TUI prompt is
+      // actually driven; otherwise send the label as free text.
+      const idx = a.question?.options.indexOf(option) ?? -1
+      const key = idx >= 0 ? a.question?.optionKeys?.[idx] : undefined
+      replyToAgent(a, option, key || undefined)
+    }
   }, [retryFloorAgent, replyToAgent, unifiedById])
 
   // Screenshot attach: the capture/attach transport isn't wired yet. Intentionally a
@@ -1658,28 +1668,18 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     if (!a) {
       return <div className="detail-empty">Select an agent or issue to open its conversation and reply here.</div>
     }
+    // The "needs you" decision block (why blocked · original task · the question +
+    // option chips + reply). Extracted to AgentDecision so the preview harness renders
+    // the exact same markup.
     const decision = a.needs ? (
-      <div style={{ padding: '14px 16px 0' }}>
-        <div className={`decide${a.phase === 'stalled' ? ' stall' : ''}`}>
-          <div className="ql">{a.phase === 'failed' ? 'FAILED — NEEDS YOU' : a.phase === 'stalled' ? 'STALLED — NEEDS YOU' : 'WAITING ON YOU'}</div>
-          <div className="qt">{a.question?.text ?? a.resp}</div>
-          {a.phase === 'stalled' && (
-            <div className="opts">
-              <button className="opt primary" onClick={() => nudgeFloorAgent(a)}>
-                <Icon name="refresh" size={12} /> Nudge
-              </button>
-            </div>
-          )}
-          <StructuredReply
-            question={a.question}
-            phase={a.phase}
-            error={replyErrors.get(a.id)}
-            onOption={(o) => onAgentOption(a, o)}
-            onFreeText={(t) => replyToAgent(a, t)}
-            onAttach={() => onAttachScreenshot(a)}
-          />
-        </div>
-      </div>
+      <AgentDecision
+        agent={a}
+        error={replyErrors.get(a.id)}
+        onOption={(o) => onAgentOption(a, o)}
+        onFreeText={(t) => replyToAgent(a, t)}
+        onAttach={() => onAttachScreenshot(a)}
+        onNudge={() => nudgeFloorAgent(a)}
+      />
     ) : null
 
     const u = unifiedById.get(a.id)

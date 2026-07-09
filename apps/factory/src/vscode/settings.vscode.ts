@@ -2952,6 +2952,11 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         };
         const replyAgentId = typeof message.agentId === 'string' ? message.agentId : '';
         const replyText = typeof message.text === 'string' ? message.text.trim() : '';
+        // For an interactive select-list prompt (permission / plan / AskUserQuestion)
+        // the agent wants a SELECTION KEYSTROKE, not the option label it would ignore:
+        // a digit ('1'…) picks + confirms, 'esc' cancels/denies. Sent only for the
+        // terminal + tmux rails (cloud/team are semantic-message APIs and take the label).
+        const keystroke = typeof message.keystroke === 'string' ? message.keystroke.trim() : '';
         const postReplyResult = (ok: boolean, error?: string) =>
           settingsPanel?.webview.postMessage({ type: 'replyResult', agentId: replyAgentId, ok, error });
         // Single-quote for the shell (runAgents/ssh run via a shell string).
@@ -2962,8 +2967,17 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           if (reply.kind === 'terminal') {
             const term = terminals.getAllTerminals().find((t) => t.id === reply.terminalId);
             if (!term) { postReplyResult(false, 'Terminal not found — it may have closed'); break; }
-            // Claude's Ink TUI needs an explicit CR; other agents take a newline.
-            if (term.agentType === 'claude') {
+            if (keystroke) {
+              // Select-list prompt: 'esc' cancels/denies (no CR); a digit selects then
+              // confirms with CR. Uses the same sendText rail the free-text reply does.
+              if (keystroke === 'esc') {
+                term.terminal.sendText('\x1b', false);
+              } else {
+                term.terminal.sendText(keystroke, false);
+                term.terminal.sendText('\r', false);
+              }
+            } else if (term.agentType === 'claude') {
+              // Claude's Ink TUI needs an explicit CR; other agents take a newline.
               term.terminal.sendText(replyText, false);
               term.terminal.sendText('\r', false);
             } else {
@@ -2986,8 +3000,19 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
                 await execFileAsync('tmux', ['-S', reply.muxSocket!, 'send-keys', '-t', reply.muxTarget!, ...keyArgs], { timeout: 20_000 });
               }
             };
-            await sendKeys(['-l', '--', replyText]);
-            await sendKeys(['Enter']);
+            if (keystroke) {
+              // Select-list prompt over tmux: 'esc' sends the Escape key (cancel/deny);
+              // a digit sends the literal digit then Enter to confirm.
+              if (keystroke === 'esc') {
+                await sendKeys(['Escape']);
+              } else {
+                await sendKeys(['-l', '--', keystroke]);
+                await sendKeys(['Enter']);
+              }
+            } else {
+              await sendKeys(['-l', '--', replyText]);
+              await sendKeys(['Enter']);
+            }
             postReplyResult(true);
           } else if (reply.kind === 'cloud') {
             if (!reply.cloudTaskId) { postReplyResult(false, 'Missing cloud task id'); break; }

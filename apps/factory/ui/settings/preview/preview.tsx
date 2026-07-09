@@ -21,6 +21,7 @@ import { DispatchPanel } from '../components/mission-control/DispatchPanel'
 import { BacklogCenter } from '../components/mission-control/BacklogCenter'
 import { ProjectsPane } from '../components/mission-control/ProjectsPane'
 import { TerminalExpandedDetail } from '../components/mission-control/TerminalDetail'
+import { AgentDecision } from '../components/mission-control/AgentDecision'
 import type { FloorAgent, FloorTicket, StructuredQuestion, FloorSort, TicketGroupBy, TicketSort, CenterMode, ManagedProject, LinearProjectLite } from '../components/mission-control/floorModel'
 import type { UnifiedTask, TerminalDetail } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
@@ -490,6 +491,46 @@ function Detail() {
   )
 }
 
+// The three NEEDS-YOU decision-block shapes (RUSH-1521/1546): the real question + its
+// options + a why-blocked chip, extracted at the CLI source. Renders the exact markup the
+// right detail pane uses.
+const permAgent = agent({
+  id: 'a-perm', abbr: 'CC', name: 'headless-secrets', project: 'agents-cli', phase: 'waiting', needs: true,
+  prompt: 'Wire the Linux secret-service fallback into the BYOK resolver and add a regression test.',
+  question: {
+    kind: 'destructive', reason: 'permission', text: 'Permission — Bash: rm -rf build && bun run compile',
+    options: ['Approve', 'Deny'], optionKeys: ['1', 'esc'], clusterKey: 'perm-rm-build',
+  }, since: '2m',
+})
+const askAgentD = agent({
+  id: 'a-ask-d', abbr: 'CC', name: '659a7ec6', project: 'agents-cli', phase: 'waiting', needs: true,
+  prompt: 'Make the NEEDS-YOU panel surface enough to unblock agents at a glance.',
+  question: {
+    kind: 'choice', reason: 'question', text: 'Ship v0.9.290 with the two follow-ups now, or pull more of the feed-UI backlog into this pass first?',
+    options: ['Build 0.9.290 now', 'Pull more backlog first'], optionKeys: ['1', '2'], clusterKey: 'ship-0-9-290',
+  }, since: '18h',
+})
+const planAgent = agent({
+  id: 'a-plan', abbr: 'GX', name: 'dispatch-refactor', project: 'rush', phase: 'waiting', needs: true,
+  prompt: 'Refactor the dispatch resolver so repo/owner parsing lives in one place.',
+  question: {
+    kind: 'confirm', reason: 'plan_review', text: 'Plan ready — review it',
+    options: ['Approve plan', 'Keep planning'], optionKeys: ['1', 'esc'], clusterKey: 'plan-dispatch',
+  }, since: '30s',
+})
+
+function Decision() {
+  return (
+    <div className="feed-col" style={{ maxWidth: 460 }}>
+      <div className="sw-unified-detail">
+        {[permAgent, askAgentD, planAgent].map((a) => (
+          <AgentDecision key={a.id} agent={a} onOption={noop} onFreeText={noop} onAttach={noop} onNudge={noop} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
@@ -499,7 +540,7 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel
