@@ -60,6 +60,40 @@ agents teams add my-feature claude "Run tests" --name qa --after backend,fronten
 agents teams start my-feature --watch
 ```
 
+## Distributed Teams (teammates on other machines)
+
+Place teammates on **different machines** across your fleet (from `agents devices`)
+instead of all on the box running `teams start`. One orchestrator still drives the
+DAG, polls status, and cleans up — teammates just execute over SSH. One vocabulary —
+`--device` / `--devices` (aliases `--host` / `--hosts`); all optional (omit it and
+every teammate runs local, exactly as before).
+
+```bash
+# Send ONE teammate elsewhere — no pool needed
+agents teams create feat
+agents teams add feat claude "build the API" --name backend --device yosemite-s0
+agents teams add feat claude "build the UI"  --name ui               # stays local
+agents teams start feat --watch
+
+# A device POOL — unpinned teammates auto-schedule across it (least-loaded)
+agents teams create feat --devices zion,yosemite-s0 --repo https://github.com/you/repo.git
+agents teams add feat claude "..." --name w1                         # auto-scheduled
+agents teams add feat claude "..." --name w2 --device yosemite-s0    # or pin
+```
+
+**Where a teammate runs** — resolved at launch, top-down:
+
+1. teammate `--device X` → **X** (explicit pin, no pool required)
+2. else single-device pool → that device (whole team there)
+3. else multi-device pool → **auto-scheduled** (least-loaded)
+4. else → **local** (today's behavior)
+
+- `--devices <list>` on `create` declares the pool; `--repo <url|path>` is how each
+  device gets the code (defaults to the local checkout's `origin`, reused or cloned
+  into `~/.agents/repos/<team>`). Per-teammate worktrees work over SSH too.
+- `status` / `logs` show each teammate's host. **POSIX hosts only** in v1 (Windows
+  hosts are rejected with a clear message).
+
 ## Modes
 
 | Mode | Use When |
