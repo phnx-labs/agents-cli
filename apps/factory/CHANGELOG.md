@@ -6,6 +6,16 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.289] - 2026-07-08
+
+### Fixed
+
+- **0.9.288 failed to activate** — it was packaged without `node_modules`, so the
+  extension host threw on `require()` of runtime deps (`ws`, `yaml`, MCP SDK, …) and
+  no commands registered (`command 'agents.configure' not found`). Repackaged with
+  dependencies included. The 0.9.288 card redesign is unchanged; this only restores
+  the shipped dependencies.
+
 ## [0.9.288] - 2026-07-08
 
 ### Added
