@@ -3,13 +3,14 @@ import type { TaskSummary, TerminalDetail as TerminalInfo, AgentDetail, UnifiedT
 import { AgentAvatar, agentShortChunk } from './AgentAvatar'
 import { Icon } from './icons'
 import { relTime, taskNameToTitle, swarmOverallStatus, shortDuration } from './types'
-import { postMessage, usePanelVisibility, useNow } from '../../hooks'
+import { postMessage, usePanelVisibility } from '../../hooks'
 import { ExtLink } from '../common'
 import { renderTodoDescription, renderMarkdown } from '../../utils/markdown'
 import { CMD_PALETTE_EVENTS } from './CommandPalette'
 import { CloudActivityFeed } from './CloudActivityFeed'
 import { VerticalTimeline } from './Timeline'
 import { TerminalExpandedDetail } from './TerminalDetail'
+import { useNow } from './useNow'
 import {
   isTerminalActive,
   isTerminalJustSpawned,
