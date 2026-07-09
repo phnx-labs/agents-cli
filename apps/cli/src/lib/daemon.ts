@@ -385,6 +385,37 @@ export async function runDaemon(): Promise<void> {
   const healInterval = setInterval(() => { void runHealCheck(); }, 6 * 60 * 60_000);
   const healKickoff = setTimeout(() => { void runHealCheck(); }, 30_000);
 
+  // Auto-dispatch: for any managed project that has opted in (autoDispatch:true +
+  // maxAgents>0 in ~/.agents/factory/projects.json), pick up Linear tickets that
+  // are delegated to an agent and still in Todo, and move them Todo -> Doing so
+  // the existing factory webhook turns each into a run — capped at maxAgents
+  // concurrent per project. OFF unless a project opts in; a machine with no
+  // opted-in project or no LINEAR_API_KEY is a clean no-op. Overlap-guarded like
+  // the probes above. ~every 3 min.
+  let autoDispatching = false;
+  const runAutoDispatch = async () => {
+    if (autoDispatching) return;
+    autoDispatching = true;
+    try {
+      const { readAutoDispatchProjects, isEligible, autoDispatchTick } = await import('./auto-dispatch.js');
+      const projects = readAutoDispatchProjects();
+      if (!projects.some(isEligible)) return; // opt-in: nothing enabled → skip
+      const { createLinearGateway } = await import('./auto-dispatch-linear.js');
+      const linear = createLinearGateway();
+      if (!linear) return; // no LINEAR_API_KEY configured → skip
+      const dispatched = await autoDispatchTick({ projects, linear, log: (lvl, m) => log(lvl, m) });
+      if (dispatched.length) {
+        log('INFO', `auto-dispatch: started ${dispatched.length} delegated ticket(s): ${dispatched.map((d) => d.identifier).join(', ')}`);
+      }
+    } catch (err) {
+      log('ERROR', `auto-dispatch failed: ${(err as Error).message}`);
+    } finally {
+      autoDispatching = false;
+    }
+  };
+  const autoDispatchInterval = setInterval(() => { void runAutoDispatch(); }, 3 * 60_000);
+  const autoDispatchKickoff = setTimeout(() => { void runAutoDispatch(); }, 45_000);
+
   // Device probe: refresh registered devices' reachability and detect newly
   // appeared tailnet nodes, dropping a sentinel per pending device so the
   // menu-bar helper can surface "NEW DEVICES → Register / Ignore". Refresh mode
@@ -484,6 +515,8 @@ export async function runDaemon(): Promise<void> {
     clearInterval(syncInterval);
     clearInterval(healInterval);
     clearTimeout(healKickoff);
+    clearInterval(autoDispatchInterval);
+    clearTimeout(autoDispatchKickoff);
     clearInterval(deviceProbeInterval);
     clearTimeout(deviceProbeKickoff);
     clearInterval(tmuxReconcileInterval);

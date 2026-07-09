@@ -248,6 +248,8 @@ export interface ManagedProject {
   repoSlug?: string                // "owner/repo"
   linearProjectId?: string
   linearProjectName?: string       // for the Linear pill
+  autoDispatch?: boolean           // opt-in: factory auto-picks delegated Todo tickets (default off)
+  maxAgents?: number               // cap on concurrent auto-dispatched agents for this project
   confidence: 'high' | 'medium' | 'low'
   source: 'detected' | 'manual'
 }

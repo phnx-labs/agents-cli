@@ -22,6 +22,8 @@ export interface ManagedProject {
   repoSlug?: string;                          // "owner/repo"
   linearProjectId?: string;
   linearProjectName?: string;                 // for the Linear pill
+  autoDispatch?: boolean;                     // opt-in: auto-pick delegated Todo tickets (default off)
+  maxAgents?: number;                         // cap on concurrent auto-dispatched agents for this project
   confidence: 'high' | 'medium' | 'low';
   source: 'detected' | 'manual';
 }
@@ -77,6 +79,8 @@ export function sanitizeManagedProjects(raw: unknown): ManagedProject[] {
       repoSlug: typeof o.repoSlug === 'string' ? o.repoSlug : undefined,
       linearProjectId: typeof o.linearProjectId === 'string' ? o.linearProjectId : undefined,
       linearProjectName: typeof o.linearProjectName === 'string' ? o.linearProjectName : undefined,
+      autoDispatch: o.autoDispatch === true,
+      maxAgents: typeof o.maxAgents === 'number' ? o.maxAgents : undefined,
       confidence,
       source,
     });
