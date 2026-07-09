@@ -30,7 +30,7 @@ import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTail } from './tail.js';
-import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { mapBounded } from '../concurrency.js';
 
@@ -69,6 +69,10 @@ export interface ActiveSession {
   activity?: SessionActivity;
   /** Why the agent is waiting, when activity is waiting_input. */
   awaitingReason?: AwaitingReason;
+  /** The structured decision (question/plan/permission + options) the agent is waiting on. */
+  question?: StructuredQuestion;
+  /** Last few assistant turns (most-recent last), for at-a-glance context in the UI. */
+  tail?: string[];
   /** PR opened during the session. */
   pr?: DetectedPr;
   /** Worktree the session runs in. */
@@ -344,6 +348,8 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     status: statusFromActivity(state.activity),
     activity: state.activity,
     awaitingReason: state.awaitingReason,
+    question: state.question,
+    tail: state.tail,
     // Prefer the live preview (latest turn); keep the first-prompt topic as a fallback.
     preview: state.preview ?? base.preview,
     pr: state.pr,

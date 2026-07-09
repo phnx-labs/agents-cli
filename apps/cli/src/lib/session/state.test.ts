@@ -11,6 +11,7 @@ import {
   detectSpawnedTeam,
   isTicketCreateTool,
   extractCreatedTicket,
+  structuredQuestionFromAsk,
 } from './state.js';
 
 const now = Date.now();
@@ -81,6 +82,77 @@ describe('inferActivity — working signals', () => {
   it('user spoke last and process alive ⇒ working (owes a reply)', () => {
     const s = inferActivity([msg('assistant', 'anything else?'), msg('user', 'yes, add logging')], { pidAlive: true, mtimeMs: fresh });
     expect(s.activity).toBe('working');
+  });
+});
+
+// A Claude AskUserQuestion tool_use carries the full question + options on `args`.
+function ask(question: string, options: Array<{ label: string; description?: string }>): SessionEvent {
+  return { type: 'tool_use', agent: 'claude', timestamp: '', tool: 'AskUserQuestion', args: { questions: [{ question, header: 'Scope', options }] } };
+}
+
+describe('structuredQuestionFromAsk', () => {
+  it('pulls the question text + labelled options with 1-based select keys', () => {
+    const q = structuredQuestionFromAsk({
+      questions: [{ question: 'Ship v0.9.290 now?', options: [{ label: 'Build now', description: 'the two follow-ups' }, { label: 'Pull more backlog' }] }],
+    });
+    expect(q?.text).toBe('Ship v0.9.290 now?');
+    expect(q?.reason).toBe('question');
+    expect(q?.options).toEqual([
+      { label: 'Build now', description: 'the two follow-ups', key: '1' },
+      { label: 'Pull more backlog', description: undefined, key: '2' },
+    ]);
+  });
+  it('falls back to the header when the question text is empty', () => {
+    const q = structuredQuestionFromAsk({ questions: [{ header: 'Pick one', options: [{ label: 'A' }] }] });
+    expect(q?.text).toBe('Pick one');
+  });
+  it('returns undefined when there is no question', () => {
+    expect(structuredQuestionFromAsk({})).toBeUndefined();
+    expect(structuredQuestionFromAsk(undefined)).toBeUndefined();
+  });
+});
+
+describe('inferActivity — structured question (the panel fix)', () => {
+  it('AskUserQuestion surfaces the REAL question + options, not "Asked you a question"', () => {
+    const s = inferActivity([msg('user', 'go'), ask('Ship v0.9.290 now?', [{ label: 'Build now' }, { label: 'Pull backlog' }])], { pidAlive: true, mtimeMs: fresh });
+    expect(s.activity).toBe('waiting_input');
+    expect(s.question?.text).toBe('Ship v0.9.290 now?');
+    expect(s.question?.options?.map(o => o.label)).toEqual(['Build now', 'Pull backlog']);
+    // preview must be the question, never the discarded generic line.
+    expect(s.preview).toBe('Ship v0.9.290 now?');
+    expect(s.preview).not.toBe('Asked you a question');
+  });
+
+  it('a trailing thinking block no longer masks the question as "thinking…"', () => {
+    const s = inferActivity(
+      [msg('assistant', 'I can do A or B. Which do you prefer?'), { type: 'thinking', agent: 'claude', timestamp: '', content: 'weighing options' }],
+      { pidAlive: true, mtimeMs: fresh },
+    );
+    // last event is a thinking block, but the preview shows the assistant question.
+    expect(s.preview).not.toBe('thinking…');
+    expect(s.preview).toContain('Which do you prefer?');
+  });
+
+  it('a prose question carries a question object with no select keys (free-text reply)', () => {
+    const s = inferActivity([msg('assistant', 'Should I merge this PR?')], { pidAlive: true, mtimeMs: stale });
+    expect(s.question?.reason).toBe('question');
+    expect(s.question?.text).toBe('Should I merge this PR?');
+    expect(s.question?.options).toBeUndefined();
+  });
+
+  it('a permission block carries Approve(1)/Deny(esc) choices', () => {
+    const s = inferActivity([tool('Bash', { command: 'rm -rf build' }, 'rm -rf build')], { pidAlive: true, mtimeMs: stale });
+    expect(s.awaitingReason).toBe('permission');
+    expect(s.question?.reason).toBe('permission');
+    expect(s.question?.options).toEqual([{ label: 'Approve', key: '1' }, { label: 'Deny', key: 'esc' }]);
+  });
+
+  it('collects the last few assistant turns as tail context', () => {
+    const s = inferActivity(
+      [msg('assistant', 'first'), msg('user', 'ok'), msg('assistant', 'second'), msg('assistant', 'Which one — A or B?')],
+      { pidAlive: true, mtimeMs: fresh },
+    );
+    expect(s.tail).toEqual(['first', 'second', 'Which one — A or B?']);
   });
 });
 

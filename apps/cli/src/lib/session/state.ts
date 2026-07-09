@@ -21,6 +21,32 @@ import { summarizeToolUse } from './parse.js';
 export type SessionActivity = 'working' | 'waiting_input' | 'idle';
 export type AwaitingReason = 'question' | 'plan_review' | 'permission';
 
+/** One discrete choice the agent offered the user. */
+export interface QuestionOption {
+  /** The choice label — also what a free-text reply channel sends back. */
+  label: string;
+  /** Optional longer description shown under the label. */
+  description?: string;
+  /**
+   * Selection keystroke for an interactive TUI prompt (AskUserQuestion / plan /
+   * permission are select-lists, not text inputs): a digit ('1'), or 'esc' to
+   * cancel/deny. Absent for a plain prose question, which takes free text.
+   */
+  key?: string;
+}
+
+/**
+ * The decision an agent handed back to the user, extracted at the SOURCE so every
+ * consumer (Factory panel, teams, cloud) gets the real question + options instead
+ * of re-deriving them from a truncated preview line. `reason` mirrors
+ * {@link AwaitingReason}; `options` is present when the agent offered discrete choices.
+ */
+export interface StructuredQuestion {
+  text: string;
+  reason: AwaitingReason;
+  options?: QuestionOption[];
+}
+
 export interface DetectedPr {
   url: string;
   number?: number;
@@ -45,6 +71,13 @@ export interface SessionState {
   lastEventKind?: SessionEvent['type'];
   /** Single-line description of the latest turn (message text or tool action). */
   preview?: string;
+  /**
+   * The structured decision the agent is waiting on (question / plan / permission),
+   * with its options when it offered any. Set only when activity is waiting_input.
+   */
+  question?: StructuredQuestion;
+  /** Last few assistant turns (most-recent last), one line each — panel context. */
+  tail?: string[];
   lastActivityMs?: number;
   pr?: DetectedPr;
   worktree?: DetectedWorktree;
@@ -183,6 +216,56 @@ export function extractCreatedTicket(text?: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Structured question from a Claude `AskUserQuestion` tool call. Its input is
+ * `{ questions: [{ question, header, options: [{label, description}] }] }` and the
+ * whole thing is already parsed onto `event.args` by the transcript parser — this
+ * surfaces the first question + its options (instead of collapsing to a generic
+ * "Asked you a question"). The prompt is a select-list, so each option carries its
+ * 1-based selection digit as `key`.
+ */
+export function structuredQuestionFromAsk(args?: Record<string, any>): StructuredQuestion | undefined {
+  const q = Array.isArray(args?.questions) ? args!.questions[0] : undefined;
+  if (!q) return undefined;
+  const text = oneLine(String(q.question ?? q.header ?? '')) || 'Asked you a question';
+  const raw = Array.isArray(q.options) ? q.options : [];
+  const options: QuestionOption[] = [];
+  for (const o of raw) {
+    const label = typeof o === 'string' ? oneLine(o) : o?.label != null ? oneLine(String(o.label)) : '';
+    if (!label) continue;
+    const description = typeof o === 'object' && o?.description != null ? oneLine(String(o.description)) : undefined;
+    options.push({ label, description, key: String(options.length + 1) });
+  }
+  return { text, reason: 'question', options: options.length ? options : undefined };
+}
+
+/**
+ * Canonical approve/deny choices for an interactive prompt that carries no
+ * agent-supplied option list: Claude's plan-review and permission dialogs. Approve
+ * is reliably option 1; deny/keep-planning maps to ESC, which cancels the prompt in
+ * every variant (2- or 3-option) — safer than guessing a digit that could differ.
+ */
+function planReviewQuestion(): StructuredQuestion {
+  return {
+    text: 'Plan ready — review it',
+    reason: 'plan_review',
+    options: [
+      { label: 'Approve plan', key: '1' },
+      { label: 'Keep planning', key: 'esc' },
+    ],
+  };
+}
+function permissionQuestion(preview?: string): StructuredQuestion {
+  return {
+    text: preview ? `Permission — ${preview}` : 'Waiting on a permission prompt',
+    reason: 'permission',
+    options: [
+      { label: 'Approve', key: '1' },
+      { label: 'Deny', key: 'esc' },
+    ],
+  };
+}
+
 /** Does an assistant message read as a question directed at the user? */
 function looksLikeQuestion(text: string): boolean {
   const t = text.trim();
@@ -229,12 +312,21 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
 
   // The most informative recent line: a message or tool call as-is, but for a
   // trailing tool_result/thinking show the tool *call* that produced it (its
-  // command) rather than a bare "↳ Bash".
+  // command), or — failing that — the last assistant message, rather than a bare
+  // "↳ Bash" or a content-free "thinking…". This is what stops a trailing thinking
+  // block from masking the real turn (the defect behind the "Thinking…" panel).
   const previewSource = !last
     ? undefined
     : last.type === 'message' || last.type === 'tool_use'
       ? last
-      : (lastToolUse ?? last);
+      : (lastToolUse ?? lastMsg ?? last);
+
+  // Last few assistant turns, most-recent last — context for the decision panel.
+  const tail = meaningful
+    .filter(e => e.type === 'message' && e.role === 'assistant' && e.content)
+    .slice(-3)
+    .map(e => oneLine(e.content ?? ''))
+    .filter(Boolean);
 
   const base: SessionState = {
     activity: 'idle',
@@ -242,6 +334,7 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     lastEventKind: last?.type,
     lastActivityMs: ctx.mtimeMs,
     preview: previewSource ? describeEvent(previewSource) : undefined,
+    tail: tail.length ? tail : undefined,
   };
 
   if (!last) return base;
@@ -253,19 +346,21 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     e => e.type === 'tool_use' && (e.tool === PLAN_TOOL || e.tool === ASK_TOOL),
   );
   if (lastPlanOrAsk && meaningful.indexOf(lastPlanOrAsk) === meaningful.length - 1) {
-    return {
-      ...base,
-      activity: 'waiting_input',
-      awaitingReason: lastPlanOrAsk.tool === PLAN_TOOL ? 'plan_review' : 'question',
-      preview: lastPlanOrAsk.tool === PLAN_TOOL ? 'Plan ready — awaiting your review' : 'Asked you a question',
-    };
+    if (lastPlanOrAsk.tool === PLAN_TOOL) {
+      const question = planReviewQuestion();
+      return { ...base, activity: 'waiting_input', awaitingReason: 'plan_review', preview: question.text, question };
+    }
+    // AskUserQuestion: surface the real question + options (they're on `args`),
+    // not the generic "Asked you a question" that discarded them.
+    const question = structuredQuestionFromAsk(lastPlanOrAsk.args) ?? { text: 'Asked you a question', reason: 'question' as const };
+    return { ...base, activity: 'waiting_input', awaitingReason: 'question', preview: question.text, question };
   }
 
   // Pending tool call (tool_use with no following tool_result): mid-turn.
   if (last.type === 'tool_use') {
     if (canWork && fresh) return { ...base, activity: 'working' };
     // Alive but the file hasn't moved — likely blocked on a permission prompt.
-    if (ctx.pidAlive) return { ...base, activity: 'waiting_input', awaitingReason: 'permission' };
+    if (ctx.pidAlive) return { ...base, activity: 'waiting_input', awaitingReason: 'permission', question: permissionQuestion(base.preview) };
     return { ...base, activity: 'idle' };
   }
 
@@ -281,8 +376,10 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
       return { ...base, activity: canWork ? 'working' : 'idle' };
     }
     // Assistant spoke last and stopped. A trailing question → waiting; else idle.
+    // A prose question takes a free-text reply (no select-list), so no options/keys.
     if (looksLikeQuestion(last.content ?? '')) {
-      return { ...base, activity: 'waiting_input', awaitingReason: 'question' };
+      const text = oneLine(last.content ?? '');
+      return { ...base, activity: 'waiting_input', awaitingReason: 'question', question: { text, reason: 'question' } };
     }
     return { ...base, activity: 'idle' };
   }
