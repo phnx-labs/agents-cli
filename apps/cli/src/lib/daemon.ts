@@ -387,11 +387,13 @@ export async function runDaemon(): Promise<void> {
 
   // Auto-dispatch: for any managed project that has opted in (autoDispatch:true +
   // maxAgents>0 in ~/.agents/factory/projects.json), pick up Linear tickets that
-  // are delegated to an agent and still in Todo, and move them Todo -> Doing so
-  // the existing factory webhook turns each into a run — capped at maxAgents
-  // concurrent per project. OFF unless a project opts in; a machine with no
-  // opted-in project or no LINEAR_API_KEY is a clean no-op. Overlap-guarded like
-  // the probes above. ~every 3 min.
+  // are delegated to an agent and still in Todo, and DISPATCH each through
+  // agents-cli's own cloud-provider layer (resolveProvider().dispatch(), same as
+  // `agents cloud run`) — then mark it Doing so it isn't re-picked. Capped at
+  // maxAgents concurrent per project. No hidden Prix dependency: Rush is one
+  // provider among rush/codex/factory, pinned per-project via `provider`. OFF
+  // unless a project opts in; no opted-in project or no LINEAR_API_KEY is a clean
+  // no-op. Overlap-guarded like the probes above. ~every 3 min.
   let autoDispatching = false;
   const runAutoDispatch = async () => {
     if (autoDispatching) return;
@@ -403,7 +405,9 @@ export async function runDaemon(): Promise<void> {
       const { createLinearGateway } = await import('./auto-dispatch-linear.js');
       const linear = createLinearGateway();
       if (!linear) return; // no LINEAR_API_KEY configured → skip
-      const dispatched = await autoDispatchTick({ projects, linear, log: (lvl, m) => log(lvl, m) });
+      const { createProviderDispatcher } = await import('./auto-dispatch-provider.js');
+      const dispatcher = createProviderDispatcher();
+      const dispatched = await autoDispatchTick({ projects, linear, dispatcher, log: (lvl, m) => log(lvl, m) });
       if (dispatched.length) {
         log('INFO', `auto-dispatch: started ${dispatched.length} delegated ticket(s): ${dispatched.map((d) => d.identifier).join(', ')}`);
       }

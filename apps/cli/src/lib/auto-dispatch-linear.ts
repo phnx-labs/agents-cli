@@ -52,6 +52,7 @@ async function gql<T>(apiKey: string, query: string, variables: Record<string, u
 interface IssueNode {
   id: string;
   identifier: string;
+  title: string;
   priority: number;
   delegate?: { name: string } | null;
   team?: { id: string } | null;
@@ -96,19 +97,19 @@ export function createLinearGateway(): LinearGateway | null {
     async fetchDelegatedTodo(linearProjectId: string): Promise<DelegatedIssue[]> {
       const data = await gql<{ issues: { nodes: IssueNode[] } }>(
         apiKey!,
-        `query($p:ID!){ issues(filter:{ project:{ id:{ eq:$p } }, state:{ type:{ eq:"unstarted" } }, delegate:{ null:false } }, first:50){ nodes{ id identifier priority delegate{ name } team{ id } } } }`,
+        `query($p:ID!){ issues(filter:{ project:{ id:{ eq:$p } }, state:{ type:{ eq:"unstarted" } }, delegate:{ null:false } }, first:50){ nodes{ id identifier title priority delegate{ name } team{ id } } } }`,
         { p: linearProjectId },
       );
       const out: DelegatedIssue[] = [];
       for (const n of data.issues.nodes) {
         if (!n.delegate?.name) continue;
         if (n.team?.id) teamByIssue.set(n.id, n.team.id);
-        out.push({ id: n.id, identifier: n.identifier, priority: n.priority ?? 0, delegateName: n.delegate.name });
+        out.push({ id: n.id, identifier: n.identifier, title: n.title ?? '', priority: n.priority ?? 0, delegateName: n.delegate.name });
       }
       return out;
     },
 
-    async startIssue(issueId: string, delegateName: string): Promise<void> {
+    async markStarted(issueId: string, delegateName: string): Promise<void> {
       const teamId = teamByIssue.get(issueId);
       if (!teamId) throw new Error(`unknown team for issue ${issueId} (fetch it first)`);
       const stateId = await resolveStartedState(teamId);

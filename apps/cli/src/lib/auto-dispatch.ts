@@ -1,19 +1,17 @@
 /**
  * Auto-dispatch — pull side of the factory dispatch loop.
  *
- * The run pipeline already exists: a Linear webhook fires when an issue moves to
- * Doing, and the factory spawns an agent on it. What was missing is the *pull*:
- * nothing picked up tickets that were delegated to an agent but left in Todo.
+ * Polls Linear for issues that are delegated to an agent and still in Todo for a
+ * managed project, and — up to a per-project concurrency cap — DISPATCHES each
+ * through agents-cli's own cloud-provider abstraction (`resolveProvider().dispatch()`),
+ * then marks the ticket Doing so it isn't picked up twice.
  *
- * This module polls Linear for issues delegated to an agent in a managed project
- * and, up to a per-project concurrency cap, moves them Todo -> Doing (which the
- * existing webhook turns into a real run). It reads the shared factory project
- * registry at ~/.agents/factory/projects.json — the CLI cannot import the factory
- * package (no cross-package imports), so it reads the JSON directly.
+ * The dispatch goes through the same provider layer as `agents cloud run`, so Rush
+ * (Prix) is just one provider among rush/codex/factory — NOT a hidden requirement.
+ * A project may pin its provider via `provider` in ~/.agents/factory/projects.json.
  *
- * OPT-IN: a project auto-dispatches ONLY when it has `autoDispatch: true` AND
- * `maxAgents > 0`. With no project opted in, the tick is a no-op. There is no
- * global default-on switch.
+ * OPT-IN: a project auto-dispatches ONLY when `autoDispatch: true` AND `maxAgents > 0`.
+ * Nothing global is on by default.
  */
 
 import * as fs from 'fs';
@@ -25,15 +23,17 @@ export interface AutoDispatchProject {
   id: string;
   name: string;
   linearProjectId?: string;
-  repoSlug?: string; // "owner/repo" — passed through so the run knows its repo
+  repoSlug?: string; // "owner/repo" — the dispatch's target repo
   autoDispatch?: boolean; // opt-in; default (undefined) = off
   maxAgents?: number; // per-project concurrency cap; <=0 or undefined = off
+  provider?: string; // optional pin: 'rush' | 'codex' | 'factory' | ... (else the agent's native cloud)
 }
 
 /** A Linear issue that is a candidate for dispatch. */
 export interface DelegatedIssue {
   id: string;
   identifier: string;
+  title: string;
   delegateName: string; // e.g. "Claude", "Codex" — the agent to run
   priority: number; // Linear priority (1=urgent … 4=low, 0=none)
 }
@@ -42,8 +42,10 @@ export interface DelegatedIssue {
 export interface PlannedDispatch {
   projectId: string;
   repoSlug?: string;
+  provider?: string;
   issueId: string;
   identifier: string;
+  title: string;
   delegateName: string;
 }
 
@@ -52,13 +54,13 @@ export function factoryProjectsPath(): string {
   return path.join(homedir(), '.agents', 'factory', 'projects.json');
 }
 
-/** Read the project registry, keeping only rows that have opted into auto-dispatch. */
+/** Read the project registry rows this module cares about. */
 export function readAutoDispatchProjects(): AutoDispatchProject[] {
   let raw: unknown;
   try {
     raw = JSON.parse(fs.readFileSync(factoryProjectsPath(), 'utf-8'));
   } catch {
-    return []; // no registry yet, or unreadable — nothing to dispatch
+    return [];
   }
   if (!Array.isArray(raw)) return [];
   const out: AutoDispatchProject[] = [];
@@ -73,6 +75,7 @@ export function readAutoDispatchProjects(): AutoDispatchProject[] {
       repoSlug: typeof o.repoSlug === 'string' ? o.repoSlug : undefined,
       autoDispatch: o.autoDispatch === true,
       maxAgents: typeof o.maxAgents === 'number' ? o.maxAgents : undefined,
+      provider: typeof o.provider === 'string' ? o.provider : undefined,
     });
   }
   return out;
@@ -84,11 +87,9 @@ export function isEligible(p: AutoDispatchProject): boolean {
 }
 
 /**
- * PURE planner. Given the eligible projects, how many agents are already in flight
- * per project, and the delegated-Todo issues per project, decide exactly which
- * issues to dispatch — never exceeding `maxAgents` in-flight for a project.
- *
- * Highest Linear priority first (urgent=1 < low=4; 0/none sorts last).
+ * PURE planner. Given eligible projects, in-flight counts, and delegated-Todo
+ * issues per project, decide which issues to dispatch — never exceeding
+ * `maxAgents` in-flight. Highest Linear priority first.
  */
 export function planAutoDispatch(
   projects: AutoDispatchProject[],
@@ -99,8 +100,7 @@ export function planAutoDispatch(
   for (const p of projects) {
     if (!isEligible(p)) continue;
     const cap = p.maxAgents as number;
-    const inFlight = inFlightByProject[p.id] ?? 0;
-    const slots = cap - inFlight;
+    const slots = cap - (inFlightByProject[p.id] ?? 0);
     if (slots <= 0) continue;
     const candidates = (delegatedTodoByProject[p.id] ?? [])
       .slice()
@@ -109,8 +109,10 @@ export function planAutoDispatch(
       plan.push({
         projectId: p.id,
         repoSlug: p.repoSlug,
+        provider: p.provider,
         issueId: issue.id,
         identifier: issue.identifier,
+        title: issue.title,
         delegateName: issue.delegateName,
       });
     }
@@ -120,31 +122,41 @@ export function planAutoDispatch(
 
 /** Map Linear priority to a sortable rank (urgent first, none last). */
 export function priorityRank(priority: number): number {
-  // Linear: 1=urgent, 2=high, 3=medium, 4=low, 0=no priority.
   return priority === 0 ? 5 : priority;
 }
 
-/** Linear I/O surface — injected so the planner + tick are testable without network. */
+/** Build the prompt an auto-dispatched agent receives for a ticket. */
+export function dispatchPrompt(identifier: string, title: string): string {
+  return `Work on Linear ticket ${identifier}: ${title}. Read the ticket for full context, implement it, and open a PR when done.`;
+}
+
+/** Linear I/O surface — discovery + bookkeeping (NOT the dispatch trigger). */
 export interface LinearGateway {
-  /** Count issues in a "started" (Doing) state whose delegate is set, per project id. */
+  /** Count issues in a started ("Doing") state whose delegate is set, per project. */
   countInFlight(linearProjectId: string): Promise<number>;
-  /** Fetch delegated issues in an "unstarted" (Todo) state for a project. */
+  /** Fetch delegated issues in an unstarted ("Todo") state for a project. */
   fetchDelegatedTodo(linearProjectId: string): Promise<DelegatedIssue[]>;
-  /** Move an issue Todo -> Doing (the existing webhook turns this into a run). */
-  startIssue(issueId: string, delegateName: string): Promise<void>;
+  /** After a successful dispatch: move the issue Todo -> Doing so it isn't re-picked. */
+  markStarted(issueId: string, delegateName: string): Promise<void>;
+}
+
+/** Dispatch surface — runs a ticket through agents-cli's cloud/local provider layer. */
+export interface Dispatcher {
+  dispatch(opts: { agent: string; prompt: string; repo?: string; provider?: string }): Promise<{ id: string }>;
 }
 
 export interface AutoDispatchDeps {
   projects: AutoDispatchProject[];
   linear: LinearGateway;
+  dispatcher: Dispatcher;
   log?: (level: 'INFO' | 'WARN' | 'ERROR', msg: string) => void;
 }
 
-/** One tick: read state per eligible project, plan, and start the planned issues. */
+/** One tick: read state per eligible project, plan, dispatch, then mark started. */
 export async function autoDispatchTick(deps: AutoDispatchDeps): Promise<PlannedDispatch[]> {
   const log = deps.log ?? (() => {});
   const eligible = deps.projects.filter(isEligible);
-  if (eligible.length === 0) return []; // opt-in: nothing to do
+  if (eligible.length === 0) return [];
 
   const inFlight: Record<string, number> = {};
   const todo: Record<string, DelegatedIssue[]> = {};
@@ -155,7 +167,7 @@ export async function autoDispatchTick(deps: AutoDispatchDeps): Promise<PlannedD
       todo[p.id] = await deps.linear.fetchDelegatedTodo(pid);
     } catch (err) {
       log('WARN', `auto-dispatch: failed to read Linear state for '${p.name}': ${(err as Error).message}`);
-      inFlight[p.id] = Number.MAX_SAFE_INTEGER; // fail closed: dispatch nothing for this project
+      inFlight[p.id] = Number.MAX_SAFE_INTEGER; // fail closed for this project
       todo[p.id] = [];
     }
   }
@@ -164,11 +176,23 @@ export async function autoDispatchTick(deps: AutoDispatchDeps): Promise<PlannedD
   const dispatched: PlannedDispatch[] = [];
   for (const d of plan) {
     try {
-      await deps.linear.startIssue(d.issueId, d.delegateName);
+      const task = await deps.dispatcher.dispatch({
+        agent: d.delegateName.trim().toLowerCase(),
+        prompt: dispatchPrompt(d.identifier, d.title),
+        repo: d.repoSlug,
+        provider: d.provider,
+      });
+      // Bookkeeping only — dispatch already happened; moving to Doing keeps the
+      // ticket out of the next Todo poll. A failure here is non-fatal.
+      try {
+        await deps.linear.markStarted(d.issueId, d.delegateName);
+      } catch (err) {
+        log('WARN', `auto-dispatch: dispatched ${d.identifier} but failed to mark Doing: ${(err as Error).message}`);
+      }
       dispatched.push(d);
-      log('INFO', `auto-dispatch: started ${d.identifier} (${d.delegateName}) in ${d.projectId}`);
+      log('INFO', `auto-dispatch: dispatched ${d.identifier} to ${d.delegateName} (task ${task.id})`);
     } catch (err) {
-      log('WARN', `auto-dispatch: failed to start ${d.identifier}: ${(err as Error).message}`);
+      log('WARN', `auto-dispatch: failed to dispatch ${d.identifier}: ${(err as Error).message}`);
     }
   }
   return dispatched;
