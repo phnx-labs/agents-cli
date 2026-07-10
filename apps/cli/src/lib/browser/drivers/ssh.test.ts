@@ -63,12 +63,19 @@ describe('ssh driver CDP launch args', () => {
 });
 
 describe('buildWindowsLaunchScript', () => {
-  it('spawns via WMI so the browser survives the ssh session (no start /B)', () => {
+  it('spawns via an interactive scheduled task so the browser survives the ssh session AND serves CDP', () => {
     const s = buildWindowsLaunchScript('edge', 9222);
-    expect(s).toContain('Win32_Process');
-    expect(s).toContain('Invoke-CimMethod');
+    expect(s).toContain('Register-ScheduledTask');
+    expect(s).toContain('Start-ScheduledTask');
+    // one-shot: nothing lingers in the scheduler after launch
+    expect(s).toContain('Unregister-ScheduledTask');
+    // start /B and Start-Process children are reaped on ssh disconnect; WMI
+    // Win32_Process.Create survives disconnect but lands in session 0, where
+    // Edge binds the CDP port yet the DevTools server never initializes
+    // (/json/version hangs forever, DevToolsActivePort never written).
     expect(s).not.toContain('start /B');
-    expect(s).not.toContain('Start-Process');
+    expect(s).not.toContain('Start-Process ');
+    expect(s).not.toContain('Invoke-CimMethod');
   });
 
   it('resolves the real .exe from App Paths for a known browser', () => {
