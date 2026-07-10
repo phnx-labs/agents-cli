@@ -6,6 +6,16 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The backlog now shows who is already working each ticket.** A ticket an agent
+  carries gets an in-flight chip on its row (phase dot + agent abbr, `+N` when several
+  are on it; hover for the full roster), and the ticket detail pane gains an **In
+  flight** section — one row per worker with phase, host, and PR, each jumping to that
+  agent's card. Dispatching onto a ticket that's already in flight is guarded: the
+  button turns amber, reads "Dispatch anyway", and names the agent already on it, so a
+  second agent is a deliberate choice instead of an accident.
+
 ## [0.9.291] - 2026-07-09
 
 ### Fixed

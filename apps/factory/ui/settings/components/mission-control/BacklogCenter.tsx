@@ -2,6 +2,7 @@ import React from 'react'
 import {
   groupTickets,
   sortTickets,
+  type FloorAgent,
   type FloorTicket,
   type TicketGroupBy,
   type TicketSort,
@@ -25,14 +26,31 @@ interface BacklogCenterProps {
   /** Free-text query from the top bar (matches id / title / labels). */
   search: string
   selectedTicketId: string | null
+  /** Agents keyed by the ticket they carry (ticketWorkers) — rows show who's on it. */
+  workers?: Record<string, FloorAgent[]>
   onSelectTicket: (id: string) => void
   /** Double-click a row to open it as a closeable task tab in the sub-tab strip. */
   onOpenTask: (ticket: FloorTicket) => void
 }
 
-function TicketRow({ ticket: t, selected, onSelect, onOpen }: {
+/** In-flight chip: phase dot + first worker's abbr (+N when several are on it). */
+function WorkerChip({ workers }: { workers: FloorAgent[] }) {
+  const first = workers[0]
+  if (!first) return null
+  const title = workers.map((a) => `${a.abbr} · ${a.name} · ${a.hostLabel ?? a.host}`).join('\n')
+  return (
+    <span className="twork" title={title}>
+      <span className={`dot ${first.phase}`} />
+      {first.abbr}
+      {workers.length > 1 ? ` +${workers.length - 1}` : ''}
+    </span>
+  )
+}
+
+function TicketRow({ ticket: t, selected, workers = [], onSelect, onOpen }: {
   ticket: FloorTicket
   selected: boolean
+  workers?: FloorAgent[]
   onSelect: (id: string) => void
   onOpen: (ticket: FloorTicket) => void
 }) {
@@ -47,6 +65,7 @@ function TicketRow({ ticket: t, selected, onSelect, onOpen }: {
       <span className={`src ${t.source}`}>{t.source}</span>
       <span className="tid">{t.id}</span>
       <span className="tt">{t.title}</span>
+      {workers.length > 0 && <WorkerChip workers={workers} />}
       <span className="tlabels">
         {(t.labels || []).slice(0, 2).map((l) => (
           <span key={l} className="tlbl">{l}</span>
@@ -59,7 +78,7 @@ function TicketRow({ ticket: t, selected, onSelect, onOpen }: {
 }
 
 export function BacklogCenter({
-  tickets, group, sort, srcFilter, projFilter, search, selectedTicketId,
+  tickets, group, sort, srcFilter, projFilter, search, selectedTicketId, workers = {},
   onSelectTicket, onOpenTask,
 }: BacklogCenterProps) {
   // Backlog = work you can still dispatch onto, so completed tickets are excluded.
@@ -90,6 +109,7 @@ export function BacklogCenter({
               key={t.id}
               ticket={t}
               selected={selectedTicketId === t.id}
+              workers={workers[t.id]}
               onSelect={onSelectTicket}
               onOpen={onOpenTask}
             />

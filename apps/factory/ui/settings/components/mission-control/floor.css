@@ -378,6 +378,20 @@
 .swarmify-root .tstat.in-progress { background: var(--status-running-bg); color: var(--status-running); }
 .swarmify-root .tstat.blocked { background: var(--status-failed-bg); color: var(--status-failed); }
 .swarmify-root .tproj { font-size: 11px; color: var(--ds-text-dim); flex: 0 0 auto; width: 96px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* In-flight chip on a backlog row: phase dot + worker abbr (+N). */
+.swarmify-root .trow2 .twork { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--ds-text-dim); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
+.swarmify-root .trow2 .twork .dot { width: 6px; height: 6px; box-shadow: none; }
+/* Ticket detail: agents already carrying the ticket, each row jumps to the card. */
+.swarmify-root .dflight { border: 1px solid var(--ds-border); border-radius: var(--r-lg); padding: 10px 12px; }
+.swarmify-root .dflight .dflight-row { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; padding: 5px 2px; cursor: pointer; color: var(--ds-text); font-size: 12px; text-align: left; border-radius: var(--r-sm); }
+.swarmify-root .dflight .dflight-row:hover { background: var(--ds-bg-panel); }
+.swarmify-root .dflight .dflight-row .dot { width: 7px; height: 7px; box-shadow: none; }
+.swarmify-root .dflight .abbr { font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--ds-text-dim); }
+.swarmify-root .dflight .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarmify-root .dflight .h { color: var(--ds-text-faint); font-size: 11px; }
+.swarmify-root .dflight .pr { font-family: "Geist Mono", monospace; font-size: 10px; color: var(--brand-600); }
+.swarmify-root .dflight-note { font-size: 11px; color: var(--status-pending); margin-top: 8px; }
+.swarmify-root .disp.caution { background: var(--status-pending); }
 .swarmify-root .dispatch-panel { background: var(--ds-bg); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-lg); padding: 12px 14px; }
 .swarmify-root .dp-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .swarmify-root .dp-k { width: 48px; font-size: 11px; color: var(--ds-text-dim); font-weight: 600; }

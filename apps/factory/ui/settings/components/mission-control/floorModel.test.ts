@@ -19,6 +19,7 @@ import {
   toFloorTicket,
   groupTickets,
   sortTickets,
+  ticketWorkers,
   resolveProject,
   sessionTaskLine,
   todosWithFallback,
@@ -860,5 +861,29 @@ describe('todosWithFallback — the checklist survives the recent-tool window ca
   test('empty fresh + no remembered set yields empty (no phantom checklist)', () => {
     expect(todosWithFallback([], undefined)).toEqual([])
     expect(todosWithFallback([], [])).toEqual([])
+  })
+})
+
+describe('ticketWorkers', () => {
+  test('groups agents by carried ticket, skipping agents with none', () => {
+    const agents = [
+      makeAgent({ id: 'a', ticket: 'RUSH-812' }),
+      makeAgent({ id: 'b', ticket: 'RUSH-812', phase: 'waiting' }),
+      makeAgent({ id: 'c', ticket: '#412' }),
+      makeAgent({ id: 'd', ticket: null }),
+    ]
+    const by = ticketWorkers(agents)
+    expect(Object.keys(by).sort()).toEqual(['#412', 'RUSH-812'])
+    expect(by['RUSH-812']!.map((a) => a.id)).toEqual(['a', 'b'])
+    expect(by['#412']!.map((a) => a.id)).toEqual(['c'])
+  })
+
+  test('keeps done agents — a finished worker with an open PR still owns the ticket', () => {
+    const by = ticketWorkers([makeAgent({ id: 'a', ticket: 'RUSH-1', phase: 'done', pr: '#9' })])
+    expect(by['RUSH-1']).toHaveLength(1)
+  })
+
+  test('empty input yields empty map', () => {
+    expect(ticketWorkers([])).toEqual({})
   })
 })
