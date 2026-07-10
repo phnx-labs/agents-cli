@@ -36,6 +36,14 @@ All notable changes to the Factory extension are documented here. Format follows
   instead of a label the TUI would ignore, so you can unblock without opening the
   terminal. Cloud/team replies stay label-based (semantic-message APIs). (RUSH-453)
 
+### Fixed
+
+- **The standalone Factory app now pauses its floor poll when the floor is hidden.** The
+  Electron host handled `subscribeFloor` but dropped `unsubscribeFloor`, so its 5s poll —
+  which shells out to read agent state and hit the cloud-runs API — kept running even when
+  no floor was visible. It now stops on `unsubscribeFloor` and resumes on `subscribeFloor`,
+  mirroring the VS Code host's `cleanupFloorWatchers` lifecycle. (RUSH-1509)
+
 ## [0.9.290] - 2026-07-08
 
 ### Added
