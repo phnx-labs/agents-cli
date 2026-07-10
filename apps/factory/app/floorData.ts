@@ -8,6 +8,7 @@
 import * as os from 'os'
 import * as path from 'path'
 import { promises as fsp } from 'fs'
+import { mapCloudStatus } from '../src/core/cloudStatus'
 
 const TEAMS_DIR = path.join(os.homedir(), '.agents', 'teams', 'agents')
 const SWARM_DIR = path.join(os.homedir(), '.agents', 'swarm', 'agents')
@@ -58,6 +59,23 @@ function emptyDetail(meta: AgentMetaLike, fallbackId: string) {
   }
 }
 
+// Pick the most recent ISO timestamp by real chronological order. A lexical
+// `.sort()` mis-ranks mixed offsets / missing-`Z` strings, so compare on
+// Date.getTime() — matching the VS Code host (swarm.vscode.ts).
+export function latestActivity(times: string[]): string {
+  let best: string | null = null
+  let bestMs = -Infinity
+  for (const t of times) {
+    if (!t) continue
+    const ms = new Date(t).getTime()
+    if (!Number.isNaN(ms) && ms >= bestMs) {
+      bestMs = ms
+      best = t
+    }
+  }
+  return best ?? new Date().toISOString()
+}
+
 export async function fetchLocalTasks() {
   const byTask = new Map<string, ReturnType<typeof emptyDetail>[]>()
   for (const base of [SWARM_DIR, TEAMS_DIR]) {
@@ -87,7 +105,7 @@ export async function fetchLocalTasks() {
     for (const a of agents) {
       if ((status_counts as Record<string, number>)[a.status] != null) (status_counts as Record<string, number>)[a.status]++
     }
-    const latest = agents.map((a) => a.completed_at || a.started_at).sort().pop() || new Date().toISOString()
+    const latest = latestActivity(agents.map((a) => a.completed_at || a.started_at))
     tasks.push({ task_name, agent_count: agents.length, status_counts, latest_activity: latest, agents })
   }
   return tasks
@@ -101,14 +119,6 @@ async function readRushToken(): Promise<string | null> {
   } catch {
     return null
   }
-}
-
-function mapCloudStatus(s: string): 'running' | 'completed' | 'failed' | 'stopped' {
-  const v = (s || '').toLowerCase()
-  if (v === 'running' || v === 'in_progress' || v === 'queued' || v === 'pending') return 'running'
-  if (v === 'failed' || v === 'error') return 'failed'
-  if (v === 'cancelled' || v === 'canceled' || v === 'stopped') return 'stopped'
-  return 'completed'
 }
 
 export async function fetchCloudTasks() {

@@ -22,7 +22,9 @@ import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { randomBytes } from 'crypto';
+import { randomBytes, createHash } from 'crypto';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import { sshExec, SSH_OPTS } from './ssh-exec.js';
 import { backgroundSpawnOptions } from './platform/process.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
@@ -30,6 +32,7 @@ import { getDevice, type DeviceProfile } from './devices/registry.js';
 import { sshTargetFor } from './devices/connect.js';
 import { hostNameFor } from './devices/ssh-config.js';
 import { getCacheDir } from './state.js';
+import { getCliVersion } from './version.js';
 import { openComputerClient, resolveTcpEndpoint, type ComputerClient } from './computer-rpc.js';
 
 // ---------------------------------------------------------------------------
@@ -125,8 +128,10 @@ export const REMOTE_TASK_NAME = 'AgentsComputerHelper';
 export const WIN_HELPER_EXE = 'computer-helper-win.exe';
 
 /**
- * Locate the cross-published Windows daemon exe. Only the local build output is
- * a candidate — `scripts/build-win.sh` writes it to packages/.../dist/.
+ * Locate a locally built Windows daemon exe — a repo-checkout build output from
+ * `scripts/build-win.sh`, or one bundled next to the package. Local paths are
+ * only the first candidate; npm-installed CLIs have neither and fall through to
+ * the release-asset download (`ensureWinHelperExe`).
  */
 export function resolveWinHelperExe(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -140,6 +145,100 @@ export function resolveWinHelperExe(): string | null {
     if (fs.existsSync(c)) return c;
   }
   return null;
+}
+
+/** GitHub repo whose `v<version>` releases carry the exe as an asset. */
+export const WIN_HELPER_RELEASE_REPO = 'phnx-labs/agents-cli';
+
+/** Cache dir for downloaded helper exes, one subdir per release tag. */
+export function winHelperCacheDir(version: string): string {
+  return path.join(getCacheDir(), 'computer', 'win-helper', `v${version}`);
+}
+
+/** Release-asset URLs for the exe + its checksum at one exact `v<version>` tag. */
+export function winHelperAssetUrls(version: string): { exe: string; sha256: string } {
+  const base = `https://github.com/${WIN_HELPER_RELEASE_REPO}/releases/download/v${version}`;
+  return { exe: `${base}/${WIN_HELPER_EXE}`, sha256: `${base}/${WIN_HELPER_EXE}.sha256` };
+}
+
+/**
+ * Parse the published `.sha256` asset — `sha256sum` format (`<hex>  <name>`) or
+ * a bare hex digest. Throws on anything that does not lead with 64 hex chars.
+ */
+export function parseSha256Asset(text: string): string {
+  const m = text.trim().match(/^([A-Fa-f0-9]{64})(\s|$)/);
+  if (!m) throw new Error(`malformed .sha256 release asset: ${JSON.stringify(text.slice(0, 80))}`);
+  return m[1].toLowerCase();
+}
+
+/** Stream a file through sha256 — the exe is ~157MB, never read it whole. */
+export function sha256File(file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    fs.createReadStream(file)
+      .on('error', reject)
+      .on('data', (d) => hash.update(d))
+      .on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+/**
+ * Download the exe release asset for this CLI version, verify its sha256
+ * against the published `.sha256` asset, and cache it under the agents cache
+ * dir. Only the exact `v<version>` tag is consulted — a missing asset is a
+ * hard error naming that tag, never a silent fallback to another release.
+ */
+export async function downloadWinHelperExe(version: string): Promise<string> {
+  const cached = path.join(winHelperCacheDir(version), WIN_HELPER_EXE);
+  if (fs.existsSync(cached)) return cached;
+
+  const tag = `v${version}`;
+  const { exe: exeUrl, sha256: shaUrl } = winHelperAssetUrls(version);
+  const missing = (status: number, url: string) =>
+    new Error(
+      `no ${WIN_HELPER_EXE} release asset for tag ${tag} (HTTP ${status} on ${url}). ` +
+        `The Windows helper ships as a GitHub release asset per tagged CLI version; ` +
+        `from a repo checkout you can build it locally instead: bash scripts/build-win.sh`,
+    );
+
+  // Checksum first: it is tiny and 404s fast when the tag has no assets.
+  const shaRes = await fetch(shaUrl, { signal: AbortSignal.timeout(30_000) });
+  if (!shaRes.ok) throw missing(shaRes.status, shaUrl);
+  const expected = parseSha256Asset(await shaRes.text());
+
+  console.error(`Downloading ${WIN_HELPER_EXE} ${tag} from GitHub releases (~160 MB)...`);
+  const exeRes = await fetch(exeUrl, { signal: AbortSignal.timeout(15 * 60_000) });
+  if (!exeRes.ok || !exeRes.body) throw missing(exeRes.status, exeUrl);
+
+  fs.mkdirSync(path.dirname(cached), { recursive: true });
+  // Stream to a partial file and rename only after the checksum passes, so an
+  // interrupted download can never be picked up as a valid cache hit.
+  const partial = `${cached}.download`;
+  try {
+    await pipeline(
+      Readable.fromWeb(exeRes.body as unknown as import('stream/web').ReadableStream),
+      fs.createWriteStream(partial),
+    );
+    const actual = await sha256File(partial);
+    if (actual !== expected) {
+      throw new Error(`sha256 mismatch for ${exeUrl}: expected ${expected}, got ${actual}`);
+    }
+    fs.renameSync(partial, cached);
+  } finally {
+    fs.rmSync(partial, { force: true });
+  }
+  return cached;
+}
+
+/**
+ * Resolve the helper exe for `setup --host`: local build outputs first (repo
+ * checkout / bundled), then the checksum-verified release-asset download for
+ * the running CLI version. Throws with the tag it checked when neither exists.
+ */
+export async function ensureWinHelperExe(version = getCliVersion()): Promise<string> {
+  const local = resolveWinHelperExe();
+  if (local) return local;
+  return downloadWinHelperExe(version);
 }
 
 /** Persisted per-device tunnel state so verbs can reconnect after `start --host`. */
@@ -318,10 +417,9 @@ function copyFileOverScp(
 export async function setupRemoteHelper(name: string): Promise<{ target: string; taskName: string }> {
   const { target } = await resolveRemoteDevice(name);
 
-  const exe = resolveWinHelperExe();
-  if (!exe) {
-    throw new Error(`Windows helper exe not built. Run: bash scripts/build-win.sh`);
-  }
+  // Local build output, else the checksum-verified GitHub release asset for
+  // this CLI version. Throws naming the tag it checked when neither exists.
+  const exe = await ensureWinHelperExe();
 
   const prep = sshExec(target, encodePowerShell(buildPushScript()), { timeoutMs: 60_000 });
   if (prep.code !== 0) {

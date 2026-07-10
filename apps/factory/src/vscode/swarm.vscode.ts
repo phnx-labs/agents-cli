@@ -27,6 +27,7 @@ export type { AgentCli } from '../core/swarm.detect';
 export type { PromptPackAgent } from '../core/swarm.detect';
 import { readRushTokenCached } from '../core/rushToken';
 import { parseGhChecks, type CiStatus } from '../core/prChecks';
+import { mapCloudStatus } from '../core/cloudStatus';
 
 const execAsync = promisify(exec);
 
@@ -1336,22 +1337,4 @@ function stopCloudStream(executionId: string): void {
     s.pendingNotify = null;
   }
   cloudStreams.delete(executionId);
-}
-
-function mapCloudStatus(s: string): string {
-  switch (s) {
-    case 'running':
-    case 'allocating':
-      return 'running';
-    case 'completed':
-      return 'completed';
-    case 'failed':
-      return 'failed';
-    case 'cancelled':
-      return 'stopped';
-    case 'needs_review':
-      return 'completed';
-    default:
-      return s;
-  }
 }

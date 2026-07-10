@@ -239,12 +239,59 @@ async function main() {
     }
     ok('type_text symbol-run byte-for-byte (x4)');
 
-    // 6. screenshot
-    const shot = await c.call('screenshot');
+    // 6. screenshot — pid-scoped like the macOS helper (#548): list the pid's
+    // windows, capture the target window, capture its display, and assert the
+    // window crop is genuinely scoped (not the whole desktop).
+    const winList = await c.call('screenshot', { pid, list: true });
+    if (!Array.isArray(winList.windows) || winList.windows.length === 0) {
+      fail(`screenshot list returned no windows: ${JSON.stringify(winList)}`);
+    }
+    const w0 = winList.windows[0];
+    if (typeof w0.window_id !== 'number' || !Array.isArray(w0.bounds)) {
+      fail(`window entry wrong shape: ${JSON.stringify(w0)}`);
+    }
+    ok(`screenshot list: ${winList.window_count} window(s), top "${w0.title}"`);
+
+    const shot = await c.call('screenshot', { pid });
     if (!shot.image_data || shot.image_data.length < 1000) fail('screenshot image_data too small');
     const png = Buffer.from(shot.image_data, 'base64');
     if (!(png[0] === 0x89 && png[1] === 0x50 && png[2] === 0x4e && png[3] === 0x47)) fail('screenshot is not a PNG');
-    ok(`screenshot ${shot.width}x${shot.height} (${png.length} bytes)`);
+    if (shot.mode !== 'window' || typeof shot.window_id !== 'number') {
+      fail(`window capture missing mode/window_id: ${JSON.stringify({ mode: shot.mode, window_id: shot.window_id })}`);
+    }
+    ok(`screenshot window ${shot.width}x${shot.height} (${png.length} bytes)`);
+
+    const disp = await c.call('screenshot', { pid, display: true });
+    if (disp.mode !== 'display') fail(`display capture mode wrong: ${disp.mode}`);
+    if (!(shot.width <= disp.width && shot.height <= disp.height)) {
+      fail(`window capture ${shot.width}x${shot.height} exceeds its display ${disp.width}x${disp.height}`);
+    }
+    ok(`screenshot display ${disp.width}x${disp.height}; window crop is scoped`);
+
+    const byId = await c.call('screenshot', { pid, window_id: w0.window_id });
+    if (byId.window_id !== w0.window_id) {
+      fail(`window_id capture echoed ${byId.window_id}, wanted ${w0.window_id}`);
+    }
+    ok(`screenshot window_id=${w0.window_id}`);
+
+    // 6b. get_text max_chars (#548) — the cap the CLI sends must be honored.
+    const capped = await c.call('get_text', { pid, element_id: elId, max_chars: 5 });
+    if (String(capped.text ?? '').length > 5) {
+      fail(`max_chars ignored: got ${String(capped.text).length} chars`);
+    }
+    ok('get_text max_chars caps output');
+
+    // 6c. background=true must be REJECTED (macOS postToPid has no Win32
+    // analogue), never silently ignored (#548). The rejection throws before
+    // any cursor movement.
+    let backgroundRejected = false;
+    try {
+      await c.call('click', { pid, x: 10, y: 10, background: true });
+    } catch (e) {
+      backgroundRejected = /action_unsupported/.test(String(e.message));
+    }
+    if (!backgroundRejected) fail('click background=true was not rejected with action_unsupported');
+    ok('click background=true rejected (action_unsupported)');
 
     // ---- parity verbs: match the macOS helper's result shapes ----------
 
@@ -269,6 +316,12 @@ async function main() {
       fail(`focus_window wrong shape: ${JSON.stringify(focused)}`);
     }
     ok(`focus_window (${focused.focus_elapsed_ms}ms, was_minimized=${focused.was_minimized})`);
+
+    // 9b. key with a pid reports frontmost (#548); after focus_window the
+    // target IS foreground, so require_frontmost must pass too.
+    const keyed = await c.call('key', { pid, keys: 'end', require_frontmost: true });
+    if (keyed.frontmost !== true) fail(`key after focus_window should report frontmost=true: ${JSON.stringify(keyed)}`);
+    ok('key reports frontmost=true, require_frontmost passes when foreground');
 
     // 10. scroll — synthesized wheel. Notepad has little to scroll, but the RPC
     // must still succeed with the {ok, method} shape.

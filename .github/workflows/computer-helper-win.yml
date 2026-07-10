@@ -6,10 +6,16 @@ name: computer-helper-win
 #
 # Required check: the verb set is at parity with the macOS helper and the smoke
 # is green on windows-latest, so a failure blocks the merge.
+#
+# On v* tags (pushed by apps/cli/scripts/release.sh) the release-exe job builds
+# the shipped single-file exe, smokes it, and uploads it + a .sha256 as release
+# assets — the download source for npm-installed CLIs (GitHub #547). The paths
+# filter does not gate tag runs: GitHub does not evaluate `paths` for tag pushes.
 
 on:
   push:
     branches: ['win-computer-use', 'main']
+    tags: ['v*']
     paths:
       - 'native/computer-win/**'
       - '.github/workflows/computer-helper-win.yml'
@@ -20,6 +26,8 @@ on:
 
 jobs:
   build-and-smoke:
+    # Branch/PR gate only; tag runs ship via release-exe (which re-smokes).
+    if: github.ref_type != 'tag'
     runs-on: windows-latest
     permissions: {}
     defaults:
@@ -52,6 +60,8 @@ jobs:
   # so a single-file host that can't resolve the native UIA libraries fails here
   # (describe/get_text walk the UIA tree). Required check: a failure blocks merge.
   publish-and-smoke:
+    # Branch/PR gate only; tag runs ship via release-exe (which re-smokes).
+    if: github.ref_type != 'tag'
     runs-on: windows-latest
     permissions: {}
     defaults:
@@ -78,3 +88,60 @@ jobs:
           $full = (Resolve-Path $exe).Path
           Write-Host "exe: $full"
           node smoke/smoke.mjs --exe "$full" --port 8772
+
+  # On v* tags: build the SAME self-contained single-file exe, smoke it, and
+  # upload it + its sha256 as release assets. `ssh-tunnel.ts` downloads exactly
+  # `releases/download/v<cli-version>/computer-helper-win.exe` when no local
+  # build exists (npm global installs), verifying against the .sha256 asset.
+  release-exe:
+    if: github.ref_type == 'tag'
+    runs-on: windows-latest
+    permissions:
+      contents: write # create the release for the tag + upload assets
+    defaults:
+      run:
+        working-directory: native/computer-win
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: '10.0.x'
+
+      # Exact flags scripts/build-win.sh uses — this artifact IS the shipped one.
+      - name: Publish (self-contained single-file win-x64)
+        run: dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
+
+      - name: Smoke test the exe being released (UIA roundtrip + screenshot)
+        shell: pwsh
+        run: |
+          $exe = "dist/computer-helper-win.exe"
+          if (-not (Test-Path $exe)) { throw "published single-file exe not found at $exe" }
+          $full = (Resolve-Path $exe).Path
+          Write-Host "exe: $full"
+          node smoke/smoke.mjs --exe "$full" --port 8773
+
+      # sha256sum format ("<hex>  <name>") — what parseSha256Asset expects.
+      - name: Write sha256 checksum asset
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist/computer-helper-win.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  computer-helper-win.exe" | Out-File -Encoding ascii dist/computer-helper-win.exe.sha256
+          Get-Content dist/computer-helper-win.exe.sha256
+
+      # release.sh pushes only the tag; create the release for it on first
+      # touch, then attach the assets. --clobber keeps a re-run idempotent.
+      - name: Upload release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --verify-tag --title $env:GITHUB_REF_NAME --notes "agents-cli $env:GITHUB_REF_NAME. Assets: the Windows computer-helper daemon exe (downloaded on demand by 'agents computer setup --host')."
+            if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+          }
+          gh release upload $env:GITHUB_REF_NAME dist/computer-helper-win.exe dist/computer-helper-win.exe.sha256 --clobber --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }

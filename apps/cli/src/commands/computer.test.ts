@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectImageFormat, reconcileScreenshotExt, shouldBlockOffPlatform } from './computer.js';
+import { buildRestartTaskScript, detectImageFormat, reconcileScreenshotExt, shouldBlockOffPlatform } from './computer.js';
 
 // Real leading magic bytes, matching what each helper actually encodes.
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // Windows helper (ImageFormat.Png)
@@ -67,5 +67,23 @@ describe('shouldBlockOffPlatform', () => {
   it('does NOT block off macOS when a --host remote device is given', () => {
     // The remote path resolves its own endpoint before the client opens.
     expect(shouldBlockOffPlatform({ platform: 'linux', tcpConfigured: false, host: 'win-mini' })).toBe(false);
+  });
+});
+
+describe('buildRestartTaskScript', () => {
+  const script = buildRestartTaskScript('AgentsComputerHelper', 'computer-helper-win.exe');
+
+  it('kills by PROCESS name (no .exe suffix — Stop-Process -Name takes the bare name)', () => {
+    expect(script).toContain(`Stop-Process -Name 'computer-helper-win' -Force`);
+    expect(script).not.toContain(`'computer-helper-win.exe'`);
+  });
+
+  it('tolerates the daemon not running, but fails loud on anything else', () => {
+    expect(script).toContain('-ErrorAction SilentlyContinue');
+    expect(script).toContain(`$ErrorActionPreference = 'Stop'`);
+  });
+
+  it('starts the LOGON scheduled task that owns the daemon lifecycle', () => {
+    expect(script).toContain(`Start-ScheduledTask -TaskName 'AgentsComputerHelper'`);
   });
 });

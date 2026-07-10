@@ -24,7 +24,13 @@ import {
   startRemoteTunnel,
   stopRemoteHelper,
   hydrateRemoteEnvFromState,
+  readRemoteState,
+  resolveRemoteDevice,
+  REMOTE_TASK_NAME,
+  WIN_HELPER_EXE,
 } from '../lib/ssh-tunnel.js';
+import { sshExec } from '../lib/ssh-exec.js';
+import { encodePowershell } from '../lib/hosts/remote-cmd.js';
 import { registerActionCommands, withClient, unwrap, pickTarget, type AppInfo } from './computer-actions.js';
 import { runComputerLoop, type LoopEvent } from '../lib/computer/loop.js';
 import { makeVerbDispatcher } from '../lib/computer/dispatch.js';
@@ -40,9 +46,10 @@ const COMPUTER_HELP_GROUPS = [
 ] as const;
 
 // Subcommands that manage the `--host` remote path themselves (provisioning /
-// tunnel lifecycle). Every other `--host`-bearing subcommand is a plain verb
-// that just needs the TCP endpoint hydrated before it runs.
-const REMOTE_LIFECYCLE = new Set(['setup', 'start', 'stop']);
+// tunnel lifecycle, or daemon-state reporting that must degrade gracefully
+// when no tunnel is recorded). Every other `--host`-bearing subcommand is a
+// plain verb that just needs the TCP endpoint hydrated before it runs.
+const REMOTE_LIFECYCLE = new Set(['setup', 'start', 'stop', 'status', 'reload']);
 
 /**
  * Pure platform gate. The computer subsystem is macOS-only for LOCAL driving
@@ -137,8 +144,13 @@ export function registerComputerSubcommands(program: Command): void {
 function registerStatusCommand(program: Command): void {
   program
     .command('status')
-    .description('Report install state, daemon state, and Accessibility trust')
-    .action(async () => {
+    .description('Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --host')
+    .option('--host <device>', 'Report the remote Windows daemon (tunnel + liveness) instead of the local helper')
+    .action(async (opts: { host?: string }) => {
+      if (opts.host) {
+        await reportRemoteStatus(opts.host);
+        return;
+      }
       const socketPath = resolveSocketPath();
       const installed = fs.existsSync(HELPER_APP_DEST);
       const socketUp = fs.existsSync(socketPath);
@@ -187,6 +199,110 @@ function registerStatusCommand(program: Command): void {
         await client.close();
       }
     });
+}
+
+// status --host: the local checks (app install, launchd socket, policy files)
+// are macOS concepts — a remote Windows daemon is reported from what actually
+// exists for it: the recorded tunnel and a live trust_status probe through it.
+async function reportRemoteStatus(host: string): Promise<void> {
+  console.log(`host:      ${host}`);
+  const state = readRemoteState(host);
+  if (!state) {
+    console.log('tunnel:    none');
+    console.log('daemon:    unknown (no tunnel to probe through)');
+    console.log('');
+    console.log(`Run:  agents computer start --host ${host}`);
+    process.exit(1);
+  }
+  console.log(`tunnel:    127.0.0.1:${state.localPort} -> ${state.target} (127.0.0.1:${state.remotePort})`);
+  hydrateRemoteEnvFromState(host);
+  try {
+    const client = openComputerClient();
+    try {
+      const r = await client.call('trust_status');
+      if (r.error) {
+        console.error(`error: ${r.error.code}: ${r.error.message}`);
+        process.exit(1);
+      }
+      console.log('daemon:    running');
+      console.log(`trust:     ${r.result?.trusted ? 'granted' : 'denied'} (Windows UIAutomation needs no per-app grant)`);
+      if (typeof r.result?.pid === 'number') console.log(`pid:       ${r.result.pid}`);
+      if (typeof r.result?.path === 'string' && r.result.path) console.log(`exe:       ${r.result.path}`);
+    } finally {
+      await client.close();
+    }
+  } catch (err) {
+    console.log('daemon:    unreachable');
+    console.log(`           ${(err as Error).message}`);
+    console.log('');
+    console.log(`Run:  agents computer start --host ${host}`);
+    process.exit(1);
+  }
+}
+
+// PowerShell to bounce the remote daemon: kill the running exe (tolerating
+// "not running"), then start the LOGON scheduled task that owns its
+// lifecycle. Pure so tests can assert the exact script (mirrors the
+// ssh-tunnel script builders).
+export function buildRestartTaskScript(taskName: string, exeName: string): string {
+  const procName = exeName.replace(/\.exe$/i, '');
+  return [
+    `$ErrorActionPreference = 'Stop'`,
+    `Stop-Process -Name '${procName}' -Force -ErrorAction SilentlyContinue`,
+    `Start-ScheduledTask -TaskName '${taskName}'`,
+    `Write-Output 'restarted'`,
+  ].join('; ');
+}
+
+// reload --host: the Windows daemon has no policy file to re-read (it
+// enforces no allow-list — see TrustStatus in native/computer-win/Rpc.cs), so
+// reload means bounce the daemon via its scheduled task — the way to pick up
+// a freshly pushed exe — then prove it answers through the recorded tunnel.
+async function reloadRemoteHelper(host: string): Promise<void> {
+  const { target } = await resolveRemoteDevice(host);
+  const script = buildRestartTaskScript(REMOTE_TASK_NAME, WIN_HELPER_EXE);
+  const res = sshExec(
+    target,
+    `powershell -NoProfile -NonInteractive -EncodedCommand ${encodePowershell(script)}`,
+    { timeoutMs: 60_000 },
+  );
+  if (res.code !== 0) {
+    const msg = (res.stderr || res.stdout || '').trim();
+    console.error(`restart failed on ${target}${res.timedOut ? ' (timed out)' : ''}${msg ? `: ${msg}` : ''}`);
+    process.exit(1);
+  }
+  console.log(`task:   restarted "${REMOTE_TASK_NAME}" on ${target}`);
+
+  const state = readRemoteState(host);
+  if (!state) {
+    console.log(`(no tunnel recorded — run \`agents computer start --host ${host}\` to drive it)`);
+    return;
+  }
+  hydrateRemoteEnvFromState(host);
+  // The relaunched daemon needs a beat to rebind its port; poll through the
+  // tunnel until it answers.
+  const deadline = Date.now() + 15_000;
+  let lastErr = '';
+  while (Date.now() < deadline) {
+    try {
+      const client = openComputerClient();
+      try {
+        const r = await client.call('trust_status');
+        if (!r.error && r.result) {
+          console.log(`reloaded: daemon answering (pid ${r.result.pid ?? '?'})`);
+          return;
+        }
+        lastErr = r.error ? `${r.error.code}: ${r.error.message}` : 'empty result';
+      } finally {
+        await client.close();
+      }
+    } catch (err) {
+      lastErr = (err as Error).message;
+    }
+    await sleep(500);
+  }
+  console.error(`daemon did not answer within 15s after restart${lastErr ? ` (${lastErr})` : ''}`);
+  process.exit(1);
 }
 
 // run — the embedded observe -> act -> verify agent loop. A reasoning model
@@ -622,8 +738,18 @@ function registerStartCommand(program: Command): void {
 function registerReloadCommand(program: Command): void {
   program
     .command('reload')
-    .description('Reload the allow-list policy from ~/.agents/permissions/groups/ (SIGHUP the daemon)')
-    .action(async () => {
+    .description('Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --host')
+    .option('--host <device>', 'Restart the remote Windows daemon (its scheduled task) instead of SIGHUPing the local one')
+    .action(async (opts: { host?: string }) => {
+      if (opts.host) {
+        try {
+          await reloadRemoteHelper(opts.host);
+        } catch (err) {
+          console.error(`error: ${(err as Error).message}`);
+          process.exit(1);
+        }
+        return;
+      }
       const socketPath = resolveSocketPath();
       if (!fs.existsSync(socketPath)) {
         console.error(`daemon not running (no socket at ${socketPath})`);
