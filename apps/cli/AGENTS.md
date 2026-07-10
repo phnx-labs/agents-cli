@@ -160,6 +160,12 @@ runs the real suite cheaply on Linux — `test`
 (ubuntu + macOS + Windows × Node 22/24, `ci.yml`) is cost-gated to `release/**`
 branches and `v*` tags. CI runs from `apps/cli` via `defaults.run.working-directory`.
 
+**Live Windows `--host` e2e (opt-in):** `src/lib/ssh-tunnel.e2e.test.ts` and
+`src/lib/browser/drivers/ssh.e2e.test.ts` drive a real Windows box end-to-end
+(exe push + LOGON task, tunnel + RPC, screenshot, type/get-text round-trip,
+remote browser launch/stop). Gated on `AGENTS_TEST_WIN_HOST=<registered device>`;
+both suites skip cleanly when the var is unset, so CI needs no Windows runner.
+
 **Local dev build:** `scripts/install.sh --skip-tests` builds the working tree and
 installs at `$HOME/.local/agents-cli-dev/`, symlinked into `$HOME/.local/bin/agents`.
 The npm-installed global is never touched. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
