@@ -100,6 +100,19 @@ const askAgent = agent({
   resp: 'Drop the legacy policy_v1 table, or keep it for rollback?',
   question: dropQuestion, since: '1m',
 })
+// NEEDS YOU — an idle/paused session whose last turn was a thinking block. Its verb is
+// the "Thinking..." live-activity placeholder, but the card must NOT render it (once was
+// shown twice: as the body AND the now-line). Expect: task + timeline + reply, no "Thinking...".
+const idleThinkingAgent = agent({
+  id: 'a-idle', abbr: 'CC', name: 'agents-cli-readiness', project: 'agents-cli', phase: 'waiting',
+  needs: true, verb: 'Thinking...', target: '', resp: '', since: '22h',
+  sessionId: '659a7ec6-2c1a-4f9e-b2d1-7a3c9e10ab55',
+  prompt: 'Is our agents-cli, our skills and factory tooling good enough — like remote agent execution — such that I can dispatch 100 tasks from Linear and the results will be **somewhat good**?',
+  recent: [
+    { name: 'Bash', input: { command: 'cd /Users/muqsit/src/github.com/muqsitnawaz/agents-cli' }, timestamp: new Date(Date.now() - 86_400_000).toISOString() },
+    { name: 'Read', input: { file_path: '/Users/muqsit/CleanShot 2026-07-08 at 16.07.46@2x.png' }, timestamp: new Date(Date.now() - 86_460_000).toISOString() },
+  ],
+})
 
 // RUNNING lane.
 const running: FloorAgent[] = [
@@ -230,9 +243,10 @@ function Feed() {
       />
 
       <div className="feed-sec attn">
-        <Icon name="alert" size={11} /> NEEDS YOU · 4
+        <Icon name="alert" size={11} /> NEEDS YOU · 5
         <span className="ln" />
       </div>
+      <FeedItem agent={idleThinkingAgent} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
       <FeedItem agent={twinA} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
       <FeedItem agent={twinB} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
       <FeedItem agent={askAgent} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
