@@ -8,7 +8,6 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
 import Database from '../sqlite.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
 
@@ -1019,47 +1018,55 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
 
   const events: SessionEvent[] = [];
 
+  // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
+  // works on every OS — the CLI is absent on Windows.
+  let rows: Array<{ role: unknown; part_type: unknown; part_data: unknown; time_created: unknown }>;
+  let db: Database.Database | undefined;
   try {
-    // Query messages with their parts, ordered chronologically.
-    // Each row: msg_role ||| part_type ||| part_data (truncated for tool output) ||| msg_time
+    // Query messages with their parts, ordered chronologically. Tool parts are
+    // truncated to keep large tool outputs from bloating memory; the session id
+    // is bound as a parameter rather than interpolated.
     const query = `
       SELECT
-        json_extract(m.data, '$.role'),
-        json_extract(p.data, '$.type'),
+        json_extract(m.data, '$.role') AS role,
+        json_extract(p.data, '$.type') AS part_type,
         CASE
           WHEN json_extract(p.data, '$.type') = 'tool'
           THEN substr(p.data, 1, 2000)
           ELSE p.data
-        END,
-        m.time_created
+        END AS part_data,
+        m.time_created AS time_created
       FROM message m
       JOIN part p ON p.message_id = m.id AND p.session_id = m.session_id
-      WHERE m.session_id = '${sessionId.replace(/'/g, "''")}'
+      WHERE m.session_id = ?
       ORDER BY m.time_created ASC, p.time_created ASC;
     `.replace(/\n/g, ' ');
 
-    const out = execFileSync('sqlite3', ['-separator', '|||', dbPath, query], {
-      encoding: 'utf-8',
-      timeout: 10000,
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    db = new Database(dbPath);
+    rows = db.prepare(query).all(sessionId) as Array<{
+      role: unknown;
+      part_type: unknown;
+      part_data: unknown;
+      time_created: unknown;
+    }>;
+  } catch {
+    /* DB not accessible, sqlite module unavailable, or query failed */
+    return events;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* best-effort close */
+    }
+  }
 
-    for (const line of out.split('\n')) {
-      if (!line.trim()) continue;
+  try {
+    for (const row of rows) {
+      const role = typeof row.role === 'string' ? row.role : '';
+      const partType = typeof row.part_type === 'string' ? row.part_type : '';
+      const partDataStr = typeof row.part_data === 'string' ? row.part_data : '';
 
-      const sepIdx1 = line.indexOf('|||');
-      if (sepIdx1 === -1) continue;
-      const sepIdx2 = line.indexOf('|||', sepIdx1 + 3);
-      if (sepIdx2 === -1) continue;
-      const sepIdx3 = line.lastIndexOf('|||');
-
-      const role = line.slice(0, sepIdx1);
-      const partType = line.slice(sepIdx1 + 3, sepIdx2);
-      const partDataStr = line.slice(sepIdx2 + 3, sepIdx3);
-      const timeStr = line.slice(sepIdx3 + 3);
-
-      const timeMs = parseInt(timeStr, 10);
+      const timeMs = typeof row.time_created === 'number' ? row.time_created : parseInt(String(row.time_created), 10);
       const timestamp = isNaN(timeMs) ? new Date().toISOString() : new Date(timeMs).toISOString();
 
       let partData: any;
@@ -1129,7 +1136,7 @@ export function parseOpenCode(filePath: string): SessionEvent[] {
       }
     }
   } catch {
-    /* DB not accessible or query failed */
+    /* malformed row payload — return what we parsed so far */
   }
 
   return events;
