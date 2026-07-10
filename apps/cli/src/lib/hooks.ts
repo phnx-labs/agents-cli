@@ -163,10 +163,12 @@ export type HookEntry = { name: string; scriptPath: string; dataFile?: string };
 /**
  * Resolve the command path to register for a hook.
  *
- * Returns either the raw script path (no `cache:` set, legacy behavior) or
- * the path to a generated caching/timing shim. The shim is written as a
- * side effect when `cache:` is configured. The agent-native settings file
- * gets the same shape either way — just a different command path.
+ * Returns either the raw script path (neither `cache:` nor `matches:` set,
+ * legacy behavior) or the path to a generated wrapper shim. The shim is written
+ * as a side effect when `cache:` and/or `matches:` is configured — it enforces
+ * the `matches:` gate at fire time and layers the caching/timing machinery when
+ * `cache:` is set. The agent-native settings file gets the same shape either
+ * way — just a different command path.
  */
 function resolveHookCommand(
   name: string,
@@ -177,13 +179,20 @@ function resolveHookCommand(
   if (!scriptPath) return null;
   if (!isValidHookShimName(name)) return null;
   const cache = parseCacheConfig(hookDef.cache);
-  if (!cache) {
-    // No caching opted in — make sure a previously generated shim from an
-    // earlier `cache:` config is gone so the JSONL doesn't keep claiming hits.
+  const matches = hookDef.matches;
+  const hasMatches = matches != null && Object.keys(matches).length > 0;
+  if (!cache && !hasMatches) {
+    // No caching and no matches: gate opted in — make sure a previously
+    // generated shim from an earlier `cache:`/`matches:` config is gone so the
+    // JSONL doesn't keep claiming hits.
     removeHookShim(name);
     return toPortableCommand(scriptPath);
   }
-  return toPortableCommand(generateHookShim({ name, scriptPath, cache }));
+  // A shim is generated when the hook opts into caching and/or declares
+  // `matches:` predicates. The shim enforces the `matches:` gate at fire time
+  // (skipping the script when predicates don't hold) and, when `cache:` is set,
+  // layers the cache/timing machinery on top.
+  return toPortableCommand(generateHookShim({ name, scriptPath, cache, matches }));
 }
 
 /**

@@ -247,7 +247,7 @@ describe('killRemoteBrowser on stop/cleanup (#559)', () => {
     const p = killRemoteBrowser('me', 'win-mini', 'windows', 9222);
     const rec = cp.calls.at(-1)!;
     expect(rec.cmd).toBe('ssh');
-    expect(rec.args[0]).toBe('me@win-mini');
+    expect(rec.args).toContain('me@win-mini');
     // The remote command is the exact encoded Get-NetTCPConnection -> Stop-Process
     // script, so `browser stop` reaps the WMI-spawned browser (not just the tunnel).
     expect(rec.args).toContain(buildKillCmd('windows', 9222));
@@ -260,6 +260,49 @@ describe('killRemoteBrowser on stop/cleanup (#559)', () => {
     const rec = cp.calls.at(-1)!;
     expect(rec.args).toContain(buildKillCmd('posix', 9222));
     rec.child.emit('close', 0);
+    await p;
+  });
+});
+
+describe('raw-ssh spawns reuse SSH_OPTS so unreachable hosts fail fast (#746)', () => {
+  afterEach(() => {
+    cp.calls.length = 0;
+  });
+
+  // The two raw-ssh call sites (ensureRemoteBrowser, runSSHCommand-via-
+  // killRemoteBrowser) previously passed only `-o BatchMode=yes` — no
+  // ConnectTimeout — so a dropped SYN to an unreachable host hung on the OS
+  // default (~127s). They now compose the shared hardened baseline.
+  const hardened = (args: string[]) => {
+    const target = args.find((a) => a.includes('@'))!;
+    const targetIdx = args.indexOf(target);
+    // ConnectTimeout is present and bounds the connect.
+    expect(args).toContain('ConnectTimeout=10');
+    expect(args).toContain('BatchMode=yes');
+    // Every hardened option (an `-o` and its value) precedes the target — on
+    // BSD getopt (macOS) an option after the target is swallowed into the
+    // remote command instead of applied.
+    const optValueIdx = args.indexOf('ConnectTimeout=10');
+    const batchIdx = args.indexOf('BatchMode=yes');
+    expect(optValueIdx).toBeLessThan(targetIdx);
+    expect(batchIdx).toBeLessThan(targetIdx);
+    // The remote command is the LAST arg (after the target).
+    expect(targetIdx).toBe(args.length - 2);
+  };
+
+  it('ensureRemoteBrowser composes SSH_OPTS before the target', async () => {
+    const p = ensureRemoteBrowser('me', '203.0.113.1', 'chrome', 9222, 'posix');
+    const rec = cp.calls.at(-1)!;
+    hardened(rec.args);
+    rec.child.emit('close', 0); // settle so the 2s launch-window timer is cleared
+    await p;
+  });
+
+  it('killRemoteBrowser (runSSHCommand) composes SSH_OPTS before the target', async () => {
+    const p = killRemoteBrowser('me', '203.0.113.1', 'posix', 9222);
+    const rec = cp.calls.at(-1)!;
+    hardened(rec.args);
+    rec.child.emit('close'); // settle so the 3s kill timer is cleared
     await p;
   });
 });

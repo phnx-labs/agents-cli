@@ -18,7 +18,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import type { HookCache, HookCacheConfig, HookCacheKey, HookCachePrefetch } from '../types.js';
+import type { HookCache, HookCacheConfig, HookCacheKey, HookCachePrefetch, HookMatches } from '../types.js';
 import { getHookCacheDir, getHookShimsDir, getLogsDir } from '../state.js';
 
 /**
@@ -117,18 +117,25 @@ export interface HookShimPaths {
 /**
  * Generate (or refresh) the shim script for a hook. Idempotent — only writes
  * when the content differs from what's on disk. Returns the absolute shim path.
+ *
+ * A shim is generated when the hook opts into caching (`cache`) and/or declares
+ * `matches:` predicates. When `matches` is present the shim gates execution on
+ * those predicates before running the underlying script (see `renderShim`);
+ * when `cache` is absent the shim is a thin pass-through wrapper that only
+ * applies the gate and forwards stdin/stdout unchanged.
  */
 export function generateHookShim(args: {
   name: string;
   scriptPath: string;
-  cache: HookCacheConfig;
+  cache?: HookCacheConfig | null;
+  matches?: HookMatches;
   paths?: HookShimPaths;
 }): string {
   const shimsDir = args.paths?.shimsDir ?? getHookShimsDir();
   const cacheDir = args.paths?.cacheDir ?? getHookCacheDir();
   const logsDir = args.paths?.logsDir ?? getLogsDir();
   const shimPath = resolveContainedHookShimPath(shimsDir, args.name);
-  const content = renderShim(args.name, args.scriptPath, args.cache, { cacheDir, logsDir });
+  const content = renderShim(args.name, args.scriptPath, args.cache ?? null, args.matches, { cacheDir, logsDir });
   fs.mkdirSync(shimsDir, { recursive: true });
 
   let existing: string | null = null;
@@ -145,30 +152,215 @@ export function generateHookShim(args: {
 }
 
 /**
+ * The matches: gate, as a self-contained Python program run once per fire.
+ *
+ * Reads the hook's `matches:` block from $MATCHES_JSON and the event JSON from
+ * stdin, then prints `FIRE` or `SKIP`. A faithful port of `shouldFire()` in
+ * src/lib/hooks/match.ts — all declared predicates AND together, an empty block
+ * always fires, and the same ReDoS guard (`isSafeHookRegex`) rejects unsafe
+ * regexes to `SKIP`. Kept in double-quotes/apostrophe-free so it survives being
+ * embedded in a single-quoted `python -c '...'` argument in the shim. Behavioural
+ * parity with shouldFire() is pinned by a conformance test (match-parity.test.ts).
+ *
+ * On any exception it does NOT print SKIP — the shim treats a missing/garbled
+ * verdict as FIRE (fail-open), so a broken gate never silently disables a hook.
+ */
+const GATE_PY = `import json, os, re, subprocess, sys
+
+def arr(v):
+    if v is None:
+        return []
+    return v if isinstance(v, list) else [v]
+
+def max_group_depth(src):
+    depth = 0
+    mx = 0
+    escaped = False
+    in_class = False
+    for ch in src:
+        if escaped:
+            escaped = False
+            continue
+        if ch == chr(92):
+            escaped = True
+            continue
+        if ch == "[":
+            in_class = True
+            continue
+        if ch == "]":
+            in_class = False
+            continue
+        if in_class:
+            continue
+        if ch == "(":
+            depth += 1
+            if depth > mx:
+                mx = depth
+        elif ch == ")" and depth > 0:
+            depth -= 1
+    return mx
+
+_NESTED = re.compile(r"\\((?:\\?:)?[^)]*[*+][?+*{,\\d}]*[^)]*\\)\\s*(?:[+*]|\\{\\d*,?\\d*\\})")
+
+def is_safe(src):
+    if len(src) > 200:
+        return False
+    if max_group_depth(src) > 3:
+        return False
+    if _NESTED.search(src):
+        return False
+    return True
+
+def compile_rx(src):
+    if not is_safe(src):
+        return None
+    try:
+        return re.compile(src)
+    except re.error:
+        return None
+
+def find_root(start):
+    d = os.path.abspath(start)
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+def git_dirty(cwd):
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        return len(out.stdout.decode().strip()) > 0
+    except Exception:
+        return False
+
+def should_fire():
+    m = json.loads(os.environ.get("MATCHES_JSON") or "{}")
+    if not m:
+        return True
+    try:
+        inp = json.load(sys.stdin)
+    except Exception:
+        inp = {}
+    cwd = inp.get("cwd") or os.getcwd()
+
+    v = m.get("prompt_contains")
+    if v is not None:
+        if v not in (inp.get("prompt") or ""):
+            return False
+
+    v = m.get("prompt_matches")
+    if v is not None:
+        rx = compile_rx(v)
+        if rx is None or not rx.search(inp.get("prompt") or ""):
+            return False
+
+    v = m.get("tool_name")
+    if v is not None:
+        allowed = arr(v)
+        if allowed:
+            tn = inp.get("tool_name")
+            if not tn or tn not in allowed:
+                return False
+
+    v = m.get("tool_args_match")
+    if v is not None:
+        ta = inp.get("tool_args")
+        ser = ta if isinstance(ta, str) else json.dumps(ta if ta is not None else "", separators=(",", ":"))
+        rx = compile_rx(v)
+        if rx is None or not rx.search(ser):
+            return False
+
+    v = m.get("cwd_includes")
+    if v is not None:
+        needles = arr(v)
+        if needles and not any(n in cwd for n in needles):
+            return False
+
+    v = m.get("project_has")
+    if v is not None:
+        root = find_root(cwd)
+        if not root or not os.path.exists(os.path.join(root, v)):
+            return False
+
+    v = m.get("git_dirty")
+    if v is not None:
+        if bool(v) != git_dirty(cwd):
+            return False
+
+    return True
+
+print("FIRE" if should_fire() else "SKIP")
+`;
+
+/**
+ * Gate-only pass-through tail: no caching, just run the underlying script with
+ * stdin forwarded and stdout/exit code propagated, plus one timing log line.
+ * Used when a hook declares \`matches:\` but no \`cache:\`.
+ */
+const PASSTHROUGH_TAIL = `now_ns() { "$PY" -c 'import time; print(int(time.time()*1e9))'; }
+START_NS=$(now_ns)
+EXIT=0
+if printf '%s' "$STDIN_PAYLOAD" | "$SOURCE"; then
+  EXIT=0
+else
+  EXIT=$?
+fi
+END_NS=$(now_ns)
+MS=$(( (END_NS - START_NS) / 1000000 ))
+TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+LOG_FILE="$LOGS_DIR/events-$(date -u +%Y-%m-%d).jsonl"
+printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":%d,"cache":"%s","exit":%d}\\n' \\
+  "$TS" "$HOOK_NAME" "$MS" "none" "$EXIT" >>"$LOG_FILE" 2>/dev/null || true
+
+exit "$EXIT"`;
+
+/**
  * Render the bash shim. Bash 3.2-compatible (macOS default). Uses Python for
  * hashing + monotonic-ish nanosecond timing + portable mtime, resolved at
  * runtime (python3, then python) so a Windows Microsoft Store `python3` alias
  * stub — which exits non-zero without running — doesn't silently break caching.
+ *
+ * When `matches` is set, an early gate block evaluates the `matches:` predicates
+ * against the event JSON on stdin and exits 0 without running the script when
+ * they don't hold — this is the runtime enforcement of the documented `matches:`
+ * gating (mirrors `shouldFire()` in match.ts). When `cache` is null the shim is
+ * a gate-only pass-through: it forwards stdin to the script and its stdout back,
+ * with no cache read/write.
  */
 function renderShim(
   name: string,
   scriptPath: string,
-  cache: HookCacheConfig,
+  cache: HookCacheConfig | null,
+  matches: HookMatches | undefined,
   paths: { cacheDir: string; logsDir: string }
 ): string {
-  const ttl = typeof cache.ttl === 'number' ? cache.ttl : (parseDuration(cache.ttl) ?? 0);
-  const key: HookCacheKey = cache.key ?? 'global';
-  const prefetch: HookCachePrefetch = cache.prefetch ?? 'none';
+  const ttl = cache ? (typeof cache.ttl === 'number' ? cache.ttl : (parseDuration(cache.ttl) ?? 0)) : 0;
+  const key: HookCacheKey = cache?.key ?? 'global';
+  const prefetch: HookCachePrefetch = cache?.prefetch ?? 'none';
   const { cacheDir, logsDir } = paths;
+
+  const hasMatches = matches != null && Object.keys(matches).length > 0;
+  const matchesJson = hasMatches ? JSON.stringify(matches) : '';
 
   // sh-escape: wrap in single quotes, escape any embedded single quotes.
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+  const cacheHeader = cache
+    ? `# Cache: key=${key} ttl=${ttl}s prefetch=${prefetch}`
+    : `# Cache: none (gate-only pass-through)`;
+  const matchesHeader = hasMatches ? `\n# Matches: ${matchesJson}` : '';
 
   return `#!/usr/bin/env bash
 # GENERATED by agents-cli. Do not edit — re-run \`agents hooks sync\` to refresh.
 # Hook: ${name}
 # Source: ${scriptPath}
-# Cache: key=${key} ttl=${ttl}s prefetch=${prefetch}
+${cacheHeader}${matchesHeader}
 set -u
 
 HOOK_NAME=${q(name)}
@@ -178,6 +370,7 @@ LOGS_DIR=${q(logsDir)}
 TTL=${ttl}
 PREFETCH=${q(prefetch)}
 KEY_MODE=${q(key)}
+MATCHES_JSON=${q(matchesJson)}
 
 mkdir -p "$CACHE_DIR" "$LOGS_DIR"
 
@@ -197,7 +390,34 @@ done
 # Read stdin once (Claude/Codex/Gemini pass JSON on stdin to every hook).
 STDIN_PAYLOAD="$(cat || true)"
 
-# Portable sha1 — \`shasum\` is Perl, missing on minimal Linux images;
+# --- matches: gate (issue #744 / RUSH-1506) -------------------------------
+# Enforce the hook's declared \`matches:\` predicates at fire time. Mirrors
+# shouldFire() in src/lib/hooks/match.ts: all declared predicates AND together;
+# an empty/absent block always fires. When the predicates don't hold we exit 0
+# WITHOUT running the script (a skipped hook is not an error). Fail-open: any
+# gate-eval error runs the script, so a broken predicate can never silently
+# disable a safety hook (e.g. git-guard).
+if [ -n "$MATCHES_JSON" ]; then
+  _GATE="$(printf '%s' "$STDIN_PAYLOAD" | MATCHES_JSON="$MATCHES_JSON" "$PY" -c ${q(GATE_PY)} 2>/dev/null || printf FIRE)"
+  [ -z "$_GATE" ] && _GATE=FIRE
+  if [ "$_GATE" = SKIP ]; then
+    _TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    _LOG_FILE="$LOGS_DIR/events-$(date -u +%Y-%m-%d).jsonl"
+    printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":0,"cache":"skip","exit":0}\\n' \\
+      "$_TS" "$HOOK_NAME" >>"$_LOG_FILE" 2>/dev/null || true
+    exit 0
+  fi
+fi
+${cache ? CACHE_TAIL : PASSTHROUGH_TAIL}
+`;
+}
+
+/**
+ * Cache tail: the full cache lookup / stale-while-revalidate / timing machinery.
+ * Emitted only when the hook opts into \`cache:\`. (When only \`matches:\` is set,
+ * PASSTHROUGH_TAIL runs instead — no cache read/write.)
+ */
+const CACHE_TAIL = `# Portable sha1 — \`shasum\` is Perl, missing on minimal Linux images;
 # \`sha1sum\` is coreutils, missing on macOS. Truncate to 12 hex chars.
 sha1_12() { "$PY" -c 'import hashlib,sys; print(hashlib.sha1(sys.stdin.read().encode()).hexdigest()[:12])'; }
 
@@ -286,7 +506,6 @@ printf '{"ts":"%s","event":"hook.fire","hook":"%s","ms":%d,"cache":"%s","exit":%
 
 exit "$EXIT"
 `;
-}
 
 /**
  * Remove a hook's shim. Called by the registrar's garbage collection when a
