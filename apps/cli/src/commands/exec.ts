@@ -16,6 +16,7 @@ import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
+import { warnUnpushedWork } from '../lib/warn-unpushed.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -1661,6 +1662,13 @@ export function registerRunCommand(program: Command): void {
         }
         cleanupWorkflowMcpConfig();
         cleanupWorkflowSubagents();
+        // Surface committed-but-unpushed work a headless writable run left
+        // behind, so it isn't silently stranded in a worktree. Advisory only,
+        // never throws; skipped for interactive runs (the human sees the shell)
+        // and read-only plan mode (can't commit).
+        if (mode !== 'plan' && !resolveInteractive(execOptions)) {
+          await warnUnpushedWork(cwd);
+        }
         // Governance chokepoint (#347): every dispatched run finalizes here.
         // ONE tamper-evident audit record per run — non-fatal by contract.
         recordDispatchedRun({ agent: ranAgent, version: ranVersion ?? 'unknown', mode, cwd, exitCode });
