@@ -742,7 +742,12 @@ function registerReloadCommand(program: Command): void {
     .option('--host <device>', 'Restart the remote Windows daemon (its scheduled task) instead of SIGHUPing the local one')
     .action(async (opts: { host?: string }) => {
       if (opts.host) {
-        await reloadRemoteHelper(opts.host);
+        try {
+          await reloadRemoteHelper(opts.host);
+        } catch (err) {
+          console.error(`error: ${(err as Error).message}`);
+          process.exit(1);
+        }
         return;
       }
       const socketPath = resolveSocketPath();
