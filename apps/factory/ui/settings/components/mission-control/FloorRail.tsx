@@ -28,11 +28,16 @@ export interface RailScopeState {
  * Which rail button reads as active for the current scope. Queue follows the center;
  * the agent scopes only light while the agents center is showing. 'all' is the
  * everything-else state: agents center with no project/host/needs narrowing.
+ *
+ * At most one button lights for ANY state: onScope keeps the smart views mutually
+ * exclusive (scoping a project/host drops the needs chip and vice versa), and this
+ * function is defensive about combined states anyway — a project/host scope wins
+ * over a lingering needs chip, so 'needs' only lights with no other narrowing.
  */
 export function railActive(key: RailKey, s: RailScopeState): boolean {
   if (key === 'queue') return s.center === 'backlog'
   if (s.center !== 'agents') return false
-  if (key === 'needs') return s.needsOnly
+  if (key === 'needs') return s.needsOnly && s.projFilter == null && s.hostFilter == null
   if (key === 'projects') return s.projFilter != null
   if (key === 'hosts') return s.hostFilter != null
   return !s.needsOnly && s.projFilter == null && s.hostFilter == null

@@ -81,6 +81,25 @@ describe('railActive', () => {
     // Other centers (host detail, projects manage) do not claim the scope buttons.
     expect(railActive('projects', { ...base, center: 'projects', projFilter: 'swarmify' })).toBe(false)
   })
+
+  test('at most one button lights for any combined state (prix-cloud repro)', () => {
+    // needs chip lingering alongside a project or host scope: the scope wins.
+    const keys = ['all', 'needs', 'queue', 'projects', 'hosts'] as const
+    const states: RailScopeState[] = [
+      { ...base, needsOnly: true, projFilter: 'swarmify' },
+      { ...base, needsOnly: true, hostFilter: 'zion' },
+      { ...base, needsOnly: true, projFilter: 'swarmify', center: 'backlog' },
+      { ...base, needsOnly: true },
+      base,
+    ]
+    for (const s of states) {
+      const lit = keys.filter((k) => railActive(k, s))
+      expect(lit.length).toBeLessThanOrEqual(1)
+    }
+    expect(railActive('projects', { ...base, needsOnly: true, projFilter: 'swarmify' })).toBe(true)
+    expect(railActive('needs', { ...base, needsOnly: true, projFilter: 'swarmify' })).toBe(false)
+    expect(railActive('needs', { ...base, needsOnly: true, hostFilter: 'zion' })).toBe(false)
+  })
 })
 
 describe('railProjectRows', () => {

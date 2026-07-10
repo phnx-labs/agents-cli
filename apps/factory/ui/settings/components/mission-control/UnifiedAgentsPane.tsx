@@ -1631,13 +1631,16 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       const h = value.slice(5)
       setCenter('agents'); setProjFilter(null)
       setHostFilter((cur) => (cur === h ? null : h)) // click again to clear
+      // Scoping to a host replaces the needs narrowing, mirroring how '__needs'
+      // replaces the project/host scope — the smart views are mutually exclusive.
+      setStatusChips((cur) => cur.filter((c) => c !== 'needs'))
       return
     }
     setCenter('agents')
     setHostFilter(null)
     setProjFilter(value || null)
-    // 'All agents' ('') also drops the needs narrowing — All must mean everything.
-    if (!value) setStatusChips((cur) => cur.filter((c) => c !== 'needs'))
+    // Project scope and 'All agents' ('') both drop the needs narrowing too.
+    setStatusChips((cur) => cur.filter((c) => c !== 'needs'))
   }, [])
 
   // Selecting an agent opens its detail rail — the SAME setRightOpen(true) that
