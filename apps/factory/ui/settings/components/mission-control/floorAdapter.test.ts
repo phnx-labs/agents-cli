@@ -122,12 +122,24 @@ describe('toFloorAgentFromUnified', () => {
       }),
       { pinned: new Set(), workspaceRepo: 'swarmify', nowMs: NOW },
     )
-    // no agent.last_messages, so resp falls back to activity 'idle' -> not a question,
-    // but phase is waiting from the flag; needs is still true.
+    // no agent.last_messages, so resp is empty (the now-line, not the body, carries the
+    // live activity); phase is waiting from the flag; needs is still true.
     expect(a.phase).toBe('waiting')
     expect(a.needs).toBe(true)
     expect(a.host).toBe('this-mac')
     expect(a.abbr).toBe('CC')
+  })
+
+  test('resp is empty (not the live-activity placeholder) when there is no last message', () => {
+    // Regression: resp used to fall back to u.activity, so a placeholder now-line
+    // ("Thinking...") rendered twice — once as the card body, once as the verb nowline.
+    const a = toFloorAgentFromUnified(
+      baseUnified({ activity: 'Thinking...', status: 'idle', active: false, agent: null }),
+      { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
+    )
+    expect(a.resp).toBe('')
+    // The activity still reaches the card via the verb/target now-line, not the body.
+    expect(a.verb).toBe('Thinking...')
   })
 
   test('local agent keeps host this-mac (routing) but takes hostLabel from localHostName (display)', () => {
