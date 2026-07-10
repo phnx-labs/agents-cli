@@ -2452,28 +2452,6 @@ function getOpenClawWorkspaceMap(): Map<string, string> {
 // Utilities
 // ---------------------------------------------------------------------------
 
-/** Read up to maxLines non-empty lines from the beginning of a file. */
-export function readFirstLines(filePath: string, maxLines: number): Promise<string[]> {
-  return new Promise((resolve) => {
-    const lines: string[] = [];
-    const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
-
-    rl.on('line', (line) => {
-      if (line.trim()) {
-        lines.push(line);
-      }
-      if (lines.length >= maxLines) {
-        rl.close();
-        stream.destroy();
-      }
-    });
-
-    rl.on('close', () => resolve(lines));
-    rl.on('error', () => resolve(lines));
-  });
-}
-
 /** Compute the SHA-256 hex digest of a string. */
 function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');

@@ -382,52 +382,6 @@ export function buildDispatchBody(input: {
   return body;
 }
 
-/** A single account registered in Rush Cloud's multi-account rotation pool. */
-export interface RemoteAccount {
-  id: string;
-  provider: string;
-  email: string | null;
-  subscription_type: string | null;
-  five_hour_pct: number | null;
-  seven_day_pct: number | null;
-  usage_fetched_at: string | null;
-  created_at: string;
-}
-
-/** Fetch all Claude accounts in this user's Rush Cloud rotation pool (no tokens). */
-export async function listRemoteAccounts(): Promise<RemoteAccount[]> {
-  const token = readToken();
-  const res = await api('GET', '/api/v1/cloud-accounts', token);
-  if (!res.ok) {
-    throw new Error(`Failed to list accounts (${res.status}): ${sanitizeErrorBody(await res.text())}`);
-  }
-  const data = await res.json() as { accounts: RemoteAccount[] };
-  return data.accounts ?? [];
-}
-
-/**
- * Register a CLAUDE_CODE_OAUTH_TOKEN with Rush Cloud's rotation pool.
- * The server validates the token against the Anthropic usage API and stores it
- * encrypted in Vault. Returns the account metadata (no token).
- */
-export async function addRemoteAccount(provider: string, pastedToken: string): Promise<RemoteAccount & { five_hour_pct: number | null; seven_day_pct: number | null }> {
-  const token = readToken();
-  const res = await api('POST', '/api/v1/cloud-accounts', token, { provider, token: pastedToken });
-  if (!res.ok) {
-    throw new Error(`Failed to add account (${res.status}): ${sanitizeErrorBody(await res.text())}`);
-  }
-  return await res.json() as RemoteAccount & { five_hour_pct: number | null; seven_day_pct: number | null };
-}
-
-/** Remove a Claude account from Rush Cloud's rotation pool by its ID. */
-export async function removeRemoteAccount(id: string): Promise<void> {
-  const token = readToken();
-  const res = await api('DELETE', `/api/v1/cloud-accounts/${encodeURIComponent(id)}`, token);
-  if (!res.ok) {
-    throw new Error(`Failed to remove account (${res.status}): ${sanitizeErrorBody(await res.text())}`);
-  }
-}
-
 export class RushCloudProvider implements CloudProvider {
   id = 'rush' as const;
   name = 'Rush Cloud';
