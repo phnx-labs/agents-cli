@@ -281,18 +281,3 @@ export function getAgentResources(
     workflows,
   };
 }
-
-/**
- * Get resources for all agents.
- */
-export function getAllAgentResources(
-  agentIds: AgentId[],
-  options: GetAgentResourcesOptions & { cliStates?: Record<AgentId, { installed: boolean }> } = {}
-): AgentResources[] {
-  const { cliStates, ...restOptions } = options;
-
-  return agentIds.map((agentId) => {
-    const cliInstalled = cliStates?.[agentId]?.installed ?? true;
-    return getAgentResources(agentId, { ...restOptions, cliInstalled });
-  });
-}
