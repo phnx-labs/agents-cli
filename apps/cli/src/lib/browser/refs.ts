@@ -1,4 +1,5 @@
 import type { CDPClient } from './cdp.js';
+import { truncate } from '../format.js';
 
 export interface RefOpts {
   interactive?: boolean;
@@ -265,10 +266,6 @@ export async function getRefs(
   return { refs: lines.join('\n'), nodeMap, opts: { interactive, limit } };
 }
 
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
-}
 
 export async function resolveRefToCoords(
   cdp: CDPClient,

@@ -8,6 +8,7 @@
 
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
+import { visibleWidth, padVisible, readStdinSync } from '../lib/format.js';
 import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/width.js';
 import * as fs from 'fs';
 import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
@@ -186,21 +187,6 @@ async function resolveVault(vaultOpt: string | undefined): Promise<string> {
 }
 
 /** Read all available data from stdin synchronously, trimmed. */
-function readStdinSync(): string {
-  const chunks: Buffer[] = [];
-  const buf = Buffer.alloc(65536);
-  while (true) {
-    let bytesRead: number;
-    try {
-      bytesRead = fs.readSync(0, buf, 0, buf.length, null);
-    } catch {
-      break;
-    }
-    if (bytesRead === 0) break;
-    chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
-  }
-  return Buffer.concat(chunks).toString('utf-8').trim();
-}
 
 /**
  * Read the raw `.env` text for `import --from <path|->`. A `-` reads the .env
@@ -323,17 +309,6 @@ async function browseRemote(targets: string[], args: string[], tty: boolean): Pr
 }
 
 /** Strip ANSI escape sequences so padding can be computed on visible width. */
-function visibleWidth(s: string): number {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1b\[[0-9;]*m/g, '').length;
-}
-
-/** padEnd that respects ANSI color codes (chalk-wrapped strings have invisible bytes). */
-function padVisible(s: string, n: number): string {
-  const w = visibleWidth(s);
-  if (w >= n) return s;
-  return s + ' '.repeat(n - w);
-}
 
 /** Render an ISO-8601 timestamp as a compact relative age: "now", "5m", "1h", "3d", "2w", "4mo", "1y". */
 function relativeAge(iso: string): string {

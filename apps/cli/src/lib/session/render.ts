@@ -8,6 +8,7 @@
  */
 
 import chalk from 'chalk';
+import { truncate } from '../format.js';
 import type { SessionEvent } from './types.js';
 import { summarizeToolUse } from './parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
@@ -387,13 +388,13 @@ function renderCommandsSection(
         if (catEntry.signal === 'mid') {
           // Mid signal: display the bucket key (e.g. ssh→openclaw browser) with aggregate count
           const countSuffix = v.count > 1 ? chalk.gray(` × ${v.count}`) : '';
-          lines.push(`    ${chalk.cyan(truncateCmd(key, 80))}${countSuffix}`);
+          lines.push(`    ${chalk.cyan(truncate(key, 80))}${countSuffix}`);
         } else {
           // High signal: display distinct raw sample commands
           const distinctSamples = pickDistinct(v.samples, 3);
           for (const sample of distinctSamples) {
             const countSuffix = v.count > 1 ? chalk.gray(` × ${v.count}`) : '';
-            lines.push(`    ${chalk.cyan(truncateCmd(sample, 80))}${countSuffix}`);
+            lines.push(`    ${chalk.cyan(truncate(sample, 80))}${countSuffix}`);
           }
         }
         shown++;
@@ -405,7 +406,7 @@ function renderCommandsSection(
     lines.push(`  ${chalk.dim('Other')} ${chalk.gray(`(${otherCount})`)}`);
     for (const [, v] of Array.from(otherKeys.entries()).slice(0, 5)) {
       const countSuffix = v.count > 1 ? chalk.gray(` × ${v.count}`) : '';
-      lines.push(`    ${chalk.cyan(truncateCmd(v.samples[0] ?? '', 80))}${countSuffix}`);
+      lines.push(`    ${chalk.cyan(truncate(v.samples[0] ?? '', 80))}${countSuffix}`);
     }
   }
 
@@ -425,9 +426,6 @@ function pickDistinct(samples: string[], max: number): string[] {
   return result.length > 0 ? result : samples.slice(0, max);
 }
 
-function truncateCmd(cmd: string, max: number): string {
-  return cmd.length <= max ? cmd : cmd.slice(0, max - 1) + '…';
-}
 
 // ── File grouping ─────────────────────────────────────────────────────────────
 

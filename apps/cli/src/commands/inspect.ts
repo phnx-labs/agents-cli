@@ -19,6 +19,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { truncate, termLink } from '../lib/format.js';
 import * as yaml from 'yaml';
 import type { AgentId, CapabilityName, DiscoveredPlugin, ManifestHook, HookMatches, HookCache } from '../lib/types.js';
 import { AGENTS, getCliState, resolveAgentName } from '../lib/agents.js';
@@ -1325,12 +1326,6 @@ function readFirstProseLine(p: string): string {
 
 // ─── OSC-8 + path helpers ────────────────────────────────────────────────────
 
-function termLink(text: string, filePath: string): string {
-  if (!filePath || !process.stdout.isTTY) return text;
-  const url = `file://${filePath}`;
-  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
-}
-
 function linkTarget(p: string): string {
   if (!p) return '';
   try {
@@ -1364,7 +1359,3 @@ function safeCountSessions(agent: AgentId): number {
   try { return countSessionsInScope({ agent: agent as SessionAgentId }); } catch { return 0; }
 }
 
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + '…';
-}

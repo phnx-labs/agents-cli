@@ -6,16 +6,13 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { die } from '../lib/format.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
 import { betaEnableHint, isBetaEnabled } from '../lib/beta.js';
 import { insertTask } from '../lib/cloud/store.js';
 
-function die(msg: string, code = 1): never {
-  console.error(chalk.red(msg));
-  process.exit(code);
-}
 
 function requireFactoryUrl(): string {
   const url = process.env.FACTORY_FLOOR_URL;

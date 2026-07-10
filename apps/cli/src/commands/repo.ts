@@ -12,6 +12,7 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { visibleWidth, padVisible } from '../lib/format.js';
 import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -281,16 +282,6 @@ async function diffResourceEntries(
     out.push({ action, file });
   }
   return out;
-}
-
-/** Visible character width of a string with embedded ANSI color codes. */
-function visibleWidth(s: string): number {
-  return s.replace(/\[[0-9;]*m/g, '').length;
-}
-
-/** Pad string with trailing spaces to a target visible column width. */
-function padVisible(s: string, width: number): string {
-  return s + ' '.repeat(Math.max(0, width - visibleWidth(s)));
 }
 
 /** One side of a divergence: the resource delta plus the raw commit count (fallback). */
