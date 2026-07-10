@@ -88,6 +88,8 @@ const REMOTE_POLL_MS = 45_000
 interface FloorPrefs {
   plain: boolean
   sidebar: boolean
+  // Collapsed icon rail (true, the default) vs the full text sidebar.
+  rail: boolean
   right: boolean
   pinned: string[]
   // Ordered pinned host names for the HOSTS sidebar. null = never customized
@@ -96,7 +98,7 @@ interface FloorPrefs {
 }
 
 function defaultFloorPrefs(): FloorPrefs {
-  return { plain: false, sidebar: true, right: true, pinned: [], hostPins: null }
+  return { plain: false, sidebar: true, rail: true, right: true, pinned: [], hostPins: null }
 }
 
 function loadFloorPrefs(): FloorPrefs {
@@ -624,7 +626,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
   // Collapsed = the icon rail (mockup default); expanded = the full text sidebar.
-  const [railCollapsed, setRailCollapsed] = useState(true)
+  const [railCollapsed, setRailCollapsed] = useState(floorPrefs0.rail)
   const [rightOpen, setRightOpen] = useState(floorPrefs0.right)
   const [pinned, setPinned] = useState<Set<string>>(() => new Set(floorPrefs0.pinned))
   // Ordered pinned HOSTS names (null = default: pin the local machine).
@@ -685,8 +687,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   // Persist the durable Floor prefs (pinned set, plain/sidebar/right toggles, group-by, host pins).
   useEffect(() => {
-    saveFloorPrefs({ plain, sidebar: sidebarOpen, right: rightOpen, pinned: [...pinned], hostPins })
-  }, [plain, sidebarOpen, rightOpen, pinned, hostPins])
+    saveFloorPrefs({ plain, sidebar: sidebarOpen, rail: railCollapsed, right: rightOpen, pinned: [...pinned], hostPins })
+  }, [plain, sidebarOpen, railCollapsed, rightOpen, pinned, hostPins])
 
   // Effective HOSTS pins: default to pinning just the local machine until the user
   // customizes. Pin/unpin and drag-reorder always write an explicit list.
@@ -1618,7 +1620,13 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   const onScope = useCallback((value: string) => {
     if (value === '__queue') { setCenter('backlog'); return }
-    if (value === '__needs') { setCenter('agents'); setProjFilter(null); setHostFilter(null); return }
+    if (value === '__needs') {
+      // A REAL needs-only view: toggle the same 'needs' status chip the controls bar
+      // and saved views drive, so one filter mechanism serves all three surfaces.
+      setCenter('agents'); setProjFilter(null); setHostFilter(null)
+      setStatusChips((cur) => (cur.includes('needs') ? cur.filter((c) => c !== 'needs') : ['needs']))
+      return
+    }
     if (value.startsWith('host:')) {
       const h = value.slice(5)
       setCenter('agents'); setProjFilter(null)
@@ -1628,6 +1636,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     setCenter('agents')
     setHostFilter(null)
     setProjFilter(value || null)
+    // 'All agents' ('') also drops the needs narrowing — All must mean everything.
+    if (!value) setStatusChips((cur) => cur.filter((c) => c !== 'needs'))
   }, [])
 
   // Selecting an agent opens its detail rail — the SAME setRightOpen(true) that
@@ -2089,8 +2099,22 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           <FloorRail
             agents={floorAgents}
             tickets={floorTickets}
-            scope={projFilter}
+            center={center}
+            projFilter={projFilter}
+            hostFilter={hostFilter}
+            needsOnly={statusChips.includes('needs')}
+            projects={managedProjects}
+            devices={
+              dispatchDevices.length
+                ? dispatchDevices.map((d) => ({ name: d.name, online: !!d.reachable, agents: d.runningAgents ?? 0 }))
+                : fleetDevices.map((d) => ({ name: d.name, online: d.online, agents: 0 }))
+            }
+            offlineHosts={offlineHosts}
+            hostPins={effectiveHostPins}
+            localHost={localHostName || undefined}
             onScope={onScope}
+            onDispatch={() => openDispatch(selectedTicketId ? { ticketId: selectedTicketId } : undefined)}
+            onManageProjects={() => { setCenter('projects'); setRightOpen(true) }}
             onExpand={() => setRailCollapsed(false)}
           />
         ) : (

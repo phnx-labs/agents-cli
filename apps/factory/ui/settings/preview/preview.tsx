@@ -406,8 +406,18 @@ function Sidebar() {
     <FloorRail
       agents={sidebarAgents}
       tickets={tickets}
-      scope={null}
+      center="agents"
+      projFilter={null}
+      hostFilter={null}
+      needsOnly={false}
+      projects={managedProjects}
+      devices={devices}
+      offlineHosts={['yosemite-s1']}
+      hostPins={pins}
+      localHost="zion"
       onScope={noop}
+      onDispatch={noop}
+      onManageProjects={noop}
       onExpand={() => setCollapsed(false)}
     />
   ) : (
