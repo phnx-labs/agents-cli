@@ -1,4 +1,13 @@
 import type { Readable, Writable } from 'stream';
+// The `ws` client, NOT the platform (undici) WebSocket: undici enforces a
+// non-configurable max decompressed message size, and a CDP response carrying
+// a base64 screenshot of a content-rich page blows past it — the socket dies
+// with code 1006 ("Max decompressed message size exceeded") while the command
+// is pending. `ws` offers no permessage-deflate by default and takes an
+// explicit payload cap. (Reproduced live against a remote Edge over
+// `browser --host`: fresh blank newtab passed, reused content-rich newtab
+// failed on every Page.captureScreenshot.)
+import WSWebSocket from 'ws';
 
 export interface CDPPipeTransport {
   read: Readable;
@@ -22,7 +31,7 @@ export function registerPipeTransport(transport: CDPPipeTransport): string {
 }
 
 export class CDPClient {
-  private ws: WebSocket | null = null;
+  private ws: WSWebSocket | null = null;
   private pipe: CDPPipeTransport | null = null;
   private pipeBuffer = Buffer.alloc(0);
   private transport: TransportKind | null = null;
@@ -45,7 +54,7 @@ export class CDPClient {
     }
 
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(endpoint);
+      this.ws = new WSWebSocket(endpoint, { maxPayload: 256 * 1024 * 1024 });
       this.transport = 'websocket';
 
       this.ws.onopen = () => resolve();
@@ -137,7 +146,7 @@ export class CDPClient {
 
   get connected(): boolean {
     return (
-      (this.ws !== null && this.ws.readyState === WebSocket.OPEN) ||
+      (this.ws !== null && this.ws.readyState === WSWebSocket.OPEN) ||
       (this.pipe !== null && !this.pipe.write.destroyed)
     );
   }
