@@ -135,6 +135,113 @@ describe('generateVersionedAliasScript', () => {
   });
 });
 
+describe('grok binary resolution order', () => {
+  // Grok ships a native binary (not an npm package). It lands in the versioned
+  // home's .grok/downloads when the installer runs with GROK_HOME set (via the
+  // shim, a correct `agents add grok`, or a grok self-update under the shim).
+  // Both generated shims must check the versioned home FIRST, then fall back to
+  // the global ~/.grok/downloads for pre-fix installs. The pre-fix bug checked
+  // only the global dir, so a pinned grok that installed into the versioned home
+  // failed with "grok@<version> not installed".
+
+  it('checks the versioned home before the global ~/.grok/downloads in the dispatcher shim', () => {
+    const script = generateShimScript('grok');
+    const versionedIdx = script.indexOf('$VERSION_DIR/home/.grok/downloads');
+    const globalIdx = script.indexOf('$HOME/.grok/downloads');
+    expect(versionedIdx, 'versioned home path must be present').toBeGreaterThanOrEqual(0);
+    expect(globalIdx, 'global fallback path must be present').toBeGreaterThanOrEqual(0);
+    expect(versionedIdx, 'versioned home must be checked before the global dir').toBeLessThan(globalIdx);
+  });
+
+  it('checks the versioned home before the global ~/.grok/downloads in the versioned alias', () => {
+    const script = generateVersionedAliasScript('grok', '0.2.91');
+    const versionedIdx = script.indexOf('/home/.grok/downloads');
+    const globalIdx = script.indexOf('$HOME/.grok/downloads');
+    expect(versionedIdx, 'versioned home path must be present').toBeGreaterThanOrEqual(0);
+    expect(globalIdx, 'global fallback path must be present').toBeGreaterThanOrEqual(0);
+    expect(versionedIdx, 'versioned home must be checked before the global dir').toBeLessThan(globalIdx);
+    // The concrete version is interpolated into the versioned-home path.
+    expect(script).toContain('/versions/grok/0.2.91/home/.grok/downloads');
+  });
+
+  it('dispatcher execs the grok binary from the versioned home when the global dir is empty', () => {
+    // This is the exact bug from #830: binary in the versioned home, global
+    // ~/.grok/downloads empty. Pre-fix the dispatcher checked only the global
+    // dir and died "not installed"; post-fix it resolves the versioned home.
+    const dir = makeTempDir();
+    const home = path.join(dir, 'home');
+    const project = path.join(dir, 'project');
+    const fakeAgents = path.join(dir, 'agents');
+    const logPath = path.join(dir, 'exec.log');
+    const version = '0.2.91';
+
+    // Versioned home downloads dir holds the real binary; global stays empty.
+    const versionedDownloads = path.join(
+      home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads',
+    );
+    fs.mkdirSync(versionedDownloads, { recursive: true });
+    fs.mkdirSync(path.join(home, '.grok', 'downloads'), { recursive: true }); // empty global
+    const binary = path.join(versionedDownloads, `grok-${version}-macos-aarch64`);
+    fs.writeFileSync(binary, `#!/bin/sh\nprintf "ran:%s\\n" "$1" >> ${JSON.stringify(logPath)}\n`, { mode: 0o755 });
+
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'agents.yaml'), `agents:\n  grok: "${version}"\n`, 'utf-8');
+    // Fake agents-cli entrypoint: swallows the `sync --launch` hot-path call.
+    fs.writeFileSync(fakeAgents, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const shimPath = path.join(dir, 'grok-shim');
+    const shim = generateShimScript('grok').replace(/^AGENTS_BIN=.*$/m, `AGENTS_BIN=${JSON.stringify(fakeAgents)}`);
+    fs.writeFileSync(shimPath, shim, { mode: 0o755 });
+
+    const result = spawnSync('bash', [shimPath, 'ok'], {
+      cwd: project,
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.readFileSync(logPath, 'utf-8')).toContain('ran:ok');
+  });
+
+  it('dispatcher falls back to the global ~/.grok/downloads when the versioned home is empty', () => {
+    // Pre-fix installs left the binary in the global dir. The fallback must
+    // still find it so existing grok users are not broken by this change.
+    const dir = makeTempDir();
+    const home = path.join(dir, 'home');
+    const project = path.join(dir, 'project');
+    const fakeAgents = path.join(dir, 'agents');
+    const logPath = path.join(dir, 'exec.log');
+    const version = '0.2.91';
+
+    // Empty versioned-home downloads dir; binary lives only in the global dir.
+    fs.mkdirSync(
+      path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads'),
+      { recursive: true },
+    );
+    const globalDownloads = path.join(home, '.grok', 'downloads');
+    fs.mkdirSync(globalDownloads, { recursive: true });
+    const binary = path.join(globalDownloads, `grok-${version}-macos-aarch64`);
+    fs.writeFileSync(binary, `#!/bin/sh\nprintf "global:%s\\n" "$1" >> ${JSON.stringify(logPath)}\n`, { mode: 0o755 });
+
+    fs.mkdirSync(project, { recursive: true });
+    fs.writeFileSync(path.join(project, 'agents.yaml'), `agents:\n  grok: "${version}"\n`, 'utf-8');
+    fs.writeFileSync(fakeAgents, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+
+    const shimPath = path.join(dir, 'grok-shim');
+    const shim = generateShimScript('grok').replace(/^AGENTS_BIN=.*$/m, `AGENTS_BIN=${JSON.stringify(fakeAgents)}`);
+    fs.writeFileSync(shimPath, shim, { mode: 0o755 });
+
+    const result = spawnSync('bash', [shimPath, 'ok'], {
+      cwd: project,
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.readFileSync(logPath, 'utf-8')).toContain('global:ok');
+  });
+});
+
 describe('claude shim .oauth_token fallback', () => {
   function buildTestShim(dir: string, opts: {
     tokenFileContent?: string;
