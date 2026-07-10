@@ -208,18 +208,27 @@ export function encodePowerShell(script: string): string {
 }
 
 /**
- * The PowerShell that launches the browser on a Windows remote. Two hard
+ * The PowerShell that launches the browser on a Windows remote. Three hard
  * requirements shaped this:
  *   1. The browser must OUTLIVE the ssh session. Windows OpenSSH terminates
  *      the session's job tree on disconnect, which reaps both `start /B` and
- *      `Start-Process` children (verified against a real box). WMI
- *      `Win32_Process.Create` spawns under the WMI provider service instead,
- *      so the process survives after we drop the ssh connection and reconnect
- *      over the CDP tunnel.
- *   2. A distinct `--user-data-dir` so a fresh instance bound to the debugging
+ *      `Start-Process` children (verified against a real box). A scheduled
+ *      task runs under the Task Scheduler service, so the process survives
+ *      after we drop the ssh connection and reconnect over the CDP tunnel.
+ *   2. The browser must run in the user's INTERACTIVE session. The previous
+ *      WMI `Win32_Process.Create` launch also survived disconnect, but it
+ *      spawned Edge in session 0 (the services session): the CDP socket bound
+ *      and accepted, yet the DevTools server never initialized — every
+ *      /json/version probe hung forever and DevToolsActivePort was never
+ *      written (verified against a real box, Edg/150). A scheduled task
+ *      registered and started by the logged-on user runs in that user's
+ *      interactive session, where DevTools comes up normally.
+ *   3. A distinct `--user-data-dir` so a fresh instance bound to the debugging
  *      port comes up even when the user already has Edge open.
  * CreateProcess ignores App Paths, so we resolve the real `.exe` from the
- * registry at runtime rather than relying on a bare `msedge` name.
+ * registry at runtime rather than relying on a bare `msedge` name. The task is
+ * unregistered immediately after start — the browser keeps running; nothing
+ * lingers in the scheduler.
  */
 export function buildWindowsLaunchScript(
   browserType: string,
@@ -252,25 +261,46 @@ export function buildWindowsLaunchScript(
   // source — a test asserts CDP is never opened to `*`.
   return [
     ...exeStmts,
-    `$cl = '"' + $exe + '" --remote-debugging-port=${port}` +
+    // First-run / default-browser modals block automation (same rationale as
+    // the local launcher in chrome.ts), and the crash-restore bubble is worse
+    // here: `browser stop` hard-kills the remote process, so the NEXT launch
+    // against the same --user-data-dir marks the profile crashed and session
+    // restore swaps the initial page target — closing its CDP websocket while
+    // a command is pending (reproduced live: Page.captureScreenshot rejected
+    // with "CDP connection closed" on every reused-profile launch).
+    `$args = '--remote-debugging-port=${port}` +
       ` --remote-allow-origins=http://127.0.0.1:${port}` +
+      ` --no-first-run --no-default-browser-check` +
+      ` --hide-crash-restore-bubble --disable-session-crashed-bubble` +
       ` --disable-background-timer-throttling --user-data-dir="' + $env:TEMP + '\\agents-browser-${port}"'`,
-    `Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cl } | Out-Null`,
+    `$action = New-ScheduledTaskAction -Execute $exe -Argument $args`,
+    `Register-ScheduledTask -TaskName 'agents-browser-${port}' -Action $action -Force | Out-Null`,
+    `Start-ScheduledTask -TaskName 'agents-browser-${port}'`,
+    `Unregister-ScheduledTask -TaskName 'agents-browser-${port}' -Confirm:$false`,
   ].join('; ');
 }
 
-/** The PowerShell that kills whatever holds the CDP port on a Windows remote. */
+/**
+ * The PowerShell that kills whatever holds the CDP port on a Windows remote.
+ * Tree-kill (`taskkill /T`), not `Stop-Process`: Chromium is multi-process, and
+ * killing only the port-owning main process orphans its children. The orphans
+ * keep the profile's SingletonLock, so every later launch against the same
+ * `--user-data-dir` delegates to the zombie tree, exits, and never binds the
+ * CDP port — `browser start --host` then fails until someone hand-cleans the
+ * box (found live on win-mini by the #561 e2e suite).
+ */
 export function buildWindowsKillScript(port: number): string {
   return (
     `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue ` +
-    `| ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`
+    `| ForEach-Object { taskkill /PID $_.OwningProcess /T /F 2>$null } | Out-Null`
   );
 }
 
 /**
  * Build the remote command that launches the browser detached with a CDP port.
  * POSIX backgrounds the `.app` binary with `… &`; Windows resolves the exe and
- * spawns it via WMI (encoded PowerShell) so it survives the ssh session.
+ * starts it via an interactive one-shot scheduled task (encoded PowerShell)
+ * so it survives the ssh session AND serves CDP (session 0 never does).
  */
 export function buildLaunchCmd(
   remoteOs: RemoteOs,
@@ -398,7 +428,7 @@ export async function restartRemoteBrowser(
 
 /**
  * Kill the remote browser holding the CDP port. Invoked on stop/cleanup so the
- * WMI-spawned (Windows) / detached (posix) browser process is not orphaned when
+ * task-launched (Windows) / detached (posix) browser process is not orphaned when
  * the ssh tunnel is torn down — killing only the tunnel left it running on
  * win-mini after every `browser stop`. Best-effort: never rejects.
  */
