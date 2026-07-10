@@ -132,7 +132,7 @@ describe('encodePowerShell', () => {
 });
 
 describe('buildLaunchCmd (windows)', () => {
-  it('returns an EncodedCommand wrapping the WMI launch script', () => {
+  it('returns an EncodedCommand wrapping the scheduled-task launch script', () => {
     const cmd = buildLaunchCmd('windows', 'edge', 9222);
     expect(decodeEncoded(cmd)).toBe(buildWindowsLaunchScript('edge', 9222));
   });
@@ -258,8 +258,9 @@ describe('killRemoteBrowser on stop/cleanup (#559)', () => {
     const rec = cp.calls.at(-1)!;
     expect(rec.cmd).toBe('ssh');
     expect(rec.args).toContain('me@win-mini');
-    // The remote command is the exact encoded Get-NetTCPConnection -> Stop-Process
-    // script, so `browser stop` reaps the WMI-spawned browser (not just the tunnel).
+    // The remote command is the exact encoded Get-NetTCPConnection -> taskkill /T
+    // tree-kill script, so `browser stop` reaps the task-launched browser and its
+    // children (not just the tunnel).
     expect(rec.args).toContain(buildKillCmd('windows', 9222));
     rec.child.emit('close', 0);
     await p;

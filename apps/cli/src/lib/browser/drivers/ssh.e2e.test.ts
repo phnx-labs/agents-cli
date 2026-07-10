@@ -3,11 +3,11 @@
  *
  * Unlike ssh.test.ts (script-builder units + spawn-stubbed transport tests),
  * this suite drives the REAL remote browser against a live Windows box: it
- * launches Edge over ssh via WMI, opens the ssh -L CDP tunnel, connects over
+ * launches Edge over ssh via an interactive scheduled task, opens the ssh -L CDP tunnel, connects over
  * CDP, screenshots a page, then tears the browser down and confirms the remote
  * process is actually gone. It covers the regression class from issue #561 —
  * remote launch, tunnel, and the cleanup gap where `browser stop` left the
- * WMI-spawned browser running on win-mini.
+ * task-launched browser running on win-mini.
  *
  * GATED: SKIPS cleanly when AGENTS_TEST_WIN_HOST is unset, so CI stays green
  * with no Windows runner. To run it against a registered Windows device:
@@ -60,7 +60,7 @@ suite('browser --host live remote (AGENTS_TEST_WIN_HOST)', () => {
 
   afterAll(async () => {
     // Guarantee the remote browser is torn down even if the test bailed before
-    // calling cleanup() — otherwise a WMI-spawned Edge lingers on the box.
+    // calling cleanup() — otherwise a task-launched Edge lingers on the box.
     try {
       conn?.cleanup();
     } catch {
@@ -87,7 +87,7 @@ suite('browser --host live remote (AGENTS_TEST_WIN_HOST)', () => {
         viewport: { width: 1280, height: 800 },
       };
 
-      // Scenario 4: `browser start --host` — WMI-launch Edge on the remote, open
+      // Scenario 4: `browser start --host` — scheduled-task-launch Edge on the remote, open
       // the ssh -L CDP tunnel, and connect over CDP. connectSSH throws on any hop
       // failure (missing exe, tunnel timeout, wrong browser identity).
       //

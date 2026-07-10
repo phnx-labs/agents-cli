@@ -299,7 +299,8 @@ export function buildWindowsKillScript(port: number): string {
 /**
  * Build the remote command that launches the browser detached with a CDP port.
  * POSIX backgrounds the `.app` binary with `… &`; Windows resolves the exe and
- * spawns it via WMI (encoded PowerShell) so it survives the ssh session.
+ * starts it via an interactive one-shot scheduled task (encoded PowerShell)
+ * so it survives the ssh session AND serves CDP (session 0 never does).
  */
 export function buildLaunchCmd(
   remoteOs: RemoteOs,
@@ -427,7 +428,7 @@ export async function restartRemoteBrowser(
 
 /**
  * Kill the remote browser holding the CDP port. Invoked on stop/cleanup so the
- * WMI-spawned (Windows) / detached (posix) browser process is not orphaned when
+ * task-launched (Windows) / detached (posix) browser process is not orphaned when
  * the ssh tunnel is torn down — killing only the tunnel left it running on
  * win-mini after every `browser stop`. Best-effort: never rejects.
  */
