@@ -6,8 +6,11 @@ import { parseEndpointUrl } from '../profiles.js';
 import { writeProfileRuntime, clearProfileRuntime } from '../runtime-state.js';
 import type { BrowserProfile } from '../types.js';
 // shellQuote lives in the shared ssh-exec helper (single choke point); re-export
-// so existing importers of `shellQuote` from this module keep working.
-import { shellQuote } from '../../ssh-exec.js';
+// so existing importers of `shellQuote` from this module keep working. SSH_OPTS
+// is the shared hardened baseline (BatchMode + ConnectTimeout + keepalive) —
+// reuse it so the raw-ssh spawns below fail fast on an unreachable host instead
+// of hanging on the default ~127s TCP timeout, rather than re-listing options.
+import { shellQuote, SSH_OPTS } from '../../ssh-exec.js';
 export { shellQuote };
 // The `ssh -L` tunnel spawn is shared with `agents computer --host`; it lives in
 // the single ssh-tunnel helper. Calling it with no options preserves this
@@ -323,12 +326,14 @@ export async function ensureRemoteBrowser(
     // ignored and this resolved on close regardless of exit code, so failures
     // were swallowed and only re-emerged 8s later as a generic
     // "SSH tunnel failed to establish".
+    // Options BEFORE the target (matching `sshExec`): OpenSSH's BSD getopt on
+    // macOS stops at the first non-option, so any `-o` after `user@host` would
+    // be swallowed into the remote command instead of applied.
     const child = spawn(
       'ssh',
       [
+        ...SSH_OPTS,
         `${user}@${host}`,
-        '-o',
-        'BatchMode=yes',
         remoteCmd,
       ],
       { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }
@@ -408,7 +413,11 @@ export function killRemoteBrowser(
 
 function runSSHCommand(user: string, host: string, cmd: string): Promise<void> {
   return new Promise((resolve) => {
-    const child = spawn('ssh', [`${user}@${host}`, '-o', 'BatchMode=yes', cmd], {
+    // Reuse the shared hardened baseline so a hung TCP SYN to an unreachable
+    // host is bounded by ConnectTimeout (the local 3s kill below only bounds a
+    // connected-but-slow command, not the connect itself). Options precede the
+    // target — see ensureRemoteBrowser.
+    const child = spawn('ssh', [...SSH_OPTS, `${user}@${host}`, cmd], {
       stdio: 'ignore',
       windowsHide: true,
     });
