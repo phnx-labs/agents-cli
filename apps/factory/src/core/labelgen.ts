@@ -69,10 +69,6 @@ export async function generateLabelWithLLM(
   });
 }
 
-export function resetFastModelCache(): void {
-  fastModelCache = null;
-}
-
 async function resolveFastModel(): Promise<string> {
   if (!fastModelCache) {
     fastModelCache = queryFastModel().catch(() => 'haiku');

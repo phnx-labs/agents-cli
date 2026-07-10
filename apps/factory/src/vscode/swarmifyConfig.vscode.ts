@@ -12,15 +12,7 @@ import {
   parseAgentsConfigOverrides,
   mergeAgentsConfig,
   serializeAgentsConfig,
-  // Legacy exports for backward compat
-  SwarmifyConfig,
-  parseSwarmifyConfig,
-  serializeSwarmifyConfig,
 } from '../core/swarmifyConfig';
-
-// Re-export legacy names for backward compatibility
-export type { SwarmifyConfig };
-export { parseSwarmifyConfig, serializeSwarmifyConfig };
 
 // Cache for loaded configs per workspace
 const configCache = new Map<string, AgentsConfig>();
