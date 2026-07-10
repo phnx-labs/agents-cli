@@ -280,11 +280,19 @@ export function buildWindowsLaunchScript(
   ].join('; ');
 }
 
-/** The PowerShell that kills whatever holds the CDP port on a Windows remote. */
+/**
+ * The PowerShell that kills whatever holds the CDP port on a Windows remote.
+ * Tree-kill (`taskkill /T`), not `Stop-Process`: Chromium is multi-process, and
+ * killing only the port-owning main process orphans its children. The orphans
+ * keep the profile's SingletonLock, so every later launch against the same
+ * `--user-data-dir` delegates to the zombie tree, exits, and never binds the
+ * CDP port — `browser start --host` then fails until someone hand-cleans the
+ * box (found live on win-mini by the #561 e2e suite).
+ */
 export function buildWindowsKillScript(port: number): string {
   return (
     `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue ` +
-    `| ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`
+    `| ForEach-Object { taskkill /PID $_.OwningProcess /T /F 2>$null } | Out-Null`
   );
 }
 

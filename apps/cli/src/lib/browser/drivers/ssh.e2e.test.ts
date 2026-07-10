@@ -23,7 +23,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { connectSSH, type SSHConnection } from './ssh.js';
 import { resolveRemoteDevice } from '../../ssh-tunnel.js';
 import { sshExec } from '../../ssh-exec.js';
-import { encodePowerShell } from './ssh.js';
+import { buildWindowsKillScript, encodePowerShell } from './ssh.js';
 import { CDPClient } from '../cdp.js';
 import type { BrowserProfile } from '../types.js';
 
@@ -67,10 +67,10 @@ suite('browser --host live remote (AGENTS_TEST_WIN_HOST)', () => {
       /* best effort */
     }
     if (target) {
-      const kill =
-        `Get-NetTCPConnection -LocalPort ${CDP_PORT} -State Listen -ErrorAction SilentlyContinue ` +
-        `| ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }`;
-      sshExec(target, encodePowerShell(kill), { timeoutMs: 20_000 });
+      // Tree-kill via the canonical driver script — Stop-Process on the main
+      // pid alone orphans Chromium children that hold the profile lock and
+      // wedge every later launch (the bug this suite caught on win-mini).
+      sshExec(target, encodePowerShell(buildWindowsKillScript(CDP_PORT)), { timeoutMs: 20_000 });
     }
   }, LAUNCH_TIMEOUT);
 

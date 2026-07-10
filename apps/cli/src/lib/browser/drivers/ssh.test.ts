@@ -199,12 +199,15 @@ describe('isOwnTunnel (win32)', () => {
 });
 
 describe('buildKillCmd', () => {
-  it('windows tears down via encoded Get-NetTCPConnection → Stop-Process', () => {
+  it('windows tears down via encoded Get-NetTCPConnection → taskkill tree-kill', () => {
     const cmd = buildKillCmd('windows', 9222);
     const script = decodeEncoded(cmd);
     expect(script).toBe(buildWindowsKillScript(9222));
     expect(script).toContain('Get-NetTCPConnection -LocalPort 9222');
-    expect(script).toContain('Stop-Process');
+    // Tree-kill: Stop-Process on the main pid orphans Chromium children that
+    // hold the profile lock and wedge every subsequent launch.
+    expect(script).toContain('taskkill /PID $_.OwningProcess /T /F');
+    expect(script).not.toContain('Stop-Process');
     expect(script).not.toContain('lsof');
   });
 
