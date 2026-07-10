@@ -178,6 +178,30 @@ describe.skipIf(IS_WINDOWS)('MCP CLI execution', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe('skipped: agent does not support HTTP MCP registration');
   });
+
+  it('skips HTTP MCP headers for agents that accept HTTP but not headers (codex)', async () => {
+    const dir = makeTempDir();
+    const { binary } = writeArgLogger(dir);
+
+    const result = runAgentsModule(
+      `registerMcp('codex', 'docs', 'https://developers.openai.com/mcp', 'user', 'http', { binary: ${JSON.stringify(binary)}, home: ${JSON.stringify(dir)}, headers: { Authorization: 'Bearer token' } })`
+    ) as { success: boolean; error?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('skipped: HTTP MCP headers are only supported for Claude registration');
+  });
+
+  it('skips HTTP MCP headers for agents that accept HTTP but not headers (gemini)', async () => {
+    const dir = makeTempDir();
+    const { binary } = writeArgLogger(dir);
+
+    const result = runAgentsModule(
+      `registerMcp('gemini', 'docs', 'https://developers.openai.com/mcp', 'project', 'http', { binary: ${JSON.stringify(binary)}, home: ${JSON.stringify(dir)}, headers: { Authorization: 'Bearer token' } })`
+    ) as { success: boolean; error?: string };
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('skipped: HTTP MCP headers are only supported for Claude registration');
+  });
 });
 
 describe('AGENTS capability matrix', () => {
@@ -185,6 +209,8 @@ describe('AGENTS capability matrix', () => {
     const requiredCapabilities: CapabilityName[] = [
       'hooks',
       'mcp',
+      'mcpHttp',
+      'mcpHeaders',
       'allowlist',
       'skills',
       'commands',

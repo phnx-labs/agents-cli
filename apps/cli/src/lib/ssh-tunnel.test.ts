@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   buildTunnelArgs,
   buildScpArgs,
@@ -6,10 +9,15 @@ import {
   buildVerifyPushScript,
   buildRegisterTaskScript,
   buildUnregisterTaskScript,
+  downloadWinHelperExe,
+  parseSha256Asset,
   pickFreePort,
   readRemoteState,
   writeRemoteState,
   clearRemoteState,
+  sha256File,
+  winHelperAssetUrls,
+  winHelperCacheDir,
   REMOTE_HELPER_PORT,
   REMOTE_TASK_NAME,
   WIN_HELPER_EXE,
@@ -118,6 +126,57 @@ describe('pickFreePort', () => {
     expect(Number.isInteger(p)).toBe(true);
     expect(p).toBeGreaterThan(1024);
   });
+});
+
+describe('win helper release-asset download', () => {
+  it('builds asset URLs pinned to the exact v<version> tag', () => {
+    const u = winHelperAssetUrls('1.20.50');
+    expect(u.exe).toBe(
+      'https://github.com/phnx-labs/agents-cli/releases/download/v1.20.50/computer-helper-win.exe',
+    );
+    expect(u.sha256).toBe(`${u.exe}.sha256`);
+  });
+
+  it('parses sha256sum-format and bare-hex checksum assets, rejects garbage', () => {
+    const hex = 'a'.repeat(64);
+    expect(parseSha256Asset(`${hex}  ${WIN_HELPER_EXE}\r\n`)).toBe(hex);
+    expect(parseSha256Asset(hex.toUpperCase())).toBe(hex);
+    expect(() => parseSha256Asset('not a checksum')).toThrow(/malformed/);
+    expect(() => parseSha256Asset(hex.slice(0, 63))).toThrow(/malformed/);
+  });
+
+  it('hashes file contents with streaming sha256', async () => {
+    const f = path.join(os.tmpdir(), `ssh-tunnel-sha-test-${process.pid}.bin`);
+    fs.writeFileSync(f, 'hello');
+    try {
+      // Well-known vector: sha256("hello").
+      expect(await sha256File(f)).toBe(
+        '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
+      );
+    } finally {
+      fs.rmSync(f, { force: true });
+    }
+  });
+
+  it('returns the cached exe without touching the network', async () => {
+    const version = '0.0.0-ssh-tunnel-cache-test';
+    const dir = winHelperCacheDir(version);
+    const cached = path.join(dir, WIN_HELPER_EXE);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(cached, 'cached-exe-bytes');
+    try {
+      expect(await downloadWinHelperExe(version)).toBe(cached);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails naming the exact tag checked when the release asset does not exist', async () => {
+    // Real GitHub 404 — no fallback to any other tag is attempted.
+    await expect(downloadWinHelperExe('0.0.0-ssh-tunnel-no-such-tag')).rejects.toThrow(
+      /v0\.0\.0-ssh-tunnel-no-such-tag/,
+    );
+  }, 30_000);
 });
 
 describe('remote tunnel state round-trip', () => {
