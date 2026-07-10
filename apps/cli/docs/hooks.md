@@ -42,9 +42,13 @@ Central storage (user > system):
                          Agent fires event
                                     │
                                     ▼
-  Agent reads registered hooks from its settings file.
-  For each matching hook: evaluate matches: predicates (shouldFire())
-  If all predicates pass: exec the script with event context as JSON on stdin.
+  Agent reads registered hooks from its settings file and execs the registered
+  command with event context as JSON on stdin. For a hook that declares matches:
+  (and/or cache:) the registered command is a generated wrapper shim, not the raw
+  script. The shim evaluates the matches: predicates first (a port of shouldFire()
+  in src/lib/hooks/match.ts): if any predicate fails it exits 0 without running
+  the script; if all pass it execs the real script (then applies cache: if set).
+  A hook with neither matches: nor cache: is registered by its raw script path.
 ```
 
 ## Command Reference
