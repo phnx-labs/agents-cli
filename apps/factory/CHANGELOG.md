@@ -38,6 +38,14 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Fixed
 
+- **Cloud status + latest-activity now render identically across hosts.** The Electron app
+  and the VS Code extension carried two divergent `mapCloudStatus` tables — the extension
+  missed `error` / `in_progress` / `queued` and matched case-sensitively, the app missed
+  `allocating` / `needs_review` — so the same cloud run could show a different status per
+  host. Both now import one shared `mapCloudStatus` (`src/core/cloudStatus.ts`) whose
+  case-insensitive switch is the union of the two tables. The standalone app's
+  "latest activity" also sorted ISO timestamps lexically (wrong on mixed offsets); it now
+  compares on `Date.getTime()`, matching the extension. (RUSH-1512)
 - **The standalone Factory app now pauses its floor poll when the floor is hidden.** The
   Electron host handled `subscribeFloor` but dropped `unsubscribeFloor`, so its 5s poll —
   which shells out to read agent state and hit the cloud-runs API — kept running even when
