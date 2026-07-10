@@ -61,7 +61,3 @@ export interface SyncManifest {
   workflows?: Record<string, DirEntry>;
   plugins?:   Record<string, PluginEntry>;
 }
-
-export type ResourceType =
-  | 'commands' | 'skills' | 'hooks' | 'mcp' | 'rules'
-  | 'subagents' | 'workflows' | 'plugins' | 'permissions';

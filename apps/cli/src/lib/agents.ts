@@ -751,12 +751,6 @@ export async function getAllCliStates(): Promise<Partial<Record<AgentId, CliStat
   return states;
 }
 
-/** Check whether the agent's config directory exists on disk. */
-export function isConfigured(agentId: AgentId): boolean {
-  const agent = AGENTS[agentId];
-  return fs.existsSync(agent.configDir);
-}
-
 /** Info about an existing unmanaged agent installation. */
 export interface UnmanagedInstall {
   agentId: AgentId;
@@ -1398,21 +1392,6 @@ function buildIdentityKey(
     .map(([label, value]) => `${label}=${value}`);
   if (encoded.length === 0) return null;
   return `${agentId}:${encoded.join(':')}`;
-}
-
-/** Check whether a named MCP server is registered with the agent's CLI. */
-export async function isMcpRegistered(agentId: AgentId, mcpName: string): Promise<boolean> {
-  const agent = AGENTS[agentId];
-  if (!agent.capabilities.mcp || !(await isCliInstalled(agentId))) {
-    return false;
-  }
-  try {
-    const { stdout } = await execFileAsync(agent.cliCommand, ['mcp', 'list']);
-    return stdout.toLowerCase().includes(mcpName.toLowerCase());
-  } catch {
-    /* mcp list command failed */
-    return false;
-  }
 }
 
 /** Register an MCP server with an agent's CLI via `mcp add`. */

@@ -1104,26 +1104,6 @@ export function topSessionsByCost(
   }));
 }
 
-/** Return the set of all file paths currently tracked in the sessions table. */
-export function getAllFilePaths(): Set<string> {
-  const db = getDB();
-  const rows = db.prepare(`SELECT file_path FROM sessions`).all() as { file_path: string }[];
-  return new Set(rows.map(r => r.file_path));
-}
-
-/** Look up sessions by their source file paths. */
-export function getSessionsByFilePaths(paths: string[]): Map<string, SessionMeta> {
-  if (paths.length === 0) return new Map();
-  const db = getDB();
-  const placeholders = paths.map(() => '?').join(',');
-  const rows = db
-    .prepare(`SELECT * FROM sessions WHERE file_path IN (${placeholders})`)
-    .all(...paths) as SessionRow[];
-  const result = new Map<string, SessionMeta>();
-  for (const row of rows) result.set(row.file_path, rowToMeta(row));
-  return result;
-}
-
 /** Look up a single session by its unique ID. */
 export function getSessionById(id: string): SessionMeta | null {
   const db = getDB();

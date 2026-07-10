@@ -131,8 +131,8 @@ Verbs are grouped the way `agents computer --help` groups them.
 | `setup` (alias `install-helper`) | Copy helper to /Applications/, write LaunchAgent plist |
 | `start` | Write policy + peers, load the LaunchAgent, start the daemon |
 | `stop` | Unload the LaunchAgent, remove the socket |
-| `reload` | Reload the allow-list policy from ~/.agents/permissions/groups/ (SIGHUP the daemon) |
-| `status` | Report install state, daemon state, TCC trust, policy, and peer list |
+| `reload` | Reload the allow-list policy from ~/.agents/permissions/groups/ (SIGHUP the daemon); with `--host`, restart the remote Windows daemon |
+| `status` | Report install state, daemon state, TCC trust, policy, and peer list; with `--host`, tunnel + liveness of the remote Windows daemon |
 
 ### Observe
 
@@ -216,6 +216,42 @@ agents computer type-text --bundle <id> --text "..." --require-frontmost
 | `peers` | Count of caller executables allowed to connect |
 | `trust` | `granted` or `denied` from a live `trust_status` RPC call |
 | `pid` | Helper process PID (when trust is probed successfully) |
+
+## Remote Windows (`--host`)
+
+Every verb takes `--host <device>` to drive a Windows machine registered with
+`agents devices`: `setup --host` pushes the C# daemon
+(`computer-helper-win.exe`) and registers a LOGON scheduled task,
+`start --host` opens an `ssh -L` tunnel to its loopback port, and every other
+verb reconnects through that tunnel. The daemon mirrors the macOS wire
+contract, with these Windows specifics:
+
+- **Screenshots are pid-scoped, PNG-encoded.** `--list` enumerates the target
+  pid's top-level windows (`window_id` is the Win32 HWND — the same id
+  `raise --window-id` takes), the default capture crops to the pid's largest
+  on-screen window, `--window-id` shoots one window, `--display` the whole
+  display the app is on. `--quality` is ignored (lossless PNG).
+- **Lifecycle:** `status --host <device>` reports the recorded tunnel and a
+  live daemon probe; `reload --host <device>` restarts the daemon's scheduled
+  task (the way to pick up a freshly pushed exe) and confirms it answers.
+  There is no allow-list policy on Windows — the daemon is tunnel-gated.
+- **`--require-frontmost` is enforced:** Windows synthetic input lands in the
+  *focused* window, so `type-text`/`key` report `frontmost` and the flag turns
+  a non-foreground target into a hard `not_frontmost` error.
+- **`--background` is rejected** (`action_unsupported`): the macOS
+  focus-safe postToPid delivery has no Win32 analogue — synthetic input is
+  global. Element mode (`--id` on an invokable element) is the focus-safe path.
+- **`get-text` needs `--id`** (from `describe`); `--max-chars` caps the
+  extraction (default 20k).
+
+```bash
+agents computer setup --host win-mini      # push exe + register LOGON task
+agents computer start --host win-mini      # open the tunnel
+agents computer status --host win-mini     # tunnel + daemon liveness
+agents computer screenshot --host win-mini --pid 27180 --list
+agents computer reload --host win-mini     # restart the remote daemon
+agents computer stop --host win-mini       # tear down tunnel + task
+```
 
 ## Recipes
 

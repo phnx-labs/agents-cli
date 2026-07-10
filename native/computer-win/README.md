@@ -96,7 +96,7 @@ match the mac helper exactly.
 | `Program.cs` | Entry point (top-level statements); TCP listener, auth handshake, RPC framing loop |
 | `Rpc.cs` | Method dispatch table |
 | `Automation.cs` | UI Automation tree walk, `SendInput` click/type/key/scroll/drag, window focus |
-| `Screenshot.cs` | `Graphics.CopyFromScreen` over `SystemInformation.VirtualScreen` |
+| `Screenshot.cs` | pid-scoped `Graphics.CopyFromScreen` capture: window list / window / display (`window_id` = HWND) |
 | `Apps.cs` | Process/window enumeration; `launch_app` via PATH + App Paths registry |
 | `ElementCache.cs` | `@eN` element handle cache |
 | `smoke/smoke.mjs` | Smoke test (incl. Unicode-typing regression loops for #554/#581) |
@@ -113,3 +113,10 @@ match the mac helper exactly.
   targets via PATH + the App Paths registry.
 - **`notify` is pass-through only** — there is no Windows Toast call; the Rush
   computer-manager intercepts the return value (mirrors `Notify.swift`).
+- **`background=true` is rejected** (`action_unsupported`) on `click`/`drag`
+  physical paths — macOS postToPid delivery has no Win32 analogue; `SendInput`
+  is global. UIA-pattern element clicks are already focus-safe.
+- **`require_frontmost` is a hard gate** for `type_text`/`key`: `SendInput`
+  lands in the *focused* window, so a non-foreground target pid raises
+  `not_frontmost`; without the flag the result carries `frontmost` for the
+  CLI-side warning (mirrors `Events.swift`).

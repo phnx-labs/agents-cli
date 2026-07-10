@@ -577,8 +577,3 @@ export function listCliStatus(cwd?: string): {
   }));
   return { statuses, errors };
 }
-
-/** Names of CLIs that are declared but not currently installed on the host. */
-export function getMissingClis(cwd?: string): CliManifest[] {
-  return listCliStatus(cwd).statuses.filter((s) => !s.installed).map((s) => s.manifest);
-}
