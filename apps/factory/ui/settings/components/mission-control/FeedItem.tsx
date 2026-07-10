@@ -105,7 +105,12 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const showSummary =
     !plain && !!taskLine && taskLine !== a.resp.trim() && taskLine !== nowlineText &&
     !(showTask && taskLine === prompt)
-  const showNowline = !plain && !!a.verb && !(showSummary && taskLine === nowlineText)
+  // The now-line is a LIVE-activity indicator — only meaningful while the agent is
+  // actively working (running) or stuck mid-action (stalled). For an idle / needs-you /
+  // done agent there's no live activity, and the verb is just the "Thinking..." fallback,
+  // so showing it reads as a contextless "Thinking..." on a paused card.
+  const isActive = a.phase === 'running' || a.phase === 'stalled'
+  const showNowline = !plain && isActive && !!a.verb && !(showSummary && taskLine === nowlineText)
 
   const marker =
     a.pr ? (

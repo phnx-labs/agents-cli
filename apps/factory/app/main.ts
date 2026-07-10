@@ -9,6 +9,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { getDefaultSettings } from '../src/core/settings'
 import { fetchAllFloorTasks } from './floorData'
+import { FloorPoll } from './floorPoll'
 
 // Resolve UI / preload / assets for both dev and a packaged .app.
 //   dev  (`electron ./dist/main.js`): getAppPath() = <ext>/app/dist; the built
@@ -29,11 +30,15 @@ const ASSETS_DIR = app.isPackaged
 const POLL_MS = 5000
 
 let win: BrowserWindow | null = null
-let pollTimer: ReturnType<typeof setInterval> | null = null
 
 function send(message: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send('to-renderer', message)
 }
+
+// The floor poll pauses when the floor is hidden and resumes when shown, so a
+// dashboard tab nobody is looking at stops burning CPU/network + `agents` calls
+// every 5s (mirrors the VS Code host's subscribeFloor / cleanupFloorWatchers).
+const floorPoll = new FloorPoll(POLL_MS, () => void pushFloor())
 
 async function pushFloor(): Promise<void> {
   // The standalone app owns no editor terminal tabs, so allTerminalsData is empty
@@ -57,10 +62,22 @@ ipcMain.on('to-host', (_event, message: { type?: string } | null) => {
       dismissedTaskIds: [],
     })
     send({ type: 'panelVisibility', visible: true })
+    floorPoll.start()
     void pushFloor()
     return
   }
-  if (type === 'fetchTasks' || type === 'fetchAllTerminals' || type === 'subscribeFloor') {
+  if (type === 'subscribeFloor') {
+    // Floor shown again — resume the poll and push a fresh snapshot immediately.
+    floorPoll.start()
+    void pushFloor()
+    return
+  }
+  if (type === 'unsubscribeFloor') {
+    // Floor hidden — pause the poll so it stops running while nobody's looking.
+    floorPoll.stop()
+    return
+  }
+  if (type === 'fetchTasks' || type === 'fetchAllTerminals') {
     void pushFloor()
   }
   // Other message types (dispatch, settings, oauth, foreman, ...) are extension-only
@@ -92,13 +109,15 @@ function createWindow(): void {
 
 app.whenReady().then(() => {
   createWindow()
-  pollTimer = setInterval(() => void pushFloor(), POLL_MS)
+  // The floor is visible on launch, so start polling now; subscribe/unsubscribe
+  // from the UI toggle it thereafter.
+  floorPoll.start()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
 
 app.on('window-all-closed', () => {
-  if (pollTimer) clearInterval(pollTimer)
+  floorPoll.stop()
   if (process.platform !== 'darwin') app.quit()
 })
