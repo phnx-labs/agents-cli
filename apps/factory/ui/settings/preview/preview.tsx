@@ -19,10 +19,11 @@ import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
 import { BacklogCenter } from '../components/mission-control/BacklogCenter'
+import { TicketDetail } from '../components/mission-control/TicketDetail'
 import { ProjectsPane } from '../components/mission-control/ProjectsPane'
 import { TerminalExpandedDetail } from '../components/mission-control/TerminalDetail'
 import { AgentDecision } from '../components/mission-control/AgentDecision'
-import type { FloorAgent, FloorTicket, StructuredQuestion, FloorSort, TicketGroupBy, TicketSort, CenterMode, ManagedProject, LinearProjectLite } from '../components/mission-control/floorModel'
+import { ticketWorkers, type FloorAgent, type FloorTicket, type StructuredQuestion, type FloorSort, type TicketGroupBy, type TicketSort, type CenterMode, type ManagedProject, type LinearProjectLite } from '../components/mission-control/floorModel'
 import type { UnifiedTask, TerminalDetail } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
 
@@ -284,6 +285,12 @@ function Backlog() {
   const [sort, setSort] = useState<TicketSort>('priority')
   const [srcFilter, setSrcFilter] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
   const [selected, setSelected] = useState<string | null>(null)
+  // One in-flight ticket (two workers) so the .twork chip renders at true size.
+  const workers = ticketWorkers([
+    ...running,
+    agent({ id: 'w1', ticket: 'RUSH-1262', name: 'pkce-pinning', abbr: 'CC' }),
+    agent({ id: 'w2', ticket: 'RUSH-1262', name: 'pkce-review', abbr: 'CX', phase: 'waiting' }),
+  ])
   return (
     <>
       <FloorControls
@@ -303,6 +310,7 @@ function Backlog() {
         projFilter={null}
         search=""
         selectedTicketId={selected}
+        workers={workers}
         onSelectTicket={setSelected}
         onOpenTask={noop}
       />
@@ -406,8 +414,18 @@ function Sidebar() {
     <FloorRail
       agents={sidebarAgents}
       tickets={tickets}
-      scope={null}
+      center="agents"
+      projFilter={null}
+      hostFilter={null}
+      needsOnly={false}
+      projects={managedProjects}
+      devices={devices}
+      offlineHosts={['yosemite-s1']}
+      hostPins={pins}
+      localHost="zion"
       onScope={noop}
+      onDispatch={noop}
+      onManageProjects={noop}
       onExpand={() => setCollapsed(false)}
     />
   ) : (
@@ -545,6 +563,20 @@ function Decision() {
   )
 }
 
+// Ticket detail with an in-flight worker — the dflight block + "Dispatch anyway"
+// caution at true size (?view=ticket).
+function Ticket() {
+  const workers = ticketWorkers([
+    agent({ id: 'w1', ticket: 'RUSH-1262', name: 'pkce-pinning', abbr: 'CC', pr: '#142' }),
+    agent({ id: 'w2', ticket: 'RUSH-1262', name: 'pkce-review', abbr: 'CX', phase: 'waiting' }),
+  ])
+  return (
+    <div className="detail-col" style={{ maxWidth: 420 }}>
+      <TicketDetail ticket={tickets[0]!} hosts={['zion', 'mac-mini']} workers={workers['RUSH-1262']} onSelectAgent={noop} onDispatch={noop} />
+    </div>
+  )
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
@@ -554,7 +586,7 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : view === 'ticket' ? <Ticket /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel

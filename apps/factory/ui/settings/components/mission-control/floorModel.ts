@@ -871,6 +871,21 @@ export function groupTickets(tickets: FloorTicket[], by: TicketGroupBy): Map<str
   return groups
 }
 
+/**
+ * Agents grouped by the ticket they carry ("RUSH-812" / "#412" — the same
+ * identifier space as FloorTicket.id). The backlog joins on this to show who is
+ * already working a ticket; all phases are kept (a done agent with an open PR is
+ * still the ticket's worker) so the UI can style by phase.
+ */
+export function ticketWorkers(agents: FloorAgent[]): Record<string, FloorAgent[]> {
+  const by: Record<string, FloorAgent[]> = {}
+  for (const a of agents) {
+    if (!a.ticket) continue
+    ;(by[a.ticket] ??= []).push(a)
+  }
+  return by
+}
+
 export function sortTickets(tickets: FloorTicket[], by: TicketSort): FloorTicket[] {
   const arr = [...tickets]
   if (by === 'priority') return arr.sort((a, b) => PRI_RANK[a.pri] - PRI_RANK[b.pri])

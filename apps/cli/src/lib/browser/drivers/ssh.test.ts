@@ -63,12 +63,19 @@ describe('ssh driver CDP launch args', () => {
 });
 
 describe('buildWindowsLaunchScript', () => {
-  it('spawns via WMI so the browser survives the ssh session (no start /B)', () => {
+  it('spawns via an interactive scheduled task so the browser survives the ssh session AND serves CDP', () => {
     const s = buildWindowsLaunchScript('edge', 9222);
-    expect(s).toContain('Win32_Process');
-    expect(s).toContain('Invoke-CimMethod');
+    expect(s).toContain('Register-ScheduledTask');
+    expect(s).toContain('Start-ScheduledTask');
+    // one-shot: nothing lingers in the scheduler after launch
+    expect(s).toContain('Unregister-ScheduledTask');
+    // start /B and Start-Process children are reaped on ssh disconnect; WMI
+    // Win32_Process.Create survives disconnect but lands in session 0, where
+    // Edge binds the CDP port yet the DevTools server never initializes
+    // (/json/version hangs forever, DevToolsActivePort never written).
     expect(s).not.toContain('start /B');
-    expect(s).not.toContain('Start-Process');
+    expect(s).not.toContain('Start-Process ');
+    expect(s).not.toContain('Invoke-CimMethod');
   });
 
   it('resolves the real .exe from App Paths for a known browser', () => {
@@ -125,7 +132,7 @@ describe('encodePowerShell', () => {
 });
 
 describe('buildLaunchCmd (windows)', () => {
-  it('returns an EncodedCommand wrapping the WMI launch script', () => {
+  it('returns an EncodedCommand wrapping the scheduled-task launch script', () => {
     const cmd = buildLaunchCmd('windows', 'edge', 9222);
     expect(decodeEncoded(cmd)).toBe(buildWindowsLaunchScript('edge', 9222));
   });
@@ -192,12 +199,15 @@ describe('isOwnTunnel (win32)', () => {
 });
 
 describe('buildKillCmd', () => {
-  it('windows tears down via encoded Get-NetTCPConnection → Stop-Process', () => {
+  it('windows tears down via encoded Get-NetTCPConnection → taskkill tree-kill', () => {
     const cmd = buildKillCmd('windows', 9222);
     const script = decodeEncoded(cmd);
     expect(script).toBe(buildWindowsKillScript(9222));
     expect(script).toContain('Get-NetTCPConnection -LocalPort 9222');
-    expect(script).toContain('Stop-Process');
+    // Tree-kill: Stop-Process on the main pid orphans Chromium children that
+    // hold the profile lock and wedge every subsequent launch.
+    expect(script).toContain('taskkill /PID $_.OwningProcess /T /F');
+    expect(script).not.toContain('Stop-Process');
     expect(script).not.toContain('lsof');
   });
 
@@ -248,8 +258,9 @@ describe('killRemoteBrowser on stop/cleanup (#559)', () => {
     const rec = cp.calls.at(-1)!;
     expect(rec.cmd).toBe('ssh');
     expect(rec.args).toContain('me@win-mini');
-    // The remote command is the exact encoded Get-NetTCPConnection -> Stop-Process
-    // script, so `browser stop` reaps the WMI-spawned browser (not just the tunnel).
+    // The remote command is the exact encoded Get-NetTCPConnection -> taskkill /T
+    // tree-kill script, so `browser stop` reaps the task-launched browser and its
+    // children (not just the tunnel).
     expect(rec.args).toContain(buildKillCmd('windows', 9222));
     rec.child.emit('close', 0);
     await p;
