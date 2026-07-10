@@ -45,10 +45,13 @@ elsewhere; route through `supports()`.
 
 ### 4. No fallback logic for legacy layouts
 
-[`src/lib/migrate.ts`](src/lib/migrate.ts) folds legacy paths ONCE at install time
-(`runMigration()` writes a `.migrated` sentinel). Downstream code assumes the
-post-fold layout. "Just-in-case" branches re-introduce drift bugs; the migrator is
-the single source of truth for legacy handling.
+[`src/lib/migrate.ts`](src/lib/migrate.ts) folds legacy paths ONCE at install time.
+The bootstrap gate that invokes `runMigration()` then writes the `.migrated` sentinel
+(`MIGRATED_SENTINEL_FILE`, [`src/lib/state.ts`](src/lib/state.ts)), keyed to the
+migration SCHEMA version, so the scan short-circuits next run — `runMigration()` itself
+only relocates a legacy sentinel via `moveFileOnce`, never writes one. Downstream code
+assumes the post-fold layout. "Just-in-case" branches re-introduce drift bugs; the
+migrator is the single source of truth for legacy handling.
 
 ### 5. Hooks live in a single layered `hooks.yaml`
 
