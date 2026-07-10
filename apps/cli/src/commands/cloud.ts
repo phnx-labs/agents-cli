@@ -7,6 +7,7 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { die, relTime, truncate, isJsonMode } from '../lib/format.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import ora from 'ora';
@@ -46,26 +47,6 @@ function parseSkillRef(raw: string): SkillRef {
 }
 
 /** Print an error message to stderr and exit. */
-function die(msg: string, code = 1): never {
-  console.error(chalk.red(msg));
-  process.exit(code);
-}
-
-/** Format an ISO timestamp as a human-readable relative time string. */
-function relTime(iso: string): string {
-  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (secs < 10) return 'just now';
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)} minutes ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)} hours ago`;
-  return `${Math.floor(secs / 86400)} days ago`;
-}
-
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + '...';
-}
-
 /** Return a chalk color function appropriate for the given task status. */
 function statusColor(status: string): (s: string) => string {
   switch (status) {
@@ -80,9 +61,6 @@ function statusColor(status: string): (s: string) => string {
   }
 }
 
-function isJsonMode(opts: { json?: boolean }): boolean {
-  return Boolean(opts.json) || !process.stdout.isTTY;
-}
 
 /**
  * After a `MissingTargetError`, try to resolve the target interactively.

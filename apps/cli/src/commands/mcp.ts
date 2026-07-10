@@ -8,6 +8,7 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { truncate } from '../lib/format.js';
 import ora from 'ora';
 import { checkbox } from '@inquirer/prompts';
 
@@ -900,7 +901,7 @@ function buildMcpRows(opts: {
 
     rows.push({
       name,
-      description: displayCommand ? truncateString(displayCommand, 60) : '',
+      description: displayCommand ? truncate(displayCommand, 60) : '',
       extra: source,
       targets,
       buildDetail: () => formatMcpDetail(name, source, centralConfig, manifestConfig, displayCommand, targets),
@@ -962,7 +963,3 @@ function formatMcpDetail(
   return lines.join('\n');
 }
 
-function truncateString(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
-}

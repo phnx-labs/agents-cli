@@ -8,6 +8,7 @@
  */
 
 import chalk from 'chalk';
+import { truncate, padVisible } from '../lib/format.js';
 import type { AgentId } from '../lib/types.js';
 import { agentLabel } from '../lib/agents.js';
 import { itemPicker } from '../lib/picker.js';
@@ -104,15 +105,15 @@ function filterRows(rows: ResourceRow[], query: string): ResourceRow[] {
 
 /** Row label rendered inside the picker list. */
 function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
-  const name = chalk.cyan(padRight(row.name, 22));
+  const name = chalk.cyan(padVisible(row.name, 22));
   const extra = opts.extraLabel
-    ? chalk.gray(padRight(row.extra ?? '-', 10))
+    ? chalk.gray(padVisible(row.extra ?? '-', 10))
     : '';
   const extra2 = opts.extra2Label
-    ? chalk.gray(padRight(row.extra2 ?? '-', 16))
+    ? chalk.gray(padVisible(row.extra2 ?? '-', 16))
     : '';
   const descRaw = row.description ? truncate(row.description, 40) : '';
-  const desc = padRight(chalk.gray(descRaw), 42);
+  const desc = padVisible(chalk.gray(descRaw), 42);
   const sync = formatSyncSummary(row.targets, opts);
   return `${name} ${extra}${extra2}${desc} ${sync}`;
 }
@@ -329,15 +330,3 @@ function formatVersionPill(t: SyncTarget): string {
 }
 
 /** Pad a string to a fixed width, accounting for ANSI escape codes in length calculation. */
-function padRight(s: string, width: number): string {
-  // Strip ANSI for length calc
-  const raw = s.replace(/\x1b\[[0-9;]*m/g, '');
-  if (raw.length >= width) return s;
-  return s + ' '.repeat(width - raw.length);
-}
-
-/** Truncate a string to a maximum length, appending an ellipsis if needed. */
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
-}

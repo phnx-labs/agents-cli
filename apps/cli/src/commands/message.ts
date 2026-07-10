@@ -13,16 +13,13 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { die } from '../lib/format.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { resolveMessageTarget } from '../lib/mailbox-target.js';
 
-function die(msg: string, code = 1): never {
-  console.error(chalk.red(msg));
-  process.exit(code);
-}
 
 export function registerMessageCommand(program: Command): void {
   program

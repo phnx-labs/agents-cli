@@ -23,6 +23,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { truncate } from '../lib/format.js';
 import * as path from 'path';
 import { setHelpSections } from '../lib/help.js';
 import {
@@ -451,9 +452,6 @@ function formatAge(secs: number): string {
   return `${h}h ${m % 60}m`;
 }
 
-function truncate(s: string, n: number): string {
-  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
-}
 
 function printMeta(m: SessionMeta): void {
   console.log(`  ${chalk.bold('name')}       ${m.name}`);

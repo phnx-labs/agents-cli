@@ -7,6 +7,7 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { die, relTime, truncate, isJsonMode, padRight } from '../lib/format.js';
 import * as fs from 'fs/promises';
 import { addHostOption } from '../lib/hosts/option.js';
 import * as path from 'path';
@@ -107,15 +108,6 @@ type Effort = (typeof VALID_EFFORTS)[number];
 
 // Auto-enable JSON mode when piped / not a TTY so AI agent consumers get
 // parseable output by default.
-function isJsonMode(opts: { json?: boolean }): boolean {
-  return Boolean(opts.json) || !process.stdout.isTTY;
-}
-
-function die(msg: string, code = 1): never {
-  console.error(chalk.red(msg));
-  process.exit(code);
-}
-
 function statusColor(status: string): (s: string) => string {
   switch (status) {
     case 'pending': return chalk.blue;
@@ -125,20 +117,6 @@ function statusColor(status: string): (s: string) => string {
     case 'stopped': return chalk.gray;
     default: return chalk.white;
   }
-}
-
-function relTime(iso: string): string {
-  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (secs < 10) return 'just now';
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + '…';
 }
 
 function compactPrompt(s: string, n = 160): string {
@@ -157,9 +135,6 @@ function formatTimestamp(iso: string | null | undefined): string | null {
   });
 }
 
-function padRight(s: string, width: number): string {
-  return s.length >= width ? s : s + ' '.repeat(width - s.length);
-}
 
 function fullName(type: AgentType, version: string | null | undefined): string {
   const name = AGENT_NAMES[type];

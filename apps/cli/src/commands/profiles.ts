@@ -9,7 +9,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import * as fs from 'fs';
+import { readStdinSync } from '../lib/format.js';
 import { spawn } from 'child_process';
 import {
   listProfiles,
@@ -66,21 +66,6 @@ async function promptForSecret(message: string): Promise<string> {
 }
 
 /** Read all available data from stdin synchronously, trimmed. */
-function readStdinSync(): string {
-  const chunks: Buffer[] = [];
-  const buf = Buffer.alloc(65536);
-  while (true) {
-    let bytesRead: number;
-    try {
-      bytesRead = fs.readSync(0, buf, 0, buf.length, null);
-    } catch {
-      break;
-    }
-    if (bytesRead === 0) break;
-    chunks.push(Buffer.from(buf.subarray(0, bytesRead)));
-  }
-  return Buffer.concat(chunks).toString('utf-8').trim();
-}
 
 /** Ensure a provider API key exists in keychain, prompting or reading stdin if missing. */
 async function ensureProviderToken(provider: string, signupUrl?: string, fromStdin?: boolean): Promise<void> {
