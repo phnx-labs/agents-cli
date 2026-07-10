@@ -56,8 +56,13 @@ dotnet publish computer-helper-win.csproj -c Release -r win-x64 \
 
 Output: `dist/computer-helper-win.exe` — a self-contained, single-file exe.
 `EnableWindowsTargeting` lets it **cross-publish from a macOS/Linux build host**.
-The exe is not committed (`dist/` is gitignored); release scripts stage it into
-the npm tarball.
+The exe is not committed (`dist/` is gitignored) and does not ship in the npm
+tarball (~157MB). On `v*` tags the `release-exe` job in
+[`computer-helper-win.yml`](../../.github/workflows/computer-helper-win.yml)
+uploads it plus a `.sha256` as GitHub release assets, and `agents computer
+setup --host` downloads the asset matching the running CLI version
+(checksum-verified, cached under `~/.agents/.cache/computer/win-helper/`)
+when no local build exists.
 
 ### Why single-file needs native-lib self-extraction
 
