@@ -81,6 +81,50 @@ describe('supports() capability gate', () => {
   });
 });
 
+describe('mcpHttp / mcpHeaders capability gates', () => {
+  it('mcpHttp: only claude, codex, gemini', () => {
+    expect(supports('claude', 'mcpHttp').ok).toBe(true);
+    expect(supports('codex', 'mcpHttp').ok).toBe(true);
+    expect(supports('gemini', 'mcpHttp').ok).toBe(true);
+    expect(supports('cursor', 'mcpHttp').ok).toBe(false);
+    expect(supports('opencode', 'mcpHttp').ok).toBe(false);
+    expect(supports('openclaw', 'mcpHttp').ok).toBe(false);
+    expect(supports('copilot', 'mcpHttp').ok).toBe(false);
+    expect(supports('amp', 'mcpHttp').ok).toBe(false);
+    expect(supports('kiro', 'mcpHttp').ok).toBe(false);
+    expect(supports('goose', 'mcpHttp').ok).toBe(false);
+    expect(supports('antigravity', 'mcpHttp').ok).toBe(false);
+    expect(supports('grok', 'mcpHttp').ok).toBe(false);
+    expect(supports('kimi', 'mcpHttp').ok).toBe(false);
+    expect(supports('droid', 'mcpHttp').ok).toBe(false);
+  });
+
+  it('mcpHeaders: only claude', () => {
+    expect(supports('claude', 'mcpHeaders').ok).toBe(true);
+    expect(supports('codex', 'mcpHeaders').ok).toBe(false);
+    expect(supports('gemini', 'mcpHeaders').ok).toBe(false);
+    expect(supports('cursor', 'mcpHeaders').ok).toBe(false);
+    expect(supports('opencode', 'mcpHeaders').ok).toBe(false);
+    expect(supports('openclaw', 'mcpHeaders').ok).toBe(false);
+    expect(supports('copilot', 'mcpHeaders').ok).toBe(false);
+    expect(supports('amp', 'mcpHeaders').ok).toBe(false);
+    expect(supports('kiro', 'mcpHeaders').ok).toBe(false);
+    expect(supports('goose', 'mcpHeaders').ok).toBe(false);
+    expect(supports('antigravity', 'mcpHeaders').ok).toBe(false);
+    expect(supports('grok', 'mcpHeaders').ok).toBe(false);
+    expect(supports('kimi', 'mcpHeaders').ok).toBe(false);
+    expect(supports('droid', 'mcpHeaders').ok).toBe(false);
+  });
+
+  it('capableAgents(mcpHttp) matches the old inline allowlist exactly', () => {
+    expect(capableAgents('mcpHttp').sort()).toEqual(['claude', 'codex', 'gemini']);
+  });
+
+  it('capableAgents(mcpHeaders) matches the old inline claude-only check', () => {
+    expect(capableAgents('mcpHeaders')).toEqual(['claude']);
+  });
+});
+
 describe('isCapable()', () => {
   it('reports true for any non-false capability', () => {
     expect(isCapable('claude', 'hooks')).toBe(true);

@@ -139,6 +139,19 @@ export interface AgentConfig {
   capabilities: {
     hooks: Capability;
     mcp: Capability;
+    /**
+     * Whether `mcp add --transport http` is supported. Only true for agents
+     * whose CLI accepts an HTTP-transport MCP server registration; false for
+     * agents that only accept stdio (registerMcp skips HTTP registration with
+     * a clear reason).
+     */
+    mcpHttp: Capability;
+    /**
+     * Whether HTTP-MCP registration accepts `--header` args. Independent of
+     * `mcpHttp`: only Claude's CLI takes headers today; Codex/Gemini accept
+     * HTTP MCP but reject header args.
+     */
+    mcpHeaders: Capability;
     allowlist: Capability;
     skills: Capability;
     commands: Capability;
@@ -173,7 +186,7 @@ export type Capability = boolean | { since?: string; until?: string };
 export type RulesCapability = false | { file: string };
 
 /** Names of every gateable capability on AgentConfig. */
-export type CapabilityName = 'hooks' | 'mcp' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows';
+export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows';
 
 /**
  * Permission modes controlling agent autonomy.
