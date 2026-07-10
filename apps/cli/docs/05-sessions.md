@@ -87,20 +87,33 @@ Fields:
 | `costUsd` | Σ tokens × per-model price, at scan time | `null` when the model is unknown/unpriced; see `agents cost` |
 | `durationMs` | `lastTs − firstTs` over timestamped events | `null` for single-event sessions |
 | `isTeamOrigin` | Set when spawned by `agents teams` | JSONL `entrypoint: 'sdk-cli'` |
+| `plan` | Last `ExitPlanMode` plan markdown (Claude sessions only) | `null` when the session never entered plan-review |
 
 ## SessionEvent (detail output)
 
-`agents sessions <id> --json` returns the normalized event array:
+`agents sessions <id> --json` returns a `{ session, events }` wrapper — the
+`SessionMeta` for the session (durable signals like `plan`, `prUrl`, `ticketId`
+live here) alongside the normalized event array. Pre-1.20.51 emitted a bare
+event array; consumers that JSON.parse the output should read `output.events`:
 
 ```json
-[
-  { "type": "message", "role": "user", "timestamp": "...", "content": "..." },
-  { "type": "tool_use", "timestamp": "...", "tool": "Edit", "args": {...}, "path": "/repo/src/a.ts" },
-  { "type": "tool_result", "timestamp": "...", "tool": "Edit", "success": true },
-  { "type": "usage", "timestamp": "...", "model": "claude-opus-4-7", "inputTokens": 6, "outputTokens": 364 },
-  { "type": "thinking", "timestamp": "...", "content": "..." },
-  { "type": "message", "role": "assistant", "timestamp": "...", "content": "..." }
-]
+{
+  "session": {
+    "id": "c07ec355-...",
+    "agent": "claude",
+    "plan": "# Plan\n\n1. ...",
+    "prUrl": "https://github.com/.../pull/38",
+    "..."
+  },
+  "events": [
+    { "type": "message", "role": "user", "timestamp": "...", "content": "..." },
+    { "type": "tool_use", "timestamp": "...", "tool": "Edit", "args": {}, "path": "/repo/src/a.ts" },
+    { "type": "tool_result", "timestamp": "...", "tool": "Edit", "success": true },
+    { "type": "usage", "timestamp": "...", "model": "claude-opus-4-7", "inputTokens": 6, "outputTokens": 364 },
+    { "type": "thinking", "timestamp": "...", "content": "..." },
+    { "type": "message", "role": "assistant", "timestamp": "...", "content": "..." }
+  ]
+}
 ```
 
 The event types are an agent-agnostic union:

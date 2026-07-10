@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 11;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   pr_url TEXT,
   pr_number INTEGER,
   worktree_slug TEXT,
-  ticket_id TEXT
+  ticket_id TEXT,
+  plan TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -130,6 +131,7 @@ export interface SessionRow {
   pr_number: number | null;
   worktree_slug: string | null;
   ticket_id: string | null;
+  plan: string | null;
 }
 
 /** File stat snapshot used to detect changes between scan runs. */
@@ -277,6 +279,15 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
                  (SELECT label FROM sessions WHERE sessions.id = session_text.session_id), '')`);
       db.exec(`ALTER TABLE sessions DROP COLUMN name`);
     }
+  }
+  if (fromVersion < 11) {
+    // v10 → v11: the Claude scanner now captures the ExitPlanMode plan markdown
+    // at scan time so `agents sessions --json` can surface it without forcing
+    // consumers (the Factory NEEDS-YOU panel) to re-read raw JSONL. Additive
+    // column; rescan to backfill.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'plan')) db.exec(`ALTER TABLE sessions ADD COLUMN plan TEXT`);
+    db.exec(`DELETE FROM scan_ledger;`);
   }
 }
 
@@ -506,13 +517,13 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     project, cwd, git_branch, topic, label, message_count, token_count,
     cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
-    pr_url, pr_number, worktree_slug, ticket_id
+    pr_url, pr_number, worktree_slug, ticket_id, plan
   ) VALUES (
     @id, @short_id, @agent, @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
-    @pr_url, @pr_number, @worktree_slug, @ticket_id
+    @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan
   )
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
@@ -538,7 +549,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     pr_url = excluded.pr_url,
     pr_number = excluded.pr_number,
     worktree_slug = excluded.worktree_slug,
-    ticket_id = excluded.ticket_id
+    ticket_id = excluded.ticket_id,
+    plan = excluded.plan
 `);
 
 const deleteTextStmt = (db: Database.Database) =>
@@ -596,6 +608,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     pr_number: meta.prNumber ?? null,
     worktree_slug: meta.worktreeSlug ?? null,
     ticket_id: meta.ticketId ?? null,
+    plan: meta.plan ?? null,
   };
 
   const txn = db.transaction(() => {
@@ -697,6 +710,7 @@ export function upsertSessionsBatch(
         pr_number: meta.prNumber ?? null,
         worktree_slug: meta.worktreeSlug ?? null,
         ticket_id: meta.ticketId ?? null,
+        plan: meta.plan ?? null,
       });
       delText.run(meta.id);
       insText.run(
@@ -880,6 +894,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     prNumber: row.pr_number ?? undefined,
     worktreeSlug: row.worktree_slug ?? undefined,
     ticketId: row.ticket_id ?? undefined,
+    plan: row.plan ?? undefined,
   };
 }
 
