@@ -305,7 +305,11 @@ export function toFloorAgentFromUnified(
   // The full recent-messages window (up to the CLI's last N) drives the detail Activity
   // feed; the single last one still feeds `resp` (card body / question parsing).
   const messages = (lastMsgs ?? []).filter((m) => typeof m === 'string' && m.trim().length > 0)
-  const resp = (messages.length ? messages[messages.length - 1] ?? '' : '') || u.activity || ''
+  // `resp` is the agent's last real MESSAGE, never the live now-line. Falling back to
+  // `u.activity` here duplicated it: the now-line placeholder ("Thinking...") rendered
+  // once as the card body AND again as the `verb` nowline. The nowline (verb/target,
+  // below) is the sole live-activity surface; the body stays empty when there's no message.
+  const resp = messages.length ? messages[messages.length - 1] ?? '' : ''
   // Original task anchor: a terminal session's first user message, else a headless run's
   // dispatch prompt. Distinct from `resp` (the last message), which drifts as work goes.
   const prompt = firstNonEmptyStr(u.terminal?.firstUserMessage, u.agent?.prompt)
