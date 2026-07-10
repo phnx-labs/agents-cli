@@ -50,26 +50,6 @@ export function getAliasesForSource(config: AgentsConfig, source: string): strin
 
 // --- Legacy compatibility aliases ---
 
-/** @deprecated Use isContextSourceFile */
-export function isMemorySourceFile(fileName: string, config: AgentsConfig): boolean {
-  return isContextSourceFile(fileName, config);
-}
-
-/** @deprecated Use getContextMappings */
-export function getFileMappings(config: AgentsConfig): ContextMapping[] {
-  return config.context;
-}
-
-/** @deprecated Use getSourceFiles */
-export function getPatternFiles(config: AgentsConfig): string[] {
-  return config.context.map(c => c.source);
-}
-
-/** @deprecated Use getAliasesForSource */
-export function getSymlinksForPattern(config: AgentsConfig, pattern: string): string[] {
-  return getAliasesForSource(config, pattern);
-}
-
 /** @deprecated Context files are always synced when aliases are defined */
 export function isSymlinkingEnabled(_config: AgentsConfig): boolean {
   return true;

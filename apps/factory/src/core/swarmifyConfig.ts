@@ -230,37 +230,3 @@ export function parseSwarmifyConfig(yamlContent: string): AgentsConfig {
 export function serializeSwarmifyConfig(config: AgentsConfig): string {
   return serializeAgentsConfig(config);
 }
-
-/** @deprecated Use getContextMappings */
-export function getSymlinkMappings(config: AgentsConfig): ContextMapping[] {
-  return config.context;
-}
-
-/** @deprecated Use getSourceFiles */
-export function getPatterns(config: AgentsConfig): string[] {
-  return config.context.map(c => c.source);
-}
-
-/** @deprecated Use getAliasesForSource */
-export function getSymlinksForPattern(config: AgentsConfig, pattern: string): string[] {
-  return getAliasesForSource(config, pattern);
-}
-
-// For backward compat with old field names - map new to old
-export function toLegacyFormat(config: AgentsConfig): {
-  memory: MemoryConfig;
-  agents: AgentId[];
-  files: FilesConfig;
-} {
-  return {
-    memory: {
-      symlinking: true,
-      files: config.context.map(c => ({
-        pattern: c.source,
-        symlinks: c.aliases,
-      })),
-    },
-    agents: config.agents,
-    files: config.tasks,
-  };
-}
