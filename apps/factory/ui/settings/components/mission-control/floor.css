@@ -324,6 +324,26 @@
 .swarmify-root .rail-ib .rail-bdg.attn { background: var(--status-pending); border-color: var(--status-pending); color: #1a1a1a; }
 .swarmify-root .floor-rail .rail-gap { height: 6px; }
 .swarmify-root .rail-ib.rail-expand { color: var(--ds-text-faint); }
+/* Dispatch: the rail's one primary (lime-filled) action, mirroring the .disp pill. */
+.swarmify-root .rail-ib.rail-dispatch { background: var(--brand); border-color: var(--brand); color: #1a1a1a; }
+.swarmify-root .rail-ib.rail-dispatch:hover { filter: brightness(1.06); color: #1a1a1a; }
+/* Offline-host indicator on the Hosts button — status dot, never brand. */
+.swarmify-root .rail-ib .rail-off { position: absolute; bottom: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--status-failed); border: 2px solid var(--ds-bg); }
+/* Flyout menus for Projects / Hosts: anchored to the button, over the feed. */
+.swarmify-root .rail-fly-anchor { position: relative; }
+.swarmify-root .rail-fly-backdrop { position: fixed; inset: 0; z-index: 40; }
+.swarmify-root .rail-fly { position: absolute; left: calc(100% + 10px); top: -4px; z-index: 41; min-width: 190px; max-width: 280px; max-height: min(50vh, 420px); overflow: auto; background: var(--ds-bg-panel); border: 1px solid var(--ds-border); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.swarmify-root .rail-fly .fly-sec { font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ds-text-faint); padding: 4px 8px 3px; }
+.swarmify-root .rail-fly .fly-empty { font-size: 12px; color: var(--ds-text-faint); padding: 6px 8px; }
+.swarmify-root .rail-fly .fly-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 7px; background: none; border: 0; cursor: pointer; color: var(--ds-text); font-size: 12px; text-align: left; }
+.swarmify-root .rail-fly .fly-row:hover { background: var(--ds-bg-recessed); }
+.swarmify-root .rail-fly .fly-row.on { color: var(--brand); }
+.swarmify-root .rail-fly .fly-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarmify-root .rail-fly .fly-row .c { color: var(--ds-text-dim); font-family: "Geist Mono", monospace; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.swarmify-root .rail-fly .fly-row .w { display: inline-flex; align-items: center; gap: 2px; color: var(--status-pending); font-family: "Geist Mono", monospace; font-size: 10.5px; }
+.swarmify-root .rail-fly .fly-row .fly-hd { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--status-running); }
+.swarmify-root .rail-fly .fly-row .fly-hd.off { background: var(--status-failed); }
+.swarmify-root .rail-fly .fly-manage { color: var(--ds-text-faint); }
 .swarmify-root .sb-sec .sb-collapse { margin-left: auto; background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--ds-text-faint); display: inline-flex; align-items: center; }
 .swarmify-root .sb-sec .sb-collapse:hover { color: var(--ds-text); }
 .swarmify-root .sb-sec { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--ds-text-faint); padding: 12px 14px 4px; }

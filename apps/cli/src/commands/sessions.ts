@@ -1515,8 +1515,11 @@ async function renderSession(
     return;
   }
 
-  // json — no header, raw events only (pipeable)
-  process.stdout.write(renderJson(events));
+  // json — normalized events plus the durable session signals from the state
+  // engine (plan text, PR, worktree, ticket). Pre-1.20.51 emitted a bare event
+  // array; consumers that JSON.parse this now read `output.events` for the
+  // array. See issue #743 (plan surfaced) and CHANGELOG for the shape change.
+  process.stdout.write(renderJson(events, session));
 }
 
 function renderTopicCell(

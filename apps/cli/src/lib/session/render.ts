@@ -9,7 +9,7 @@
 
 import chalk from 'chalk';
 import { truncate } from '../format.js';
-import type { SessionEvent } from './types.js';
+import type { SessionEvent, SessionMeta } from './types.js';
 import { summarizeToolUse } from './parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
@@ -1024,10 +1024,17 @@ export function renderConversationMarkdown(
 }
 
 /**
- * Render session as JSON (normalized events).
+ * Render one session's JSON output — the shape `agents sessions <id> --json`
+ * emits. When `meta` is provided (the standard path), returns a
+ * `{ session, events }` wrapper so top-level fields (`plan`, `prUrl`, …) that
+ * live on `SessionMeta` are visible without re-parsing events. Legacy
+ * callers that pass no meta still get a bare `SessionEvent[]` array.
  */
-export function renderJson(events: SessionEvent[]): string {
-  return JSON.stringify(events, null, 2);
+export function renderJson(events: SessionEvent[], meta?: SessionMeta): string {
+  if (!meta) return JSON.stringify(events, null, 2);
+  // Strip internal-only bookkeeping fields the listing --json path also strips.
+  const { _matchedTerms, _bm25Score, _remote, ...session } = meta;
+  return JSON.stringify({ session, events }, null, 2);
 }
 
 /** Replace the home directory prefix with ~ for trace display. */

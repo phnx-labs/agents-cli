@@ -1,10 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   parseCliManifest,
   selectInstallMethod,
   describeMethod,
   buildInstallCommand,
+  hasCommand,
+  isCliInstalled,
   type CliManifest,
   type InstallMethod,
 } from './cli-resources.js';
@@ -163,5 +168,53 @@ describe('selectInstallMethod', () => {
     if (picked) {
       expect(picked).toEqual({ npm: 'foo' });
     }
+  });
+});
+
+describe('host detection', () => {
+  it('hasCommand finds node and rejects garbage on every platform', () => {
+    // node is guaranteed: it is running this test.
+    expect(hasCommand('node')).toBe(true);
+    expect(hasCommand('definitely-not-a-real-command-xyz')).toBe(false);
+  });
+
+  it('isCliInstalled is false for a version check on a missing command', () => {
+    const m = manifest([{ npm: 'foo' }]);
+    m.check = { kind: 'version', cmd: 'definitely-not-a-real-command-xyz', args: ['--version'] };
+    expect(isCliInstalled(m)).toBe(false);
+  });
+
+  describe.runIf(process.platform === 'win32')('win32 .cmd shims', () => {
+    // npm installs and script installers put `.cmd`/`.bat` shims on PATH, which
+    // Node cannot spawn without a shell — the version check must still pass.
+    let tmpDir: string | undefined;
+    const savedPath = process.env.Path ?? process.env.PATH;
+
+    afterEach(() => {
+      if (process.env.Path !== undefined) process.env.Path = savedPath;
+      else process.env.PATH = savedPath;
+      if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+      tmpDir = undefined;
+    });
+
+    it('isCliInstalled passes a version check backed by a .cmd shim', () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-shim-'));
+      fs.writeFileSync(path.join(tmpDir, 'fake-shim-tool.cmd'), '@exit /b 0\r\n');
+      const key = process.env.Path !== undefined ? 'Path' : 'PATH';
+      process.env[key] = `${tmpDir};${savedPath}`;
+      const m = manifest([{ npm: 'foo' }]);
+      m.check = { kind: 'version', cmd: 'fake-shim-tool', args: ['--version'] };
+      expect(isCliInstalled(m)).toBe(true);
+    });
+
+    it('isCliInstalled stays false when the .cmd shim exits non-zero', () => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-shim-'));
+      fs.writeFileSync(path.join(tmpDir, 'fake-shim-fail.cmd'), '@exit /b 1\r\n');
+      const key = process.env.Path !== undefined ? 'Path' : 'PATH';
+      process.env[key] = `${tmpDir};${savedPath}`;
+      const m = manifest([{ npm: 'foo' }]);
+      m.check = { kind: 'version', cmd: 'fake-shim-fail', args: ['--version'] };
+      expect(isCliInstalled(m)).toBe(false);
+    });
   });
 });

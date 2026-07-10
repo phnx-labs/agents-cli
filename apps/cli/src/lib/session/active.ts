@@ -71,6 +71,12 @@ export interface ActiveSession {
   awaitingReason?: AwaitingReason;
   /** The structured decision (question/plan/permission + options) the agent is waiting on. */
   question?: StructuredQuestion;
+  /**
+   * Plan markdown from the last `ExitPlanMode` tool call. Present when the
+   * transcript ever entered plan-review; `awaitingReason === 'plan_review'`
+   * says whether it is still pending.
+   */
+  plan?: string;
   /** Last few assistant turns (most-recent last), for at-a-glance context in the UI. */
   tail?: string[];
   /** PR opened during the session. */
@@ -349,6 +355,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     activity: state.activity,
     awaitingReason: state.awaitingReason,
     question: state.question,
+    plan: state.plan,
     tail: state.tail,
     // Prefer the live preview (latest turn); keep the first-prompt topic as a fallback.
     preview: state.preview ?? base.preview,

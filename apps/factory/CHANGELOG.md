@@ -6,6 +6,24 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The collapsed Floor rail's Projects and Hosts buttons are now flyout menus instead of
+  three buttons that all expanded the sidebar.** Click Projects for the curated project
+  list (live agent count + amber waiting count per project, plus any uncurated project
+  that has agents running) and jump straight to that scope; click Hosts for the fleet
+  roster with health dots and per-host counts. The Hosts button carries a red dot whenever
+  any host is offline, a lime **Dispatch** button now sits at the top of the rail, and the
+  `»` chevron is the single expand affordance. Active states are fixed across the board
+  (Backlog lights when the backlog center is showing; a project/host scope lights its
+  button), and the rail-vs-sidebar choice is remembered across reloads.
+
+### Fixed
+
+- **"Needs you" in the rail and sidebar now actually filters the feed.** It used to clear
+  all filters — identical to "All agents" — despite the amber badge. It now toggles the
+  same `needs` status chip the controls bar drives, and "All agents" clears it.
+
 ## [0.9.291] - 2026-07-09
 
 ### Fixed

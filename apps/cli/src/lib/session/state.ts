@@ -76,6 +76,14 @@ export interface SessionState {
    * with its options when it offered any. Set only when activity is waiting_input.
    */
   question?: StructuredQuestion;
+  /**
+   * The plan markdown from the most recent `ExitPlanMode` tool call, surfaced
+   * when `awaitingReason === 'plan_review'`. The state engine detects the
+   * handoff off the same tool event; carrying the plan text alongside it lets
+   * consumers (the Factory NEEDS-YOU panel, `agents sessions <id> --json`)
+   * render the actual plan without re-parsing the transcript.
+   */
+  plan?: string;
   /** Last few assistant turns (most-recent last), one line each — panel context. */
   tail?: string[];
   lastActivityMs?: number;
@@ -217,6 +225,19 @@ export function extractCreatedTicket(text?: string): string | undefined {
 }
 
 /**
+ * Pull the plan markdown out of an `ExitPlanMode` tool_use event's args. The
+ * Claude tool schema is `{ plan: string }`; the transcript parser already
+ * lifts `input` onto `event.args`. Returns undefined for a missing/empty plan
+ * so consumers can rely on `plan?: string` truthiness.
+ */
+export function extractPlanText(args?: Record<string, any>): string | undefined {
+  const plan = args?.plan;
+  if (typeof plan !== 'string') return undefined;
+  const trimmed = plan.trim();
+  return trimmed ? plan : undefined;
+}
+
+/**
  * Structured question from a Claude `AskUserQuestion` tool call. Its input is
  * `{ questions: [{ question, header, options: [{label, description}] }] }` and the
  * whole thing is already parsed onto `event.args` by the transcript parser — this
@@ -348,7 +369,8 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
   if (lastPlanOrAsk && meaningful.indexOf(lastPlanOrAsk) === meaningful.length - 1) {
     if (lastPlanOrAsk.tool === PLAN_TOOL) {
       const question = planReviewQuestion();
-      return { ...base, activity: 'waiting_input', awaitingReason: 'plan_review', preview: question.text, question };
+      const plan = extractPlanText(lastPlanOrAsk.args);
+      return { ...base, activity: 'waiting_input', awaitingReason: 'plan_review', preview: question.text, question, plan };
     }
     // AskUserQuestion: surface the real question + options (they're on `args`),
     // not the generic "Asked you a question" that discarded them.

@@ -105,6 +105,15 @@ export interface SessionMeta {
    */
   spawnedTeam?: string;
   /**
+   * The plan markdown from the LAST `ExitPlanMode` tool call in the transcript
+   * (Claude sessions only), captured at scan time. Present whenever the session
+   * ever entered plan-review; consumers can pair it with a live
+   * `awaitingReason === 'plan_review'` to decide whether it is still pending.
+   * Fills the gap that forced the Factory extension to re-read raw JSONL to
+   * recover the plan text — the CLI now carries it on the metadata row.
+   */
+  plan?: string;
+  /**
    * True when the session was spawned programmatically (SDK entrypoint) rather
    * than by a human at the Claude CLI. Captured at scan time from the JSONL
    * `entrypoint` field ('sdk-cli' for team spawns, 'cli' for real sessions).
