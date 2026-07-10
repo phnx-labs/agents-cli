@@ -170,6 +170,7 @@ public sealed class Automation
                     return new() { ["ok"] = true, ["action"] = "select" };
                 }
                 // No actionable pattern — click the element's center physically.
+                RejectBackground(p);
                 var b = RectToBounds(el.Current.BoundingRectangle)
                     ?? throw RpcError.Unsupported("element has no invoke/toggle/select pattern and no bounds");
                 int cx = b[0] + b[2] / 2, cy = b[1] + b[3] / 2;
@@ -183,12 +184,26 @@ public sealed class Automation
         // Coordinate click (no element_id): the universal fallback.
         if (p.TryGetProperty("x", out var xe) && p.TryGetProperty("y", out var ye))
         {
+            RejectBackground(p);
             int x = xe.GetInt32(), y = ye.GetInt32();
             MoveCursor(x, y);
             SendMouse(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_LEFTUP);
             return new() { ["ok"] = true, ["action"] = "click", ["at"] = new[] { x, y } };
         }
         throw RpcError.Invalid("pass either element_id or x,y");
+    }
+
+    // macOS `background=true` posts events straight to the target process
+    // (postToPid) without touching the cursor or foreground. Win32 SendInput
+    // has no per-process delivery — synthetic input is global — so a physical
+    // click/drag cannot honor it. Reject loudly instead of silently ignoring.
+    // Element clicks that resolve to a UIA pattern (Invoke/Toggle/Select) are
+    // already focus-safe and never reach this check.
+    private static void RejectBackground(JsonElement p)
+    {
+        if (P.BoolOr(p, "background", false))
+            throw RpcError.Unsupported(
+                "background (focus-safe postToPid) delivery is macOS-only — Windows synthetic input is global. Element mode (--id on an invokable element) is already focus-safe; omit --background");
     }
 
     // ---- type / set value (ValuePattern, focus+type fallback) -----------
@@ -244,9 +259,13 @@ public sealed class Automation
         string? elementId = P.StringOpt(p, "element_id");
         if (elementId == null) throw RpcError.Invalid("get_text needs `element_id`");
         int pid = P.Int(p, "pid");
+        // Caller-supplied cap (CLI --max-chars). Default keeps the historical
+        // 20k; the ceiling mirrors the macOS helper's 200k (AX.swift).
+        int maxChars = Math.Clamp(P.IntOr(p, "max_chars", MaxTextChars), 1, MaxTextCharsCeiling);
         var el = _cache.Get(pid, elementId) ?? throw RpcError.Stale();
         try
         {
+            string extracted;
             // Prefer rich document text, then ValuePattern, then the Name.
             if (el.TryGetCurrentPattern(TextPattern.Pattern, out var tp))
             {
@@ -274,12 +293,15 @@ public sealed class Automation
                     // as empty so get_text is total over all editable states. (#587)
                     text = "";
                 }
-                if (text.Length > MaxTextChars) text = text.Substring(0, MaxTextChars);
-                return new() { ["text"] = text };
+                extracted = text;
             }
-            if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
-                return new() { ["text"] = ((ValuePattern)vp).Current.Value ?? "" };
-            return new() { ["text"] = el.Current.Name ?? "" };
+            else if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var vp))
+                extracted = ((ValuePattern)vp).Current.Value ?? "";
+            else
+                extracted = el.Current.Name ?? "";
+
+            if (extracted.Length > maxChars) extracted = extracted.Substring(0, maxChars);
+            return new() { ["text"] = extracted };
         }
         catch (ElementNotAvailableException) { throw RpcError.Stale(); }
     }
@@ -289,9 +311,12 @@ public sealed class Automation
     {
         string text = P.StringOpt(p, "text") ?? throw RpcError.Invalid("type_text needs `text`");
         int delayMs = P.IntOr(p, "char_delay_ms", 0);
+        bool? front = CheckFrontmost(p);
         SendUnicodeString(text, delayMs);
         if (P.BoolOr(p, "commit", false)) SendVirtualKey(VK_RETURN);
-        return new() { ["ok"] = true, ["chars"] = text.Length };
+        var result = new Dictionary<string, object?> { ["ok"] = true, ["chars"] = text.Length };
+        if (front != null) result["frontmost"] = front;
+        return result;
     }
 
     // ---- key: a chord like "enter", "ctrl+a", "alt+f4" -------------------
@@ -315,11 +340,38 @@ public sealed class Automation
             }
         }
         if (main is null) throw RpcError.Invalid($"unrecognized key in chord: {keys}");
+        bool? front = CheckFrontmost(p);
         foreach (var m in mods) SendKeyEvent(m, false);
         SendKeyEvent(main.Value, false);
         SendKeyEvent(main.Value, true);
         for (int i = mods.Count - 1; i >= 0; i--) SendKeyEvent(mods[i], true);
-        return new() { ["ok"] = true };
+        var result = new Dictionary<string, object?> { ["ok"] = true };
+        if (front != null) result["frontmost"] = front;
+        return result;
+    }
+
+    // SendInput delivers keystrokes to the FOCUSED window, so a non-foreground
+    // target pid means the keys land in a different app entirely — the Windows
+    // analogue of the macOS postToPid drop this mirrors (Events.swift
+    // checkFrontmost). Reports whether the target was foreground at post time
+    // (null when the caller sent no pid — type_text/key also work pid-less
+    // against the focused control); with require_frontmost the mismatch becomes
+    // a hard error instead of a CLI-side warning.
+    private static bool? CheckFrontmost(JsonElement p)
+    {
+        bool require = P.BoolOr(p, "require_frontmost", false);
+        int pid = P.IntOr(p, "pid", 0);
+        if (pid <= 0)
+        {
+            if (require) throw RpcError.Invalid("require_frontmost needs `pid`");
+            return null;
+        }
+        GetWindowThreadProcessId(GetForegroundWindow(), out uint fgPid);
+        bool front = fgPid == (uint)pid;
+        if (!front && require)
+            throw new RpcError("not_frontmost",
+                $"pid {pid} is not the foreground app — keystrokes would land in the focused window instead. Run `agents computer raise` first, then retry");
+        return front;
     }
 
     // ---- scroll ---------------------------------------------------------
@@ -371,6 +423,7 @@ public sealed class Automation
     // Mirrors the macOS drag (Mouse.swift:20-58): { ok, method }.
     public Dictionary<string, object?> Drag(JsonElement p)
     {
+        RejectBackground(p);
         int pid = P.Int(p, "pid");
         var from = ResolvePoint(p, pid, "element_id", "from");
         var to = ResolvePoint(p, pid, "to_element_id", "to");
@@ -729,6 +782,7 @@ public sealed class Automation
     private const int MaxElements = 500;
     private const int MaxDepthDefault = 25;
     private const int MaxTextChars = 20_000;
+    private const int MaxTextCharsCeiling = 200_000; // mirrors the macOS helper's max_chars cap
     private const int MaxValueDisplayChars = 400;
 
     // ---- wait tuning ----------------------------------------------------
@@ -859,6 +913,7 @@ public sealed class Automation
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int n);
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
 
     private static void MoveCursor(int x, int y) => SetCursorPos(x, y);
 
