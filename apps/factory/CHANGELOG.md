@@ -6,6 +6,18 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.291] - 2026-07-09
+
+### Fixed
+
+- **NEEDS-YOU cards no longer show a doubled, contextless "Thinking…".** A paused/idle
+  card rendered the live-activity fallback string `"Thinking..."` twice — once as the card
+  body and again as the green now-line — because `resp` fell back to the live-activity
+  string when the agent had no last message. `resp` is now strictly the agent's last real
+  message (empty when there is none), and the now-line renders only while an agent is
+  actively working (`running`/`stalled`), so a paused card that's waiting on you shows just
+  its task, progress timeline, and reply box.
+
 ### Added
 
 - **The NEEDS-YOU detail panel now shows why an agent is blocked, the task, and the real
@@ -34,6 +46,11 @@ All notable changes to the Factory extension are documented here. Format follows
   case-insensitive switch is the union of the two tables. The standalone app's
   "latest activity" also sorted ISO timestamps lexically (wrong on mixed offsets); it now
   compares on `Date.getTime()`, matching the extension. (RUSH-1512)
+- **The standalone Factory app now pauses its floor poll when the floor is hidden.** The
+  Electron host handled `subscribeFloor` but dropped `unsubscribeFloor`, so its 5s poll —
+  which shells out to read agent state and hit the cloud-runs API — kept running even when
+  no floor was visible. It now stops on `unsubscribeFloor` and resumes on `subscribeFloor`,
+  mirroring the VS Code host's `cleanupFloorWatchers` lifecycle. (RUSH-1509)
 
 ## [0.9.290] - 2026-07-08
 

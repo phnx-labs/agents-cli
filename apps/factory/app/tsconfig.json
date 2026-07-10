@@ -11,5 +11,5 @@
     "noEmit": true,
     "types": ["node", "electron"]
   },
-  "include": ["main.ts", "preload.ts", "floorData.ts"]
+  "include": ["main.ts", "preload.ts", "floorData.ts", "floorPoll.ts"]
 }
