@@ -163,10 +163,12 @@ export type HookEntry = { name: string; scriptPath: string; dataFile?: string };
 /**
  * Resolve the command path to register for a hook.
  *
- * Returns either the raw script path (no `cache:` set, legacy behavior) or
- * the path to a generated caching/timing shim. The shim is written as a
- * side effect when `cache:` is configured. The agent-native settings file
- * gets the same shape either way — just a different command path.
+ * Returns either the raw script path (neither `cache:` nor `matches:` set,
+ * legacy behavior) or the path to a generated wrapper shim. The shim is written
+ * as a side effect when `cache:` and/or `matches:` is configured — it enforces
+ * the `matches:` gate at fire time and layers the caching/timing machinery when
+ * `cache:` is set. The agent-native settings file gets the same shape either
+ * way — just a different command path.
  */
 function resolveHookCommand(
   name: string,
