@@ -14,6 +14,7 @@ import * as crypto from 'crypto';
 import * as readline from 'readline';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import Database from '../sqlite.js';
 import { getAgentsDir, getUserAgentsDir, getHistoryDir } from '../state.js';
 
 const execFileAsync = promisify(execFile);
@@ -1269,19 +1270,25 @@ let cachedOpenCodeAccount: string | undefined;
 async function getOpenCodeAccount(): Promise<string | undefined> {
   if (cachedOpenCodeAccount !== undefined) return cachedOpenCodeAccount || undefined;
 
+  // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
+  // works on every OS — the CLI is absent on Windows.
+  let db: Database.Database | undefined;
   try {
     if (fs.existsSync(OPENCODE_DB)) {
-      const { stdout } = await execFileAsync('sqlite3', [
-        OPENCODE_DB,
-        'SELECT email FROM control_account WHERE active=1 LIMIT 1;',
-      ], { encoding: 'utf-8' });
-      const out = stdout.trim();
+      db = new Database(OPENCODE_DB);
+      const row = db
+        .prepare('SELECT email FROM control_account WHERE active=1 LIMIT 1;')
+        .get() as { email?: unknown } | undefined;
+      const out = typeof row?.email === 'string' ? row.email.trim() : '';
       if (out) {
         cachedOpenCodeAccount = out;
         return out;
       }
     }
-  } catch { /* sqlite3 unavailable or DB locked */ }
+  } catch { /* DB not accessible, sqlite module unavailable, or query failed */ }
+  finally {
+    try { db?.close(); } catch { /* best-effort close */ }
+  }
 
   cachedOpenCodeAccount = '';
   return undefined;
@@ -1308,18 +1315,21 @@ async function scanOpenCodeIncremental(): Promise<void> {
   const account = await getOpenCodeAccount();
   const currentVersion = await getCurrentAgentVersion('opencode');
 
+  // Read through the node/bun SQLite wrapper (not the `sqlite3` CLI) so this
+  // works on every OS — the CLI is absent on Windows.
+  let db: Database.Database | undefined;
   try {
     const query = `
       SELECT
-        s.id,
-        s.title,
-        s.directory,
-        s.version,
-        s.time_created,
-        s.time_updated,
-        COALESCE(stats.message_count, 0),
-        stats.token_count,
-        COALESCE(stats.has_token_data, 0)
+        s.id AS id,
+        s.title AS title,
+        s.directory AS directory,
+        s.version AS version,
+        s.time_created AS time_created,
+        s.time_updated AS time_updated,
+        COALESCE(stats.message_count, 0) AS message_count,
+        stats.token_count AS token_count,
+        COALESCE(stats.has_token_data, 0) AS has_token_data
       FROM session s
       LEFT JOIN (
         SELECT
@@ -1341,23 +1351,34 @@ async function scanOpenCodeIncremental(): Promise<void> {
       LIMIT 1000;
     `.replace(/\n/g, ' ');
 
-    const { stdout: out } = await execFileAsync('sqlite3', ['-separator', '|||', OPENCODE_DB, query], {
-      encoding: 'utf-8',
-      timeout: 5000,
-      maxBuffer: 32 * 1024 * 1024,
-    });
+    db = new Database(OPENCODE_DB);
+    const rows = db.prepare(query).all() as Array<{
+      id: unknown;
+      title: unknown;
+      directory: unknown;
+      version: unknown;
+      time_created: unknown;
+      time_updated: unknown;
+      message_count: unknown;
+      token_count: unknown;
+      has_token_data: unknown;
+    }>;
 
     const entries: ScanEntry[] = [];
-    for (const line of out.split('\n')) {
-      if (!line.trim()) continue;
-      const [id, title, directory, version, timeCreatedStr, timeUpdatedStr, messageCountStr, tokenCountStr, hasTokenDataStr] = line.split('|||');
+    for (const row of rows) {
+      const id = typeof row.id === 'string' ? row.id : '';
       if (!id) continue;
+      const title = typeof row.title === 'string' ? row.title : '';
+      const directory = typeof row.directory === 'string' ? row.directory : '';
+      const version = typeof row.version === 'string' ? row.version : '';
 
-      const timeCreated = parseInt(timeCreatedStr, 10);
-      const timeUpdated = parseInt(timeUpdatedStr, 10);
-      const messageCount = parseInt(messageCountStr, 10);
-      const tokenCount = parseInt(tokenCountStr, 10);
-      const hasTokenData = hasTokenDataStr === '1';
+      const asInt = (v: unknown): number =>
+        typeof v === 'number' ? v : parseInt(String(v), 10);
+      const timeCreated = asInt(row.time_created);
+      const timeUpdated = asInt(row.time_updated);
+      const messageCount = asInt(row.message_count);
+      const tokenCount = asInt(row.token_count);
+      const hasTokenData = asInt(row.has_token_data) === 1;
       const timestamp = isNaN(timeCreated) ? new Date().toISOString() : new Date(timeCreated).toISOString();
       // OpenCode is one shared DB, not one file per session — its row carries a
       // per-session updated time. Set lastActivity explicitly (falling back to
@@ -1391,6 +1412,8 @@ async function scanOpenCodeIncremental(): Promise<void> {
     if (process.stderr.isTTY) {
       console.error(`Warning: Could not query OpenCode sessions: ${err.message}`);
     }
+  } finally {
+    try { db?.close(); } catch { /* best-effort close */ }
   }
 }
 
