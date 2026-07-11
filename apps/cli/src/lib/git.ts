@@ -546,6 +546,94 @@ export async function cloneIntoExisting(
 }
 
 /**
+ * Git-back an EXISTING, populated directory from a remote — clone it in place
+ * without deleting the local files. Turns a plain `~/.agents` folder (which setup
+ * creates as a bare `mkdirSync` and never git-clones — see state.ts ensureAgentsDir)
+ * into a real clone of the user's config remote, so `agents repo pull/push` and
+ * `agents sync` work on a fresh or Windows machine that never got the manual clone.
+ *
+ * Unlike cloneIntoExisting (which blindly `checkout .`s over local files), this
+ * BACKS UP every tracked file whose local copy differs from the remote — into a
+ * sibling `<dir>.pre-adopt-backup/` OUTSIDE the repo so it can't be re-committed —
+ * before overwriting it. So a box with local edits to agents.yaml/hooks/rules
+ * doesn't silently lose them. Untracked runtime state (.cache/.history/.system,
+ * all gitignored) is never touched because `checkout .` only restores tracked paths.
+ */
+export async function adoptRepo(
+  source: string,
+  targetDir: string,
+): Promise<{ success: boolean; commit: string; backupDir?: string; backedUp: string[]; error?: string }> {
+  const trimmed = source.trim();
+  const parsed = parseSource(source);
+  if (parsed.type === 'local') {
+    return { success: false, commit: '', backedUp: [], error: 'Cannot adopt from a local source' };
+  }
+  if (fs.existsSync(path.join(targetDir, '.git'))) {
+    return { success: false, commit: '', backedUp: [], error: 'Already a git repo — nothing to adopt' };
+  }
+
+  // Preserve the user's transport. parseSource rewrites `git@github.com:x` →
+  // `https://…`, which breaks SSH-key-only auth (the common config-repo setup) —
+  // a private-repo https clone then hangs on a credential prompt. If the user gave
+  // an SSH URL, clone THAT; otherwise use the normalized https url.
+  const isSsh = trimmed.startsWith('git@') || trimmed.startsWith('ssh://');
+  const cloneUrl = isSsh ? trimmed : parsed.url;
+
+  const tempDir = path.join(targetDir, '.git-adopt-temp');
+  try {
+    assertSafeGitTransport(cloneUrl);
+    fs.mkdirSync(targetDir, { recursive: true });
+    // Idempotency: clear a stale temp left by an interrupted prior run.
+    if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+
+    // Clone to temp, then move its .git in so the index == remote HEAD.
+    // Fail fast on a missing credential instead of hanging on a prompt: set
+    // GIT_TERMINAL_PROMPT=0 on the inherited env directly rather than via
+    // simple-git's `.env()`, which validates and rejects command-like vars the
+    // harness may set (GIT_EDITOR, PAGER, …) — the child inherits process.env,
+    // and non-interactive git is what we always want in the CLI anyway.
+    process.env.GIT_TERMINAL_PROMPT = '0';
+    await simpleGit().clone(cloneUrl, tempDir);
+    const repoGit = simpleGit(tempDir);
+    if (parsed.ref) await repoGit.checkout(parsed.ref);
+    fs.renameSync(path.join(tempDir, '.git'), path.join(targetDir, '.git'));
+    fs.rmSync(tempDir, { recursive: true, force: true });
+
+    const targetGit = simpleGit(targetDir);
+
+    // Back up any TRACKED file whose local copy differs from the remote before the
+    // checkout clobbers it. `diff --name-only` (worktree vs the moved-in index) is
+    // exactly that set; a deleted-locally file has nothing to preserve.
+    const diff = await targetGit.diff(['--name-only']);
+    const clobbered = diff.split('\n').map((s) => s.trim()).filter(Boolean);
+    let backupDir: string | undefined;
+    const backedUp: string[] = [];
+    if (clobbered.length > 0) {
+      backupDir = path.join(path.dirname(targetDir), path.basename(targetDir) + '.pre-adopt-backup');
+      for (const rel of clobbered) {
+        const src = path.join(targetDir, rel);
+        if (!fs.existsSync(src)) continue;
+        const dst = path.join(backupDir, rel);
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.copyFileSync(src, dst);
+        backedUp.push(rel);
+      }
+    }
+
+    // Materialize the remote's tracked files (respects .gitignore, so
+    // .cache/.history/.system stay put), overwriting the now-backed-up locals.
+    await targetGit.checkout('.');
+    installGithooksSymlinks(targetDir);
+
+    const log = await targetGit.log({ maxCount: 1 });
+    return { success: true, commit: log.latest?.hash.slice(0, 8) || 'unknown', backupDir, backedUp };
+  } catch (err) {
+    if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+    return { success: false, commit: '', backedUp: [], error: (err as Error).message };
+  }
+}
+
+/**
  * Check if the repo's origin points to the system repo.
  */
 export async function isSystemRepoOrigin(dir: string): Promise<boolean> {
