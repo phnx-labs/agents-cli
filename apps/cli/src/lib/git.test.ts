@@ -242,4 +242,17 @@ describe('adoptRepo guards', () => {
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/already a git repo/i);
   });
+
+  it('returns a graceful error (never throws) for an unsafe transport URL', async () => {
+    // parseSource/assertSafeGitTransport throw for http:// — the command has no
+    // try/catch, so this must be caught inside adoptRepo and returned, not thrown.
+    const target = path.join(base, 'bad');
+    fs.mkdirSync(target);
+    const res = await adoptRepo('http://insecure.example/repo.git', target);
+    expect(res.success).toBe(false);
+    expect(res.error).toBeTruthy();
+    // A rejected adopt leaves no .git and no leftover temp.
+    expect(fs.existsSync(path.join(target, '.git'))).toBe(false);
+    expect(fs.existsSync(path.join(target, '.git-adopt-temp'))).toBe(false);
+  });
 });
