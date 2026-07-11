@@ -147,26 +147,39 @@ describe('buildExecCommand — native resume wiring', () => {
     expect(cmd).not.toContain('--resume');
   });
 
-  it('codex headless: `codex exec resume <id> <prompt>` with the bypass flag, id before prompt', () => {
+  it('codex headless edit resume: `codex exec resume <id> <prompt>` sandboxed via -c, no bypass', () => {
     const cmd = buildExecCommand(execOpts({
       agent: 'codex', mode: 'edit', resume: true, sessionId: 'xyz-9', headless: true, prompt: 'go',
     }));
     expect(cmd.slice(0, 3)).toEqual(['codex', 'exec', 'resume']);
-    expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
+    // Only skip may bypass approvals/sandbox — edit resumes stay sandboxed.
+    expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(cmd).toContain('sandbox_mode=workspace-write');
+    expect(cmd).toContain('sandbox_workspace_write.network_access=true');
     expect(idx(cmd, 'xyz-9')).toBeGreaterThan(idx(cmd, 'resume'));
     expect(idx(cmd, 'go')).toBeGreaterThan(idx(cmd, 'xyz-9'));
     // codex's `exec resume` does NOT accept --sandbox; it must not leak through.
     expect(cmd).not.toContain('--sandbox');
   });
 
-  it('codex interactive resume drops `exec`: `codex resume <id>`, no sandbox flags', () => {
-    const cmd = buildExecCommand(execOpts({ agent: 'codex', mode: 'plan', resume: true, sessionId: 'xyz-9', interactive: true }));
-    expect(cmd).toEqual(['codex', 'resume', 'xyz-9']);
+  it('codex headless skip resume passes the bypass flag', () => {
+    const cmd = buildExecCommand(execOpts({
+      agent: 'codex', mode: 'skip', resume: true, sessionId: 'xyz-9', headless: true, prompt: 'go',
+    }));
+    expect(cmd.slice(0, 3)).toEqual(['codex', 'exec', 'resume']);
+    expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(cmd).not.toContain('--sandbox');
   });
 
-  it('codex plan-mode headless resume passes no bypass (read-only intent inherits sandbox)', () => {
+  it('codex interactive resume drops `exec` and carries the TUI sandbox flags', () => {
+    const cmd = buildExecCommand(execOpts({ agent: 'codex', mode: 'plan', resume: true, sessionId: 'xyz-9', interactive: true }));
+    expect(cmd).toEqual(['codex', 'resume', '--sandbox', 'read-only', 'xyz-9']);
+  });
+
+  it('codex plan-mode headless resume passes no bypass (read-only via -c sandbox_mode)', () => {
     const cmd = buildExecCommand(execOpts({ agent: 'codex', mode: 'plan', resume: true, sessionId: 'xyz-9', headless: true, prompt: 'go' }));
     expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(cmd).toContain('sandbox_mode=read-only');
   });
 
   it('non-native agent ignores resume in the arg builder (Tier-2 handles it via the prompt)', () => {

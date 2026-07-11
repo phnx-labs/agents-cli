@@ -886,6 +886,47 @@ export function ticketWorkers(agents: FloorAgent[]): Record<string, FloorAgent[]
   return by
 }
 
+/** Per-project activity rollup — what the rail flyout and Projects pane summarize. */
+export interface ProjectRollup {
+  /** Agents currently on the project. */
+  run: number
+  /** Of those, agents waiting on the user. */
+  wait: number
+  /** Open (non-done) backlog tickets for the project. */
+  backlog: number
+  /** Distinct open-PR URLs carried by the project's agents. */
+  prs: number
+  /** Most recent agent activity (epoch ms); 0 when unknown/idle. */
+  lastActivityMs: number
+}
+
+/**
+ * Derive every project's rollup from the live feed + backlog in one pass. Keyed by
+ * project name (the same key ManagedProject.name / FloorTicket.project use), so a
+ * consumer can look up curated and discovered projects alike.
+ */
+export function projectRollups(agents: FloorAgent[], tickets: FloorTicket[]): Record<string, ProjectRollup> {
+  const by: Record<string, ProjectRollup> = {}
+  const prSets = new Map<string, Set<string>>()
+  const get = (name: string): ProjectRollup => (by[name] ??= { run: 0, wait: 0, backlog: 0, prs: 0, lastActivityMs: 0 })
+  for (const a of agents) {
+    const r = get(a.project)
+    r.run += 1
+    if (a.needs) r.wait += 1
+    if (a.lastActivityMs > r.lastActivityMs) r.lastActivityMs = a.lastActivityMs
+    if (a.prUrl) {
+      const set = prSets.get(a.project) ?? new Set<string>()
+      set.add(a.prUrl)
+      prSets.set(a.project, set)
+    }
+  }
+  for (const t of tickets) {
+    if (t.status !== 'done') get(t.project).backlog += 1
+  }
+  for (const [name, set] of prSets) get(name).prs = set.size
+  return by
+}
+
 export function sortTickets(tickets: FloorTicket[], by: TicketSort): FloorTicket[] {
   const arr = [...tickets]
   if (by === 'priority') return arr.sort((a, b) => PRI_RANK[a.pri] - PRI_RANK[b.pri])

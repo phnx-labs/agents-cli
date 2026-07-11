@@ -46,6 +46,7 @@ import {
   groupAgents,
   sessionTaskLine,
   ticketWorkers,
+  projectRollups,
   type FloorAgent,
   type FloorTicket,
   type CenterMode,
@@ -1460,6 +1461,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Ticket id -> agents carrying it: the backlog's in-flight chips and the ticket
   // detail's "In flight" block + double-dispatch guard all join on this.
   const floorWorkers = useMemo(() => ticketWorkers(floorAgents), [floorAgents])
+  // Per-project activity rollups: the rail's Projects flyout sub-counts and the
+  // Projects pane's activity line both read from this one derivation.
+  const floorRollups = useMemo(() => projectRollups(floorAgents, floorTickets), [floorAgents, floorTickets])
 
   // Lookup back to the source UnifiedAgent so the right pane can reuse the rich DetailPane.
   const unifiedById = useMemo(() => {
@@ -2111,6 +2115,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const rightContent = center === 'projects'
     ? <ProjectsPane
         projects={managedProjects}
+        rollups={floorRollups}
         linearProjects={linearProjects}
         pickedFolder={pickedFolder}
         onSave={(p) => postMessage({ type: 'saveManagedProject', project: p })}

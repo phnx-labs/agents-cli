@@ -457,6 +457,10 @@ function Projects() {
   return (
     <ProjectsPane
       projects={managedProjects}
+      rollups={{
+        'agents-cli': { run: 3, wait: 1, backlog: 4, prs: 2, lastActivityMs: Date.now() - 40 * 60_000 },
+        rush: { run: 2, wait: 0, backlog: 12, prs: 1, lastActivityMs: Date.now() - 5 * 60_000 },
+      }}
       linearProjects={linearProjectList}
       pickedFolder={null}
       onSave={noop}

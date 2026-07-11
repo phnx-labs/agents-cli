@@ -314,7 +314,7 @@ export function registerRunCommand(program: Command): void {
     .option('--cwd <dir>', 'Working directory for the agent (defaults to current directory)')
     .option(
       '--add-dir <dir>',
-      'Grant access to an additional directory outside the project (Claude only, repeatable)',
+      'Grant access to an additional directory outside the project (Claude and Codex, repeatable)',
       (val: string, prev: string[]) => [...prev, val],
       []
     )
@@ -396,6 +396,13 @@ export function registerRunCommand(program: Command): void {
   runCmd.addOption(new Option('--on <name>', 'Alias of --host.').hideHelp());
   runCmd.addOption(new Option('--computer <name>', 'Alias of --host.').hideHelp());
 
+  // Required for the documented `agents run <agent> [prompt] -- <native flags>`
+  // passthrough: commander >=13 rejects excess operands by default, so any
+  // post-`--` token died with "too many arguments" before the action ran. The
+  // action re-derives the `--` boundary from rawArgs and still errors on excess
+  // operands that are NOT behind `--`.
+  runCmd.allowExcessArguments(true);
+
   setHelpSections(runCmd, {
     examples: `
       # Headless, read-only: investigate or summarize without writing files
@@ -445,10 +452,27 @@ export function registerRunCommand(program: Command): void {
   });
 
   runCmd.action(async (agentSpec: string, prompt: string | undefined, options: ExecCommandActionOptions, command: Command) => {
-      // Capture everything after -- as passthrough args forwarded verbatim to the underlying CLI.
-      // Use command.args (all positional strings) and strip the declared positional args from the front.
-      const declaredArgCount = prompt !== undefined ? 2 : 1;
-      const passthroughArgs = command.args.slice(declaredArgCount);
+      // Capture everything after -- as passthrough args forwarded verbatim to the
+      // underlying CLI. Commander strips the literal `--` and folds what follows
+      // into the positional operands (so `agents run codex -- --yolo` would parse
+      // `--yolo` as the PROMPT) — recover the boundary from rawArgs instead of
+      // operand counts. Excess operands not behind `--` are still an error (an
+      // unquoted prompt must not silently become agent flags).
+      const rawArgs: string[] = process.argv;
+      const separatorIdx = rawArgs.indexOf('--');
+      const passthroughArgs = separatorIdx === -1 ? [] : rawArgs.slice(separatorIdx + 1);
+      const operandsBeforeSeparator = command.args.length - passthroughArgs.length;
+      if (operandsBeforeSeparator > 2) {
+        console.error(chalk.red(
+          `Too many arguments for 'run'. Quote the prompt ("fix the bug"), and put agent-native flags after -- (agents run codex -- --yolo).`,
+        ));
+        process.exit(1);
+      }
+      if (prompt !== undefined && operandsBeforeSeparator < 2) {
+        // The token commander assigned to [prompt] came from behind `--` — it is
+        // a native flag, not a prompt. Run interactively.
+        prompt = undefined;
+      }
 
       // --lease: invent a disposable cloud box for this run (via crabbox), run
       // the agent there, then tear it down. Unlike --host, nothing is registered.
