@@ -3,9 +3,11 @@ import { compareVersions } from './agent-spec/primitives.js';
 
 /**
  * Render a compact "What's new" summary from a CHANGELOG.md body: one bullet
- * per feature/fix heading (the `**...**` lines) for each version in the range
- * the user actually moved through, `(fromVersion, toVersion]`. The verbose
- * sub-bullets are intentionally dropped — the full notes live in the changelog.
+ * per feature/fix heading for each version in the range the user actually
+ * moved through, `(fromVersion, toVersion]`. Headings are recognized in both
+ * changelog formats — the current `- **Title.** prose…` single-line bullets
+ * and the older standalone `**Heading**` lines. The verbose prose/sub-bullets
+ * are intentionally dropped — the full notes live in the changelog.
  *
  * Returns colored lines ready to print, empty when nothing is in range.
  */
@@ -29,8 +31,15 @@ export function renderWhatsNew(changelog: string, fromVersion: string, toVersion
       continue;
     }
 
-    // Only the bold headings — one bullet per feature/fix.
-    if (inRelevantSection && line.startsWith('**') && line.endsWith('**')) {
+    // Only the entry headings — one bullet per feature/fix. Two formats exist
+    // across the changelog's history: the current single-line bullets
+    // (`- **Title.** verbose prose…`, heading kept, prose dropped) and the
+    // older standalone `**Heading**` lines with `-` sub-bullets beneath.
+    if (!inRelevantSection) continue;
+    const entryBullet = line.match(/^- \*\*(.+?)\*\*/);
+    if (entryBullet) {
+      out.push(`  ${chalk.cyan('•')} ${entryBullet[1].replace(/\*\*/g, '')}`);
+    } else if (line.startsWith('**') && line.endsWith('**')) {
       out.push(`  ${chalk.cyan('•')} ${line.replace(/\*\*/g, '')}`);
     }
   }

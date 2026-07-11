@@ -9,6 +9,13 @@ const CHANGELOG = `# Changelog
 
 ## Unreleased
 
+- **An unreleased entry that must never render.** Prose detail here.
+
+## 1.20.35
+
+- **Codex mode flags now match what the mode names promise — only \`--mode skip\` is yolo.** \`--mode edit\` used to append the bypass flag alongside \`--sandbox workspace-write\`, and the bypass flag wins. Long prose continues with **inline bold** and \`code\`.
+- **\`--add-dir\` is now forwarded to Codex (it was silently dropped).** More verbose prose that should not appear.
+
 ## 1.20.34
 
 **Test suite runs remotely on a crabbox VM (#525, #540)**
@@ -64,5 +71,22 @@ describe('renderWhatsNew', () => {
 
   it('returns nothing when the range is empty', () => {
     expect(renderWhatsNew(CHANGELOG, '1.20.34', '1.20.34')).toEqual([]);
+  });
+
+  it('renders modern `- **Title.** prose` entries: heading kept, prose dropped', () => {
+    const lines = renderWhatsNew(CHANGELOG, '1.20.34', '1.20.35').map(plain);
+    expect(lines).toContain('v1.20.35');
+    expect(lines).toContain(
+      '  • Codex mode flags now match what the mode names promise — only `--mode skip` is yolo.',
+    );
+    expect(lines).toContain('  • `--add-dir` is now forwarded to Codex (it was silently dropped).');
+    // The verbose prose after the bold heading must be gone.
+    expect(lines.some((l) => l.includes('bypass flag wins'))).toBe(false);
+    expect(lines.some((l) => l.includes('verbose prose'))).toBe(false);
+  });
+
+  it('never renders the Unreleased section, in either format', () => {
+    const lines = renderWhatsNew(CHANGELOG, '1.20.30', '1.20.35').map(plain);
+    expect(lines.some((l) => l.includes('unreleased entry'))).toBe(false);
   });
 });
