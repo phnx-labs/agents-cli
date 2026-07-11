@@ -42,6 +42,35 @@ function q(s: string): string {
 }
 
 /**
+ * Bash snippet that guarantees `agents` is runnable on the box. Fresh crabbox
+ * images ship without node, and the box user may not own the global npm prefix,
+ * so everything installs user-level under ~/.local (node from the official
+ * latest-v22.x tarball to satisfy engines.node >=22.5.0). Exits 96 with a
+ * diagnostic when the CLI still isn't runnable — a silent `|| true` here used
+ * to surface only as `agents: command not found` deep in the script.
+ */
+const ENSURE_AGENTS_CLI = [
+  'export PATH="$HOME/.local/bin:$PATH"',
+  'if ! command -v node >/dev/null 2>&1; then',
+  '  case "$(uname -m)" in aarch64|arm64) narch=arm64;; *) narch=x64;; esac',
+  '  nver=$(curl -fsSL https://nodejs.org/dist/latest-v22.x/ | grep -oE "v22\\.[0-9]+\\.[0-9]+" | head -1)',
+  '  mkdir -p "$HOME/.local"',
+  '  curl -fsSL "https://nodejs.org/dist/latest-v22.x/node-$nver-linux-$narch.tar.xz" | tar -xJ -C "$HOME/.local" --strip-components=1',
+  'fi',
+  'if ! command -v agents >/dev/null 2>&1; then',
+  '  npm config set prefix "$HOME/.local" >/dev/null 2>&1 || true',
+  '  npm install -g @phnx-labs/agents-cli >/dev/null 2>&1',
+  'fi',
+  'if ! command -v agents >/dev/null 2>&1; then',
+  '  echo "lease bootstrap: agents-cli install failed (node: $(command -v node || echo missing))" >&2',
+  '  exit 96',
+  'fi',
+  // Same first-run guard the hosts bootstrap uses (hosts/ready.ts) — a fresh
+  // install refuses `agents run` with "agents-cli is not set up" until setup ran.
+  'if [ ! -d "$HOME/.agents/.system" ]; then agents setup >/dev/null 2>&1 || true; fi',
+].join('\n');
+
+/**
  * Build the single bootstrap script run on the box: ensure agents-cli, install
  * the picked runtime CLIs, write their credentials, run the agent, then shred
  * the credential files. Best-effort install steps never abort the run.
@@ -65,7 +94,7 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
 
   return [
     'set -uo pipefail',
-    'if ! command -v agents >/dev/null 2>&1; then npm install -g @phnx-labs/agents-cli >/dev/null 2>&1 || true; fi',
+    ENSURE_AGENTS_CLI,
     installRuntimes,
     credScript,
     `${runParts.join(' ')}`,
