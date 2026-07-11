@@ -341,6 +341,7 @@
 .swarmify-root .rail-fly .fly-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .swarmify-root .rail-fly .fly-row .c { color: var(--ds-text-dim); font-family: "Geist Mono", monospace; font-size: 10.5px; font-variant-numeric: tabular-nums; }
 .swarmify-root .rail-fly .fly-row .w { display: inline-flex; align-items: center; gap: 2px; color: var(--status-pending); font-family: "Geist Mono", monospace; font-size: 10.5px; }
+.swarmify-root .rail-fly .fly-row .fly-sub { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ds-text-faint); font-size: 10px; }
 .swarmify-root .rail-fly .fly-row .fly-hd { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--status-running); }
 .swarmify-root .rail-fly .fly-row .fly-hd.off { background: var(--status-failed); }
 .swarmify-root .rail-fly .fly-manage { color: var(--ds-text-faint); }

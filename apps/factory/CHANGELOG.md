@@ -8,6 +8,12 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Added
 
+- **Project rollups — one glance answers "what's happening in this project".** The
+  rail's Projects flyout rows now carry dim sub-counts (open backlog tickets and
+  distinct open PRs) next to the live agent count, and each card in the Projects
+  pane gains an activity line — "3 running · 1 waiting · 4 backlog · 2 PRs ·
+  active 40m ago" (or "quiet") — all derived in one pass from the live feed and
+  backlog the Floor already holds.
 - **Recap — a work ledger for "what happened while I was away".** A new Recap center
   (clock button on the rail, Recap tab in the strip) lists finished sessions across the
   whole fleet, grouped by day, each with its task line, project · host · branch, ticket,

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Icon } from './icons'
-import type { ManagedProject, LinearProjectLite } from './floorModel'
+import type { ManagedProject, LinearProjectLite, ProjectRollup } from './floorModel'
 
 // Projects management pane. Opens in the detail column when center === 'projects'
 // (via the sidebar cog / "+N more" row) — NOT a modal. Mirrors HostDetail's layout:
@@ -11,6 +11,8 @@ import type { ManagedProject, LinearProjectLite } from './floorModel'
 
 interface ProjectsPaneProps {
   projects: ManagedProject[]
+  /** Per-project activity rollups (projectRollups), keyed by project name. */
+  rollups?: Record<string, ProjectRollup>
   linearProjects: LinearProjectLite[]
   pickedFolder: { path: string; repoSlug?: string; name: string; suggestedLinear?: LinearProjectLite } | null
   onSave: (p: ManagedProject) => void
@@ -21,6 +23,22 @@ interface ProjectsPaneProps {
 
 const VIOLET = '#8b8ce8'
 
+/** "3 running · 1 waiting · 12 backlog · 2 PRs · active 40m ago" — only non-zero
+ *  parts; 'quiet' when the project has no live activity and no backlog. */
+export function rollupLine(r: ProjectRollup | undefined, nowMs: number): string {
+  if (!r) return 'quiet'
+  const parts: string[] = []
+  if (r.run > 0) parts.push(`${r.run} running`)
+  if (r.wait > 0) parts.push(`${r.wait} waiting`)
+  if (r.backlog > 0) parts.push(`${r.backlog} backlog`)
+  if (r.prs > 0) parts.push(`${r.prs} PR${r.prs === 1 ? '' : 's'}`)
+  if (r.lastActivityMs > 0) {
+    const mins = Math.max(1, Math.round((nowMs - r.lastActivityMs) / 60_000))
+    parts.push(`active ${mins < 60 ? `${mins}m` : `${Math.round(mins / 60)}h`} ago`)
+  }
+  return parts.length ? parts.join(' · ') : 'quiet'
+}
+
 /** Truncate a long path in the middle so both the root and the leaf stay visible. */
 function truncateMiddle(s: string, max = 42): string {
   if (s.length <= max) return s
@@ -29,7 +47,7 @@ function truncateMiddle(s: string, max = 42): string {
   return `${s.slice(0, head)}…${s.slice(s.length - tail)}`
 }
 
-export function ProjectsPane({ projects, linearProjects, pickedFolder, onSave, onDelete, onPickFolder, onClose }: ProjectsPaneProps) {
+export function ProjectsPane({ projects, rollups = {}, linearProjects, pickedFolder, onSave, onDelete, onPickFolder, onClose }: ProjectsPaneProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [path, setPath] = useState('')
   const [name, setName] = useState('')
@@ -130,6 +148,9 @@ export function ProjectsPane({ projects, linearProjects, pickedFolder, onSave, o
                   </div>
                   <div className="mono" style={{ color: 'var(--ds-text-dim)', fontSize: 11, marginTop: 2 }} title={p.path}>
                     {truncateMiddle(p.path)}
+                  </div>
+                  <div style={{ color: 'var(--ds-text-faint)', fontSize: 11, marginTop: 2 }}>
+                    {rollupLine(rollups[p.name], Date.now())}
                   </div>
                 </div>
                 <button className="host-btn" onClick={() => startEdit(p)}>Edit</button>

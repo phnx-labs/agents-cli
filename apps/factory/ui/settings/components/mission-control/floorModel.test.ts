@@ -20,6 +20,7 @@ import {
   groupTickets,
   sortTickets,
   ticketWorkers,
+  projectRollups,
   resolveProject,
   sessionTaskLine,
   todosWithFallback,
@@ -885,5 +886,30 @@ describe('ticketWorkers', () => {
 
   test('empty input yields empty map', () => {
     expect(ticketWorkers([])).toEqual({})
+  })
+})
+
+describe('projectRollups', () => {
+  test('one pass over agents + tickets: run/wait/backlog/prs/lastActivity per project', () => {
+    const by = projectRollups(
+      [
+        makeAgent({ id: 'a', project: 'swarmify', needs: true, lastActivityMs: 100, prUrl: 'https://x/pull/1' }),
+        makeAgent({ id: 'b', project: 'swarmify', lastActivityMs: 900, prUrl: 'https://x/pull/1' }),
+        makeAgent({ id: 'c', project: 'rush', lastActivityMs: 50 }),
+      ],
+      [
+        { id: 'T-1', title: '', project: 'swarmify', source: 'LN', pri: 'high', status: 'todo', desc: '', labels: [], owner: '' },
+        { id: 'T-2', title: '', project: 'swarmify', source: 'LN', pri: 'low', status: 'done', desc: '', labels: [], owner: '' },
+        { id: 'T-3', title: '', project: 'ghost', source: 'GH', pri: 'med', status: 'in-progress', desc: '', labels: [], owner: '' },
+      ],
+    )
+    expect(by['swarmify']).toEqual({ run: 2, wait: 1, backlog: 1, prs: 1, lastActivityMs: 900 })
+    expect(by['rush']).toEqual({ run: 1, wait: 0, backlog: 0, prs: 0, lastActivityMs: 50 })
+    // A ticket-only project still gets a rollup (the Projects pane may manage it).
+    expect(by['ghost']).toEqual({ run: 0, wait: 0, backlog: 1, prs: 0, lastActivityMs: 0 })
+  })
+
+  test('empty inputs yield an empty map', () => {
+    expect(projectRollups([], [])).toEqual({})
   })
 })
