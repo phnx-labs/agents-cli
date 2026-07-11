@@ -14,6 +14,12 @@ import { compareVersions } from './agent-spec/primitives.js';
 export function renderWhatsNew(changelog: string, fromVersion: string, toVersion: string): string[] {
   const out: string[] = [];
   let inRelevantSection = false;
+  // Whether the CURRENT version section uses the old standalone-heading format.
+  // Old sections nest `-` sub-bullets under each `**Heading**` line, and some
+  // sub-bullets are themselves bold-led (`- **Claim.** detail…`) — once a
+  // standalone heading is seen, `- **` lines in that section are sub-bullets,
+  // not entries, and must not render.
+  let sectionUsesStandaloneHeadings = false;
 
   for (const line of changelog.split('\n')) {
     const versionMatch = line.match(/^## (\d+\.\d+\.\d+)/);
@@ -24,6 +30,7 @@ export function renderWhatsNew(changelog: string, fromVersion: string, toVersion
       inRelevantSection =
         compareVersions(currentVersion, fromVersion) > 0 &&
         compareVersions(currentVersion, toVersion) <= 0;
+      sectionUsesStandaloneHeadings = false;
       if (inRelevantSection) {
         out.push('');
         out.push(chalk.bold(`v${currentVersion}`));
@@ -36,11 +43,14 @@ export function renderWhatsNew(changelog: string, fromVersion: string, toVersion
     // (`- **Title.** verbose prose…`, heading kept, prose dropped) and the
     // older standalone `**Heading**` lines with `-` sub-bullets beneath.
     if (!inRelevantSection) continue;
-    const entryBullet = line.match(/^- \*\*(.+?)\*\*/);
+    if (line.startsWith('**') && line.endsWith('**')) {
+      sectionUsesStandaloneHeadings = true;
+      out.push(`  ${chalk.cyan('•')} ${line.replace(/\*\*/g, '')}`);
+      continue;
+    }
+    const entryBullet = sectionUsesStandaloneHeadings ? null : line.match(/^- \*\*(.+?)\*\*/);
     if (entryBullet) {
       out.push(`  ${chalk.cyan('•')} ${entryBullet[1].replace(/\*\*/g, '')}`);
-    } else if (line.startsWith('**') && line.endsWith('**')) {
-      out.push(`  ${chalk.cyan('•')} ${line.replace(/\*\*/g, '')}`);
     }
   }
 
