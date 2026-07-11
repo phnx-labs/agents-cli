@@ -90,6 +90,13 @@ describe('buildJobCommand', () => {
       expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('read-only');
     });
 
+    it('auto mode gets the same sandboxed treatment as edit', () => {
+      const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'auto' }), 'hello');
+      expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('workspace-write');
+      expect(cmd).toContain('sandbox_workspace_write.network_access=true');
+    });
+
     it('skip mode drops the sandbox and adds the bypass flag', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'skip' }), 'hello');
       expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
