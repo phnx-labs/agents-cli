@@ -8,6 +8,14 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Added
 
+- **Recap — a work ledger for "what happened while I was away".** A new Recap center
+  (clock button on the rail, Recap tab in the strip) lists finished sessions across the
+  whole fleet, grouped by day, each with its task line, project · host · branch, ticket,
+  a PR link, and the session's real duration and cost. Day headers roll up sessions,
+  spend, and PRs (e.g. "Today — 12 sessions · $18.40 · 3 PRs"). No new bookkeeping: the
+  CLI's `agents sessions` metrics (`durationMs`, `costUsd`, `tokenCount`) were already
+  computed per session and are now carried through instead of dropped. Live sessions are
+  excluded — the feed owns what's running, the ledger owns what finished.
 - **The backlog now shows who is already working each ticket.** A ticket an agent
   carries gets an in-flight chip on its row (phase dot + agent abbr, `+N` when several
   are on it; hover for the full roster), and the ticket detail pane gains an **In

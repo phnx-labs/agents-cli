@@ -322,7 +322,7 @@ export interface FloorTicket {
 
 // ---------- controls state ----------
 
-export type CenterMode = 'agents' | 'backlog' | 'host' | 'projects'
+export type CenterMode = 'agents' | 'backlog' | 'host' | 'projects' | 'recap'
 
 // Host detail pane payloads. Mirror of extension/src/core/hostInventory.ts —
 // the webview can't import from src/*, so the shape is redeclared here and

@@ -201,6 +201,12 @@ export interface RemoteSession {
   /** Where the session is currently being viewed, pre-formatted by the CLI (e.g.
    *  "Codium tab 3", "Ghostty tab 2", "detached"). '' when the CLI supplies none. */
   viewingIn: string;
+  /** Outcome fields, populated only for RECENT (historical) sessions — the flat
+   *  `agents sessions --json` payload carries them; the --active payload does not.
+   *  0 when unknown. These drive the Recap ledger (duration/cost per session). */
+  durationMs?: number;
+  costUsd?: number;
+  tokenCount?: number;
 }
 
 /** One machine's worth of sessions plus its reachability + freshness stamp. */
@@ -304,6 +310,16 @@ const TICKET_RE = /\b[A-Z][A-Z0-9]*-\d+\b/;
  */
 function asStr(v: unknown): string {
   return typeof v === 'string' ? v : '';
+}
+
+/** Coerce a CLI-emitted numeric field (number, or numeric string) to a number; 0 otherwise. */
+function asNum(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return 0;
 }
 
 /**
@@ -483,6 +499,11 @@ export interface RawRecentSession {
   topic?: string;
   label?: string;
   machine?: string;
+  // Outcome metrics the CLI computes per session (may arrive as numeric strings).
+  durationMs?: number | string;
+  costUsd?: number | string;
+  tokenCount?: number | string;
+  messageCount?: number | string;
 }
 
 /** Map a recent (historical, non-active) SessionMeta onto RemoteSession. Recent =
@@ -536,6 +557,11 @@ export function normalizeRecentSession(
     // client to resolve, so both are empty (the required-string default).
     tmuxPane: '',
     viewingIn: '',
+    // Outcome metrics for the Recap ledger. The CLI emits these on the flat
+    // SessionMeta payload; coerce defensively (numeric strings observed in the wild).
+    durationMs: asNum(raw.durationMs),
+    costUsd: asNum(raw.costUsd),
+    tokenCount: asNum(raw.tokenCount),
   };
 }
 

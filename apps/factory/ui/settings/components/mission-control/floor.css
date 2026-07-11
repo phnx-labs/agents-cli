@@ -412,6 +412,19 @@
 .swarmify-root .dflight .pr { font-family: "Geist Mono", monospace; font-size: 10px; color: var(--brand-600); }
 .swarmify-root .dflight-note { font-size: 11px; color: var(--status-pending); margin-top: 8px; }
 .swarmify-root .disp.caution { background: var(--status-pending); }
+/* Recap ledger — day-grouped ended sessions with duration/cost. */
+.swarmify-root .recap-empty { padding: 24px 16px; color: var(--ds-text-faint); font-size: 12.5px; }
+.swarmify-root .feed-sec .rc-rollup { margin-left: 8px; color: var(--ds-text-dim); font-weight: 600; font-size: 10.5px; }
+.swarmify-root .recap-row { display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-bottom: 1px solid var(--ds-border-subtle); border-radius: var(--r-sm); }
+.swarmify-root .recap-row:hover { background: var(--ds-bg-panel); }
+.swarmify-root .recap-row .rc-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .recap-row .rc-meta { flex: 0 1 auto; min-width: 0; color: var(--ds-text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .recap-row .rc-ticket { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10px; color: var(--ds-text-dim); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
+.swarmify-root .recap-row .rc-pr { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--brand-600); background: none; border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; cursor: pointer; }
+.swarmify-root .recap-row .rc-pr:hover { border-color: var(--brand-600); }
+.swarmify-root .recap-row .rc-dur { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-dim); font-variant-numeric: tabular-nums; }
+.swarmify-root .recap-row .rc-cost { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-muted); font-variant-numeric: tabular-nums; }
+.swarmify-root .recap-row .rc-ago { flex: 0 0 auto; width: 64px; text-align: right; color: var(--ds-text-faint); font-size: 10.5px; }
 .swarmify-root .dispatch-panel { background: var(--ds-bg); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-lg); padding: 12px 14px; }
 .swarmify-root .dp-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .swarmify-root .dp-k { width: 48px; font-size: 11px; color: var(--ds-text-dim); font-weight: 600; }
