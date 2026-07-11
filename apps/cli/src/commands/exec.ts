@@ -16,7 +16,7 @@ import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/rotate.js';
 import { AGENTS } from '../lib/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
-import { warnUnpushedWork } from '../lib/warn-unpushed.js';
+import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -727,7 +727,7 @@ export function registerRunCommand(program: Command): void {
           exitCode: resumeExit,
         });
         // A resumed loop is always headless; surface any commits it left unpushed.
-        if ((resumeExec.mode ?? 'auto') !== 'plan') await warnUnpushedWork(resumeExec.cwd ?? process.cwd());
+        if (shouldWarnUnpushed(resumeExec.mode ?? 'auto', false)) await warnUnpushedWork(resumeExec.cwd ?? process.cwd());
         process.exit(resumeExit);
       }
 
@@ -1483,7 +1483,7 @@ export function registerRunCommand(program: Command): void {
           // the normal finalize below — record its one audit entry.
           recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode });
           // ACP headless run always has a prompt; surface any unpushed commits.
-          if (mode !== 'plan') await warnUnpushedWork(cwd);
+          if (shouldWarnUnpushed(mode, false)) await warnUnpushedWork(cwd);
           process.exit(exitCode);
         } catch (err) {
           console.error(chalk.red(`ACP run failed for ${agent}: ${(err as Error).message}`));
@@ -1641,7 +1641,7 @@ export function registerRunCommand(program: Command): void {
           const loopExit = loopExitCode(result.stoppedBy);
           recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode: loopExit });
           // A loop is always headless; surface any commits it left unpushed.
-          if (mode !== 'plan') await warnUnpushedWork(cwd);
+          if (shouldWarnUnpushed(mode, false)) await warnUnpushedWork(cwd);
           process.exit(loopExit);
         } catch (err) {
           cleanupWorkflowMcpConfig();
@@ -1672,7 +1672,7 @@ export function registerRunCommand(program: Command): void {
         // behind, so it isn't silently stranded in a worktree. Advisory only,
         // never throws; skipped for interactive runs (the human sees the shell)
         // and read-only plan mode (can't commit).
-        if (mode !== 'plan' && !resolveInteractive(execOptions)) {
+        if (shouldWarnUnpushed(mode, resolveInteractive(execOptions))) {
           await warnUnpushedWork(cwd);
         }
         // Governance chokepoint (#347): every dispatched run finalizes here.
@@ -1684,7 +1684,7 @@ export function registerRunCommand(program: Command): void {
         cleanupWorkflowSubagents();
         // An agent that committed then crashed is the case where stranded work
         // matters most — warn before exiting the error path too.
-        if (mode !== 'plan' && !resolveInteractive(execOptions)) {
+        if (shouldWarnUnpushed(mode, resolveInteractive(execOptions))) {
           await warnUnpushedWork(cwd);
         }
         console.error(chalk.red(`Failed to execute ${agent}: ${(err as Error).message}`));

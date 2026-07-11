@@ -19,6 +19,16 @@ const execFileAsync = promisify(execFile);
 // a commit subject, so splitting on it never truncates a subject with spaces.
 const SEP = '\x1f';
 
+/**
+ * Whether a just-finished run should be checked for stranded work: only
+ * writable modes can leave commits (plan is read-only), and only non-interactive
+ * runs need the warning (an interactive user sees their own shell). Centralizes
+ * the gate so every exit path in the run command applies it identically.
+ */
+export function shouldWarnUnpushed(mode: string, interactive: boolean): boolean {
+  return mode !== 'plan' && !interactive;
+}
+
 export interface UnpushedState {
   /** cwd is inside a git work tree. */
   isRepo: boolean;

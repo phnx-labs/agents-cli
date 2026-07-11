@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getUnpushedState, formatUnpushedWarning, warnUnpushedWork } from './warn-unpushed.js';
+import { getUnpushedState, formatUnpushedWarning, warnUnpushedWork, shouldWarnUnpushed } from './warn-unpushed.js';
 
 const tempDirs: string[] = [];
 
@@ -163,6 +163,23 @@ describe('warnUnpushedWork (wired entry point)', () => {
   it('never throws on a non-git directory', async () => {
     const dir = makeTempDir('warn-unpushed-safe-');
     await expect(warnUnpushedWork(dir)).resolves.toBeUndefined();
+  });
+});
+
+describe('shouldWarnUnpushed (the exit-path gate)', () => {
+  it('fires for writable headless runs', () => {
+    expect(shouldWarnUnpushed('edit', false)).toBe(true);
+    expect(shouldWarnUnpushed('skip', false)).toBe(true);
+    expect(shouldWarnUnpushed('auto', false)).toBe(true);
+  });
+
+  it('stays silent for read-only plan mode, even headless', () => {
+    expect(shouldWarnUnpushed('plan', false)).toBe(false);
+  });
+
+  it('stays silent for interactive runs, even in a writable mode', () => {
+    expect(shouldWarnUnpushed('edit', true)).toBe(false);
+    expect(shouldWarnUnpushed('skip', true)).toBe(false);
   });
 });
 
