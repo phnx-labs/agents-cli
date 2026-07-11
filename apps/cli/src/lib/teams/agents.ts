@@ -2034,9 +2034,11 @@ export class AgentManager {
 
     if (cwd) cmd.push('--cwd', cwd);
 
-    // Pin Claude's session UUID to our agent_id so its session file lands at
-    // ~/.claude/projects/.../<agent_id>.jsonl — unified identity for status polling.
-    if (agentType === 'claude' && sessionId) {
+    // Pin the session UUID to our agent_id so buildExecEnv keys
+    // AGENTS_MAILBOX_DIR by the same id mailboxIdForActiveSession returns.
+    // Claude also forwards --session-id to its CLI (unified identity);
+    // other agents ignore the flag but still get the correct mailbox dir.
+    if (sessionId) {
       cmd.push('--session-id', sessionId);
     }
 
