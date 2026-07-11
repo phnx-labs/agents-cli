@@ -541,15 +541,21 @@ export async function runDaemon(): Promise<void> {
 /**
  * Read the long-lived Claude OAuth token (from `claude setup-token`) that the
  * user stored under the `claude` secrets bundle. Resolves the bundle the same
- * way `agents run --secrets` does, so the token is found whether it was stored
- * keychain-backed or as a literal. Returns null when the bundle/key isn't
- * configured, the Keychain read is cancelled, or the platform has no keychain —
- * the daemon then behaves exactly as before (relying on the interactive OAuth
- * session). Never throws: a misconfigured token must not block daemon startup.
+ * way `agents run --secrets` does. Interactive starts may prompt Keychain;
+ * headless auto-starts are broker-only and return null unless the user already
+ * unlocked the bundle in the secrets agent. That keeps a background browser
+ * command from hanging on an unseen biometric prompt. Never throws: an absent
+ * token leaves the daemon on its existing interactive OAuth session.
  */
-export function readDaemonClaudeOAuthToken(): string | null {
+export function readDaemonClaudeOAuthToken(
+  opts: { allowPrompt?: boolean } = {},
+): string | null {
   try {
-    const { env } = readAndResolveBundleEnv(DAEMON_OAUTH_BUNDLE, { caller: 'daemon' });
+    const allowPrompt = opts.allowPrompt ?? Boolean(process.stdin.isTTY);
+    const { env } = readAndResolveBundleEnv(DAEMON_OAUTH_BUNDLE, {
+      caller: 'daemon',
+      agentOnly: !allowPrompt,
+    });
     const token = (env[DAEMON_OAUTH_KEY] ?? '').trim();
     return token.length > 0 ? token : null;
   } catch {
@@ -584,10 +590,9 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
 }
 
 /** Generate a macOS launchd plist for auto-starting the daemon. */
-export function generateLaunchdPlist(): string {
+export function generateLaunchdPlist(oauthToken: string | null = readDaemonClaudeOAuthToken()): string {
   const agentsBin = getAgentsBinPath();
   const logPath = getLogPath();
-  const oauthToken = readDaemonClaudeOAuthToken();
   const oauthEntry = oauthToken
     ? `
     <key>${DAEMON_OAUTH_KEY}</key>
@@ -624,9 +629,8 @@ export function generateLaunchdPlist(): string {
 }
 
 /** Generate a Linux systemd user unit for auto-starting the daemon. */
-export function generateSystemdUnit(): string {
+export function generateSystemdUnit(oauthToken: string | null = readDaemonClaudeOAuthToken()): string {
   const agentsBin = getAgentsBinPath();
-  const oauthToken = readDaemonClaudeOAuthToken();
   const oauthLine = oauthToken
     ? `\nEnvironment=${DAEMON_OAUTH_KEY}=${oauthToken}`
     : '';
@@ -646,14 +650,29 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin:${os.homedir()}/.nvm/versions/node
 WantedBy=default.target`;
 }
 
-function getAgentsBinPath(): string {
+export function getAgentsBinPath(): string {
   // Prefer the binary actively executing this code. `which agents` returns
   // whatever happens to be first on PATH, which means a side-by-side dev
   // build at ~/.local/bin would silently spawn the registry-installed
   // daemon and run stale code. process.argv[1] is the absolute path of
   // the JS entrypoint the user actually invoked.
   const argv1 = process.argv[1];
-  if (argv1 && fs.existsSync(argv1)) return argv1;
+  if (argv1 && fs.existsSync(argv1)) {
+    // The package's browser/computer entrypoints are sibling shims without a
+    // `daemon` command. A daemon started as their IPC side effect must launch
+    // through the main agents entrypoint instead of replaying the shim path.
+    const entryName = path.basename(argv1);
+    const compiledShim = /^(browser|computer)\.(c|m)?js$/.test(entryName);
+    const installedShim = /^(browser|computer)$/.test(entryName);
+    if (compiledShim || installedShim) {
+      const agentsEntry = path.join(path.dirname(argv1), compiledShim ? 'index.js' : 'agents');
+      if (!fs.existsSync(agentsEntry)) {
+        throw new Error(`Cannot start agents daemon: main CLI entry not found at ${agentsEntry}`);
+      }
+      return agentsEntry;
+    }
+    return argv1;
+  }
   try {
     return execFileSync('which', ['agents'], { encoding: 'utf-8' }).trim();
   } catch {
@@ -793,11 +812,13 @@ function startDaemonLocked(): { pid: number | null; method: string } {
  * the daemon then passes it to every routine run it spawns. An already-set
  * value (e.g. inherited from launchd) is left untouched.
  */
-export function buildDetachedDaemonEnv(baseEnv: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function buildDetachedDaemonEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  oauthToken: string | null = readDaemonClaudeOAuthToken(),
+): NodeJS.ProcessEnv {
   const env = { ...baseEnv };
   if (!env.CLAUDE_CODE_OAUTH_TOKEN) {
-    const token = readDaemonClaudeOAuthToken();
-    if (token) env.CLAUDE_CODE_OAUTH_TOKEN = token;
+    if (oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = oauthToken;
   }
   return env;
 }
