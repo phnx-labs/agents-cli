@@ -33,7 +33,9 @@ export interface UnpushedState {
 const INERT: UnpushedState = { isRepo: false, branch: null, hasUpstream: false, unpushed: [] };
 
 async function git(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd });
+  // These are all local, non-prompting reads, but the call sits on a run's exit
+  // path — a hard timeout guarantees a wedged git can never delay exit unbounded.
+  const { stdout } = await execFileAsync('git', args, { cwd, timeout: 5000 });
   return stdout.trim();
 }
 

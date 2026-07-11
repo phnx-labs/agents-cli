@@ -726,6 +726,8 @@ export function registerRunCommand(program: Command): void {
           cwd: resumeExec.cwd ?? process.cwd(),
           exitCode: resumeExit,
         });
+        // A resumed loop is always headless; surface any commits it left unpushed.
+        if ((resumeExec.mode ?? 'auto') !== 'plan') await warnUnpushedWork(resumeExec.cwd ?? process.cwd());
         process.exit(resumeExit);
       }
 
@@ -1480,6 +1482,8 @@ export function registerRunCommand(program: Command): void {
           // Governance chokepoint (#347): the --acp path exits here, bypassing
           // the normal finalize below — record its one audit entry.
           recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode });
+          // ACP headless run always has a prompt; surface any unpushed commits.
+          if (mode !== 'plan') await warnUnpushedWork(cwd);
           process.exit(exitCode);
         } catch (err) {
           console.error(chalk.red(`ACP run failed for ${agent}: ${(err as Error).message}`));
@@ -1636,6 +1640,8 @@ export function registerRunCommand(program: Command): void {
           // the normal finalize below — record its one audit entry.
           const loopExit = loopExitCode(result.stoppedBy);
           recordDispatchedRun({ agent, version: defaultVersion ?? 'unknown', mode, cwd, exitCode: loopExit });
+          // A loop is always headless; surface any commits it left unpushed.
+          if (mode !== 'plan') await warnUnpushedWork(cwd);
           process.exit(loopExit);
         } catch (err) {
           cleanupWorkflowMcpConfig();
@@ -1676,6 +1682,11 @@ export function registerRunCommand(program: Command): void {
       } catch (err) {
         cleanupWorkflowMcpConfig();
         cleanupWorkflowSubagents();
+        // An agent that committed then crashed is the case where stranded work
+        // matters most — warn before exiting the error path too.
+        if (mode !== 'plan' && !resolveInteractive(execOptions)) {
+          await warnUnpushedWork(cwd);
+        }
         console.error(chalk.red(`Failed to execute ${agent}: ${(err as Error).message}`));
         process.exit(1);
       }

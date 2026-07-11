@@ -2,8 +2,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getUnpushedState, formatUnpushedWarning } from './warn-unpushed.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getUnpushedState, formatUnpushedWarning, warnUnpushedWork } from './warn-unpushed.js';
 
 const tempDirs: string[] = [];
 
@@ -116,6 +116,53 @@ describe('getUnpushedState', () => {
     const state = await getUnpushedState(work);
     expect(state.branch).toBeNull();
     expect(formatUnpushedWarning(state, work)).toBeNull();
+  });
+
+  it('detects unpushed commits inside a git worktree on a feature branch (the target flow)', async () => {
+    // The primary real-world case: an agent creates a worktree on its own
+    // branch and commits there. The commit is NOT reachable from the main
+    // checkout's HEAD, so inspecting the worktree path is what surfaces it.
+    const { work, commit } = makeRepoWithRemote();
+    commit('chore: base');
+    git(work, 'push', '-u', 'origin', 'main');
+
+    const wt = path.join(work, '.wt-feature');
+    git(work, 'worktree', 'add', '-b', 'agents/feature', wt, 'HEAD');
+    fs.writeFileSync(path.join(wt, 'w.txt'), 'work');
+    git(wt, 'add', '-A');
+    git(wt, '-c', 'user.email=t@e.co', '-c', 'user.name=T', 'commit', '-m', 'feat: work in worktree');
+
+    const state = await getUnpushedState(wt);
+    expect(state.branch).toBe('agents/feature');
+    expect(state.hasUpstream).toBe(false);
+    expect(state.unpushed.map((c) => c.subject)).toEqual(['feat: work in worktree']);
+  });
+});
+
+describe('warnUnpushedWork (wired entry point)', () => {
+  it('writes a warning to stderr for unpushed work, and nothing once pushed', async () => {
+    const { work, commit } = makeRepoWithRemote();
+    commit('feat: only');
+
+    const spy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      await warnUnpushedWork(work);
+      const printed = spy.mock.calls.map((c) => String(c[0])).join('');
+      expect(printed).toContain("not pushed to any remote");
+      expect(printed).toContain('feat: only');
+
+      spy.mockClear();
+      git(work, 'push', '-u', 'origin', 'main');
+      await warnUnpushedWork(work);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('never throws on a non-git directory', async () => {
+    const dir = makeTempDir('warn-unpushed-safe-');
+    await expect(warnUnpushedWork(dir)).resolves.toBeUndefined();
   });
 });
 
