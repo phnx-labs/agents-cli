@@ -261,7 +261,10 @@ export function crabboxRunScript(slug: string, script: string, opts: CrabboxRunO
 /** Release the lease / delete the box. Best-effort; never throws. */
 export function crabboxStop(slug: string, opts: CrabboxOptions = {}): boolean {
   try {
-    const r = spawnSync('crabbox', ['stop', '--id', slug], { encoding: 'utf-8', env: crabboxEnv(opts) });
+    // Positional target: crabbox's stop subcommand has no --id flag (unlike
+    // status/run/ssh) — `stop --id <slug>` dies with "flag provided but not
+    // defined: -id" and the box leaks past the run it was leased for.
+    const r = spawnSync('crabbox', ['stop', slug], { encoding: 'utf-8', env: crabboxEnv(opts) });
     return r.status === 0;
   } catch {
     return false;
