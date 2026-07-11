@@ -48,6 +48,24 @@ describe('resolveMessageTarget', () => {
     expect(resolveMessageTarget('agent-uuid', [s], noCloud)).toEqual({ kind: 'local', id: 'agent-uuid' });
   });
 
+  it('routes to agentId even when sessionId differs (RUSH-1534 regression)', () => {
+    const s = mk({
+      context: 'teams',
+      agentId: 'teams-minted-uuid',
+      sessionId: 'runtime-session-uuid',
+      teamName: 'feat',
+    });
+    expect(mailboxIdForActiveSession(s)).toBe('teams-minted-uuid');
+    expect(resolveMessageTarget('teams-minted-uuid', [s], noCloud)).toEqual({
+      kind: 'local',
+      id: 'teams-minted-uuid',
+    });
+    expect(resolveMessageTarget('runtime-session-uuid', [s], noCloud)).toEqual({
+      kind: 'local',
+      id: 'teams-minted-uuid',
+    });
+  });
+
   it('collapses multiple rows that share one canonical id (subagents/forks) to a single box', () => {
     const sessions = [
       mk({ sessionId: 'aaaa-1111', pidCount: 2 }),

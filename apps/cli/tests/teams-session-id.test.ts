@@ -218,12 +218,14 @@ describe('AgentProcess: remoteSessionId extraction', () => {
       expect(cmd[idx + 1]).toBe('/tmp/work');
     });
 
-    it('non-Claude agents (Codex) get no --settings / --session-id (but do get --add-dir for ~/.agents)', () => {
+    it('non-Claude agents pin the outer run session for mailbox identity without forwarding settings', () => {
       const mgr = new AgentManager(50, tmpBase);
       // @ts-expect-error — private
       const cmd: string[] = mgr.buildCommand('codex', 'hi', 'edit', 'some-model', '/tmp', 'uuid');
       expect(cmd).not.toContain('--settings');
-      expect(cmd).not.toContain('--session-id');
+      const sessionIdIdx = cmd.indexOf('--session-id');
+      expect(sessionIdIdx).toBeGreaterThan(-1);
+      expect(cmd[sessionIdIdx + 1]).toBe('uuid');
       // Codex gets --add-dir ~/.agents so subprocesses can write to the store.
       const addDirIdx = cmd.indexOf('--add-dir');
       expect(addDirIdx).toBeGreaterThan(-1);
