@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
+  readAndResolveBundleEnv,
   type SecretsBundle,
 } from './bundles.js';
+import { setKeychainBackendForTest, type KeychainBackend } from './index.js';
 
 /**
  * Regression tests for the two least-privilege bypasses on the
@@ -96,6 +98,32 @@ describe('filterAgentHitBySubsetAndExpiry (agent fast-path gate)', () => {
     );
     const out = filterAgentHitBySubsetAndExpiry(hit, { keys: ['API_KEY'] });
     expect(out.env).toEqual({ API_KEY: 'v-API_KEY' });
+  });
+});
+
+describe('readAndResolveBundleEnv agent-only reads', () => {
+  it('fails before touching Keychain when the broker has no unlocked snapshot', () => {
+    let keychainCalls = 0;
+    const fail = () => { keychainCalls++; throw new Error('keychain must not be read'); };
+    const backend: KeychainBackend = {
+      has: fail,
+      get: fail,
+      set: fail,
+      delete: fail,
+      list: fail,
+    };
+    const previousBackend = setKeychainBackendForTest(backend);
+    const previousNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    try {
+      expect(() => readAndResolveBundleEnv('claude', { caller: 'daemon', agentOnly: true }))
+        .toThrow("Secrets bundle 'claude' is not unlocked in the secrets agent.");
+      expect(keychainCalls).toBe(0);
+    } finally {
+      setKeychainBackendForTest(previousBackend);
+      if (previousNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+      else process.env.AGENTS_SECRETS_NO_AGENT = previousNoAgent;
+    }
   });
 });
 

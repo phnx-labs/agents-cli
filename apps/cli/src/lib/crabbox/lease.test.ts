@@ -22,6 +22,26 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain('exit $rc');
   });
 
+  it('bootstraps node user-level and fails loud when agents-cli is not runnable', () => {
+    const script = buildBootstrapScript({
+      agent: 'claude',
+      prompt: 'print hostname',
+      runtimes: ['claude'],
+      detected,
+    });
+    // Fresh crabbox images ship without node; everything must land in ~/.local.
+    expect(script).toContain('export PATH="$HOME/.local/bin:$PATH"');
+    expect(script).toContain('command -v node');
+    expect(script).toContain('nodejs.org/dist/latest-v22.x');
+    expect(script).toContain('npm config set prefix "$HOME/.local"');
+    // A missing CLI must abort with a diagnostic, not run into `agents: command not found`.
+    expect(script).toContain('exit 96');
+    // First-run setup, same guard as the hosts bootstrap (hosts/ready.ts).
+    expect(script).toContain('agents setup');
+    // Node bootstrap runs before the credential write — never after.
+    expect(script.indexOf('command -v node')).toBeLessThan(script.indexOf("agents run 'claude'"));
+  });
+
   it('threads mode/model into the remote run', () => {
     const script = buildBootstrapScript({
       agent: 'codex',

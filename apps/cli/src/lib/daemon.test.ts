@@ -22,6 +22,7 @@ import {
   readDaemonClaudeOAuthToken,
   buildDetachedDaemonEnv,
   getDaemonLaunch,
+  getAgentsBinPath,
   startDetached,
   writeOwnerOnlyServiceManifest,
   ensureDaemonStarted,
@@ -97,22 +98,27 @@ describe('readDaemonClaudeOAuthToken', () => {
 
   it('returns a keychain-backed token', () => {
     seedKeychainBacked('sk-ant-oat01-abc123');
-    expect(readDaemonClaudeOAuthToken()).toBe('sk-ant-oat01-abc123');
+    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
   });
 
   it('returns a token stored as a literal (the no-op footgun fix)', () => {
     seedLiteral('sk-ant-oat01-literal');
-    expect(readDaemonClaudeOAuthToken()).toBe('sk-ant-oat01-literal');
+    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-literal');
   });
 
   it('trims surrounding whitespace from the stored token', () => {
     seedKeychainBacked('  sk-ant-oat01-abc123\n');
-    expect(readDaemonClaudeOAuthToken()).toBe('sk-ant-oat01-abc123');
+    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBe('sk-ant-oat01-abc123');
   });
 
   it('treats an empty/whitespace-only token as absent', () => {
     seedKeychainBacked('   ');
-    expect(readDaemonClaudeOAuthToken()).toBeNull();
+    expect(readDaemonClaudeOAuthToken({ allowPrompt: true })).toBeNull();
+  });
+
+  it('does not fall through to Keychain when prompting is unavailable', () => {
+    seedKeychainBacked('sk-ant-oat01-must-not-be-read');
+    expect(readDaemonClaudeOAuthToken({ allowPrompt: false })).toBeNull();
   });
 });
 
@@ -151,7 +157,7 @@ describe('writeOwnerOnlyServiceManifest', () => {
 
 describe('generateLaunchdPlist', () => {
   it('omits CLAUDE_CODE_OAUTH_TOKEN when none is configured', () => {
-    const plist = generateLaunchdPlist();
+    const plist = generateLaunchdPlist(readDaemonClaudeOAuthToken({ allowPrompt: true }));
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     // The PATH entry is always present so EnvironmentVariables is never empty.
     expect(plist).toContain('<key>PATH</key>');
@@ -159,7 +165,7 @@ describe('generateLaunchdPlist', () => {
 
   it('injects the token into EnvironmentVariables when configured', () => {
     seedKeychainBacked('sk-ant-oat01-abc123');
-    const plist = generateLaunchdPlist();
+    const plist = generateLaunchdPlist(readDaemonClaudeOAuthToken({ allowPrompt: true }));
     expect(plist).toContain('<key>CLAUDE_CODE_OAUTH_TOKEN</key>');
     expect(plist).toContain('<string>sk-ant-oat01-abc123</string>');
     // Must sit inside the EnvironmentVariables dict, after PATH.
@@ -171,7 +177,7 @@ describe('generateLaunchdPlist', () => {
 
   it('XML-escapes special characters in the token value', () => {
     seedKeychainBacked('tok&en<x>');
-    const plist = generateLaunchdPlist();
+    const plist = generateLaunchdPlist(readDaemonClaudeOAuthToken({ allowPrompt: true }));
     expect(plist).toContain('<string>tok&amp;en&lt;x&gt;</string>');
     expect(plist).not.toContain('<string>tok&en<x></string>');
   });
@@ -184,7 +190,7 @@ describe('generateSystemdUnit', () => {
 
   it('adds an Environment line for the token when configured', () => {
     seedKeychainBacked('sk-ant-oat01-abc123');
-    expect(generateSystemdUnit()).toContain(
+    expect(generateSystemdUnit(readDaemonClaudeOAuthToken({ allowPrompt: true }))).toContain(
       'Environment=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc123',
     );
   });
@@ -193,7 +199,10 @@ describe('generateSystemdUnit', () => {
 describe('buildDetachedDaemonEnv', () => {
   it('injects the token when configured and absent from the base env', () => {
     seedKeychainBacked('sk-ant-oat01-detached');
-    const env = buildDetachedDaemonEnv({ PATH: '/usr/bin' });
+    const env = buildDetachedDaemonEnv(
+      { PATH: '/usr/bin' },
+      readDaemonClaudeOAuthToken({ allowPrompt: true }),
+    );
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-detached');
     expect(env.PATH).toBe('/usr/bin');
   });
@@ -232,6 +241,85 @@ describe('getDaemonLaunch', () => {
     const { command, args } = getDaemonLaunch('/usr/local/bin/agents');
     expect(command).toBe('/usr/local/bin/agents');
     expect(args).toEqual(['daemon', '_run']);
+  });
+});
+
+describe('getAgentsBinPath (sibling shim resolution)', () => {
+  let savedArgv1: string | undefined;
+
+  beforeEach(() => { savedArgv1 = process.argv[1]; });
+  afterEach(() => {
+    if (savedArgv1 !== undefined) process.argv[1] = savedArgv1;
+  });
+
+  it('resolves compiled browser and computer shims to index.js', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
+    fs.writeFileSync(path.join(tmpDir, 'index.js'), '');
+    fs.writeFileSync(path.join(tmpDir, 'browser.js'), '');
+    fs.writeFileSync(path.join(tmpDir, 'computer.js'), '');
+    process.argv[1] = path.join(tmpDir, 'browser.js');
+    expect(getAgentsBinPath()).toBe(path.join(tmpDir, 'index.js'));
+    process.argv[1] = path.join(tmpDir, 'computer.js');
+    expect(getAgentsBinPath()).toBe(path.join(tmpDir, 'index.js'));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('resolves installed browser and computer shims to the agents launcher', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
+    fs.writeFileSync(path.join(tmpDir, 'agents'), '');
+    fs.writeFileSync(path.join(tmpDir, 'browser'), '');
+    fs.writeFileSync(path.join(tmpDir, 'computer'), '');
+    process.argv[1] = path.join(tmpDir, 'browser');
+    expect(getAgentsBinPath()).toBe(path.join(tmpDir, 'agents'));
+    process.argv[1] = path.join(tmpDir, 'computer');
+    expect(getAgentsBinPath()).toBe(path.join(tmpDir, 'agents'));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('keeps the main compiled and installed entries unchanged', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
+    const indexJs = path.join(tmpDir, 'index.js');
+    const agentsBin = path.join(tmpDir, 'agents');
+    fs.writeFileSync(indexJs, '');
+    fs.writeFileSync(agentsBin, '');
+    process.argv[1] = indexJs;
+    expect(getAgentsBinPath()).toBe(indexJs);
+    process.argv[1] = agentsBin;
+    expect(getAgentsBinPath()).toBe(agentsBin);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses a sibling shim when its main entry is missing', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
+    const browserJs = path.join(tmpDir, 'browser.js');
+    fs.writeFileSync(browserJs, '');
+    process.argv[1] = browserJs;
+    expect(() => getAgentsBinPath()).toThrow(`main CLI entry not found at ${path.join(tmpDir, 'index.js')}`);
+    const browser = path.join(tmpDir, 'browser');
+    fs.writeFileSync(browser, '');
+    process.argv[1] = browser;
+    expect(() => getAgentsBinPath()).toThrow(`main CLI entry not found at ${path.join(tmpDir, 'agents')}`);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('generates launchd arguments for the main entry from both shim layouts', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-plist-'));
+    const indexJs = path.join(tmpDir, 'index.js');
+    const browserJs = path.join(tmpDir, 'browser.js');
+    const agentsBin = path.join(tmpDir, 'agents');
+    const browserBin = path.join(tmpDir, 'browser');
+    for (const file of [indexJs, browserJs, agentsBin, browserBin]) fs.writeFileSync(file, '');
+    process.argv[1] = browserJs;
+    let plist = generateLaunchdPlist();
+    expect(plist).toContain(`<string>${indexJs}</string>`);
+    expect(plist).not.toContain(`<string>${browserJs}</string>`);
+    process.argv[1] = browserBin;
+    plist = generateLaunchdPlist();
+    expect(plist).toContain(`<string>${agentsBin}</string>`);
+    expect(plist).not.toContain(`<string>${browserBin}</string>`);
+    expect(plist).toContain('<string>daemon</string>');
+    expect(plist).toContain('<string>_run</string>');
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
 

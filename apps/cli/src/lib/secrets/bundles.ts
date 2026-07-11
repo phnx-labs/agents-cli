@@ -638,6 +638,13 @@ export interface ResolveBundleOptions {
    */
   noAgent?: boolean;
   /**
+   * Resolve only from an already-unlocked secrets-agent snapshot. If the
+   * broker has no snapshot, fail before touching Keychain or any other store.
+   * Background processes use this to guarantee they never surface a biometric
+   * prompt that nobody can answer.
+   */
+  agentOnly?: boolean;
+  /**
    * Inject only this subset of keys from the bundle. Keys not in this list are
    * silently excluded from the returned env map. An error is thrown if any
    * requested key is absent from the bundle (fail-loud, never silent skip).
@@ -856,6 +863,10 @@ export function readAndResolveBundleEnv(
       });
       return filtered;
     }
+  }
+
+  if (opts.agentOnly) {
+    throw new Error(`Secrets bundle '${name}' is not unlocked in the secrets agent.`);
   }
 
   if (backend === 'file') assertFileBackendUsable(name);

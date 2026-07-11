@@ -17,7 +17,7 @@ import { openSingleAgentWithQueue, runHeadlessAgent, focusSessionInTerminal } fr
 import { generateClaudeSessionId } from '../core/prewarm.simple';
 import { nudgeSession } from '../mcp/watchdog-bridge';
 import { runAgents } from '../core/agentsBin';
-import { AgentLaunchMode, parsePlanFromClaudeJsonl, planTextToSteps } from '../core/agents';
+import { AgentLaunchMode, extractPlanFromSessionJson, planTextToSteps } from '../core/agents';
 import { CLAUDE_TITLE } from '../core/utils';
 import { discoverRecentSessions, getSessionPathBySessionId } from './sessions.vscode';
 import { formatTerminalTitle, parseTerminalName, getSessionChunk } from '../core/utils';
@@ -417,14 +417,17 @@ export function getDispatchSessionPolicy(sessionId: string): DispatchSessionPoli
   return dispatchSessionPolicies.get(sessionId);
 }
 
-// Watch a plan-mode Claude session's .jsonl for an ExitPlanMode tool call and
-// post `planReady` to the webview once, so the Floor can show the plan for
-// approval. Polls (no fs.watch: the file may not exist yet at spawn) until the
-// plan appears or the budget elapses.
+// Watch a plan-mode Claude session for an ExitPlanMode tool call and post
+// `planReady` to the webview once, so the Floor can show the plan for approval.
+// Polls `agents sessions <id> --json --local` (the CLI's canonical session
+// state engine, which captures the plan markdown at scan time) until the plan
+// appears or the budget elapses. Previous versions read the raw JSONL and
+// re-implemented the ExitPlanMode scanner; the CLI now carries `session.plan`,
+// so the extension consumes it directly.
 function watchForPlan(
   sessionId: string,
   agentId: string,
-  cwd: string,
+  _cwd: string,
   notify: NotifyPrefsMsg,
 ): void {
   const POLL_MS = 2000;
@@ -435,24 +438,19 @@ function watchForPlan(
     if (done) return;
     attempts++;
     try {
-      const filePath = await getSessionPathBySessionId(sessionId, 'claude', cwd);
-      if (filePath) {
-        const jsonl = await fs.promises.readFile(filePath, 'utf8');
-        const planText = parsePlanFromClaudeJsonl(jsonl);
-        if (planText) {
-          done = true;
-          const plan: PendingPlanMsg = { sessionId, agentId, steps: planTextToSteps(planText) };
-          settingsPanel?.webview.postMessage({ type: 'planReady', plan });
-          // notify.events.plan gates whether this also escalates to an external
-          // channel; the in-app Floor surface always receives it.
-          if (notify.events.plan && !notify.dnd) {
-            console.log(`[DISPATCH] plan ready for ${sessionId} — notify via ${notify.channel}`);
-          }
-          return;
+      const { stdout } = await runAgents(`sessions ${sessionId} --json --local`, { timeout: 10_000 });
+      const planText = extractPlanFromSessionJson(stdout);
+      if (planText) {
+        done = true;
+        const plan: PendingPlanMsg = { sessionId, agentId, steps: planTextToSteps(planText) };
+        settingsPanel?.webview.postMessage({ type: 'planReady', plan });
+        if (notify.events.plan && !notify.dnd) {
+          console.log(`[DISPATCH] plan ready for ${sessionId} — notify via ${notify.channel}`);
         }
+        return;
       }
     } catch (err) {
-      console.warn('[DISPATCH] plan watch read failed:', err);
+      console.warn('[DISPATCH] plan watch poll failed:', err);
     }
     if (attempts < MAX_ATTEMPTS) setTimeout(tick, POLL_MS);
   };

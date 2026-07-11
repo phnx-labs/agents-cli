@@ -522,7 +522,7 @@ export function registerRunCommand(program: Command): void {
             secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE,
             keep: options.keepBox,
           });
-          console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${box.ip ? ` (${box.ip})` : ''}. Stop it: crabbox stop --id ${box.slug}`));
+          console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${box.ip ? ` (${box.ip})` : ''}. Stop it: crabbox stop ${box.slug}`));
           process.exit(exitCode === null ? 1 : exitCode);
         } catch (err) {
           console.error(chalk.red((err as Error).message));

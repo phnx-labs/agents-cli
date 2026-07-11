@@ -2109,8 +2109,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
             pendingTicketTools.add(b.id);
           }
           // ExitPlanMode plan markdown — last one wins so a re-planned session
-          // reports its most recent plan (the semantic parsePlanFromClaudeJsonl
-          // implemented in the extension).
+          // reports its most recent plan.
           if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
             const p = b.input.plan.trim();
             if (p) plan = b.input.plan;

@@ -40,6 +40,13 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Changed
 
+- **Plan-watch now reads from the CLI's canonical `session.plan` field instead of re-parsing
+  raw JSONL.** `watchForPlan` previously read the session `.jsonl` file and re-implemented the
+  `ExitPlanMode` scanner (`parsePlanFromClaudeJsonl`) — a duplicate of the CLI's session state
+  engine. The CLI now carries `plan` on `SessionMeta` (surfaced via `agents sessions <id>
+  --json`), so the extension polls the CLI directly and `parsePlanFromClaudeJsonl` is deleted.
+  No behavior change for the Floor's plan-ready surface. (RUSH-1505)
+
 - **The collapsed Floor rail's Projects and Hosts buttons are now flyout menus instead of
   three buttons that all expanded the sidebar.** Click Projects for the curated project
   list (live agent count + amber waiting count per project, plus any uncurated project
