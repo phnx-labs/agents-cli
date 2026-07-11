@@ -564,23 +564,31 @@ export async function adoptRepo(
   targetDir: string,
 ): Promise<{ success: boolean; commit: string; backupDir?: string; backedUp: string[]; error?: string }> {
   const trimmed = source.trim();
-  const parsed = parseSource(source);
-  if (parsed.type === 'local') {
-    return { success: false, commit: '', backedUp: [], error: 'Cannot adopt from a local source' };
-  }
   if (fs.existsSync(path.join(targetDir, '.git'))) {
     return { success: false, commit: '', backedUp: [], error: 'Already a git repo — nothing to adopt' };
   }
 
-  // Preserve the user's transport. parseSource rewrites `git@github.com:x` →
-  // `https://…`, which breaks SSH-key-only auth (the common config-repo setup) —
-  // a private-repo https clone then hangs on a credential prompt. If the user gave
-  // an SSH URL, clone THAT; otherwise use the normalized https url.
+  // Preserve the user's transport. `parseSource` THROWS for `ssh://` and any
+  // non-github `git@host:` URL, and rewrites `git@github.com:x` → https (breaking
+  // SSH-key-only auth — the common config-repo setup — so a private clone hangs on
+  // a credential prompt). So for an SSH URL, clone it AS-IS and never call
+  // parseSource; for everything else, normalize + reject local via parseSource —
+  // inside the try, so a malformed URL returns a graceful error, not a stack trace.
   const isSsh = trimmed.startsWith('git@') || trimmed.startsWith('ssh://');
-  const cloneUrl = isSsh ? trimmed : parsed.url;
-
   const tempDir = path.join(targetDir, '.git-adopt-temp');
   try {
+    let cloneUrl: string;
+    let ref: string | undefined;
+    if (isSsh) {
+      cloneUrl = trimmed; // SSH stays SSH; clone the remote's default HEAD.
+    } else {
+      const parsed = parseSource(source);
+      if (parsed.type === 'local') {
+        return { success: false, commit: '', backedUp: [], error: 'Cannot adopt from a local source' };
+      }
+      cloneUrl = parsed.url;
+      ref = parsed.ref;
+    }
     assertSafeGitTransport(cloneUrl);
     fs.mkdirSync(targetDir, { recursive: true });
     // Idempotency: clear a stale temp left by an interrupted prior run.
@@ -595,7 +603,7 @@ export async function adoptRepo(
     process.env.GIT_TERMINAL_PROMPT = '0';
     await simpleGit().clone(cloneUrl, tempDir);
     const repoGit = simpleGit(tempDir);
-    if (parsed.ref) await repoGit.checkout(parsed.ref);
+    if (ref) await repoGit.checkout(ref);
     fs.renameSync(path.join(tempDir, '.git'), path.join(targetDir, '.git'));
     fs.rmSync(tempDir, { recursive: true, force: true });
 
