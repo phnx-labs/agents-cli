@@ -139,6 +139,9 @@ export interface RemoteSessionLike {
   worktreePath?: string
   sinceMs: number
   startedAtMs: number
+  /** Epoch ms of the most recent observed activity (session-file last write).
+   *  Recent (historical) sessions carry it from the CLI's lastActivity stamp. */
+  lastActivityMs?: number
   topic: string
   context: string
   cloudTaskId: string
@@ -151,6 +154,10 @@ export interface RemoteSessionLike {
   replyMuxSocket: string
   tmuxPane: string
   viewingIn?: string
+  /** Outcome metrics, populated only on RECENT (historical) sessions — Recap ledger. */
+  durationMs?: number
+  costUsd?: number
+  tokenCount?: number
 }
 
 // ---------- primitive helpers ----------

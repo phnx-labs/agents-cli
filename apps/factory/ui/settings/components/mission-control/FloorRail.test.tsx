@@ -75,6 +75,13 @@ describe('railActive', () => {
     expect(railActive('queue', base)).toBe(false)
   })
 
+  test('recap follows the recap center', () => {
+    expect(railActive('recap', { ...base, center: 'recap' })).toBe(true)
+    expect(railActive('recap', base)).toBe(false)
+    // A lingering project filter cannot double-light while the recap center shows.
+    expect(railActive('projects', { ...base, center: 'recap', projFilter: 'swarmify' })).toBe(false)
+  })
+
   test('projects/hosts light while their filter narrows the agents center', () => {
     expect(railActive('projects', { ...base, projFilter: 'swarmify' })).toBe(true)
     expect(railActive('hosts', { ...base, hostFilter: 'zion' })).toBe(true)
@@ -84,11 +91,12 @@ describe('railActive', () => {
 
   test('at most one button lights for any combined state (prix-cloud repro)', () => {
     // needs chip lingering alongside a project or host scope: the scope wins.
-    const keys = ['all', 'needs', 'queue', 'projects', 'hosts'] as const
+    const keys = ['all', 'needs', 'queue', 'recap', 'projects', 'hosts'] as const
     const states: RailScopeState[] = [
       { ...base, needsOnly: true, projFilter: 'swarmify' },
       { ...base, needsOnly: true, hostFilter: 'zion' },
       { ...base, needsOnly: true, projFilter: 'swarmify', center: 'backlog' },
+      { ...base, needsOnly: true, projFilter: 'swarmify', center: 'recap' },
       { ...base, needsOnly: true },
       base,
     ]
@@ -148,7 +156,7 @@ describe('FloorRail render', () => {
   test('renders dispatch, three scopes, two flyout anchors, one expand — no dupes', () => {
     const html = renderToStaticMarkup(<FloorRail {...props} />)
     expect(html).toContain('rail-dispatch')
-    for (const label of ['All agents', 'Needs you', 'Backlog', 'Projects', 'Hosts', 'Expand sidebar']) {
+    for (const label of ['All agents', 'Needs you', 'Backlog', 'Recap', 'Projects', 'Hosts', 'Expand sidebar']) {
       expect(html.split(`aria-label="${label}"`).length - 1).toBe(1)
     }
   })

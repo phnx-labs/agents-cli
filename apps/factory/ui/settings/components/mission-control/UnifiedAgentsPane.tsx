@@ -30,6 +30,8 @@ import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } 
 import { BacklogCenter } from './BacklogCenter'
 import { PrBoardPane } from './PrBoardPane'
 import { buildPrBoard, collectPrUrls, type PrStatusLike } from './prBoardModel'
+import { RecapPane } from './RecapPane'
+import { buildRecap } from './recapModel'
 import { TaskDetail } from '../bench/TaskDetail'
 import type { FlatTask } from '../bench/TaskCard'
 import { TicketDetail } from './TicketDetail'
@@ -624,6 +626,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [prStatuses, setPrStatuses] = useState<PrStatusLike[] | null>(null)
   const [prMerging, setPrMerging] = useState<Set<string>>(() => new Set())
   const [prErrors, setPrErrors] = useState<Record<string, string>>({})
+  // Recap ledger: fleet-wide recent (ended) sessions. null = not fetched yet — the
+  // sweep is expensive (SSH fan-out), so it runs lazily when the Recap center opens.
+  const [recapSessions, setRecapSessions] = useState<RemoteSessionLike[] | null>(null)
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
   // Group the live feed by an axis (project/host/status/agent). Defaults to 'project'
   // so sessions cluster under the repo/Linear project they're working on (NEEDS YOU
@@ -763,6 +768,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         } else {
           setPrErrors((prev) => ({ ...prev, [mu]: typeof msg.error === 'string' ? msg.error : 'merge failed' }))
         }
+      } else if (msg?.type === 'recapSessions') {
+        setRecapSessions(Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : [])
       }
     }
     window.addEventListener('message', onMsg)
@@ -1494,6 +1501,16 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     }
   }, [center, prStatuses, floorAgents])
   const prRows = useMemo(() => buildPrBoard(prStatuses ?? [], floorAgents), [prStatuses, floorAgents])
+  // Recap ledger: lazy fleet sweep the first time the Recap center opens; live
+  // sessions are excluded (the feed owns what's running, the ledger what finished).
+  useEffect(() => {
+    if (center === 'recap' && recapSessions === null) postMessage({ type: 'fetchRecap' })
+  }, [center, recapSessions])
+  const recapDays = useMemo(() => {
+    if (!recapSessions) return []
+    const liveIds = new Set(floorAgents.map((a) => a.sessionId).filter((id): id is string => !!id))
+    return buildRecap(recapSessions, liveIds, Date.now())
+  }, [recapSessions, floorAgents])
 
   const needsAgents = useMemo(() => scopedAgents.filter((a) => a.needs), [scopedAgents])
   const waitingAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'waiting'), [needsAgents])
@@ -1651,6 +1668,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   const onScope = useCallback((value: string) => {
     if (value === '__queue') { setCenter('backlog'); return }
+    if (value === '__recap') { setCenter('recap'); return }
     if (value === '__needs') {
       // A REAL needs-only view: toggle the same 'needs' status chip the controls bar
       // and saved views drive, so one filter mechanism serves all three surfaces.
@@ -1855,9 +1873,11 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     { center: 'backlog', label: 'Backlog', count: floorTickets.length },
     { center: 'projects', label: 'Projects', count: managedProjects.length },
     { center: 'host', label: 'Hosts', count: fleetDevices.length },
+    // Recap count = today's finished sessions (0 until the lazy sweep has run).
+    { center: 'recap', label: 'Recap', count: recapDays[0]?.label === 'Today' ? recapDays[0].sessions : 0 },
     // PRs count = open rows once fetched; before the first fetch, the URL count.
     { center: 'prs', label: 'PRs', count: prStatuses === null ? collectPrUrls(floorAgents).length : prRows.filter((r) => r.state === 'open').length },
-  ], [floorAgents, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, prStatuses, prRows])
+  ], [floorAgents, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, recapDays, prStatuses, prRows])
 
   // Resolve the active task tab (if any) back to a bench FlatTask so its detail renders.
   const activeTab = activeTaskTab ? openTaskTabs.find((t) => t.id === activeTaskTab) ?? null : null
@@ -1904,6 +1924,12 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       workers={floorWorkers}
       onSelectTicket={(id) => setSelectedTicketId(id)}
       onOpenTask={openTaskFromTicket}
+    />
+  ) : center === 'recap' ? (
+    <RecapPane
+      days={recapDays}
+      loading={recapSessions === null}
+      onOpenUrl={(url) => postMessage({ type: 'openExternal', url })}
     />
   ) : center === 'prs' ? (
     <PrBoardPane

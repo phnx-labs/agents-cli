@@ -14,7 +14,7 @@ import {
 // click one to scope the feed to a project or host directly, without expanding into
 // the full FloorSidebar. The » button remains the single expand affordance.
 
-export type RailKey = 'all' | 'needs' | 'queue' | 'projects' | 'hosts'
+export type RailKey = 'all' | 'needs' | 'queue' | 'recap' | 'projects' | 'hosts'
 
 /** The scope state the rail reflects. needsOnly = the 'needs' status chip is active. */
 export interface RailScopeState {
@@ -36,6 +36,7 @@ export interface RailScopeState {
  */
 export function railActive(key: RailKey, s: RailScopeState): boolean {
   if (key === 'queue') return s.center === 'backlog'
+  if (key === 'recap') return s.center === 'recap'
   if (s.center !== 'agents') return false
   if (key === 'needs') return s.needsOnly && s.projFilter == null && s.hostFilter == null
   if (key === 'projects') return s.projFilter != null
@@ -168,6 +169,7 @@ export function FloorRail({
         {iconBtn('all', 'radar', 'All agents', () => scope(''), agents.length)}
         {iconBtn('needs', 'alert', 'Needs you', () => scope('__needs'), needs || undefined, true)}
         {iconBtn('queue', 'inbox', 'Backlog', () => scope('__queue'), tickets.length || undefined)}
+        {iconBtn('recap', 'clock', 'Recap', () => scope('__recap'))}
 
         <div className="rail-fly-anchor">
           {iconBtn('projects', 'folder', 'Projects', () => setFly((f) => (f === 'projects' ? null : 'projects')))}
