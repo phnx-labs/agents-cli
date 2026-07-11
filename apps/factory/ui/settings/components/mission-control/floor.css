@@ -413,6 +413,30 @@
 .swarmify-root .dflight .pr { font-family: "Geist Mono", monospace; font-size: 10px; color: var(--brand-600); }
 .swarmify-root .dflight-note { font-size: 11px; color: var(--status-pending); margin-top: 8px; }
 .swarmify-root .disp.caution { background: var(--status-pending); }
+/* PR board — CI / review / mergeable per PR, Merge only on ready rows. */
+.swarmify-root .prb-empty { padding: 24px 16px; color: var(--ds-text-faint); font-size: 12.5px; }
+.swarmify-root .feed-sec .prb-count { margin-left: 8px; color: var(--ds-text-dim); font-weight: 600; font-size: 10.5px; }
+.swarmify-root .feed-sec .prb-refresh { background: none; border: 0; padding: 2px; cursor: pointer; color: var(--ds-text-faint); display: inline-flex; }
+.swarmify-root .feed-sec .prb-refresh:hover { color: var(--ds-text); }
+.swarmify-root .prb-row { display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-bottom: 1px solid var(--ds-border-subtle); border-radius: var(--r-sm); }
+.swarmify-root .prb-row:hover { background: var(--ds-bg-panel); }
+.swarmify-root .prb-row.settled { opacity: .55; }
+.swarmify-root .prb-num { flex: 0 0 auto; background: none; border: 0; padding: 0; cursor: pointer; font-family: "Geist Mono", monospace; font-size: 11px; font-weight: 700; color: var(--brand-600); }
+.swarmify-root .prb-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .prb-owner { flex: 0 0 auto; background: none; cursor: pointer; font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--ds-text-dim); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
+.swarmify-root .prb-owner:hover { color: var(--ds-text); border-color: var(--ds-text-dim); }
+.swarmify-root .prb-draft, .swarmify-root .prb-state { flex: 0 0 auto; font-size: 10px; font-weight: 700; color: var(--ds-text-faint); text-transform: uppercase; letter-spacing: .04em; }
+.swarmify-root .prb-ci { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+.swarmify-root .prb-ci.passed { background: var(--status-running-bg); color: var(--status-running); }
+.swarmify-root .prb-ci.failed { background: var(--status-failed-bg); color: var(--status-failed); }
+.swarmify-root .prb-ci.running { background: var(--status-pending-bg); color: var(--status-pending); }
+.swarmify-root .prb-rev { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--ds-border); color: var(--ds-text-dim); }
+.swarmify-root .prb-rev.approved { border-color: var(--status-running); color: var(--status-running); }
+.swarmify-root .prb-rev.changes_requested { border-color: var(--status-pending); color: var(--status-pending); }
+.swarmify-root .prb-conflict { flex: 0 0 auto; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: var(--status-failed-bg); color: var(--status-failed); }
+.swarmify-root .prb-merge { flex: 0 0 auto; background: var(--brand); color: #1a1a1a; border: none; border-radius: var(--r-md); padding: 4px 12px; font-weight: 700; font-size: 11px; cursor: pointer; }
+.swarmify-root .prb-merge:disabled { opacity: .6; cursor: default; }
+.swarmify-root .prb-err { margin: 0 8px 6px 8px; padding: 6px 10px; border-radius: var(--r-sm); background: var(--status-failed-bg); color: var(--status-failed); font-size: 11px; font-family: "Geist Mono", monospace; white-space: pre-wrap; word-break: break-word; }
 /* Recap ledger — day-grouped ended sessions with duration/cost. */
 .swarmify-root .recap-empty { padding: 24px 16px; color: var(--ds-text-faint); font-size: 12.5px; }
 .swarmify-root .feed-sec .rc-rollup { margin-left: 8px; color: var(--ds-text-dim); font-weight: 600; font-size: 10.5px; }

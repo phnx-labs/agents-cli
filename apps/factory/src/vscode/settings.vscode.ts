@@ -2033,6 +2033,34 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       }
+      case 'fetchPrBoard': {
+        // PR board: CI + review + mergeable per PR URL (TTL-cached gh pr view).
+        const urls = Array.isArray(message.urls) ? message.urls.filter((u: unknown) => typeof u === 'string') : [];
+        try {
+          const { fetchPrStatuses } = await import('./prBoard.vscode');
+          const statuses = await fetchPrStatuses(urls);
+          settingsPanel?.webview.postMessage({ type: 'prBoard', statuses });
+        } catch (err) {
+          console.error('[SETTINGS] Error fetching PR board:', err);
+          settingsPanel?.webview.postMessage({ type: 'prBoard', statuses: [] });
+        }
+        break;
+      }
+      case 'mergePr': {
+        // Board merge action. Plain --rebase, no --admin — branch protection stays
+        // in force; a refusal comes back to the row as an inline error.
+        const mergeUrl = typeof message.url === 'string' ? message.url : '';
+        try {
+          if (!mergeUrl) break;
+          const { mergePr } = await import('./prBoard.vscode');
+          const result = await mergePr(mergeUrl);
+          settingsPanel?.webview.postMessage({ type: 'mergePrResult', url: mergeUrl, ...result });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          settingsPanel?.webview.postMessage({ type: 'mergePrResult', url: mergeUrl, ok: false, error: msg });
+        }
+        break;
+      }
       case 'fetchRecap': {
         // Recap ledger: recent (ended) sessions across the WHOLE fleet — local +
         // every online registered device — with the CLI's per-session outcome
