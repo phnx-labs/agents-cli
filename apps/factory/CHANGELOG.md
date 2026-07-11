@@ -8,6 +8,15 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Added
 
+- **PR board — every open PR the floor's agents produced, in one actionable list.**
+  A new PRs center tab aggregates the live feed's PR URLs and shows, per PR: CI
+  state, review decision (approved / changes requested / review required), merge
+  conflicts, a chip for the agent that owns it (jumps to its card), and a **Merge**
+  button that appears only when the PR is open, not draft, approved, CI-green, and
+  conflict-free. Rows are ranked for action: ready-to-merge first, then red CI /
+  conflicts, then changes-requested. Merge runs plain `gh pr merge --rebase` (never
+  `--admin` — branch protection stays in force); refusals surface inline on the row.
+
 - **The backlog now shows who is already working each ticket.** A ticket an agent
   carries gets an in-flight chip on its row (phase dot + agent abbr, `+N` when several
   are on it; hover for the full roster), and the ticket detail pane gains an **In

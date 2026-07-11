@@ -28,6 +28,8 @@ import { FloorSidebar } from './FloorSidebar'
 import { FloorRail } from './FloorRail'
 import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from './FloorSubtabs'
 import { BacklogCenter } from './BacklogCenter'
+import { PrBoardPane } from './PrBoardPane'
+import { buildPrBoard, collectPrUrls, type PrStatusLike } from './prBoardModel'
 import { TaskDetail } from '../bench/TaskDetail'
 import type { FlatTask } from '../bench/TaskCard'
 import { TicketDetail } from './TicketDetail'
@@ -617,6 +619,11 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Recent (historical) sessions per host, fetched lazily only when a host filter has
   // 0 live agents — so an empty host shows recent work instead of a blank pane.
   const [recentByHost, setRecentByHost] = useState<Record<string, RemoteSessionLike[]>>({})
+  // PR board: statuses for every PR URL the live feed carries. null = not fetched
+  // yet (the gh fan-out runs lazily when the PRs center opens).
+  const [prStatuses, setPrStatuses] = useState<PrStatusLike[] | null>(null)
+  const [prMerging, setPrMerging] = useState<Set<string>>(() => new Set())
+  const [prErrors, setPrErrors] = useState<Record<string, string>>({})
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
   // Group the live feed by an axis (project/host/status/agent). Defaults to 'project'
   // so sessions cluster under the repo/Linear project they're working on (NEEDS YOU
@@ -745,6 +752,17 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         const rh = typeof msg.host === 'string' ? msg.host : ''
         const recent = Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : []
         setRecentByHost((p) => ({ ...p, [rh]: recent }))
+      } else if (msg?.type === 'prBoard') {
+        setPrStatuses(Array.isArray(msg.statuses) ? (msg.statuses as PrStatusLike[]) : [])
+      } else if (msg?.type === 'mergePrResult') {
+        const mu = typeof msg.url === 'string' ? msg.url : ''
+        setPrMerging((prev) => { const next = new Set(prev); next.delete(mu); return next })
+        if (msg.ok === true) {
+          // Merged: refetch so the row settles (and any dependent rows update).
+          setPrStatuses(null)
+        } else {
+          setPrErrors((prev) => ({ ...prev, [mu]: typeof msg.error === 'string' ? msg.error : 'merge failed' }))
+        }
       }
     }
     window.addEventListener('message', onMsg)
@@ -1468,6 +1486,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     [hostFilter, hostHasNoActive, recentByHost, pinned, localHostName, projectRules]
   )
 
+  // PR board: lazy gh fan-out over the live feed's PR URLs on first open of the
+  // PRs center (and again after a merge clears prStatuses back to null).
+  useEffect(() => {
+    if (center === 'prs' && prStatuses === null) {
+      postMessage({ type: 'fetchPrBoard', urls: collectPrUrls(floorAgents) })
+    }
+  }, [center, prStatuses, floorAgents])
+  const prRows = useMemo(() => buildPrBoard(prStatuses ?? [], floorAgents), [prStatuses, floorAgents])
+
   const needsAgents = useMemo(() => scopedAgents.filter((a) => a.needs), [scopedAgents])
   const waitingAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'waiting'), [needsAgents])
   const failedAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'failed'), [needsAgents])
@@ -1828,7 +1855,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     { center: 'backlog', label: 'Backlog', count: floorTickets.length },
     { center: 'projects', label: 'Projects', count: managedProjects.length },
     { center: 'host', label: 'Hosts', count: fleetDevices.length },
-  ], [floorAgents.length, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length])
+    // PRs count = open rows once fetched; before the first fetch, the URL count.
+    { center: 'prs', label: 'PRs', count: prStatuses === null ? collectPrUrls(floorAgents).length : prRows.filter((r) => r.state === 'open').length },
+  ], [floorAgents, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, prStatuses, prRows])
 
   // Resolve the active task tab (if any) back to a bench FlatTask so its detail renders.
   const activeTab = activeTaskTab ? openTaskTabs.find((t) => t.id === activeTaskTab) ?? null : null
@@ -1875,6 +1904,21 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       workers={floorWorkers}
       onSelectTicket={(id) => setSelectedTicketId(id)}
       onOpenTask={openTaskFromTicket}
+    />
+  ) : center === 'prs' ? (
+    <PrBoardPane
+      rows={prRows}
+      loading={prStatuses === null}
+      merging={prMerging}
+      errors={prErrors}
+      onMerge={(url) => {
+        setPrMerging((prev) => new Set(prev).add(url))
+        setPrErrors((prev) => { const { [url]: _gone, ...rest } = prev; return rest })
+        postMessage({ type: 'mergePr', url })
+      }}
+      onOpenUrl={(url) => postMessage({ type: 'openExternal', url })}
+      onRefresh={() => setPrStatuses(null)}
+      onSelectAgent={selectFloorAgent}
     />
   ) : (
     <div className="feed">

@@ -19,6 +19,8 @@ import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
 import { BacklogCenter } from '../components/mission-control/BacklogCenter'
+import { PrBoardPane } from '../components/mission-control/PrBoardPane'
+import { buildPrBoard, type PrStatusLike } from '../components/mission-control/prBoardModel'
 import { TicketDetail } from '../components/mission-control/TicketDetail'
 import { ProjectsPane } from '../components/mission-control/ProjectsPane'
 import { TerminalExpandedDetail } from '../components/mission-control/TerminalDetail'
@@ -577,6 +579,30 @@ function Ticket() {
   )
 }
 
+// PR board — CI/review/mergeable badges + the ready-row Merge button (?view=prs).
+function PrBoard() {
+  const st = (over: Partial<PrStatusLike>): PrStatusLike => ({
+    url: 'https://github.com/phnx-labs/agents-cli/pull/142', number: 142,
+    title: 'feat(factory): floor rail flyouts — Projects/Hosts menus, Dispatch button',
+    state: 'open', isDraft: false, ci: 'passed', review: 'approved', mergeable: 'mergeable', readyToMerge: true,
+    ...over,
+  })
+  const rows = buildPrBoard(
+    [
+      st({}),
+      st({ url: 'u866', number: 866, title: 'feat(factory): in-flight ticket linkage on the backlog', ci: 'running', review: null, readyToMerge: false }),
+      st({ url: 'u869', number: 869, title: 'feat(factory): Recap — fleet-wide work ledger', ci: 'failed', review: 'changes_requested', readyToMerge: false }),
+      st({ url: 'u871', number: 871, title: 'chore: bump deps', mergeable: 'conflicting', review: 'review_required', ci: null, readyToMerge: false }),
+    ],
+    [reviewAgent],
+  )
+  return (
+    <div className="feed-col">
+      <PrBoardPane rows={rows} loading={false} merging={new Set(['u866'])} errors={{ u871: 'GraphQL: Pull Request has merge conflicts (mergePullRequest)' }} onMerge={noop} onOpenUrl={noop} onRefresh={noop} />
+    </div>
+  )
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
@@ -586,7 +612,7 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : view === 'ticket' ? <Ticket /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : view === 'prs' ? <PrBoard /> : view === 'ticket' ? <Ticket /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel
