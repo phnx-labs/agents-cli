@@ -77,14 +77,30 @@ describe('buildJobCommand', () => {
       expect(cmd).toContain('hello');
     });
 
-    it('adds --dangerously-bypass-approvals-and-sandbox in edit mode', () => {
+    it('edit mode stays sandboxed (workspace-write + network), no approval bypass', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'edit' }), 'hello');
-      expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('workspace-write');
+      expect(cmd).toContain('sandbox_workspace_write.network_access=true');
     });
 
-    it('does not add bypass flag in plan mode', () => {
+    it('plan mode swaps the sandbox to read-only, no bypass flag', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'plan' }), 'hello');
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('read-only');
+    });
+
+    it('auto mode gets the same sandboxed treatment as edit', () => {
+      const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'auto' }), 'hello');
+      expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('workspace-write');
+      expect(cmd).toContain('sandbox_workspace_write.network_access=true');
+    });
+
+    it('skip mode drops the sandbox and adds the bypass flag', () => {
+      const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'skip' }), 'hello');
+      expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(cmd).not.toContain('--sandbox');
     });
 
     it('adds --model flag when config.model is set', () => {

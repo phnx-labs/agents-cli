@@ -28,6 +28,8 @@ import { FloorSidebar } from './FloorSidebar'
 import { FloorRail } from './FloorRail'
 import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from './FloorSubtabs'
 import { BacklogCenter } from './BacklogCenter'
+import { PrBoardPane } from './PrBoardPane'
+import { buildPrBoard, collectPrUrls, type PrStatusLike } from './prBoardModel'
 import { RecapPane } from './RecapPane'
 import { buildRecap } from './recapModel'
 import { TaskDetail } from '../bench/TaskDetail'
@@ -44,6 +46,7 @@ import {
   groupAgents,
   sessionTaskLine,
   ticketWorkers,
+  projectRollups,
   type FloorAgent,
   type FloorTicket,
   type CenterMode,
@@ -619,6 +622,11 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Recent (historical) sessions per host, fetched lazily only when a host filter has
   // 0 live agents — so an empty host shows recent work instead of a blank pane.
   const [recentByHost, setRecentByHost] = useState<Record<string, RemoteSessionLike[]>>({})
+  // PR board: statuses for every PR URL the live feed carries. null = not fetched
+  // yet (the gh fan-out runs lazily when the PRs center opens).
+  const [prStatuses, setPrStatuses] = useState<PrStatusLike[] | null>(null)
+  const [prMerging, setPrMerging] = useState<Set<string>>(() => new Set())
+  const [prErrors, setPrErrors] = useState<Record<string, string>>({})
   // Recap ledger: fleet-wide recent (ended) sessions. null = not fetched yet — the
   // sweep is expensive (SSH fan-out), so it runs lazily when the Recap center opens.
   const [recapSessions, setRecapSessions] = useState<RemoteSessionLike[] | null>(null)
@@ -750,6 +758,17 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         const rh = typeof msg.host === 'string' ? msg.host : ''
         const recent = Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : []
         setRecentByHost((p) => ({ ...p, [rh]: recent }))
+      } else if (msg?.type === 'prBoard') {
+        setPrStatuses(Array.isArray(msg.statuses) ? (msg.statuses as PrStatusLike[]) : [])
+      } else if (msg?.type === 'mergePrResult') {
+        const mu = typeof msg.url === 'string' ? msg.url : ''
+        setPrMerging((prev) => { const next = new Set(prev); next.delete(mu); return next })
+        if (msg.ok === true) {
+          // Merged: refetch so the row settles (and any dependent rows update).
+          setPrStatuses(null)
+        } else {
+          setPrErrors((prev) => ({ ...prev, [mu]: typeof msg.error === 'string' ? msg.error : 'merge failed' }))
+        }
       } else if (msg?.type === 'recapSessions') {
         setRecapSessions(Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : [])
       }
@@ -1442,6 +1461,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Ticket id -> agents carrying it: the backlog's in-flight chips and the ticket
   // detail's "In flight" block + double-dispatch guard all join on this.
   const floorWorkers = useMemo(() => ticketWorkers(floorAgents), [floorAgents])
+  // Per-project activity rollups: the rail's Projects flyout sub-counts and the
+  // Projects pane's activity line both read from this one derivation.
+  const floorRollups = useMemo(() => projectRollups(floorAgents, floorTickets), [floorAgents, floorTickets])
 
   // Lookup back to the source UnifiedAgent so the right pane can reuse the rich DetailPane.
   const unifiedById = useMemo(() => {
@@ -1475,6 +1497,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     [hostFilter, hostHasNoActive, recentByHost, pinned, localHostName, projectRules]
   )
 
+  // PR board: lazy gh fan-out over the live feed's PR URLs on first open of the
+  // PRs center (and again after a merge clears prStatuses back to null).
+  useEffect(() => {
+    if (center === 'prs' && prStatuses === null) {
+      postMessage({ type: 'fetchPrBoard', urls: collectPrUrls(floorAgents) })
+    }
+  }, [center, prStatuses, floorAgents])
+  const prRows = useMemo(() => buildPrBoard(prStatuses ?? [], floorAgents), [prStatuses, floorAgents])
   // Recap ledger: lazy fleet sweep the first time the Recap center opens; live
   // sessions are excluded (the feed owns what's running, the ledger what finished).
   useEffect(() => {
@@ -1849,7 +1879,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     { center: 'host', label: 'Hosts', count: fleetDevices.length },
     // Recap count = today's finished sessions (0 until the lazy sweep has run).
     { center: 'recap', label: 'Recap', count: recapDays[0]?.label === 'Today' ? recapDays[0].sessions : 0 },
-  ], [floorAgents.length, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, recapDays])
+    // PRs count = open rows once fetched; before the first fetch, the URL count.
+    { center: 'prs', label: 'PRs', count: prStatuses === null ? collectPrUrls(floorAgents).length : prRows.filter((r) => r.state === 'open').length },
+  ], [floorAgents, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, recapDays, prStatuses, prRows])
 
   // Resolve the active task tab (if any) back to a bench FlatTask so its detail renders.
   const activeTab = activeTaskTab ? openTaskTabs.find((t) => t.id === activeTaskTab) ?? null : null
@@ -1902,6 +1934,21 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       days={recapDays}
       loading={recapSessions === null}
       onOpenUrl={(url) => postMessage({ type: 'openExternal', url })}
+    />
+  ) : center === 'prs' ? (
+    <PrBoardPane
+      rows={prRows}
+      loading={prStatuses === null}
+      merging={prMerging}
+      errors={prErrors}
+      onMerge={(url) => {
+        setPrMerging((prev) => new Set(prev).add(url))
+        setPrErrors((prev) => { const { [url]: _gone, ...rest } = prev; return rest })
+        postMessage({ type: 'mergePr', url })
+      }}
+      onOpenUrl={(url) => postMessage({ type: 'openExternal', url })}
+      onRefresh={() => setPrStatuses(null)}
+      onSelectAgent={selectFloorAgent}
     />
   ) : (
     <div className="feed">
@@ -2068,6 +2115,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const rightContent = center === 'projects'
     ? <ProjectsPane
         projects={managedProjects}
+        rollups={floorRollups}
         linearProjects={linearProjects}
         pickedFolder={pickedFolder}
         onSave={(p) => postMessage({ type: 'saveManagedProject', project: p })}

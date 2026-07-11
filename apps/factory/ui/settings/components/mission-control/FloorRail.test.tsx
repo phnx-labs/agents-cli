@@ -126,7 +126,22 @@ describe('railProjectRows', () => {
 
   test('managed project with zero agents still gets a row', () => {
     const rows = railProjectRows([], [makeProject({ name: 'idle-proj' })])
-    expect(rows).toEqual([{ key: 'p1', name: 'idle-proj', run: 0, wait: 0, managed: true }])
+    expect(rows).toEqual([{ key: 'p1', name: 'idle-proj', run: 0, wait: 0, backlog: 0, prs: 0, managed: true }])
+  })
+
+  test('rows carry backlog + distinct-PR rollups; ticket-only projects do not appear as extras', () => {
+    const agents = [
+      makeAgent({ id: '1', project: 'swarmify', prUrl: 'https://github.com/x/y/pull/1' }),
+      makeAgent({ id: '2', project: 'swarmify', prUrl: 'https://github.com/x/y/pull/1' }),
+    ]
+    const tickets = [
+      { id: 'T-1', title: 't', project: 'swarmify', source: 'LN', pri: 'high', status: 'todo', desc: '', labels: [], owner: '' },
+      { id: 'T-2', title: 't', project: 'swarmify', source: 'LN', pri: 'high', status: 'done', desc: '', labels: [], owner: '' },
+      { id: 'T-3', title: 't', project: 'ghost-proj', source: 'GH', pri: 'med', status: 'todo', desc: '', labels: [], owner: '' },
+    ] as FloorTicket[]
+    const rows = railProjectRows(agents, [makeProject({ name: 'swarmify' })], tickets)
+    expect(rows.map((r) => r.name)).toEqual(['swarmify']) // ghost-proj has no agents: not a scopable extra
+    expect(rows[0]).toMatchObject({ run: 2, backlog: 1, prs: 1 }) // done ticket excluded, PR deduped
   })
 })
 

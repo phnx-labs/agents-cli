@@ -423,12 +423,12 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     promptFlag: 'positional',
     resume: { subcommand: 'resume' },
     modeFlags: {
-      // NOTE: codex has no read-only mode in --sandbox; 'plan' here means
-      // "workspace-write but no auto-approval" — closer to plan-as-restraint.
-      // True read-only requires --sandbox read-only which we haven't wired.
-      plan: ['--sandbox', 'workspace-write'],
-      edit: ['--sandbox', 'workspace-write', '--dangerously-bypass-approvals-and-sandbox'],
-      // skip drops the sandbox entirely; --dangerously-bypass-approvals-and-sandbox then approves anything.
+      plan: ['--sandbox', 'read-only'],
+      // Sandboxed writes inside the workspace. Network stays on (workspace-write
+      // disables it by default) so edit-mode runs can still use git/gh/package
+      // installs. No approval bypass here — only `skip` drops the guardrails.
+      edit: ['--sandbox', 'workspace-write', '-c', 'sandbox_workspace_write.network_access=true'],
+      // skip = codex --yolo: drops the sandbox entirely and approves anything.
       skip: ['--dangerously-bypass-approvals-and-sandbox'],
     },
     jsonFlags: ['--json'],
@@ -684,13 +684,22 @@ export function buildExecCommand(options: ExecOptions): string[] {
     );
   }
   if (resumeSpec && 'subcommand' in resumeSpec) {
-    // codex `exec resume` / `resume` does NOT accept `--sandbox <mode>` (only the
-    // bypass flag, verified against `codex exec resume --help`). So the standard
-    // codex modeFlags can't be reused on resume. A non-plan HEADLESS resume needs
-    // the bypass or it stalls on approval prompts; plan and interactive resume
-    // inherit codex's default sandbox and pass no flag.
-    if (!interactive && resolvedMode !== 'plan') {
+    if (resolvedMode === 'skip') {
+      // skip = yolo on resume too; both `codex resume` (TUI) and
+      // `codex exec resume` accept the bypass flag.
       cmd.push('--dangerously-bypass-approvals-and-sandbox');
+    } else if (interactive) {
+      // `codex resume` (TUI) accepts the same -s/--sandbox flags as a fresh run.
+      cmd.push(...modeFlags);
+    } else {
+      // `codex exec resume` rejects `--sandbox <mode>` (verified against
+      // `codex exec resume --help` on 0.142.5), but takes -c config overrides —
+      // map the mode through sandbox_mode so a non-skip resume never gets the
+      // approval/sandbox bypass.
+      cmd.push('-c', `sandbox_mode=${resolvedMode === 'plan' ? 'read-only' : 'workspace-write'}`);
+      if (resolvedMode !== 'plan') {
+        cmd.push('-c', 'sandbox_workspace_write.network_access=true');
+      }
     }
   } else if (options.agent === 'kimi' && !interactive) {
     // kimi's headless prompt mode (`-p`/`--prompt`) is self-contained and REFUSES
@@ -782,8 +791,16 @@ export function buildExecCommand(options: ExecOptions): string[] {
     }
   }
 
-  // Claude-specific: add dirs
-  if (options.agent === 'claude' && options.addDirs) {
+  // Extra writable dirs. Claude and Codex both take `--add-dir`; for Codex it
+  // widens the workspace-write sandbox (teams relies on this to let teammates
+  // write ~/.agents), so it must actually be forwarded — it used to be
+  // claude-only, silently dropped for codex and masked by edit mode carrying
+  // the approval/sandbox bypass. Codex's resume forms reject --add-dir, so
+  // skip it there (claude's flag-based resume accepts it).
+  if (
+    options.addDirs &&
+    (options.agent === 'claude' || (options.agent === 'codex' && !options.resume))
+  ) {
     for (const dir of options.addDirs) {
       cmd.push('--add-dir', dir);
     }

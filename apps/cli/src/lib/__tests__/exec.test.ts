@@ -71,17 +71,19 @@ describe('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('auto');
     });
 
-    it('codex plan produces --sandbox workspace-write', () => {
+    it('codex plan produces --sandbox read-only', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'plan' }));
       expect(cmd).toContain('--sandbox');
-      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('workspace-write');
+      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('read-only');
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
-    it('codex edit produces --sandbox workspace-write --dangerously-bypass-approvals-and-sandbox', () => {
+    it('codex edit produces --sandbox workspace-write with network on, no approval bypass', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'edit' }));
       expect(cmd).toContain('--sandbox');
-      expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(cmd[cmd.indexOf('--sandbox') + 1]).toBe('workspace-write');
+      expect(cmd).toContain('sandbox_workspace_write.network_access=true');
+      expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
     it('codex skip produces --dangerously-bypass-approvals-and-sandbox without --sandbox', () => {
@@ -662,8 +664,20 @@ describe('buildExecCommand', () => {
       expect(cmd[indices[1] + 1]).toBe('/b');
     });
 
-    it('codex ignores addDirs', () => {
+    it('codex addDirs adds --add-dir (widens the workspace-write sandbox)', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', addDirs: ['/a'] }));
+      expect(cmd[cmd.indexOf('--add-dir') + 1]).toBe('/a');
+    });
+
+    it('codex resume drops addDirs (`codex exec resume` rejects --add-dir)', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'codex', addDirs: ['/a'], resume: true, sessionId: 'xyz-9', prompt: 'go',
+      }));
+      expect(cmd).not.toContain('--add-dir');
+    });
+
+    it('gemini ignores addDirs', () => {
+      const cmd = buildExecCommand(opts({ agent: 'gemini', addDirs: ['/a'] }));
       expect(cmd).not.toContain('--add-dir');
     });
   });

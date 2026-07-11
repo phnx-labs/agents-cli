@@ -94,8 +94,14 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
   }
 
   if (config.agent === 'codex') {
-    if (mode === 'edit') {
-      cmd.push('--dangerously-bypass-approvals-and-sandbox');
+    if (mode === 'plan') {
+      // The template defaults to workspace-write; plan means read-only.
+      const sbIndex = cmd.indexOf('--sandbox');
+      if (sbIndex !== -1) cmd[sbIndex + 1] = 'read-only';
+    } else if (mode === 'edit' || mode === 'auto') {
+      // Keep the workspace-write sandbox — no approval bypass; only skip drops
+      // the guardrails. Re-enable network, which workspace-write turns off.
+      cmd.push('-c', 'sandbox_workspace_write.network_access=true');
     } else if (mode === 'skip') {
       // Remove sandbox restriction, just --dangerously-bypass-approvals-and-sandbox
       const sbIndex = cmd.indexOf('--sandbox');

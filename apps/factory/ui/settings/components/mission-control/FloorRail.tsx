@@ -3,6 +3,7 @@ import { Icon, type IconName } from './icons'
 import {
   computeHostRows,
   orderManagedProjects,
+  projectRollups,
   type CenterMode,
   type FloorAgent,
   type FloorTicket,
@@ -51,6 +52,10 @@ export interface RailProjectRow {
   run: number
   /** Agents on the project waiting on the user (amber). */
   wait: number
+  /** Open backlog tickets for the project (dim sub-count). */
+  backlog: number
+  /** Distinct open PRs carried by the project's agents (dim sub-count). */
+  prs: number
   /** Curated ManagedProject vs discovered-from-agents only. */
   managed: boolean
 }
@@ -58,27 +63,23 @@ export interface RailProjectRow {
 /**
  * Rows for the Projects flyout: curated projects first (orderManagedProjects), then
  * any project that has live agents but isn't curated — those must still be scopable
- * from the rail, busiest first.
+ * from the rail, busiest first. Each row carries the full projectRollups counts so
+ * one hover answers "what's happening in this project".
  */
-export function railProjectRows(agents: FloorAgent[], projects: ManagedProject[]): RailProjectRow[] {
+export function railProjectRows(agents: FloorAgent[], projects: ManagedProject[], tickets: FloorTicket[] = []): RailProjectRow[] {
+  const rollups = projectRollups(agents, tickets)
   const run: Record<string, number> = {}
-  const wait: Record<string, number> = {}
-  for (const a of agents) {
-    run[a.project] = (run[a.project] || 0) + 1
-    if (a.needs) wait[a.project] = (wait[a.project] || 0) + 1
-  }
+  for (const [name, r] of Object.entries(rollups)) run[name] = r.run
   const managedNames = new Set(projects.map((p) => p.name))
-  const rows: RailProjectRow[] = orderManagedProjects(projects, run).map((p) => ({
-    key: p.id,
-    name: p.name,
-    run: run[p.name] ?? 0,
-    wait: wait[p.name] ?? 0,
-    managed: true,
-  }))
-  const extras = Object.keys(run)
-    .filter((name) => !managedNames.has(name))
-    .sort((x, y) => (run[y] ?? 0) - (run[x] ?? 0) || x.localeCompare(y))
-    .map((name) => ({ key: `agents:${name}`, name, run: run[name] ?? 0, wait: wait[name] ?? 0, managed: false }))
+  const rowFor = (key: string, name: string, managed: boolean): RailProjectRow => {
+    const r = rollups[name]
+    return { key, name, run: r?.run ?? 0, wait: r?.wait ?? 0, backlog: r?.backlog ?? 0, prs: r?.prs ?? 0, managed }
+  }
+  const rows = orderManagedProjects(projects, run).map((p) => rowFor(p.id, p.name, true))
+  const extras = Object.keys(rollups)
+    .filter((name) => !managedNames.has(name) && (rollups[name]?.run ?? 0) > 0)
+    .sort((x, y) => (rollups[y]?.run ?? 0) - (rollups[x]?.run ?? 0) || x.localeCompare(y))
+    .map((name) => rowFor(`agents:${name}`, name, false))
   return [...rows, ...extras]
 }
 
@@ -140,7 +141,7 @@ export function FloorRail({
   const scope = (value: string) => { setFly(null); onScope(value) }
   const state: RailScopeState = { center, projFilter, hostFilter, needsOnly }
   const needs = agents.filter((a) => a.needs).length
-  const projRows = railProjectRows(agents, projects)
+  const projRows = railProjectRows(agents, projects, tickets)
   const hostRows = computeHostRows(agents, devices, offlineHosts, hostPins, localHost)
   const anyOffline = hostRows.some((h) => h.offline)
 
@@ -181,6 +182,13 @@ export function FloorRail({
                 <button key={p.key} type="button" className={`fly-row${projFilter === p.name ? ' on' : ''}`} onClick={() => scope(p.name)}>
                   <span className="n">{p.name}</span>
                   {p.wait > 0 && <span className="w"><Icon name="clock" size={10} />{p.wait}</span>}
+                  {(p.backlog > 0 || p.prs > 0) && (
+                    <span className="fly-sub">
+                      {p.backlog > 0 ? `${p.backlog} ticket${p.backlog === 1 ? '' : 's'}` : ''}
+                      {p.backlog > 0 && p.prs > 0 ? ' · ' : ''}
+                      {p.prs > 0 ? `${p.prs} PR${p.prs === 1 ? '' : 's'}` : ''}
+                    </span>
+                  )}
                   <span className="c">{p.run > 0 ? p.run : '—'}</span>
                 </button>
               ))}
