@@ -56,7 +56,7 @@ import {
   resolveExtraRepoDir,
   updateMeta,
 } from '../lib/state.js';
-import { parseSource, pullRepo, commitAndPush, isGitRepo, isSystemRepoOrigin } from '../lib/git.js';
+import { parseSource, pullRepo, commitAndPush, isGitRepo, isSystemRepoOrigin, adoptRepo } from '../lib/git.js';
 import { DEFAULT_SYSTEM_REPO } from '../lib/types.js';
 import type { AgentId, ExtraRepoConfig } from '../lib/types.js';
 import { ALL_AGENT_IDS, isAgentName, resolveAgentName } from '../lib/agents.js';
@@ -856,9 +856,9 @@ export function registerRepoCommands(program: Command): void {
     });
 
   repoCmd
-    .command('pull [alias]')
-    .description('Pull updates. Aliases: "system" (~/.agents/.system/), "user" (~/.agents/), or any registered extra. No arg pulls all.')
-    .action(async (alias: string | undefined) => {
+    .command('pull [alias] [url]')
+    .description('Pull updates. Aliases: "system" (~/.agents/.system/), "user" (~/.agents/), or any registered extra. No arg pulls all. Pass a git URL to git-back a not-yet-cloned user repo: "agents repo pull user <url>".')
+    .action(async (alias: string | undefined, url: string | undefined) => {
       const targets = collectRepoTargets(alias);
       if (!targets) {
         process.exitCode = 1;
@@ -870,8 +870,33 @@ export function registerRepoCommands(program: Command): void {
       }
       for (const t of targets) {
         if (!fs.existsSync(t.dir) || !isGitRepo(t.dir)) {
-          console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
-          continue;
+          // A plain (never-cloned) user repo — setup makes ~/.agents a bare dir and
+          // never git-clones it (state.ts ensureAgentsDir), so a fresh/Windows box
+          // silently falls out of config sync. If a URL was passed, git-back it in
+          // place (keeping local files, backing up any that differ); else guide the
+          // user. Only the USER repo gets this — system is cloned by setup, extras
+          // by `repo add`.
+          if (t.alias === 'user' && url) {
+            const spinner = ora(`Git-backing ${t.dir} from ${url}...`).start();
+            const res = await adoptRepo(url, t.dir);
+            if (!res.success) {
+              spinner.fail(`user: could not git-back — ${res.error}`);
+              process.exitCode = 1;
+              continue;
+            }
+            spinner.succeed(`user: git-backed -> ${res.commit}`);
+            if (res.backedUp.length > 0) {
+              console.log(chalk.yellow(`  backed up ${res.backedUp.length} locally-modified file(s) to ${res.backupDir}`));
+              console.log(chalk.gray(`  (${res.backedUp.slice(0, 5).join(', ')}${res.backedUp.length > 5 ? ', …' : ''})`));
+            }
+            // Now a git repo — fall through to the normal pull below.
+          } else {
+            console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
+            if (t.alias === 'user') {
+              console.log(chalk.gray('  git-back it from your config remote: agents repo pull user <git-url>'));
+            }
+            continue;
+          }
         }
         if (t.alias === 'system') {
           // Skip system repo unless explicitly requested
