@@ -26,7 +26,7 @@ Every agents-cli installation maintains two repos:
 | Repo | Path | Owner | Purpose |
 |------|------|-------|---------|
 | **System repo** | `~/.agents/.system/` | agents-cli maintainers | Core resources and defaults shipped with every install. Updated via `npm update -g agents-cli`. |
-| **User repo** | `~/.agents/` | You | Your personal additions and overrides. Synced with `agents repo push` / `agents repo pull`. |
+| **User repo** | `~/.agents/` | You | Your personal additions and overrides. Synced with `agents repo push` / `agents repo pull`. To git-back a fresh/Windows machine whose `~/.agents` isn't a clone yet, run `agents repo pull user <git-url>` once — it adopts the existing directory in place. |
 
 A project can also have a local repo — drop a `.agents/` directory at the project root. Its resources apply only while you're inside that project tree.
 
