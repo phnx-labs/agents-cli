@@ -2033,6 +2033,21 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       }
+      case 'fetchRecap': {
+        // Recap ledger: recent (ended) sessions across the WHOLE fleet — local +
+        // every online registered device — with the CLI's per-session outcome
+        // metrics (duration/cost/tokens). Fetched lazily when the Recap center
+        // opens; rides its own 'recapSessions' message.
+        try {
+          const { fetchRecapSessions } = await import('./remoteSessions.vscode');
+          const sessions = await fetchRecapSessions(20, getSettings(context).projectRules ?? []);
+          settingsPanel?.webview.postMessage({ type: 'recapSessions', sessions });
+        } catch (err) {
+          console.error('[SETTINGS] Error fetching recap sessions:', err);
+          settingsPanel?.webview.postMessage({ type: 'recapSessions', sessions: [] });
+        }
+        break;
+      }
       case 'fetchHostInventory': {
         // Host detail pane: installed agents/versions/accounts/usage/resources on
         // one host (over SSH for remotes) + registry metadata. Cached per host.

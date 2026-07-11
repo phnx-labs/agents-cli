@@ -347,6 +347,27 @@ export async function fetchRecentForHost(
   }
 }
 
+/**
+ * Recap fan-out: recent (historical) sessions across the WHOLE fleet — the local
+ * machine plus every online registered device — flattened and sorted by last
+ * activity, newest first. Feeds the Floor's Recap ledger ("what happened while I
+ * was away"), so unlike fetchRecentForHost's lazy per-host path this sweeps all
+ * hosts at once. Unreachable hosts contribute nothing (fetchRecentForHost already
+ * swallows per-host failures); the sweep itself never throws.
+ */
+export async function fetchRecapSessions(
+  limitPerHost: number,
+  projectRules: ProjectRule[],
+): Promise<RemoteSession[]> {
+  const hosts = await discoverHosts();
+  const targets = hosts.filter((h) => h.isLocal || h.online);
+  const results = await Promise.allSettled(
+    targets.map((h) => fetchRecentForHost(h.isLocal ? LOCAL_LABEL : h.address, h.isLocal, h.name, limitPerHost, projectRules)),
+  );
+  const sessions = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+  return sessions.sort((a, b) => (b.lastActivityMs || b.startedAtMs) - (a.lastActivityMs || a.startedAtMs));
+}
+
 export interface HostSessionsResult {
   hosts: HostInfo[];
   sessions: RemoteSession[];

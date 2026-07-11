@@ -13,6 +13,7 @@ import * as path from 'path';
 import { spawn, type ChildProcess } from 'child_process';
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { truncate, padRight } from '../lib/format.js';
 import ora from 'ora';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
@@ -1514,8 +1515,11 @@ async function renderSession(
     return;
   }
 
-  // json — no header, raw events only (pipeable)
-  process.stdout.write(renderJson(events));
+  // json — normalized events plus the durable session signals from the state
+  // engine (plan text, PR, worktree, ticket). Pre-1.20.51 emitted a bare event
+  // array; consumers that JSON.parse this now read `output.events` for the
+  // array. See issue #743 (plan surfaced) and CHANGELOG for the shape change.
+  process.stdout.write(renderJson(events, session));
 }
 
 function renderTopicCell(
@@ -2579,11 +2583,4 @@ function formatAbsoluteTime(isoTimestamp: string): string {
   return `${months[d.getMonth()]} ${d.getDate()} ${hh}:${mm}`;
 }
 
-function padRight(s: string, width: number): string {
-  return s.length >= width ? s : s + ' '.repeat(width - s.length);
-}
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + '.' : s;
-}
 

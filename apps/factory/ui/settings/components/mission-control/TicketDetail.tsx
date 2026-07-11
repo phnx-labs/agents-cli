@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Icon } from './icons'
-import type { FloorTicket } from './floorModel'
+import type { FloorAgent, FloorTicket } from './floorModel'
 import { renderTodoDescription } from '../../utils/markdown'
 
 // Right-pane ticket detail + Dispatch panel. Prototype ticketDetail():666-680.
@@ -19,14 +19,53 @@ export interface DispatchChoice {
   mode: 'plan' | 'edit'
 }
 
+/**
+ * Dispatch CTA copy for a ticket that may already be in flight: the guard turns the
+ * button into an explicit "anyway" when workers exist. Pure — unit-tested directly
+ * (the full TicketDetail render needs DOMPurify/DOM, which the test runner lacks).
+ */
+export function dispatchCta(ticketId: string, workers: FloorAgent[]): { label: string; caution: boolean; note: string | null } {
+  const first = workers[0]
+  if (!first) return { label: `Dispatch onto ${ticketId}`, caution: false, note: null }
+  return {
+    label: `Dispatch anyway onto ${ticketId}`,
+    caution: true,
+    note: `${first.abbr} is already on this ticket — dispatching adds a second agent.`,
+  }
+}
+
+/** The "In flight" block: agents already carrying the ticket, each row jumps to its card. */
+export function TicketInFlight({ workers, onSelectAgent }: { workers: FloorAgent[]; onSelectAgent?: (id: string) => void }) {
+  if (workers.length === 0) return null
+  return (
+    <div className="dflight">
+      <div className="lbl">In flight</div>
+      {workers.map((a) => (
+        <button key={a.id} type="button" className="dflight-row" onClick={() => onSelectAgent?.(a.id)}>
+          <span className={`dot ${a.phase}`} />
+          <span className="abbr">{a.abbr}</span>
+          <span className="n">{a.name}</span>
+          <span className="h">{a.hostLabel ?? a.host}</span>
+          {a.pr && <span className="pr">{a.pr}</span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 interface TicketDetailProps {
   ticket: FloorTicket
   /** Available hosts to dispatch onto (SHELL supplies real host list). */
   hosts?: string[]
+  /** Agents already carrying this ticket (ticketWorkers[t.id]) — the in-flight block. */
+  workers?: FloorAgent[]
+  /** Jump to a worker's agent card/detail. */
+  onSelectAgent?: (id: string) => void
   onDispatch: (choice: DispatchChoice) => void
 }
 
-export function TicketDetail({ ticket: t, hosts = ['this-mac'], onDispatch }: TicketDetailProps) {
+export function TicketDetail({ ticket: t, hosts = ['this-mac'], workers = [], onSelectAgent, onDispatch }: TicketDetailProps) {
+  const cta = dispatchCta(t.id, workers)
   const [agent, setAgent] = useState<string>(AGENTS[0])
   const [mode, setMode] = useState<'plan' | 'edit'>('edit')
   const [host, setHost] = useState<string>(hosts[0] ?? 'this-mac')
@@ -54,6 +93,8 @@ export function TicketDetail({ ticket: t, hosts = ['this-mac'], onDispatch }: Ti
           </div>
         </div>
 
+        <TicketInFlight workers={workers} onSelectAgent={onSelectAgent} />
+
         <div className="dispatch-panel">
           <div className="lbl">Dispatch an agent onto this ticket</div>
           <div className="dp-row">
@@ -80,12 +121,13 @@ export function TicketDetail({ ticket: t, hosts = ['this-mac'], onDispatch }: Ti
               ))}
             </span>
           </div>
+          {cta.note && <div className="dflight-note">{cta.note}</div>}
           <button
-            className="disp"
+            className={`disp${cta.caution ? ' caution' : ''}`}
             style={{ width: '100%', justifyContent: 'center', marginTop: 8 }}
             onClick={() => onDispatch({ agent: agent.toLowerCase(), host, mode })}
           >
-            <Icon name="zap" size={12} /> Dispatch onto {t.id}
+            <Icon name="zap" size={12} /> {cta.label}
           </button>
         </div>
 

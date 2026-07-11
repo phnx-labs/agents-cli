@@ -29,11 +29,17 @@ export function needsWindowsShell(binary: string, platform: NodeJS.Platform = pr
  * Resolve an executable name to its absolute path via the OS PATH search, or
  * `null` if not found. On Windows `where` can return several lines (one per
  * PATHEXT match, e.g. `agents.cmd` and `agents.ps1`) — the first is the one the
- * shell would actually run, matching `which` semantics on POSIX.
+ * shell would actually run, matching `which` semantics on POSIX. stderr is
+ * dropped: a miss is an expected outcome here, and `where.exe` announces every
+ * miss on stderr ("INFO: Could not find files..."), which would otherwise leak
+ * into the caller's terminal once per probe.
  */
 export function findExecutable(name: string, platform: NodeJS.Platform = process.platform): string | null {
   try {
-    const out = execFileSync(whichCommand(platform), [name], { encoding: 'utf-8' });
+    const out = execFileSync(whichCommand(platform), [name], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
     const first = out.trim().split(/\r?\n/)[0]?.trim();
     return first || null;
   } catch {

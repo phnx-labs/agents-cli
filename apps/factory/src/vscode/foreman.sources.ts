@@ -303,7 +303,12 @@ export async function listLocalSessions(opts: { since?: string; limit?: number; 
 }
 
 export async function readSessionEvents(sessionId: string, lastN = 20): Promise<SessionEvent[]> {
-  return runJson<SessionEvent[]>(['sessions', sessionId, '--json', '--last', String(lastN)], []);
+  // 1.20.51+ emits { session, events }; older CLIs emit a bare event array.
+  const parsed = await runJson<SessionEvent[] | { events?: SessionEvent[] }>(
+    ['sessions', sessionId, '--json', '--last', String(lastN)],
+    []
+  );
+  return Array.isArray(parsed) ? parsed : (parsed.events ?? []);
 }
 
 export async function listCloudTasks(): Promise<CloudTaskLite[]> {

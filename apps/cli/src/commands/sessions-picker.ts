@@ -7,6 +7,7 @@
  */
 import fs from 'node:fs';
 import chalk from 'chalk';
+import { truncate, humanDuration } from '../lib/format.js';
 import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
 import { parseSession, sanitizeForTerminal } from '../lib/session/parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from '../lib/session/prompt.js';
@@ -179,18 +180,6 @@ function extractTiming(events: SessionEvent[]): { startedAgo?: string; duration?
   return { startedAgo: ago, duration: dur };
 }
 
-function humanDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  if (h < 24) return mm ? `${h}h ${mm}m` : `${h}h`;
-  const d = Math.floor(h / 24);
-  const hh = h % 24;
-  return hh ? `${d}d ${hh}h` : `${d}d`;
-}
 
 function countMessages(events: SessionEvent[]): number {
   return events.filter(e => e.type === 'message').length;
@@ -401,9 +390,6 @@ function renderTodos(todos: TodoItem[], termWidth: number): string[] {
   return out;
 }
 
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + '…' : s;
-}
 
 /** Show an interactive session picker and return the selected session with its action (resume or view). */
 export async function sessionPicker(config: SessionPickerConfig): Promise<PickedSession | null> {

@@ -7,6 +7,7 @@
  */
 
 import * as fs from 'fs';
+import { truncate } from '../format.js';
 import * as path from 'path';
 import Database from '../sqlite.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
@@ -186,10 +187,6 @@ export function summarizeToolUse(tool: string, args?: Record<string, any>): stri
   }
 }
 
-/** Truncate a string to n characters, appending '...' if shortened. */
-function truncate(s: string, n: number): string {
-  return s.length <= n ? s : s.slice(0, n - 3) + '...';
-}
 
 /** Replace the home directory prefix with ~ for display. */
 function shortenPath(p: string): string {

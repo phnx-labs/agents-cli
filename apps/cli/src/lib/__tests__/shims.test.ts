@@ -96,8 +96,8 @@ describe('addShimsToPath', () => {
 });
 
 describe('SHIM_SCHEMA_VERSION', () => {
-  it('is 25 (shim self-recovers a vanished dispatcher via `agents` on PATH)', () => {
-    expect(SHIM_SCHEMA_VERSION).toBe(25);
+  it('is 26 (grok resolves from the versioned home before global ~/.grok/downloads)', () => {
+    expect(SHIM_SCHEMA_VERSION).toBe(26);
   });
 });
 
@@ -157,7 +157,7 @@ describe('generateShimScript — config-dir env vars', () => {
 describe('generateVersionedAliasScript', () => {
   it('uses ~/.agents/.history for direct alias binary and config paths', () => {
     const script = generateVersionedAliasScript('codex', '0.125.0');
-    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(12);
+    expect(VERSIONED_ALIAS_SCHEMA_VERSION).toBe(13);
     expect(script).toContain('$HOME/.agents/.history/versions/codex/0.125.0');
     expect(script).not.toContain('$HOME/.agents-system/versions/codex/0.125.0');
   });
@@ -177,9 +177,13 @@ describe('generateVersionedAliasScript', () => {
     expect(script).not.toContain('node_modules/.bin/droid');
   });
 
-  it('resolves grok from ~/.grok/downloads and exports GROK_HOME', () => {
+  it('resolves grok from the versioned home first, global ~/.grok/downloads as fallback, and exports GROK_HOME', () => {
     const script = generateVersionedAliasScript('grok', '0.2.33');
-    expect(script).toContain('GROK_DOWNLOADS="$HOME/.grok/downloads"');
+    // Versioned home is the primary location — where the binary lands when the
+    // installer runs with GROK_HOME set or grok self-updates under the shim.
+    expect(script).toContain('GROK_DOWNLOADS="$HOME/.agents/.history/versions/grok/0.2.33/home/.grok/downloads"');
+    // Global dir stays as the fallback for pre-fix installs.
+    expect(script).toContain('GROK_GLOBAL_DOWNLOADS="$HOME/.grok/downloads"');
     expect(script).not.toContain('node_modules/.bin/grok');
     expect(script).toContain('export GROK_HOME=');
   });

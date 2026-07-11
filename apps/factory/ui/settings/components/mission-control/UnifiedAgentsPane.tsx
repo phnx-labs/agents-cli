@@ -28,6 +28,8 @@ import { FloorSidebar } from './FloorSidebar'
 import { FloorRail } from './FloorRail'
 import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from './FloorSubtabs'
 import { BacklogCenter } from './BacklogCenter'
+import { RecapPane } from './RecapPane'
+import { buildRecap } from './recapModel'
 import { TaskDetail } from '../bench/TaskDetail'
 import type { FlatTask } from '../bench/TaskCard'
 import { TicketDetail } from './TicketDetail'
@@ -41,6 +43,7 @@ import {
   sortAgents,
   groupAgents,
   sessionTaskLine,
+  ticketWorkers,
   type FloorAgent,
   type FloorTicket,
   type CenterMode,
@@ -88,6 +91,8 @@ const REMOTE_POLL_MS = 45_000
 interface FloorPrefs {
   plain: boolean
   sidebar: boolean
+  // Collapsed icon rail (true, the default) vs the full text sidebar.
+  rail: boolean
   right: boolean
   pinned: string[]
   // Ordered pinned host names for the HOSTS sidebar. null = never customized
@@ -96,7 +101,7 @@ interface FloorPrefs {
 }
 
 function defaultFloorPrefs(): FloorPrefs {
-  return { plain: false, sidebar: true, right: true, pinned: [], hostPins: null }
+  return { plain: false, sidebar: true, rail: true, right: true, pinned: [], hostPins: null }
 }
 
 function loadFloorPrefs(): FloorPrefs {
@@ -614,6 +619,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Recent (historical) sessions per host, fetched lazily only when a host filter has
   // 0 live agents — so an empty host shows recent work instead of a blank pane.
   const [recentByHost, setRecentByHost] = useState<Record<string, RemoteSessionLike[]>>({})
+  // Recap ledger: fleet-wide recent (ended) sessions. null = not fetched yet — the
+  // sweep is expensive (SSH fan-out), so it runs lazily when the Recap center opens.
+  const [recapSessions, setRecapSessions] = useState<RemoteSessionLike[] | null>(null)
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
   // Group the live feed by an axis (project/host/status/agent). Defaults to 'project'
   // so sessions cluster under the repo/Linear project they're working on (NEEDS YOU
@@ -624,7 +632,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
   // Collapsed = the icon rail (mockup default); expanded = the full text sidebar.
-  const [railCollapsed, setRailCollapsed] = useState(true)
+  const [railCollapsed, setRailCollapsed] = useState(floorPrefs0.rail)
   const [rightOpen, setRightOpen] = useState(floorPrefs0.right)
   const [pinned, setPinned] = useState<Set<string>>(() => new Set(floorPrefs0.pinned))
   // Ordered pinned HOSTS names (null = default: pin the local machine).
@@ -685,8 +693,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   // Persist the durable Floor prefs (pinned set, plain/sidebar/right toggles, group-by, host pins).
   useEffect(() => {
-    saveFloorPrefs({ plain, sidebar: sidebarOpen, right: rightOpen, pinned: [...pinned], hostPins })
-  }, [plain, sidebarOpen, rightOpen, pinned, hostPins])
+    saveFloorPrefs({ plain, sidebar: sidebarOpen, rail: railCollapsed, right: rightOpen, pinned: [...pinned], hostPins })
+  }, [plain, sidebarOpen, railCollapsed, rightOpen, pinned, hostPins])
 
   // Effective HOSTS pins: default to pinning just the local machine until the user
   // customizes. Pin/unpin and drag-reorder always write an explicit list.
@@ -742,6 +750,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         const rh = typeof msg.host === 'string' ? msg.host : ''
         const recent = Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : []
         setRecentByHost((p) => ({ ...p, [rh]: recent }))
+      } else if (msg?.type === 'recapSessions') {
+        setRecapSessions(Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : [])
       }
     }
     window.addEventListener('message', onMsg)
@@ -1429,6 +1439,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     [floorLocalAgents, floorRemoteAgents]
   )
   const floorTickets = useMemo(() => adaptTickets(unifiedTasks), [unifiedTasks])
+  // Ticket id -> agents carrying it: the backlog's in-flight chips and the ticket
+  // detail's "In flight" block + double-dispatch guard all join on this.
+  const floorWorkers = useMemo(() => ticketWorkers(floorAgents), [floorAgents])
 
   // Lookup back to the source UnifiedAgent so the right pane can reuse the rich DetailPane.
   const unifiedById = useMemo(() => {
@@ -1461,6 +1474,17 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     () => (hostFilter && hostHasNoActive ? adaptRemote(recentByHost[hostFilter] ?? [], pinned, localHostName, projectRules) : []),
     [hostFilter, hostHasNoActive, recentByHost, pinned, localHostName, projectRules]
   )
+
+  // Recap ledger: lazy fleet sweep the first time the Recap center opens; live
+  // sessions are excluded (the feed owns what's running, the ledger what finished).
+  useEffect(() => {
+    if (center === 'recap' && recapSessions === null) postMessage({ type: 'fetchRecap' })
+  }, [center, recapSessions])
+  const recapDays = useMemo(() => {
+    if (!recapSessions) return []
+    const liveIds = new Set(floorAgents.map((a) => a.sessionId).filter((id): id is string => !!id))
+    return buildRecap(recapSessions, liveIds, Date.now())
+  }, [recapSessions, floorAgents])
 
   const needsAgents = useMemo(() => scopedAgents.filter((a) => a.needs), [scopedAgents])
   const waitingAgents = useMemo(() => needsAgents.filter((a) => a.phase === 'waiting'), [needsAgents])
@@ -1618,16 +1642,28 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   const onScope = useCallback((value: string) => {
     if (value === '__queue') { setCenter('backlog'); return }
-    if (value === '__needs') { setCenter('agents'); setProjFilter(null); setHostFilter(null); return }
+    if (value === '__recap') { setCenter('recap'); return }
+    if (value === '__needs') {
+      // A REAL needs-only view: toggle the same 'needs' status chip the controls bar
+      // and saved views drive, so one filter mechanism serves all three surfaces.
+      setCenter('agents'); setProjFilter(null); setHostFilter(null)
+      setStatusChips((cur) => (cur.includes('needs') ? cur.filter((c) => c !== 'needs') : ['needs']))
+      return
+    }
     if (value.startsWith('host:')) {
       const h = value.slice(5)
       setCenter('agents'); setProjFilter(null)
       setHostFilter((cur) => (cur === h ? null : h)) // click again to clear
+      // Scoping to a host replaces the needs narrowing, mirroring how '__needs'
+      // replaces the project/host scope — the smart views are mutually exclusive.
+      setStatusChips((cur) => cur.filter((c) => c !== 'needs'))
       return
     }
     setCenter('agents')
     setHostFilter(null)
     setProjFilter(value || null)
+    // Project scope and 'All agents' ('') both drop the needs narrowing too.
+    setStatusChips((cur) => cur.filter((c) => c !== 'needs'))
   }, [])
 
   // Selecting an agent opens its detail rail — the SAME setRightOpen(true) that
@@ -1811,7 +1847,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     { center: 'backlog', label: 'Backlog', count: floorTickets.length },
     { center: 'projects', label: 'Projects', count: managedProjects.length },
     { center: 'host', label: 'Hosts', count: fleetDevices.length },
-  ], [floorAgents.length, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length])
+    // Recap count = today's finished sessions (0 until the lazy sweep has run).
+    { center: 'recap', label: 'Recap', count: recapDays[0]?.label === 'Today' ? recapDays[0].sessions : 0 },
+  ], [floorAgents.length, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, recapDays])
 
   // Resolve the active task tab (if any) back to a bench FlatTask so its detail renders.
   const activeTab = activeTaskTab ? openTaskTabs.find((t) => t.id === activeTaskTab) ?? null : null
@@ -1855,8 +1893,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       projFilter={projFilter}
       search={floorSearch}
       selectedTicketId={selectedTicketId}
+      workers={floorWorkers}
       onSelectTicket={(id) => setSelectedTicketId(id)}
       onOpenTask={openTaskFromTicket}
+    />
+  ) : center === 'recap' ? (
+    <RecapPane
+      days={recapDays}
+      loading={recapSessions === null}
+      onOpenUrl={(url) => postMessage({ type: 'openExternal', url })}
     />
   ) : (
     <div className="feed">
@@ -2044,7 +2089,13 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       : <div className="detail-empty">Select a host to see its installed agents and configuration.</div>)
     : center === 'backlog'
     ? (selectedFloorTicket
-      ? <TicketDetail ticket={selectedFloorTicket} hosts={floorHosts} onDispatch={() => openDispatch({ ticketId: selectedFloorTicket.id })} />
+      ? <TicketDetail
+          ticket={selectedFloorTicket}
+          hosts={floorHosts}
+          workers={floorWorkers[selectedFloorTicket.id] ?? []}
+          onSelectAgent={selectFloorAgent}
+          onDispatch={() => openDispatch({ ticketId: selectedFloorTicket.id })}
+        />
       : <div className="detail-empty">Select a ticket to see its details and dispatch an agent onto it.</div>)
     : renderAgentDetail()
 
@@ -2089,8 +2140,22 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           <FloorRail
             agents={floorAgents}
             tickets={floorTickets}
-            scope={projFilter}
+            center={center}
+            projFilter={projFilter}
+            hostFilter={hostFilter}
+            needsOnly={statusChips.includes('needs')}
+            projects={managedProjects}
+            devices={
+              dispatchDevices.length
+                ? dispatchDevices.map((d) => ({ name: d.name, online: !!d.reachable, agents: d.runningAgents ?? 0 }))
+                : fleetDevices.map((d) => ({ name: d.name, online: d.online, agents: 0 }))
+            }
+            offlineHosts={offlineHosts}
+            hostPins={effectiveHostPins}
+            localHost={localHostName || undefined}
             onScope={onScope}
+            onDispatch={() => openDispatch(selectedTicketId ? { ticketId: selectedTicketId } : undefined)}
+            onManageProjects={() => { setCenter('projects'); setRightOpen(true) }}
             onExpand={() => setRailCollapsed(false)}
           />
         ) : (

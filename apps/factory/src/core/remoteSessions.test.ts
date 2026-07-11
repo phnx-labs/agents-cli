@@ -9,6 +9,7 @@ import {
   resolveProject,
   normalizeActiveSession,
   normalizeActiveSessions,
+  normalizeRecentSession,
   normalizeQuestion,
   dedupeSessions,
   enrichWithSessionContent,
@@ -626,5 +627,34 @@ describe('staleness — long-dead sessions drop out of running / needs-you', () 
     const unknown = mk({ sessionId: 'cccc3333', lastActivityMs: 0, startedAtMs: 0 });
     const kept = filterStaleSessions([fresh, stale, unknown], NOW);
     expect(kept.map((s) => s.sessionId).sort()).toEqual(['aaaa1111', 'cccc3333']);
+  });
+});
+
+describe('normalizeRecentSession outcome metrics', () => {
+  const base = {
+    id: 'abc-123',
+    agent: 'Claude',
+    timestamp: '2026-07-10T10:00:00.000Z',
+    lastActivity: '2026-07-10T10:42:00.000Z',
+    cwd: '/repo',
+    topic: 'Ship the recap',
+  };
+
+  test('carries durationMs / costUsd / tokenCount through, coercing numeric strings', () => {
+    const s = normalizeRecentSession(
+      { ...base, durationMs: '2562344', costUsd: 5.6019435, tokenCount: '2849270' },
+      'zion',
+      Date.parse('2026-07-10T11:00:00.000Z'),
+    );
+    expect(s.durationMs).toBe(2562344);
+    expect(s.costUsd).toBeCloseTo(5.6019435);
+    expect(s.tokenCount).toBe(2849270);
+  });
+
+  test('missing or garbage metrics land as 0, never NaN', () => {
+    const s = normalizeRecentSession({ ...base, costUsd: 'n/a' }, 'zion', Date.now());
+    expect(s.durationMs).toBe(0);
+    expect(s.costUsd).toBe(0);
+    expect(s.tokenCount).toBe(0);
   });
 });

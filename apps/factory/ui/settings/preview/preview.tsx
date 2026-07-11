@@ -19,10 +19,14 @@ import { FeedItem, TicketStrip } from '../components/mission-control/FeedItem'
 import { SavedViews } from '../components/mission-control/SavedViewsBar'
 import { DispatchPanel } from '../components/mission-control/DispatchPanel'
 import { BacklogCenter } from '../components/mission-control/BacklogCenter'
+import { TicketDetail } from '../components/mission-control/TicketDetail'
 import { ProjectsPane } from '../components/mission-control/ProjectsPane'
 import { TerminalExpandedDetail } from '../components/mission-control/TerminalDetail'
 import { AgentDecision } from '../components/mission-control/AgentDecision'
-import type { FloorAgent, FloorTicket, StructuredQuestion, FloorSort, TicketGroupBy, TicketSort, CenterMode, ManagedProject, LinearProjectLite } from '../components/mission-control/floorModel'
+import { ticketWorkers, type FloorAgent, type FloorTicket, type StructuredQuestion, type FloorSort, type TicketGroupBy, type TicketSort, type CenterMode, type ManagedProject, type LinearProjectLite } from '../components/mission-control/floorModel'
+import { RecapPane } from '../components/mission-control/RecapPane'
+import { buildRecap } from '../components/mission-control/recapModel'
+import type { RemoteSessionLike } from '../components/mission-control/floorAdapter'
 import type { UnifiedTask, TerminalDetail } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
 
@@ -284,6 +288,12 @@ function Backlog() {
   const [sort, setSort] = useState<TicketSort>('priority')
   const [srcFilter, setSrcFilter] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
   const [selected, setSelected] = useState<string | null>(null)
+  // One in-flight ticket (two workers) so the .twork chip renders at true size.
+  const workers = ticketWorkers([
+    ...running,
+    agent({ id: 'w1', ticket: 'RUSH-1262', name: 'pkce-pinning', abbr: 'CC' }),
+    agent({ id: 'w2', ticket: 'RUSH-1262', name: 'pkce-review', abbr: 'CX', phase: 'waiting' }),
+  ])
   return (
     <>
       <FloorControls
@@ -303,6 +313,7 @@ function Backlog() {
         projFilter={null}
         search=""
         selectedTicketId={selected}
+        workers={workers}
         onSelectTicket={setSelected}
         onOpenTask={noop}
       />
@@ -406,8 +417,18 @@ function Sidebar() {
     <FloorRail
       agents={sidebarAgents}
       tickets={tickets}
-      scope={null}
+      center="agents"
+      projFilter={null}
+      hostFilter={null}
+      needsOnly={false}
+      projects={managedProjects}
+      devices={devices}
+      offlineHosts={['yosemite-s1']}
+      hostPins={pins}
+      localHost="zion"
       onScope={noop}
+      onDispatch={noop}
+      onManageProjects={noop}
       onExpand={() => setCollapsed(false)}
     />
   ) : (
@@ -545,6 +566,45 @@ function Decision() {
   )
 }
 
+// Ticket detail with an in-flight worker — the dflight block + "Dispatch anyway"
+// caution at true size (?view=ticket).
+function Ticket() {
+  const workers = ticketWorkers([
+    agent({ id: 'w1', ticket: 'RUSH-1262', name: 'pkce-pinning', abbr: 'CC', pr: '#142' }),
+    agent({ id: 'w2', ticket: 'RUSH-1262', name: 'pkce-review', abbr: 'CX', phase: 'waiting' }),
+  ])
+  return (
+    <div className="detail-col" style={{ maxWidth: 420 }}>
+      <TicketDetail ticket={tickets[0]!} hosts={['zion', 'mac-mini']} workers={workers['RUSH-1262']} onSelectAgent={noop} onDispatch={noop} />
+    </div>
+  )
+}
+
+// Recap ledger — day-grouped ended sessions with duration/cost rollups (?view=recap).
+function Recap() {
+  const now = Date.now()
+  const rs = (over: Partial<RemoteSessionLike>): RemoteSessionLike => ({
+    host: 'zion', sessionId: Math.random().toString(36).slice(2), agentType: 'claude', cwd: '/repo',
+    project: 'agents-cli', phase: 'idle', activity: '', tokPerSec: 0, waitingForInput: false,
+    lastResponse: '', prUrl: null, ticket: null, branch: 'main', sinceMs: 0,
+    startedAtMs: now - 3_600_000, lastActivityMs: now - 1_800_000, topic: '', context: 'recent',
+    cloudTaskId: '', cloudProvider: '', teamName: '', pid: 0, transport: '', replyRail: '',
+    replyMuxTarget: '', replyMuxSocket: '', tmuxPane: '',
+    durationMs: 2_562_000, costUsd: 5.6, tokenCount: 2_849_270, ...over,
+  })
+  const days = buildRecap(
+    [
+      rs({ topic: 'Floor rail flyouts — Projects/Hosts menus, Dispatch button', prUrl: 'https://github.com/phnx-labs/agents-cli/pull/862', ticket: 'RUSH-1521', lastActivityMs: now - 40 * 60_000 }),
+      rs({ topic: 'In-flight ticket linkage on the backlog', agentType: 'codex', host: 'yosemite-s0', prUrl: 'https://github.com/phnx-labs/agents-cli/pull/866', costUsd: 3.2, durationMs: 1_100_000, lastActivityMs: now - 2 * 3_600_000 }),
+      rs({ topic: 'Fix PKCE http client pinning', agentType: 'gemini', host: 'mac-mini', project: 'rush', costUsd: 0.8, durationMs: 600_000, lastActivityMs: now - 26 * 3_600_000 }),
+      rs({ topic: 'Deploy agents on mac-mini and sync system repo', costUsd: 1.4, durationMs: 900_000, lastActivityMs: now - 27 * 3_600_000, branch: 'HEAD' }),
+    ],
+    new Set(),
+    now,
+  )
+  return <div className="feed-col"><RecapPane days={days} loading={false} onOpenUrl={noop} /></div>
+}
+
 function Preview() {
   const params = new URLSearchParams(location.search)
   const theme = params.get('theme') === 'light' ? 'theme-light' : 'theme-dark'
@@ -554,7 +614,7 @@ function Preview() {
     <div className={`swarmify-root ${theme}`} style={{ minHeight: '100vh' }}>
       <div className="sw-floor-dashboard" style={{ padding: 0 }}>
         <div className="page" style={{ display: 'flex' }}>
-          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
+          {view === 'sidebar' ? <Sidebar /> : view === 'subtabs' ? <Subtabs /> : view === 'projects' ? <div className="feed-col"><Projects /></div> : view === 'detail' ? <Detail /> : view === 'decision' ? <Decision /> : view === 'ticket' ? <Ticket /> : view === 'recap' ? <Recap /> : <div className="feed-col">{view === 'backlog' ? <Backlog /> : <Feed />}</div>}
         </div>
       </div>
       <DispatchPanel

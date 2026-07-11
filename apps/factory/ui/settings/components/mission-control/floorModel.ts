@@ -322,7 +322,7 @@ export interface FloorTicket {
 
 // ---------- controls state ----------
 
-export type CenterMode = 'agents' | 'backlog' | 'host' | 'projects'
+export type CenterMode = 'agents' | 'backlog' | 'host' | 'projects' | 'recap'
 
 // Host detail pane payloads. Mirror of extension/src/core/hostInventory.ts —
 // the webview can't import from src/*, so the shape is redeclared here and
@@ -869,6 +869,21 @@ export function groupTickets(tickets: FloorTicket[], by: TicketGroupBy): Map<str
     else groups.set(key, [t])
   }
   return groups
+}
+
+/**
+ * Agents grouped by the ticket they carry ("RUSH-812" / "#412" — the same
+ * identifier space as FloorTicket.id). The backlog joins on this to show who is
+ * already working a ticket; all phases are kept (a done agent with an open PR is
+ * still the ticket's worker) so the UI can style by phase.
+ */
+export function ticketWorkers(agents: FloorAgent[]): Record<string, FloorAgent[]> {
+  const by: Record<string, FloorAgent[]> = {}
+  for (const a of agents) {
+    if (!a.ticket) continue
+    ;(by[a.ticket] ??= []).push(a)
+  }
+  return by
 }
 
 export function sortTickets(tickets: FloorTicket[], by: TicketSort): FloorTicket[] {

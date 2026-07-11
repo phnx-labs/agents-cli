@@ -7,6 +7,7 @@
  * activity for each team.
  */
 import chalk from 'chalk';
+import { relTime, truncate, humanDuration } from '../lib/format.js';
 import { itemPicker } from '../lib/picker.js';
 import type { AgentStatusDetail, TaskInfo } from '../lib/teams/api.js';
 
@@ -39,20 +40,6 @@ function statusColor(status: string): (s: string) => string {
     case 'stopped': return chalk.gray;
     default: return chalk.white;
   }
-}
-
-function relTime(iso: string): string {
-  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (secs < 10) return 'just now';
-  if (secs < 60) return `${secs}s ago`;
-  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
-  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
-  return `${Math.floor(secs / 86400)}d ago`;
-}
-
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s;
-  return s.slice(0, n - 1) + '…';
 }
 
 function firstLine(s: string): string {
@@ -129,18 +116,6 @@ function formatComposition(agents: AgentStatusDetail[]): string {
   return parts.join(' ');
 }
 
-function humanDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  if (h < 24) return mm ? `${h}h${mm}m` : `${h}h`;
-  const d = Math.floor(h / 24);
-  const hh = h % 24;
-  return hh ? `${d}d${hh}h` : `${d}d`;
-}
 
 function runtimeSpan(t: TaskInfo): string {
   const startMs = new Date(t.created_at).getTime();

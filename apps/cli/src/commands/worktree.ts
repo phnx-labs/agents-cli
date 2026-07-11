@@ -17,6 +17,7 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { die } from '../lib/format.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
@@ -29,10 +30,6 @@ const execFileAsync = promisify(execFile);
 const WORKTREE_SUBDIR = path.join('.agents', 'worktrees');
 const BRANCH_PREFIX = 'agents/';
 
-function die(msg: string, code = 1): never {
-  console.error(chalk.red(msg));
-  process.exit(code);
-}
 
 function isValidTerminalId(id: string): boolean {
   // Allow letters, digits, dot, dash, underscore. Reject anything else so a

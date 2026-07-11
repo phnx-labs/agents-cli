@@ -35,6 +35,25 @@ describe('inferActivity — waiting signals', () => {
     expect(s.awaitingReason).toBe('plan_review');
   });
 
+  it('ExitPlanMode as the last event ⇒ surfaces plan markdown on state.plan', () => {
+    const planText = '# Plan\n\n1. Read the code\n2. Ship it';
+    const s = inferActivity([msg('user', 'plan it'), tool('ExitPlanMode', { plan: planText })], { pidAlive: true, mtimeMs: fresh });
+    expect(s.awaitingReason).toBe('plan_review');
+    expect(s.plan).toBe(planText);
+  });
+
+  it('ExitPlanMode with empty plan input ⇒ state.plan is undefined', () => {
+    const s = inferActivity([msg('user', 'plan it'), tool('ExitPlanMode', { plan: '   ' })], { pidAlive: true, mtimeMs: fresh });
+    expect(s.awaitingReason).toBe('plan_review');
+    expect(s.plan).toBeUndefined();
+  });
+
+  it('AskUserQuestion trailing tool ⇒ no plan surfaced', () => {
+    const s = inferActivity([msg('user', 'go'), tool('AskUserQuestion', { plan: 'not a plan' })], { pidAlive: true, mtimeMs: fresh });
+    expect(s.awaitingReason).toBe('question');
+    expect(s.plan).toBeUndefined();
+  });
+
   it('AskUserQuestion as the last event ⇒ waiting / question', () => {
     const s = inferActivity([msg('user', 'go'), tool('AskUserQuestion')], { pidAlive: true, mtimeMs: fresh });
     expect(s.activity).toBe('waiting_input');

@@ -128,6 +128,8 @@ interface ClaudeSessionScan {
   createdTickets?: string[];
   /** Team name this session SPAWNED via `agents teams create/add` (not team-of-origin). */
   spawnedTeam?: string;
+  /** Plan markdown from the last ExitPlanMode tool call (Claude sessions only). */
+  plan?: string;
 }
 
 /** Lightweight metadata extracted from a Codex JSONL file during incremental scan. */
@@ -650,6 +652,7 @@ async function readClaudeMeta(
       ticketId: scan.ticketId,
       createdTickets: scan.createdTickets,
       spawnedTeam: scan.spawnedTeam,
+      plan: scan.plan,
     };
   } else {
     const stat = safeStatSync(filePath);
@@ -674,6 +677,7 @@ async function readClaudeMeta(
       ticketId: scan.ticketId,
       createdTickets: scan.createdTickets,
       spawnedTeam: scan.spawnedTeam,
+      plan: scan.plan,
     };
   }
 
@@ -2069,6 +2073,9 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
   const createdTickets = new Set<string>();
   const pendingTicketTools = new Set<string>();
   let spawnedTeam: string | undefined;
+  // The LAST ExitPlanMode plan wins so a re-planned session surfaces its most
+  // recent plan, matching the semantic the extension's re-parser relied on.
+  let plan: string | undefined;
 
   try {
     for await (const line of rl) {
@@ -2100,6 +2107,13 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
           }
           if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
             pendingTicketTools.add(b.id);
+          }
+          // ExitPlanMode plan markdown — last one wins so a re-planned session
+          // reports its most recent plan (the semantic parsePlanFromClaudeJsonl
+          // implemented in the extension).
+          if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
+            const p = b.input.plan.trim();
+            if (p) plan = b.input.plan;
           }
         }
       }
@@ -2246,6 +2260,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
     ticketId: ticket?.id,
     createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
     spawnedTeam,
+    plan,
   };
 }
 

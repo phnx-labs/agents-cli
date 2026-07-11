@@ -5,6 +5,7 @@
  * Shows task name, profile, domains, and tab count; preview pane shows full tab list.
  */
 import chalk from 'chalk';
+import { truncate, humanDuration } from '../lib/format.js';
 import type { ProfileStatus, TaskStatus } from '../lib/browser/types.js';
 import { itemPicker } from '../lib/picker.js';
 
@@ -20,25 +21,8 @@ export interface PickedBrowserTask {
 
 const DOT = chalk.gray(' · ');
 
-function humanDuration(ms: number): string {
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  const mm = m % 60;
-  if (h < 24) return mm ? `${h}h ${mm}m` : `${h}h`;
-  const d = Math.floor(h / 24);
-  const hh = h % 24;
-  return hh ? `${d}d ${hh}h` : `${d}d`;
-}
-
 function formatAge(ms: number): string {
   return humanDuration(Date.now() - ms) + ' ago';
-}
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
 /** Build the preview pane for a browser task. */

@@ -8,7 +8,8 @@
  */
 
 import chalk from 'chalk';
-import type { SessionEvent } from './types.js';
+import { truncate } from '../format.js';
+import type { SessionEvent, SessionMeta } from './types.js';
 import { summarizeToolUse } from './parse.js';
 import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
@@ -387,13 +388,13 @@ function renderCommandsSection(
         if (catEntry.signal === 'mid') {
           // Mid signal: display the bucket key (e.g. ssh→openclaw browser) with aggregate count
           const countSuffix = v.count > 1 ? chalk.gray(` × ${v.count}`) : '';
-          lines.push(`    ${chalk.cyan(truncateCmd(key, 80))}${countSuffix}`);
+          lines.push(`    ${chalk.cyan(truncate(key, 80))}${countSuffix}`);
         } else {
           // High signal: display distinct raw sample commands
           const distinctSamples = pickDistinct(v.samples, 3);
           for (const sample of distinctSamples) {
             const countSuffix = v.count > 1 ? chalk.gray(` × ${v.count}`) : '';
-            lines.push(`    ${chalk.cyan(truncateCmd(sample, 80))}${countSuffix}`);
+            lines.push(`    ${chalk.cyan(truncate(sample, 80))}${countSuffix}`);
           }
         }
         shown++;
@@ -405,7 +406,7 @@ function renderCommandsSection(
     lines.push(`  ${chalk.dim('Other')} ${chalk.gray(`(${otherCount})`)}`);
     for (const [, v] of Array.from(otherKeys.entries()).slice(0, 5)) {
       const countSuffix = v.count > 1 ? chalk.gray(` × ${v.count}`) : '';
-      lines.push(`    ${chalk.cyan(truncateCmd(v.samples[0] ?? '', 80))}${countSuffix}`);
+      lines.push(`    ${chalk.cyan(truncate(v.samples[0] ?? '', 80))}${countSuffix}`);
     }
   }
 
@@ -425,9 +426,6 @@ function pickDistinct(samples: string[], max: number): string[] {
   return result.length > 0 ? result : samples.slice(0, max);
 }
 
-function truncateCmd(cmd: string, max: number): string {
-  return cmd.length <= max ? cmd : cmd.slice(0, max - 1) + '…';
-}
 
 // ── File grouping ─────────────────────────────────────────────────────────────
 
@@ -1026,10 +1024,17 @@ export function renderConversationMarkdown(
 }
 
 /**
- * Render session as JSON (normalized events).
+ * Render one session's JSON output — the shape `agents sessions <id> --json`
+ * emits. When `meta` is provided (the standard path), returns a
+ * `{ session, events }` wrapper so top-level fields (`plan`, `prUrl`, …) that
+ * live on `SessionMeta` are visible without re-parsing events. Legacy
+ * callers that pass no meta still get a bare `SessionEvent[]` array.
  */
-export function renderJson(events: SessionEvent[]): string {
-  return JSON.stringify(events, null, 2);
+export function renderJson(events: SessionEvent[], meta?: SessionMeta): string {
+  if (!meta) return JSON.stringify(events, null, 2);
+  // Strip internal-only bookkeeping fields the listing --json path also strips.
+  const { _matchedTerms, _bm25Score, _remote, ...session } = meta;
+  return JSON.stringify({ session, events }, null, 2);
 }
 
 /** Replace the home directory prefix with ~ for trace display. */

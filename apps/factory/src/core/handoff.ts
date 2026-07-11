@@ -104,7 +104,9 @@ export async function getSessionMessagesViaAgentsCli(
       ['sessions', sessionId, '--json', '--last', String(turns), '--include', 'user,assistant'],
       cwd
     );
-    const events: AgentsCliSessionEvent[] = JSON.parse(stdout);
+    // 1.20.51+ emits { session, events }; older CLIs emit a bare event array.
+    const parsed = JSON.parse(stdout);
+    const events: AgentsCliSessionEvent[] = Array.isArray(parsed) ? parsed : (parsed.events ?? []);
     const messages: HandoffMessage[] = [];
     for (const ev of events) {
       if (ev.type !== 'message') continue;
@@ -130,7 +132,13 @@ async function computeSessionToolStats(
     ['sessions', sessionId, '--json', '--include', 'tools'],
     cwd
   );
-  const events: Array<{ type: string; tool?: string; args?: Record<string, unknown> }> = JSON.parse(stdout);
+  // 1.20.51+ emits { session, events }; older CLIs emit a bare event array.
+  const parsedStats = JSON.parse(stdout);
+  const events: Array<{ type: string; tool?: string; args?: Record<string, unknown> }> = Array.isArray(
+    parsedStats
+  )
+    ? parsedStats
+    : (parsedStats.events ?? []);
   const toolUses = events.filter(ev => ev.type === 'tool_use');
   const editedFiles = new Set<string>();
   const readFiles = new Set<string>();

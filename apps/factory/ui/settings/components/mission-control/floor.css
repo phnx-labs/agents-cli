@@ -324,6 +324,26 @@
 .swarmify-root .rail-ib .rail-bdg.attn { background: var(--status-pending); border-color: var(--status-pending); color: #1a1a1a; }
 .swarmify-root .floor-rail .rail-gap { height: 6px; }
 .swarmify-root .rail-ib.rail-expand { color: var(--ds-text-faint); }
+/* Dispatch: the rail's one primary (lime-filled) action, mirroring the .disp pill. */
+.swarmify-root .rail-ib.rail-dispatch { background: var(--brand); border-color: var(--brand); color: #1a1a1a; }
+.swarmify-root .rail-ib.rail-dispatch:hover { filter: brightness(1.06); color: #1a1a1a; }
+/* Offline-host indicator on the Hosts button — status dot, never brand. */
+.swarmify-root .rail-ib .rail-off { position: absolute; bottom: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--status-failed); border: 2px solid var(--ds-bg); }
+/* Flyout menus for Projects / Hosts: anchored to the button, over the feed. */
+.swarmify-root .rail-fly-anchor { position: relative; }
+.swarmify-root .rail-fly-backdrop { position: fixed; inset: 0; z-index: 40; }
+.swarmify-root .rail-fly { position: absolute; left: calc(100% + 10px); top: -4px; z-index: 41; min-width: 190px; max-width: 280px; max-height: min(50vh, 420px); overflow: auto; background: var(--ds-bg-panel); border: 1px solid var(--ds-border); border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); }
+.swarmify-root .rail-fly .fly-sec { font-size: 9.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ds-text-faint); padding: 4px 8px 3px; }
+.swarmify-root .rail-fly .fly-empty { font-size: 12px; color: var(--ds-text-faint); padding: 6px 8px; }
+.swarmify-root .rail-fly .fly-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 7px; background: none; border: 0; cursor: pointer; color: var(--ds-text); font-size: 12px; text-align: left; }
+.swarmify-root .rail-fly .fly-row:hover { background: var(--ds-bg-recessed); }
+.swarmify-root .rail-fly .fly-row.on { color: var(--brand); }
+.swarmify-root .rail-fly .fly-row .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarmify-root .rail-fly .fly-row .c { color: var(--ds-text-dim); font-family: "Geist Mono", monospace; font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.swarmify-root .rail-fly .fly-row .w { display: inline-flex; align-items: center; gap: 2px; color: var(--status-pending); font-family: "Geist Mono", monospace; font-size: 10.5px; }
+.swarmify-root .rail-fly .fly-row .fly-hd { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--status-running); }
+.swarmify-root .rail-fly .fly-row .fly-hd.off { background: var(--status-failed); }
+.swarmify-root .rail-fly .fly-manage { color: var(--ds-text-faint); }
 .swarmify-root .sb-sec .sb-collapse { margin-left: auto; background: none; border: 0; padding: 0 2px; cursor: pointer; color: var(--ds-text-faint); display: inline-flex; align-items: center; }
 .swarmify-root .sb-sec .sb-collapse:hover { color: var(--ds-text); }
 .swarmify-root .sb-sec { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--ds-text-faint); padding: 12px 14px 4px; }
@@ -378,6 +398,33 @@
 .swarmify-root .tstat.in-progress { background: var(--status-running-bg); color: var(--status-running); }
 .swarmify-root .tstat.blocked { background: var(--status-failed-bg); color: var(--status-failed); }
 .swarmify-root .tproj { font-size: 11px; color: var(--ds-text-dim); flex: 0 0 auto; width: 96px; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* In-flight chip on a backlog row: phase dot + worker abbr (+N). */
+.swarmify-root .trow2 .twork { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--ds-text-dim); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
+.swarmify-root .trow2 .twork .dot { width: 6px; height: 6px; box-shadow: none; }
+/* Ticket detail: agents already carrying the ticket, each row jumps to the card. */
+.swarmify-root .dflight { border: 1px solid var(--ds-border); border-radius: var(--r-lg); padding: 10px 12px; }
+.swarmify-root .dflight .dflight-row { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: 0; padding: 5px 2px; cursor: pointer; color: var(--ds-text); font-size: 12px; text-align: left; border-radius: var(--r-sm); }
+.swarmify-root .dflight .dflight-row:hover { background: var(--ds-bg-panel); }
+.swarmify-root .dflight .dflight-row .dot { width: 7px; height: 7px; box-shadow: none; }
+.swarmify-root .dflight .abbr { font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--ds-text-dim); }
+.swarmify-root .dflight .n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.swarmify-root .dflight .h { color: var(--ds-text-faint); font-size: 11px; }
+.swarmify-root .dflight .pr { font-family: "Geist Mono", monospace; font-size: 10px; color: var(--brand-600); }
+.swarmify-root .dflight-note { font-size: 11px; color: var(--status-pending); margin-top: 8px; }
+.swarmify-root .disp.caution { background: var(--status-pending); }
+/* Recap ledger — day-grouped ended sessions with duration/cost. */
+.swarmify-root .recap-empty { padding: 24px 16px; color: var(--ds-text-faint); font-size: 12.5px; }
+.swarmify-root .feed-sec .rc-rollup { margin-left: 8px; color: var(--ds-text-dim); font-weight: 600; font-size: 10.5px; }
+.swarmify-root .recap-row { display: flex; align-items: center; gap: 9px; padding: 8px 8px; border-bottom: 1px solid var(--ds-border-subtle); border-radius: var(--r-sm); }
+.swarmify-root .recap-row:hover { background: var(--ds-bg-panel); }
+.swarmify-root .recap-row .rc-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .recap-row .rc-meta { flex: 0 1 auto; min-width: 0; color: var(--ds-text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swarmify-root .recap-row .rc-ticket { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10px; color: var(--ds-text-dim); border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; }
+.swarmify-root .recap-row .rc-pr { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; font-family: "Geist Mono", monospace; font-size: 10px; font-weight: 700; color: var(--brand-600); background: none; border: 1px solid var(--ds-border); border-radius: 999px; padding: 1px 7px; cursor: pointer; }
+.swarmify-root .recap-row .rc-pr:hover { border-color: var(--brand-600); }
+.swarmify-root .recap-row .rc-dur { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-dim); font-variant-numeric: tabular-nums; }
+.swarmify-root .recap-row .rc-cost { flex: 0 0 auto; font-family: "Geist Mono", monospace; font-size: 10.5px; color: var(--ds-text-muted); font-variant-numeric: tabular-nums; }
+.swarmify-root .recap-row .rc-ago { flex: 0 0 auto; width: 64px; text-align: right; color: var(--ds-text-faint); font-size: 10.5px; }
 .swarmify-root .dispatch-panel { background: var(--ds-bg); border: 1px solid var(--ds-border-subtle); border-radius: var(--r-lg); padding: 12px 14px; }
 .swarmify-root .dp-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .swarmify-root .dp-k { width: 48px; font-size: 11px; color: var(--ds-text-dim); font-weight: 600; }

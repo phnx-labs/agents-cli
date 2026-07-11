@@ -6,6 +6,42 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Recap — a work ledger for "what happened while I was away".** A new Recap center
+  (clock button on the rail, Recap tab in the strip) lists finished sessions across the
+  whole fleet, grouped by day, each with its task line, project · host · branch, ticket,
+  a PR link, and the session's real duration and cost. Day headers roll up sessions,
+  spend, and PRs (e.g. "Today — 12 sessions · $18.40 · 3 PRs"). No new bookkeeping: the
+  CLI's `agents sessions` metrics (`durationMs`, `costUsd`, `tokenCount`) were already
+  computed per session and are now carried through instead of dropped. Live sessions are
+  excluded — the feed owns what's running, the ledger owns what finished.
+- **The backlog now shows who is already working each ticket.** A ticket an agent
+  carries gets an in-flight chip on its row (phase dot + agent abbr, `+N` when several
+  are on it; hover for the full roster), and the ticket detail pane gains an **In
+  flight** section — one row per worker with phase, host, and PR, each jumping to that
+  agent's card. Dispatching onto a ticket that's already in flight is guarded: the
+  button turns amber, reads "Dispatch anyway", and names the agent already on it, so a
+  second agent is a deliberate choice instead of an accident.
+
+### Changed
+
+- **The collapsed Floor rail's Projects and Hosts buttons are now flyout menus instead of
+  three buttons that all expanded the sidebar.** Click Projects for the curated project
+  list (live agent count + amber waiting count per project, plus any uncurated project
+  that has agents running) and jump straight to that scope; click Hosts for the fleet
+  roster with health dots and per-host counts. The Hosts button carries a red dot whenever
+  any host is offline, a lime **Dispatch** button now sits at the top of the rail, and the
+  `»` chevron is the single expand affordance. Active states are fixed across the board
+  (Backlog lights when the backlog center is showing; a project/host scope lights its
+  button), and the rail-vs-sidebar choice is remembered across reloads.
+
+### Fixed
+
+- **"Needs you" in the rail and sidebar now actually filters the feed.** It used to clear
+  all filters — identical to "All agents" — despite the amber badge. It now toggles the
+  same `needs` status chip the controls bar drives, and "All agents" clears it.
+
 ## [0.9.291] - 2026-07-09
 
 ### Fixed

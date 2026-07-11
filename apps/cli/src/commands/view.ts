@@ -9,6 +9,7 @@
 import type { Command } from 'commander';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
+import { visibleWidth, termLink } from '../lib/format.js';
 import ora from 'ora';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -120,12 +121,6 @@ function profileKindAndModel(model: string, planWidth: number): string {
   return `${kind}  ${model}`;
 }
 
-function termLink(text: string, filePath: string): string {
-  if (!process.stdout.isTTY) return text;
-  const url = `file://${filePath}`;
-  return `\x1b]8;;${url}\x1b\\${text}\x1b]8;;\x1b\\`;
-}
-
 /**
  * Resolve a resource path to something the IDE can open inline. When `p` is a
  * directory, OSC 8 file:// links cause IDEs (Cursor/VS Code) to open it as a
@@ -158,9 +153,6 @@ function formatLastActive(date: Date | null): string {
   return chalk.gray(`${days}d ago`);
 }
 
-function visibleWidth(s: string): number {
-  return s.replace(/\u001b\[[0-9;]*m/g, '').length;
-}
 
 function compareVersions(a: string, b: string): number {
   const partsA = a.split('.').map(Number);
