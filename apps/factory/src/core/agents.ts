@@ -67,34 +67,28 @@ export function modeFlagForAgent(_agentKey: string, mode: AgentLaunchMode): stri
 }
 
 // ---- Plan detection (a Plan-mode Claude agent emits a plan) ----------------
-// When a plan-mode agent finishes planning it calls Claude's ExitPlanMode tool,
-// whose input carries the plan markdown. These pure helpers turn the raw
-// session JSONL into the PendingPlan the Floor renders. Kept here (not in the
-// VS Code layer) so they're unit-testable without a live session.
+// The CLI's session state engine (`state.ts`) captures the ExitPlanMode plan
+// markdown and surfaces it as `session.plan` in `agents sessions <id> --json`.
+// These pure helpers read the CLI JSON and turn the plan into the PendingPlan
+// the Floor renders. Kept here (not in the VS Code layer) so they're
+// unit-testable without a live session.
 
 export interface PlanStepData { n: number; text: string }
 
-// Scan a Claude session .jsonl (one JSON object per line) and return the plan
-// markdown from the LAST ExitPlanMode tool call, or null if none present. The
-// last one wins so a re-planned agent surfaces its most recent plan.
-export function parsePlanFromClaudeJsonl(jsonl: string): string | null {
-  let latest: string | null = null;
-  for (const line of jsonl.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed[0] !== '{') continue;
-    let obj: any;
-    try { obj = JSON.parse(trimmed); } catch { continue; }
-    if (obj?.type !== 'assistant') continue;
-    const blocks = obj?.message?.content;
-    if (!Array.isArray(blocks)) continue;
-    for (const b of blocks) {
-      if (b?.type === 'tool_use' && b?.name === 'ExitPlanMode') {
-        const plan = b?.input?.plan;
-        if (typeof plan === 'string' && plan.trim()) latest = plan;
-      }
-    }
+// Extract the plan markdown from `agents sessions <id> --json` output. The CLI
+// emits `{ session: { plan?: string, ... }, events: [...] }` — this reads
+// `session.plan`, which the state engine populates from the LAST ExitPlanMode
+// tool call at scan time (last one wins so a re-planned session surfaces its
+// most recent plan). Returns null when no plan is present or the JSON is
+// unparseable, matching the polling contract in watchForPlan.
+export function extractPlanFromSessionJson(json: string): string | null {
+  try {
+    const parsed = JSON.parse(json);
+    const plan = parsed?.session?.plan;
+    return typeof plan === 'string' && plan.trim() ? plan : null;
+  } catch {
+    return null;
   }
-  return latest;
 }
 
 // Split plan markdown into ordered steps. Prefers explicit list items

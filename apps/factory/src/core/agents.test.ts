@@ -7,7 +7,7 @@ import {
   pickLatestVersion,
   STRATEGY_LAUNCH_AGENTS,
   modeFlagForAgent,
-  parsePlanFromClaudeJsonl,
+  extractPlanFromSessionJson,
   planTextToSteps
 } from './agents';
 import { CLAUDE_TITLE, CODEX_TITLE, GEMINI_TITLE, OPENCODE_TITLE, CURSOR_TITLE, SHELL_TITLE } from './utils';
@@ -187,34 +187,38 @@ describe('modeFlagForAgent', () => {
   });
 });
 
-describe('parsePlanFromClaudeJsonl', () => {
-  const exitPlanLine = JSON.stringify({
-    type: 'assistant',
-    message: { content: [{ type: 'tool_use', name: 'ExitPlanMode', input: { plan: '1. First\n2. Second' } }] },
-  });
-
-  test('extracts plan markdown from an ExitPlanMode tool_use', () => {
-    const jsonl = [
-      JSON.stringify({ type: 'user', message: { content: 'hi' } }),
-      exitPlanLine,
-    ].join('\n');
-    expect(parsePlanFromClaudeJsonl(jsonl)).toBe('1. First\n2. Second');
-  });
-
-  test('returns the LAST plan when the agent re-plans', () => {
-    const second = JSON.stringify({
-      type: 'assistant',
-      message: { content: [{ type: 'tool_use', name: 'ExitPlanMode', input: { plan: 'revised plan' } }] },
+describe('extractPlanFromSessionJson', () => {
+  test('extracts plan from CLI JSON output', () => {
+    const json = JSON.stringify({
+      session: { id: 'abc', plan: '1. First\n2. Second' },
+      events: [],
     });
-    expect(parsePlanFromClaudeJsonl([exitPlanLine, second].join('\n'))).toBe('revised plan');
+    expect(extractPlanFromSessionJson(json)).toBe('1. First\n2. Second');
   });
 
-  test('returns null when there is no plan and ignores malformed lines', () => {
-    const jsonl = [
-      'not json',
-      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'thinking' }] } }),
-    ].join('\n');
-    expect(parsePlanFromClaudeJsonl(jsonl)).toBeNull();
+  test('returns null when session has no plan', () => {
+    const json = JSON.stringify({
+      session: { id: 'abc' },
+      events: [],
+    });
+    expect(extractPlanFromSessionJson(json)).toBeNull();
+  });
+
+  test('returns null for empty/whitespace plan', () => {
+    const json = JSON.stringify({
+      session: { id: 'abc', plan: '   ' },
+      events: [],
+    });
+    expect(extractPlanFromSessionJson(json)).toBeNull();
+  });
+
+  test('returns null for unparseable JSON', () => {
+    expect(extractPlanFromSessionJson('not json')).toBeNull();
+  });
+
+  test('returns null for legacy bare-array format (no session wrapper)', () => {
+    const json = JSON.stringify([{ type: 'message', content: 'hi' }]);
+    expect(extractPlanFromSessionJson(json)).toBeNull();
   });
 });
 
