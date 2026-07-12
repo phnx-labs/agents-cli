@@ -9,7 +9,7 @@
 
 import type { AgentId } from '../types.js';
 import { crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, type CrabboxBox } from './cli.js';
-import { buildCredentialScript, type DetectedRuntime } from './runtimes.js';
+import { buildCredentialScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
 
 export interface LeaseRunOptions {
   agent: string;
@@ -28,6 +28,12 @@ export interface LeaseRunOptions {
   onData?: (s: string) => void;
   /** Keep the box after the run instead of stopping it. */
   keep?: boolean;
+  /**
+   * Raw wrapped Claude OAuth payload (from `resolveClaudeCredentialsBlob`), written
+   * to `~/.claude/.credentials.json` on the box. The command layer resolves it
+   * (after consent) so this module stays free of Keychain I/O and unit-testable.
+   */
+  claudeCredentialsJson?: string | null;
 }
 
 export interface LeaseRunResult {
@@ -76,19 +82,21 @@ const ENSURE_AGENTS_CLI = [
  * the credential files. Best-effort install steps never abort the run.
  */
 export function buildBootstrapScript(opts: LeaseRunOptions): string {
-  const credScript = buildCredentialScript(opts.runtimes, opts.detected);
+  const credScript = buildCredentialScript(opts.runtimes, opts.detected, {
+    claudeCredentialsJson: opts.claudeCredentialsJson,
+  });
   const runParts = ['agents', 'run', q(opts.agent), q(opts.prompt), '--quiet'];
   if (opts.mode) runParts.push('--mode', q(opts.mode));
   if (opts.model) runParts.push('--model', q(opts.model));
 
   // Credential files to shred after the run (home-level paths written above).
-  const shred = opts.runtimes
-    .map((id) => {
-      const cred = { claude: '.claude.json', codex: '.codex/auth.json', gemini: '.gemini/google_accounts.json', grok: '.grok/auth.json' }[id as string];
-      return cred ? `rm -f "$HOME/${cred}" 2>/dev/null || true` : '';
-    })
-    .filter(Boolean)
-    .join('\n');
+  // Runs regardless of --keep-box (it's in the box body, not teardown), so a kept
+  // box still loses the token after the run — minimizing the credential window.
+  const shredPaths = opts.runtimes.flatMap((id) => {
+    const paths = { claude: ['.claude.json', CLAUDE_TOKEN_REMOTE], codex: ['.codex/auth.json'], gemini: ['.gemini/google_accounts.json'], grok: ['.grok/auth.json'] }[id as string];
+    return paths ?? [];
+  });
+  const shred = shredPaths.map((p) => `rm -f "$HOME/${p}" 2>/dev/null || true`).join('\n');
 
   const installRuntimes = opts.runtimes.map((id) => `agents add ${q(id)} >/dev/null 2>&1 || true`).join('\n');
 

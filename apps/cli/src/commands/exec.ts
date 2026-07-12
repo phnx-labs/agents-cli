@@ -482,7 +482,7 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const backend = typeof options.lease === 'string' ? options.lease : undefined;
-        const { detectSignedInRuntimes, pickRuntimes } = await import('../lib/crabbox/runtimes.js');
+        const { detectSignedInRuntimes, pickRuntimes, resolveClaudeCredentialsBlob } = await import('../lib/crabbox/runtimes.js');
         const { leaseAndRun } = await import('../lib/crabbox/lease.js');
         const { confirm } = await import('@inquirer/prompts');
 
@@ -501,13 +501,28 @@ export function registerRunCommand(program: Command): void {
             return `${d?.label ?? id}${d?.email ? ` (${d.email})` : ''}`;
           })
           .join(', ');
+        // Claude ships its OAuth token (not just the .claude.json config) — name it
+        // explicitly so the consent covers the actual credential transferred.
+        const whatShips = runtimes.includes('claude') ? 'credentials + Claude OAuth token' : 'credentials';
         const ok = await confirm({
-          message: `Copy credentials for ${names} to a disposable cloud box, run there, then destroy it?`,
+          message: `Copy ${whatShips} for ${names} to a disposable cloud box, run there, then destroy it?`,
           default: false,
         });
         if (!ok) {
           console.error(chalk.yellow('Aborted — no credentials pushed, no box leased.'));
           process.exit(1);
+        }
+
+        // Read the Claude OAuth token from the local Keychain (silent) so it can be
+        // written to ~/.claude/.credentials.json on the box — otherwise Claude boots
+        // "Not logged in". Consent above already covered this transfer.
+        let claudeCredentialsJson: string | null = null;
+        if (runtimes.includes('claude')) {
+          const claudeEmail = detected.find((d) => d.id === 'claude')?.email ?? null;
+          claudeCredentialsJson = await resolveClaudeCredentialsBlob({ preferEmail: claudeEmail });
+          if (!claudeCredentialsJson) {
+            console.error(chalk.yellow('Warning: could not read the local Claude OAuth token — the box may come up "Not logged in".'));
+          }
         }
 
         try {
@@ -519,6 +534,7 @@ export function registerRunCommand(program: Command): void {
             backend,
             runtimes,
             detected,
+            claudeCredentialsJson,
             secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE,
             keep: options.keepBox,
           });

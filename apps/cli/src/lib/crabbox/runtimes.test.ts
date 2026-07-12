@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { buildCredentialScript, pickRuntimes, type DetectedRuntime } from './runtimes.js';
+import { buildCredentialScript, pickRuntimes, resolveClaudeCredentialsBlob, type DetectedRuntime } from './runtimes.js';
 
 describe('buildCredentialScript', () => {
   let tmpDir: string;
@@ -43,6 +43,98 @@ describe('buildCredentialScript', () => {
     const script = buildCredentialScript(['codex'], detected);
     expect(script).toContain('mkdir -p "$HOME/.codex"');
     expect(script).toContain('cat > "$HOME/.codex/auth.json" <<');
+  });
+
+  it('writes .claude/.credentials.json (0600) alongside the config when a claude blob is supplied', () => {
+    const detected: DetectedRuntime[] = [
+      { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: claudeCred },
+    ];
+    const token = '{"claudeAiOauth":{"accessToken":"tok"}}';
+    const script = buildCredentialScript(['claude'], detected, { claudeCredentialsJson: token });
+    // config still copied...
+    expect(script).toContain('cat > "$HOME/.claude.json" <<');
+    // ...plus the token, which is what actually logs the box in.
+    expect(script).toContain('mkdir -p "$HOME/.claude"');
+    expect(script).toContain('cat > "$HOME/.claude/.credentials.json" <<');
+    expect(script).toContain(token);
+    expect(script).toContain('chmod 600 "$HOME/.claude/.credentials.json"');
+  });
+
+  it('omits the credentials write when no claude blob is supplied (back-compat)', () => {
+    const detected: DetectedRuntime[] = [
+      { id: 'claude', label: 'Claude Code', email: 'a@b.com', signedIn: true, credPath: claudeCred },
+    ];
+    expect(buildCredentialScript(['claude'], detected)).not.toContain('.credentials.json');
+    expect(buildCredentialScript(['claude'], detected, { claudeCredentialsJson: null })).not.toContain('.credentials.json');
+  });
+});
+
+describe('resolveClaudeCredentialsBlob', () => {
+  const WRAPPED = '{"claudeAiOauth":{"accessToken":"tok"}}';
+  // Only the darwin branch is unit-tested (the Linux branch reads a real file).
+  const itDarwin = process.platform === 'darwin' ? it : it.skip;
+
+  itDarwin('returns the bare-service payload for a default native install', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      service: (home) => (home ? `svc-${home}` : 'bare'),
+      readItem: (svc) => (svc === 'bare' ? WRAPPED : (() => { throw new Error('miss'); })()),
+      listVersions: () => ['2.1.0'],
+      versionHome: (v) => `/home/${v}`,
+      accountEmail: async () => null,
+    });
+    expect(blob).toBe(WRAPPED);
+  });
+
+  itDarwin('falls back to a managed version home when the bare service misses', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      service: (home) => (home ? `svc:${home}` : 'bare'),
+      readItem: (svc) => (svc === 'svc:/home/2.1.0' ? WRAPPED : (() => { throw new Error('miss'); })()),
+      listVersions: () => ['2.1.0'],
+      versionHome: (v) => `/home/${v}`,
+      accountEmail: async () => null,
+    });
+    expect(blob).toBe(WRAPPED);
+  });
+
+  itDarwin('prefers the version whose account email matches preferEmail', async () => {
+    const reads: string[] = [];
+    const blob = await resolveClaudeCredentialsBlob({
+      preferEmail: 'want@x.com',
+      service: (home) => (home ? `svc:${home}` : 'bare'),
+      readItem: (svc) => {
+        reads.push(svc);
+        if (svc === 'bare') throw new Error('miss');
+        // Both managed homes have a token; the matching one must be read first.
+        return WRAPPED;
+      },
+      listVersions: () => ['other', 'match'],
+      versionHome: (v) => `/home/${v}`,
+      accountEmail: async (home) => (home === '/home/match' ? 'want@x.com' : 'no@x.com'),
+    });
+    expect(blob).toBe(WRAPPED);
+    // After the bare miss, the matching home is tried before the non-matching one.
+    expect(reads.filter((r) => r !== 'bare')[0]).toBe('svc:/home/match');
+  });
+
+  itDarwin('rejects a payload without a claudeAiOauth.accessToken', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      service: () => 'bare',
+      readItem: () => '{"claudeAiOauth":{"refreshToken":"r"}}',
+      listVersions: () => [],
+      versionHome: (v) => v,
+    });
+    expect(blob).toBeNull();
+  });
+
+  itDarwin('returns null when every read misses', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      service: (home) => (home ? `svc:${home}` : 'bare'),
+      readItem: () => { throw new Error('miss'); },
+      listVersions: () => ['2.1.0'],
+      versionHome: (v) => `/home/${v}`,
+      accountEmail: async () => null,
+    });
+    expect(blob).toBeNull();
   });
 });
 

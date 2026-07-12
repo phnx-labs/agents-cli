@@ -42,6 +42,22 @@ describe('buildBootstrapScript', () => {
     expect(script.indexOf('command -v node')).toBeLessThan(script.indexOf("agents run 'claude'"));
   });
 
+  it('shreds the claude OAuth token file after the run, regardless of --keep-box', () => {
+    for (const keep of [false, true]) {
+      const script = buildBootstrapScript({
+        agent: 'claude',
+        prompt: 'print hostname',
+        runtimes: ['claude'],
+        detected,
+        keep,
+      });
+      // Both the config AND the token file are removed post-run (shred is in the
+      // box body, not teardown — a kept box still loses the token).
+      expect(script).toContain('rm -f "$HOME/.claude.json"');
+      expect(script).toContain('rm -f "$HOME/.claude/.credentials.json"');
+    }
+  });
+
   it('threads mode/model into the remote run', () => {
     const script = buildBootstrapScript({
       agent: 'codex',

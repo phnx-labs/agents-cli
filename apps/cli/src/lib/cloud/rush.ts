@@ -235,8 +235,14 @@ function parsePromptCode(body: string): string | null {
  *
  * Returns null when no credentials are findable — caller treats as "version
  * is installed but not signed in" and skips it from the manifest.
+ *
+ * NOTE: the darwin branch returns the UNWRAPPED oauth sub-object (what the Rush
+ * server re-wraps). It is NOT the shape Claude Code reads back from
+ * `.credentials.json`. The lease exporter (crabbox/runtimes.ts) therefore only
+ * reuses the Linux `.credentials.json` branch here and reads the wrapped raw
+ * Keychain payload itself on darwin.
  */
-async function readClaudeCredentialsBlob(home: string): Promise<string | null> {
+export async function readClaudeCredentialsBlob(home: string): Promise<string | null> {
   if (process.platform === 'darwin') {
     const oauth = await loadClaudeOauth(home);
     if (oauth && oauth.accessToken) {
