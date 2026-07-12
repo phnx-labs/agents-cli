@@ -13,6 +13,17 @@ export type { BrowserProfile } from './types.js';
 
 export const DEFAULT_BROWSER_PROFILE_NAME = 'default';
 
+/**
+ * The device-local configured default profile name (set via
+ * `agents browser profiles set-default`), or undefined when unset. When set, it
+ * is the profile `agents browser start` resolves to for BOTH the no-`--profile`
+ * path and an explicit `--profile default`. Stored per-machine — see
+ * `Meta.defaultBrowserProfile`.
+ */
+export function getConfiguredDefaultProfileName(): string | undefined {
+  return readMeta().defaultBrowserProfile || undefined;
+}
+
 export function getBrowserRuntimeDir(): string {
   return getBrowserRuntimeDirRoot();
 }
@@ -76,17 +87,28 @@ export async function getProfile(name: string): Promise<BrowserProfile | null> {
 }
 
 /**
- * Ensure a `default` profile exists, auto-picking the first installed
- * Chromium-family browser per the platform priority list in chrome.ts.
+ * Resolve the profile `agents browser start` uses when no `--profile` is given.
  *
- * Re-uses an existing `default` profile as-is (we don't second-guess the user
- * if they've already customized it). On first run we walk the priority list
- * (macOS: chrome > brave > edge > chromium > comet; Linux: chrome > chromium >
- * brave > edge; Windows: edge > chrome > brave > comet) and pin the profile to the
- * first match. Throws an actionable error if none of those binaries are
- * installed so the user knows exactly which browsers we'd accept.
+ * Order: (1) the device-local configured default (`agents browser profiles
+ * set-default <name>`) when it names an existing profile; (2) an existing
+ * `default` profile as-is; (3) auto-pick the first installed Chromium-family
+ * browser per the platform priority list in chrome.ts (macOS: chrome > brave >
+ * edge > chromium > comet; Linux: chrome > chromium > brave > edge; Windows:
+ * edge > chrome > brave > comet) and pin a new `default` profile to it. Throws an
+ * actionable error if none of those binaries are installed. A configured default
+ * that no longer exists warns and falls through to (2)/(3) — never a hard fail.
  */
 export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
+  const configured = getConfiguredDefaultProfileName();
+  if (configured) {
+    const chosen = await getProfile(configured);
+    if (chosen) return chosen;
+    console.warn(
+      `warning: configured default browser profile "${configured}" no longer exists; ` +
+      `falling back to auto-detect. Fix with: agents browser profiles set-default <name>  (or --unset)`
+    );
+  }
+
   const existing = await getProfile(DEFAULT_BROWSER_PROFILE_NAME);
   if (existing) return existing;
 

@@ -7,12 +7,16 @@ import {
   createProfile,
   deleteProfile,
   ensureDefaultBrowserProfile,
+  getConfiguredDefaultProfileName,
+  DEFAULT_BROWSER_PROFILE_NAME,
   getProfileRuntimeDir,
   extractConfiguredPort,
   findFreeProfilePort,
   getEndpointPresets,
   type BrowserProfile,
 } from '../lib/browser/profiles.js';
+import { readMeta, updateMeta } from '../lib/state.js';
+import { loginsForProfile, profilesLoggedInto, serviceForUrl } from '../lib/browser/login-detection.js';
 import { findBrowserPath, getPortOccupant, isLauncherScript } from '../lib/browser/chrome.js';
 import {
   listProfileCacheDirs,
@@ -139,6 +143,11 @@ function registerProfilesCommands(browser: Command): void {
         return;
       }
 
+      // The configured default is what a bare `agents browser start` (and an
+      // explicit `--profile default`) resolves to on THIS machine — mark it.
+      const configuredDefault = getConfiguredDefaultProfileName();
+      const marker = (name: string) => (name === configuredDefault ? '   (default)' : '');
+
       const hasDescriptions = allProfiles.some(p => p.description);
       if (hasDescriptions) {
         console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'DESCRIPTION'.padEnd(38) + 'ENDPOINTS');
@@ -149,7 +158,7 @@ function registerProfilesCommands(browser: Command): void {
             .map(([name, ep]) => (name.startsWith('endpoint-') ? ep.target : `${name}=${ep.target}`))
             .join(', ');
           const desc = (p.description ?? '').slice(0, 36).padEnd(38);
-          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + desc + endpoints);
+          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + desc + endpoints + marker(p.name));
         }
       } else {
         console.log('NAME'.padEnd(20) + 'BROWSER'.padEnd(12) + 'ENDPOINTS');
@@ -159,8 +168,67 @@ function registerProfilesCommands(browser: Command): void {
           const endpoints = Object.entries(presets)
             .map(([name, ep]) => (name.startsWith('endpoint-') ? ep.target : `${name}=${ep.target}`))
             .join(', ');
-          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + endpoints);
+          console.log(p.name.padEnd(20) + (p.browser || '-').padEnd(12) + endpoints + marker(p.name));
         }
+      }
+      if (configuredDefault) {
+        console.log('');
+        console.log(`Default profile (this machine): ${configuredDefault}`);
+      }
+    });
+
+  profiles
+    .command('set-default [name]')
+    .description('Set the profile `agents browser start` uses when no --profile is passed (also re-points an explicit `--profile default`). Device-local — each machine has its own. No name prints the current value.')
+    .option('--unset', 'Clear the configured default (revert to auto-detecting an installed browser)')
+    .action(async (name: string | undefined, opts: { unset?: boolean }) => {
+      if (opts.unset) {
+        updateMeta((m) => {
+          const { defaultBrowserProfile, ...rest } = m;
+          void defaultBrowserProfile;
+          return rest;
+        });
+        console.log('Default browser profile cleared. `agents browser start` will auto-detect an installed Chromium-family browser.');
+        return;
+      }
+      if (!name) {
+        const current = getConfiguredDefaultProfileName();
+        if (current) {
+          console.log(`Default browser profile (this machine): ${current}`);
+        } else {
+          console.log('No default browser profile set. `agents browser start` auto-detects an installed Chromium-family browser.');
+          console.log('Set one with: agents browser profiles set-default <name>');
+        }
+        return;
+      }
+      const target = await getProfile(name);
+      if (!target) {
+        console.error(`Profile "${name}" not found.`);
+        const all = await listProfiles();
+        if (all.length > 0) console.error(`Available profiles: ${all.map((p) => p.name).join(', ')}`);
+        process.exit(1);
+      }
+      updateMeta((m) => ({ ...m, defaultBrowserProfile: name }));
+      const eps = getEndpointPresets(target);
+      const epStr = Object.values(eps)[0]?.target ?? '';
+      console.log(`Default browser profile (this machine) is now "${name}" (${target.browser}${epStr ? `, ${epStr}` : ''}).`);
+      console.log('Bare `agents browser start` and `--profile default` will use it.');
+    });
+
+  profiles
+    .command('logins')
+    .description('Show which login-gated services each profile has a live session for (reads cookie presence only, never decrypts).')
+    .action(async () => {
+      const allProfiles = await listProfiles();
+      if (allProfiles.length === 0) {
+        console.log('No browser profiles configured.');
+        return;
+      }
+      console.log('PROFILE'.padEnd(20) + 'LOGGED INTO');
+      console.log('-'.repeat(60));
+      for (const p of allProfiles) {
+        const services = await loginsForProfile(p.name);
+        console.log(p.name.padEnd(20) + (services.length ? services.join(', ') : '(none detected)'));
       }
     });
 
@@ -288,6 +356,9 @@ function registerProfilesCommands(browser: Command): void {
 
       console.log(`Name: ${profile.name}`);
       console.log(`Browser: ${profile.browser}`);
+      if (getConfiguredDefaultProfileName() === profile.name) {
+        console.log('Default: yes (this machine — used by `agents browser start`)');
+      }
       if (profile.binary) console.log(`Binary: ${profile.binary}`);
       if (profile.electron) console.log(`Electron: true`);
       if (profile.targetFilter) console.log(`Target filter: ${profile.targetFilter}`);
@@ -340,6 +411,12 @@ function registerProfilesCommands(browser: Command): void {
         `Deleted profile: ${name}` +
           (removed > 0 ? ` (and ${removed} cache dir${removed === 1 ? '' : 's'})` : '')
       );
+      if (getConfiguredDefaultProfileName() === name) {
+        console.error(
+          `warning: "${name}" was this machine's default browser profile; ` +
+          `\`agents browser start\` will auto-detect until you run: agents browser profiles set-default <name>`
+        );
+      }
     });
 
   profiles
@@ -513,8 +590,8 @@ function registerProfilesCommands(browser: Command): void {
 function registerTaskCommands(browser: Command): void {
   browser
     .command('start')
-    .description('Start a browser task. Pass --profile <name>, or omit to auto-pick a Chromium-family browser already installed on this machine.')
-    .option('-p, --profile <name>', 'Browser profile to use (auto-picks from installed Chromium-family browsers if omitted)')
+    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser profiles set-default`), else auto-pick an installed Chromium-family browser.')
+    .option('-p, --profile <name>', 'Browser profile to use (omit to use the configured default, else auto-pick an installed Chromium-family browser)')
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated if omitted)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
@@ -532,6 +609,23 @@ function registerTaskCommands(browser: Command): void {
         } catch (err) {
           console.error(err instanceof Error ? err.message : String(err));
           process.exit(1);
+        }
+      } else if (profileName === DEFAULT_BROWSER_PROFILE_NAME) {
+        // Explicit `--profile default` honors the configured default too, so an
+        // agent that hardcodes the reserved `default` name still lands on the
+        // user's chosen profile (e.g. their logged-in Comet) rather than a
+        // literal `default` (which auto-detects Chrome). Narrowly scoped: only
+        // the reserved name, only here in `start`.
+        const configured = getConfiguredDefaultProfileName();
+        if (configured && configured !== DEFAULT_BROWSER_PROFILE_NAME) {
+          const target = await getProfile(configured);
+          if (target) {
+            profileName = target.name;
+          } else {
+            console.error(
+              `warning: configured default profile "${configured}" not found; using "${DEFAULT_BROWSER_PROFILE_NAME}".`
+            );
+          }
         }
       }
 
@@ -560,6 +654,26 @@ function registerTaskCommands(browser: Command): void {
           );
           process.exit(1);
         }
+      }
+
+      // Grounded login guardrail: if the opening URL is a known login-gated
+      // service and the resolved profile has no session for it, say so on stderr
+      // and name a profile that IS logged in. Reads the profile's real cookie DB
+      // (presence only) — never blocks or slows start; any failure is silent.
+      if (opts.url) {
+        try {
+          const service = serviceForUrl(opts.url);
+          if (service) {
+            const here = await loginsForProfile(profileName);
+            if (!here.includes(service)) {
+              const elsewhere = (await profilesLoggedInto(service)).filter((p) => p !== profileName);
+              const hint = elsewhere.length
+                ? `logged in elsewhere: ${elsewhere.join(', ')}. try: --profile ${elsewhere[0]}`
+                : `no profile on this machine has a ${service} session.`;
+              console.error(`warning: profile "${profileName}" (${profile.browser}) has no ${service} session. ${hint}`);
+            }
+          }
+        } catch { /* login detection is best-effort; never block start */ }
       }
 
       const response = await sendIPCRequest({
