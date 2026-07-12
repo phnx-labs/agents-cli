@@ -1128,8 +1128,11 @@ export async function getTerminalsByAgentType(
     const quickDetails = summaryAgentType
       ? await getSessionQuickDetailsCached(sessionPath, summaryAgentType)
       : null;
+    // Pass the session file's last write so a prose trailing "?" decays after
+    // PROSE_QUESTION_FRESH_MS — a finished session must not read as waiting
+    // forever (RUSH-1522). A structural AskUserQuestion never decays.
     const waitingForInput = (tail && summaryAgentType && summaryAgentType !== 'gemini')
-      ? detectWaitingForInput(tail, summaryAgentType)
+      ? detectWaitingForInput(tail, summaryAgentType, sessionStat?.mtime ? { lastWriteMs: sessionStat.mtime.getTime(), nowMs: Date.now() } : undefined)
       : false;
 
     return {
