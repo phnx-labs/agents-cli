@@ -387,6 +387,58 @@ describe('ensureDefaultBrowserProfile', () => {
       /No supported browser found.*Chrome.*Brave.*Edge/
     );
   });
+
+  it('returns the configured default profile without auto-detecting', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+      browser: { 'comet-local': { browser: 'comet', endpoints: ['cdp://localhost:9333'] } },
+      defaultBrowserProfile: 'comet-local',
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    expect(profile.name).toBe('comet-local');
+    expect(profile.browser).toBe('comet');
+    // The configured default short-circuits the installed-browser auto-detect.
+    expect(findFirstInstalledBrowser).not.toHaveBeenCalled();
+  });
+
+  it('configured default wins over a literal default profile', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+      browser: {
+        default: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'] },
+        'comet-local': { browser: 'comet', endpoints: ['cdp://localhost:9333'] },
+      },
+      defaultBrowserProfile: 'comet-local',
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    expect(profile.name).toBe('comet-local');
+    expect(profile.browser).toBe('comet');
+  });
+
+  it('warns and falls back to auto-detect when the configured default is missing', async () => {
+    const store: { browser: Record<string, BrowserProfileConfig>; defaultBrowserProfile?: string } = {
+      browser: {},
+      defaultBrowserProfile: 'ghost',
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+    vi.mocked(isPortInUse).mockReturnValue(false);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const profile = await ensureDefaultBrowserProfile();
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('ghost'));
+    // Fell through to the installed-browser auto-detect (Chrome in this mock).
+    expect(profile.name).toBe('default');
+    expect(profile.browser).toBe('chrome');
+    warnSpy.mockRestore();
+  });
 });
 
 describe('findFreeProfilePort', () => {

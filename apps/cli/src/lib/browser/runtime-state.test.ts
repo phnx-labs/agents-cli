@@ -10,6 +10,7 @@ import {
   clearProfileRuntime,
   removeProfileCache,
   listProfileCacheDirs,
+  listAllProfileSnapshots,
   isProcessAlive,
   reapOrphanedProcesses,
 } from './runtime-state.js';
@@ -245,5 +246,63 @@ describe('isProcessAlive', () => {
 
   it('returns false for a definitely-dead pid', () => {
     expect(isProcessAlive(999999)).toBe(false);
+  });
+});
+
+describe('fork runtime cleanup (RUSH-1528)', () => {
+  it('clearProfileRuntime on a fork name removes stale fork entries from snapshots', () => {
+    const base = uniq('fork-parent');
+    const fork2 = `${base}.2`;
+    const fork3 = `${base}.3`;
+    created.push(fork2, fork3);
+
+    writeProfileRuntime(fork2, { pid: 999990, command: 'chrome' });
+    writeProfileRuntime(fork3, { pid: 999991, command: 'chrome' });
+
+    const beforeClear = listAllProfileSnapshots().filter(
+      (s) => s.name === fork2 || s.name === fork3,
+    );
+    expect(beforeClear).toHaveLength(2);
+
+    clearProfileRuntime(fork2);
+    clearProfileRuntime(fork3);
+
+    const afterClear = listAllProfileSnapshots().filter(
+      (s) => s.name === fork2 || s.name === fork3,
+    );
+    expect(afterClear.every((s) => s.meta === null)).toBe(true);
+  });
+
+  it('listProfileCacheDirs finds composite forks (.N) alongside composites', () => {
+    const base = uniq('forkdir');
+    const composite = `${base}@endpoint-0`;
+    const fork2 = `${composite}.2`;
+    const fork3 = `${composite}.3`;
+    const root = getBrowserRuntimeDir();
+    for (const name of [base, composite, fork2, fork3]) {
+      fs.mkdirSync(path.join(root, name), { recursive: true });
+      created.push(name);
+    }
+
+    const found = listProfileCacheDirs(base).map((p) => path.basename(p)).sort();
+    expect(found).toEqual([base, composite, fork2, fork3].sort());
+  });
+
+  it('repeated fork write + clear leaves no stale snapshots', () => {
+    const base = uniq('repeat');
+    const fork = `${base}.2`;
+    created.push(fork);
+
+    for (let cycle = 0; cycle < 3; cycle++) {
+      writeProfileRuntime(fork, { pid: 999980 + cycle, command: 'chrome' });
+      expect(readProfileRuntimeMeta(fork)).not.toBeNull();
+      clearProfileRuntime(fork);
+      expect(readProfileRuntimeMeta(fork)).toBeNull();
+    }
+
+    const stale = listAllProfileSnapshots().filter(
+      (s) => s.name === fork && s.meta !== null,
+    );
+    expect(stale).toHaveLength(0);
   });
 });

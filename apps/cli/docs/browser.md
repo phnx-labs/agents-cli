@@ -66,13 +66,24 @@ agents browser profiles create staging --browser chrome \
   --endpoint "ssh://deploy@staging.example.com?port=9222"
 ```
 
-If you skip `--profile` on `agents browser start`, the CLI auto-detects the
-first installed Chromium-family browser on your machine and saves it as the
-`default` profile. Detection priority:
+If you skip `--profile` on `agents browser start`, the profile is resolved in
+this order:
 
-- macOS: Chrome > Brave > Edge > Chromium > Comet
-- Linux: Chrome > Chromium > Brave > Edge
-- Windows: Edge > Chrome > Brave > Comet
+1. **Your configured default** — the profile set via
+   `agents browser profiles set-default <name>` on THIS machine. This also
+   re-points an explicit `--profile default`, so an agent that hardcodes
+   `default` still lands on your chosen profile (e.g. a logged-in Comet).
+2. **An existing `default` profile**, if one has already been created.
+3. **Auto-detect** — the first installed Chromium-family browser, saved as the
+   `default` profile. Detection priority:
+   - macOS: Chrome > Brave > Edge > Chromium > Comet
+   - Linux: Chrome > Chromium > Brave > Edge
+   - Windows: Edge > Chrome > Brave > Comet
+
+The configured default is **device-local**: it lives in
+`~/.agents/devices/<machine>/agents.yaml` and never syncs to your other
+machines (they keep auto-detecting), because the profile it points at may hold
+machine-local logins. Set it once per machine.
 
 Safari and Firefox are not supported. They do not implement the Chrome
 DevTools Protocol.
@@ -100,9 +111,11 @@ automatically.
 
 | Command | Description |
 |---------|-------------|
-| `agents browser profiles list` | List all configured profiles |
+| `agents browser profiles list` | List all configured profiles (marks the machine's default) |
 | `agents browser profiles create <name>` | Create a new profile (see flags below) |
 | `agents browser profiles show <name>` | Show profile details |
+| `agents browser profiles set-default [name]` | Set the profile a bare `start` (and `--profile default`) uses; `--unset` to clear; no name prints the current value. Device-local. |
+| `agents browser profiles logins` | Show which login-gated services each profile has a live session for (reads cookie presence only) |
 | `agents browser profiles delete <name>` | Delete profile config and chrome-data cache |
 | `agents browser profiles doctor <name>` | Diagnose binary, port, user-data-dir, onboarding state |
 

@@ -130,6 +130,34 @@ describe('toFloorAgentFromUnified', () => {
     expect(a.abbr).toBe('CC')
   })
 
+  test('a completed agent with a stale waiting flag lands in done, not needs-you (RUSH-1522)', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        status: 'completed',
+        active: false,
+        terminal: { id: 't1', waitingForInput: true },
+        agent: null,
+      }),
+      { pinned: new Set(), workspaceRepo: 'swarmify', nowMs: NOW },
+    )
+    expect(a.phase).toBe('done')
+    expect(a.needs).toBe(false) // no PR — nothing for the user to do
+  })
+
+  test('a stopped agent with a stale waiting flag settles to idle, not needs-you (RUSH-1522)', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        status: 'stopped',
+        active: false,
+        terminal: { id: 't1', waitingForInput: true },
+        agent: null,
+      }),
+      { pinned: new Set(), workspaceRepo: 'swarmify', nowMs: NOW },
+    )
+    expect(a.phase).toBe('idle')
+    expect(a.needs).toBe(false)
+  })
+
   test('resp is empty (not the live-activity placeholder) when there is no last message', () => {
     // Regression: resp used to fall back to u.activity, so a placeholder now-line
     // ("Thinking...") rendered twice — once as the card body, once as the verb nowline.

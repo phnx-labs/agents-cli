@@ -78,6 +78,26 @@ describe('inferActivity — waiting signals', () => {
     const s = inferActivity([msg('assistant', 'Done — tests pass.')], { pidAlive: true, mtimeMs: stale });
     expect(s.activity).toBe('idle');
   });
+
+  it('a prose trailing question DECAYS: an hours-old "?" is a finished session, not waiting (RUSH-1522)', () => {
+    const ancient = now - 2 * 60 * 60_000; // 2h — far past PROSE_QUESTION_FRESH_MS
+    const s = inferActivity([msg('assistant', 'All done. Anything else you need?')], { pidAlive: true, mtimeMs: ancient });
+    expect(s.activity).toBe('idle');
+  });
+
+  it('a structural AskUserQuestion never decays: hours-old, still waiting', () => {
+    const ancient = now - 2 * 60 * 60_000;
+    const s = inferActivity([msg('user', 'go'), tool('AskUserQuestion')], { pidAlive: true, mtimeMs: ancient });
+    expect(s.activity).toBe('waiting_input');
+    expect(s.awaitingReason).toBe('question');
+  });
+
+  it('a structural ExitPlanMode never decays: hours-old, still waiting', () => {
+    const ancient = now - 2 * 60 * 60_000;
+    const s = inferActivity([msg('user', 'plan it'), tool('ExitPlanMode')], { pidAlive: true, mtimeMs: ancient });
+    expect(s.activity).toBe('waiting_input');
+    expect(s.awaitingReason).toBe('plan_review');
+  });
 });
 
 describe('inferActivity — working signals', () => {

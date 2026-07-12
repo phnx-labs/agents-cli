@@ -717,6 +717,16 @@ export interface Meta {
    */
   browser?: Record<string, BrowserProfileConfig>;
   /**
+   * Device-local pointer: the browser profile `agents browser start` resolves to
+   * when no `--profile` is passed (and what an explicit `--profile default`
+   * re-points to). Stored per-machine in `~/.agents/devices/<machine>/agents.yaml`,
+   * NOT central — the target profile may carry machine-local logins, so the choice
+   * must not ride `agents repo push/pull` to other machines. Unset = auto-detect an
+   * installed Chromium-family browser (legacy behavior). Set via
+   * `agents browser profiles set-default <name>`.
+   */
+  defaultBrowserProfile?: string;
+  /**
    * Agent-host registry keyed by host name (`agents hosts`). Portable user
    * config synced with `agents repo push/pull`. For `ssh-config` hosts this is
    * just an overlay (caps/os) — the connection details stay in ~/.ssh/config and

@@ -32,8 +32,10 @@ export type { ProjectRule }
 
 /**
  * Single field everything keys off. Precedence when deriving from raw signals:
- *   waiting > failed > running > done(unreviewed) > done(settled) > idle
- * (waiting outranks failed: a waiting agent is reversible by the user right now.)
+ *   failed > waiting > running > done(unreviewed) > done(settled) > idle
+ * A FINISHED agent (completed / stopped / failed) can no longer consume an answer,
+ * so a stale waitingForInput flag never lifts it back into Needs-You (RUSH-1522) —
+ * waiting wins only for statuses that can still take input (running / idle).
  * Prototype: factory-floor.html:330,363-364.
  *
  * 'stalled' is a running agent that has gone quiet past STALL_THRESHOLD_MS — the
@@ -493,13 +495,15 @@ export function derivePhase(input: {
   active: boolean
   prOpenUnreviewed: boolean
 }): FloorPhase {
-  // Precedence: waiting > failed > running > done > idle.
-  if (input.waitingForInput) return 'waiting'
+  // Precedence: failed > waiting > running > done > idle. Finished statuses are
+  // checked FIRST: a completed/stopped/failed agent cannot consume an answer, so a
+  // stale waitingForInput flag must not resurrect it into Needs-You (RUSH-1522).
   if (input.status === 'failed') return 'failed'
+  if (input.status === 'completed') return 'done'
+  if (input.status === 'stopped') return 'idle'
+  if (input.waitingForInput) return 'waiting'
   // A stale 'running' whose process is no longer alive is really idle.
   if (input.status === 'running') return input.active ? 'running' : 'idle'
-  if (input.status === 'completed') return 'done'
-  // 'stopped' and 'idle' both settle to idle.
   return 'idle'
 }
 

@@ -422,6 +422,41 @@ describe('enrichWithSessionContent', () => {
     expect(s.phase).toBe('waiting');
   });
 
+  test('a fresh last write keeps a trailing prose question waiting', () => {
+    const content = fs.readFileSync(path.join(TESTDATA, 'claude-waiting.jsonl'), 'utf-8');
+    const s = enrichWithSessionContent({ ...base, lastActivityMs: now - 60_000 }, content, now);
+    expect(s.waitingForInput).toBe(true);
+    expect(s.phase).toBe('waiting');
+  });
+
+  test('a stale prose question decays — a finished session is not waiting (RUSH-1522)', () => {
+    const content = fs.readFileSync(path.join(TESTDATA, 'claude-waiting.jsonl'), 'utf-8');
+    const s = enrichWithSessionContent({ ...base, lastActivityMs: now - 2 * 60 * 60_000 }, content, now);
+    expect(s.waitingForInput).toBe(false);
+    expect(s.phase).toBe('running'); // untouched: the CLI-reported phase stands
+  });
+
+  test('freshness clears a stale waiting flag and phase from an older CLI (RUSH-1522)', () => {
+    const content = fs.readFileSync(path.join(TESTDATA, 'claude-waiting.jsonl'), 'utf-8');
+    const s = enrichWithSessionContent({
+      ...base,
+      phase: 'waiting',
+      waitingForInput: true,
+      lastActivityMs: now - 2 * 60 * 60_000,
+    }, content, now);
+    expect(s.waitingForInput).toBe(false);
+    expect(s.phase).toBe('idle');
+  });
+
+  test('a structural AskUserQuestion never decays, however stale', () => {
+    const content = [
+      JSON.stringify({ type: 'assistant', timestamp: '2026-06-30T10:00:00.000Z', message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', input: { questions: [{ question: 'Prod or staging?' }] } }] } }),
+    ].join('\n');
+    const s = enrichWithSessionContent({ ...base, lastActivityMs: now - 2 * 60 * 60_000 }, content, now);
+    expect(s.waitingForInput).toBe(true);
+    expect(s.phase).toBe('waiting');
+  });
+
   test('leaves non-parsable agent types untouched', () => {
     const cursor = { ...base, agentType: 'cursor' };
     const s = enrichWithSessionContent(cursor, 'irrelevant', now);

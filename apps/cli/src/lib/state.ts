@@ -649,25 +649,33 @@ function writeIfChanged(filePath: string, content: string): void {
 /**
  * Partition the in-memory Meta across three files by sync-domain:
  *   - central  `~/.agents/agents.yaml`             — portable, everything else
- *   - device   `~/.agents/devices/<machine>/agents.yaml` — `agents:` pins (per-device)
+ *   - device   `~/.agents/devices/<machine>/agents.yaml` — `agents:` pins +
+ *              `defaultBrowserProfile:` (both per-device)
  *   - history  `~/.agents/.history/version-resources.json` — `versions:` (machine-local)
  * All callers funnel through writeMeta → here, so nothing else changes. Empty
  * `agents:` / `versions:` are not written (no empty committed files).
  */
 function writeMetaUnlocked(meta: Meta): void {
-  const { agents, versions, ...central } = meta;
+  const { agents, versions, defaultBrowserProfile, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
   const devicePath = getDeviceMetaPath();
-  if (agents && Object.keys(agents).length > 0) {
+  const hasAgents = !!agents && Object.keys(agents).length > 0;
+  const hasDefaultBrowser = !!defaultBrowserProfile;
+  if (hasAgents || hasDefaultBrowser) {
+    // Device-local doc carries `agents:` pins and `defaultBrowserProfile:` — both
+    // are per-machine and must never land in central agents.yaml (which syncs).
+    const deviceDoc: Partial<Meta> = {};
+    if (hasAgents) deviceDoc.agents = agents;
+    if (hasDefaultBrowser) deviceDoc.defaultBrowserProfile = defaultBrowserProfile;
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
-    writeIfChanged(devicePath, META_HEADER + yaml.stringify({ agents }));
+    writeIfChanged(devicePath, META_HEADER + yaml.stringify(deviceDoc));
   } else if (fs.existsSync(devicePath)) {
-    // Every pin was cleared. Persist the emptied map instead of skipping the
-    // write — otherwise the stale device file survives and overlayMachineLocal
-    // re-applies the removed pin on the next read, leaving a dangling default
-    // (e.g. a launcher pointing at a version that was just uninstalled).
+    // Every device-local value was cleared. Persist the emptied doc instead of
+    // skipping the write — otherwise the stale device file survives and
+    // overlayMachineLocal re-applies the removed pin/default on the next read,
+    // leaving a dangling value (e.g. a default pointing at a deleted profile).
     writeIfChanged(devicePath, META_HEADER + yaml.stringify({ agents: {} }));
   }
 
@@ -685,6 +693,8 @@ function writeMetaUnlocked(meta: Meta): void {
  * Overlay this machine's local state onto a central-portable Meta:
  *   - `agents:` from the device file (device wins; the union both preserves the
  *     one-level merge and self-heals a pre-migration central that still has pins)
+ *   - `defaultBrowserProfile:` from the device file (device is the sole source;
+ *     the field is stripped from central on write, so nothing to merge against)
  *   - `versions:` from the history JSON (wholesale replace; falls back to
  *     whatever central carried when the history file doesn't exist yet)
  */
@@ -694,6 +704,7 @@ function overlayMachineLocal(meta: Meta): Meta {
     try {
       const dm = yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as Meta;
       if (dm?.agents) meta.agents = { ...meta.agents, ...dm.agents };
+      if (dm?.defaultBrowserProfile) meta.defaultBrowserProfile = dm.defaultBrowserProfile;
     } catch { /* ignore malformed device file */ }
   }
   const vrPath = getVersionResourcesPath();
