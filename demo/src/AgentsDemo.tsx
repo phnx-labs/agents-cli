@@ -365,6 +365,8 @@ export const AgentsDemo: React.FC = () => {
     "skills",
     "mcp",
     "cloud",
+    "fleet",
+    "focus",
   ]);
 
   return (

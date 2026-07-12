@@ -45,9 +45,9 @@ export const SCENES: Scene[] = [
     title: 'INSTALL',
     caption: 'Install any agent, pinned to an exact version.',
     lines: [
-      { text: '$ agents add claude@2.1.113', color: W, typing: true, delay: 0 },
-      { text: 'Installing Claude Code@2.1.113...', color: D, delay: 30, spinner: true },
-      { text: 'Installed Claude Code@2.1.113', color: G, delay: 70 },
+      { text: '$ agents add claude@2.1.187', color: W, typing: true, delay: 0 },
+      { text: 'Installing Claude Code@2.1.187...', color: D, delay: 30, spinner: true },
+      { text: 'Installed Claude Code@2.1.187', color: G, delay: 70 },
       { text: '  Created shim: ~/.agents/shims/claude', color: D, delay: 80 },
       { text: '  Synced: commands, skills, mcp, hooks, rules', color: G, delay: 90 },
     ],
@@ -59,12 +59,12 @@ export const SCENES: Scene[] = [
     caption: 'Switch the global default in one command.',
     clear: true,
     lines: [
-      { text: '$ agents use claude@2.1.113', color: W, typing: true, delay: 0 },
+      { text: '$ agents use claude@2.1.187', color: W, typing: true, delay: 0 },
       { text: 'Backed up existing config to: ~/.agents/backups/claude/1713600000/', color: D, delay: 25 },
-      { text: 'Set Claude Code@2.1.113 as global default', color: G, delay: 40 },
+      { text: 'Set Claude Code@2.1.187 as global default', color: G, delay: 40 },
       { text: 'Synced: commands, skills, mcp, hooks, rules', color: G, delay: 50 },
       { text: '', delay: 60 },
-      { text: '  ~/.claude/ -> ~/.agents/versions/claude/2.1.113/home/.claude/', color: C, delay: 65 },
+      { text: '  ~/.claude/ -> ~/.agents/versions/claude/2.1.187/home/.claude/', color: C, delay: 65 },
     ],
     durationFrames: 100,  // 3.3s
   },
@@ -115,10 +115,10 @@ export const SCENES: Scene[] = [
       { text: '$ agents install mcp:com.linear/linear', color: W, typing: true, delay: 0 },
       { text: "Added MCP server 'linear' to manifest", color: G, delay: 30 },
       { text: 'Registering across agents...', color: D, delay: 40, spinner: true },
-      { text: '  + Claude Code@2.1.113', color: G, delay: 55, indent: 2 },
-      { text: '  + Codex@0.116.0', color: G, delay: 60, indent: 2 },
-      { text: '  + Gemini CLI@1.0.2', color: G, delay: 65, indent: 2 },
-      { text: '  + Cursor@0.48.1', color: G, delay: 70, indent: 2 },
+      { text: '  + Claude Code@2.1.187', color: G, delay: 55, indent: 2 },
+      { text: '  + Codex@0.144.1', color: G, delay: 60, indent: 2 },
+      { text: '  + Grok CLI@0.2.32', color: G, delay: 65, indent: 2 },
+      { text: '  + Kimi CLI@0.19.2', color: G, delay: 70, indent: 2 },
       { text: '', delay: 80 },
       { text: 'Run: agents mcp register to apply', color: D, delay: 85 },
     ],
@@ -133,11 +133,11 @@ export const SCENES: Scene[] = [
     clear: true,
     lines: [
       { text: '$ cat .agents-version', color: W, typing: true, delay: 0 },
-      { text: 'claude  2.1.113', color: G, delay: 20 },
-      { text: 'codex   0.116.0', color: G, delay: 25 },
+      { text: 'claude  2.1.187', color: G, delay: 20 },
+      { text: 'codex   0.144.1', color: G, delay: 25 },
       { text: '', delay: 35 },
       { text: '$ cd myproject && agents run claude "audit auth"', color: W, typing: true, delay: 40 },
-      { text: 'Resolved claude@2.1.113 from .agents-version', color: C, delay: 70 },
+      { text: 'Resolved claude@2.1.187 from .agents-version', color: C, delay: 70 },
       { text: 'booting Claude Code  14 skills  3 MCP servers  ready', color: D, delay: 80 },
     ],
     durationFrames: 110,  // 3.7s
@@ -153,11 +153,11 @@ export const SCENES: Scene[] = [
       { text: '$ agents sessions', color: W, typing: true, delay: 0 },
       { text: '', delay: 20 },
       { text: 'ID         AGENT     VER      PROJECT         TOPIC                                    WHEN', color: D, delay: 25 },
-      { text: 'a7f3e2c1   claude    2.1.113  payments-api    fix stripe webhook signature verify       2m ago', color: W, delay: 30 },
-      { text: 'b8d4f102   codex     0.116.0  payments-api    refactor retry logic in queue worker      14m ago', color: W, delay: 35 },
-      { text: 'c9e5a213   gemini    1.0.2    landing-page    update hero copy and CTA placement        1h ago', color: W, delay: 40 },
-      { text: 'd0f6b324   claude    2.1.113  auth-service    add PKCE flow to OAuth provider           3h ago', color: W, delay: 45 },
-      { text: 'e1a7c435   codex     0.116.0  infra           terraform plan for staging RDS upgrade     5h ago', color: W, delay: 50 },
+      { text: 'a7f3e2c1   claude    2.1.187  payments-api    fix stripe webhook signature verify       2m ago', color: W, delay: 30 },
+      { text: 'b8d4f102   codex     0.144.1  payments-api    refactor retry logic in queue worker      14m ago', color: W, delay: 35 },
+      { text: 'c9e5a213   grok      0.2.32   landing-page    update hero copy and CTA placement        1h ago', color: W, delay: 40 },
+      { text: 'd0f6b324   claude    2.1.187  auth-service    add PKCE flow to OAuth provider           3h ago', color: W, delay: 45 },
+      { text: 'e1a7c435   codex     0.144.1  infra           terraform plan for staging RDS upgrade     5h ago', color: W, delay: 50 },
       { text: '', delay: 55 },
       { text: '5 sessions across 3 agents', color: D, delay: 60 },
     ],
@@ -173,11 +173,11 @@ export const SCENES: Scene[] = [
     lines: [
       { text: '$ agents run claude "find auth vulnerabilities in src/" \\', color: W, typing: true, delay: 0 },
       { text: '    | agents run codex "fix the issues Claude found" \\', color: W, typing: true, delay: 30 },
-      { text: '    | agents run gemini "write regression tests for the fixes"', color: W, typing: true, delay: 55 },
+      { text: '    | agents run kimi "write regression tests for the fixes"', color: W, typing: true, delay: 55 },
       { text: '', delay: 75 },
       { text: '[claude] Found 3 issues: missing CSRF token validation, SQL injection in /api/users, open redirect in /auth/callback', color: C, delay: 85 },
       { text: '[codex]  Fixed 3/3 issues across 4 files', color: G, delay: 105 },
-      { text: '[gemini] Generated 7 test cases covering all fixes', color: Y, delay: 125 },
+      { text: '[kimi]   Generated 7 test cases covering all fixes', color: Y, delay: 125 },
     ],
     durationFrames: 150,  // 5s
   },
@@ -203,21 +203,61 @@ export const SCENES: Scene[] = [
     durationFrames: 160,  // 5.3s
   },
 
-  // ── ACT 8: ROTATION (UNIQUE FEATURE) ──
+  // ── ACT 8: DISTRIBUTED TEAMS (FLEET) ──
+  {
+    id: 'fleet',
+    title: 'FLEET',
+    caption: 'One team, many machines — teammates run across your fleet over SSH.',
+    clear: true,
+    lines: [
+      { text: '$ agents teams create feat --devices yosemite-s0,yosemite-s1', color: W, typing: true, delay: 0 },
+      { text: "Team 'feat' created — device pool: yosemite-s0, yosemite-s1", color: G, delay: 30 },
+      { text: '$ agents teams add feat claude "Owns: api/*" --name api', color: W, typing: true, delay: 40 },
+      { text: '$ agents teams start feat --watch', color: W, typing: true, delay: 70 },
+      { text: '', delay: 90 },
+      { text: '  api   claude@2.1.187   yosemite-s0   working', color: W, delay: 95 },
+      { text: '  ui    codex@0.144.1    yosemite-s1   working', color: W, delay: 102 },
+      { text: '', delay: 110 },
+      { text: '2 teammates across 2 machines — dispatched over SSH', color: G, delay: 115 },
+    ],
+    durationFrames: 150,  // 5s
+  },
+
+  // ── ACT 9: SESSIONS FOCUS ──
+  {
+    id: 'focus',
+    title: 'FOCUS',
+    caption: 'Jump back into any session, wherever it runs.',
+    clear: true,
+    lines: [
+      { text: '$ agents sessions --active', color: W, typing: true, delay: 0 },
+      { text: '', delay: 20 },
+      { text: 'ID         AGENT     DEVICE        STATE     TOPIC', color: D, delay: 25 },
+      { text: 'a7f3e2c1   claude    zion          working   fix stripe webhook signature verify', color: W, delay: 30 },
+      { text: 'b8d4f102   codex     yosemite-s0   waiting   refactor retry logic in queue worker', color: Y, delay: 35 },
+      { text: '', delay: 45 },
+      { text: '$ agents sessions focus b8d4f102', color: W, typing: true, delay: 55 },
+      { text: 'Attaching to codex on yosemite-s0 (ssh -tt, tmux attach)...', color: D, delay: 80, spinner: true },
+      { text: 'Attached — you are in the live session', color: G, delay: 95 },
+    ],
+    durationFrames: 110,  // 3.7s
+  },
+
+  // ── ACT 10: ROTATION (UNIQUE FEATURE) ──
   {
     id: 'rotate',
     title: 'ROTATE',
     caption: 'Rotate across accounts — never hit a usage limit again.',
     clear: true,
     lines: [
-      { text: '$ agents run claude --rotate "run full test suite"', color: W, typing: true, delay: 0 },
+      { text: '$ agents run claude --balanced "run full test suite"', color: W, typing: true, delay: 0 },
       { text: '', delay: 25 },
-      { text: 'Checking usage across 3 Claude versions...', color: D, delay: 30 },
-      { text: '  claude@2.1.113 (you@example.com)    89% used', color: Y, delay: 40 },
-      { text: '  claude@2.1.113 (work@example.com)   23% used', color: G, delay: 45 },
-      { text: '  claude@2.1.110 (you@example.com)    expired', color: R, delay: 50 },
+      { text: 'Checking usage across 3 Claude accounts...', color: D, delay: 30 },
+      { text: '  claude@2.1.187 (you@example.com)    89% used', color: Y, delay: 40 },
+      { text: '  claude@2.1.187 (work@example.com)   23% used', color: G, delay: 45 },
+      { text: '  claude@2.1.170 (you@example.com)    expired', color: R, delay: 50 },
       { text: '', delay: 55 },
-      { text: 'Selected: claude@2.1.113 (work@example.com) -- lowest usage', color: G, delay: 60 },
+      { text: 'Selected: claude@2.1.187 (work@example.com) -- lowest usage', color: G, delay: 60 },
       { text: 'booting Claude Code  14 skills  3 MCP servers  ready', color: D, delay: 70 },
     ],
     durationFrames: 100,  // 3.3s
@@ -233,6 +273,6 @@ export const SCENES: Scene[] = [
   },
 ];
 
-// Total: ~40s at 30fps = 1200 frames
+// Total: ~48.5s at 30fps = 1460 frames
 // We'll adjust durationInFrames in Root.tsx to match
 export const TOTAL_FRAMES = SCENES.reduce((sum, s) => sum + s.durationFrames, 0);
