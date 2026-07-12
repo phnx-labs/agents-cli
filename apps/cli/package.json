@@ -24,6 +24,7 @@
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/**/*.json",
+    "dist/bin/**",
     "dist/lib/secrets/Agents CLI.app/**",
     "dist/lib/menubar/MenubarHelper.app/**",
     "scripts/postinstall.js",
@@ -44,10 +45,10 @@
     "url": "https://github.com/phnx-labs/agents-cli/issues"
   },
   "scripts": {
-    "build": "tsc && rm -rf 'dist/lib/secrets/AgentsKeychain.app' 'dist/lib/secrets/Agents CLI.app' 'dist/lib/menubar/MenubarHelper.app' && ([ -d 'bin/Agents CLI.app' ] && cp -R 'bin/Agents CLI.app' 'dist/lib/secrets/Agents CLI.app' || true) && ([ -d 'bin/MenubarHelper.app' ] && mkdir -p 'dist/lib/menubar' && cp -R 'bin/MenubarHelper.app' 'dist/lib/menubar/MenubarHelper.app' || true)",
+    "build": "tsc && rm -rf 'dist/lib/secrets/AgentsKeychain.app' 'dist/lib/secrets/Agents CLI.app' 'dist/lib/menubar/MenubarHelper.app' && ([ -d 'bin/Agents CLI.app' ] && cp -R 'bin/Agents CLI.app' 'dist/lib/secrets/Agents CLI.app' || true) && ([ -d 'bin/MenubarHelper.app' ] && mkdir -p 'dist/lib/menubar' && cp -R 'bin/MenubarHelper.app' 'dist/lib/menubar/MenubarHelper.app' || true) && ([ -f 'bin/agents-macos' ] && mkdir -p dist/bin && cp -f 'bin/agents-macos' 'dist/bin/agents' && chmod 755 'dist/bin/agents' || true)",
     "build:bin": "scripts/build-bin.sh",
     "prepare": "npm run build",
-    "prepack": "cp ../../README.md README.md && scripts/verify-keychain-helper.sh && scripts/verify-menubar-helper.sh",
+    "prepack": "cp ../../README.md README.md && scripts/verify-keychain-helper.sh && scripts/verify-menubar-helper.sh && scripts/verify-cli-binary.sh",
     "postinstall": "node scripts/postinstall.js",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
