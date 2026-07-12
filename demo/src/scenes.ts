@@ -273,6 +273,6 @@ export const SCENES: Scene[] = [
   },
 ];
 
-// Total: ~48.5s at 30fps = 1460 frames
+// Total: ~55.8s at 30fps = 1675 frames
 // We'll adjust durationInFrames in Root.tsx to match
 export const TOTAL_FRAMES = SCENES.reduce((sum, s) => sum + s.durationFrames, 0);
