@@ -462,19 +462,34 @@ function truncateCommand(command: string, maxLen: number = 50): string {
 }
 
 /**
+ * A prose trailing question ("…?") is a HEURISTIC, so it decays: past this long
+ * with no session writes it stops reading as "waiting" — otherwise a finished
+ * session that signed off with "anything else?" sits in NEEDS YOU forever
+ * (RUSH-1522). A structural AskUserQuestion never decays: it is a precise,
+ * still-unanswered decision.
+ */
+export const PROSE_QUESTION_FRESH_MS = 30 * 60_000;
+
+/**
  * Detect whether the agent appears to be awaiting user input.
  * Walks the session JSONL from the end and looks at the last actionable turn:
  *   - Claude: last assistant message whose final text block ends with "?" and
  *     has no pending tool_use, OR used the AskUserQuestion tool.
  *   - Codex:  last response_item message (role=assistant) with text ending "?".
  * Returns false for agents mid-tool or when the user has already responded.
+ *
+ * `freshness` (when the caller knows the session file's last write) applies the
+ * PROSE_QUESTION_FRESH_MS decay to the prose-"?" heuristic; the structural
+ * AskUserQuestion signal is exempt. Omitted freshness keeps prose undecayed.
  */
 export function detectWaitingForInput(
   sessionContent: string,
-  agentType: AgentType
+  agentType: AgentType,
+  freshness?: { lastWriteMs: number; nowMs: number }
 ): boolean {
   if (agentType !== 'claude' && agentType !== 'codex') return false;
   const lines = sessionContent.split(/\r?\n/).filter(l => l.trim());
+  const proseFresh = freshness == null || freshness.nowMs - freshness.lastWriteMs < PROSE_QUESTION_FRESH_MS;
   const endsWithQuestion = (s: string) => /\?\s*$/.test(s.trim());
 
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -503,7 +518,7 @@ export function detectWaitingForInput(
 
       const textBlocks = content.filter((b: any) => b?.type === 'text' && typeof b.text === 'string');
       if (textBlocks.length === 0) return false;
-      return endsWithQuestion(textBlocks[textBlocks.length - 1].text);
+      return proseFresh && endsWithQuestion(textBlocks[textBlocks.length - 1].text);
     }
 
     if (agentType === 'codex') {
@@ -520,7 +535,7 @@ export function detectWaitingForInput(
         else if (Array.isArray(content)) {
           text = content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join('');
         }
-        return endsWithQuestion(text);
+        return proseFresh && endsWithQuestion(text);
       }
     }
   }

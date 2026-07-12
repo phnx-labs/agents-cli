@@ -121,10 +121,32 @@ function makeTask(overrides: Partial<UnifiedTask> = {}): UnifiedTask {
   }
 }
 
-describe('derivePhase — precedence waiting > failed > running > done > idle', () => {
-  test('waitingForInput wins over a failed status', () => {
+describe('derivePhase — precedence failed > waiting > running > done > idle', () => {
+  test('a failed agent stays failed even with a stale waiting flag (it cannot take input)', () => {
     expect(
       derivePhase({ status: 'failed', waitingForInput: true, active: true, prOpenUnreviewed: false }),
+    ).toBe('failed')
+  })
+
+  test('a completed agent lands in done, never needs-you, despite a stale waiting flag (RUSH-1522)', () => {
+    expect(
+      derivePhase({ status: 'completed', waitingForInput: true, active: false, prOpenUnreviewed: false }),
+    ).toBe('done')
+  })
+
+  test('a stopped agent settles to idle despite a stale waiting flag (RUSH-1522)', () => {
+    expect(
+      derivePhase({ status: 'stopped', waitingForInput: true, active: false, prOpenUnreviewed: false }),
+    ).toBe('idle')
+  })
+
+  test('a real pending ask on a live agent still classifies as waiting', () => {
+    expect(
+      derivePhase({ status: 'running', waitingForInput: true, active: true, prOpenUnreviewed: false }),
+    ).toBe('waiting')
+    // An open-but-quiet tab with an unanswered ask is still answerable.
+    expect(
+      derivePhase({ status: 'idle', waitingForInput: true, active: false, prOpenUnreviewed: false }),
     ).toBe('waiting')
   })
 

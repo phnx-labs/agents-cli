@@ -110,6 +110,15 @@ export interface StateContext {
 /** A healthy live session writes several times a minute; 2 min ⇒ "recently active". */
 const ACTIVE_WINDOW_MS = 2 * 60_000;
 
+/**
+ * A prose trailing question ("…?") is a HEURISTIC, so it decays: past this long
+ * with no session writes it stops classifying as waiting_input — otherwise a
+ * finished session that signed off with "anything else?" reads as needing input
+ * forever (RUSH-1522). The structural ExitPlanMode / AskUserQuestion signals are
+ * exempt: they are precise, still-unanswered decisions.
+ */
+const PROSE_QUESTION_FRESH_MS = 30 * 60_000;
+
 /** Claude tool names that structurally mean "the agent handed control back to you". */
 const PLAN_TOOL = 'ExitPlanMode';
 const ASK_TOOL = 'AskUserQuestion';
@@ -399,7 +408,11 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     }
     // Assistant spoke last and stopped. A trailing question → waiting; else idle.
     // A prose question takes a free-text reply (no select-list), so no options/keys.
-    if (looksLikeQuestion(last.content ?? '')) {
+    // Unlike the structural plan/ask signals above, the prose heuristic DECAYS: a
+    // question nobody answered within PROSE_QUESTION_FRESH_MS is a session that
+    // ended, not one that needs you (RUSH-1522). Unknown mtime keeps the question.
+    const questionFresh = ctx.mtimeMs == null || Date.now() - ctx.mtimeMs < PROSE_QUESTION_FRESH_MS;
+    if (questionFresh && looksLikeQuestion(last.content ?? '')) {
       const text = oneLine(last.content ?? '');
       return { ...base, activity: 'waiting_input', awaitingReason: 'question', question: { text, reason: 'question' } };
     }

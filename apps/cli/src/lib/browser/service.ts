@@ -20,7 +20,7 @@ import {
 import { killChrome, getRunningChromeInfo, launchBrowser, allocatePort } from './chrome.js';
 import { connectLocal } from './drivers/local.js';
 import { connectSSH, shellQuote } from './drivers/ssh.js';
-import { clearProfileRuntime } from './runtime-state.js';
+import { clearProfileRuntime, listProfileCacheDirs, readProfileRuntimeMeta, isProcessAlive } from './runtime-state.js';
 import { resolveDomainSkill, type ResolvedDomainSkill } from './domain-skills.js';
 import {
   generateTaskId,
@@ -512,6 +512,7 @@ export class BrowserService {
           killChrome(conn.pid);
           conn.cleanup?.();
           this.connections.delete(profileName);
+          clearProfileRuntime(profileName);
         }
 
         return { ok: true, profile: profileName };
@@ -544,19 +545,19 @@ export class BrowserService {
       killChrome(conn.pid);
       conn.cleanup?.();
       this.connections.delete(key);
+      clearProfileRuntime(key);
     }
 
-    const runtimeDir = getProfileRuntimeDir(profileName);
-    const pidFile = path.join(runtimeDir, 'pid');
-    const portFile = path.join(runtimeDir, 'port');
-
-    if (fs.existsSync(pidFile)) {
-      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-      killChrome(pid);
-      fs.unlinkSync(pidFile);
-    }
-    if (fs.existsSync(portFile)) {
-      fs.unlinkSync(portFile);
+    // Kill stale processes and clean runtime dirs for every composite and
+    // fork entry belonging to this profile (including `.N` forks left by
+    // earlier daemon sessions that the connection loop above didn't cover).
+    for (const dir of listProfileCacheDirs(profileName)) {
+      const dirName = path.basename(dir);
+      const meta = readProfileRuntimeMeta(dirName);
+      if (meta?.pid && meta.pid !== 0 && isProcessAlive(meta.pid, meta.command)) {
+        killChrome(meta.pid);
+      }
+      clearProfileRuntime(dirName);
     }
   }
 

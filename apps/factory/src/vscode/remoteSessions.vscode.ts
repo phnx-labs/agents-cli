@@ -282,11 +282,12 @@ async function fetchActiveForHost(sshTarget: string, isLocal: boolean, hostKey: 
       if (session.host === LOCAL_LABEL && session.sessionFile) {
         const tail = await readSessionTail(session.sessionFile, session.agentType);
         if (tail) {
-          session = enrichWithSessionContent(session, tail.content, fetchedAt);
           // The file's last-write time is the real last-activity signal (the CLI
-          // payload carries no timestamp for terminal sessions) — feed it to the
-          // staleness check so an abandoned local agent ages out.
+          // payload carries no timestamp for terminal sessions) — stamp it BEFORE
+          // enriching so the staleness check ages out an abandoned local agent AND
+          // enrich's prose-question decay sees the real last write (RUSH-1522).
           session = { ...session, lastActivityMs: tail.mtimeMs };
+          session = enrichWithSessionContent(session, tail.content, fetchedAt);
         }
       }
       sessions.push(session);

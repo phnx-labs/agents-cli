@@ -6,6 +6,23 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **NEEDS YOU precision — finished/stopped agents no longer masquerade as needing
+  input (RUSH-1522).** Two gates tightened. (1) `derivePhase` now checks terminal
+  statuses first: a `completed`/`stopped`/`failed` agent can no longer be lifted
+  into the `waiting` phase by a stale `waitingForInput` flag — it lands in
+  DONE/idle/FAILED where it belongs. (2) The prose trailing-"?" waiting heuristic
+  now decays: past 30 minutes with no session writes (`PROSE_QUESTION_FRESH_MS`),
+  a session that signed off with "anything else?" stops classifying as waiting —
+  previously such sessions sat in NEEDS YOU indefinitely (the reported card was 13
+  days stale). Structural signals are exempt: a genuinely pending
+  `AskUserQuestion`/`ExitPlanMode` still lands in NEEDS YOU at any age. Source:
+  `ui/settings/components/mission-control/floorModel.ts` (`derivePhase`),
+  `src/core/session.activity.ts` (`detectWaitingForInput`),
+  `src/core/remoteSessions.ts` (`enrichWithSessionContent`),
+  `src/vscode/terminals.vscode.ts`.
+
 ### Added
 
 - **Project rollups — one glance answers "what's happening in this project".** The
