@@ -11,9 +11,21 @@ fi
 
 VERSION=$1
 
-# Get the project root directory
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Resolve script dir absolutely before any cwd change so activate.sh
+# can be found regardless of the invocation shape (repo root vs package cwd).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# Install dependencies (factory + UI) so a clean worktree can build.
+if [ ! -d "node_modules" ]; then
+    echo "Installing factory dependencies..."
+    bun install
+fi
+if [ ! -d "ui/node_modules" ]; then
+    echo "Installing UI dependencies..."
+    (cd ui && bun install)
+fi
 
 # Build the extension
 echo "Building extension..."
@@ -48,4 +60,4 @@ echo "Extension installed to $INSTALLED editor(s)."
 
 # Installed to disk != active in a running editor. Reload running windows and
 # verify activation from exthost.log (best-effort reload, authoritative verify).
-bash "$(dirname "${BASH_SOURCE[0]}")/activate.sh" "swarmify.swarm-ext"
+bash "$SCRIPT_DIR/activate.sh" "swarmify.swarm-ext"
