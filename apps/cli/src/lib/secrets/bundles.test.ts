@@ -1,12 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
+  listBundles,
   readAndResolveBundleEnv,
+  readBundle,
   shouldEvictAfterBundleWrite,
+  writeBundle,
   type SecretsBundle,
 } from './bundles.js';
-import { setKeychainBackendForTest, type KeychainBackend } from './index.js';
+import {
+  deleteKeychainToken,
+  secretsKeychainItem,
+  setKeychainBackendForTest,
+  setKeychainServiceHashingForTest,
+  setKeychainToken,
+  type KeychainBackend,
+} from './index.js';
 
 /**
  * Regression tests for the two least-privilege bypasses on the
@@ -175,5 +186,89 @@ describe('shouldEvictAfterBundleWrite (writes never leave a stale broker copy)',
   it('never touches the real broker while a test keychain backend is installed', () => {
     // A test writing bundle 'prod' must not evict the user's real 'prod' unlock.
     expect(shouldEvictAfterBundleWrite(false, undefined, true)).toBe(false);
+  });
+});
+
+// ─── Bundle lifecycle under hashed service names (GitHub #316) ──────────────
+//
+// Same code paths as production macOS with hashing active: the in-memory
+// backend stands in for the keychain, the test seam pins the HMAC key, and
+// every storage-layer name must be opaque (`agents-cli.h.*`).
+
+describe('bundles under hashed service names (#316)', () => {
+  class MemBackend implements KeychainBackend {
+    store = new Map<string, string>();
+    has(item: string) { return this.store.has(item); }
+    get(item: string) {
+      const v = this.store.get(item);
+      if (v === undefined) throw new Error(`missing ${item}`);
+      return v;
+    }
+    set(item: string, value: string) { this.store.set(item, value); }
+    delete(item: string) { return this.store.delete(item); }
+    list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+  }
+
+  let mem: MemBackend;
+  let prevBackend: KeychainBackend | null = null;
+  const key = randomBytes(32);
+  const prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+  const prevNoUsage = process.env.AGENTS_NO_USAGE_TRACK;
+
+  beforeEach(() => {
+    mem = new MemBackend();
+    prevBackend = setKeychainBackendForTest(mem);
+    setKeychainServiceHashingForTest(key);
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    process.env.AGENTS_NO_USAGE_TRACK = '1';
+  });
+  afterEach(() => {
+    setKeychainServiceHashingForTest(null);
+    setKeychainBackendForTest(prevBackend);
+    if (prevNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
+    if (prevNoUsage === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
+    else process.env.AGENTS_NO_USAGE_TRACK = prevNoUsage;
+  });
+
+  function createBundle(name: string, vars: Record<string, string>): void {
+    const bundle: SecretsBundle = { name, vars: {} };
+    for (const [k, v] of Object.entries(vars)) {
+      setKeychainToken(secretsKeychainItem(name, k), v);
+      bundle.vars[k] = `keychain:${k}`;
+    }
+    writeBundle(bundle);
+  }
+
+  it('stores metadata and values under opaque names only', () => {
+    createBundle('prod', { API_KEY: 'sk-1', DB_URL: 'postgres://x' });
+    for (const stored of mem.store.keys()) {
+      expect(stored).toMatch(/^agents-cli\.h\./);
+      expect(stored).not.toContain('prod');
+      expect(stored).not.toContain('API_KEY');
+    }
+  });
+
+  it('readBundle and readAndResolveBundleEnv round-trip by bundle name (one silent enumeration + one batch)', () => {
+    createBundle('prod', { API_KEY: 'sk-1', DB_URL: 'postgres://x' });
+    expect(Object.keys(readBundle('prod').vars).sort()).toEqual(['API_KEY', 'DB_URL']);
+    const { bundle, env } = readAndResolveBundleEnv('prod', { caller: 'test' });
+    expect(bundle.name).toBe('prod');
+    expect(env).toEqual({ API_KEY: 'sk-1', DB_URL: 'postgres://x' });
+  });
+
+  it('listBundles recovers display names from the persisted metadata JSON', () => {
+    createBundle('prod', { API_KEY: 'sk-1' });
+    createBundle('hetzner.com', { HCLOUD_TOKEN: 'hc-1' });
+    const names = listBundles().map((b) => b.name);
+    expect(names).toContain('prod');
+    expect(names).toContain('hetzner.com');
+  });
+
+  it('deleting a key purges the hashed value item', () => {
+    createBundle('prod', { API_KEY: 'sk-1' });
+    const item = secretsKeychainItem('prod', 'API_KEY');
+    expect(deleteKeychainToken(item)).toBe(true);
+    expect(() => readAndResolveBundleEnv('prod', {})).toThrow(/stored item .* not found/);
   });
 });

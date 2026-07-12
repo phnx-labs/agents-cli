@@ -24,6 +24,7 @@
  */
 
 import { execFileSync, spawnSync } from 'child_process';
+import { createHmac, randomBytes } from 'node:crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -144,6 +145,10 @@ let backend: KeychainBackend | null = null;
 export function setKeychainBackendForTest(b: KeychainBackend | null): KeychainBackend | null {
   const prev = backend;
   backend = b;
+  // The hashing state depends on whether a backend is installed — never let a
+  // state resolved against the real keychain leak into a backend-driven test.
+  hashStateCache = null;
+  autoRekeyAttempted = false;
   return prev;
 }
 
@@ -168,8 +173,563 @@ function isOurItem(item: string): boolean {
   return item.startsWith('agents-cli.');
 }
 
+// ─── Hashed service names (GitHub #316, Finding 1) ──────────────────────────
+//
+// The helper's `list` never decrypts and never prompts (by design), which made
+// service names enumerable metadata: any same-user process could silently read
+// every bundle, key, and provider name (`agents-cli.secrets.<bundle>.<KEY>`,
+// `agents-cli.<provider>.token`) and build a target list before ever popping
+// Touch ID. To close that, on macOS every item in our namespace is stored
+// under an opaque HMAC-SHA256-hashed service name:
+//
+//   agents-cli.bundles.<name>          → agents-cli.h.<ns>.m
+//   agents-cli.secrets.<bundle>.<KEY>  → agents-cli.h.<ns>.k.<kh>
+//   agents-cli.<anything else>         → agents-cli.h.o.<ih>
+//
+// where <ns> = HMAC(key, 'ns\0'+bundle) and <kh>/<ih> are per-item HMACs
+// (first 32 hex chars each). The per-bundle <ns> segment is deliberate: a
+// bundle's value items keep a common silent-enumerable prefix
+// (`agents-cli.h.<ns>.k.`), so readAndResolveBundleEnv still fetches metadata
+// + all values in ONE get-batch behind ONE Touch ID — a flat hash of the full
+// name would have forced a second prompt on every bundle read. Names still
+// start with `agents-cli.`, so the helper's JIT-migration guard and prefix
+// gates keep working. What an enumerator learns shrinks to item grouping and
+// counts — never a bundle, key, or provider name.
+//
+// The HMAC key is 32 random bytes in `agents-cli.hmackey`, written through the
+// helper's no-ACL path (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+// device-local, access-group-pinned). Deliberately NO user-presence ACL: the
+// key protects metadata confidentiality only, and gating it behind Touch ID
+// would make every silent operation (list/has) prompt. Per-machine is fine —
+// sync re-materializes items locally through the same primitives, so hashed
+// names never leave the machine. Deriving the key from machine constants was
+// rejected: that would hand any local process a dictionary-confirmation
+// oracle without even touching the keychain.
+//
+// Hashing activates only after the one-time re-key migration
+// (rekeyServiceNames below / `agents secrets rekey`) has moved every existing
+// cleartext-named item; until then all operations use cleartext names exactly
+// as before. The sentinel lives INSIDE the hmackey record — in the keychain,
+// not on disk — so it can never desync from the items it describes (e.g. a
+// keychain restored from a backup brings its matching state along).
+
+const HASHED_SERVICE_PREFIX = `${SERVICE_PREFIX}.h.`;
+export const HMAC_KEY_ITEM = `${SERVICE_PREFIX}.hmackey`;
+const HASHED_META_RE = /^agents-cli\.h\.[0-9a-f]{32}\.m$/;
+
+interface HmacKeyRecord {
+  v: number;
+  /** 64 hex chars — the raw HMAC-SHA256 key. */
+  k: string;
+  /** True once the one-time re-key has moved every cleartext-named item. */
+  migrated: boolean;
+  /** Old cleartext services whose hashed copies are verified but whose
+   * originals are not yet deleted (crash-resume list; deletes are silent). */
+  pendingDeletes?: string[];
+}
+
+interface HashState {
+  active: boolean;
+  key: Buffer | null;
+  record: HmacKeyRecord | null;
+}
+
+let hashStateCache: HashState | null = null;
+let forcedTestKey: Buffer | null = null;
+let rawScopeDepth = 0;
+let rekeyRunning = false;
+let autoRekeyAttempted = false;
+
+/** Force hashed service names on with a fixed key (test only). Pass null to
+ * restore lazy production resolution. Composes with setKeychainBackendForTest
+ * so unit tests exercise the exact transform production uses. */
+export function setKeychainServiceHashingForTest(key: Buffer | null): void {
+  forcedTestKey = key;
+  hashStateCache = null;
+  autoRekeyAttempted = false;
+}
+
+/**
+ * Run `fn` with service-name hashing suspended: every primitive uses the
+ * literal names it is given. For migration flows ONLY — they enumerate raw
+ * names from the helper (which may be pre-re-key cleartext leftovers) and must
+ * read/delete those exact items, not their hashed transforms.
+ */
+export function withRawKeychainServiceNames<T>(fn: () => T): T {
+  rawScopeDepth++;
+  try {
+    return fn();
+  } finally {
+    rawScopeDepth--;
+  }
+}
+
+function hmacHex32(key: Buffer, input: string): string {
+  return createHmac('sha256', key).update(input, 'utf8').digest('hex').slice(0, 32);
+}
+
+function bundleNamespaceHash(bundle: string, key: Buffer): string {
+  return hmacHex32(key, `ns\0${bundle}`);
+}
+
+/** The hashed (storage) service name for a cleartext item name. Exported for
+ * the re-key migration and tests; runtime callers go through the primitives,
+ * which apply this transparently. */
+export function hashedServiceName(item: string, key: Buffer): string {
+  if (item.startsWith(BUNDLES_ITEM_PREFIX)) {
+    const name = item.slice(BUNDLES_ITEM_PREFIX.length);
+    return `${HASHED_SERVICE_PREFIX}${bundleNamespaceHash(name, key)}.m`;
+  }
+  if (item.startsWith(SECRETS_ITEM_PREFIX)) {
+    // Bundle names may contain dots; env keys and wallet ids never do — the
+    // LAST dot is the unambiguous bundle/key split.
+    const rest = item.slice(SECRETS_ITEM_PREFIX.length);
+    const dot = rest.lastIndexOf('.');
+    if (dot > 0 && dot < rest.length - 1) {
+      const bundle = rest.slice(0, dot);
+      const keyName = rest.slice(dot + 1);
+      return `${HASHED_SERVICE_PREFIX}${bundleNamespaceHash(bundle, key)}.k.${hmacHex32(key, `kv\0${bundle}\0${keyName}`)}`;
+    }
+  }
+  return `${HASHED_SERVICE_PREFIX}o.${hmacHex32(key, `it\0${item}`)}`;
+}
+
+function parseHmacKeyRecord(raw: string): HmacKeyRecord | null {
+  try {
+    const rec = JSON.parse(raw) as HmacKeyRecord;
+    if (rec && typeof rec === 'object' && rec.v === 1 && typeof rec.k === 'string' && /^[0-9a-f]{64}$/.test(rec.k)) {
+      return rec;
+    }
+  } catch {
+    /* malformed — treated as absent */
+  }
+  return null;
+}
+
+function readHmacKeyRecord(): HmacKeyRecord | null {
+  // HMAC_KEY_ITEM is exempt from the transform, so this routes to the helper
+  // (or the test backend) under its literal name. The item is no-ACL, so the
+  // read is silent.
+  let raw: string;
+  try {
+    raw = getKeychainToken(HMAC_KEY_ITEM);
+  } catch {
+    return null;
+  }
+  return parseHmacKeyRecord(raw);
+}
+
+function writeHmacKeyRecord(rec: HmacKeyRecord): void {
+  // JSON.stringify drops undefined fields (used to clear pendingDeletes).
+  // noAcl: reads of this record must stay prompt-free; an old pinned helper
+  // without the set-no-acl path rejects this loudly (see setKeychainToken),
+  // which is exactly the "old helper never half-runs the re-key" gate.
+  setKeychainToken(HMAC_KEY_ITEM, JSON.stringify(rec), { noAcl: true });
+  hashStateCache = null;
+}
+
+function resolveHashState(): HashState {
+  if (forcedTestKey) return { active: true, key: forcedTestKey, record: null };
+  if (hashStateCache) return hashStateCache;
+  if (backend || process.platform !== 'darwin' || process.env.AGENTS_SECRETS_HASH_NAMES === '0') {
+    hashStateCache = { active: false, key: null, record: null };
+    return hashStateCache;
+  }
+  const record = readHmacKeyRecord();
+  const key = record ? Buffer.from(record.k, 'hex') : null;
+  // AGENTS_SECRETS_HASH_NAMES=1 forces hashing on before the machine-wide
+  // sentinel flips — used to verify a partial (--prefix) re-key end-to-end.
+  const active = !!record && (record.migrated || process.env.AGENTS_SECRETS_HASH_NAMES === '1');
+  hashStateCache = { active, key, record };
+  return hashStateCache;
+}
+
+/**
+ * The storage-layer service name for `item`: hashed when hashing is active,
+ * the item itself otherwise. For callers that mix helper-enumerated
+ * (already-hashed) names with computed cleartext names in one lookup map —
+ * see readAndResolveBundleEnv.
+ */
+export function keychainServiceAlias(item: string): string {
+  return prepareServiceName(item);
+}
+
+function prepareServiceName(item: string, opts?: { autoRekey?: boolean }): string {
+  if (rawScopeDepth > 0) return item;
+  if (!isOurItem(item)) return item;
+  if (item === HMAC_KEY_ITEM || item.startsWith(HASHED_SERVICE_PREFIX)) return item;
+  if (opts?.autoRekey) maybeAutoRekey();
+  const st = resolveHashState();
+  if (!st.active || !st.key) return item;
+  return hashedServiceName(item, st.key);
+}
+
+interface MappedListPrefix {
+  prefix: string;
+  filter?: (service: string) => boolean;
+}
+
+/**
+ * Map a cleartext enumeration prefix to its hashed-storage equivalent. Only
+ * two shapes are ever enumerated at sub-namespace granularity (bundle
+ * metadata, and one bundle's value items); both map to a broad `agents-cli.`
+ * helper query plus a client-side filter. Every mapped filter is a UNION with
+ * the original cleartext prefix so mid-migration leftovers (or items written
+ * by an older CLI on this machine) stay visible to migration tooling.
+ */
+function prepareListPrefix(prefix: string): MappedListPrefix {
+  if (rawScopeDepth > 0) return { prefix };
+  if (!prefix.startsWith(`${SERVICE_PREFIX}.`)) return { prefix };
+  if (prefix.startsWith(HASHED_SERVICE_PREFIX)) return { prefix };
+  maybeAutoRekey();
+  const st = resolveHashState();
+  if (!st.active || !st.key) return { prefix };
+  if (prefix === BUNDLES_ITEM_PREFIX) {
+    return {
+      prefix: `${SERVICE_PREFIX}.`,
+      filter: (s) => HASHED_META_RE.test(s) || s.startsWith(BUNDLES_ITEM_PREFIX),
+    };
+  }
+  if (prefix.startsWith(SECRETS_ITEM_PREFIX) && prefix.endsWith('.') && prefix.length > SECRETS_ITEM_PREFIX.length + 1) {
+    const bundle = prefix.slice(SECRETS_ITEM_PREFIX.length, -1);
+    const hashedValuePrefix = `${HASHED_SERVICE_PREFIX}${bundleNamespaceHash(bundle, st.key)}.k.`;
+    return {
+      prefix: `${SERVICE_PREFIX}.`,
+      filter: (s) => s.startsWith(hashedValuePrefix) || s.startsWith(prefix),
+    };
+  }
+  return { prefix };
+}
+
+function listCleartextServices(prefixes?: string[]): string[] {
+  const all = withRawKeychainServiceNames(() => listKeychainItems(`${SERVICE_PREFIX}.`));
+  return all.filter(
+    (s) =>
+      s.startsWith(`${SERVICE_PREFIX}.`) &&
+      !s.startsWith(HASHED_SERVICE_PREFIX) &&
+      s !== HMAC_KEY_ITEM &&
+      (!prefixes || prefixes.some((p) => s.startsWith(p))),
+  );
+}
+
+function ensureHmacKeyRecord(markMigratedIfCreating: boolean): HmacKeyRecord {
+  const existing = readHmacKeyRecord();
+  if (existing) return existing;
+  const fresh: HmacKeyRecord = { v: 1, k: randomBytes(32).toString('hex'), migrated: markMigratedIfCreating };
+  writeHmacKeyRecord(fresh);
+  // If two processes raced the first write, the keychain holds exactly one
+  // winner — adopt whatever is stored NOW so both sides converge on a single
+  // key before hashing anything under it.
+  return readHmacKeyRecord() ?? fresh;
+}
+
+/**
+ * Guard against a silently-degraded enumeration. The helper's `list` skips the
+ * data-protection pass wholesale when the DP keybag is locked (screen lock —
+ * see keychain-helper.swift, errSecInteractionNotAllowed handling), returning
+ * an EMPTY result even though items exist and no-ACL reads/writes still work.
+ * Observed live on macOS 26: `set-no-acl` + `get` succeed while `list` of the
+ * just-written item returns nothing. Without this probe, a re-key run in that
+ * state would see "zero cleartext items" and wrongly activate hashed naming,
+ * making every existing cleartext item invisible after unlock.
+ *
+ * The probe requires the hmackey record (a DP item that provably exists — the
+ * caller just ensured it) to appear in a raw enumeration. Trivially true for
+ * the in-memory test backend.
+ */
+function assertEnumerationTrustworthy(): void {
+  const all = withRawKeychainServiceNames(() => listKeychainItems(`${SERVICE_PREFIX}.`));
+  if (!all.includes(HMAC_KEY_ITEM)) {
+    throw new Error(
+      'keychain enumeration is unavailable (locked keybag / screen lock?) — refusing to decide the re-key on an empty listing. Retry while unlocked.',
+    );
+  }
+}
+
+function finishPendingDeletes(rec: HmacKeyRecord): void {
+  const pending = rec.pendingDeletes ?? [];
+  if (pending.length === 0) return;
+  withRawKeychainServiceNames(() => {
+    for (const service of pending) deleteKeychainToken(service);
+  });
+  writeHmacKeyRecord({ ...rec, pendingDeletes: undefined });
+}
+
+/**
+ * One-shot per process: activate hashing on machines with nothing to move,
+ * finish a crash-interrupted delete phase (silent), and run the interactive
+ * one-time re-key when cleartext-named items exist and a human is present.
+ * Never throws — a failed attempt leaves the process on cleartext names
+ * (exact pre-#316 behavior) and the next process retries.
+ */
+function maybeAutoRekey(): void {
+  if (autoRekeyAttempted || rekeyRunning || rawScopeDepth > 0) return;
+  autoRekeyAttempted = true;
+  if (forcedTestKey || backend) return;
+  // Never auto-mutate the developer's real keychain from a test runner.
+  if (process.env.VITEST) return;
+  if (process.platform !== 'darwin') return;
+  if (process.env.AGENTS_SECRETS_NO_AUTO_REKEY === '1') return;
+  if (process.env.AGENTS_SECRETS_HASH_NAMES === '0') return;
+  const st = resolveHashState();
+  if (st.active) {
+    if (st.record?.pendingDeletes?.length) {
+      try {
+        finishPendingDeletes(st.record);
+      } catch {
+        /* next process retries */
+      }
+    }
+    return;
+  }
+  let cleartext: string[];
+  try {
+    cleartext = listCleartextServices();
+  } catch {
+    return;
+  }
+  // Moving real items pops Touch ID — only auto-run with a human present. An
+  // empty listing still goes through rekeyServiceNames (prompt-free): it
+  // verifies the enumeration is trustworthy before activating on "nothing to
+  // migrate", so a locked keybag can never masquerade as a fresh machine.
+  const interactive = process.stdin.isTTY && process.stderr.isTTY;
+  if (cleartext.length > 0 && !interactive) return;
+  try {
+    rekeyServiceNames({ announce: cleartext.length > 0, log: (line) => console.error(line) });
+  } catch (err) {
+    // Headless processes stay quiet (e.g. locked-keybag probe failures would
+    // otherwise spam every background run); a human gets the pointer.
+    if (interactive) {
+      console.error(
+        `agents secrets: one-time re-key did not complete (${(err as Error).message}). ` +
+          `Keychain service names remain enumerable; run 'agents secrets rekey' to retry.`,
+      );
+    }
+  }
+}
+
+/** One re-keyed (or failed) item, by its old cleartext service name. */
+export interface RekeyPlanItem {
+  oldService: string;
+  newService: string;
+  /** Preserve the no-ACL write path for `never`-policy bundle items. */
+  noAcl: boolean;
+  /** Replacement payload (bundle metadata gets `name` injected); absent = copy verbatim. */
+  payload?: string;
+}
+
+/**
+ * Build the old→new mapping for a set of cleartext services. Bundle metadata
+ * is parsed first to (a) recover each bundle's prompt policy — the persisted
+ * `tier` token, where `none`/`never` means the item must be re-written through
+ * the no-ACL path — and (b) inject the cleartext `name` into the JSON, because
+ * after hashing the service name can no longer carry it (listBundles reads it
+ * back from the payload). Exported for unit tests.
+ */
+export function computeRekeyPlan(
+  services: string[],
+  values: Map<string, string>,
+  key: Buffer,
+): { items: RekeyPlanItem[]; unreadable: string[] } {
+  const items: RekeyPlanItem[] = [];
+  const unreadable: string[] = [];
+  const noAclBundles = new Set<string>();
+  for (const service of services) {
+    if (!service.startsWith(BUNDLES_ITEM_PREFIX)) continue;
+    const value = values.get(service);
+    if (value === undefined) {
+      unreadable.push(service);
+      continue;
+    }
+    const name = service.slice(BUNDLES_ITEM_PREFIX.length);
+    let payload: string | undefined;
+    let noAcl = false;
+    try {
+      const parsed = JSON.parse(value) as Record<string, unknown> | null;
+      if (parsed && typeof parsed === 'object') {
+        const tier = parsed.tier;
+        noAcl = tier === 'none' || tier === 'never';
+        payload = JSON.stringify({ ...parsed, name });
+      }
+    } catch {
+      /* malformed JSON — copy verbatim, ACL'd */
+    }
+    if (noAcl) noAclBundles.add(name);
+    items.push({ oldService: service, newService: hashedServiceName(service, key), noAcl, payload });
+  }
+  for (const service of services) {
+    if (service.startsWith(BUNDLES_ITEM_PREFIX)) continue;
+    const value = values.get(service);
+    if (value === undefined) {
+      unreadable.push(service);
+      continue;
+    }
+    let noAcl = false;
+    if (service.startsWith(SECRETS_ITEM_PREFIX)) {
+      const rest = service.slice(SECRETS_ITEM_PREFIX.length);
+      const dot = rest.lastIndexOf('.');
+      if (dot > 0) noAcl = noAclBundles.has(rest.slice(0, dot));
+    }
+    items.push({ oldService: service, newService: hashedServiceName(service, key), noAcl });
+  }
+  return { items, unreadable };
+}
+
+/** Outcome of one rekeyServiceNames run. */
+export interface RekeyReport {
+  /** Old cleartext services whose items now live under hashed names. */
+  migrated: string[];
+  failed: Array<{ item: string; detail: string }>;
+  /** True when hashed naming is on after this run. */
+  activated: boolean;
+  nothingToDo: boolean;
+}
+
+/**
+ * The one-time re-key: move every cleartext-named `agents-cli.*` item to its
+ * hashed service name. Composed entirely from the existing helper primitives —
+ * no new Swift command:
+ *
+ *   1. Enumerate cleartext services (silent) and batch-read every value behind
+ *      ONE Touch ID (`get-batch`; readItem also sweeps legacy/orphaned copies).
+ *   2. Write each hashed copy (`set`/`set-no-acl` never prompt), preserving
+ *      the no-ACL tier for `never`-policy bundles.
+ *   3. Batch-verify every copy round-trips (second Touch ID).
+ *   4. Only then activate hashing (sentinel + pendingDeletes) and delete the
+ *      old items (silent).
+ *
+ * Add-before-delete throughout: a cancel/crash/failure anywhere before step 4
+ * leaves every old item intact and hashing OFF — same rationale as the
+ * helper's migrate-orphans, which is also why no pre-write backup is taken.
+ * On ANY per-item failure nothing is deleted and the sentinel stays off
+ * (all-or-nothing activation); the report names every failed item. A crash
+ * between the sentinel write and the deletes is resumed silently by the next
+ * process (pendingDeletes). Idempotent: re-running converges.
+ */
+export function rekeyServiceNames(
+  opts: { prefixes?: string[]; announce?: boolean; log?: (line: string) => void } = {},
+): RekeyReport {
+  const log = opts.log ?? (() => {});
+  if (!backend && process.platform !== 'darwin') {
+    throw new Error('secrets rekey is macOS-only — service names are enumerable only via the macOS keychain helper.');
+  }
+  if (rekeyRunning) throw new Error('re-key already running in this process.');
+  rekeyRunning = true;
+  try {
+    const partial = !!opts.prefixes?.length;
+    let record = ensureHmacKeyRecord(false);
+    const key = Buffer.from(record.k, 'hex');
+
+    // The record we just ensured is a DP item — if enumeration can't see it,
+    // every listing below is lying (locked keybag) and no decision — least of
+    // all "nothing to migrate, activate" — can be made on it.
+    assertEnumerationTrustworthy();
+
+    if (record.pendingDeletes?.length) {
+      log(`Finishing interrupted re-key: removing ${record.pendingDeletes.length} already-copied cleartext item(s)…`);
+      finishPendingDeletes(record);
+      record = readHmacKeyRecord() ?? record;
+    }
+
+    const cleartext = listCleartextServices(opts.prefixes);
+    if (cleartext.length === 0) {
+      if (!record.migrated && !partial) {
+        writeHmacKeyRecord({ ...record, migrated: true });
+        log('No cleartext-named keychain items found — hashed service names are now active.');
+        return { migrated: [], failed: [], activated: true, nothingToDo: true };
+      }
+      return { migrated: [], failed: [], activated: record.migrated, nothingToDo: true };
+    }
+
+    if (opts.announce) {
+      log(`One-time secrets re-key: replacing ${cleartext.length} enumerable keychain service name(s) with opaque hashed names (GitHub #316).`);
+      log('Touch ID will prompt twice (read + verify). Cancelling is safe — the re-key resumes on a later run.');
+    }
+
+    const values = withRawKeychainServiceNames(() => getKeychainTokens(cleartext));
+    const { items, unreadable } = computeRekeyPlan(cleartext, values, key);
+    const failed: Array<{ item: string; detail: string }> = unreadable.map((item) => ({
+      item,
+      detail: 'read failed or item absent',
+    }));
+
+    const added: RekeyPlanItem[] = [];
+    for (const plan of items) {
+      try {
+        setKeychainToken(plan.newService, plan.payload ?? values.get(plan.oldService)!, { noAcl: plan.noAcl });
+        added.push(plan);
+      } catch (err) {
+        failed.push({ item: plan.oldService, detail: `write: ${(err as Error).message}` });
+      }
+    }
+
+    const verified: RekeyPlanItem[] = [];
+    if (added.length > 0) {
+      const readBack = getKeychainTokens(added.map((p) => p.newService));
+      for (const plan of added) {
+        const expected = plan.payload ?? values.get(plan.oldService)!;
+        if (readBack.get(plan.newService) === expected) verified.push(plan);
+        else failed.push({ item: plan.oldService, detail: 'verify: value mismatch after rewrite' });
+      }
+    }
+
+    if (failed.length > 0) {
+      log(`Re-key INCOMPLETE — ${failed.length} of ${cleartext.length} item(s) could not be moved; nothing was deleted and hashed naming stays OFF:`);
+      for (const f of failed) log(`  ${f.item}: ${f.detail}`);
+      return { migrated: [], failed, activated: false, nothingToDo: false };
+    }
+
+    if (partial) {
+      withRawKeychainServiceNames(() => {
+        for (const plan of verified) deleteKeychainToken(plan.oldService);
+      });
+      log(`Re-keyed ${verified.length} item(s) (partial run — hashed naming NOT activated).`);
+      return { migrated: verified.map((p) => p.oldService), failed: [], activated: record.migrated, nothingToDo: false };
+    }
+
+    writeHmacKeyRecord({ ...record, migrated: true, pendingDeletes: verified.map((p) => p.oldService) });
+    withRawKeychainServiceNames(() => {
+      for (const plan of verified) deleteKeychainToken(plan.oldService);
+    });
+    writeHmacKeyRecord({ ...record, migrated: true, pendingDeletes: undefined });
+    log(`Re-keyed ${verified.length} keychain item(s); service names are now opaque (agents-cli.h.*).`);
+    return { migrated: verified.map((p) => p.oldService), failed: [], activated: true, nothingToDo: false };
+  } finally {
+    rekeyRunning = false;
+  }
+}
+
+/** Re-key state snapshot for `agents secrets rekey --status`. */
+export function rekeyStatus(): {
+  migrated: boolean;
+  hasKey: boolean;
+  pendingDeletes: number;
+  cleartext: string[];
+  /** False when the enumeration probe fails (locked keybag) — the cleartext
+   * count is then meaningless. Only probeable once the key record exists. */
+  enumerationOk: boolean;
+} {
+  const rec = readHmacKeyRecord();
+  let enumerationOk = true;
+  if (rec) {
+    try {
+      assertEnumerationTrustworthy();
+    } catch {
+      enumerationOk = false;
+    }
+  }
+  return {
+    migrated: !!rec?.migrated,
+    hasKey: !!rec,
+    pendingDeletes: rec?.pendingDeletes?.length ?? 0,
+    cleartext: listCleartextServices(),
+    enumerationOk,
+  };
+}
+
 /** Check if a keychain/keyring item exists. Never prompts for biometry. */
 export function hasKeychainToken(item: string): boolean {
+  item = prepareServiceName(item);
   if (backend) return backend.has(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.has(item);
@@ -193,6 +753,10 @@ export function hasKeychainToken(item: string): boolean {
  * single biometric prompt covers every key in the batch.
  */
 export function getKeychainToken(item: string): string {
+  // Errors keep the requested (human-readable) name; the storage name may be
+  // an opaque hash.
+  const requested = item;
+  item = prepareServiceName(item, { autoRekey: true });
   if (backend) return backend.get(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.get(item);
@@ -205,20 +769,20 @@ export function getKeychainToken(item: string): string {
       const token = sec.stdout?.toString().trim();
       if (token) return token;
     }
-    throw new Error(`Keychain item '${item}' not found.`);
+    throw new Error(`Keychain item '${requested}' not found.`);
   }
   const bin = getKeychainHelperPath();
   const result = spawnSync(bin, ['get', item, os.userInfo().username], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (result.status === 1) throw new Error(`Keychain item '${item}' not found.`);
-  if (result.status === 4) throw new Error(`Touch ID cancelled while reading '${item}'.`);
+  if (result.status === 1) throw new Error(`Keychain item '${requested}' not found.`);
+  if (result.status === 4) throw new Error(`Touch ID cancelled while reading '${requested}'.`);
   if (result.status !== 0) {
     const msg = result.stderr?.toString().trim();
-    throw new Error(msg || `Failed to read keychain item '${item}'.`);
+    throw new Error(msg || `Failed to read keychain item '${requested}'.`);
   }
   const token = result.stdout?.toString();
-  if (!token) throw new Error(`Keychain item '${item}' exists but is empty.`);
+  if (!token) throw new Error(`Keychain item '${requested}' exists but is empty.`);
   return token;
 }
 
@@ -235,27 +799,39 @@ export function getKeychainToken(item: string): string {
 export function getKeychainTokens(items: string[]): Map<string, string> {
   const result = new Map<string, string>();
   if (items.length === 0) return result;
+  // Resolve storage names up front, remembering which requested name each one
+  // answers for — the returned map is keyed by the names the CALLER passed,
+  // whether those were cleartext (hashed here) or already-hashed (enumerated).
+  const requestedByStorage = new Map<string, string>();
+  const storageItems = items.map((item) => {
+    const storage = prepareServiceName(item, { autoRekey: true });
+    if (!requestedByStorage.has(storage)) requestedByStorage.set(storage, item);
+    return storage;
+  });
+  const record = (storage: string, value: string) => {
+    result.set(requestedByStorage.get(storage) ?? storage, value);
+  };
   if (backend) {
-    for (const item of items) {
-      try { result.set(item, backend.get(item)); } catch { /* missing — skip */ }
+    for (const storage of storageItems) {
+      try { record(storage, backend.get(storage)); } catch { /* missing — skip */ }
     }
     return result;
   }
   assertSupportedPlatform();
   if (isLinux()) {
-    for (const item of items) {
-      try { result.set(item, linuxBackend.get(item)); } catch { /* missing — skip */ }
+    for (const storage of storageItems) {
+      try { record(storage, linuxBackend.get(storage)); } catch { /* missing — skip */ }
     }
     return result;
   }
   if (isWindows()) {
-    for (const item of items) {
-      try { result.set(item, windowsBackend.get(item)); } catch { /* missing — skip */ }
+    for (const storage of storageItems) {
+      try { record(storage, windowsBackend.get(storage)); } catch { /* missing — skip */ }
     }
     return result;
   }
   const bin = getKeychainHelperPath();
-  const child = spawnSync(bin, ['get-batch', os.userInfo().username, ...items], {
+  const child = spawnSync(bin, ['get-batch', os.userInfo().username, ...storageItems], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (child.status === 4) {
@@ -266,21 +842,23 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
     throw new Error(msg || `Failed to batch-read ${items.length} keychain items.`);
   }
   const out = child.stdout?.toString() ?? '';
-  parseBatchRecords(out, result);
+  parseBatchRecords(out, record);
   return result;
 }
 
 /**
- * Parse the helper's batch-read output into `into`. The format is shared by
- * `get-batch` and `get-batch-synced` — a sequence of records, one per service
- * in input order:
+ * Parse the helper's batch-read output, routing each present record through
+ * `record(service, value)` — getKeychainTokens uses that to reverse-map hashed
+ * storage names back to the names the caller asked with. The format is shared
+ * by `get-batch` and `get-batch-synced` — a sequence of records, one per
+ * service in input order:
  *   "V <service>\n<value>\n"   (present)
  *   "M <service>\n"            (missing)
  * Service names are validated newline/'='-free by setKeychainToken below
  * and values are rejected if they contain newlines — so splitting on '\n'
  * and walking line-by-line is unambiguous.
  */
-function parseBatchRecords(out: string, into: Map<string, string>): void {
+function parseBatchRecords(out: string, record: (service: string, value: string) => void): void {
   const lines = out.split('\n');
   let i = 0;
   while (i < lines.length) {
@@ -289,7 +867,7 @@ function parseBatchRecords(out: string, into: Map<string, string>): void {
     if (line.startsWith('V ')) {
       const service = line.slice(2);
       const value = lines[i + 1] ?? '';
-      into.set(service, value);
+      record(service, value);
       i += 2;
     } else if (line.startsWith('M ')) {
       i += 1;
@@ -309,10 +887,13 @@ function parseBatchRecords(out: string, into: Map<string, string>): void {
  * rather than silently falling back to an ACL'd `set` (which would behave like
  * `always`). Ignored by the Linux/Windows/test backends, which have no ACL. */
 export function setKeychainToken(item: string, value: string, opts?: { noAcl?: boolean }): void {
+  // Validate the CLEARTEXT name (a hashed storage name is always clean), then
+  // resolve the storage name.
+  if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
+  item = prepareServiceName(item, { autoRekey: true });
   if (backend) { backend.set(item, value); return; }
   assertSupportedPlatform();
   assertValueStorable(value);
-  if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
 
   if (isLinux()) { linuxBackend.set(item, value); return; }
   if (isWindows()) { windowsBackend.set(item, value); return; }
@@ -363,6 +944,7 @@ export function setKeychainToken(item: string, value: string, opts?: { noAcl?: b
 
 /** Delete a keychain/keyring item. Returns true if it existed. Never prompts for biometry. */
 export function deleteKeychainToken(item: string): boolean {
+  item = prepareServiceName(item);
   if (backend) return backend.delete(item);
   assertSupportedPlatform();
   if (isLinux()) return linuxBackend.delete(item);
@@ -390,14 +972,19 @@ export function keychainUsesFileFallback(): boolean {
   return false;
 }
 
-/** Enumerate keychain/keyring item names starting with the given prefix. */
+/** Enumerate keychain/keyring item names starting with the given prefix.
+ * With hashed service names active, the two sub-namespace prefixes callers
+ * use (bundle metadata; one bundle's value items) are mapped to their hashed
+ * shapes — the returned names are then storage (opaque) names. */
 export function listKeychainItems(prefix: string): string[] {
-  if (backend) return backend.list(prefix);
+  const mapped = prepareListPrefix(prefix);
+  const apply = (names: string[]) => (mapped.filter ? names.filter(mapped.filter) : names);
+  if (backend) return apply(backend.list(mapped.prefix));
   assertSupportedPlatform();
-  if (isLinux()) return linuxBackend.list(prefix);
-  if (isWindows()) return windowsBackend.list(prefix);
+  if (isLinux()) return apply(linuxBackend.list(mapped.prefix));
+  if (isWindows()) return apply(windowsBackend.list(mapped.prefix));
   const bin = getKeychainHelperPath();
-  const result = spawnSync(bin, ['list', prefix], {
+  const result = spawnSync(bin, ['list', mapped.prefix], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   if (result.status !== 0) {
@@ -405,7 +992,7 @@ export function listKeychainItems(prefix: string): string[] {
     throw new Error(msg || `Failed to enumerate keychain items with prefix '${prefix}'.`);
   }
   const out = result.stdout?.toString() || '';
-  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+  return apply(out.split('\n').map((s) => s.trim()).filter(Boolean));
 }
 
 /**
@@ -505,7 +1092,7 @@ export function getSyncedKeychainTokens(items: string[]): Map<string, string> {
     const msg = child.stderr?.toString().trim();
     throw new Error(msg || `Failed to batch-read ${items.length} iCloud keychain items.`);
   }
-  parseBatchRecords(child.stdout?.toString() ?? '', result);
+  parseBatchRecords(child.stdout?.toString() ?? '', (service, value) => { result.set(service, value); });
   return result;
 }
 
