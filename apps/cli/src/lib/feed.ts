@@ -186,6 +186,17 @@ def main():
         notification_type = payload.get("notification_type", "")
         if notification_type not in WAITING_NOTIFICATION_TYPES:
             return
+        # Claude emits a generic permission notification after presenting an
+        # AskUserQuestion. Keep the structured questions and options already
+        # published for this session instead of replacing them with that less
+        # useful notification text.
+        try:
+            with open(target) as existing_file:
+                existing = json.load(existing_file)
+            if existing.get("kind") == "question":
+                return
+        except Exception:
+            pass
         message = payload.get("message", "")
         if not message:
             return

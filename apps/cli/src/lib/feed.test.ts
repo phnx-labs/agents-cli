@@ -223,6 +223,54 @@ describe('feed store', () => {
     }]);
   });
 
+  it.runIf(hasPython)('real hook keeps AskUserQuestion details when Claude emits its permission notification', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-question-notification-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const question = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-question-notify',
+        hook_event_name: 'PreToolUse',
+        tool_input: {
+          questions: [{
+            question: 'Which environment?',
+            header: 'Deploy',
+            options: [
+              { label: 'Staging', description: 'Deploy to staging' },
+              { label: 'Production', description: 'Deploy to production' },
+            ],
+          }],
+        },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(question.status).toBe(0);
+
+    const notification = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-question-notify',
+        hook_event_name: 'Notification',
+        notification_type: 'permission_prompt',
+        title: 'Permission Prompt',
+        message: 'Claude needs your permission',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(notification.status).toBe(0);
+    expect(listBlocks(feedDir)).toMatchObject([{
+      kind: 'question',
+      questions: [{
+        text: 'Which environment?',
+        header: 'Deploy',
+        options: [
+          { label: 'Staging', description: 'Deploy to staging' },
+          { label: 'Production', description: 'Deploy to production' },
+        ],
+      }],
+    }]);
+  });
+
   it.runIf(hasPython)('real hook ignores notifications that do not represent a wait', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-notification-ignore-'));
     const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
