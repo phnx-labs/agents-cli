@@ -860,6 +860,97 @@ describe('registerHooksToSettings - Kiro', () => {
   });
 });
 
+describe('registerHooksToSettings - Goose', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeGooseScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  function gooseHooksPath(versionHome: string): string {
+    return path.join(versionHome, '.agents', 'plugins', 'agents-cli-hooks', 'hooks', 'hooks.json');
+  }
+
+  it('writes Open Plugins hooks.json under versionHome/.agents/plugins/agents-cli-hooks/', () => {
+    makeGooseScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> UserPromptSubmit');
+    expect(result.registered).toContain('on-prompt -> SessionStart');
+
+    const outPath = gooseHooksPath(versionHome);
+    expect(fs.existsSync(outPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(parsed.hooks.SessionStart).toHaveLength(1);
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].type).toBe('command');
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(45);
+    expect(resolvedCommand(parsed.hooks.UserPromptSubmit[0].hooks[0].command)).toContain('on-prompt.sh');
+  });
+
+  it('groups by matcher for PreToolUse', () => {
+    makeGooseScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      guard: {
+        script: 'guard.sh',
+        events: ['PreToolUse'],
+        matcher: 'developer__shell',
+      },
+    };
+
+    registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(fs.readFileSync(gooseHooksPath(versionHome), 'utf-8'));
+    expect(parsed.hooks.PreToolUse[0].matcher).toBe('developer__shell');
+    expect(parsed.hooks.PreToolUse[0].hooks).toHaveLength(1);
+  });
+
+  it('does not duplicate entries on repeated sync', () => {
+    makeGooseScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(fs.readFileSync(gooseHooksPath(versionHome), 'utf-8'));
+    expect(parsed.hooks.PreToolUse[0].hooks).toHaveLength(1);
+  });
+
+  it('writes managed marker file', () => {
+    makeGooseScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings(
+      'goose',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['SessionStart'] } },
+      agentsDir
+    );
+    const marker = path.join(versionHome, '.agents', 'plugins', 'agents-cli-hooks', '.agents-cli-managed');
+    expect(fs.existsSync(marker)).toBe(true);
+  });
+});
+
 describe('registerHooksToSettings - Antigravity', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));

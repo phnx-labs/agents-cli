@@ -166,11 +166,32 @@ describe('capableAgents()', () => {
     expect(agents).toContain('kiro');
   });
 
+  it('includes goose for hooks (block-goose-cli ≥ 1.34.0 Open Plugins)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('goose');
+  });
+
   it('excludes cursor/opencode/amp for hooks', () => {
     const agents = capableAgents('hooks');
     expect(agents).not.toContain('cursor');
     expect(agents).not.toContain('opencode');
     expect(agents).not.toContain('amp');
+  });
+});
+
+describe('goose hooks version gate', () => {
+  it('gates versions below 1.34.0 as too_old', () => {
+    const result = supports('goose', 'hooks', '1.33.0');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 1.34.0');
+    }
+  });
+
+  it('passes 1.34.0 and above', () => {
+    expect(supports('goose', 'hooks', '1.34.0')).toEqual({ ok: true });
+    expect(supports('goose', 'hooks', '1.37.0')).toEqual({ ok: true });
   });
 });
 
