@@ -36,6 +36,7 @@ export const loadCommands: ModuleLoader = async () => (await import('../../comma
 export const loadHooks: ModuleLoader = async () => (await import('../../commands/hooks.js')).registerHooksCommands;
 export const loadSkills: ModuleLoader = async () => (await import('../../commands/skills.js')).registerSkillsCommands;
 export const loadRules: ModuleLoader = async () => (await import('../../commands/rules.js')).registerRulesCommands;
+export const loadMemory: ModuleLoader = async () => (await import('../../commands/memory.js')).registerMemoryCommands;
 export const loadPermissions: ModuleLoader = async () => (await import('../../commands/permissions.js')).registerPermissionsCommands;
 export const loadMcp: ModuleLoader = async () => (await import('../../commands/mcp.js')).registerMcpCommands;
 export const loadCli: ModuleLoader = async () => (await import('../../commands/cli.js')).registerCliCommands;
@@ -124,6 +125,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   hooks: [loadHooks],
   skills: [loadSkills],
   rules: [loadRules],
+  memory: [loadMemory],
   permissions: [loadPermissions],
   mcp: [loadMcp],
   cli: [loadCli],

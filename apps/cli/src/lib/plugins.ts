@@ -141,6 +141,7 @@ export function buildDiscoveredPlugin(
     scripts: discoverPluginScripts(pluginRoot),
     commands: discoverPluginCommands(pluginRoot),
     agentDefs: discoverPluginAgentDefs(pluginRoot),
+    memory: discoverPluginMemory(pluginRoot),
     bin: discoverPluginBin(pluginRoot),
     mcpServers: discoverPluginMcpServers(pluginRoot),
     lspServers: discoverPluginLspServers(pluginRoot),
@@ -170,6 +171,7 @@ export function pluginResourceGroups(plugin: DiscoveredPlugin): PluginResourceGr
     { label: 'commands', items: plugin.commands.map((c) => `/${plugin.name}:${c}`) },
     { label: 'subagents', items: plugin.agentDefs },
     { label: 'hooks', items: plugin.hooks },
+    { label: 'memory', items: plugin.memory },
     { label: 'mcp', items: plugin.mcpServers },
     { label: 'lsp', items: plugin.lspServers },
     { label: 'monitors', items: plugin.monitors },
@@ -284,6 +286,21 @@ export function pluginSupportsAgent(plugin: DiscoveredPlugin, agent: AgentId): b
 }
 
 // ─── Discovery helpers ────────────────────────────────────────────────────────
+
+/** Fact basenames (no .md) from a plugin's memory/ directory. */
+export function discoverPluginMemory(pluginRoot: string): string[] {
+  const dir = path.join(pluginRoot, 'memory');
+  if (!fs.existsSync(dir)) return [];
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith('.md') && f.toLowerCase() !== 'memory.md')
+      .map((f) => f.replace(/\.md$/i, ''))
+      .sort();
+  } catch {
+    return [];
+  }
+}
 
 function discoverPluginSkills(pluginRoot: string): string[] {
   const skillsDir = path.join(pluginRoot, 'skills');

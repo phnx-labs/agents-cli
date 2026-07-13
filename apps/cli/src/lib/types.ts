@@ -160,6 +160,12 @@ export interface AgentConfig {
     rules: RulesCapability;
     workflows: Capability;
     /**
+     * Portable knowledge-store memory (`agents memory` / ~/.agents/memory/).
+     * Distinct from `rules` (instructions). When true, sync fans facts into
+     * the agent version home (see memoryTargetDir).
+     */
+    memory: Capability;
+    /**
      * Permission modes this agent natively supports. Modes outside this set
      * are gated by buildExecCommand: `auto` silently degrades to `edit`,
      * `skip` errors with a clear message naming the supported modes.
@@ -186,8 +192,7 @@ export type Capability = boolean | { since?: string; until?: string };
 export type RulesCapability = false | { file: string };
 
 /** Names of every gateable capability on AgentConfig. */
-export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows';
-
+export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory';
 /**
  * Permission modes controlling agent autonomy.
  *   plan  read-only investigation; no writes, no shell side-effects
@@ -579,6 +584,8 @@ export interface DiscoveredPlugin {
   commands: string[];
   /** Subagent .md files in the plugin's agents/ directory (names without extension). */
   agentDefs: string[];
+  /** Memory fact basenames from the plugin's memory/ directory (without .md). */
+  memory: string[];
   /** Executable files in the plugin's bin/ directory. */
   bin: string[];
   /** MCP server names parsed from .mcp.json. */

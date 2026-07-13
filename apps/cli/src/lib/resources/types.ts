@@ -8,7 +8,7 @@
 
 export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'antigravity' | 'grok' | 'kimi';
 export type Layer = 'system' | 'user' | 'project';
-export type ResourceKind = 'command' | 'hook' | 'skill' | 'rule' | 'mcp' | 'permission' | 'subagent' | 'workflow';
+export type ResourceKind = 'command' | 'hook' | 'skill' | 'rule' | 'mcp' | 'permission' | 'subagent' | 'workflow' | 'memory';
 
 /** A resolved resource with its origin layer. */
 export interface ResolvedItem<T> {

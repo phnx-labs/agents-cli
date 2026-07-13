@@ -53,14 +53,18 @@ jobs:
         working-directory: apps/cli
     env:
       AGENTS_TEST_WIN_HOST: win-mini
-      # setup-dotnet defaults to /usr/share/dotnet, which needs root the
-      # hosted runners have but this self-hosted (rootless, user-systemd)
-      # runner does not. Install into a user-writable, workspace-local dir.
-      DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      # setup-dotnet defaults to /usr/share/dotnet, which needs root the hosted
+      # runners have but this self-hosted (rootless, user-systemd) runner does
+      # not. Point it at a user-writable, workspace-local dir. `runner.*` is not
+      # available in job-level `env:`, so set it here via $RUNNER_TEMP -> the
+      # install dir the next step's setup-dotnet reads (and adds to PATH).
+      - name: Pick a user-writable dotnet install dir
+        run: echo "DOTNET_INSTALL_DIR=$RUNNER_TEMP/dotnet" >> "$GITHUB_ENV"
 
       - name: Setup .NET (cross-publish the win-x64 daemon exe)
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
