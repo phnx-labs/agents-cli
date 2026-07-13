@@ -509,6 +509,10 @@ function canonicalToCursorRule(perm: string): string {
   if (perm.startsWith('WebSearch(')) {
     return perm.replace(/^WebSearch/, 'WebFetch');
   }
+  // Cursor has no Edit prefix — file writes use Write(...).
+  if (perm === 'Edit' || perm.startsWith('Edit(')) {
+    return perm.replace(/^Edit/, 'Write');
+  }
   return perm;
 }
 

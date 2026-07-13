@@ -9,6 +9,7 @@ import {
   discoverPermissionsFromRepo,
   convertToClaudeFormat,
   convertToOpenCodeFormat,
+  convertToCursorFormat,
   convertToCodexFormat,
   convertToAntigravityFormat,
   convertToGrokFormat,
@@ -822,6 +823,20 @@ describe('applyPermissionsToVersion', () => {
     expect(config.permissions.allow).toContain('Shell(git *)');
     expect(config.permissions.allow).toContain('Read(src/**)');
     expect(config.permissions.deny).toContain('Shell(rm *)');
+  });
+
+  it('convertToCursorFormat maps Edit(...) to Write(...) for both allow and deny (Cursor has no Edit prefix)', () => {
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Edit(src/**)'],
+      deny: ['Edit(secrets/**)'],
+    };
+
+    const out = convertToCursorFormat(set);
+    expect(out.permissions.allow).toContain('Write(src/**)');
+    expect(out.permissions.allow).not.toContain('Edit(src/**)');
+    expect(out.permissions.deny).toContain('Write(secrets/**)');
+    expect(out.permissions.deny).not.toContain('Edit(secrets/**)');
   });
 
   it('writes Antigravity permissions to .gemini/antigravity-cli/settings.json', () => {
