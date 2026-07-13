@@ -41,7 +41,7 @@ describe('normalizeTicketRef / normalizePrRef', () => {
     expect(normalizePrRef('#534')).toBe('#534');
     expect(normalizePrRef('PR#534')).toBe('#534');
     expect(normalizePrRef('pr 534')).toBe('#534');
-    expect(normalizePrRef('https://github.com/phnx-labs/agents-cli/pull/534')).toBe('#534');
+    expect(normalizePrRef('https://github.com/phnx-labs/agents-cli/pull/534')).toBe('phnx-labs/agents-cli#534');
   });
 });
 
@@ -87,7 +87,19 @@ describe('deriveOutcome', () => {
     expect(deriveOutcome({ text: 'merge #534?' }).label).toBe('PR#534');
     expect(deriveOutcome({
       text: 'see https://github.com/phnx-labs/agents-cli/pull/999',
-    }).label).toBe('PR#999');
+    })).toEqual({
+      key: 'pr:phnx-labs/agents-cli#999',
+      kind: 'pr',
+      label: 'PR phnx-labs/agents-cli#999',
+    });
+  });
+
+  it('keys PR outcomes by owner/repo when URL is known (RUSH-1630)', () => {
+    const a = deriveOutcome({ pr: 'https://github.com/phnx-labs/agents-cli/pull/10' });
+    const b = deriveOutcome({ pr: 'https://github.com/other/repo/pull/10' });
+    expect(a.key).toBe('pr:phnx-labs/agents-cli#10');
+    expect(b.key).toBe('pr:other/repo#10');
+    expect(a.key).not.toBe(b.key);
   });
 });
 

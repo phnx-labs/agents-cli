@@ -22,6 +22,7 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
+import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
@@ -32,6 +33,7 @@ import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import type { SessionAttachment } from './types.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { mapBounded } from '../concurrency.js';
 
@@ -98,6 +100,8 @@ export interface ActiveSession {
   createdTickets?: string[];
   /** Team name the session SPAWNED via `agents teams create/add`. */
   spawnedTeam?: string;
+  /** Files/screenshots attached to the session prompt. */
+  attachments?: SessionAttachment[];
   sessionFile?: string;
   startedAtMs?: number;
   status: ActiveStatus;
@@ -156,6 +160,19 @@ export interface ActiveSession {
    * renderer-set (see src/lib/session/viewing-in.ts) — NOT on the discovery path.
    */
   viewingIn?: { app: string; tab?: number };
+}
+
+export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'idle':
+      return 'idle';
+    case 'input_required':
+      return 'input_required';
+    default:
+      return 'queued';
+  }
 }
 
 export interface ActiveQueryOptions {
@@ -398,6 +415,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     ticket: state.ticket,
     createdTickets: state.createdTickets,
     spawnedTeam: state.spawnedTeam,
+    attachments: state.attachments,
     rateLimited: state.rateLimited,
   };
 }
@@ -568,11 +586,7 @@ export function listCloudActive(): ActiveSession[] {
     kind: t.agent || 'cloud',
     label: t.prompt.length > 60 ? t.prompt.slice(0, 57) + '...' : t.prompt,
     startedAtMs: Date.parse(t.createdAt) || undefined,
-    status: t.status === 'running'
-      ? 'running'
-      : t.status === 'input_required'
-        ? 'input_required'
-        : 'queued',
+    status: activeStatusFromCloudStatus(t.status),
     cloudProvider: t.provider,
     cloudTaskId: t.id,
     cloudStatus: t.status,

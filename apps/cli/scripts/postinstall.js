@@ -392,7 +392,10 @@ async function healLongRunningProcesses() {
     const d = await import('../dist/lib/daemon.js');
     if (d.isDaemonRunning?.()) {
       d.stopDaemon?.();
-      d.startDaemon?.();
+      // This lifecycle script is process.argv[1] while npm is installing. Pin
+      // the restart to the installed CLI entrypoint so the service manifest
+      // never records scripts/postinstall.js as the daemon command.
+      d.startDaemon?.(AGENTS_BIN);
       console.log('  Restarted the routines daemon onto this version.');
     }
   } catch { /* best effort */ }

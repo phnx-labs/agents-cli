@@ -49,11 +49,12 @@ function parseSkillRef(raw: string): SkillRef {
 
 /** Print an error message to stderr and exit. */
 /** Return a chalk color function appropriate for the given task status. */
-function statusColor(status: string): (s: string) => string {
+export function statusColor(status: string): (s: string) => string {
   switch (status) {
     case 'queued':
     case 'allocating': return chalk.blue;
     case 'running': return chalk.yellow;
+    case 'idle': return chalk.gray;
     case 'completed': return chalk.green;
     case 'input_required': return chalk.magenta;
     case 'failed': return chalk.red;

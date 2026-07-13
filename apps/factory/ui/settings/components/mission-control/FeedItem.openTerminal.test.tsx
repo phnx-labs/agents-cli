@@ -94,3 +94,26 @@ describe('FeedItem open/resume terminal action (RUSH-1520)', () => {
     expect(html).toContain('open-term')
   })
 })
+
+describe('FeedItem produced artifacts (RUSH-1547)', () => {
+  test('renders linked Linear ticket refs and commit chips', () => {
+    const html = renderToStaticMarkup(
+      <FeedItem
+        agent={agent({
+          createdTickets: ['RUSH-1545'],
+          createdCommits: ['095e588093ca'],
+        })}
+        selected={false}
+        plain={false}
+        onSelect={noop}
+        onOption={noop}
+        onFreeText={noop}
+        onAttach={noop}
+        onOpenPlan={noop}
+      />,
+    )
+    expect(html).toContain('href="https://linear.app/issue/RUSH-1"')
+    expect(html).toContain('href="https://linear.app/issue/RUSH-1545"')
+    expect(html).toContain('095e588093ca')
+  })
+})

@@ -590,6 +590,21 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     jsonFlags: ['-o', 'stream-json'],
     modelFlag: '-m',
   },
+  hermes: {
+    base: ['hermes', 'chat'],
+    promptFlag: 'positional',
+    modeFlags: {
+      edit: [],
+    },
+    modelFlag: '--model',
+  },
+  forge: {
+    base: ['forge'],
+    promptFlag: 'positional',
+    modeFlags: {
+      edit: [],
+    },
+  },
 };
 
 /**
@@ -1075,14 +1090,15 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     // When the AGENT pane dies, detach the client (don't kill) so the session
     // survives just long enough to read the dead pane's exit status below. The
     // `#{hook_pane}` guard scopes this to the agent pane only: if the user splits
-    // the window and exits one of THEIR panes, the else-branch `kill-pane` closes
-    // that split in place instead of detaching everyone (the pane-died hook runs
-    // in the dead pane's context, so bare `kill-pane` targets it). Without the
-    // guard, exiting any split kicked the user clean out of tmux.
-    await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane), socket);
-    // Stamp the schema marker so the daemon reconcile (which retrofits older
-    // sessions) recognizes this one as already current and skips it.
-    await markSessionHookSchema(name, socket);
+    // the window and exits one of THEIR panes, the else-branch closes that split
+    // in place instead of detaching everyone (`run-shell -C` executes the
+    // targeted kill inside tmux's server command queue, avoiding a second
+    // client racing the same socket under load, #965). Without the guard,
+    // exiting any split kicked the user clean out of tmux.
+    const hookInstalled = await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane), socket);
+    // Stamp the schema marker only after tmux accepted the hook. A failed
+    // install stays unmarked so daemon reconciliation retries it later.
+    if (hookInstalled) await markSessionHookSchema(name, socket);
 
     // Record the agent's OS pid (the pane leaf, thanks to `exec`) WITH its tmux
     // pane so the active-scan attributes it exactly and shows the %pane.

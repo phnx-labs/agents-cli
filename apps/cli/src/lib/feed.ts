@@ -173,7 +173,8 @@ export function recordAnswer(
   const operatorId = answer.operatorId;
 
   if (block?.consequence && block.consequence !== 'normal') {
-    if (!operatorId || answer.verified !== true || !isHighConsequenceAllowed(block.consequence, operatorId, dir)) {
+    // Operators live in ~/.agents/operators.yaml — never the feed store root.
+    if (!operatorId || answer.verified !== true || !isHighConsequenceAllowed(block.consequence, operatorId)) {
       return {
         ok: false,
         unauthorized: true,

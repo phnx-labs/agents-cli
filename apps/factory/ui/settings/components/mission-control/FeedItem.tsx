@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { Icon } from './icons'
+import { FileIcon, ImageIcon } from './dispatchIcons'
 import { AgentAvatar, agentIdFromPrefix } from './AgentAvatar'
 import { StructuredReply, type ReplyCallbacks } from './StructuredReply'
-import { heartbeatLevel, sessionTaskLine, type FloorAgent, type FloorTicket } from './floorModel'
+import { heartbeatLevel, linearIssueLabel, linearIssueUrl, sessionTaskLine, type FloorAgent, type FloorAttachment, type FloorTicket } from './floorModel'
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
 import { CardChecklist } from './TodoChecklist'
@@ -34,6 +35,14 @@ function plainTok(tok: number, plain: boolean): string {
   return tok ? `${tok} tok/s` : ''
 }
 
+function TicketArtifact({ ticket, className }: { ticket: string; className: string }) {
+  const href = linearIssueUrl(ticket)
+  const label = linearIssueLabel(ticket)
+  return href
+    ? <ExtLink href={href} className={className} title={`Open ${label}`} style={{ textDecoration: 'none' }}><Icon name="plus" size={10} /> {label}</ExtLink>
+    : <span className={className} title={`Created ticket ${label}`}><Icon name="plus" size={10} /> {label}</span>
+}
+
 // Reply callbacks are agent-scoped (they take the FloorAgent, not a pre-bound closure)
 // so the caller can pass the SAME stable function reference to every row. That is what
 // lets React.memo(FeedItem) skip re-rendering unchanged rows — an inline `(o) => f(a, o)`
@@ -49,6 +58,7 @@ interface FeedItemProps {
   onFreeText: (agent: FloorAgent, text: string) => void
   onAttach: (agent: FloorAgent) => void
   onOpenPlan: (agent: FloorAgent, plan: PlanFile) => void
+  onOpenAttachment: (agent: FloorAgent, attachment: FloorAttachment) => void
   /**
    * Open/resume this session in a live terminal (RUSH-1520). Present when the
    * agent carries a sessionId (or a local terminal id) the host can focus.
@@ -56,7 +66,7 @@ interface FeedItemProps {
   onOpenTerminal?: (agent: FloorAgent) => void
 }
 
-function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeText, onAttach, onOpenPlan, onOpenTerminal }: FeedItemProps) {
+function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeText, onAttach, onOpenPlan, onOpenAttachment, onOpenTerminal }: FeedItemProps) {
   // Live heartbeat: only a running / stalled agent with a known last-activity stamp ticks.
   // The shared 1s ticker re-renders just this leaf, never the parent list.
   const now = useNow(1000)
@@ -79,7 +89,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const wt = a.worktreeSlug || a.branch
   const meta = plain
     ? a.project
-    : `${a.project} · ${a.hostLabel ?? a.host}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
+    : `${a.project} · ${a.hostLabel ?? a.host}${filesLabel}${paneLabel}${viewingLabel}`
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 
@@ -138,6 +148,12 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const rateBadge = a.rateLimited
     ? <span className="pill rate" title="This session hit a rate or usage limit">rate limited</span>
     : null
+  const ticketHref = linearIssueUrl(a.ticket)
+  const ticketBadge = a.ticket
+    ? ticketHref
+      ? <ExtLink href={ticketHref} className="pill ticket" title={`Open ${linearIssueLabel(a.ticket)}`} style={{ textDecoration: 'none' }}>{linearIssueLabel(a.ticket)}</ExtLink>
+      : <span className="pill ticket">{linearIssueLabel(a.ticket)}</span>
+    : null
 
   return (
     <div
@@ -153,6 +169,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         {!plain && wt && <span className="wtchip mono" title={a.worktreePath || wt}>{wt}</span>}
         <span className="when">
           {marker}
+          {ticketBadge}
           {bgBadge}
           {rateBadge}
           {ciBadge}
@@ -185,8 +202,27 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
       {a.resp && !(a.needs && a.question && a.question.kind !== 'retry' && a.question.text.trim() === a.resp.trim()) && (
         <div className={`resp${destructive ? ' q' : ''}`}>{renderMarkdown(a.resp, { clamp: true })}</div>
       )}
-      {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
+      {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.createdCommits?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0 || (a.attachments?.length ?? 0) > 0) && (
         <div className="artifacts" onClick={(e) => e.stopPropagation()}>
+          {(a.attachments ?? []).map((attachment) => {
+            const isImage = attachment.mediaType.startsWith('image/')
+            return (
+              <button
+                key={attachment.path}
+                type="button"
+                className={`artifact attachment${isImage ? ' image' : ''}`}
+                title={`Preview ${attachment.path}`}
+                onClick={() => onOpenAttachment(a, attachment)}
+              >
+                <span className="artifact-thumb">
+                  {isImage && attachment.thumbnailUri
+                    ? <img src={attachment.thumbnailUri} alt="" />
+                    : isImage ? <ImageIcon size={12} /> : <FileIcon size={12} />}
+                </span>
+                <span className="artifact-label">{attachment.label}</span>
+              </button>
+            )
+          })}
           {(a.plans ?? []).map((plan) => (
             <button
               key={plan.path}
@@ -204,8 +240,11 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
             </span>
           )}
           {(a.createdTickets ?? []).map((t) => (
-            <span key={t} className="artifact ticket" title={`Created ticket ${t}`}>
-              <Icon name="plus" size={10} /> {t}
+            <TicketArtifact key={t} ticket={t} className="artifact ticket" />
+          ))}
+          {(a.createdCommits ?? []).map((sha) => (
+            <span key={sha} className="artifact commit" title={`Created commit ${sha}`}>
+              <Icon name="gitBranch" size={10} /> {sha}
             </span>
           ))}
         </div>

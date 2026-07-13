@@ -430,6 +430,8 @@ describe('feed store', () => {
 
   it('recordAnswer refuses unverified answers to high-consequence blocks', () => {
     const dir = tmpFeedDir();
+    // operators.yaml under the feed root must NOT authorize (RUSH-1618) —
+    // the registry lives at ~/.agents/operators.yaml only.
     fs.writeFileSync(path.join(dir, 'operators.yaml'), 'operators:\n  muqsit:\n    admin: true\n', 'utf-8');
     publishBlock(makeBlock('sess-authz', 'Deploy to prod?', {
       consequence: 'merge',
@@ -443,8 +445,35 @@ describe('feed store', () => {
       expect('unauthorized' in unverified).toBe(true);
     }
 
-    const verified = recordAnswer(blockId, { answeredFrom: 'feed', answeredBy: 'Muqsit', operatorId: 'muqsit', verified: true }, dir);
-    expect(verified.ok).toBe(true);
+    // verified:false still refused even with a known-looking operatorId.
+    const claimed = recordAnswer(blockId, {
+      answeredFrom: 'feed',
+      answeredBy: 'Muqsit',
+      operatorId: 'muqsit',
+      verified: false,
+    }, dir);
+    expect(claimed.ok).toBe(false);
+  });
+
+  it('recordAnswer ignores operators.yaml colocated with the feed store (RUSH-1618)', () => {
+    const dir = tmpFeedDir();
+    // Only the feed root has operators.yaml — the canonical registry is separate.
+    // Claiming verified:true for an id that exists ONLY here must still fail
+    // when that id is not in the real ~/.agents registry. Use a unique id.
+    fs.writeFileSync(
+      path.join(dir, 'operators.yaml'),
+      'operators:\n  feed-only-operator-xyz:\n    admin: true\n',
+      'utf-8',
+    );
+    publishBlock(makeBlock('sess-authz-feed', 'Deploy?', { consequence: 'merge' }), dir);
+    const blockId = blockIdForSession('sess-authz-feed');
+    const result = recordAnswer(blockId, {
+      answeredFrom: 'feed',
+      operatorId: 'feed-only-operator-xyz',
+      verified: true,
+    }, dir);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect('unauthorized' in result).toBe(true);
   });
 
   it('recordAnswer permits any answer to normal-consequence blocks', () => {

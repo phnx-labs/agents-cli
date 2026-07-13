@@ -361,13 +361,52 @@ export function shouldWipeOnWatchEvent(chunk: string): boolean {
   return /\bSLEEP\b/.test(chunk);
 }
 
+type BrokerConnectionHandler = (conn: net.Socket) => void;
+
+/**
+ * Bind the shared broker socket without stealing it from another live owner.
+ * Both the standalone service and daemon-hosted broker use this single path so
+ * either startup order is safe: a reachable owner wins, while an unreachable
+ * stale socket is reclaimed once.
+ */
+async function bindBrokerSocket(
+  sock: string,
+  onConnection: BrokerConnectionHandler,
+): Promise<net.Server | null> {
+  const listenOnce = (): Promise<net.Server | 'inuse'> =>
+    new Promise((resolve, reject) => {
+      const server = net.createServer(onConnection);
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') resolve('inuse');
+        else reject(err);
+      };
+      server.once('error', onError);
+      server.listen(sock, () => {
+        try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
+        resolve(server);
+      });
+    });
+
+  let bound = await listenOnce();
+  if (bound !== 'inuse') return bound;
+  if ((await agentPing()).reachable) return null;
+
+  try { fs.unlinkSync(sock); } catch { /* disappeared between probe and reclaim */ }
+  bound = await listenOnce();
+  if (bound !== 'inuse') return bound;
+  if ((await agentPing()).reachable) return null;
+  throw new Error(`Secrets broker socket is in use but unreachable: ${sock}`);
+}
+
 /**
  * Run the broker in the foreground. Spawned detached by ensureAgentRunning via
  * `agents secrets _agent-run`. Holds the store in memory, serves the socket,
  * sweeps expired entries, wipes on sleep, and self-exits when idle.
  */
-export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise<void> {
-  if (!onDarwin()) return; // nothing to broker without biometry prompts
+export async function runSecretsAgent(
+  opts: { service?: boolean } = {},
+): Promise<{ close(): void } | null> {
+  if (!onDarwin()) return null; // nothing to broker without biometry prompts
   // When launchd keeps us alive as a persistent service, never idle-exit:
   // exiting would just make launchd cold-start us again, reintroducing the
   // startup-under-load fragility the service exists to avoid.
@@ -383,7 +422,7 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   } catch (err: any) {
     if (err?.code === 'EEXIST') {
       const holder = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-      if (!isNaN(holder) && isAlive(holder)) return; // another broker is live
+      if (!isNaN(holder) && isAlive(holder)) return null; // another broker is live
       // Stale pid — reclaim it.
       try { fs.unlinkSync(pidFile); } catch { /* race; fall through */ }
       fs.writeFileSync(pidFile, String(process.pid));
@@ -397,7 +436,40 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   // the process once it's been empty for IDLE_EXIT_MS so no idle broker lingers.
   let emptySince = Date.now();
   const sock = socketPath();
-  try { fs.unlinkSync(sock); } catch { /* no stale socket */ }
+
+  const releasePid = () => {
+    try {
+      if (parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) === process.pid) {
+        fs.unlinkSync(pidFile);
+      }
+    } catch { /* gone or no longer ours */ }
+  };
+
+  // Register lifecycle handlers before socket arbitration. A persistent
+  // launchd service may spend its whole lifetime as the standby loser, and a
+  // kickstart/bootout during that wait must still release its pid-file lease.
+  let standbyTimer: NodeJS.Timeout | null = null;
+  let cleanupActive: (() => void) | null = null;
+  let shuttingDown = false;
+  const onSigterm = () => shutdown(0);
+  const onSigint = () => shutdown(0);
+  const detachSignals = () => {
+    process.off('SIGTERM', onSigterm);
+    process.off('SIGINT', onSigint);
+  };
+  const shutdown = (code: number) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (standbyTimer) {
+      clearTimeout(standbyTimer);
+      standbyTimer = null;
+    }
+    if (cleanupActive) cleanupActive();
+    else releasePid();
+    process.exit(code);
+  };
+  process.on('SIGTERM', onSigterm);
+  process.on('SIGINT', onSigint);
 
   // Capture the version of the code we're running so the sweep can detect when
   // an in-place upgrade has landed and self-heal onto it. getCliVersion caches
@@ -436,7 +508,7 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
     return resp;
   };
 
-  const server = net.createServer((conn) => {
+  const onConnection = (conn: net.Socket) => {
     conn.setEncoding('utf-8');
     let buf = '';
     conn.on('data', (chunk) => {
@@ -456,33 +528,48 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
       }
     });
     conn.on('error', () => { /* client vanished mid-request; ignore */ });
-  });
+  };
+
+  let server: net.Server | null = null;
+  do {
+    try {
+      server = await bindBrokerSocket(sock, onConnection);
+    } catch (err) {
+      detachSignals();
+      releasePid();
+      throw err;
+    }
+    if (!server && persistent) {
+      // launchd KeepAlive would immediately relaunch a persistent loser if it
+      // returned here. Stay quiescent instead, then claim the socket if the
+      // daemon-hosted owner goes away. The pid file keeps launchd/manual starts
+      // from creating additional waiters while this process is standing by.
+      do {
+        await new Promise<void>((resolve) => {
+          standbyTimer = setTimeout(() => {
+            standbyTimer = null;
+            resolve();
+          }, 1000);
+        });
+      } while ((await agentPing()).reachable);
+    }
+  } while (!server && persistent);
+  if (!server) {
+    detachSignals();
+    releasePid();
+    return null;
+  }
 
   let watcher: ChildProcess | null = null;
   let sweepTimer: NodeJS.Timeout | null = null;
-  let shuttingDown = false;
-  const shutdown = (code: number) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+  cleanupActive = () => {
     store.clear();
     if (sweepTimer) clearInterval(sweepTimer);
     try { watcher?.kill(); } catch { /* already gone */ }
     try { server.close(); } catch { /* not listening */ }
     try { fs.unlinkSync(sock); } catch { /* gone */ }
-    try { if (parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) === process.pid) fs.unlinkSync(pidFile); } catch { /* gone */ }
-    process.exit(code);
+    releasePid();
   };
-
-  process.on('SIGTERM', () => shutdown(0));
-  process.on('SIGINT', () => shutdown(0));
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(sock, () => {
-      try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
-      resolve();
-    });
-  });
 
   sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
 
@@ -507,6 +594,99 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   } catch {
     watcher = null;
   }
+
+  return {
+    close() {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      detachSignals();
+      cleanupActive?.();
+    },
+  };
+}
+
+/**
+ * Host the secrets broker inside the always-on daemon (#416).
+ *
+ * Serves the SAME socket and wire protocol as the standalone `runSecretsAgent`
+ * — so every existing client (`agentGetSync`, `agentPing`, `agentAutoLoadSync`)
+ * keeps working unchanged, no PROTOCOL_VERSION bump — but it is daemon-safe:
+ *
+ *   - no pid-file single-instance guard (the daemon owns the instance);
+ *   - no `process.exit`, no SIGTERM/SIGINT handlers, no self-heal/idle-exit
+ *     (those would kill the daemon — the daemon is the always-on backbone and
+ *     manages its own version/lifecycle). The sweep only TTL-evicts.
+ *
+ * The caller (`runDaemon`) normally invokes this only when no broker answers
+ * its initial ping. Binding still arbitrates ownership through the same shared
+ * path as the standalone service: a live owner wins, while only an unreachable
+ * stale socket is reclaimed. Returns a handle the daemon closes on shutdown,
+ * or null off-darwin (nothing to broker without biometry).
+ */
+export async function startHostedBroker(): Promise<{ close(): void } | null> {
+  if (!onDarwin()) return null;
+
+  const store = new Map<string, StoredBundle>();
+  const sock = socketPath(); // agentDir() creates the 0700 dir as a side effect
+
+  const handle = (req: Request): Response => handleAgentRequest(store, req);
+  const onConn = (conn: net.Socket) => {
+    conn.setEncoding('utf-8');
+    let buf = '';
+    conn.on('data', (chunk) => {
+      buf += chunk;
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        let resp: Response;
+        try {
+          resp = handle(JSON.parse(line) as Request);
+        } catch (err) {
+          resp = { ok: false, error: (err as Error).message };
+        }
+        conn.write(JSON.stringify(resp) + '\n');
+      }
+    });
+    conn.on('error', () => { /* client vanished mid-request; ignore */ });
+  };
+
+  const server = await bindBrokerSocket(sock, onConn);
+  if (!server) return null;
+
+  // TTL eviction ONLY. Unlike the standalone broker's sweep, there is no
+  // self-heal-exit or idle-exit here — the daemon is always-on and owns the
+  // upgrade/lifecycle path; a broker that called process.exit() would take the
+  // whole daemon down with it.
+  const sweepTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
+  }, SWEEP_INTERVAL_MS);
+
+  // Auto-lock on sleep, same as the standalone broker: the signed helper emits
+  // LOCK/SLEEP lines; wipe the in-memory store on a wipe-worthy event.
+  let watcher: ChildProcess | null = null;
+  try {
+    watcher = spawn(getKeychainHelperPath(), ['watch-lock'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    watcher.stdout?.setEncoding('utf-8');
+    watcher.stdout?.on('data', (chunk: string) => {
+      if (shouldWipeOnWatchEvent(chunk)) store.clear();
+    });
+    watcher.on('error', () => { watcher = null; });
+  } catch {
+    watcher = null;
+  }
+
+  return {
+    close() {
+      store.clear();
+      clearInterval(sweepTimer);
+      try { watcher?.kill(); } catch { /* already gone */ }
+      try { server.close(); } catch { /* not listening */ }
+      try { fs.unlinkSync(sock); } catch { /* gone */ }
+    },
+  };
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
@@ -773,7 +953,7 @@ export async function agentStatus(): Promise<AgentStatusEntry[]> {
 
 /** Ping result: whether a broker is reachable + speaking our protocol, and the
  * version of the code it's running (for staleness detection). */
-async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
+export async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
   if (!agentSocketExists()) return { reachable: false };
   const r = await request({ cmd: 'ping' });
   if (r?.ok === true && r.cmd === 'ping' && r.version === PROTOCOL_VERSION) {
@@ -807,6 +987,22 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
     if (!shouldTeardownVersionSkewedBroker((await agentStatus()).length)) return true;
     await teardownStaleBroker();
   }
+
+  // Path 0 (#416): prefer the always-on daemon — it hosts the broker socket
+  // (one supervised backbone rather than a separate launchd service). If
+  // bringing the daemon up makes the broker answer, we're done. Fall through to
+  // the standalone-service paths below when the daemon path isn't available
+  // (kept as a fallback until the standalone service is retired, #416 step 2).
+  try {
+    const { ensureDaemonStarted } = await import('../daemon.js');
+    if (ensureDaemonStarted()) {
+      const d0 = Date.now() + timeoutMs;
+      while (Date.now() < d0) {
+        if ((await agentPing()).reachable) return true;
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    }
+  } catch { /* daemon path unavailable — fall through to the standalone service */ }
 
   // Path 1: the persistent service. installSecretsAgentService is idempotent and
   // waits for the socket; for an already-installed service we kickstart and wait.

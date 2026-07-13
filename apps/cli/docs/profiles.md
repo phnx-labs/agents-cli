@@ -64,11 +64,25 @@ All OpenRouter presets share one key (`agents-cli.openrouter.token`). Adding a s
 | `glm` | openrouter | `z-ai/glm-5` | #1 Chatbot Arena ELO among open-weight. REASONING — interactive only. |
 | `qwen` | openrouter | `qwen/qwen3-coder-next` | Latest coding Qwen. PRINT-SAFE. |
 | `deepseek` | openrouter | `deepseek/deepseek-chat-v3-0324` | Non-reasoning DeepSeek Chat. PRINT-SAFE. |
+| `open-claude` | openrouter | `qwen/qwen3-coder-next` | Open-weight coding inside Claude Code — general open-claude path. PRINT-SAFE. |
+| `claude-spark` | openrouter | `meta/claude-spark-1.1` | Meta Claude Spark 1.1 via OpenRouter inside Claude Code. Open alternative for open-claude spark usage. |
+| `opencode` | opencode | (default) | OpenCode default — uses configured model. Auth via `opencode auth`. |
+| `opencode-spark` | opencode | `meta/claude-spark-1.1` | Meta Claude Spark 1.1 via OpenCode — best for open-claude usage with opencode harness. |
+| `opencode-qwen` | opencode | `qwen/qwen3-coder-next` | Qwen3 Coder Next via OpenCode — free via opencode provider. |
 | `grok-fast` | xai | `grok-build-fast` | Native grok host. |
 | `grok-heavy` | xai | `grok-build` | Native grok host (SuperGrok). |
 | `agy` | google | (CLI default) | Native antigravity host. |
+| `anthropic` | anthropic | `claude-3-5-sonnet-latest` | Direct Anthropic API. |
+| `proxy` | proxy | (custom) | Generic local proxy / gateway. |
+| `truefoundry` | truefoundry | (custom) | TrueFoundry AI Gateway. |
+| `bedrock` | bedrock | (custom) | AWS Bedrock native mode. |
+| `vertex` | vertex | (custom) | Google Vertex AI. |
+| `foundry` | foundry | (custom) | Azure AI Foundry. |
+| `litellm` | litellm | (custom) | LiteLLM proxy. |
+| `vllm` | vllm | (custom) | Self-hosted vLLM. |
+| `ollama` | ollama | `qwen3-coder:30b` (default) | Local Ollama via Codex host. |
 
-Source: `src/lib/profiles-presets.ts:45-143`.
+Source: `src/lib/profiles-presets.ts`.
 
 **REASONING vs PRINT-SAFE:** Claude Code sends `thinking:{type:"enabled"}` in its Anthropic payload. When the model returns reasoning/redacted_thinking blocks, `--print` consolidation returns empty stdout. Reasoning presets (`kimi`, `minimax`, `glm`) work fine interactively; use print-safe variants (`kimi-chat`, `qwen`, `deepseek`) for `agents run --print` and scripted pipelines.
 
