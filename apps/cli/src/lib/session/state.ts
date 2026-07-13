@@ -64,6 +64,27 @@ export interface DetectedTicket {
   url?: string;
 }
 
+/**
+ * Detect per-session rate-limit / usage-limit signals in assistant or error
+ * text (RUSH-1523). Matches the same shapes Factory's prewarm detectBlockingPrompt
+ * uses, plus common Claude/Codex/Gemini limit strings.
+ */
+export function detectRateLimited(text?: string): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  return (
+    /\brate[- ]?limit(ed|s)?\b/.test(t) ||
+    /\btoo many requests\b/.test(t) ||
+    /\b429\b/.test(t) ||
+    /\busage[- ]?limit(ed)?\b/.test(t) ||
+    /\bhit your (usage |rate )?limit\b/.test(t) ||
+    /\byou('ve| have) (hit|reached|exceeded) (your |the )?(rate |usage )?limit\b/.test(t) ||
+    /\bout of (credits|quota)\b/.test(t) ||
+    /\bquota exceeded\b/.test(t) ||
+    /\btry again (in|later|after)\b/.test(t) && /\b(limit|rate|quota|throttl)\b/.test(t)
+  );
+}
+
 export interface SessionState {
   activity: SessionActivity;
   awaitingReason?: AwaitingReason;
@@ -71,6 +92,11 @@ export interface SessionState {
   lastEventKind?: SessionEvent['type'];
   /** Single-line description of the latest turn (message text or tool action). */
   preview?: string;
+  /**
+   * True when the transcript shows the session is rate/usage limited (RUSH-1523).
+   * Distinct from account-level usageStatus — this is per-session evidence.
+   */
+  rateLimited?: boolean;
   /**
    * The structured decision the agent is waiting on (question / plan / permission),
    * with its options when it offered any. Set only when activity is waiting_input.
@@ -481,6 +507,21 @@ export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}
   const state = inferActivity(events, ctx);
   const { pr, ticket, createdTickets, spawnedTeam } = detectDurableSignals(events);
   const worktree = detectWorktree(ctx.cwd, ctx.gitBranch);
+  // Rate-limit: scan the most recent assistant messages + tool errors (tail-first).
+  let rateLimited = false;
+  for (let i = events.length - 1; i >= 0 && i >= events.length - 12; i--) {
+    const e = events[i];
+    if (!e) continue;
+    if (e.type === 'message' && e.role === 'assistant' && detectRateLimited(e.content)) {
+      rateLimited = true;
+      break;
+    }
+    if (e.type === 'tool_result' && detectRateLimited(e.output)) {
+      rateLimited = true;
+      break;
+    }
+  }
+  if (!rateLimited && detectRateLimited(state.preview)) rateLimited = true;
   return {
     ...state,
     pr: pr ?? state.pr,
@@ -488,5 +529,6 @@ export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}
     ticket: ticket ?? detectTicket(undefined, ctx.gitBranch) ?? state.ticket,
     createdTickets,
     spawnedTeam,
+    rateLimited: rateLimited || undefined,
   };
 }

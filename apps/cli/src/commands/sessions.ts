@@ -32,7 +32,7 @@ import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
-import { runRemoteSessions, buildForwardedArgs } from '../lib/session/remote.js';
+import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -666,8 +666,10 @@ export function serializeSessionsJson(sessions: SessionMeta[]): string {
  */
 async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
   // Forward the caller's own filters (query, --limit, --since, …) minus --host,
-  // and guarantee --json so each peer answers with a parseable array.
-  const forwarded = buildForwardedArgs(process.argv, new Set(hosts));
+  // and guarantee --json so each peer answers with a parseable array. Force
+  // whole-index scope: an explicit --host means "that box's index", not the
+  // slice that happens to sit under the peer's SSH-login home dir.
+  const forwarded = ensureWholeIndex(buildForwardedArgs(process.argv, new Set(hosts)));
   if (!forwarded.includes('--json')) forwarded.push('--json');
   const { sessions } = await gatherRemoteList(forwarded, hosts);
   process.stdout.write(serializeSessionsJson(sessions));

@@ -4,6 +4,7 @@ import * as path from 'path';
 import {
   buildForwardedArgs,
   buildRemoteCommand,
+  ensureWholeIndex,
   shellQuote,
   classifySshFailure,
   remoteCachePath,
@@ -105,6 +106,20 @@ describe('buildForwardedArgs', () => {
   });
 });
 
+describe('ensureWholeIndex', () => {
+  it('adds --all so a remote listing spans the peer index, not its login cwd', () => {
+    expect(ensureWholeIndex(['sessions', '--agent', 'grok'])).toEqual(['sessions', '--agent', 'grok', '--all']);
+  });
+
+  it('is idempotent — never adds a second --all', () => {
+    expect(ensureWholeIndex(['sessions', '--all'])).toEqual(['sessions', '--all']);
+  });
+
+  it('preserves an explicit path query (--all is inert when a path filter wins on the remote)', () => {
+    expect(ensureWholeIndex(['sessions', '/srv/app'])).toEqual(['sessions', '/srv/app', '--all']);
+  });
+});
+
 describe('shellQuote', () => {
   it('wraps a plain word in single quotes', () => {
     expect(shellQuote('agents')).toBe("'agents'");
@@ -135,6 +150,12 @@ describe('buildRemoteCommand', () => {
   it('neutralizes shell metacharacters in a query (no command substitution)', () => {
     expect(decodeRemoteArgv(['sessions', '$(whoami); rm -rf /', '--json']))
       .toEqual(['sessions', '$(whoami); rm -rf /', '--json']);
+  });
+
+  it('pins the peer local so --host does not re-sweep its fleet', () => {
+    // Without AGENTS_SESSIONS_LOCAL=1 the remote `agents sessions` fans back out
+    // to every device it knows (incl. us) and prints a spurious "unreachable".
+    expect(buildRemoteCommand(['sessions', '--agent', 'codex'])).toContain('AGENTS_SESSIONS_LOCAL=1');
   });
 });
 

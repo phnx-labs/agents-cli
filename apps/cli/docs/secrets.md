@@ -450,10 +450,12 @@ What the macOS Keychain ACL actually protects:
 
 The **`never` prompt-policy drops even the user-presence check.** A `never` bundle is stored *without* the biometry access control (`set-no-acl` in the helper uses a plain `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` and attaches no `kSecAttrAccessControl`), so reads are fully silent — no Touch ID, no broker, no user-presence gate at all. That means **any code running as your user reads it with zero interaction**, which is exactly the on-disk-plaintext-equivalent exposure the biometry ACL otherwise mitigates. Reserve `never` for low-sensitivity, automation-only credentials, and never put a high-value secret (signing keys, long-lived cloud tokens) in a `never` bundle. Creating or switching to `never` requires an explicit confirmation (`--i-understand`, or an interactive "are you sure" prompt) precisely because it is the global downgrade the rest of this model is built to avoid. See [Prompt policy and auto-cache](#prompt-policy-and-auto-cache) for the operational details.
 
+**Service names are hashed, not descriptive.** Keychain enumeration (`list`) never decrypts and never prompts — by design, so `agents secrets list` stays snappy. That used to mean service names themselves (`agents-cli.secrets.<bundle>.<KEY>`, `agents-cli.<provider>.token`) were silently enumerable metadata: any same-user process could build a target list of your bundles, keys, and providers before ever requesting Touch ID. Since #316, items are stored under opaque HMAC-SHA256-hashed names (`agents-cli.h.*`) keyed by a per-machine random key (`agents-cli.hmackey`, stored no-ACL so silent operations stay silent — it protects metadata *names*, not values). An enumerator now learns only item grouping and counts. The rename is applied by a one-time re-key that runs automatically on the first interactive keychain use after upgrading (two Touch ID prompts: one to read, one to verify; add-before-delete throughout, so cancelling or crashing mid-run never loses a value and the re-key resumes later). Headless machines can trigger it explicitly with `agents secrets rekey`; `agents secrets rekey --status` reports the state. Caveat: after the re-key, an *older* agents-cli on the same machine (a stale global install, a pinned old version) still writes and looks up cleartext names — it won't see re-keyed items and its newly written items won't be seen. Keep all installs on one machine at or above the version that shipped hashing.
+
 Practical implications:
 
 - A malicious binary running as your user, with you logged in at the keyboard, can read any bundle by popping Touch ID with a prompt that says "Unlock agents-cli secrets". Don't approve Touch ID prompts you didn't initiate.
-- `agents secrets list` returns service names without prompting — service names are enumerable metadata. Don't name a bundle after a secret value.
+- `agents secrets list` still enumerates without prompting, but the stored service names are opaque hashes — what leaks is how many items exist and which ones group together, not what they're called. (Bundle *display* names come from the biometry-gated metadata read that `secrets list` already performs.)
 - Bundle values injected via `agents secrets exec` or `agents run --secrets <bundle>` flow into the child process environment, which is inherited by every subprocess that child spawns (npm install scripts, shell commands, etc.). That's the documented feature — only put credentials in a bundle that you're OK letting the agent's full subprocess tree see.
 
 What we don't protect against:
@@ -461,6 +463,7 @@ What we don't protect against:
 - Other same-user processes (you control your user account).
 - A user who approves a Touch ID prompt for an attacker-controlled binary.
 - Cross-user attacks where the attacker is `root` (the OS keychain is owned at user scope).
+- A same-user process that deliberately executes the signed helper to read `agents-cli.hmackey` and confirm a *guessed* name by hashing it. Name hashing removes the passive one-call enumeration of every name; it is not a cryptographic boundary against an active local attacker (nothing here is — see the first bullet).
 
 ## The secrets-agent (macOS)
 

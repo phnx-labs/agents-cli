@@ -24,6 +24,36 @@ import { followHostTask } from './progress.js';
 // injection-safe to interpolate unquoted into remote commands.
 const REMOTE_DIR = '$HOME/.agents/.cache/hosts';
 
+/**
+ * If `p` is anchored at the home dir — a leading `~` or `$HOME` — return the
+ * remainder (no leading slash), else null. Callers that want a local-home
+ * absolute (`/Users/<me>/x`, from a shell-expanded `--cwd ~/x`) re-rooted at the
+ * remote home normalize it to `~/x` first (`toRemotePortable`); explicit
+ * `--remote-cwd` is left literal and so is never re-rooted here.
+ */
+function homeRemainder(p: string): string | null {
+  if (p === '~' || p === '$HOME') return '';
+  if (p.startsWith('~/')) return p.slice(2);
+  if (p.startsWith('$HOME/')) return p.slice(6);
+  return null;
+}
+
+/**
+ * Build a `cd <dir> && ` prefix that resolves on the REMOTE host.
+ *
+ * A `~`/`$HOME`-anchored path must resolve against the REMOTE user's home, not
+ * the local one (`/home/<me>` vs `/Users/<me>`). We emit an unquoted `"$HOME"`
+ * for that segment — the remote login shell expands it — and shell-quote the
+ * remainder. Any other path (absolute or relative) is quoted verbatim.
+ */
+export function remoteCdPrefix(remoteCwd?: string): string {
+  if (!remoteCwd) return '';
+  const rest = homeRemainder(remoteCwd);
+  if (rest === '') return 'cd "$HOME" && ';
+  if (rest !== null) return `cd "$HOME"/${shellQuote(rest)} && `;
+  return `cd ${shellQuote(remoteCwd)} && `;
+}
+
 export interface DispatchResult {
   task: HostTask;
   /** Exit code when followed; undefined when detached (--no-follow). */
@@ -75,7 +105,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 
   // Inner command run under a login shell so PATH resolves `agents`.
   const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
-  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const cwd = remoteCdPrefix(opts.remoteCwd);
   const inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
 
   // Outer: ensure dir, launch detached under bash -lc, print the PID.
@@ -210,7 +240,7 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
   const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
-  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const cwd = remoteCdPrefix(opts.remoteCwd);
   const remoteCmd = `${cwd}${invocation}`;
   return sshStream(target, remoteCmd, { tty: process.stdin.isTTY, multiplex: true });
 }

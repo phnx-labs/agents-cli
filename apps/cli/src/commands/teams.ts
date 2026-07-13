@@ -13,6 +13,7 @@ import { addHostOption } from '../lib/hosts/option.js';
 import * as path from 'path';
 import {
   AgentManager,
+  AgentStatus,
   checkCliSignedIn,
   collectTeamsDoctorData,
   getAgentsDir,
@@ -21,6 +22,7 @@ import {
   type TaskType,
   type TeamsDoctorEntry,
 } from '../lib/teams/agents.js';
+import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import type { CloudProviderId, DispatchOptions } from '../lib/cloud/types.js';
 import { emit } from '../lib/events.js';
@@ -196,6 +198,28 @@ function parseTeammate(spec: string): {
 
 function shortId(id: string): string {
   return id.slice(0, 8);
+}
+
+/** Where `teams message`/`teams resume` routes a follow-up, by teammate status. */
+export type TeamMessageRoute =
+  | { kind: 'steer' }        // running -> mailbox, delivered at next tool call
+  | { kind: 'resume' }       // stopped/completed/failed -> re-enter its session
+  | { kind: 'need-message' } // actionable, but no message was supplied
+  | { kind: 'not-started' }; // pending --after deps, never launched
+
+/**
+ * Decide how a follow-up to a teammate is delivered from its reconciled status.
+ * Pure — the source of truth for the routing table, unit-tested without I/O.
+ *   - pending                       -> not-started (tell them to `teams start`)
+ *   - running     + message         -> steer (mailbox)
+ *   - stopped/etc + message         -> resume (re-enter session)
+ *   - any actionable + no message   -> need-message
+ */
+export function decideTeamMessageRoute(status: AgentStatus, hasMessage: boolean): TeamMessageRoute {
+  if (status === AgentStatus.PENDING) return { kind: 'not-started' };
+  if (!hasMessage) return { kind: 'need-message' };
+  if (status === AgentStatus.RUNNING) return { kind: 'steer' };
+  return { kind: 'resume' };
 }
 
 /**
@@ -983,6 +1007,12 @@ export function registerTeamsCommands(program: Command): void {
 
       # Delta-poll status without rereading everything
       agents teams status pricing-page --since 2026-04-24T09:00:00-07:00
+
+      # Nudge a teammate that stopped with more to do — resumes its own session
+      agents teams resume pricing-page backend "Review's in — rebase-merge the PR, then release"
+
+      # Steer a still-running teammate mid-flight (delivered at its next tool call)
+      agents teams message pricing-page qa "Skip the flaky screenshot test for now"
 
       # Wind everyone down when shipped
       agents teams disband pricing-page
@@ -1915,7 +1945,7 @@ export function registerTeamsCommands(program: Command): void {
 
   // stop
   addHostOption(teams.command('stop [team] [teammate]'))
-    .description('Stop a running teammate. Can be restarted later. Cleans up worktree if no uncommitted changes.')
+    .description('Stop a running teammate. Resume it later with `agents teams resume`. Cleans up worktree if no uncommitted changes.')
     .option('--json', 'Output machine-readable JSON')
     .action(async (team: string | undefined, ref: string | undefined, opts: { json?: boolean }) => {
       const mgr = mkManager();
@@ -2002,6 +2032,97 @@ export function registerTeamsCommands(program: Command): void {
       if (worktreeKept && agent?.worktreeName) {
         console.log(chalk.yellow(`Worktree '${agent.worktreeName}' has uncommitted changes. Keeping it at: ${agent.worktreePath}`));
       }
+    });
+
+  // message / resume — send a follow-up message to a teammate. Routes by the
+  // teammate's reconciled status: a RUNNING teammate is STEERED via its mailbox
+  // (delivered at its next tool call); a STOPPED one (completed/failed/stopped)
+  // is RESUMED — re-entering its own session with the message as the next user
+  // turn, re-attaching it to the team as live.
+  async function teamMessageAction(
+    team: string,
+    ref: string,
+    message: string | undefined,
+    opts: { json?: boolean; from?: string },
+  ): Promise<void> {
+    const mgr = mkManager();
+
+    const lookup = await mgr.resolveAgentIdInTask(team, ref);
+    if (lookup.kind === 'none') die(`No teammate matching '${ref}' in team ${team}`, 2);
+    if (lookup.kind === 'ambiguous') {
+      const shorts = lookup.matches.map(shortId).join(', ');
+      die(`'${ref}' matches multiple teammates: ${shorts}. Use more characters or a name.`, 2);
+    }
+    const agentId = (lookup as { kind: 'ok'; agentId: string }).agentId;
+
+    // mgr.get reconciles the teammate's status (PID + start-time guard / remote
+    // .exit sentinel / exit-code reap) before we branch — so running-vs-stopped
+    // is a fact, not a guess.
+    const agent = await mgr.get(agentId);
+    if (!agent) die(`Teammate ${shortId(agentId)} vanished from team ${team}.`);
+    const display = agent!.name || shortId(agentId);
+    const status = agent!.status;
+    const hasMessage = message != null && message.trim().length > 0;
+
+    const route = decideTeamMessageRoute(status, hasMessage);
+    switch (route.kind) {
+      case 'not-started':
+        die(`Teammate '${display}' hasn't started yet (waiting on --after deps). Run \`agents teams start ${team}\` to launch it.`);
+        return;
+      case 'need-message':
+        if (status === AgentStatus.RUNNING) {
+          die(`Teammate '${display}' is running — pass a message to steer it.`);
+        }
+        die(`Teammate '${display}' is ${status} — pass a message to resume it: \`agents teams resume ${team} ${display} "<message>"\`.`);
+        return;
+      case 'steer': {
+        // Running -> steer via mailbox; never re-launch (that forks a 2nd session).
+        enqueue(mailboxDir(agentId), { to: agentId, text: message!, from: opts.from });
+        if (isJsonMode(opts)) {
+          console.log(JSON.stringify({ team, agent_id: agentId, name: agent!.name ?? null, action: 'steer', status }, null, 2));
+          return;
+        }
+        console.log(
+          chalk.green(`Steering ${chalk.cyan(display)} (running) — `) +
+            chalk.dim('message queued; it will see it at its next tool call.'),
+        );
+        return;
+      }
+      case 'resume': {
+        // Stopped / completed / failed -> resume its own session with the message.
+        try {
+          await mgr.resumeTeammate(agentId, message!);
+        } catch (err) {
+          die((err as Error).message);
+        }
+        if (isJsonMode(opts)) {
+          console.log(JSON.stringify({ team, agent_id: agentId, name: agent!.name ?? null, action: 'resume', prior_status: status }, null, 2));
+          return;
+        }
+        console.log(
+          chalk.green(`Resuming ${chalk.cyan(display)} `) +
+            chalk.dim(`(was ${status}) in team ${team} — re-entering its session with your message.`),
+        );
+        console.log(chalk.dim(`Track it with \`agents teams status ${team}\`.`));
+        return;
+      }
+    }
+  }
+
+  addHostOption(teams.command('message <team> <teammate> <message>'))
+    .description('Send a follow-up message to a teammate. A running teammate is steered via its mailbox; a stopped one is resumed — re-entering its own session with the message.')
+    .option('--from <who>', 'Label recorded as the sender of this message')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (team: string, ref: string, message: string, opts: { json?: boolean; from?: string }) => {
+      await teamMessageAction(team, ref, message, opts);
+    });
+
+  addHostOption(teams.command('resume <team> <teammate> [message]'))
+    .description("Resume a stopped teammate (completed/failed/stopped) by re-entering its own session with a message as the next user turn. If the teammate is still running, the message is steered via its mailbox instead.")
+    .option('--from <who>', 'Label recorded as the sender of this message')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (team: string, ref: string, message: string | undefined, opts: { json?: boolean; from?: string }) => {
+      await teamMessageAction(team, ref, message, opts);
     });
 
   // remove

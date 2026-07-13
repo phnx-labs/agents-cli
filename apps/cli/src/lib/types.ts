@@ -9,7 +9,7 @@
 import type { CloudProviderId } from './cloud/types.js';
 
 /** Unique identifier for a supported AI coding agent. */
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid';
+export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes' | 'forge';
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
@@ -492,6 +492,12 @@ export interface SkillEntry {
   tags?: string[];
   /** Registry-specific trust signal (e.g. 'builtin', 'trusted', 'community'). */
   trustLevel?: string;
+  /**
+   * Lowercase hex sha256 of the skill's SKILL.md, as recorded by
+   * `agents publish`. When present, install verifies the cloned SKILL.md
+   * against it and aborts on mismatch.
+   */
+  sha256?: string;
 }
 
 /** Paginated response from a skill registry search endpoint. */
@@ -700,6 +706,12 @@ export interface Meta {
   versions?: Partial<Record<AgentId, Record<string, VersionResources>>>;
   // Git remote source URL (when ~/.agents/.system/ is a git repo)
   source?: string;
+  /**
+   * Projects root for the `agents run --project <slug>` shorthand, e.g.
+   * `~/src/github.com/<user>`. Auto-inferred from the repo you launch inside and
+   * cached here; stored home-relative (`~/…`) so it resolves on remote hosts too.
+   */
+  projectRoot?: string;
   /**
    * Extra DotAgent repos merged after ~/.agents/. Managed clones live as peer
    * dirs at ~/.agents-<alias>/; user-owned repos can point at arbitrary paths

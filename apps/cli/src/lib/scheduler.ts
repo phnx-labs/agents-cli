@@ -8,7 +8,7 @@
 
 import { Cron } from 'croner';
 import type { JobConfig } from './routines.js';
-import { listJobs, deleteJob, isPastEndAt, setJobEnabled } from './routines.js';
+import { listJobs, deleteJob, isPastEndAt, setJobEnabled, jobRunsOnThisDevice } from './routines.js';
 
 /** A job config paired with its active cron instance. */
 interface ScheduledJob {
@@ -29,8 +29,9 @@ export class JobScheduler {
     const configs = listJobs();
     for (const config of configs) {
       // Trigger-only jobs (no cron schedule) fire via the webhook receiver,
-      // not the cron loop — skip them here.
-      if (config.enabled && config.schedule) {
+      // not the cron loop — skip them here. Jobs pinned to another device
+      // (routines are fleet-synced) never enter this machine's cron loop.
+      if (config.enabled && config.schedule && jobRunsOnThisDevice(config)) {
         this.schedule(config);
       }
     }

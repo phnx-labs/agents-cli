@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { createHash } from 'crypto';
 import { SessionAgentKind } from './protocol';
+import { runAgents } from '../core/agentsBin';
 
 const LINE_CAP = 100;
 
@@ -165,6 +166,8 @@ export interface WatcherRoot {
 /**
  * The set of roots the machine-wide watcher recursively watches — one entry
  * per (root, agentType). The watcher mounts exactly one fs.watch per root.
+ * This is the degraded path for a machine without agents-cli; the watcher
+ * normally configures itself from watcherRootsFromCli() below.
  */
 export function watcherRoots(): WatcherRoot[] {
   const home = homeDir();
@@ -174,6 +177,53 @@ export function watcherRoots(): WatcherRoot[] {
   roots.push({ root: path.join(home, '.gemini', 'tmp'), agentType: 'gemini' });
   roots.push({
     root: path.join(home, '.local', 'share', 'opencode', 'storage', 'session'),
+    agentType: 'opencode',
+  });
+  return roots;
+}
+
+/** One `agents sessions --roots --json` entry (the CLI's SessionRoots shape). */
+interface CliSessionRootsEntry {
+  agent?: string;
+  dirs?: unknown[];
+}
+
+/**
+ * Watcher roots from the CLI's own discovery table (`agents sessions --roots
+ * --json`, issue #741) — the exact directories `agents sessions` scans, so the
+ * watcher stays in lockstep when an agent's on-disk layout changes (the
+ * hardcoded list kept watching ~/.gemini/sessions after gemini moved its
+ * transcripts to ~/.gemini/tmp). Roots for agents whose transcripts this
+ * monitor cannot parse (antigravity, droid, kimi) are skipped. OpenCode is
+ * appended from the local default: the CLI does not scan opencode transcripts,
+ * so it never appears in --roots. Falls back to watcherRoots() when the CLI is
+ * missing or the payload is unusable.
+ */
+export async function watcherRootsFromCli(): Promise<WatcherRoot[]> {
+  let stdout: string;
+  try {
+    ({ stdout } = await runAgents('sessions --roots --json', { timeout: 15_000 }));
+  } catch {
+    return watcherRoots();
+  }
+  let entries: CliSessionRootsEntry[];
+  try {
+    const parsed = JSON.parse(stdout);
+    entries = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return watcherRoots();
+  }
+  const roots: WatcherRoot[] = [];
+  for (const entry of entries) {
+    const agent = entry?.agent;
+    if (agent !== 'claude' && agent !== 'codex' && agent !== 'gemini') continue;
+    for (const dir of entry.dirs ?? []) {
+      if (typeof dir === 'string' && dir) roots.push({ root: dir, agentType: agent });
+    }
+  }
+  if (roots.length === 0) return watcherRoots();
+  roots.push({
+    root: path.join(homeDir(), '.local', 'share', 'opencode', 'storage', 'session'),
     agentType: 'opencode',
   });
   return roots;

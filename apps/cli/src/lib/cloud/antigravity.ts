@@ -28,7 +28,7 @@ import type {
   DispatchOptions,
   ProviderCapabilities,
 } from './types.js';
-import { resolveDispatchRepos } from './types.js';
+import { resolveDispatchRepos, normalizeProviderStatus } from './types.js';
 import { readAndResolveBundleEnv } from '../secrets/bundles.js';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
@@ -45,17 +45,6 @@ interface InteractionResponse {
   error?: { message?: string } | string;
 }
 
-/** Map an Interactions API status string to the canonical CloudTaskStatus. */
-export function mapStatus(s: string | undefined): CloudTaskStatus {
-  const lower = (s ?? '').toLowerCase();
-  if (lower.includes('queue') || lower.includes('pending')) return 'queued';
-  if (lower.includes('run') || lower.includes('progress')) return 'running';
-  if (lower.includes('complete') || lower.includes('success')) return 'completed';
-  if (lower.includes('fail') || lower.includes('error')) return 'failed';
-  if (lower.includes('cancel')) return 'cancelled';
-  return 'completed';
-}
-
 /** Build the Interactions API request body for a fresh dispatch. */
 export function buildInteractionBody(prompt: string, model: string): Record<string, unknown> {
   return {
@@ -70,7 +59,7 @@ export function parseInteraction(resp: InteractionResponse): { id: string; statu
   const id = resp.id ?? resp.interaction_id ?? `antigravity-${Date.now()}`;
   return {
     id,
-    status: mapStatus(resp.status),
+    status: normalizeProviderStatus('antigravity', resp.status),
     summary: resp.output_text,
     environmentId: resp.environment_id,
   };
