@@ -87,6 +87,8 @@ function getAgentConfigPath(agent: AgentId, versionHome: string): string | null 
       return path.join(versionHome, '.opencode', 'opencode.jsonc');
     case 'kimi':
       return path.join(versionHome, '.kimi-code', 'config.toml');
+    case 'droid':
+      return path.join(versionHome, '.factory', 'settings.json');
     default:
       return null;
   }
