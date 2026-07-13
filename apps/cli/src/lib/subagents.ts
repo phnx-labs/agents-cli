@@ -303,6 +303,75 @@ export function transformSubagentForDroid(subagentDir: string): string {
 }
 
 /**
+ * Transform a subagent into a Kimi Code YAML agent file.
+ *
+ * Kimi loads custom agents via `--agent-file` YAML. Subagents are declared on
+ * a parent agent under `agent.subagents.<name> = { path, description }` and
+ * each subagent file is itself a standard agent YAML (typically extend: default
+ * + system prompt body). We write each subagent as a standalone agent YAML
+ * under ~/.kimi-code/agents/<name>.yaml and maintain a managed parent file
+ * that lists them for `--agent-file`.
+ * https://moonshotai.github.io/kimi-cli/en/customization/agents.html
+ */
+export function transformSubagentForKimi(subagentDir: string): string {
+  const agentMd = path.join(subagentDir, 'AGENT.md');
+  const frontmatter = parseSubagentFrontmatter(agentMd);
+  const body = getSubagentBody(agentMd);
+
+  if (!frontmatter) {
+    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
+  }
+
+  let systemPrompt = body.trim();
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    systemPrompt += `\n\n## ${title}\n\n${content}`;
+  }
+
+  // YAML agent file (version 1, extend default, system_prompt from body)
+  const doc: Record<string, unknown> = {
+    version: 1,
+    agent: {
+      extend: 'default',
+      name: frontmatter.name,
+      description: frontmatter.description,
+      system_prompt: systemPrompt,
+    },
+  };
+  if (frontmatter.model) {
+    (doc.agent as Record<string, unknown>).model = frontmatter.model;
+  }
+  return yaml.stringify(doc);
+}
+
+/**
+ * Build the managed parent agent YAML that declares all installed subagents
+ * so `kimi --agent-file ~/.kimi-code/agents/agents-cli.yaml` can launch them.
+ */
+export function buildKimiSubagentsParentYaml(
+  entries: Array<{ name: string; description: string; relativePath: string }>
+): string {
+  const subagents: Record<string, { path: string; description: string }> = {};
+  for (const e of entries) {
+    subagents[e.name] = { path: e.relativePath, description: e.description };
+  }
+  return yaml.stringify({
+    version: 1,
+    agent: {
+      extend: 'default',
+      name: 'agents-cli',
+      description: 'Managed parent agent listing agents-cli synced subagents',
+      subagents,
+    },
+  });
+}
+
+/**
  * Transform a subagent into a Codex custom-agent TOML file.
  *
  * Codex loads standalone TOML under ~/.codex/agents/*.toml. Required fields:
@@ -413,6 +482,19 @@ export function installSubagentToAgent(
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  } else if (agent === 'kimi') {
+    // Kimi: YAML agent files under ~/.kimi-code/agents/<name>.yaml
+    const agentsDir = path.join(agentHome, '.kimi-code', 'agents');
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true });
+    }
+    try {
+      const yml = transformSubagentForKimi(subagentDir);
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.yaml`), yml);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else if (agent === 'openclaw') {
     // OpenClaw: copy full directory
     const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
@@ -440,6 +522,12 @@ export function removeSubagentFromAgent(
       return { success: true };
     } else if (agent === 'codex') {
       const targetPath = safeJoin(path.join(agentHome, '.codex', 'agents'), `${subagentName}.toml`);
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+      }
+      return { success: true };
+    } else if (agent === 'kimi') {
+      const targetPath = safeJoin(path.join(agentHome, '.kimi-code', 'agents'), `${subagentName}.yaml`);
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
       }

@@ -4,7 +4,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
-import { transformSubagentForDroid, transformSubagentForCodex, installSubagentToAgent } from '../src/lib/subagents.js';
+import {
+  transformSubagentForDroid,
+  transformSubagentForCodex,
+  transformSubagentForKimi,
+  buildKimiSubagentsParentYaml,
+  installSubagentToAgent,
+} from '../src/lib/subagents.js';
 
 describe('capableAgents("commands")', () => {
   it('excludes openclaw since it uses Gateway-based slash commands', () => {
@@ -138,6 +144,65 @@ describe('codex subagents (TOML custom agents)', () => {
       const dest = path.join(home, '.codex', 'agents', 'explorer.toml');
       expect(fs.existsSync(dest)).toBe(true);
       expect(fs.readFileSync(dest, 'utf-8')).toContain('name = "explorer"');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('kimi subagents (YAML agent files)', () => {
+  it('is capable of subagents', () => {
+    expect(capableAgents('subagents')).toContain('kimi');
+    expect(supports('kimi', 'subagents').ok).toBe(true);
+  });
+
+  it('transformSubagentForKimi emits YAML agent with system_prompt', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-sub-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'AGENT.md'),
+        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: kimi-k2\n---\n\nYou review code.\n`
+      );
+      const out = transformSubagentForKimi(dir);
+      expect(out).toContain('version: 1');
+      expect(out).toContain('name: reviewer');
+      expect(out).toContain('description: Reviews diffs');
+      expect(out).toContain('model: kimi-k2');
+      expect(out).toContain('extend: default');
+      expect(out).toContain('system_prompt:');
+      expect(out).toContain('You review code.');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('buildKimiSubagentsParentYaml lists subagents for --agent-file', () => {
+    const out = buildKimiSubagentsParentYaml([
+      { name: 'reviewer', description: 'Reviews diffs', relativePath: './reviewer.yaml' },
+      { name: 'explorer', description: 'Explores', relativePath: './explorer.yaml' },
+    ]);
+    expect(out).toContain('name: agents-cli');
+    expect(out).toContain('subagents:');
+    expect(out).toContain('reviewer:');
+    expect(out).toContain('path: ./reviewer.yaml');
+    expect(out).toContain('explorer:');
+  });
+
+  it('installSubagentToAgent writes ~/.kimi-code/agents/<name>.yaml', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'kimi', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.kimi-code', 'agents', 'explorer.yaml');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('name: explorer');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
