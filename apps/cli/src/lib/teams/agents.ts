@@ -864,6 +864,18 @@ export class AgentProcess {
     }
   }
 
+  /** Reset the local stdout cursor for a newly truncated resume log. */
+  resetLogReadPosition(): number {
+    const previous = this.lastReadPos;
+    this.lastReadPos = 0;
+    return previous;
+  }
+
+  /** Restore the cursor when a resume transaction puts the prior log back. */
+  restoreLogReadPosition(position: number): void {
+    this.lastReadPos = position;
+  }
+
   async readNewEvents(): Promise<void> {
     // Distributed teammate: mirror the host's new log bytes locally first, then
     // fall through to the identical local read+parse below.
@@ -1289,12 +1301,14 @@ export class AgentProcess {
 export type CloudDispatchFn = (agent: AgentProcess) => Promise<{ cloudSessionId: string }>;
 
 interface ResumeLogTransaction {
+  agent: AgentProcess;
   stdoutPath: string;
   backupPath: string;
   hadOriginal: boolean;
+  previousReadPos: number;
 }
 
-async function beginResumeLogTransaction(agent: AgentProcess): Promise<ResumeLogTransaction> {
+export async function beginResumeLogTransaction(agent: AgentProcess): Promise<ResumeLogTransaction> {
   const stdoutPath = await agent.getStdoutPath();
   const backupPath = `${stdoutPath}.resume-backup-${randomUUID()}`;
   let hadOriginal = false;
@@ -1304,46 +1318,45 @@ async function beginResumeLogTransaction(agent: AgentProcess): Promise<ResumeLog
   } catch (err: any) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  return { stdoutPath, backupPath, hadOriginal };
+  const previousReadPos = agent.resetLogReadPosition();
+  return { agent, stdoutPath, backupPath, hadOriginal, previousReadPos };
 }
 
-async function commitResumeLogTransaction(transaction: ResumeLogTransaction): Promise<void> {
+export async function commitResumeLogTransaction(transaction: ResumeLogTransaction): Promise<void> {
   if (transaction.hadOriginal) await fs.rm(transaction.backupPath, { force: true });
 }
 
 async function rollbackResumeLogTransaction(transaction: ResumeLogTransaction): Promise<void> {
-  await fs.rm(transaction.stdoutPath, { force: true });
-  if (transaction.hadOriginal) {
-    await fs.rename(transaction.backupPath, transaction.stdoutPath);
+  try {
+    await fs.rm(transaction.stdoutPath, { force: true });
+    if (transaction.hadOriginal) {
+      await fs.rename(transaction.backupPath, transaction.stdoutPath);
+    }
+  } finally {
+    transaction.agent.restoreLogReadPosition(transaction.previousReadPos);
   }
 }
 
-async function terminateSpawnedProcess(pid: number): Promise<void> {
+export async function terminateSpawnedProcess(pid: number): Promise<void> {
   try {
     process.kill(-pid, 'SIGTERM');
-  } catch {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      return;
-    }
+  } catch (err: any) {
+    if (err?.code === 'ESRCH') return;
+    throw err;
   }
 
   await new Promise(resolve => setTimeout(resolve, 250));
   try {
-    process.kill(pid, 0);
-  } catch {
-    return;
+    process.kill(-pid, 0);
+  } catch (err: any) {
+    if (err?.code === 'ESRCH') return;
+    throw err;
   }
 
   try {
     process.kill(-pid, 'SIGKILL');
-  } catch {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // The process exited between the liveness check and the signal.
-    }
+  } catch (err: any) {
+    if (err?.code !== 'ESRCH') throw err;
   }
 }
 
@@ -2396,17 +2409,13 @@ export class AgentManager {
       return false;
     }
 
-    // Distributed teammate: no local PID — signal it over SSH. Try the process
-    // GROUP first (negative pid, matching local `kill(-pid)`) to catch the
-    // detached `agents run` and its children; but the remote launcher is
-    // `nohup bash -lc … &` under a non-interactive shell where job control is off,
-    // so `&` may NOT open a new group — fall back to signalling the wrapper pid
-    // directly. Best-effort either way; the `.exit` sentinel is the durable
-    // terminal-status source if a grandchild lingers.
+    // Distributed teammate: no local PID — signal the dedicated process group
+    // created by dispatch.ts. The persisted PID is the group leader, so one
+    // negative-PID signal reaches the login-shell wrapper and every descendant.
     if (agent.hostName && agent.status === AgentStatus.RUNNING) {
       if (agent.hostTarget && agent.remotePid) {
         try {
-          sshExec(agent.hostTarget, `kill -TERM -- -${agent.remotePid} 2>/dev/null || kill -TERM ${agent.remotePid} 2>/dev/null`, {
+          sshExec(agent.hostTarget, `kill -TERM -- -${agent.remotePid} 2>/dev/null`, {
             timeoutMs: 10000,
             multiplex: true,
           });

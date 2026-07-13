@@ -54,6 +54,25 @@ export function remoteCdPrefix(remoteCwd?: string): string {
   return `cd ${shellQuote(remoteCwd)} && `;
 }
 
+/**
+ * Launch a detached login-shell command in its own Unix session/process group.
+ *
+ * Node is already a hard requirement for a host that can run `agents`. Its
+ * `detached: true` contract calls setsid(2) on Unix, unlike `nohup ... &` under
+ * a non-interactive shell where the background wrapper can remain in the SSH
+ * shell's process group. Returning the group leader PID makes `kill(-pid)` a
+ * reliable whole-tree operation for both normal stops and rollback cleanup.
+ */
+export function buildDetachedLaunchCommand(inner: string): string {
+  const nodeScript = [
+    "const { spawn } = require('node:child_process');",
+    `const child = spawn('/bin/bash', ['-lc', ${JSON.stringify(inner)}], { detached: true, stdio: 'ignore' });`,
+    "child.once('error', error => { console.error(error.message); process.exitCode = 1; });",
+    "child.once('spawn', () => { console.log(child.pid); child.unref(); });",
+  ].join(' ');
+  return `bash -lc ${shellQuote(`node -e ${shellQuote(nodeScript)}`)}`;
+}
+
 export interface DispatchResult {
   task: HostTask;
   /** Exit code when followed; undefined when detached (--no-follow). */
@@ -64,9 +83,9 @@ function terminateRemoteLaunch(task: HostTask): void {
   if (!task.pid) throw new Error(`Cannot terminate remote task ${task.id}: launch returned no PID.`);
   const pid = task.pid;
   const command =
-    `kill -TERM -- -${pid} 2>/dev/null || kill -TERM ${pid} 2>/dev/null; ` +
-    `sleep 1; ` +
-    `kill -KILL -- -${pid} 2>/dev/null || kill -KILL ${pid} 2>/dev/null || true; ` +
+    `if kill -TERM -- -${pid} 2>/dev/null; then ` +
+      `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
+    `elif kill -0 -- -${pid} 2>/dev/null; then exit 1; fi; ` +
     `rm -f ${task.remoteLog} ${task.remoteExit}`;
   const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true });
   if (result.code !== 0) {
@@ -131,8 +150,9 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
   const cwd = remoteCdPrefix(opts.remoteCwd);
   const inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
 
-  // Outer: ensure dir, launch detached under bash -lc, print the PID.
-  const launch = `mkdir -p ${REMOTE_DIR}; nohup bash -lc ${shellQuote(inner)} >/dev/null 2>&1 & echo $!`;
+  // Outer: ensure dir, launch the login-shell wrapper as a new process-group
+  // leader, and print that leader PID.
+  const launch = `mkdir -p ${REMOTE_DIR}; ${buildDetachedLaunchCommand(inner)}`;
   const res = sshExec(target, launch, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0) {
     throw new Error(`Failed to launch on "${host.name}": ${(res.stderr || res.stdout).trim() || 'ssh error'}`);
