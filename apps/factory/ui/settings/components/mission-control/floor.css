@@ -239,6 +239,7 @@
 .swarmify-root .decide .qtask b { color: var(--ds-text-dim); font-weight: 700; }
 .swarmify-root .decide .qt { font-size: 13.5px; font-weight: 600; margin-bottom: 10px; }
 .swarmify-root .feed-sec { font-size: 11px; font-weight: 800; letter-spacing: .05em; color: var(--ds-text-dim); margin: 18px 4px 8px; display: flex; align-items: center; gap: 8px; }
+.swarmify-root .feed-sec.feed-subsec { margin: 10px 4px 6px 18px; font-size: 10.5px; color: var(--ds-text-muted); }
 .swarmify-root .feed-sec.attn { color: var(--status-pending); }
 /* Linear project link pill in a project group header (mockup: "RUSH · Agents CLI"). */
 .swarmify-root .feed-sec .proj-lk { font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 600; letter-spacing: 0; color: #4a8dff; border: 1px solid rgba(74,141,255,0.32); border-radius: 20px; padding: 2px 9px; text-transform: none; }
