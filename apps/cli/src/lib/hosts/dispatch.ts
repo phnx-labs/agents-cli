@@ -60,6 +60,29 @@ export interface DispatchResult {
   exitCode?: number;
 }
 
+function terminateRemoteLaunch(task: HostTask): void {
+  if (!task.pid) throw new Error(`Cannot terminate remote task ${task.id}: launch returned no PID.`);
+  const pid = task.pid;
+  const command =
+    `kill -TERM -- -${pid} 2>/dev/null || kill -TERM ${pid} 2>/dev/null; ` +
+    `sleep 1; ` +
+    `kill -KILL -- -${pid} 2>/dev/null || kill -KILL ${pid} 2>/dev/null || true; ` +
+    `rm -f ${task.remoteLog} ${task.remoteExit}`;
+  const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true });
+  if (result.code !== 0) {
+    throw new Error(
+      `Failed to terminate remote task ${task.id} on ${task.host}: ` +
+      `${(result.stderr || result.stdout).trim() || 'ssh error'}`,
+    );
+  }
+}
+
+/** Terminate a detached dispatch that its caller could not persist locally. */
+export function terminateDispatchedTask(task: HostTask): void {
+  terminateRemoteLaunch(task);
+  updateTask(task.id, terminalPatch(143));
+}
+
 /** Options shared by every detached dispatch. */
 interface LaunchOptions {
   /** `agents …` args (command name first), each already un-quoted (we quote them). */
@@ -130,7 +153,19 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     status: 'running',
     createdAt: new Date().toISOString(),
   };
-  saveTask(task);
+  try {
+    saveTask(task);
+  } catch (err) {
+    try {
+      terminateRemoteLaunch(task);
+    } catch (cleanupErr) {
+      throw new Error(
+        `Failed to persist remote task ${task.id}; cleanup also failed: ${(cleanupErr as Error).message}`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
 
   if (opts.follow === false) {
     return { task };

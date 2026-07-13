@@ -28,7 +28,7 @@ import { recordRunName } from '../session/run-names.js';
 import { sshExec, shellQuote } from '../ssh-exec.js';
 import { resolveHost } from '../hosts/registry.js';
 import { sshTargetFor } from '../hosts/types.js';
-import { dispatchAgentsCommand } from '../hosts/dispatch.js';
+import { dispatchAgentsCommand, terminateDispatchedTask } from '../hosts/dispatch.js';
 import { ensureHostReady } from '../hosts/ready.js';
 import { remoteShellFor } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
@@ -1288,6 +1288,65 @@ export class AgentProcess {
  */
 export type CloudDispatchFn = (agent: AgentProcess) => Promise<{ cloudSessionId: string }>;
 
+interface ResumeLogTransaction {
+  stdoutPath: string;
+  backupPath: string;
+  hadOriginal: boolean;
+}
+
+async function beginResumeLogTransaction(agent: AgentProcess): Promise<ResumeLogTransaction> {
+  const stdoutPath = await agent.getStdoutPath();
+  const backupPath = `${stdoutPath}.resume-backup-${randomUUID()}`;
+  let hadOriginal = false;
+  try {
+    await fs.rename(stdoutPath, backupPath);
+    hadOriginal = true;
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  return { stdoutPath, backupPath, hadOriginal };
+}
+
+async function commitResumeLogTransaction(transaction: ResumeLogTransaction): Promise<void> {
+  if (transaction.hadOriginal) await fs.rm(transaction.backupPath, { force: true });
+}
+
+async function rollbackResumeLogTransaction(transaction: ResumeLogTransaction): Promise<void> {
+  await fs.rm(transaction.stdoutPath, { force: true });
+  if (transaction.hadOriginal) {
+    await fs.rename(transaction.backupPath, transaction.stdoutPath);
+  }
+}
+
+async function terminateSpawnedProcess(pid: number): Promise<void> {
+  try {
+    process.kill(-pid, 'SIGTERM');
+  } catch {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      return;
+    }
+  }
+
+  await new Promise(resolve => setTimeout(resolve, 250));
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return;
+  }
+
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // The process exited between the liveness check and the signal.
+    }
+  }
+}
+
 export class AgentManager {
   private agents: Map<string, AgentProcess> = new Map();
   private maxAgents: number;
@@ -1679,16 +1738,36 @@ export class AgentManager {
     }
 
     const resume = { id: agent.remoteSessionId ?? agent.agentId, message };
+    const priorRuntime = {
+      status: agent.status,
+      completedAt: agent.completedAt,
+      pid: agent.pid,
+      startTime: agent.startTime,
+      startedAt: agent.startedAt,
+      remotePid: agent.remotePid,
+      remoteLog: agent.remoteLog,
+      remoteExit: agent.remoteExit,
+      remoteLogOffset: agent.remoteLogOffset,
+      worktreePath: agent.worktreePath,
+    };
     // Flip to RUNNING up front so a concurrent status poll can't reap the
     // teammate between the exit-sentinel clear and the new PID landing; the
-    // launch re-persists with the fresh pid/startTime.
+    // launch re-persists with the fresh pid/startTime. If relaunch fails before
+    // that happens, restore the stopped lifecycle state and keep its existing
+    // metadata/log directory intact so the user can retry.
     agent.status = AgentStatus.RUNNING;
     agent.completedAt = null;
 
-    if (agent.hostName) {
-      await this.launchRemoteProcess(agent, resume);
-    } else {
-      await this.launchProcess(agent, resume);
+    try {
+      if (agent.hostName) {
+        await this.launchRemoteProcess(agent, resume);
+      } else {
+        await this.launchProcess(agent, resume);
+      }
+    } catch (err) {
+      Object.assign(agent, priorRuntime);
+      await agent.saveMeta();
+      throw err;
     }
     return agent;
   }
@@ -1721,8 +1800,13 @@ export class AgentManager {
 
     debug(`Launching ${agent.agentType} agent ${agent.agentId} [${agent.mode}]${resume ? ' (resume)' : ''}: ${cmd.slice(0, 3).join(' ')}...`);
 
+    let childProcess: ChildProcess | null = null;
+    let stdoutFile: fs.FileHandle | null = null;
+    let resumeLog: ResumeLogTransaction | null = null;
+
     try {
-      const stdoutPath = await agent.getStdoutPath();
+      if (resume) resumeLog = await beginResumeLogTransaction(agent);
+      const stdoutPath = resumeLog?.stdoutPath ?? await agent.getStdoutPath();
       // Always TRUNCATE — including on resume. The status reader re-reads the
       // whole log from byte 0 every poll (lastReadPos is in-memory, not
       // persisted) and marks terminal status from the last `result` event it
@@ -1733,7 +1817,7 @@ export class AgentManager {
       // a forked session. Truncating keeps exactly one turn in the log, so the
       // re-read is always correct. The authoritative transcript lives in the
       // agent's own session (resumed via --resume), not this stdout mirror.
-      const stdoutFile = await fs.open(stdoutPath, 'w');
+      stdoutFile = await fs.open(stdoutPath, 'w');
       const stdoutFd = stdoutFile.fd;
 
       // Wrap the teammate command in a shell that records the underlying CLI's
@@ -1749,7 +1833,7 @@ export class AgentManager {
 
       // detached:true makes the shell the process-group leader, so stop()'s
       // `kill(-pid)` still reaches the underlying CLI through the group.
-      const childProcess = spawn('/bin/sh', ['-c', wrappedCmd], {
+      childProcess = spawn('/bin/sh', ['-c', wrappedCmd], {
         stdio: ['ignore', stdoutFd, stdoutFd],
         cwd: agent.cwd || undefined,
         detached: true,
@@ -1758,8 +1842,13 @@ export class AgentManager {
           : sanitizeProcessEnv(process.env),
       });
 
+      await new Promise<void>((resolve, reject) => {
+        childProcess!.once('spawn', resolve);
+        childProcess!.once('error', reject);
+      });
       childProcess.unref();
-      stdoutFile.close().catch(() => {});
+      await stdoutFile.close();
+      stdoutFile = null;
 
       agent.pid = childProcess.pid || null;
       // Capture start-time NOW, while we know the PID is ours. Once the
@@ -1770,8 +1859,15 @@ export class AgentManager {
       agent.status = AgentStatus.RUNNING;
       agent.startedAt = new Date();
       await agent.saveMeta();
+      if (resumeLog) await commitResumeLogTransaction(resumeLog);
     } catch (err: any) {
-      await this.cleanupPartialAgent(agent);
+      if (stdoutFile) await stdoutFile.close().catch(() => {});
+      if (childProcess?.pid) await terminateSpawnedProcess(childProcess.pid);
+      if (resumeLog) await rollbackResumeLogTransaction(resumeLog);
+      // Fresh spawns own a newly-created directory, so a failed launch removes
+      // that partial record. A resume reuses an existing teammate: its caller
+      // restores the prior terminal state and preserves the directory for retry.
+      if (!resume) await this.cleanupPartialAgent(agent);
       console.error(`Failed to spawn agent ${agent.agentId}:`, err);
       throw new Error(`Failed to spawn agent: ${err.message}`);
     }
@@ -1843,12 +1939,19 @@ export class AgentManager {
       resume,
     );
 
+    let dispatchedTask: Awaited<ReturnType<typeof dispatchAgentsCommand>>['task'] | null = null;
+    let resumeLog: ResumeLogTransaction | null = null;
     try {
+      if (resume) {
+        resumeLog = await beginResumeLogTransaction(agent);
+        await fs.writeFile(resumeLog.stdoutPath, '');
+      }
       const { task } = await dispatchAgentsCommand(host, {
         forwardedArgs,
         remoteCwd,
         follow: false,
       });
+      dispatchedTask = task;
       agent.remotePid = task.pid ?? null;
       agent.remoteLog = task.remoteLog ?? null;
       agent.remoteExit = task.remoteExit ?? null;
@@ -1857,14 +1960,33 @@ export class AgentManager {
       // syncRemoteMirror appends the delta onto the local mirror. Truncate that
       // mirror first so the prior turn's terminal event can't linger and get
       // re-read as the current status (same hazard the local path truncates for).
-      if (resume) {
-        await fs.writeFile(await agent.getStdoutPath(), '').catch(() => {});
-      }
       agent.status = AgentStatus.RUNNING;
       agent.startedAt = new Date();
       await agent.saveMeta();
+      if (resumeLog) await commitResumeLogTransaction(resumeLog);
     } catch (err: any) {
+      let cleanupError: Error | null = null;
+      if (dispatchedTask) {
+        try {
+          terminateDispatchedTask(dispatchedTask);
+        } catch (cleanupErr) {
+          cleanupError = cleanupErr as Error;
+        }
+      }
+      if (resumeLog) {
+        try {
+          await rollbackResumeLogTransaction(resumeLog);
+        } catch (cleanupErr) {
+          cleanupError = cleanupError ?? cleanupErr as Error;
+        }
+      }
       console.error(`Failed to launch remote teammate ${agent.agentId} on ${agent.hostName}:`, err);
+      if (cleanupError) {
+        throw new Error(
+          `Failed to launch remote teammate: ${err.message}; cleanup failed: ${cleanupError.message}`,
+          { cause: err },
+        );
+      }
       throw new Error(`Failed to launch remote teammate: ${err.message}`);
     }
 
