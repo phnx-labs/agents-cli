@@ -11,7 +11,7 @@
  */
 
 import * as fs from 'fs';
-import { runTmux, TmuxCommandError } from './binary.js';
+import { findTmuxBinary, runTmux, TmuxCommandError } from './binary.js';
 import { ensureTmuxDir, getDefaultSocketPath, getSessionMetaPath } from './paths.js';
 
 /** Tmux session names must not contain `.` or `:` — those are reserved for window/pane addressing. */
@@ -368,7 +368,13 @@ const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
  * the hook here, so the two can never drift.
  */
 export function agentPaneDiedHook(sessionName: string, agentPane: string, socket: string): string {
-  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'run-shell "tmux -S ${socket} kill-pane -t #{hook_pane}"'`;
+  // The tmux binary + socket are quoted (escaped double quotes survive the
+  // single-quoted branch at tmux's parse layer, then delimit words for sh -c)
+  // because both are filesystem paths — a home dir with a space would
+  // otherwise split and silently no-op the kill. The absolute binary path
+  // keeps the hook working when the server's own PATH is sparse (launchd).
+  const tmuxBin = findTmuxBinary() ?? 'tmux';
+  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'run-shell "\\"${tmuxBin}\\" -S \\"${socket}\\" kill-pane -t #{hook_pane}"'`;
 }
 
 /** Stamp a session's hook-schema marker to the current version. */
