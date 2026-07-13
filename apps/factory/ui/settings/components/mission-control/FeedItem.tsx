@@ -9,6 +9,7 @@ import { CardChecklist } from './TodoChecklist'
 import { MiniTimeline } from './Timeline'
 import { renderMarkdown } from '../../utils/markdown'
 import { ExtLink } from '../common/ExtLink'
+import type { PlanFile } from '../../utils/planDetector'
 
 /** First line of a block of text as a plain-text title — strips leading markdown
  *  (ATX headings, list bullets) and inline markers so a prompt like "## Problem"
@@ -47,9 +48,10 @@ interface FeedItemProps {
   onOption: (agent: FloorAgent, option: string) => void
   onFreeText: (agent: FloorAgent, text: string) => void
   onAttach: (agent: FloorAgent) => void
+  onOpenPlan: (agent: FloorAgent, plan: PlanFile) => void
 }
 
-function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeText, onAttach }: FeedItemProps) {
+function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeText, onAttach, onOpenPlan }: FeedItemProps) {
   // Live heartbeat: only a running / stalled agent with a known last-activity stamp ticks.
   // The shared 1s ticker re-renders just this leaf, never the parent list.
   const now = useNow(1000)
@@ -163,8 +165,19 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
       {a.resp && !(a.needs && a.question && a.question.kind !== 'retry' && a.question.text.trim() === a.resp.trim()) && (
         <div className={`resp${destructive ? ' q' : ''}`}>{renderMarkdown(a.resp, { clamp: true })}</div>
       )}
-      {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
+      {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
         <div className="artifacts" onClick={(e) => e.stopPropagation()}>
+          {(a.plans ?? []).map((plan) => (
+            <button
+              key={plan.path}
+              type="button"
+              className="artifact plan"
+              title={`Preview ${plan.path}`}
+              onClick={() => onOpenPlan(a, plan)}
+            >
+              <Icon name="external" size={10} /> {plan.label}
+            </button>
+          ))}
           {a.spawnedTeam && (
             <span className="artifact team" title={`Spawned a team: ${a.spawnedTeam}`}>
               <Icon name="grip" size={10} /> team · {a.spawnedTeam}

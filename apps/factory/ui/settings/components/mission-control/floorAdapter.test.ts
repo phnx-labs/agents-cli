@@ -290,6 +290,44 @@ describe('toFloorAgentFromUnified', () => {
     expect(a.worktreeSlug).not.toContain('/')
     expect(a.worktreeSlug).not.toContain('WT=')
   })
+
+  test('detects plan artifacts from output and recent worktree files', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        files: ['ref-cycle-18.md'],
+        agent: { last_messages: ['Rendered ref-plan.html'] },
+        terminal: {
+          id: 't1',
+          cwd: '/Users/x/src/github.com/o/agents-cli/.agents/worktrees/rush-1525',
+          recentToolCalls: [{ name: 'Bash', output: 'open .agents/artifacts/ref-review.md' }],
+        },
+      }),
+      { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
+    )
+    expect(a.plans?.map((p) => p.path)).toEqual([
+      '/Users/x/src/github.com/o/agents-cli/.agents/worktrees/rush-1525/ref-plan.html',
+      '/Users/x/src/github.com/o/agents-cli/.agents/worktrees/rush-1525/ref-cycle-18.md',
+      '/Users/x/src/github.com/o/agents-cli/.agents/worktrees/rush-1525/.agents/artifacts/ref-review.md',
+    ])
+  })
+
+  test('ignores plan-like paths that are only mentioned by the user task', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        activity: 'Review ref-task.html',
+        terminal: {
+          id: 't1',
+          cwd: '/Users/x/src/github.com/o/agents-cli/.agents/worktrees/rush-1525',
+          firstUserMessage: 'Please render ref-plan.html',
+          lastUserMessage: 'Open ref-review.md when done',
+          currentActivity: 'Thinking about ref-current.html',
+        },
+        agent: { prompt: 'Build a plan named ref-prompt.md', last_messages: [] },
+      }),
+      { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
+    )
+    expect(a.plans).toEqual([])
+  })
 })
 
 describe('cleanWorktreeSlug — kills the WT=<path> leak', () => {
@@ -354,6 +392,79 @@ describe('toFloorAgentFromRemote', () => {
     expect(a.lastActivityMs).toBe(NOW - 42_000)
     // a genuinely-remote host is already its real name — no display override.
     expect(a.hostLabel).toBeUndefined()
+  })
+
+  test('detects remote plan artifacts from output and attachment refs', () => {
+    const r: RemoteSessionLike = {
+      host: 'yosemite-s0',
+      sessionId: 'plan123',
+      agentType: 'codex',
+      cwd: '/home/u/src/agents-cli/.agents/worktrees/rush-1525',
+      project: 'agents-cli',
+      phase: 'running',
+      activity: 'Writing plan',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: 'Plan rendered at ref-plan.html',
+      output: 'See ref-cycle.md',
+      attachments: ['capture (/tmp/ref-screenshot.html)'],
+      prUrl: null,
+      ticket: 'RUSH-1525',
+      branch: 'rush-1525',
+      sinceMs: 1000,
+      startedAtMs: NOW - 1000,
+      topic: 'Preview plan files',
+      context: 'terminal',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 4321,
+      transport: 'ssh',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.plans?.map((p) => p.path)).toEqual([
+      '/home/u/src/agents-cli/.agents/worktrees/rush-1525/ref-plan.html',
+      '/home/u/src/agents-cli/.agents/worktrees/rush-1525/ref-cycle.md',
+      '/tmp/ref-screenshot.html',
+    ])
+  })
+
+  test('ignores remote plan-like paths that are only labels or task topics', () => {
+    const r: RemoteSessionLike = {
+      host: 'yosemite-s0',
+      sessionId: 'plan456',
+      agentType: 'codex',
+      cwd: '/home/u/src/agents-cli/.agents/worktrees/rush-1525',
+      project: 'agents-cli',
+      phase: 'running',
+      activity: 'Reviewing ref-activity.html',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      output: '',
+      attachments: [],
+      prUrl: null,
+      ticket: 'RUSH-1525',
+      branch: 'rush-1525',
+      sinceMs: 1000,
+      startedAtMs: NOW - 1000,
+      topic: 'Create ref-plan.html',
+      label: 'ref-topic.md',
+      context: 'terminal',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 4321,
+      transport: 'ssh',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.plans).toEqual([])
   })
 
   test('carries context/sessionId/pid so a headless run gets the bg badge + Focus/Stop', () => {

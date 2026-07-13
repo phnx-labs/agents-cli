@@ -845,10 +845,36 @@ async function writeFactoryConfigSafe(patch: Record<string, unknown>): Promise<R
 
 function resolveEditorPath(pathValue: string): string | null {
   if (!pathValue) return null;
+  if (pathValue.startsWith('~/')) return path.join(homedir(), pathValue.slice(2));
   if (path.isAbsolute(pathValue)) return pathValue;
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspacePath) return null;
   return path.join(workspacePath, pathValue);
+}
+
+async function openPlanPreview(pathValue: string, kind: string | undefined, host: string | undefined): Promise<void> {
+  const target = pathValue.trim();
+  if (!target) return;
+  if (/^https?:\/\//i.test(target)) {
+    await vscode.env.openExternal(vscode.Uri.parse(target));
+    return;
+  }
+  const remoteHost = host && host !== 'this-mac' ? host : '';
+  let resolvedPath = resolveEditorPath(target);
+  if (remoteHost) {
+    const safeHost = remoteHost.replace(/[^a-zA-Z0-9._-]+/g, '-');
+    const destDir = path.join(homedir(), '.agents', '.cache', 'factory-plan-previews', safeHost);
+    await fs.promises.mkdir(destDir, { recursive: true });
+    resolvedPath = path.join(destDir, path.basename(target));
+    await execFileAsync('scp', [`${remoteHost}:${target}`, resolvedPath], { timeout: 20_000 });
+  }
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) return;
+  const uri = vscode.Uri.file(resolvedPath);
+  if (kind === 'markdown' || resolvedPath.toLowerCase().endsWith('.md')) {
+    await vscode.commands.executeCommand('markdown.showPreview', uri);
+    return;
+  }
+  await vscode.env.openExternal(uri);
 }
 
 async function openFileOrDiffInEditor(pathValue: string): Promise<void> {
@@ -2831,6 +2857,11 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
       case 'openTerminalFile':
         if (message.path) {
           await openFileOrDiffInEditor(message.path);
+        }
+        break;
+      case 'openPlanPreview':
+        if (typeof message.path === 'string') {
+          await openPlanPreview(message.path, typeof message.kind === 'string' ? message.kind : undefined, typeof message.host === 'string' ? message.host : undefined);
         }
         break;
       case 'revealFolder':

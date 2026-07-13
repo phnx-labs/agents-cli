@@ -226,6 +226,7 @@
 .swarmify-root .detail-col .art.ci.running { color: var(--status-pending); border-color: rgba(245,179,1,0.3); }
 .swarmify-root .detail-col .art.team { color: #b98cff; border-color: rgba(185,140,255,0.35); }
 .swarmify-root .detail-col .art.tk { color: var(--brand); border-color: var(--brand-ring); }
+.swarmify-root .detail-col .art.plan { color: var(--brand-600); border-color: var(--brand-ring); cursor: pointer; }
 /* decision block at top of the right detail when an agent needs you */
 .swarmify-root .decide { background: var(--status-pending-bg); border: 1px solid var(--status-pending); border-radius: var(--r-lg); padding: 12px 14px; margin-bottom: 14px; }
 .swarmify-root .decide .ql { font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--status-pending); margin-bottom: 6px; display: flex; align-items: center; gap: 7px; }
@@ -256,6 +257,7 @@
 .swarmify-root .fitem .artifacts { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 8px; }
 .swarmify-root .fitem .artifact { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; padding: 1px 7px 1px 6px; border-radius: 999px; background: var(--status-running-bg); color: var(--status-running); border: 1px solid transparent; font-variant-numeric: tabular-nums; }
 .swarmify-root .fitem .artifact.team { background: var(--brand-ring); color: var(--brand); }
+.swarmify-root .fitem .artifact.plan { background: var(--ds-bg-recessed); color: var(--brand-600); border-color: var(--brand-ring); cursor: pointer; }
 .swarmify-root .fitem .summary { font-size: 12px; color: var(--ds-text-muted); line-height: 1.4; margin: 0 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .swarmify-root .fitem .nowline { font-family: "Geist Mono", monospace; font-size: 11px; color: var(--ds-text-muted); display: flex; align-items: center; gap: 8px; }
 .swarmify-root .fitem .nowline .v { color: var(--brand-600); }

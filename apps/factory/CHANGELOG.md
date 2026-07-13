@@ -32,6 +32,10 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Added
 
+- **Factory Floor cards now surface plan artifacts for preview (RUSH-1525).**
+  Session output, recent worktree files, and attachment refs are scanned for
+  `.html` and `ref-*.md` plan files; matching cards show plan chips that open HTML
+  plans externally and Markdown plans in the editor preview.
 - **Project rollups — one glance answers "what's happening in this project".** The
   rail's Projects flyout rows now carry dim sub-counts (open backlog tickets and
   distinct open PRs) next to the live agent count, and each card in the Projects

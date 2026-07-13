@@ -14,6 +14,7 @@
 // so the port is a 1:1 translation, not a redesign.
 
 import type { UnifiedTask, RecentToolCall } from '../../types'
+import type { PlanFile } from '../../utils/planDetector'
 
 export type { RecentToolCall }
 
@@ -151,6 +152,7 @@ export interface FloorAgent {
   ticket: string | null  // "RUSH-812" when linked (injected/worked-on ticket from prompt or branch)
   createdTickets?: string[] // tracker refs this session CREATED (Linear create_issue / gh issue create); [] / undefined when none
   spawnedTeam?: string   // team name this session SPAWNED via `agents teams create/add`; undefined when none
+  plans?: PlanFile[]     // detected ref-*.md / .html plan artifacts available for preview
   branch: string
   worktreeSlug: string   // "<slug>" under .agents/worktrees/; '' when not a worktree. Disambiguates sibling sessions + labels the card when topic/preview are empty.
   worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree

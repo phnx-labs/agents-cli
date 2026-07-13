@@ -114,6 +114,10 @@ const idleThinkingAgent = agent({
   needs: true, verb: 'Thinking...', target: '', resp: '', since: '22h',
   sessionId: '659a7ec6-2c1a-4f9e-b2d1-7a3c9e10ab55',
   prompt: 'Is our agents-cli, our skills and factory tooling good enough — like remote agent execution — such that I can dispatch 100 tasks from Linear and the results will be **somewhat good**?',
+  plans: [
+    { path: '/repo/.agents/worktrees/agent-readiness/ref-plan.html', label: 'ref-plan.html', kind: 'html', source: 'output' },
+    { path: '/repo/.agents/worktrees/agent-readiness/ref-review.md', label: 'ref-review.md', kind: 'markdown', source: 'worktree' },
+  ],
   recent: [
     { name: 'Bash', input: { command: 'cd /Users/muqsit/src/github.com/muqsitnawaz/agents-cli' }, timestamp: new Date(Date.now() - 86_400_000).toISOString() },
     { name: 'Read', input: { file_path: '/Users/muqsit/CleanShot 2026-07-08 at 16.07.46@2x.png' }, timestamp: new Date(Date.now() - 86_460_000).toISOString() },
@@ -140,6 +144,10 @@ const running: FloorAgent[] = [
       { name: 'Edit', input: { file_path: '/repo/ui/settings/components/mission-control/BacklogCenter.tsx' }, timestamp: new Date(Date.now() - 40_000).toISOString() },
       { name: 'Edit', input: { file_path: '/repo/ui/settings/components/mission-control/floorAdapter.ts' }, timestamp: new Date(Date.now() - 80_000).toISOString() },
       { name: 'Read', input: { file_path: '/repo/ui/settings/components/mission-control/floorModel.ts' }, timestamp: new Date(Date.now() - 130_000).toISOString() },
+    ],
+    plans: [
+      { path: '/repo/.agents/worktrees/bench-saved-views/ref-plan.html', label: 'ref-plan.html', kind: 'html', source: 'output' },
+      { path: '/repo/.agents/worktrees/bench-saved-views/ref-review.md', label: 'ref-review.md', kind: 'markdown', source: 'worktree' },
     ],
     createdTickets: ['RUSH-1519', 'RUSH-1520'],
     todos: [

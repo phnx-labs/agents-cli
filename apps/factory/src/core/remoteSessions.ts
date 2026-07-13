@@ -139,6 +139,10 @@ export interface RemoteSession {
   question: RemoteQuestion | null;
   /** Last few assistant turns (most-recent last), one line each — panel context. [] when none. */
   tail: string[];
+  /** Raw CLI output text, when the active-session payload carries it. */
+  output: string;
+  /** Attachment refs/names from the CLI payload, normalized to displayable strings. */
+  attachments: string[];
   prUrl: string | null;
   ticket: string | null;
   /** Tracker refs this session CREATED (Linear create_issue / gh issue create). */
@@ -279,6 +283,8 @@ export interface RawActiveSession {
   question?: { text?: string; reason?: string; options?: Array<{ label?: string; description?: string; key?: string } | null> } | null;
   /** Last few assistant turns (most-recent last), from the CLI state engine. */
   tail?: string[];
+  output?: string;
+  attachments?: unknown[];
   pr?: { url?: string; number?: number } | null;
   worktree?: { slug?: string; path?: string; branch?: string } | null;
   ticket?: string | { id?: string; url?: string } | null;
@@ -443,6 +449,17 @@ export function normalizeActiveSession(
     lastResponse: preview,
     question: normalizeQuestion(raw.question),
     tail: Array.isArray(raw.tail) ? raw.tail.map((t) => asStr(t)).filter(Boolean) : [],
+    output: asStr(raw.output),
+    attachments: Array.isArray(raw.attachments)
+      ? raw.attachments.map((a: unknown) => {
+          if (typeof a === 'string') return a;
+          if (a && typeof a === 'object') {
+            const obj = a as { name?: unknown; ref?: unknown; path?: unknown };
+            return [asStr(obj.name), asStr(obj.ref), asStr(obj.path)].filter(Boolean).join(' ');
+          }
+          return '';
+        }).filter(Boolean)
+      : [],
     // pr is a { url, number } object on the CLI payload; keep top-level prUrl as a
     // fallback for older shapes.
     prUrl: asStr(raw.prUrl) || asStr(raw.pr?.url) || null,
@@ -536,6 +553,8 @@ export function normalizeRecentSession(
     // Recent (historical) sessions are idle — no live decision to surface.
     question: null,
     tail: [],
+    output: '',
+    attachments: [],
     prUrl: asStr(raw.prUrl) || null,
     ticket: asStr(raw.ticketId) || null,
     createdTickets: Array.isArray(raw.createdTickets) ? raw.createdTickets.map((t: unknown) => String(t)) : [],

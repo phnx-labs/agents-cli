@@ -64,6 +64,7 @@ import {
 import { SavedViews } from './SavedViewsBar'
 import { loadSavedViews, persistSavedViews, upsertView, removeView, viewMatches, type SavedView } from './savedViews'
 import { adaptUnified, adaptRemote, adaptTickets, sinceFromMs, type RemoteSessionLike } from './floorAdapter'
+import type { PlanFile } from '../../utils/planDetector'
 import {
   DispatchPanel,
   type DispatchDevice,
@@ -1631,6 +1632,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     postMessage({ type: 'nudgeAgent', sessionId: a.id, host: a.host })
   }, [])
 
+  const openPlanPreview = useCallback((a: FloorAgent, plan: PlanFile) => {
+    postMessage({ type: 'openPlanPreview', path: plan.path, kind: plan.kind, host: a.host })
+  }, [])
+
   // Plan-review actions (Floor after-dispatch): approve as-is/edited, or send back a note.
   const approvePlan = useCallback((sessionId: string, edited?: PlanStep[]) => {
     postMessage({ type: 'approvePlan', sessionId, edited })
@@ -1770,8 +1775,19 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
               {/* Artifacts row: the agent's outputs at a glance — the PR (click-through),
                   CI, the team it spawned, and tickets it created. Mirrors the card chips. */}
-              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
+              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
                 <div className="arts">
+                  {(a.plans ?? []).map((plan) => (
+                    <button
+                      key={plan.path}
+                      type="button"
+                      className="art plan"
+                      title={`Preview ${plan.path}`}
+                      onClick={() => openPlanPreview(a, plan)}
+                    >
+                      <Icon name="external" size={10} /> {plan.label}
+                    </button>
+                  ))}
                   {a.prUrl && (
                     <ExtLink href={a.prUrl} className="art pr" style={{ textDecoration: 'none' }}>
                       <Icon name="chevR" size={10} /> PR {a.pr ?? ''}
@@ -1991,6 +2007,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
             />
           ))}
           {failedAgents.map((a) => (
@@ -2012,6 +2029,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
             />
           ))}
         </>
@@ -2042,6 +2060,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
             />
           ))
         : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => {
@@ -2070,6 +2089,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                   onOption={onAgentOption}
                   onFreeText={replyToAgent}
                   onAttach={onAttachScreenshot}
+                  onOpenPlan={openPlanPreview}
                 />
               ))}
             </React.Fragment>
@@ -2088,6 +2108,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
             />
           ))}
         </>
@@ -2108,6 +2129,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
             />
           ))}
         </>
