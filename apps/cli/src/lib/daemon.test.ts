@@ -202,8 +202,11 @@ describe('generateSystemdUnit', () => {
     fs.writeFileSync(indexJs, '');
     process.argv[1] = indexJs;
     try {
+      // Mirror systemdExecArg's quoting (backslashes escape for systemd) so
+      // the expectation holds on Windows paths too, not just POSIX ones.
+      const quote = (v: string) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       expect(generateSystemdUnit()).toContain(
-        `ExecStart="${process.execPath}" "${indexJs}" "daemon" "_run"`,
+        `ExecStart=${[process.execPath, indexJs, 'daemon', '_run'].map(quote).join(' ')}`,
       );
     } finally {
       process.argv[1] = savedArgv1;
