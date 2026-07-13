@@ -123,6 +123,58 @@ export const PRESETS: Preset[] = [
       ANTHROPIC_SMALL_FAST_MODEL: 'deepseek/deepseek-chat-v3-0324',
     },
   },
+  {
+    name: 'open-claude',
+    description: 'Open-weight coding via OpenRouter inside Claude Code (Qwen3 Coder Next, 256K ctx, $0.15/$0.80 per 1M). HEADLESS-SAFE — best general preset for open-claude usage with Claude Code harness.',
+    ...OPENROUTER_AUTH,
+    env: {
+      ANTHROPIC_BASE_URL: OPENROUTER_BASE,
+      ANTHROPIC_MODEL: 'qwen/qwen3-coder-next',
+      ANTHROPIC_SMALL_FAST_MODEL: 'qwen/qwen3-coder-next',
+    },
+  },
+  {
+    name: 'claude-spark',
+    description: 'Meta Claude Spark 1.1 via OpenRouter inside Claude Code (open alternative). Model: meta/claude-spark-1.1 — free via opencode, now usable in Claude Code UI. HEADLESS-SAFE. For open-claude spark usage.',
+    ...OPENROUTER_AUTH,
+    env: {
+      ANTHROPIC_BASE_URL: OPENROUTER_BASE,
+      ANTHROPIC_MODEL: 'meta/claude-spark-1.1',
+      ANTHROPIC_SMALL_FAST_MODEL: 'meta/claude-spark-1.1',
+    },
+  },
+  // ----- OpenCode CLI (open-claude harness) -----
+  {
+    name: 'opencode',
+    description: 'OpenCode default — uses your configured model via opencode auth. Run `opencode auth` to login, then `agents run opencode --model meta/claude-spark-1.1 "prompt"` for spark usage.',
+    provider: 'opencode',
+    host: 'opencode',
+    authEnvVar: 'OPENCODE_API_KEY',
+    authOptional: true,
+    env: {},
+  },
+  {
+    name: 'opencode-spark',
+    description: 'Meta Claude Spark 1.1 via OpenCode (free, headless-safe). Pinned to meta/claude-spark-1.1 — best for open-claude usage with opencode harness.',
+    provider: 'opencode',
+    host: 'opencode',
+    authEnvVar: 'OPENCODE_API_KEY',
+    authOptional: true,
+    env: {
+      OPENCODE_MODEL: 'meta/claude-spark-1.1',
+    },
+  },
+  {
+    name: 'opencode-qwen',
+    description: 'Qwen3 Coder Next via OpenCode (open-claude path). Use `agents run opencode-qwen "prompt"` — free via opencode provider.',
+    provider: 'opencode',
+    host: 'opencode',
+    authEnvVar: 'OPENCODE_API_KEY',
+    authOptional: true,
+    env: {
+      OPENCODE_MODEL: 'qwen/qwen3-coder-next',
+    },
+  },
   // ----- xAI Grok Build CLI (native host) -----
   {
     name: 'grok-fast',
