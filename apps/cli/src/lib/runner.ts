@@ -368,16 +368,20 @@ interface SpawnAttemptResult {
 }
 
 /**
- * Spawn one attempt, capture logs to `stdoutPath`, enforce timeout.
- * Appends to the log file so failover attempts leave a continuous trail.
+ * Spawn one attempt, capture logs to `attemptLogPath`, enforce timeout.
+ * Rate-limit scanning uses only this attempt's log (not prior failover output).
+ * The attempt log is also appended into `combinedLogPath` for a continuous trail.
  */
 function spawnJobAttempt(
   cmd: string[],
   env: Record<string, string>,
-  stdoutPath: string,
+  attemptLogPath: string,
   timeoutMs: number,
+  combinedLogPath?: string,
 ): Promise<SpawnAttemptResult> {
-  const stdoutFd = fs.openSync(stdoutPath, 'a', 0o600);
+  // Isolate this attempt's output so detectRateLimit never sees prior attempts.
+  fs.writeFileSync(attemptLogPath, '', { mode: 0o600 });
+  const stdoutFd = fs.openSync(attemptLogPath, 'a', 0o600);
   return new Promise((resolve) => {
     const child = spawn(cmd[0], cmd.slice(1), {
       stdio: ['ignore', stdoutFd, stdoutFd],
@@ -392,8 +396,13 @@ function spawnJobAttempt(
       try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
       let logText = '';
       try {
-        logText = fs.readFileSync(stdoutPath, 'utf-8');
+        logText = fs.readFileSync(attemptLogPath, 'utf-8');
       } catch { /* missing log */ }
+      if (combinedLogPath) {
+        try {
+          fs.appendFileSync(combinedLogPath, logText);
+        } catch { /* best-effort trail */ }
+      }
       resolve({ ...result, logText });
     };
 
@@ -570,7 +579,8 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     const elapsed = Date.now() - Date.parse(meta.startedAt);
     const remaining = Math.max(1_000, timeoutMs - (Number.isFinite(elapsed) ? elapsed : 0));
 
-    const attempt = await spawnJobAttempt(cmd, spawnEnv, stdoutPath, remaining);
+    const attemptLogPath = path.join(runDir, `stdout.attempt-${i}.log`);
+    const attempt = await spawnJobAttempt(cmd, spawnEnv, attemptLogPath, remaining, stdoutPath);
     meta.pid = attempt.pid;
     writeRunMeta(meta);
 

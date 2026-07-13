@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Routine credit-failover scans only the current attempt's log (RUSH-1616).** Each failover spawn writes `stdout.attempt-N.log` and rate-limit detection uses that file alone; prior attempts still append into `stdout.log` for the continuous trail. Source: `apps/cli/src/lib/runner.ts`.
 - **Cursor hook sync drops stale managed entries when matcher/event change (RUSH-1615).** GC keys managed hooks by `event|command|matcher` instead of command path alone, so a matcher or event edit no longer leaves dead entries. Source: `apps/cli/src/lib/hooks.ts`.
 - **Stop advertising Goose SubagentStart/SubagentStop hooks (RUSH-1613).** Goose does not emit those events; drop them from `GOOSE_EVENT_MAP` so sync no longer installs dead entries. Source: `apps/cli/src/lib/hooks.ts`.
 - **Mailbox delivery receipts are monotonic (RUSH-1614).** `recordMessageReceipt` no longer lets a late `queued` write overwrite an already-recorded `consumed`/`continued` when enqueue races the drain. Source: `apps/cli/src/lib/feed.ts`.
