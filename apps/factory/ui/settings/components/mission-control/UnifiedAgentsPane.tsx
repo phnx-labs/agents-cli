@@ -48,6 +48,7 @@ import {
   ticketWorkers,
   projectRollups,
   type FloorAgent,
+  type FloorAttachment,
   type FloorTicket,
   type CenterMode,
   type HostInventory,
@@ -1636,6 +1637,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     postMessage({ type: 'openPlanPreview', path: plan.path, kind: plan.kind, host: a.host })
   }, [])
 
+  const openAttachmentPreview = useCallback((a: FloorAgent, attachment: FloorAttachment) => {
+    postMessage({ type: 'openAttachmentPreview', path: attachment.path, mediaType: attachment.mediaType, host: a.host })
+  }, [])
+
   // Plan-review actions (Floor after-dispatch): approve as-is/edited, or send back a note.
   const approvePlan = useCallback((sessionId: string, edited?: PlanStep[]) => {
     postMessage({ type: 'approvePlan', sessionId, edited })
@@ -1775,8 +1780,19 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
               {/* Artifacts row: the agent's outputs at a glance — the PR (click-through),
                   CI, the team it spawned, and tickets it created. Mirrors the card chips. */}
-              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
+              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0 || (a.attachments?.length ?? 0) > 0) && (
                 <div className="arts">
+                  {(a.attachments ?? []).map((attachment) => (
+                    <button
+                      key={attachment.path}
+                      type="button"
+                      className="art attachment"
+                      title={`Preview ${attachment.path}`}
+                      onClick={() => openAttachmentPreview(a, attachment)}
+                    >
+                      <Icon name="paperclip" size={10} /> {attachment.label}
+                    </button>
+                  ))}
                   {(a.plans ?? []).map((plan) => (
                     <button
                       key={plan.path}
@@ -2008,6 +2024,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
             />
           ))}
           {failedAgents.map((a) => (
@@ -2030,6 +2047,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
             />
           ))}
         </>
@@ -2061,6 +2079,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
             />
           ))
         : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => {
@@ -2090,6 +2109,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                   onFreeText={replyToAgent}
                   onAttach={onAttachScreenshot}
                   onOpenPlan={openPlanPreview}
+                  onOpenAttachment={openAttachmentPreview}
                 />
               ))}
             </React.Fragment>
@@ -2109,6 +2129,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
             />
           ))}
         </>
@@ -2130,6 +2151,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
             />
           ))}
         </>

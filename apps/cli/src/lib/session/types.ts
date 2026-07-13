@@ -35,7 +35,16 @@ export interface SessionEvent {
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
   // Fields for attachment events (type === 'attachment')
+  name?: string;
   mediaType?: string;
+  sizeBytes?: number;
+}
+
+/** A displayable file attachment discovered in a session transcript. */
+export interface SessionAttachment {
+  path?: string;
+  name?: string;
+  mediaType: string;
   sizeBytes?: number;
 }
 

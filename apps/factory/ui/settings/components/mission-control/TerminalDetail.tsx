@@ -6,6 +6,7 @@ import { useNow } from './useNow'
 import { VerticalTimeline } from './Timeline'
 import { TodoChecklist } from './TodoChecklist'
 import { latestTodos } from './floorModel'
+import { FileIcon, ImageIcon } from './dispatchIcons'
 
 // The detail pane for a live terminal-tab agent. Extracted from UnifiedAgentsPane so the
 // visual preview harness can render it standalone without loading the whole pane (which
@@ -73,6 +74,32 @@ export function TerminalExpandedDetail({ terminal }: { terminal: TerminalInfo })
           <div className="sw-section-label">Task</div>
           <div className="sw-unified-detail-text">
             {renderTodoDescription(terminal.firstUserMessage, false)}
+          </div>
+        </div>
+      )}
+      {terminal.attachments && terminal.attachments.length > 0 && (
+        <div className="sw-unified-detail-section">
+          <div className="sw-section-label">Attachments ({terminal.attachments.length})</div>
+          <div className="sw-attachment-grid">
+            {terminal.attachments.slice(0, 12).map((attachment) => {
+              const isImage = attachment.mediaType.startsWith('image/')
+              return (
+                <button
+                  key={attachment.path}
+                  type="button"
+                  className="sw-attachment-tile"
+                  title={attachment.path}
+                  onClick={() => postMessage({ type: 'openAttachmentPreview', path: attachment.path, mediaType: attachment.mediaType, host: 'this-mac' })}
+                >
+                  <span className="sw-attachment-thumb">
+                    {isImage && attachment.thumbnailUri
+                      ? <img src={attachment.thumbnailUri} alt="" />
+                      : isImage ? <ImageIcon size={18} /> : <FileIcon size={18} />}
+                  </span>
+                  <span className="sw-attachment-name">{attachment.label}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

@@ -301,6 +301,7 @@ export interface AgentDetail {
   cloud_summary?: string | null
   branch?: string | null
   linear_issue?: string | null
+  attachments?: SessionAttachment[]
   // Factory metadata (Step 2: teams add --task-type flag).
   // When set, the UI shows a task-type badge and can group DAG waves.
   task_type?: 'plan' | 'implement' | 'test' | 'review' | 'bugfix' | 'docs' | null
@@ -339,6 +340,14 @@ export interface RecentToolCall {
   timestamp?: string
 }
 
+export interface SessionAttachment {
+  path: string
+  label: string
+  mediaType: string
+  sizeBytes?: number
+  thumbnailUri?: string
+}
+
 // Terminal types
 export interface TerminalDetail {
   id: string
@@ -360,6 +369,7 @@ export interface TerminalDetail {
   recentFileTimes?: Record<string, number>
   recentTools?: string[]
   recentToolCalls?: RecentToolCall[]
+  attachments?: SessionAttachment[]
   lastFilePath?: string | null
   narrative?: string
   cwd?: string | null

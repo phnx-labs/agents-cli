@@ -19,12 +19,21 @@ export interface RecentToolCall {
   timestamp?: string;
 }
 
+export interface SessionAttachment {
+  path: string;
+  label: string;
+  mediaType: string;
+  sizeBytes?: number;
+  thumbnailUri?: string;
+}
+
 export interface SessionQuickDetails {
   summary: SessionQuickSummary;
   recentFiles: string[];
   recentFileTimes: Record<string, number>;
   recentTools: string[];
   recentToolCalls: RecentToolCall[];
+  attachments: SessionAttachment[];
   lastFilePath: string | null;
   /**
    * The agent's most recent substantive assistant prose — the natural-language
@@ -49,6 +58,8 @@ type MutableSessionQuickSummary = {
   recentFileTimes: Record<string, number>;
   recentTools: string[];
   recentToolCalls: RecentToolCall[];
+  attachments: SessionAttachment[];
+  seenAttachments: Set<string>;
   pendingToolCallById: Map<string, RecentToolCall>;
   toolCalls: number;
   webSearches: number;
@@ -70,6 +81,8 @@ function initMutableSummary(): MutableSessionQuickSummary {
     recentFileTimes: {},
     recentTools: [],
     recentToolCalls: [],
+    attachments: [],
+    seenAttachments: new Set<string>(),
     pendingToolCallById: new Map<string, RecentToolCall>(),
     toolCalls: 0,
     webSearches: 0,
@@ -194,6 +207,13 @@ function toNumberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
 function parseArguments(value: unknown): Record<string, unknown> {
   if (!value) return {};
   if (typeof value === 'string') {
@@ -213,6 +233,47 @@ function pathFromArgs(args: Record<string, unknown>): string {
   const filePath = toStringValue(args.file_path);
   if (filePath) return filePath;
   return toStringValue(args.target_file);
+}
+
+function basename(filePath: string): string {
+  const parts = filePath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || filePath;
+}
+
+function addAttachment(summary: MutableSessionQuickSummary, block: Record<string, unknown>, eventTimestamp?: string): void {
+  const source = toRecord(block.source) || {};
+  const path = firstString(
+    source.path,
+    source.file_path,
+    source.filePath,
+    source.url,
+    source.ref,
+    block.path,
+    block.file_path,
+    block.filePath,
+    block.ref,
+  );
+  if (!path) return;
+  const label = firstString(
+    block.name,
+    block.title,
+    source.name,
+    source.filename,
+    source.file_name,
+    source.fileName,
+    basename(path),
+  );
+  const mediaType = firstString(source.media_type, source.mediaType, block.media_type, block.mediaType) ||
+    (toStringValue(block.type) === 'document' ? 'application/pdf' : 'image/png');
+  const sizeBytes =
+    typeof source.size === 'number' ? source.size :
+    typeof source.sizeBytes === 'number' ? source.sizeBytes :
+    typeof block.sizeBytes === 'number' ? block.sizeBytes :
+    undefined;
+  const key = path || `${label}:${mediaType}:${eventTimestamp || ''}`;
+  if (summary.seenAttachments.has(key)) return;
+  summary.seenAttachments.add(key);
+  summary.attachments.push({ path, label: label || basename(path), mediaType, sizeBytes });
 }
 
 function parsePatchPaths(input: unknown): Array<{ kind: 'create' | 'write' | 'delete'; path: string }> {
@@ -384,7 +445,13 @@ function applyClaudeEvent(summary: MutableSessionQuickSummary, event: Record<str
     if (Array.isArray(content)) {
       for (const block of content) {
         const blockRecord = toRecord(block);
-        if (!blockRecord || toStringValue(blockRecord.type) !== 'tool_result') continue;
+        if (!blockRecord) continue;
+        const blockType = toStringValue(blockRecord.type);
+        if (blockType === 'image' || blockType === 'document') {
+          addAttachment(summary, blockRecord, eventTimestamp);
+          continue;
+        }
+        if (blockType !== 'tool_result') continue;
         const toolUseId = toStringValue(blockRecord.tool_use_id);
         if (!toolUseId) continue;
         const output = stringifyToolResultContent(blockRecord.content);
@@ -642,6 +709,7 @@ export function extractSessionQuickDetails(
       recentFileTimes: {},
       recentTools: [],
       recentToolCalls: [],
+      attachments: [],
       lastFilePath: null,
       narrative: '',
     };
@@ -671,6 +739,7 @@ export function extractSessionQuickDetails(
     recentFileTimes: summary.recentFileTimes,
     recentTools: summary.recentTools.slice(0, 32),
     recentToolCalls: summary.recentToolCalls.slice(0, MAX_RECENT_TOOL_CALLS),
+    attachments: summary.attachments.slice(0, 24),
     lastFilePath: recentFilesSource[0] || null,
     narrative: truncateNarrative(summary.lastAssistantText),
   };

@@ -51,6 +51,14 @@ export interface RemoteQuestion {
   options: RemoteQuestionOption[];
 }
 
+export interface RemoteAttachment {
+  path: string;
+  label: string;
+  mediaType: string;
+  sizeBytes?: number;
+  thumbnailUri?: string;
+}
+
 /** Agent types whose session files session.activity.ts knows how to parse. */
 type ParsableAgentType = 'claude' | 'codex' | 'gemini';
 
@@ -141,8 +149,8 @@ export interface RemoteSession {
   tail: string[];
   /** Raw CLI output text, when the active-session payload carries it. */
   output: string;
-  /** Attachment refs/names from the CLI payload, normalized to displayable strings. */
-  attachments: string[];
+  /** Attachment refs/names from the CLI payload, normalized for thumbnail + preview. */
+  attachments: RemoteAttachment[];
   prUrl: string | null;
   ticket: string | null;
   /** Tracker refs this session CREATED (Linear create_issue / gh issue create). */
@@ -352,6 +360,43 @@ export function normalizeQuestion(raw: RawActiveSession['question']): RemoteQues
   return { text, reason, options };
 }
 
+function basename(filePath: string): string {
+  const parts = filePath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || filePath;
+}
+
+function normalizeAttachment(raw: unknown): RemoteAttachment | null {
+  if (typeof raw === 'string') {
+    const path = raw.trim();
+    return path ? { path, label: basename(path), mediaType: 'application/octet-stream' } : null;
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as {
+    path?: unknown;
+    ref?: unknown;
+    label?: unknown;
+    name?: unknown;
+    mediaType?: unknown;
+    media_type?: unknown;
+    sizeBytes?: unknown;
+    size?: unknown;
+    thumbnailUri?: unknown;
+  };
+  const path = asStr(obj.path) || asStr(obj.ref);
+  if (!path) return null;
+  const sizeBytes =
+    typeof obj.sizeBytes === 'number' ? obj.sizeBytes :
+    typeof obj.size === 'number' ? obj.size :
+    undefined;
+  return {
+    path,
+    label: asStr(obj.label) || asStr(obj.name) || basename(path),
+    mediaType: asStr(obj.mediaType) || asStr(obj.media_type) || 'application/octet-stream',
+    sizeBytes,
+    thumbnailUri: asStr(obj.thumbnailUri) || undefined,
+  };
+}
+
 /**
  * Map the CLI `status` string onto a FloorPhase.
  *   running            -> running
@@ -451,14 +496,7 @@ export function normalizeActiveSession(
     tail: Array.isArray(raw.tail) ? raw.tail.map((t) => asStr(t)).filter(Boolean) : [],
     output: asStr(raw.output),
     attachments: Array.isArray(raw.attachments)
-      ? raw.attachments.map((a: unknown) => {
-          if (typeof a === 'string') return a;
-          if (a && typeof a === 'object') {
-            const obj = a as { name?: unknown; ref?: unknown; path?: unknown };
-            return [asStr(obj.name), asStr(obj.ref), asStr(obj.path)].filter(Boolean).join(' ');
-          }
-          return '';
-        }).filter(Boolean)
+      ? raw.attachments.map(normalizeAttachment).filter((a): a is RemoteAttachment => Boolean(a))
       : [],
     // pr is a { url, number } object on the CLI payload; keep top-level prUrl as a
     // fallback for older shapes.

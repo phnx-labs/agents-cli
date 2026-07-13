@@ -61,7 +61,9 @@ The dashboard's mission control. A live grid of every agent on the floor — loc
 
 Agent cards surface outputs such as PRs, spawned teams, created tickets, and plan
 artifacts. `.html` and `ref-*.md` plans detected in session output, worktree
-files, or attachments appear as one-click preview chips.
+files, or attachments appear as one-click preview chips. Screenshots and other
+session attachments appear as thumbnail artifacts that click through to the host
+preview.
 
 ### Foreman Voice Orb
 

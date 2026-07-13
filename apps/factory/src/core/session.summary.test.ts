@@ -258,6 +258,40 @@ describe('extractSessionQuickSummary', () => {
     expect(details.recentToolCalls[0].output).toBe('exit 1');
   });
 
+  test('extracts Claude prompt attachments with preview metadata', () => {
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        timestamp: '2026-07-12T10:00:00Z',
+        message: {
+          content: [
+            { type: 'text', text: 'Here is the failing Factory screen.' },
+            {
+              type: 'image',
+              name: 'factory-floor.png',
+              source: {
+                type: 'file',
+                path: '/home/muqsit/.agents/.history/attachments/factory-floor.png',
+                media_type: 'image/png',
+                sizeBytes: 12345,
+              },
+            },
+          ],
+        },
+      }),
+    ];
+
+    const details = extractSessionQuickDetails(lines.join('\n'), 'claude');
+    expect(details.attachments).toEqual([
+      {
+        path: '/home/muqsit/.agents/.history/attachments/factory-floor.png',
+        label: 'factory-floor.png',
+        mediaType: 'image/png',
+        sizeBytes: 12345,
+      },
+    ]);
+  });
+
   test('ignores malformed lines', () => {
     const content = [
       'not-json',

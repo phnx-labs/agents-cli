@@ -55,11 +55,71 @@ function sanitizeEvent(e: SessionEvent): void {
   if (e.content) e.content = sanitizeForTerminal(e.content);
   if (e.command) e.command = sanitizeForTerminal(e.command);
   if (e.path) e.path = sanitizeForTerminal(e.path);
+  if (e.name) e.name = sanitizeForTerminal(e.name);
   if (e.output) e.output = sanitizeForTerminal(e.output);
   if (e.tool) e.tool = sanitizeForTerminal(e.tool);
   if (e.model) e.model = sanitizeForTerminal(e.model);
   if (e.mediaType) e.mediaType = sanitizeForTerminal(e.mediaType);
   if (e.args) e.args = sanitizeArgsDeep(e.args);
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function attachmentPath(block: any, source: any): string | undefined {
+  return firstString(
+    source?.path,
+    source?.file_path,
+    source?.filePath,
+    source?.url,
+    source?.ref,
+    block?.path,
+    block?.file_path,
+    block?.filePath,
+    block?.ref,
+  );
+}
+
+function attachmentName(block: any, source: any, filePath: string | undefined): string | undefined {
+  return firstString(
+    block?.name,
+    block?.title,
+    source?.name,
+    source?.filename,
+    source?.file_name,
+    source?.fileName,
+    filePath ? path.basename(filePath) : undefined,
+  );
+}
+
+function normalizedAttachmentEvent(
+  agent: SessionAgentId,
+  timestamp: string,
+  block: any,
+  source: any,
+  defaultMediaType: string,
+  sizeBytes: number,
+): SessionEvent {
+  const filePath = attachmentPath(block, source);
+  const name = attachmentName(block, source, filePath);
+  const explicitSize =
+    typeof source?.sizeBytes === 'number' ? source.sizeBytes :
+    typeof source?.size === 'number' ? source.size :
+    typeof block?.sizeBytes === 'number' ? block.sizeBytes :
+    undefined;
+  return {
+    type: 'attachment',
+    agent,
+    timestamp,
+    path: filePath,
+    name,
+    mediaType: firstString(source?.media_type, source?.mediaType, block?.media_type, block?.mediaType) || defaultMediaType,
+    sizeBytes: sizeBytes || explicitSize || 0,
+  };
 }
 
 /**
@@ -323,23 +383,13 @@ export function parseClaudeContent(content: string): SessionEvent[] {
             const source = block.source || {};
             if (source.type === 'base64') {
               const sizeBytes = Math.ceil(((source.data as string)?.length || 0) * 0.75);
-              events.push({
-                type: 'attachment',
-                agent: 'claude',
-                timestamp,
-                mediaType: source.media_type || 'image/png',
-                sizeBytes,
-              });
+              events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'image/png', sizeBytes));
+            } else {
+              events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'image/png', 0));
             }
           } else if (block.type === 'document') {
             const source = block.source || {};
-            events.push({
-              type: 'attachment',
-              agent: 'claude',
-              timestamp,
-              mediaType: source.media_type || 'application/pdf',
-              sizeBytes: 0,
-            });
+            events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'application/pdf', 0));
           } else if (block.type === 'tool_result') {
             const toolId = block.tool_use_id;
             const toolInfo = toolId ? toolUseMap.get(toolId) : undefined;
@@ -1583,7 +1633,7 @@ export function parseDroid(filePath: string): SessionEvent[] {
       } else if (block.type === 'image') {
         const source = block.source || {};
         const sizeBytes = source.type === 'base64' ? Math.ceil(((source.data as string)?.length || 0) * 0.75) : 0;
-        events.push({ type: 'attachment', agent: 'droid', timestamp, mediaType: source.media_type || 'image/png', sizeBytes });
+        events.push(normalizedAttachmentEvent('droid', timestamp, block, source, 'image/png', sizeBytes));
       }
     }
   }
