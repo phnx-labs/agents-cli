@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { getMailboxRootDir } from './state.js';
+import { recordMessageReceipt } from './feed.js';
 
 /** A single mailbox message. `text` may embed `host:/path` clip tokens. */
 export interface MailboxMessage {
@@ -32,6 +33,12 @@ export interface MailboxMessage {
   ts: string;
   /** The message body. */
   text: string;
+  /**
+   * The feed block this message answers. Set by `agents message` when the
+   * target has an open block, so the drain can surface consumed/continued
+   * receipts back to the feed store.
+   */
+  blockId?: string;
 }
 
 /**
@@ -88,7 +95,7 @@ function newMsgId(): string {
  * Enqueue a message into `boxDir` atomically. Returns the msgId. The `to` field
  * is stamped so a drain can refuse a message that lands in the wrong box.
  */
-export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string }): string {
+export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string; blockId?: string }): string {
   assertValidMailboxId(msg.to);
   ensureDirs(boxDir);
   const msgId = newMsgId();
@@ -98,6 +105,7 @@ export function enqueue(boxDir: string, msg: { to: string; text: string; from?: 
     from: msg.from,
     ts: new Date().toISOString(),
     text: msg.text,
+    blockId: msg.blockId,
   };
   const target = path.join(inboxDir(boxDir), `${msgId}.json`);
   const tmp = `${target}.${process.pid}.tmp`;
@@ -124,7 +132,7 @@ function readMessage(file: string): MailboxMessage | null {
   if (typeof m?.msgId !== 'string' || typeof m?.to !== 'string' || typeof m?.text !== 'string') {
     return null;
   }
-  return { msgId: m.msgId, to: m.to, from: m.from, ts: m.ts ?? '', text: m.text };
+  return { msgId: m.msgId, to: m.to, from: m.from, ts: m.ts ?? '', text: m.text, blockId: m.blockId };
 }
 
 function jsonFiles(dir: string): string[] {
@@ -142,6 +150,9 @@ function jsonFiles(dir: string): string[] {
  * to this box, then archive to `consumed/`. Returns the message iff valid AND
  * addressed here; a mismatched/corrupt file is archived (dropped) so it never
  * loops. Returns null when the file vanished (a racing drain took it).
+ *
+ * When the message carries a `blockId`, the consumed event is surfaced back to
+ * the feed store so the operator can see delivery confirmation.
  */
 function consumeClaimed(boxDir: string, name: string, expectedTo: string): MailboxMessage | null {
   const src = path.join(processingDir(boxDir), name);
@@ -153,6 +164,14 @@ function consumeClaimed(boxDir: string, name: string, expectedTo: string): Mailb
     return null; // already archived/claimed elsewhere
   }
   if (!msg || msg.to !== expectedTo) return null; // dropped (corrupt or wrong box)
+  if (msg.blockId) {
+    try {
+      const feedRoot = process.env.AGENTS_FEED_DIR;
+      recordMessageReceipt(msg.blockId, { msgId: msg.msgId, status: 'consumed', at: new Date().toISOString(), from: msg.from }, feedRoot);
+    } catch {
+      // Receipt surfacing is best-effort; never stall delivery.
+    }
+  }
   return msg;
 }
 

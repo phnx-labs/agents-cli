@@ -75,7 +75,22 @@ function renderBlock(b: OpenBlock, localHost: string): void {
     const meta = [b.ticket, b.pr].filter(Boolean).join('  ');
     console.log(`  ${chalk.gray(meta)}`);
   }
-  console.log(`  ${chalk.dim('reply:')} agents message ${b.mailboxId} "<answer>"`);
+
+  if (b.answer) {
+    const who = b.answer.answeredFrom + (b.answer.answeredBy ? ` (${b.answer.answeredBy})` : '');
+    console.log(`  ${chalk.green('answered')} by ${who}`);
+  }
+  if (b.receipts && b.receipts.length > 0) {
+    const latest = b.receipts[b.receipts.length - 1];
+    console.log(`  ${chalk.dim('delivery:')} ${latest.status}`);
+  }
+  if (b.continuedAt) {
+    console.log(`  ${chalk.green('continued')} ${relTime(b.continuedAt)}`);
+  }
+
+  if (!b.answer) {
+    console.log(`  ${chalk.dim('reply:')} agents message ${b.mailboxId} "<answer>"`);
+  }
   console.log();
 }
 
