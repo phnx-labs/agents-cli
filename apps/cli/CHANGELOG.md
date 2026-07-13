@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **GitHub Copilot CLI subagents now sync (RUSH-1390).** Installed subagents flatten into GitHub Copilot custom-agent profiles at `~/.copilot/agents/<name>.agent.md` (the Droid custom-droid format), gated to Copilot CLI ≥ 0.0.353. `agents subagents list/view` now surfaces synced Copilot agents and `agents subagents remove` soft-deletes their `.agent.md` files to trash — both previously skipped `copilot` entirely. Source: `apps/cli/src/lib/subagents.ts` (`listSubagentsForAgent`, `removeSubagentFromVersion`, `transformSubagentForCopilot`), `apps/cli/src/lib/staleness/writers/subagents.ts`, `apps/cli/src/lib/staleness/detectors/subagents.ts`, `apps/cli/src/lib/agents.ts`.
 - **`agents sessions --active --json` now carries session attachment metadata for Factory previews (RUSH-1524).** Claude and Droid prompt image/document blocks that reference local files are preserved as `{ path, name, mediaType, sizeBytes }`, and the active-session state dedupes them into `attachments` so consumers can render screenshot thumbnails and open the original files instead of only seeing an attachment count. Source: `apps/cli/src/lib/session/parse.ts`, `apps/cli/src/lib/session/state.ts`, `apps/cli/src/lib/session/active.ts`.
 
 ## 1.20.58
