@@ -83,11 +83,44 @@ browser done   # closes only this agent's tabs
 
 ## "I need to give an agent login credentials safely"
 
-Attach a secrets bundle. Credentials stay in Keychain, and every access is logged:
+**Cookie persistence comes first.** A profile keeps its login cookies across sessions,
+so the goal is: log in once (by hand or agent-driven), and the profile stays
+authenticated — no credential handling on the hot path. Check state before assuming a
+re-login is needed:
 
 ```bash
-browser profiles create bank --browser chrome --secrets bank-login
+browser profiles logins          # per profile: SERVICE | ACCOUNT | CREDS
 ```
+
+`ACCOUNT` is the signed-in identity (from saved logins, read plaintext — no decryption);
+`CREDS` shows whether the profile's secrets bundle holds login creds for that service.
+
+**When a session lapses**, drive the login with the credential resolved *inside* the
+browser layer so the plaintext never crosses stdout or your transcript. Store creds in
+the profile's bundle under the `<SERVICE>_USERNAME` / `<SERVICE>_PASSWORD` convention:
+
+```bash
+browser profiles create acme --browser comet --secrets acme-login
+agents secrets add acme-login GITHUB_USERNAME
+agents secrets add acme-login GITHUB_PASSWORD
+
+# Log in — the agent drives the form and handles 2FA/selectors adaptively:
+export AGENTS_BROWSER_TASK=$(browser start --profile acme --url https://github.com/login)
+browser refs                                              # find the field refs
+browser type <user-ref> --secret acme-login/GITHUB_USERNAME   # value never printed
+browser type <pass-ref> --secret acme-login/GITHUB_PASSWORD
+browser click <submit-ref>
+browser screenshot                                        # inspect: 2FA? captcha? done?
+```
+
+If a 2FA/OTP or "unusual activity" checkpoint appears, the agent screenshots it and asks
+the human (or reads the OTP from a connected mailbox) — the CLI never auto-solves it.
+For scripts that genuinely need the raw value, `agents secrets get <bundle> <KEY>` prints
+one value (audited) — but prefer `type --secret` so nothing lands in the transcript.
+
+Note: `--secrets` also injects the bundle as env vars into the browser *process* at
+launch (useful for extensions/CDP tooling that read env) — that is separate from web
+login, which needs the form-fill flow above.
 
 ## "I want to use a cloud browser instead of local"
 
