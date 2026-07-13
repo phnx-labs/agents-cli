@@ -120,9 +120,9 @@ On a device not in the allowlist the job is fully inert:
 - `agents routines run <name>` errors, naming the allowed devices and offering a
   ready-to-paste `--host <device>` command to run it remotely
 
-`agents routines list` shows the allowlist in a **Devices** column (grayed when the
-local machine is not in the list) and `--json` includes a `devices` array and
-`runsHere` boolean.
+`agents routines list` shows the allowlist in a **Devices** column. Unrestricted
+jobs display the word `all`; restricted lists are grayed when the local machine
+is not in the list. `--json` includes a `devices` array and `runsHere` boolean.
 
 #### v12 migration
 
