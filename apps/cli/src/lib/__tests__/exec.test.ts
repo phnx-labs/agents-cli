@@ -39,6 +39,14 @@ const ALL_AGENTS = Object.keys(AGENT_COMMANDS) as AgentId[];
 const HOME = process.env.HOME ?? os.homedir();
 
 describe('buildExecCommand', () => {
+  it('launches kiro with --v3 so standalone hooks load (RUSH-1612)', () => {
+    const cmd = buildExecCommand(opts({ agent: 'kiro', mode: 'edit', prompt: 'hi' }));
+    expect(cmd[0]).toBe('kiro-cli');
+    expect(cmd).toContain('--v3');
+    // --v3 must come before subcommands/flags so the engine is selected first
+    expect(cmd.indexOf('--v3')).toBe(1);
+  });
+
   // --- Mode flags per agent ---
 
   describe('mode flags', () => {
