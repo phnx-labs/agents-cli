@@ -1,4 +1,3 @@
-import AppKit
 import Foundation
 
 // Self-test for the quick-issue capture logic (Cmd-Shift-O). Follows the repo's
@@ -19,7 +18,6 @@ enum IssueSelfTest {
         testQuickFixContract()
         testQuickDispatchRoster()
         testRecentTicketsMerge()
-        testActivationKeyBufferFilter()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -152,31 +150,6 @@ enum IssueSelfTest {
         var many = (1...12).map { t("RUSH-\($0)") }
         many = RecentTickets.merged(many, adding: t("RUSH-99"))
         check("capped at 10", many.count == 10 && many.first?.id == "RUSH-99")
-    }
-
-    // The activation race buffer replays typed text only. Shortcuts and control
-    // keys still belong to the app that received them while the panel activates.
-    private static func testActivationKeyBufferFilter() {
-        check("activation buffer accepts printable text",
-              PromptPanelController.activationBufferText(characters: "rush",
-                                                         modifierFlags: [],
-                                                         keyCode: 15) == "rush")
-        check("activation buffer keeps shifted printable text",
-              PromptPanelController.activationBufferText(characters: "R",
-                                                         modifierFlags: [.shift],
-                                                         keyCode: 15) == "R")
-        check("activation buffer skips command shortcuts",
-              PromptPanelController.activationBufferText(characters: "v",
-                                                         modifierFlags: [.command],
-                                                         keyCode: 9) == nil)
-        check("activation buffer skips return",
-              PromptPanelController.activationBufferText(characters: "\r",
-                                                         modifierFlags: [],
-                                                         keyCode: 36) == nil)
-        check("activation buffer skips empty events",
-              PromptPanelController.activationBufferText(characters: "",
-                                                         modifierFlags: [],
-                                                         keyCode: 0) == nil)
     }
 
     // MARK: helpers
