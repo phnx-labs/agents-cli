@@ -75,8 +75,11 @@ jobs:
       - name: Build
         run: bun run build
 
-      - name: Test
-        run: bun run test
+      - name: Test shard-safe suite
+        run: bun run test:shardable
+
+      - name: Test real tmux integration serially
+        run: bun run test:tmux
 
   # No CI publish job — publishing happens locally on macOS via
   # `scripts/release.sh <version> --apply`.

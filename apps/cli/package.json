@@ -53,6 +53,8 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test:shardable": "node ./node_modules/vitest/vitest.mjs run --exclude src/lib/tmux/session.test.ts --exclude src/lib/terminal/inject.test.ts",
+    "test:tmux": "node ./node_modules/vitest/vitest.mjs run src/lib/tmux/session.test.ts src/lib/terminal/inject.test.ts --no-file-parallelism",
     "test:remote": "scripts/sandbox.sh 'bun install && bun run build && bun run test'",
     "test:watch": "node ./node_modules/vitest/vitest.mjs"
   },
