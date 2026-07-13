@@ -2313,8 +2313,7 @@ const GOOSE_EVENT_MAP: Record<string, string> = {
   AfterFileEdit: 'AfterFileEdit',
   BeforeShellExecution: 'BeforeShellExecution',
   AfterShellExecution: 'AfterShellExecution',
-  SubagentStart: 'SubagentStart',
-  SubagentStop: 'SubagentStop',
+  // SubagentStart/SubagentStop are not emitted by Goose — do not advertise them.
 };
 
 /** Managed Open Plugins directory name under ~/.agents/plugins/. */

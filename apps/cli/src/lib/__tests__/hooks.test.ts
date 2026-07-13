@@ -949,6 +949,27 @@ describe('registerHooksToSettings - Goose', () => {
     const marker = path.join(versionHome, '.agents', 'plugins', 'agents-cli-hooks', '.agents-cli-managed');
     expect(fs.existsSync(marker)).toBe(true);
   });
+
+  it('skips SubagentStart/SubagentStop (Goose never emits them) (RUSH-1613)', () => {
+    makeGooseScript('on-subagent.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings(
+      'goose',
+      versionHome,
+      {
+        'on-subagent': {
+          script: 'on-subagent.sh',
+          events: ['SubagentStart', 'SubagentStop', 'SessionStart'],
+        },
+      },
+      agentsDir,
+    );
+    expect(result.registered).toEqual(['on-subagent -> SessionStart']);
+    const parsed = JSON.parse(fs.readFileSync(gooseHooksPath(versionHome), 'utf-8'));
+    expect(parsed.hooks.SubagentStart).toBeUndefined();
+    expect(parsed.hooks.SubagentStop).toBeUndefined();
+    expect(parsed.hooks.SessionStart).toHaveLength(1);
+  });
 });
 
 describe('registerHooksToSettings - Cursor', () => {
