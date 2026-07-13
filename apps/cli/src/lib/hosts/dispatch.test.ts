@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import * as os from 'os';
-import { buildRunForwardedArgs, buildInteractiveRunForwardedArgs, remoteCdPrefix } from './dispatch.js';
+import { randomUUID } from 'crypto';
+import { sshExec } from '../ssh-exec.js';
+import {
+  buildRunForwardedArgs,
+  buildInteractiveRunForwardedArgs,
+  remoteCdPrefix,
+  terminateDispatchedTask,
+} from './dispatch.js';
+import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
 
@@ -129,5 +137,53 @@ describe('remoteCdPrefix', () => {
 
   it('shell-quotes a home remainder containing spaces', () => {
     expect(remoteCdPrefix('~/my projects/repo')).toBe(`cd "$HOME"/'my projects/repo' && `);
+  });
+});
+
+const remoteTarget = process.env.AGENTS_TEST_REMOTE_TARGET;
+
+describe.skipIf(!remoteTarget)('terminateDispatchedTask — real remote process', () => {
+  it('terminates a launched remote process before returning', () => {
+    const id = randomUUID().slice(0, 8);
+    const marker = `agents-dispatch-rollback-${id}`;
+    const remoteLog = `/tmp/${marker}.log`;
+    const remoteExit = `/tmp/${marker}.exit`;
+    const launch = sshExec(
+      remoteTarget!,
+      `nohup bash -lc 'exec -a ${marker} sleep 30' >${remoteLog} 2>&1 & echo $!`,
+      { timeoutMs: 10000, multiplex: true },
+    );
+    expect(launch.code).toBe(0);
+    const pid = Number.parseInt(launch.stdout.trim().split('\n').pop() ?? '', 10);
+    expect(Number.isFinite(pid)).toBe(true);
+
+    const task: HostTask = {
+      id,
+      host: remoteTarget!,
+      target: remoteTarget!,
+      agent: 'test',
+      prompt: marker,
+      pid,
+      remoteLog,
+      remoteExit,
+      status: 'running',
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      terminateDispatchedTask(task);
+      const probe = sshExec(
+        remoteTarget!,
+        `kill -0 ${pid} 2>/dev/null && echo ALIVE || echo DEAD`,
+        { timeoutMs: 10000, multiplex: true },
+      );
+      expect(probe.stdout.trim()).toBe('DEAD');
+    } finally {
+      sshExec(
+        remoteTarget!,
+        `kill -KILL ${pid} 2>/dev/null || true; rm -f ${remoteLog} ${remoteExit}`,
+        { timeoutMs: 10000, multiplex: true },
+      );
+    }
   });
 });
