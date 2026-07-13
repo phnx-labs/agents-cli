@@ -37,6 +37,7 @@ import {
   getJobPath,
   parseAtTime,
   jobRunsOnThisDevice,
+  checkJobDeviceEligibility,
 } from '../lib/routines.js';
 import type { JobConfig } from '../lib/routines.js';
 import { fireWebhookJobs, matchJobsToWebhook, type GithubWebhook } from '../lib/triggers/webhook.js';
@@ -92,12 +93,16 @@ function ensureSchedulerRunning(): void {
     console.log(chalk.gray('Scheduler reloaded'));
     return;
   }
-  const result = startDaemon();
-  if (result.pid) {
-    console.log(chalk.green(`Scheduler started (PID: ${result.pid}). It will run in the background and fire routines on schedule.`));
-    console.log(chalk.gray(`Stop anytime with: agents routines stop`));
-  } else {
-    console.log(chalk.yellow('Could not start the scheduler. Start it manually with: agents routines start'));
+  try {
+    const result = startDaemon();
+    if (result.pid) {
+      console.log(chalk.green(`Scheduler started (PID: ${result.pid}). It will run in the background and fire routines on schedule.`));
+      console.log(chalk.gray(`Stop anytime with: agents routines stop`));
+    } else {
+      console.log(chalk.yellow('Could not start the scheduler. Start it manually with: agents routines start'));
+    }
+  } catch (err) {
+    console.log(chalk.yellow(`Could not start the scheduler: ${(err as Error).message}`));
   }
 }
 
@@ -162,12 +167,13 @@ async function pickJob(
 
 /**
  * Parse a comma-separated devices string, normalize, deduplicate, and validate
- * each entry against the registered fleet. Exits nonzero on unknown devices.
+ * each entry against the registered fleet. Exits nonzero on empty/whitespace
+ * input or unknown devices.
  */
 async function parseAndValidateDevices(raw: string): Promise<string[]> {
-  const names = [...new Set(raw.split(',').map((s) => normalizeHost(s.trim())).filter(Boolean))];
+  const names = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean).map((s) => normalizeHost(s)))];
   if (names.length === 0) {
-    console.log(chalk.red('--devices requires at least one device name'));
+    console.log(chalk.red('--devices requires at least one non-empty device name'));
     process.exit(1);
   }
   const registry = await loadDevices();
@@ -441,7 +447,7 @@ export function registerRoutinesCommands(program: Command): void {
 
         // Parse and validate --devices against the fleet registry.
         let devices: string[] | undefined;
-        if (options.devices) {
+        if (options.devices !== undefined) {
           devices = await parseAndValidateDevices(options.devices);
         }
 
@@ -676,10 +682,10 @@ export function registerRoutinesCommands(program: Command): void {
         process.exit(1);
       }
 
-      if (!jobRunsOnThisDevice(job)) {
-        const allowed = (job.devices ?? []).join(', ');
-        console.log(chalk.red(`Job '${name}' can only run on: ${allowed}`));
-        console.log(chalk.gray(`  agents routines run ${name} --host ${(job.devices ?? [])[0]}`));
+      const eligibility = checkJobDeviceEligibility(job);
+      if (eligibility) {
+        console.log(chalk.red(eligibility.message));
+        console.log(chalk.gray(`  ${eligibility.suggestion}`));
         process.exit(1);
       }
 
@@ -992,7 +998,8 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--set <devices>', 'Replace the allowlist with this comma-separated list (strict fleet validation)')
     .option('--clear', 'Remove the allowlist so the routine runs on every device')
     .action(async (name: string | undefined, options: { set?: string; clear?: boolean }) => {
-      if (options.set && options.clear) {
+      const hasSet = options.set !== undefined;
+      if (hasSet && options.clear) {
         console.log(chalk.red('--set and --clear are mutually exclusive'));
         process.exit(1);
       }
@@ -1015,8 +1022,8 @@ export function registerRoutinesCommands(program: Command): void {
         return;
       }
 
-      if (options.set) {
-        const devices = await parseAndValidateDevices(options.set);
+      if (hasSet) {
+        const devices = await parseAndValidateDevices(options.set!);
         job.devices = devices;
         writeJob(job);
         console.log(chalk.green(`Devices for '${name}' set to: ${devices.join(', ')}`));

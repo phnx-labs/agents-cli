@@ -143,6 +143,36 @@ export function jobRunsOnThisDevice(config: Pick<JobConfig, 'devices'>): boolean
   return config.devices.some((d) => normalizeHost(d) === self);
 }
 
+/** Human presentation of a device-affinity mismatch for commands and runner. */
+export interface JobEligibilityResult {
+  /** Full human message, e.g. "Job 'NAME' can only run on: a, b". */
+  message: string;
+  /** One-line copy-paste suggestion, e.g. "agents routines run NAME --host a". */
+  suggestion: string;
+  /** Comma-separated allowed devices label, e.g. "a, b". */
+  allowedLabel: string;
+  /** First allowed device (normalized), useful for the suggested host. */
+  firstHost: string;
+}
+
+/**
+ * Return null when the job may run here; otherwise return a structured,
+ * human-friendly eligibility failure. Centralizes the message/suggestion
+ * construction so manual run, executeJob, and executeJobDetached stay in
+ * sync. Scheduler/webhook/overdue paths continue to use jobRunsOnThisDevice.
+ */
+export function checkJobDeviceEligibility(
+  config: Pick<JobConfig, 'name' | 'devices'>,
+): JobEligibilityResult | null {
+  if (jobRunsOnThisDevice(config)) return null;
+  const allowed = (config.devices ?? []).map((d) => normalizeHost(d));
+  const allowedLabel = allowed.join(', ');
+  const firstHost = allowed[0] ?? 'HOST';
+  const message = `Job '${config.name}' can only run on: ${allowedLabel}`;
+  const suggestion = `agents routines run ${config.name} --host ${firstHost}`;
+  return { message, suggestion, allowedLabel, firstHost };
+}
+
 /** Default values applied to every job config when fields are omitted. */
 const JOB_DEFAULTS: Partial<JobConfig> = {
   mode: 'auto',

@@ -272,3 +272,149 @@ describe('routines devices --set and --clear are mutually exclusive', () => {
     }
   });
 });
+
+describe('routines add --devices empty/whitespace fails closed', () => {
+  it('rejects --devices "" and does not create the routine file', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, [
+        'add', 'new-job',
+        '--schedule', '0 3 * * *',
+        '--agent', 'claude',
+        '--prompt', 'hi',
+        '--devices', '',
+      ]);
+      expect(res.status).not.toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toMatch(/--devices requires at least one non-empty device name/);
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'new-job.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --devices "   " and does not create the routine file', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, [
+        'add', 'space-job',
+        '--schedule', '0 3 * * *',
+        '--agent', 'claude',
+        '--prompt', 'hi',
+        '--devices', '   ',
+      ]);
+      expect(res.status).not.toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toMatch(/--devices requires at least one non-empty device name/);
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'space-job.yml'))).toBe(false);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('successfully persists --devices with valid names', () => {
+    const home = makeHome({ registry });
+    try {
+      const res = run(home, [
+        'add', 'placed-job',
+        '--schedule', '0 3 * * *',
+        '--agent', 'claude',
+        '--prompt', 'hi',
+        '--devices', 'yosemite-s0,mac-mini',
+      ]);
+      expect(res.status).toBe(0);
+      const doc = readRoutineYaml(home, 'placed-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.devices).toEqual(['yosemite-s0', 'mac-mini']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines devices --set empty/whitespace fails closed', () => {
+  it('rejects --set "" without mutating the routine', () => {
+    const job = { ...baseJob, devices: ['yosemite-s0'] };
+    const home = makeHome({ jobs: [job], registry });
+    try {
+      const before = fs.readFileSync(path.join(home, '.agents', 'routines', 'test-job.yml'), 'utf-8');
+      const res = run(home, ['devices', 'test-job', '--set', '']);
+      expect(res.status).not.toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toMatch(/--devices requires at least one non-empty device name/);
+      const after = fs.readFileSync(path.join(home, '.agents', 'routines', 'test-job.yml'), 'utf-8');
+      expect(after).toBe(before);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects --set "" combined with --clear as mutually exclusive', () => {
+    const job = { ...baseJob, devices: ['yosemite-s0'] };
+    const home = makeHome({ jobs: [job], registry });
+    try {
+      const before = fs.readFileSync(path.join(home, '.agents', 'routines', 'test-job.yml'), 'utf-8');
+      const res = run(home, ['devices', 'test-job', '--set', '', '--clear']);
+      expect(res.status).not.toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toMatch(/mutually exclusive/);
+      const after = fs.readFileSync(path.join(home, '.agents', 'routines', 'test-job.yml'), 'utf-8');
+      expect(after).toBe(before);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines run wrong-host exact output', () => {
+  it('prints the canonical message and suggestion then exits nonzero', () => {
+    const job = { ...baseJob, devices: ['yosemite-s0', 'mac-mini'] };
+    const home = makeHome({ jobs: [job], registry });
+    try {
+      const res = run(home, ['run', 'test-job'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      expect(res.status).not.toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toContain("Job 'test-job' can only run on: yosemite-s0, mac-mini");
+      expect(output).toContain('  agents routines run test-job --host yosemite-s0');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines list --help documents --host and --device once each', () => {
+  it('lists each routing flag exactly once', () => {
+    const home = makeHome();
+    try {
+      const res = run(home, ['list', '--help']);
+      expect(res.status).toBe(0);
+      const output = res.stdout + res.stderr;
+      expect(output).toContain('--host');
+      expect(output).toContain('--device');
+      const hostMatches = output.match(/^\s+-H, --host /gm) ?? [];
+      const deviceMatches = output.match(/^\s+--device /gm) ?? [];
+      expect(hostMatches.length).toBe(1);
+      expect(deviceMatches.length).toBe(1);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines run --host SELF follows the normal local eligibility path', () => {
+  it('passes device eligibility when self is in the allowlist', () => {
+    const job = { ...baseJob, devices: ['zion'] };
+    const home = makeHome({ jobs: [job], registry });
+    try {
+      const res = run(home, ['run', 'test-job', '--host', 'zion'], { AGENTS_SYNC_MACHINE_ID: 'zion' });
+      // Eligibility passes; the run then fails because no claude version is
+      // configured in the isolated HOME. The important thing is it did not fail
+      // with the device-mismatch message.
+      const output = res.stdout + res.stderr;
+      expect(output).not.toContain("Job 'test-job' can only run on");
+      expect(output).toMatch(/no version of claude configured|not installed|spawn failed/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

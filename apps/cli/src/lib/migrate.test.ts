@@ -358,7 +358,12 @@ describe('migrateRoutineDeviceToDevices', () => {
     expect(fs.readFileSync(path.join(dir, 'f.yml'), 'utf-8')).toBe(raw);
   });
 
-  it('propagates a write failure (no silent swallowing)', () => {
+  it('propagates a write failure (POSIX)', () => {
+    // Windows read-only directory semantics do not reliably block writes, so
+    // this test is scoped to POSIX platforms where chmod(0o555) is effective.
+    if (process.platform === 'win32') {
+      return;
+    }
     const dir = makeRoutinesDir();
     fs.writeFileSync(path.join(dir, 'g.yml'), yaml.stringify({
       name: 'g', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion',
@@ -392,17 +397,11 @@ describe('migrateRoutineDeviceToDevices', () => {
     expect(result.device).toBe(42);
   });
 
-  it('propagates a readFile error for candidate YAML', () => {
+  it('propagates a read error for a directory masquerading as a YAML file', () => {
     const dir = makeRoutinesDir();
-    const filePath = path.join(dir, 'j.yml');
-    fs.writeFileSync(filePath, yaml.stringify({
-      name: 'j', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion',
-    }));
-    fs.chmodSync(filePath, 0o000);
-    try {
-      expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
-    } finally {
-      fs.chmodSync(filePath, 0o644);
-    }
+    // A directory named with a .yml suffix causes fs.readFileSync to throw
+    // (EISDIR / EACCES) on every platform — no permission-dependent chmod needed.
+    fs.mkdirSync(path.join(dir, 'j.yml'), { recursive: true });
+    expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
   });
 });

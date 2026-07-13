@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, jobRunsOnThisDevice, type JobConfig } from './routines.js';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, jobRunsOnThisDevice, checkJobDeviceEligibility, type JobConfig } from './routines.js';
 import { getRoutinesDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
@@ -181,5 +181,34 @@ describe('jobRunsOnThisDevice', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
     expect(jobRunsOnThisDevice({ devices: ['yosemite-s0'] })).toBe(false);
     expect(jobRunsOnThisDevice({ devices: ['yosemite-s0', 'mac-mini'] })).toBe(false);
+  });
+});
+
+describe('checkJobDeviceEligibility', () => {
+  const savedId = process.env.AGENTS_SYNC_MACHINE_ID;
+
+  afterEach(() => {
+    if (savedId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = savedId;
+  });
+
+  it('returns null for unrestricted jobs', () => {
+    expect(checkJobDeviceEligibility({ name: 'j' })).toBeNull();
+    expect(checkJobDeviceEligibility({ name: 'j', devices: [] })).toBeNull();
+  });
+
+  it('returns null when this machine is in the allowlist', () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+    expect(checkJobDeviceEligibility({ name: 'j', devices: ['zion'] })).toBeNull();
+  });
+
+  it('returns normalized message, suggestion, and allowed label for foreign jobs', () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+    const result = checkJobDeviceEligibility({ name: 'backup', devices: ['Yosemite-S0.tailnet.ts.net', 'mac-mini'] });
+    expect(result).not.toBeNull();
+    expect(result!.message).toBe("Job 'backup' can only run on: yosemite-s0, mac-mini");
+    expect(result!.allowedLabel).toBe('yosemite-s0, mac-mini');
+    expect(result!.firstHost).toBe('yosemite-s0');
+    expect(result!.suggestion).toBe("agents routines run backup --host yosemite-s0");
   });
 });
