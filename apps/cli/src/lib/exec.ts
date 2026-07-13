@@ -514,7 +514,10 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modelFlag: '--model',
   },
   kiro: {
-    base: ['kiro-cli'],
+    // Standalone hooks live under ~/.kiro/hooks/*.json and only fire on the
+    // v3 engine (opt-in via --v3; see https://kiro.dev/docs/cli/v3/hooks/).
+    // Without this flag agents-cli would write v3 hook files that never run.
+    base: ['kiro-cli', '--v3'],
     promptFlag: 'positional',
     modeFlags: {
       // kiro-cli has no permission flags — edit is the default behavior.

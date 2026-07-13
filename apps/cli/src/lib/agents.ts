@@ -407,7 +407,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     skillsDir: path.join(HOME, '.kiro', 'skills'),
     // Hooks: v3 standalone files under ~/.kiro/hooks/*.json
     // (`{ "version": "v1", "hooks": [...] }`). Fixed PreToolUse/PostToolUse
-    // firing in kiro-cli 0.10; fully stable by 2.6.1. See registerHooksForKiro.
+    // firing in kiro-cli 0.10; fully stable by 2.6.1. Launch always passes
+    // --v3 (see AGENT_COMMANDS.kiro) so the standalone files actually load.
+    // See registerHooksForKiro.
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
