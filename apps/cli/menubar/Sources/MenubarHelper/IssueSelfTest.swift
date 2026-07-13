@@ -75,24 +75,42 @@ enum IssueSelfTest {
         check("no URL → nil", AgentsCLI.parseTicketURL("Created RUSH-200: real") == nil)
     }
 
-    // The meta-prompt must carry the user's note and the screenshot path forward
-    // to the agent, and drop the screenshot line when there is none.
+    // The meta-prompt must carry the user's note and every user-provided file
+    // forward, require that the files reach the issue (with placement left to the
+    // agent), and drop the upload command when there is no attachment.
     private static func testPromptContract() {
         let oneShot = AgentsCLI.ticketAgentPrompt(note: "cards show raw uuids",
-                                                  screenshotPaths: ["/tmp/clip-1.png"])
+                                                  screenshotPaths: ["/tmp/clip one.png"])
         check("prompt embeds the note", oneShot.contains("cards show raw uuids"))
-        check("prompt embeds the screenshot path", oneShot.contains("/tmp/clip-1.png"))
+        check("prompt embeds the screenshot path", oneShot.contains("/tmp/clip one.png"))
         check("prompt names the linear create step", oneShot.contains("linear create"))
+        check("prompt identifies user-provided ticket material",
+              oneShot.contains("user-provided ticket material"))
+        check("prompt requires the file to reach the Linear issue",
+              oneShot.contains("every user-provided file is uploaded"))
+        check("prompt leaves attachment placement to the agent",
+              oneShot.contains("description, comment, or another appropriate attachment surface"))
+        check("prompt gives a shell-safe upload command",
+              oneShot.contains("--proof '/tmp/clip one.png'"))
+
+        let quoted = AgentsCLI.ticketAgentPrompt(note: "quoted path",
+                                                 screenshotPaths: ["/tmp/Muqsit's shot.png"])
+        check("upload command shell-quotes apostrophes",
+              quoted.contains("--proof '/tmp/Muqsit'\\''s shot.png'"))
 
         let multi = AgentsCLI.ticketAgentPrompt(note: "before/after",
                                                 screenshotPaths: ["/tmp/a.png", "/tmp/b.png"])
         check("multi-shot prompt lists both paths",
               multi.contains("/tmp/a.png") && multi.contains("/tmp/b.png"))
         check("multi-shot prompt states the count", multi.contains("2 screenshots"))
+        check("multi-shot prompt uploads every path",
+              multi.contains("--proof '/tmp/a.png'") && multi.contains("--proof '/tmp/b.png'"))
 
         let noShot = AgentsCLI.ticketAgentPrompt(note: "flaky test", screenshotPaths: [])
         check("no-screenshot prompt says so", noShot.contains("No screenshots"))
         check("no-screenshot prompt has no /tmp path", !noShot.contains("/tmp/"))
+        check("no-screenshot prompt has no upload command", !noShot.contains("--proof"))
+        check("no-screenshot prompt skips attachment handling", noShot.contains("skip attachment handling"))
     }
 
     // The autonomous fix path must carry screenshots through and name runs with
