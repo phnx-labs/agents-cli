@@ -13,6 +13,9 @@ import { relTime } from '../lib/format.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { loadPolicy, applyPolicyToBlock, isPhoneUrgent } from '../lib/feed-policy.js';
 import { notifyUrgentBlock } from '../lib/notify.js';
+import { gcMailbox } from '../lib/mailbox-gc.js';
+import { getActiveSessions } from '../lib/session/active.js';
+import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 
 export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
@@ -139,6 +142,19 @@ export function registerFeedCommand(program: Command): void {
               setupWarnings.push(`${agent}@${version}: ${result.errors.join('; ')}`);
             }
           }
+        }
+      }
+
+      if (opts.dispatch && includeLocal) {
+        // Liveness sweep: drop messages to dead agents and retire stale blocks
+        // before we render the feed.
+        const sessions = await getActiveSessions();
+        const activeBoxIds = new Set(sessions.map(mailboxIdForActiveSession).filter((id): id is string => !!id));
+        const gcResult = gcMailbox(activeBoxIds);
+        if (gcResult.blocksRemoved > 0 || gcResult.messagesDroppedDead > 0) {
+          console.log(
+            chalk.yellow(`gc: ${gcResult.messagesDroppedDead} dead messages, ${gcResult.blocksRemoved} stale blocks removed`),
+          );
         }
       }
 
