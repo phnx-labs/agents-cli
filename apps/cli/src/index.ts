@@ -159,6 +159,7 @@ program
   .name('agents')
   .description('Environment manager for AI agents')
   .version(VERSION)
+  .option('--verbose', 'Show startup self-heal details on stderr')
   .helpOption('-h, --help', 'Show help')
   .addHelpCommand(false);
 
@@ -295,6 +296,7 @@ Automation tips:
 Options:
   -V, --version                   Show version number
   -h, --help                      Show help
+  --verbose                       Show startup self-heal details on stderr
 
 System config lives in ~/.agents/.system/. Run 'agents <command> --help' for details.
 `;
@@ -575,8 +577,9 @@ async function checkForUpdates(): Promise<void> {
 async function maybeBootstrapShimIntegration(
   requestedCommand: string | undefined,
   helpOrVersionRequested: boolean,
+  verboseStartup: boolean,
 ): Promise<void> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+  if (!verboseStartup && (!process.stdin.isTTY || !process.stdout.isTTY)) {
     return;
   }
   // Pure documentation paths must never trigger interactive repair — mirrors
@@ -599,8 +602,12 @@ async function maybeBootstrapShimIntegration(
   // (a real native binary shadowing the shim) or is worth saying once (a PATH entry
   // just added). Suppression is persistent and keyed to the condition — a new
   // terminal no longer re-nags (the old per-PPID sentinel did, every shell).
-  const { healShimsInteractive } = await import('./lib/shim-heal.js');
-  const noticeLines = await healShimsInteractive();
+  const { runInteractiveShimHeal } = await import('./lib/shim-heal.js');
+  const { summarizeSelfHeal } = await import('./lib/self-heal/registry.js');
+  const { noticeLines, report } = await runInteractiveShimHeal();
+  if (verboseStartup) {
+    process.stderr.write(`[agents] startup self-heal: ${summarizeSelfHeal(report)}\n`);
+  }
   if (noticeLines) {
     for (const line of noticeLines) console.log(chalk.gray(line));
   }
@@ -883,6 +890,7 @@ program.on('command:*', (operands) => {
 // and whether the update check + background sync run at all.
 const passedArgs = process.argv.slice(2);
 const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
+const verboseStartup = passedArgs.includes('--verbose');
 // Help and version output are pure documentation — they must never gate on
 // setup, otherwise `agents <cmd> --help` becomes useless on a fresh box.
 const helpOrVersionRequested = passedArgs.some(
@@ -1050,7 +1058,7 @@ if (passedArgs.length === 0) {
 }
 
 try {
-  await maybeBootstrapShimIntegration(requestedCommand, helpOrVersionRequested);
+  await maybeBootstrapShimIntegration(requestedCommand, helpOrVersionRequested, verboseStartup);
   await program.parseAsync();
 } catch (err) {
   if (err instanceof Error && err.name === 'ExitPromptError') {
