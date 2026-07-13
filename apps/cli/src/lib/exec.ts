@@ -1090,11 +1090,12 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     // When the AGENT pane dies, detach the client (don't kill) so the session
     // survives just long enough to read the dead pane's exit status below. The
     // `#{hook_pane}` guard scopes this to the agent pane only: if the user splits
-    // the window and exits one of THEIR panes, the else-branch `kill-pane` closes
-    // that split in place instead of detaching everyone (the pane-died hook runs
-    // in the dead pane's context, so bare `kill-pane` targets it). Without the
+    // the window and exits one of THEIR panes, the else-branch closes that split
+    // in place instead of detaching everyone (run-shell pins the target to
+    // `#{hook_pane}` — the pane that died — since the hook context's implicit
+    // "current pane" is unreliable on a loaded server, #965). Without the
     // guard, exiting any split kicked the user clean out of tmux.
-    await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane), socket);
+    await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane, socket), socket);
     // Stamp the schema marker so the daemon reconcile (which retrofits older
     // sessions) recognizes this one as already current and skips it.
     await markSessionHookSchema(name, socket);

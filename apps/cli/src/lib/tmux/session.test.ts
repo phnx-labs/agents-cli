@@ -28,6 +28,7 @@ import {
   slugifyName,
   splitPane,
   AGENT_HOOK_SCHEMA,
+  agentPaneDiedHook,
   TmuxSessionError,
 } from './session.js';
 
@@ -272,7 +273,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     await setSessionHook(
       'guardsplit',
       'pane-died',
-      `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =guardsplit' 'kill-pane'`,
+      agentPaneDiedHook('guardsplit', agentPane, socket),
       socket,
     );
     // User opens a split (a plain shell), then exits it.
@@ -299,7 +300,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     await setSessionHook(
       'guardagent',
       'pane-died',
-      `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =guardagent' 'kill-pane'`,
+      agentPaneDiedHook('guardagent', agentPane, socket),
       socket,
     );
     await wait(400);

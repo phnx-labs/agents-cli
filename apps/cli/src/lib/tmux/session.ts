@@ -343,21 +343,32 @@ export async function setSessionHook(name: string, hook: string, command: string
  *        user exiting a split they opened) tore down the whole client.
  *   v2 — `#{hook_pane}`-guarded: only the AGENT pane dying detaches; a user
  *        split's death runs `kill-pane`, closing just that split.
+ *   v3 — the else-branch pins its target via
+ *        `run-shell "tmux -S <socket> kill-pane -t #{hook_pane}"`. Untargeted
+ *        kill-pane resolves "current pane" inside the hook context, which goes
+ *        nondeterministic on a loaded detached server (CI flake #965: the dead
+ *        split survived as a husk); run-shell format-expands its command at
+ *        fire time, so the event pane is always the target.
  */
-export const AGENT_HOOK_SCHEMA = 2;
+export const AGENT_HOOK_SCHEMA = 3;
 /** Per-session tmux user-option that records which AGENT_HOOK_SCHEMA a session's hook is at. */
 const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 
 /**
  * The guarded `pane-died` hook. Detach the client ONLY when the agent pane dies
  * (so the blocking attach in runInTmux returns and the exit status can be read);
- * a user split's death falls through to `kill-pane`, which — because the hook
- * runs in the dead pane's context — closes that split in place. Single source of
- * truth: both the spawn-wrap (exec.ts) and the daemon reconcile build the hook
- * here, so the two can never drift.
+ * a user split's death runs the else-branch, closing just that split. The
+ * else-branch goes through `run-shell` with an explicit socket and an explicit
+ * `-t #{hook_pane}` target: run-shell format-expands its command at fire time,
+ * so the event pane is always the one killed. A bare `kill-pane` relied on the
+ * hook context supplying a "current pane", which resolves nondeterministically
+ * on a loaded detached server (CI flake #965 — the dead split survived as a
+ * husk); a literal `kill-pane -t "#{hook_pane}"` never expands at all. Single
+ * source of truth: both the spawn-wrap (exec.ts) and the daemon reconcile build
+ * the hook here, so the two can never drift.
  */
-export function agentPaneDiedHook(sessionName: string, agentPane: string): string {
-  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'kill-pane'`;
+export function agentPaneDiedHook(sessionName: string, agentPane: string, socket: string): string {
+  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'run-shell "tmux -S ${socket} kill-pane -t #{hook_pane}"'`;
 }
 
 /** Stamp a session's hook-schema marker to the current version. */
@@ -417,7 +428,7 @@ export async function reconcileSessionHooks(socket?: string): Promise<{ scanned:
     if (await readHookSchema(s.name, sock) === String(AGENT_HOOK_SCHEMA)) continue;
     const agentPane = s.meta?.pane ?? await lowestPaneId(s.name, sock);
     if (!agentPane) continue;
-    await setSessionHook(s.name, 'pane-died', agentPaneDiedHook(s.name, agentPane), sock);
+    await setSessionHook(s.name, 'pane-died', agentPaneDiedHook(s.name, agentPane, sock), sock);
     await markSessionHookSchema(s.name, sock);
     reconciled++;
   }
