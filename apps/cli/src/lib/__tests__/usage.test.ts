@@ -11,6 +11,7 @@ import {
   formatUsageSummary,
   formatUsageStatusBadge,
   getClaudeKeychainService,
+  loadClaudeOauth,
   getUsageInfoForIdentity,
   readClaudeUsageCache,
   isClaudeUsageOrgMatch,
@@ -21,6 +22,7 @@ import {
   type UsageSnapshot,
   type UsageWindow,
 } from '../usage.js';
+import { deleteKeychainToken, setKeychainToken } from '../secrets/index.js';
 
 function makeAccountInfo(overrides: Partial<AccountInfo> = {}): AccountInfo {
   return {
@@ -198,6 +200,13 @@ describe('usage identity deduping', () => {
 });
 
 describe('Claude usage scoping', () => {
+  const previousPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
+
+  afterEach(() => {
+    if (previousPassphrase === undefined) delete process.env.AGENTS_SECRETS_PASSPHRASE;
+    else process.env.AGENTS_SECRETS_PASSPHRASE = previousPassphrase;
+  });
+
   it('uses the shared keychain service without a managed home', () => {
     expect(getClaudeKeychainService()).toBe('Claude Code-credentials');
   });
@@ -213,6 +222,20 @@ describe('Claude usage scoping', () => {
 
   it('does not reuse the shared keychain service for managed Claude homes', () => {
     expect(getClaudeKeychainService('/tmp/claude-a')).not.toBe('Claude Code-credentials');
+  });
+
+  it('ignores malformed keychain payloads without an access token', async () => {
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'usage-test-passphrase';
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-oauth-'));
+    const service = getClaudeKeychainService(home);
+    setKeychainToken(service, JSON.stringify({ claudeAiOauth: { refreshToken: 'refresh-only' } }));
+
+    try {
+      await expect(loadClaudeOauth(home)).resolves.toBeNull();
+    } finally {
+      try { deleteKeychainToken(service); } catch {}
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('keeps usage eligible when the live org is missing', () => {
