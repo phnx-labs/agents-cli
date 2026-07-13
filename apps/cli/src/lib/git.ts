@@ -472,10 +472,30 @@ export async function hasUncommittedChanges(repoPath: string): Promise<boolean> 
 }
 
 /**
- * Check if a directory is a git repository.
+ * Check if a directory is a git repository (**synchronous, root-only**).
+ *
+ * Tests for a `.git` entry directly under `dir`, so it recognizes only a
+ * repository *root* — it returns false inside a subdirectory and for linked
+ * worktrees (whose `.git` is a file pointing elsewhere is caught, but a nested
+ * cwd is not). This is deliberate: the system-repo sync callers here always
+ * pass a known root. For the async, worktree-correct predicate used by teams,
+ * see `isGitRepo` in `lib/teams/worktree.ts` (which shells out to
+ * `git rev-parse --git-dir`). The two are intentionally **not** merged.
  */
 export function isGitRepo(dir: string): boolean {
   return fs.existsSync(path.join(dir, '.git'));
+}
+
+/**
+ * Return the absolute path to the git working-tree root containing `dir`.
+ *
+ * Shells out to `git rev-parse --show-toplevel`, so it resolves correctly from
+ * any subdirectory and for linked worktrees (unlike the root-only, synchronous
+ * {@link isGitRepo} above). Throws if `dir` is not inside a git repository.
+ */
+export async function getGitRoot(dir: string): Promise<string> {
+  const root = await simpleGit(dir).revparse(['--show-toplevel']);
+  return root.trim();
 }
 
 /**

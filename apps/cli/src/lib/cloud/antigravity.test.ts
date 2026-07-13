@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-  mapStatus,
   buildInteractionBody,
   parseInteraction,
 } from './antigravity.js';
 import { AntigravityCloudProvider } from './antigravity.js';
+import { normalizeProviderStatus } from './types.js';
 
-describe('mapStatus', () => {
+// The antigravity status mapping now lives in the shared
+// `normalizeProviderStatus('antigravity', …)` helper; assert it here (against
+// the same vocabulary) so a drift in that helper still trips this suite.
+describe("normalizeProviderStatus('antigravity', …)", () => {
+  const mapStatus = (s: string | undefined) => normalizeProviderStatus('antigravity', s);
   it('maps Interactions API statuses to the canonical enum', () => {
     expect(mapStatus('queued')).toBe('queued');
     expect(mapStatus('in_progress')).toBe('running');

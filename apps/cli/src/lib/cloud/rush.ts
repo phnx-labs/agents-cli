@@ -21,7 +21,7 @@ import type {
   ImageAttachment,
   SkillRef,
 } from './types.js';
-import { resolveDispatchRepos, MAX_IMAGES_PER_DISPATCH } from './types.js';
+import { resolveDispatchRepos, normalizeProviderStatus, MAX_IMAGES_PER_DISPATCH } from './types.js';
 import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../versions.js';
 import { getAccountInfo } from '../agents.js';
@@ -88,19 +88,6 @@ interface Installation {
   account_login: string;
   repositories?: { name: string; full_name: string }[];
   repository_selection?: string;
-}
-
-/** Map a Factory Floor status string to the canonical CloudTaskStatus enum. */
-function mapStatus(s: string): CloudTaskStatus {
-  switch (s) {
-    case 'allocating': return 'allocating';
-    case 'running': return 'running';
-    case 'needs_review': return 'input_required';
-    case 'completed': return 'completed';
-    case 'failed': return 'failed';
-    case 'cancelled': return 'cancelled';
-    default: return 'running';
-  }
 }
 
 /** Read the Rush session access token from ~/.rush/user.yaml. */
@@ -563,7 +550,7 @@ export class RushCloudProvider implements CloudProvider {
     return {
       id: taskId,
       provider: 'rush',
-      status: mapStatus(data.status as string),
+      status: normalizeProviderStatus('rush', data.status as string),
       agent: (data.agent as string) || undefined,
       prompt: (data.prompt as string) || '',
       repo: data.repo_owner && data.repo_name ? `${data.repo_owner}/${data.repo_name}` : undefined,
@@ -588,7 +575,7 @@ export class RushCloudProvider implements CloudProvider {
     return (data.executions ?? []).map((e) => ({
       id: e.execution_id as string,
       provider: 'rush' as const,
-      status: mapStatus(e.status as string),
+      status: normalizeProviderStatus('rush', e.status as string),
       agent: (e.agent as string) || undefined,
       prompt: (e.prompt as string) || '',
       repo: e.repo_owner && e.repo_name ? `${e.repo_owner}/${e.repo_name}` : undefined,
