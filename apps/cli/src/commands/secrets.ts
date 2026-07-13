@@ -763,23 +763,46 @@ export function registerSecretsCommands(program: Command): void {
     });
 
   cmd
-    .command('get <item>')
-    .description('Print a raw keychain item by name (for shell hooks/automation). Cross-platform; no bundle required.')
-    .action((item: string) => {
+    .command('get <item> [key]')
+    .description('Print one secret value for shell hooks/automation. One arg = a raw keychain item by name; two args = one KEY out of a bundle (`get <bundle> <KEY>`). Cross-platform.')
+    .action((item: string, key: string | undefined) => {
+      if (key === undefined) {
+        // Raw keychain item path — unchanged.
+        try {
+          // Routes through the platform keychain layer: macOS reads bare items
+          // via /usr/bin/security (no Touch ID), Linux via secret-tool with the
+          // encrypted-file fallback. The value goes to stdout (newline-terminated
+          // so `$(agents secrets get NAME)` captures it cleanly); diagnostics go
+          // to stderr so they never pollute the captured value.
+          const value = getKeychainToken(item);
+          // Raw item reads bypass readAndResolveBundleEnv, so audit here too.
+          // `item` is the keychain service name, never the value.
+          emit('secrets.get', { module: 'secrets', item, source: 'raw-item', status: 'success' });
+          process.stdout.write(value.endsWith('\n') ? value : `${value}\n`);
+        } catch {
+          // Missing item is a normal, quiet outcome for a hook probe: exit 1,
+          // print nothing to stdout. Callers test the exit code / empty capture.
+          process.exit(1);
+        }
+        return;
+      }
+      // Bundle-key path: `get <bundle> <KEY>` prints exactly one resolved value.
+      // Ungated like the raw path (it IS the automation primitive); the
+      // `secrets.get` audit event is emitted inside readAndResolveBundleEnv.
       try {
-        // Routes through the platform keychain layer: macOS reads bare items
-        // via /usr/bin/security (no Touch ID), Linux via secret-tool with the
-        // encrypted-file fallback. The value goes to stdout (newline-terminated
-        // so `$(agents secrets get NAME)` captures it cleanly); diagnostics go
-        // to stderr so they never pollute the captured value.
-        const value = getKeychainToken(item);
-        // Raw item reads bypass readAndResolveBundleEnv, so audit here too.
-        // `item` is the keychain service name, never the value.
-        emit('secrets.get', { module: 'secrets', item, source: 'raw-item', status: 'success' });
+        if (!bundleExists(item)) {
+          console.error(chalk.red(`Secrets bundle '${item}' not found.`));
+          process.exit(1);
+        }
+        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key] });
+        if (!(key in env)) {
+          console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
+          process.exit(1);
+        }
+        const value = env[key];
         process.stdout.write(value.endsWith('\n') ? value : `${value}\n`);
-      } catch {
-        // Missing item is a normal, quiet outcome for a hook probe: exit 1,
-        // print nothing to stdout. Callers test the exit code / empty capture.
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
         process.exit(1);
       }
     });
