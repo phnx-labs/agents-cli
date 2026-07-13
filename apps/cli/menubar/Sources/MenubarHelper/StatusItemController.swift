@@ -33,6 +33,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var recentSessionsInFlight = false
     private var recentSessionsFetchedAt: Date?
 
+    // The engine's active-session list (`sessions --active --local --json`) —
+    // authoritative coverage (tmux/IDE/headless), but costs seconds, so it rides
+    // the same warm-cache pattern as routines: refreshed off-path, rendered from
+    // cache when the menu opens. Until first load, the cheap live-terminals view
+    // fills in.
+    private var cachedActiveSessions: [ActiveSession] = []
+    private var activeSessionsLoaded = false
+    private var activeSessionsInFlight = false
+    private var activeSessionsFetchedAt: Date?
+
     private var cachedDoctorOverview: DoctorOverview?
     private var doctorLoaded = false
     private var doctorInFlight = false
@@ -115,6 +125,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         refreshRoutines()
         refreshRecentSessions()
+        refreshActiveSessions()
         refreshDoctorOverview()
         refreshWatchdog()
     }
@@ -127,6 +138,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         cachedRecentSessions = AgentsCLI.recentSessions(limit: 6)
         recentSessionsLoaded = true
         recentSessionsFetchedAt = Date()
+
+        cachedActiveSessions = AgentsCLI.activeSessions()
+        activeSessionsLoaded = true
+        activeSessionsFetchedAt = Date()
 
         cachedDoctorOverview = AgentsCLI.doctorOverview()
         doctorLoaded = true
@@ -162,6 +177,22 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                 self.recentSessionsLoaded = true
                 self.recentSessionsFetchedAt = Date()
                 self.recentSessionsInFlight = false
+            }
+        }
+    }
+
+    private func refreshActiveSessions() {
+        if activeSessionsInFlight { return }
+        if let t = activeSessionsFetchedAt, Date().timeIntervalSince(t) < 30 { return }
+        activeSessionsInFlight = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let a = AgentsCLI.activeSessions()
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.cachedActiveSessions = a
+                self.activeSessionsLoaded = true
+                self.activeSessionsFetchedAt = Date()
+                self.activeSessionsInFlight = false
             }
         }
     }
@@ -246,6 +277,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshBadge()
         refreshRoutines()
         refreshRecentSessions()
+        refreshActiveSessions()
         refreshDoctorOverview()
         refreshWatchdog()
     }
@@ -258,6 +290,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                          recentSessions: [RecentSession], routines: [Routine],
                          doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice]) {
         menu.removeAllItems()
+
+        // Prefer the engine's active list once the warm cache has it — full
+        // coverage (tmux/IDE/headless), correct running/idle. The cheap
+        // live-terminals view (`sessions` param) covers the cold start. Cloud +
+        // teams rows always come from the cheap sources.
+        var sessions = sessions
+        if activeSessionsLoaded && !cachedActiveSessions.isEmpty {
+            let nonTerminal = sessions.filter { $0.context != "terminal" }
+            sessions = LocalState.sessions(fromActive: cachedActiveSessions) + nonTerminal
+        }
 
         // Auto density keys off the FULL needs-you set — blocked sessions plus
         // failing/overdue routines and a stopped scheduler — so the menu is rich
@@ -446,7 +488,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             if !counts.isEmpty { title += "  ·  " + counts.joined(separator: " · ") }
             addSectionTitle(menu, title, color: .secondaryLabelColor)
 
-            for s in group {
+            // Running rows always render; idle rows cap at 3 per repo (the
+            // header carries the true counts) so a big idle fleet can't wall
+            // the menu.
+            let ordered = group.sorted { a, b in
+                (a.status == .running ? 0 : 1) < (b.status == .running ? 0 : 1)
+            }
+            var idleShown = 0
+            for s in ordered {
+                if s.status != .running {
+                    if idleShown >= 3 { continue }
+                    idleShown += 1
+                }
                 let glyph = s.status == .running ? "●" : "◐"
                 let color = s.status == .running ? run : idleC
                 let detail = (rich && !s.title.isEmpty) ? " — \(trim(s.title, 36))" : ""
