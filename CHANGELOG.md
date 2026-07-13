@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.55
+
 ### Added
 
 - **Heartbeat watchdog** — the daemon writes a heartbeat (timestamp + pid) every
