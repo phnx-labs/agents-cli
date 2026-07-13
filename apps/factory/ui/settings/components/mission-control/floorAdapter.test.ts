@@ -486,6 +486,106 @@ describe('toFloorAgentFromRemote', () => {
     // Reply routing still targets the real querier host, unaffected by the display label.
     expect(a.reply.host).toBe('zion')
   })
+
+  test('uses a remote manual label as the card name before topic or ids', () => {
+    const r: RemoteSessionLike = {
+      host: 'yosemite-s0',
+      sessionId: '019e30a2-raw-session-id',
+      agentType: 'codex',
+      cwd: '/home/u/src/app',
+      project: 'app',
+      phase: 'running',
+      activity: 'Editing src/app.ts',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      prUrl: null,
+      ticket: null,
+      branch: 'feature-branch',
+      sinceMs: 1_000,
+      startedAtMs: NOW - 1_000,
+      label: 'factory floor labels',
+      topic: 'Fix Factory header labels',
+      context: 'terminal',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 1,
+      transport: 'ssh',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.name).toBe('factory floor labels')
+    expect(a.name).not.toContain('019e30a2')
+  })
+
+  test('falls back to topic, never a raw session id slice, when label is absent', () => {
+    const r: RemoteSessionLike = {
+      host: 'zion',
+      sessionId: '019e30a2-dead-beef',
+      agentType: 'claude',
+      cwd: '',
+      project: '',
+      phase: 'running',
+      activity: '',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      prUrl: null,
+      ticket: null,
+      branch: '',
+      sinceMs: 1_000,
+      startedAtMs: NOW - 1_000,
+      topic: 'Audit cloud UUID headers',
+      context: 'cloud',
+      cloudTaskId: 'task_123',
+      cloudProvider: 'codex',
+      teamName: '',
+      pid: 0,
+      transport: '',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.name).toBe('Audit cloud UUID headers')
+    expect(a.name).not.toContain('019e30a2')
+  })
+
+  test('uses a generic agent label instead of a uuid when no human fields exist', () => {
+    const r: RemoteSessionLike = {
+      host: 'zion',
+      sessionId: '019e30a2-dead-beef',
+      agentType: 'claude',
+      cwd: '',
+      project: '',
+      phase: 'running',
+      activity: '',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      prUrl: null,
+      ticket: null,
+      branch: '',
+      sinceMs: 1_000,
+      startedAtMs: NOW - 1_000,
+      topic: '',
+      context: 'terminal',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 0,
+      transport: '',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.name).toBe('Claude session')
+    expect(a.name).not.toContain('019e30a2')
+  })
 })
 
 describe('deriveReplyTargetFromRemote', () => {

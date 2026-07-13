@@ -10,6 +10,11 @@
  * Cross-host is handled one layer up: `--host <h>` routes the whole command over
  * ssh via `REMOTE_PASSTHROUGH` (see src/lib/hosts/passthrough.ts), so the box is
  * written on the host that actually owns the agent.
+ *
+ * For local agents, the message is tied to the agent's current open feed block
+ * (if any). The first answer to a block wins: a second concurrent answer is
+ * rejected with the surface that already answered. Delivery receipts
+ * (queued → consumed → continued) are surfaced in the feed store.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -19,14 +24,32 @@ import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
 import { resolveMessageTarget } from '../lib/mailbox-target.js';
+import {
+  blockIdForSession,
+  listBlocks,
+  readBlock,
+  recordAnswer,
+  recordMessageReceipt,
+  type OpenBlock,
+} from '../lib/feed.js';
 
+/** Find the still-open block addressed to `mailboxId`, if any. */
+function findOpenBlockForMailbox(mailboxId: string): OpenBlock | undefined {
+  // Fast path: the mailbox id is usually the session id, so the block id is
+  // directly derivable. This avoids scanning the whole feed store.
+  const direct = readBlock(blockIdForSession(mailboxId));
+  if (direct && direct.mailboxId === mailboxId) return direct;
+  // Fallback: scan (agentId-based mailbox ids, rare).
+  return listBlocks().find((b) => b.mailboxId === mailboxId);
+}
 
 export function registerMessageCommand(program: Command): void {
   program
     .command('message <target> <text>')
     .description('Send a message to a running agent (delivered at its next tool call) or a cloud task.')
     .option('--from <who>', 'Label recorded as the sender of this message')
-    .action(async (target: string, text: string, opts: { from?: string }) => {
+    .option('--surface <surface>', 'Surface that is sending this answer (feed, terminal, etc.)', 'cli')
+    .action(async (target: string, text: string, opts: { from?: string; surface?: string }) => {
       if (!target.trim()) {
         die('Target must be a session/agent id or cloud task id. Run `agents sessions --active` to list running agents.');
       }
@@ -48,11 +71,37 @@ export function registerMessageCommand(program: Command): void {
         }
         case 'local': {
           try {
-            const msgId = enqueue(mailboxDir(res.id), { to: res.id, text, from: opts.from });
-            console.log(
-              chalk.green(`Queued message ${msgId} for ${res.id}. `) +
-                chalk.dim('The agent will see it at its next tool call.'),
-            );
+            const block = findOpenBlockForMailbox(res.id);
+            if (block) {
+              const claim = recordAnswer(block.blockId, {
+                answeredBy: opts.from,
+                answeredFrom: opts.surface || 'cli',
+              });
+              if (!claim.ok) {
+                const who = claim.existing.answeredFrom + (claim.existing.answeredBy ? ` (${claim.existing.answeredBy})` : '');
+                die(`This question was already answered by ${who}.`);
+              }
+            }
+
+            const msgId = enqueue(mailboxDir(res.id), { to: res.id, text, from: opts.from, blockId: block?.blockId });
+
+            if (block) {
+              recordMessageReceipt(block.blockId, {
+                msgId,
+                status: 'queued',
+                at: new Date().toISOString(),
+                from: opts.from,
+              });
+              console.log(
+                chalk.green(`Queued message ${msgId} for ${res.id}. `) +
+                  chalk.dim(`Answer tied to ${block.blockId}; the agent will see it at its next tool call.`),
+              );
+            } else {
+              console.log(
+                chalk.green(`Queued message ${msgId} for ${res.id}. `) +
+                  chalk.dim('The agent will see it at its next tool call.'),
+              );
+            }
           } catch (err) {
             die((err as Error).message);
           }

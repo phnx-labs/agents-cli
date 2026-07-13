@@ -74,13 +74,13 @@ function agent(p: Partial<FloorAgent>): FloorAgent {
 // identical, contextless "Edit linux.ts / waiting_input" cards. They now carry the
 // project, the worktree slug, and a distinct task line.
 const twinA = agent({
-  id: 'twin-a', abbr: 'CC', name: '02ebf318', project: 'agents-cli', phase: 'waiting',
+  id: 'twin-a', abbr: 'CC', name: 'byok-keychain-cleanup', project: 'agents-cli', phase: 'waiting',
   needs: true, worktreeSlug: 'headless-secrets-shadow', branch: 'muqsit/headless-secrets',
   verb: 'Edit', target: 'src/lib/secrets/linux.ts',
   summary: 'Removing the stale BYOK resolver and its keychain writes.', since: '0s',
 })
 const twinB = agent({
-  id: 'twin-b', abbr: 'CC', name: 'e3d6852d', project: 'agents-cli', phase: 'waiting',
+  id: 'twin-b', abbr: 'CC', name: 'linux-secret-service', project: 'agents-cli', phase: 'waiting',
   needs: true, worktreeSlug: 'headless-secrets-shadow', branch: 'muqsit/headless-secrets',
   verb: 'Edit', target: 'src/lib/secrets/linux.ts',
   summary: 'Adding the Linux secret-service fallback path + a regression test.', since: '0s',
@@ -544,7 +544,7 @@ const permAgent = agent({
   }, since: '2m',
 })
 const askAgentD = agent({
-  id: 'a-ask-d', abbr: 'CC', name: '659a7ec6', project: 'agents-cli', phase: 'waiting', needs: true,
+  id: 'a-ask-d', abbr: 'CC', name: 'agent-readiness-review', project: 'agents-cli', phase: 'waiting', needs: true,
   prompt: 'Make the NEEDS-YOU panel surface enough to unblock agents at a glance.',
   question: {
     kind: 'choice', reason: 'question', text: 'Ship v0.9.290 with the two follow-ups now, or pull more of the feed-UI backlog into this pass first?',

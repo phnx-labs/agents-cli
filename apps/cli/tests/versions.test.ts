@@ -592,8 +592,10 @@ describe('hasNewResources', () => {
     expect(hasNewResources(diff, 'claude')).toBe(true);
     // codex now supports hooks (version-gate applies at sync time, not here)
     expect(hasNewResources(diff, 'codex')).toBe(true);
-    // cursor does NOT support hooks
-    expect(hasNewResources(diff, 'cursor')).toBe(false);
+    // cursor supports hooks (CLI since 2026-01-16)
+    expect(hasNewResources(diff, 'cursor')).toBe(true);
+    // amp does NOT support hooks
+    expect(hasNewResources(diff, 'amp')).toBe(false);
   });
 
   it('filters memory by commands capability (same gate)', () => {

@@ -8,8 +8,14 @@ import {
   ensureFeedPublishHook,
   publishBlock,
   listBlocks,
+  readBlock,
   removeBlock,
   blockIdForSession,
+  recordAnswer,
+  recordMessageReceipt,
+  recordContinued,
+  getAnswerRecord,
+  isBlockAnswered,
   type OpenBlock,
 } from './feed.js';
 
@@ -369,5 +375,116 @@ describe('feed store', () => {
     expect(updated).toContain('feed-clear-answered:');
     expect(updated).toContain('feed-clear-lifecycle:');
     expect(fs.readFileSync(path.join(userDir, 'hooks', '10-feed-publish.py'), 'utf-8')).toBe(FEED_PUBLISH_HOOK_SCRIPT);
+  });
+
+  it('recordAnswer claims the first answer and rejects later ones', () => {
+    const dir = tmpFeedDir();
+    publishBlock(makeBlock('sess-answer', 'Which one?'), dir);
+    const blockId = blockIdForSession('sess-answer');
+
+    const first = recordAnswer(blockId, { answeredBy: 'operator-a', answeredFrom: 'feed' }, dir);
+    expect(first).toEqual({ ok: true });
+    expect(isBlockAnswered(blockId, dir)).toBe(true);
+    expect(getAnswerRecord(blockId, dir)).toMatchObject({ answeredFrom: 'feed', answeredBy: 'operator-a' });
+    expect(readBlock(blockId, dir)?.answer).toMatchObject({ answeredFrom: 'feed', answeredBy: 'operator-a' });
+
+    const second = recordAnswer(blockId, { answeredBy: 'operator-b', answeredFrom: 'feed' }, dir);
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.existing.answeredBy).toBe('operator-a');
+    }
+  });
+
+  it('recordMessageReceipt tracks queued → consumed → continued lifecycle', () => {
+    const dir = tmpFeedDir();
+    publishBlock(makeBlock('sess-receipt', 'Confirm?'), dir);
+    const blockId = blockIdForSession('sess-receipt');
+
+    recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'queued', at: '2026-01-01T00:00:00.000Z' }, dir);
+    recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'consumed', at: '2026-01-01T00:00:01.000Z' }, dir);
+    recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'continued', at: '2026-01-01T00:00:02.000Z' }, dir);
+    recordContinued(blockId, dir);
+
+    const block = readBlock(blockId, dir)!;
+    expect(block.receipts).toHaveLength(1);
+    expect(block.receipts![0]).toMatchObject({ msgId: 'msg-1', status: 'continued' });
+    expect(block.continuedAt).toBeTruthy();
+  });
+
+  it('removeBlock clears answered markers and receipts', () => {
+    const dir = tmpFeedDir();
+    publishBlock(makeBlock('sess-cleanup', 'Clean me?'), dir);
+    const blockId = blockIdForSession('sess-cleanup');
+    recordAnswer(blockId, { answeredFrom: 'feed' }, dir);
+    recordMessageReceipt(blockId, { msgId: 'm', status: 'queued', at: new Date().toISOString() }, dir);
+
+    expect(removeBlock(blockId, dir)).toBe(true);
+    expect(listBlocks(dir)).toHaveLength(0);
+    expect(isBlockAnswered(blockId, dir)).toBe(false);
+  });
+
+  it.runIf(hasPython)('real hook records terminal answers and removes the visible block', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-terminal-answer-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-terminal',
+        hook_event_name: 'PreToolUse',
+        tool_input: { questions: [{ question: 'Choose?', options: [{ label: 'A' }] }] },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+    expect(listBlocks(feedDir)).toHaveLength(1);
+
+    const answer = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({ session_id: 'session-terminal', hook_event_name: 'UserPromptSubmit' }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(answer.status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
+    expect(isBlockAnswered('block-session-terminal', feedDir)).toBe(true);
+    expect(getAnswerRecord('block-session-terminal', feedDir)).toMatchObject({ answeredFrom: 'terminal' });
+  });
+
+  it.runIf(hasPython)('real hook clears stale answered marker when a new question is published', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-new-question-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const sessionId = 'session-new-q';
+    const blockId = blockIdForSession(sessionId);
+
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: sessionId,
+        hook_event_name: 'PreToolUse',
+        tool_input: { questions: [{ question: 'First?' }] },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+
+    const answer = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({ session_id: sessionId, hook_event_name: 'UserPromptSubmit' }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(answer.status).toBe(0);
+    expect(isBlockAnswered(blockId, feedDir)).toBe(true);
+
+    const republish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: sessionId,
+        hook_event_name: 'PreToolUse',
+        tool_input: { questions: [{ question: 'Second?' }] },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(republish.status).toBe(0);
+    expect(isBlockAnswered(blockId, feedDir)).toBe(false);
+    expect(listBlocks(feedDir)).toMatchObject([{ questions: [{ text: 'Second?' }] }]);
   });
 });

@@ -83,14 +83,14 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — |
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — |
-| ★ OpenCode | `opencode` | — | ✓ | — | ✓ | ✓ | — | — | — |
+| ★ OpenCode | `opencode` | — | ✓ | — | ✓ | ✓ | ✓ | — | — |
 | Gemini † | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — |
-| Cursor | `cursor` | — | ✓ | — | ✓ | ✓ | — | — | — |
+| Cursor | `cursor` | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — |
 | Copilot | `copilot` | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
 | Kiro | `kiro` | ≥0.10 | ✓ | — | ✓ | ✓ | — | — | — |
-| Goose | `goose` | ≥1.34 | ✓ | — | — | — | — | — | — |
+| Goose | `goose` | ≥1.34 | ✓ | — | — | — | ✓ | — | — |
 | Droid | `droid` | ✓ | ✓ | — | — | ✓ | ✓ | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =

@@ -142,6 +142,8 @@ export interface RemoteSessionLike {
   /** Epoch ms of the most recent observed activity (session-file last write).
    *  Recent (historical) sessions carry it from the CLI's lastActivity stamp. */
   lastActivityMs?: number
+  /** User-set session label from `agents run --name` / session metadata. */
+  label?: string
   topic: string
   context: string
   cloudTaskId: string
@@ -249,6 +251,21 @@ export function floorPrLabel(url: string | null | undefined): string | null {
   if (m) return `#${m[1]}`
   const n = url.match(/#(\d+)\s*$/)
   return n ? `#${n[1]}` : null
+}
+
+function humanRemoteSessionName(r: RemoteSessionLike): string {
+  const label = firstNonEmptyStr(
+    r.label,
+    r.topic,
+    r.branch,
+    r.ticket,
+    r.worktreeSlug ? cleanWorktreeSlug(r.worktreeSlug) : undefined,
+    cleanWorktreeSlug(r.cwd),
+    r.project,
+  )
+  if (label) return label
+  const agent = firstNonEmptyStr(r.agentType)
+  return agent ? `${agent.charAt(0).toUpperCase()}${agent.slice(1)} session` : 'Session'
 }
 
 /**
@@ -389,7 +406,7 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
   const needs = deriveNeeds(phase, prOpenUnreviewed, ci)
   const { verb, target } = splitActivity(r.activity)
   const id = `remote-${r.host}-${r.sessionId}`
-  const name = r.branch || r.ticket || r.sessionId.slice(0, 8)
+  const name = humanRemoteSessionName(r)
   // Remote (Tier-1) sessions have no enriched last-response yet — fall back to the
   // session's task line (topic) so the card shows what it's working on, not blank.
   const resp = r.lastResponse || r.topic || ''

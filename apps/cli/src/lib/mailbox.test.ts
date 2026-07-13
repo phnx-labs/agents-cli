@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, type MailboxMessage } from './mailbox.js';
+import { blockIdForSession, getBlockReceipts, publishBlock } from './feed.js';
 
 function tmpRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-test-'));
@@ -133,5 +134,36 @@ describe('mailbox', () => {
     const [msg] = drain(box);
     expect(msg.from).toBe('operator@s0');
     expect(msg.text).toContain('zion:/Users/m/mock.png');
+  });
+
+  it('surfaces consumed receipts to the feed store when a message carries blockId', () => {
+    const feedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mailbox-receipt-'));
+    const previous = process.env.AGENTS_FEED_DIR;
+    process.env.AGENTS_FEED_DIR = feedDir;
+    try {
+      // The feed block must exist for the receipt to be recorded.
+      const blockId = blockIdForSession(BOX);
+      publishBlock({
+        blockId,
+        sessionId: BOX,
+        mailboxId: BOX,
+        host: 'test-host',
+        runtime: 'claude',
+        ts: new Date().toISOString(),
+        questions: [{ text: 'Confirm?' }],
+      }, feedDir);
+
+      const box = mailboxDir(BOX, tmpRoot());
+      const msgId = enqueue(box, { to: BOX, from: 'feed', text: 'yes', blockId });
+
+      const [msg] = drain(box);
+      expect(msg.blockId).toBe(blockId);
+
+      const receipts = getBlockReceipts(blockId, feedDir);
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0]).toMatchObject({ msgId, status: 'consumed', from: 'feed' });
+    } finally {
+      process.env.AGENTS_FEED_DIR = previous;
+    }
   });
 });

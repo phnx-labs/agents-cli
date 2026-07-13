@@ -951,6 +951,104 @@ describe('registerHooksToSettings - Goose', () => {
   });
 });
 
+describe('registerHooksToSettings - Cursor', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeCursorScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  it('writes ~/.cursor/hooks.json with version 1 and camelCase events', () => {
+    makeCursorScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart', 'Stop'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('cursor', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> beforeSubmitPrompt');
+    expect(result.registered).toContain('on-prompt -> sessionStart');
+    expect(result.registered).toContain('on-prompt -> stop');
+
+    const outPath = path.join(versionHome, '.cursor', 'hooks.json');
+    expect(fs.existsSync(outPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.version).toBe(1);
+    expect(parsed.hooks.sessionStart).toHaveLength(1);
+    expect(parsed.hooks.beforeSubmitPrompt[0].timeout).toBe(45);
+    expect(parsed.hooks.stop[0].command).toBeTruthy();
+    expect(resolvedCommand(parsed.hooks.sessionStart[0].command)).toContain('on-prompt.sh');
+  });
+
+  it('emits matcher for preToolUse', () => {
+    makeCursorScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Shell|Write' } },
+      agentsDir
+    );
+    const parsed = JSON.parse(fs.readFileSync(path.join(versionHome, '.cursor', 'hooks.json'), 'utf-8'));
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Shell|Write');
+  });
+
+  it('preserves user-authored entries outside managed prefixes', () => {
+    makeCursorScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const outPath = path.join(versionHome, '.cursor', 'hooks.json');
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({
+        version: 1,
+        hooks: { sessionStart: [{ command: '/usr/local/bin/my-custom-hook' }] },
+      }),
+      'utf-8'
+    );
+
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['SessionStart'] } },
+      agentsDir
+    );
+
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    const cmds = parsed.hooks.sessionStart.map((h: { command: string }) => h.command);
+    expect(cmds).toContain('/usr/local/bin/my-custom-hook');
+    expect(cmds.some((c: string) => c.includes('on-prompt') || resolvedCommand(c).includes('on-prompt'))).toBe(true);
+  });
+
+  it('does not duplicate on repeated sync', () => {
+    makeCursorScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('cursor', versionHome, manifest, agentsDir);
+    registerHooksToSettings('cursor', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(fs.readFileSync(path.join(versionHome, '.cursor', 'hooks.json'), 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+  });
+});
+
 describe('registerHooksToSettings - Antigravity', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
