@@ -39,7 +39,7 @@ import { repoSlugFromPath } from '../core/projectIndex';
 import { matchLinearProject } from '../core/linearProjects';
 import { fetchLinearProjects } from './linear.vscode';
 import { resolveForemanTarget, candidateName } from '../core/foreman.target';
-import { parseEvents } from '../core/watchdogLog';
+import { parseEvents, WATCHDOG_LOG_PATH } from '../core/watchdogLog';
 import {
   WATCHDOG_PLAYBOOK_PATH,
   ensureWatchdogPlaybookScaffold,
@@ -2917,9 +2917,8 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'getWatchdogLog': {
-        const logPath = path.join(homedir(), '.agents', 'watchdog.log');
         try {
-          const text = fs.readFileSync(logPath, 'utf8');
+          const text = fs.readFileSync(WATCHDOG_LOG_PATH, 'utf8');
           settingsPanel?.webview.postMessage({ type: 'watchdogLogData', events: parseEvents(text) });
         } catch {
           settingsPanel?.webview.postMessage({ type: 'watchdogLogData', events: [] });

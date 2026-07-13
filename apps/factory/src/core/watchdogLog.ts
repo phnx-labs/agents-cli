@@ -1,6 +1,11 @@
-// Watchdog event log: pure formatting + parsing for the JSONL feed at
-// ~/.agents/watchdog.log. The webview pulls this file periodically to
-// render the Watchdog activity card on the Factory Floor.
+import * as os from 'os';
+import * as path from 'path';
+
+// Watchdog event log: formatting + parsing for the JSONL feed at
+// ~/.agents/.cache/logs/watchdog.log. The webview pulls this file periodically
+// to render the Watchdog activity card on the Factory Floor.
+
+export const WATCHDOG_LOG_PATH = path.join(os.homedir(), '.agents', '.cache', 'logs', 'watchdog.log');
 
 export type WatchdogEventKind = 'tick' | 'decision' | 'nudge' | 'rotate' | 'error';
 
