@@ -86,6 +86,46 @@ The agent can only:
 - Use tools listed in `allow.tools`
 - Cannot access `~/.ssh`, `~/.gitconfig`, etc.
 
+### Headless claude auth
+
+The sandbox overlay builds a clean `HOME` with no Claude credentials — the real
+`~/.claude/` (and its OAuth tokens) is invisible to the spawned process by design.
+A routine that drives headless `claude` will fail authentication unless one of two
+conditions is met.
+
+**Current workaround — `sandbox: false`**
+
+Set `sandbox: false` on the routine to skip overlay creation. The agent inherits
+the daemon's full environment, including `CLAUDE_CODE_OAUTH_TOKEN` if the daemon
+was started with it (`runner.ts:218`):
+
+```yaml
+name: my-claude-routine
+schedule: "0 9 * * *"
+agent: claude
+sandbox: false            # overlay HOME has no claude credentials
+prompt: |
+  Do something useful.
+```
+
+**Why `sandbox: false` works, and why the default does not**
+
+When the daemon starts, it reads `CLAUDE_CODE_OAUTH_TOKEN` from the `claude`
+secrets bundle (`daemon.ts:550-563`) and bakes it into the daemon process
+environment (`daemon.ts:820-821`). With `sandbox: true` (the default),
+`buildSpawnEnv` only forwards keys in `ENV_ALLOWLIST` — `CLAUDE_CODE_OAUTH_TOKEN`
+is not on that list (`sandbox.ts:28-49`), so the token is stripped before the
+agent launches. `sandbox: false` sidesteps this by passing `process.env` directly,
+which includes the daemon-level token.
+
+To store the token in the `claude` secrets bundle:
+
+```bash
+agents secrets set claude CLAUDE_CODE_OAUTH_TOKEN <token>
+# Restart the daemon so the updated token is baked into its environment:
+agents routines stop && agents routines start
+```
+
 ## Execution Flow
 
 Temporal sequence from cron fire to report saved.
