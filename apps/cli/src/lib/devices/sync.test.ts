@@ -7,12 +7,35 @@
  *   3. A genuinely-new, non-ignored node IS surfaced.
  */
 import { describe, expect, it } from 'vitest';
-import { computePendingDevices, planDeviceReconciliation, selectNodesToUpsert } from './sync.js';
+import { computePendingDevices, planDeviceReconciliation, selectNodesToUpsert, withDefaultUser } from './sync.js';
 import type { TailscaleNode } from './tailscale.js';
+import type { DeviceInput } from './registry.js';
 
 function node(name: string): TailscaleNode {
   return { name, platform: 'linux', online: true, direct: true };
 }
+
+describe('withDefaultUser', () => {
+  const base: DeviceInput = { platform: 'linux', address: { via: 'tailscale', dnsName: 'mac-mini.tail.ts.net' } };
+
+  it('fills the local operator user when the device has none registered', () => {
+    expect(withDefaultUser(base, undefined, 'muqsit').user).toBe('muqsit');
+  });
+
+  it('never clobbers a pinned user: leaves input.user unset so upsert preserves the registered one', () => {
+    // With a prev user, withDefaultUser must NOT stamp localUser — it returns the
+    // input untouched so upsertDevice's `input.user ?? prev.user` keeps 'root'.
+    expect(withDefaultUser(base, 'root', 'muqsit').user).toBeUndefined();
+  });
+
+  it('leaves the user unset when there is no safe local username', () => {
+    expect(withDefaultUser(base, undefined, undefined).user).toBeUndefined();
+  });
+
+  it('does not overwrite a user already present on the input', () => {
+    expect(withDefaultUser({ ...base, user: 'deploy' }, undefined, 'muqsit').user).toBe('deploy');
+  });
+});
 
 describe('computePendingDevices', () => {
   it('surfaces only nodes that are neither registered nor ignored', () => {
