@@ -35,7 +35,7 @@ export type { NativeImportReport, NativeImportResult, NativeImportStatus } from 
 import { getKeychainHelperPath } from './install-helper.js';
 
 const SERVICE_PREFIX = 'agents-cli';
-const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
+export const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
 const BUNDLES_ITEM_PREFIX = `${SERVICE_PREFIX}.bundles.`;
 
 /** Supported secret resolution backends. */
@@ -266,12 +266,21 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
     throw new Error(msg || `Failed to batch-read ${items.length} keychain items.`);
   }
   const out = child.stdout?.toString() ?? '';
-  // Output is a sequence of records, one per service in input order:
-  //   "V <service>\n<value>\n"   (present)
-  //   "M <service>\n"            (missing)
-  // Service names are validated newline/'='-free by setKeychainToken below
-  // and values are rejected if they contain newlines — so splitting on '\n'
-  // and walking line-by-line is unambiguous.
+  parseBatchRecords(out, result);
+  return result;
+}
+
+/**
+ * Parse the helper's batch-read output into `into`. The format is shared by
+ * `get-batch` and `get-batch-synced` — a sequence of records, one per service
+ * in input order:
+ *   "V <service>\n<value>\n"   (present)
+ *   "M <service>\n"            (missing)
+ * Service names are validated newline/'='-free by setKeychainToken below
+ * and values are rejected if they contain newlines — so splitting on '\n'
+ * and walking line-by-line is unambiguous.
+ */
+function parseBatchRecords(out: string, into: Map<string, string>): void {
   const lines = out.split('\n');
   let i = 0;
   while (i < lines.length) {
@@ -280,7 +289,7 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
     if (line.startsWith('V ')) {
       const service = line.slice(2);
       const value = lines[i + 1] ?? '';
-      result.set(service, value);
+      into.set(service, value);
       i += 2;
     } else if (line.startsWith('M ')) {
       i += 1;
@@ -290,7 +299,6 @@ export function getKeychainTokens(items: string[]): Map<string, string> {
       throw new Error(`Malformed get-batch output line: ${JSON.stringify(line)}`);
     }
   }
-  return result;
 }
 
 /** Store or update a secret value in the keychain/keyring. Device-local;
@@ -424,6 +432,98 @@ export function listLegacyKeychainItems(prefix: string): string[] {
   }
   const out = result.stdout?.toString() || '';
   return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Test seam for the LEGACY SYNCHRONIZABLE (iCloud Keychain) recovery path.
+ * The main `KeychainBackend` seam models the live device-local store; this one
+ * models the orphaned iCloud items that `secrets import --from icloud` reads.
+ * Kept separate so a test can populate both sides independently.
+ */
+export interface SyncedKeychainBackend {
+  list(prefix: string): string[];
+  getBatch(items: string[]): Map<string, string>;
+  delete(item: string): boolean;
+}
+
+let syncedBackend: SyncedKeychainBackend | null = null;
+
+export function setSyncedKeychainBackendForTest(
+  b: SyncedKeychainBackend | null,
+): SyncedKeychainBackend | null {
+  const prev = syncedBackend;
+  syncedBackend = b;
+  return prev;
+}
+
+/**
+ * Enumerate LEGACY SYNCHRONIZABLE (iCloud Keychain) item names with the given
+ * prefix — bundles written by the pre-biometry helper era, which defaulted
+ * secrets to iCloud Keychain sync. The device-local cutover orphaned them:
+ * every modern query pins synchronizable=false, so only the helper's
+ * `list-synced` verb can see them. Silent (attributes only, never decrypts).
+ * macOS only — Linux/Windows never had iCloud Keychain sync, so this returns [].
+ */
+export function listSyncedKeychainItems(prefix: string): string[] {
+  if (syncedBackend) return syncedBackend.list(prefix);
+  if (backend) return [];
+  assertSupportedPlatform();
+  if (isLinux() || isWindows()) return [];
+  const bin = getKeychainHelperPath();
+  const result = spawnSync(bin, ['list-synced', prefix], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.status !== 0) {
+    const msg = result.stderr?.toString().trim();
+    throw new Error(msg || `Failed to enumerate iCloud keychain items with prefix '${prefix}'.`);
+  }
+  const out = result.stdout?.toString() || '';
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Batch-read LEGACY SYNCHRONIZABLE (iCloud Keychain) items. Returns a map of
+ * item name → value; missing items are simply absent. Pre-biometry items carry
+ * no biometry ACL, so this does not normally prompt. macOS only — returns an
+ * empty map on Linux/Windows.
+ */
+export function getSyncedKeychainTokens(items: string[]): Map<string, string> {
+  const result = new Map<string, string>();
+  if (items.length === 0) return result;
+  if (syncedBackend) return syncedBackend.getBatch(items);
+  if (backend) return result;
+  assertSupportedPlatform();
+  if (isLinux() || isWindows()) return result;
+  const bin = getKeychainHelperPath();
+  const child = spawnSync(bin, ['get-batch-synced', os.userInfo().username, ...items], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (child.status === 4) {
+    throw new Error(`Auth cancelled while reading ${items.length} iCloud keychain item(s).`);
+  }
+  if (child.status !== 0) {
+    const msg = child.stderr?.toString().trim();
+    throw new Error(msg || `Failed to batch-read ${items.length} iCloud keychain items.`);
+  }
+  parseBatchRecords(child.stdout?.toString() ?? '', result);
+  return result;
+}
+
+/**
+ * Delete a LEGACY SYNCHRONIZABLE (iCloud Keychain) item after a successful
+ * import (`--purge`). Matches synchronizable items only — the device-local
+ * copy the import wrote is untouched. iCloud propagates the deletion to the
+ * user's other devices. Returns true if a copy was removed.
+ */
+export function deleteSyncedKeychainItem(item: string): boolean {
+  if (syncedBackend) return syncedBackend.delete(item);
+  if (backend) return false;
+  assertSupportedPlatform();
+  if (isLinux() || isWindows()) return false;
+  const bin = getKeychainHelperPath();
+  return spawnSync(bin, ['delete-synced', item, os.userInfo().username], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).status === 0;
 }
 
 /**

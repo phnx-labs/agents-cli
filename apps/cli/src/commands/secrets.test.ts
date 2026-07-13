@@ -9,12 +9,44 @@ import {
   buildRemoteUnlockArgs,
   buildSecretsExecEnv,
   bundleEnvToDotenv,
+  parseImportSource,
   parsePolicyOpt,
   quoteWin32ExecArg,
   readImportDotenv,
   renderPolicyCol,
 } from './secrets.js';
 import { parseDotenv, type SecretsBundle } from '../lib/secrets/bundles.js';
+
+describe('parseImportSource', () => {
+  it('treats a plain value as a .env path, including stdin', () => {
+    expect(parseImportSource({ from: '.env.prod' })).toEqual({ kind: 'dotenv', path: '.env.prod' });
+    expect(parseImportSource({ from: '-' })).toEqual({ kind: 'dotenv', path: '-' });
+    // Explicit path escape for a file literally named like a source keyword.
+    expect(parseImportSource({ from: './icloud' })).toEqual({ kind: 'dotenv', path: './icloud' });
+  });
+
+  it('parses the 1password scheme with and without an inline vault', () => {
+    expect(parseImportSource({ from: '1password:Private' })).toEqual({ kind: '1password', vault: 'Private' });
+    expect(parseImportSource({ from: '1password:' })).toEqual({ kind: '1password', vault: undefined });
+    expect(parseImportSource({ from: '1password' })).toEqual({ kind: '1password', vault: undefined });
+    // A vault name containing a colon survives (only the first colon splits).
+    expect(parseImportSource({ from: '1password:Team: Shared' })).toEqual({ kind: '1password', vault: 'Team: Shared' });
+  });
+
+  it('parses the icloud source', () => {
+    expect(parseImportSource({ from: 'icloud' })).toEqual({ kind: 'icloud' });
+  });
+
+  it('maps the deprecated --from-1password --vault pair onto the 1password source', () => {
+    expect(parseImportSource({ from1password: true, vault: 'Personal' })).toEqual({ kind: '1password', vault: 'Personal' });
+    expect(parseImportSource({ from1password: true })).toEqual({ kind: '1password', vault: undefined });
+  });
+
+  it('rejects missing and conflicting sources', () => {
+    expect(() => parseImportSource({})).toThrow(/--from <source>/);
+    expect(() => parseImportSource({ from: '.env', from1password: true })).toThrow(/mutually exclusive/);
+  });
+});
 
 describe('assertValidSshTarget', () => {
   it('accepts bare ssh-config aliases and user@host', () => {

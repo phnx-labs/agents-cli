@@ -188,7 +188,9 @@ The Windows push bridge is `buildWindowsStdinImportCommand` in
 | `secrets remove [bundle] [key]` | Remove a key and purge its keychain item | `agents secrets remove prod OLD_KEY` |
 | `secrets remove ... --keep-secret` | Remove from bundle but leave keychain item | `agents secrets remove prod KEY --keep-secret` |
 | `secrets import [bundle] --from <path>` | Import keys from a .env file (keychain-backed by default) | `agents secrets import prod --from .env.prod` |
-| `secrets import [bundle] --from-1password --vault <name>` | Import from a 1Password vault (requires `op` CLI) | `agents secrets import prod --from-1password --vault Personal` |
+| `secrets import [bundle] --from 1password:<vault>` | Import from a 1Password vault (requires `op` CLI; `--from-1password --vault <name>` is a deprecated alias) | `agents secrets import prod --from 1password:Personal` |
+| `secrets import [bundle] --from icloud` | Recover a bundle stranded in the iCloud Keychain by the pre-biometry era (macOS; omit the bundle name for an interactive multi-select of everything discovered) | `agents secrets import hetzner.com --from icloud` |
+| `secrets import --from icloud --purge` | After a successful import, delete the iCloud copies (propagates to your other devices) | `agents secrets import --from icloud --purge` |
 | `secrets import ... --all-plaintext` | Store imported values as literals, skip keychain | `agents secrets import prod --from .env --all-plaintext` |
 | `secrets import ... --force` | Overwrite existing keys | `agents secrets import prod --from .env --force` |
 | `secrets export [bundle]` | Print `KEY=VALUE` lines for shell eval | `eval "$(agents secrets export prod --plaintext)"` |
@@ -297,18 +299,34 @@ agents run claude "process this week's invoices" --secrets prod
 agents run claude "test with staging key" --secrets prod --env STRIPE_API_KEY=$TEST_KEY
 ```
 
-### 3. Import from a .env file or 1Password
+### 3. Import from a .env file, 1Password, or the iCloud Keychain
+
+`--from <source>` is one axis for every source: a .env path (`-` reads stdin),
+`1password:<vault>`, or `icloud`.
 
 ```bash
 # Bulk import from a .env file (each value stored in keychain)
 agents secrets import prod --from .env.prod
 
 # Import from 1Password vault (requires `op` CLI and signin)
-agents secrets import prod --from-1password --vault Personal
+agents secrets import prod --from 1password:Personal
+
+# Recover bundles stranded in the iCloud Keychain (pre-biometry era).
+# Without a bundle name: interactive multi-select of everything discovered.
+agents secrets import --from icloud
+
+# Recover one specific bundle, then delete the iCloud copies
+agents secrets import hetzner.com --from icloud --purge
 
 # Import without hitting keychain (literals only, less secure)
 agents secrets import staging --from .env.staging --all-plaintext
 ```
+
+Bundles created before the device-local biometry cutover were synced via
+iCloud Keychain; the cutover made every modern query device-local, so those
+items still exist (Keychain Access shows them under the iCloud keychain) but
+`secrets list` cannot see them. `--from icloud` re-imports them as normal
+device-local bundles; `--purge` then removes the orphaned iCloud copies.
 
 ### 4. Rotate a secret
 

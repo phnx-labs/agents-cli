@@ -355,6 +355,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   if (options.sessionId && isValidMailboxId(options.sessionId)) {
     result.AGENTS_MAILBOX_DIR = mailboxDir(options.sessionId);
   }
+  result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
 
   // Export the run's durable name (companion to AGENT_SESSION_ID) so a
   // SessionStart hook / the agent can associate its transcript with the handle

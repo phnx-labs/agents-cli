@@ -85,6 +85,21 @@ export function shouldSelfHealForUpgrade(
   return onDiskVersion !== runningVersion;
 }
 
+/**
+ * Client-side twin of shouldSelfHealForUpgrade: whether ensureAgentRunning may
+ * tear down a reachable broker whose running version differs from the client's
+ * on-disk version. Only while it holds NO real unlocks — tearing down a hot
+ * broker wipes every held bundle, so the next read of each one re-prompts for
+ * Touch ID. On a machine where installed versions churn (dev builds stamp a
+ * fresh 0.0.0-dev.<sha> on every install; an npm copy and a dev copy invoke in
+ * turn), an unguarded teardown produced a rolling Touch ID storm — the exact
+ * failure #435 fixed on the server side. A hot, protocol-compatible broker
+ * keeps serving; its own sweep adopts the new code at the next quiet moment.
+ */
+export function shouldTeardownVersionSkewedBroker(realHeldBundles: number): boolean {
+  return realHeldBundles === 0;
+}
+
 export interface StoredBundle {
   bundle: SecretsBundle;
   env: Record<string, string>;
@@ -581,6 +596,49 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
   }
 }
 
+/**
+ * Inline node program for the synchronous evict path. Mirrors SYNC_GET_PROGRAM:
+ * writeBundle is synchronous and called synchronously everywhere, so a stale
+ * broker entry must be evicted without awaiting a socket round-trip. Sends one
+ * {cmd:'lock', name} and exits 0 (evicted or nothing held) / 3 (agent down).
+ * argv after -e: [execPath, <socket>, <name>].
+ */
+const SYNC_LOCK_PROGRAM = `
+const net = require('net');
+const sock = process.argv[1], name = process.argv[2];
+const c = net.createConnection(sock);
+let buf = '';
+const down = () => { try { c.destroy(); } catch (e) {} process.exit(3); };
+const timer = setTimeout(down, 2000);
+c.on('error', down);
+c.on('connect', () => c.write(JSON.stringify({ cmd: 'lock', name }) + '\\n'));
+c.setEncoding('utf-8');
+c.on('data', (d) => {
+  buf += d;
+  const nl = buf.indexOf('\\n');
+  if (nl < 0) return;
+  clearTimeout(timer);
+  try { c.destroy(); } catch (e) {}
+  process.exit(0);
+});
+`;
+
+/**
+ * Synchronously evict one bundle from the broker. Called after a mutating
+ * keychain write (add / rotate / remove / rename / delete) so the broker never
+ * keeps serving the pre-write snapshot for up to the ~7d hold — the next read
+ * re-resolves from the keychain (one prompt) and re-caches fresh values.
+ * Best-effort: no broker, no socket, or any failure is a silent no-op.
+ * macOS only.
+ */
+export function agentEvictSync(name: string): void {
+  if (!onDarwin()) return;
+  if (!agentSocketExists()) return;
+  try {
+    spawnSync(process.execPath, ['-e', SYNC_LOCK_PROGRAM, socketPath(), name], { timeout: 3000 });
+  } catch { /* best-effort */ }
+}
+
 // Key inside the cached entry's env that holds the JSON metadata snapshot.
 const META_SNAPSHOT_KEY = '__snapshot__';
 
@@ -740,10 +798,13 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   // Self-heal: if a broker is reachable but running pre-upgrade code (its
   // reported version != the version on disk now), tear it down so the paths
   // below bring up a fresh one on current code. A current, reachable broker is
-  // accepted immediately.
+  // accepted immediately — and so is a version-skewed one that still holds
+  // real unlocks (see shouldTeardownVersionSkewedBroker: wiping a hot cache
+  // re-prompts Touch ID for every held bundle).
   const ping = await agentPing();
   if (ping.reachable) {
     if (ping.cliVersion === undefined || ping.cliVersion === getCliVersionFresh()) return true;
+    if (!shouldTeardownVersionSkewedBroker((await agentStatus()).length)) return true;
     await teardownStaleBroker();
   }
 
