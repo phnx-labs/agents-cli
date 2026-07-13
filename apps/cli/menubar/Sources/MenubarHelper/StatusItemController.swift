@@ -259,8 +259,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
                          doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice]) {
         menu.removeAllItems()
 
+        // Auto density keys off the FULL needs-you set — blocked sessions plus
+        // failing/overdue routines and a stopped scheduler — so the menu is rich
+        // whenever the triage strip has anything to say, not only when a session
+        // is blocked.
         let attention = sessions.filter { $0.status == .attention }.count
-        let rich = isRich(attention: attention)
+        let routinesFailing = routines.contains { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let schedulerStopped = daemonPid == nil && !routines.isEmpty
+        let needsYou = attention + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
+        let rich = isRich(attention: needsYou)
 
         addHeader(menu, sessions: sessions)
         menu.addItem(.separator())

@@ -33,8 +33,10 @@ struct Session {
 
 // One attention sentinel: mtime = when the session flagged, content = the
 // notification message (the question), empty for hooks that only touch the file.
+// sinceMs is nil when the stat fails (sentinel raced away, permissions) — the
+// row then renders without an elapsed suffix instead of an epoch-0 "20000d".
 struct AttentionMark {
-    let sinceMs: Double
+    let sinceMs: Double?
     let text: String
 }
 
@@ -128,7 +130,7 @@ enum LocalState {
         for name in names where !name.hasPrefix(".") {
             let path = "\(dir)/\(name)"
             let attrs = try? fm.attributesOfItem(atPath: path)
-            let since = ((attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0) * 1000
+            let since = (attrs?[.modificationDate] as? Date).map { $0.timeIntervalSince1970 * 1000 }
             let raw = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
             out[name] = AttentionMark(sinceMs: since,
                                       text: raw.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -169,6 +171,7 @@ enum LocalState {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
 
         var out: [Session] = []
+        let attentionIds = Set(attention.keys)
         for (_, window) in root {
             guard let w = window as? [String: Any],
                   let entries = w["entries"] as? [[String: Any]] else { continue }
@@ -183,7 +186,7 @@ enum LocalState {
                 let repo = cwd.map { ($0 as NSString).lastPathComponent } ?? label
                 let mark = sid.isEmpty ? nil : attention[sid]
                 let status = sessionStatus(sessionId: sid, kind: kind, cwd: cwd,
-                                           attention: Set(attention.keys))
+                                           attention: attentionIds)
                 out.append(Session(agent: kind, repo: repo, cwd: cwd, status: status,
                                    context: "terminal", title: label,
                                    question: mark?.text ?? "",
