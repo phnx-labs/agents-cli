@@ -22,7 +22,7 @@ import {
 import { getAllTerminals, getById, EditorTerminal } from './terminals.vscode';
 import { getSessionPathBySessionId, readTailLines } from './sessions.vscode';
 import { formatEvent, trimToLast, WatchdogEvent, WATCHDOG_LOG_PATH } from '../core/watchdogLog';
-import { detectWaitingForInput } from '../core/session.activity';
+import { fetchLocalSessions } from './remoteSessions.vscode';
 import { summarizeWatchdogTail, TailSummary } from '../core/watchdogTail';
 import {
   WatchdogStallPayload,
@@ -470,6 +470,16 @@ async function tick(
       monitorArmWatches(watches);
     }
 
+    // Sessions the CLI state engine says are waiting on the user (question /
+    // plan review / permission) — a nudge would answer the user's prompt, so
+    // they're excluded from stall candidates. One cached local poll per tick
+    // replaces the per-candidate transcript-tail parse (issue #741).
+    let waitingSessionIds = new Set<string>();
+    try {
+      const { sessions } = await fetchLocalSessions();
+      waitingSessionIds = new Set(sessions.filter((s) => s.waitingForInput && s.sessionId).map((s) => s.sessionId));
+    } catch { /* CLI unavailable — no waiting signal, same as a failed tail parse before */ }
+
     for (const entry of tracked) {
       if (!entry.sessionId || !entry.agentType) continue;
       const agentType = entry.agentType;
@@ -568,9 +578,9 @@ async function tick(
         stalledForMs = status.stalledForMs;
       }
 
+      if (waitingSessionIds.has(entry.sessionId)) continue;
+
       const tailLines = await readTailLines(sessionPath, TAIL_LINES);
-      const tailText = tailLines.join('\n');
-      if (detectWaitingForInput(tailText, agentType)) continue;
 
       const candidate: WatchdogCandidate = {
         terminalId: entry.id,

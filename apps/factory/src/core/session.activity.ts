@@ -3,8 +3,13 @@ import { isSensitiveEnvKey } from './terminals';
 /**
  * Session Activity Extraction
  *
- * Extracts the current/last activity from agent session files.
- * Parses JSONL session logs to determine what the agent is doing.
+ * Per-line JSONL parsing for the agent panel's recent-activity feed
+ * (parseLineForActivity + formatActivity).
+ *
+ * The whole-transcript derivations that used to live here — current activity,
+ * waiting-for-input, output-token throughput — were deleted in issue #741: the
+ * CLI's state engine computes them and `agents sessions --active --json` carries
+ * them as ActiveSession.activity / awaitingReason / tokPerSec.
  */
 
 export type ActivityType =
@@ -22,95 +27,6 @@ export interface CurrentActivity {
 }
 
 type AgentType = 'claude' | 'codex' | 'gemini';
-
-/**
- * Compute output-token throughput over a rolling window.
- *
- * Parses the agent's session log, sums output tokens (plus reasoning/thoughts
- * tokens when the format reports them separately) from entries whose timestamp
- * falls within the last `windowSec` seconds, and returns tokens-per-second.
- *
- * Formats:
- *   - Claude: JSONL. Each assistant turn is `{type: 'assistant', timestamp,
- *     message: {usage: {output_tokens}}}`.
- *   - Codex:  JSONL. Each token_count event is `{type: 'event_msg', timestamp,
- *     payload: {type: 'token_count', info: {last_token_usage: {output_tokens,
- *     reasoning_output_tokens}}}}`. `last_token_usage` is per-turn (not cumulative).
- *   - Gemini: Single JSON object. `{messages: [{type: 'gemini', timestamp,
- *     tokens: {output, thoughts}}]}`. Caller must pass the whole file.
- */
-export function computeOutputTokensPerSec(
-  sessionContent: string,
-  agentType: AgentType,
-  windowSec: number = 60,
-  now: number = Date.now()
-): number {
-  const cutoff = now - windowSec * 1000;
-  let total = 0;
-  if (agentType === 'gemini') {
-    try {
-      const d = JSON.parse(sessionContent);
-      const messages = Array.isArray(d?.messages) ? d.messages : [];
-      for (const m of messages) {
-        if (m?.type !== 'gemini') continue;
-        const ts = typeof m.timestamp === 'string' ? Date.parse(m.timestamp) : 0;
-        if (!ts || ts < cutoff) continue;
-        const out = typeof m?.tokens?.output === 'number' ? m.tokens.output : 0;
-        const thoughts = typeof m?.tokens?.thoughts === 'number' ? m.tokens.thoughts : 0;
-        total += out + thoughts;
-      }
-    } catch { }
-    return total / windowSec;
-  }
-  const lines = sessionContent.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line || line[0] !== '{') continue;
-    if (!line.includes('output_tokens')) continue;
-    try {
-      const d = JSON.parse(line);
-      const ts = typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : 0;
-      if (!ts) continue;
-      if (ts < cutoff) break;
-      if (agentType === 'claude') {
-        if (d?.type !== 'assistant') continue;
-        const out = typeof d?.message?.usage?.output_tokens === 'number' ? d.message.usage.output_tokens : 0;
-        total += out;
-      } else if (agentType === 'codex') {
-        if (d?.type !== 'event_msg') continue;
-        const payload = d?.payload;
-        if (payload?.type !== 'token_count') continue;
-        const last = payload?.info?.last_token_usage;
-        if (!last) continue;
-        const out = typeof last.output_tokens === 'number' ? last.output_tokens : 0;
-        const reasoning = typeof last.reasoning_output_tokens === 'number' ? last.reasoning_output_tokens : 0;
-        total += out + reasoning;
-      }
-    } catch { }
-  }
-  return total / windowSec;
-}
-
-/**
- * Extract current activity from session content (tail of file).
- * Processes lines from end to find most recent tool activity.
- */
-export function extractCurrentActivity(
-  sessionContent: string,
-  agentType: AgentType
-): CurrentActivity | null {
-  const lines = sessionContent.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length === 0) return null;
-
-  // Process from end to find most recent activity
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    const activity = parseLineForActivity(line, agentType);
-    if (activity) return activity;
-  }
-
-  return null;
-}
 
 /**
  * Parse a single JSONL line and extract activity if present.
@@ -459,87 +375,6 @@ function truncateCommand(command: string, maxLen: number = 50): string {
   const trimmed = scrubbed.trim();
   if (trimmed.length <= maxLen) return trimmed;
   return trimmed.slice(0, maxLen - 3) + '...';
-}
-
-/**
- * A prose trailing question ("…?") is a HEURISTIC, so it decays: past this long
- * with no session writes it stops reading as "waiting" — otherwise a finished
- * session that signed off with "anything else?" sits in NEEDS YOU forever
- * (RUSH-1522). A structural AskUserQuestion never decays: it is a precise,
- * still-unanswered decision.
- */
-export const PROSE_QUESTION_FRESH_MS = 30 * 60_000;
-
-/**
- * Detect whether the agent appears to be awaiting user input.
- * Walks the session JSONL from the end and looks at the last actionable turn:
- *   - Claude: last assistant message whose final text block ends with "?" and
- *     has no pending tool_use, OR used the AskUserQuestion tool.
- *   - Codex:  last response_item message (role=assistant) with text ending "?".
- * Returns false for agents mid-tool or when the user has already responded.
- *
- * `freshness` (when the caller knows the session file's last write) applies the
- * PROSE_QUESTION_FRESH_MS decay to the prose-"?" heuristic; the structural
- * AskUserQuestion signal is exempt. Omitted freshness keeps prose undecayed.
- */
-export function detectWaitingForInput(
-  sessionContent: string,
-  agentType: AgentType,
-  freshness?: { lastWriteMs: number; nowMs: number }
-): boolean {
-  if (agentType !== 'claude' && agentType !== 'codex') return false;
-  const lines = sessionContent.split(/\r?\n/).filter(l => l.trim());
-  const proseFresh = freshness == null || freshness.nowMs - freshness.lastWriteMs < PROSE_QUESTION_FRESH_MS;
-  const endsWithQuestion = (s: string) => /\?\s*$/.test(s.trim());
-
-  for (let i = lines.length - 1; i >= 0; i--) {
-    let raw: any;
-    try { raw = JSON.parse(lines[i]); } catch { continue; }
-
-    if (agentType === 'claude') {
-      if (raw?.isMeta) continue;
-      const t = raw?.type;
-      if (t !== 'user' && t !== 'assistant') continue;
-
-      if (t === 'user') {
-        // A user event means either the human typed, or a tool_result came
-        // back — either way the agent is past the last question.
-        return false;
-      }
-
-      const content = raw?.message?.content;
-      if (!Array.isArray(content)) return false;
-
-      for (const b of content) {
-        if (b?.type === 'tool_use' && b?.name === 'AskUserQuestion') return true;
-      }
-      const hasToolUse = content.some((b: any) => b?.type === 'tool_use');
-      if (hasToolUse) return false;
-
-      const textBlocks = content.filter((b: any) => b?.type === 'text' && typeof b.text === 'string');
-      if (textBlocks.length === 0) return false;
-      return proseFresh && endsWithQuestion(textBlocks[textBlocks.length - 1].text);
-    }
-
-    if (agentType === 'codex') {
-      if (raw?.type !== 'response_item') continue;
-      const payload = raw?.payload;
-      if (!payload) continue;
-      if (payload?.type === 'function_call') return false;
-      if (payload?.type === 'message') {
-        const role = payload?.role;
-        if (role && role !== 'assistant') return false;
-        const content = payload?.content;
-        let text = '';
-        if (typeof content === 'string') text = content;
-        else if (Array.isArray(content)) {
-          text = content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join('');
-        }
-        return proseFresh && endsWithQuestion(text);
-      }
-    }
-  }
-  return false;
 }
 
 /**
