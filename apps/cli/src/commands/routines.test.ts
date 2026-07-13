@@ -181,6 +181,36 @@ describe('routines devices --set persists', () => {
   });
 });
 
+describe('routines devices --set on .yaml-only routine', () => {
+  it('updates the .yaml file, creates no .yml sibling, and list --json reports devices+runsHere', () => {
+    const home = makeHome({ registry });
+    try {
+      const yamlPath = path.join(home, '.agents', 'routines', 'yaml-only.yaml');
+      fs.writeFileSync(
+        yamlPath,
+        yaml.stringify({ name: 'yaml-only', schedule: '0 3 * * *', agent: 'claude', prompt: 'noop' }),
+      );
+
+      const setRes = run(home, ['devices', 'yaml-only', '--set', 'yosemite-s0'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
+      expect(setRes.status).toBe(0);
+
+      expect(fs.existsSync(path.join(home, '.agents', 'routines', 'yaml-only.yml'))).toBe(false);
+      const doc = yaml.parse(fs.readFileSync(yamlPath, 'utf-8'));
+      expect(doc.devices).toEqual(['yosemite-s0']);
+
+      const listRes = run(home, ['list', '--json']);
+      expect(listRes.status).toBe(0);
+      const parsed = JSON.parse(listRes.stdout.trim());
+      const entry = parsed.find((j: Record<string, unknown>) => j.name === 'yaml-only');
+      expect(entry).toBeDefined();
+      expect(entry.devices).toEqual(['yosemite-s0']);
+      expect(entry.runsHere).toBe(true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('routines devices --set normalizes mixed case and FQDN duplicates', () => {
   it('persists one normalized entry per device', () => {
     const job = { ...baseJob, devices: ['yosemite-s0'] };

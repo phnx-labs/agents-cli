@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, jobRunsOnThisDevice, checkJobDeviceEligibility, type JobConfig } from './routines.js';
 import { getRoutinesDir, ensureAgentsDir } from './state.js';
 
@@ -243,5 +245,90 @@ describe('checkJobDeviceEligibility', () => {
     expect(result!.allowedLabel).toBe('yosemite-s0, mac-mini');
     expect(result!.firstHost).toBe('yosemite-s0');
     expect(result!.suggestion).toBe("agents routines run backup --host yosemite-s0");
+  });
+});
+
+describe('readJobFile fails closed on legacy singular device key', () => {
+  it('returns null for a YAML file that still contains device:', () => {
+    ensureAgentsDir();
+    const name = '__test-readjob-device__';
+    const file = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      fs.writeFileSync(file, yaml.stringify({
+        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'yosemite-s0',
+      }));
+      expect(readJob(name)).toBeNull();
+    } finally {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  });
+});
+
+describe('writeJob extension handling', () => {
+  function fullConfig(name: string): JobConfig {
+    return {
+      name,
+      schedule: '0 3 * * *',
+      agent: 'claude',
+      prompt: 'extension test',
+      mode: 'auto',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+    } as JobConfig;
+  }
+
+  it('updates an existing .yaml file and does not create a .yml sibling', () => {
+    ensureAgentsDir();
+    const name = '__test-writejob-yaml__';
+    const yamlFile = path.join(getRoutinesDir(), `${name}.yaml`);
+    const ymlFile = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      fs.writeFileSync(yamlFile, yaml.stringify({
+        name, schedule: '0 4 * * *', agent: 'codex', prompt: 'original',
+      }));
+      writeJob(fullConfig(name));
+      expect(fs.existsSync(yamlFile)).toBe(true);
+      expect(fs.existsSync(ymlFile)).toBe(false);
+      const read = readJob(name);
+      expect(read).not.toBeNull();
+      expect(read!.agent).toBe('claude');
+    } finally {
+      if (fs.existsSync(yamlFile)) fs.unlinkSync(yamlFile);
+      if (fs.existsSync(ymlFile)) fs.unlinkSync(ymlFile);
+    }
+  });
+
+  it('creates a new routine as .yml when neither extension exists', () => {
+    ensureAgentsDir();
+    const name = '__test-writejob-new__';
+    const yamlFile = path.join(getRoutinesDir(), `${name}.yaml`);
+    const ymlFile = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      writeJob(fullConfig(name));
+      expect(fs.existsSync(ymlFile)).toBe(true);
+      expect(fs.existsSync(yamlFile)).toBe(false);
+      const read = readJob(name);
+      expect(read).not.toBeNull();
+      expect(read!.name).toBe(name);
+    } finally {
+      if (fs.existsSync(yamlFile)) fs.unlinkSync(yamlFile);
+      if (fs.existsSync(ymlFile)) fs.unlinkSync(ymlFile);
+    }
+  });
+
+  it('throws when both .yml and .yaml files exist for the same name', () => {
+    ensureAgentsDir();
+    const name = '__test-writejob-both__';
+    const ymlFile = path.join(getRoutinesDir(), `${name}.yml`);
+    const yamlFile = path.join(getRoutinesDir(), `${name}.yaml`);
+    try {
+      fs.writeFileSync(ymlFile, yaml.stringify({ name, schedule: '0 3 * * *', agent: 'claude', prompt: 'a' }));
+      fs.writeFileSync(yamlFile, yaml.stringify({ name, schedule: '0 4 * * *', agent: 'codex', prompt: 'b' }));
+      expect(() => writeJob(fullConfig(name))).toThrow(/both \.yml and \.yaml/);
+    } finally {
+      if (fs.existsSync(ymlFile)) fs.unlinkSync(ymlFile);
+      if (fs.existsSync(yamlFile)) fs.unlinkSync(yamlFile);
+    }
   });
 });

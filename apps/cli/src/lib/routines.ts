@@ -245,6 +245,11 @@ function readJobFile(filePath: string): JobConfig | null {
     const parsed = yaml.parse(content);
     if (!parsed || typeof parsed !== 'object') return null;
 
+    // Fail closed on the legacy singular `device` key. A routine that still
+    // carries it after v12 startup migration is unmigrated state and must be
+    // treated as unavailable/inert rather than unrestricted.
+    if (Object.prototype.hasOwnProperty.call(parsed, 'device')) return null;
+
     return {
       ...JOB_DEFAULTS,
       ...parsed,
@@ -255,11 +260,27 @@ function readJobFile(filePath: string): JobConfig | null {
   }
 }
 
-/** Write a job config to disk, omitting fields that match defaults. */
+/** Write a job config to disk, omitting fields that match defaults.
+ *
+ * Updates the one existing supported extension (.yml or .yaml) atomically.
+ * New routines are written as .yml. If both extensions exist for the same
+ * name, the write fails explicitly so we never choose or drop a sibling.
+ */
 export function writeJob(config: JobConfig): void {
   ensureAgentsDir();
   const jobsDir = getRoutinesDir();
-  const filePath = safeJoin(jobsDir, config.name + '.yml');
+  const ymlPath = safeJoin(jobsDir, config.name + '.yml');
+  const yamlPath = safeJoin(jobsDir, config.name + '.yaml');
+  const ymlExists = fs.existsSync(ymlPath);
+  const yamlExists = fs.existsSync(yamlPath);
+
+  if (ymlExists && yamlExists) {
+    throw new Error(
+      `Routine '${config.name}' has both .yml and .yaml files; resolve the ambiguity before editing.`,
+    );
+  }
+
+  const filePath = ymlExists ? ymlPath : yamlExists ? yamlPath : ymlPath;
 
   const output: Record<string, unknown> = { ...config };
   if (output.mode === 'auto') delete output.mode;
