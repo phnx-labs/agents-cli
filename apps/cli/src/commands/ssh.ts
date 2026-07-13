@@ -36,7 +36,8 @@ import {
   parseTailscaleStatus,
   tailscaleStatusJson,
 } from '../lib/devices/tailscale.js';
-import { planDeviceReconciliation, runDeviceSync } from '../lib/devices/sync.js';
+import { localLoginUser, planDeviceReconciliation, runDeviceSync, withDefaultUser } from '../lib/devices/sync.js';
+import { resolveDeviceTarget } from '../lib/devices/resolve-target.js';
 import { clearPendingSentinel } from '../lib/devices/pending.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { hostNameFor, renderSshConfig } from '../lib/devices/ssh-config.js';
@@ -132,7 +133,11 @@ async function runInteractiveDeviceSync(): Promise<void> {
 
   const byName = new Map(nodes.map((n) => [n.name, n]));
   const plan = planDeviceReconciliation(byName.keys(), selected, registered, ignored);
-  for (const name of plan.toRegister) await upsertDevice(name, nodeToDeviceInput(byName.get(name)!));
+  const localUser = localLoginUser();
+  for (const name of plan.toRegister) {
+    const input = withDefaultUser(nodeToDeviceInput(byName.get(name)!), reg[name]?.user, localUser);
+    await upsertDevice(name, input);
+  }
   for (const name of plan.toUnignore) await removeIgnored(name);
   for (const name of plan.toRemove) await removeDevice(name);
   for (const name of plan.toIgnore) await addIgnored(name);
@@ -361,17 +366,25 @@ secrets bundle via an askpass shim — the password never touches argv.
         await runAskpass();
         return;
       }
-      const device = await mustGetDevice(name);
+      // Accept the full fleet target grammar: a registered `name`, a
+      // `user@device` (same device, login user overridden — dialed via its
+      // Tailscale route, not LAN DNS), or an ad-hoc `user@host`/`host` literal.
+      // A bare unregistered alias still errors as "Unknown device".
+      const device = resolveDeviceTarget(name, await loadDevices());
+      if (!device) {
+        console.error(chalk.red(`Unknown device '${name}'. See 'agents devices list'.`));
+        process.exit(1);
+      }
 
       // Preflight: a device Tailscale last saw offline would otherwise hang
       // for the full ConnectTimeout. Fail fast with a clear message instead.
       if (device.tailscale && !device.tailscale.online) {
-        console.error(chalk.red(`Device '${name}' is offline (Tailscale last saw it ${device.tailscale.lastSeen ?? 'a while ago'}).`));
+        console.error(chalk.red(`Device '${device.name}' is offline (Tailscale last saw it ${device.tailscale.lastSeen ?? 'a while ago'}).`));
         console.error(chalk.gray("Run 'agents devices sync' to refresh reachability."));
         process.exit(1);
       }
       if (device.tailscale?.online && !device.tailscale.direct) {
-        console.error(chalk.yellow(`Note: connection to '${name}' is relayed (DERP ${device.tailscale.relay ?? '?'}) — expect higher latency.`));
+        console.error(chalk.yellow(`Note: connection to '${device.name}' is relayed (DERP ${device.tailscale.relay ?? '?'}) — expect higher latency.`));
       }
 
       try {
