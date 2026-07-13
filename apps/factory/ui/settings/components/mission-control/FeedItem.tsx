@@ -87,7 +87,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const wt = a.worktreeSlug || a.branch
   const meta = plain
     ? a.project
-    : `${a.project} · ${a.hostLabel ?? a.host}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
+    : `${a.project} · ${a.hostLabel ?? a.host}${filesLabel}${paneLabel}${viewingLabel}`
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 
