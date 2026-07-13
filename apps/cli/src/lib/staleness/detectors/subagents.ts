@@ -75,8 +75,9 @@ function buildKimiDetector(): ResourceDetector {
     list({ versionHome }: DetectArgs): string[] {
       const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
       if (!fs.existsSync(agentsDir)) return [];
+      // Parent is `_agents-cli.yaml` (underscore-prefixed reserved name).
       return fs.readdirSync(agentsDir)
-        .filter(f => f.endsWith('.yaml') && f !== 'agents-cli.yaml')
+        .filter(f => f.endsWith('.yaml') && !f.startsWith('_'))
         .map(f => f.replace(/\.yaml$/, ''));
     },
   };

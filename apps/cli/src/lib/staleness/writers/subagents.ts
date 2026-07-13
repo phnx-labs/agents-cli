@@ -18,8 +18,9 @@ import {
   listInstalledSubagents,
   transformSubagentForClaude,
   transformSubagentForCodex,
-  transformSubagentForKimi,
+  writeKimiSubagentFiles,
   buildKimiSubagentsParentYaml,
+  KIMI_SUBAGENTS_PARENT_FILE,
   transformSubagentForDroid,
   syncSubagentToOpenclaw,
   parseSubagentFrontmatter,
@@ -52,9 +53,7 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.toml`), transformSubagentForCodex(sub.path));
             synced.push(sub.name);
           } else if (agent === 'kimi') {
-            const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
-            fs.mkdirSync(agentsDir, { recursive: true });
-            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.yaml`), transformSubagentForKimi(sub.path));
+            writeKimiSubagentFiles(path.join(versionHome, '.kimi-code', 'agents'), sub.path, sub.name);
             synced.push(sub.name);
           } else if (agent === 'droid') {
             const droidsDir = path.join(versionHome, '.factory', 'droids');
@@ -82,7 +81,7 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
           };
         });
         fs.writeFileSync(
-          safeJoin(agentsDir, 'agents-cli.yaml'),
+          safeJoin(agentsDir, KIMI_SUBAGENTS_PARENT_FILE),
           buildKimiSubagentsParentYaml(entries)
         );
       }

@@ -302,18 +302,30 @@ export function transformSubagentForDroid(subagentDir: string): string {
   return result;
 }
 
+/** Managed parent agent file for Kimi (underscore prefix avoids clobbering a user subagent named agents-cli). */
+export const KIMI_SUBAGENTS_PARENT_FILE = '_agents-cli.yaml';
+
+export interface KimiSubagentFiles {
+  /** Agent YAML content (uses system_prompt_path, not inline system_prompt). */
+  yaml: string;
+  /** Markdown body written next to the YAML and referenced by system_prompt_path. */
+  systemPrompt: string;
+  /** Sibling prompt filename, e.g. `reviewer.system.md`. */
+  systemPromptFileName: string;
+}
+
 /**
- * Transform a subagent into a Kimi Code YAML agent file.
+ * Transform a subagent into Kimi Code agent files.
  *
- * Kimi loads custom agents via `--agent-file` YAML. Subagents are declared on
- * a parent agent under `agent.subagents.<name> = { path, description }` and
- * each subagent file is itself a standard agent YAML (typically extend: default
- * + system prompt body). We write each subagent as a standalone agent YAML
- * under ~/.kimi-code/agents/<name>.yaml and maintain a managed parent file
- * that lists them for `--agent-file`.
+ * Kimi's schema (agentspec) only accepts `system_prompt_path` (path relative to
+ * the agent YAML) — there is no inline `system_prompt` key. We write:
+ *   ~/.kimi-code/agents/<name>.yaml          — agent YAML
+ *   ~/.kimi-code/agents/<name>.system.md     — system prompt body
+ * plus a managed parent `_agents-cli.yaml` that lists them under agent.subagents
+ * for `kimi --agent-file …/_agents-cli.yaml`.
  * https://moonshotai.github.io/kimi-cli/en/customization/agents.html
  */
-export function transformSubagentForKimi(subagentDir: string): string {
+export function transformSubagentForKimi(subagentDir: string, fileBaseName: string): KimiSubagentFiles {
   const agentMd = path.join(subagentDir, 'AGENT.md');
   const frontmatter = parseSubagentFrontmatter(agentMd);
   const body = getSubagentBody(agentMd);
@@ -333,25 +345,29 @@ export function transformSubagentForKimi(subagentDir: string): string {
     systemPrompt += `\n\n## ${title}\n\n${content}`;
   }
 
-  // YAML agent file (version 1, extend default, system_prompt from body)
+  const systemPromptFileName = `${fileBaseName}.system.md`;
   const doc: Record<string, unknown> = {
     version: 1,
     agent: {
       extend: 'default',
       name: frontmatter.name,
       description: frontmatter.description,
-      system_prompt: systemPrompt,
+      system_prompt_path: `./${systemPromptFileName}`,
     },
   };
   if (frontmatter.model) {
     (doc.agent as Record<string, unknown>).model = frontmatter.model;
   }
-  return yaml.stringify(doc);
+  return {
+    yaml: yaml.stringify(doc),
+    systemPrompt,
+    systemPromptFileName,
+  };
 }
 
 /**
  * Build the managed parent agent YAML that declares all installed subagents
- * so `kimi --agent-file ~/.kimi-code/agents/agents-cli.yaml` can launch them.
+ * so `kimi --agent-file ~/.kimi-code/agents/_agents-cli.yaml` can launch them.
  */
 export function buildKimiSubagentsParentYaml(
   entries: Array<{ name: string; description: string; relativePath: string }>
@@ -369,6 +385,14 @@ export function buildKimiSubagentsParentYaml(
       subagents,
     },
   });
+}
+
+/** Write a Kimi subagent YAML + sibling system-prompt md into agentsDir. */
+export function writeKimiSubagentFiles(agentsDir: string, subagentDir: string, name: string): void {
+  const { yaml: yml, systemPrompt, systemPromptFileName } = transformSubagentForKimi(subagentDir, name);
+  fs.mkdirSync(agentsDir, { recursive: true });
+  fs.writeFileSync(safeJoin(agentsDir, `${name}.yaml`), yml);
+  fs.writeFileSync(safeJoin(agentsDir, systemPromptFileName), systemPrompt);
 }
 
 /**
@@ -483,14 +507,9 @@ export function installSubagentToAgent(
       return { success: false, error: String(err) };
     }
   } else if (agent === 'kimi') {
-    // Kimi: YAML agent files under ~/.kimi-code/agents/<name>.yaml
-    const agentsDir = path.join(agentHome, '.kimi-code', 'agents');
-    if (!fs.existsSync(agentsDir)) {
-      fs.mkdirSync(agentsDir, { recursive: true });
-    }
+    // Kimi: YAML + sibling system-prompt md under ~/.kimi-code/agents/
     try {
-      const yml = transformSubagentForKimi(subagentDir);
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.yaml`), yml);
+      writeKimiSubagentFiles(path.join(agentHome, '.kimi-code', 'agents'), subagentDir, subagentName);
       return { success: true };
     } catch (err) {
       return { success: false, error: String(err) };
@@ -527,10 +546,11 @@ export function removeSubagentFromAgent(
       }
       return { success: true };
     } else if (agent === 'kimi') {
-      const targetPath = safeJoin(path.join(agentHome, '.kimi-code', 'agents'), `${subagentName}.yaml`);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
+      const agentsDir = path.join(agentHome, '.kimi-code', 'agents');
+      const targetPath = safeJoin(agentsDir, `${subagentName}.yaml`);
+      const promptPath = safeJoin(agentsDir, `${subagentName}.system.md`);
+      if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+      if (fs.existsSync(promptPath)) fs.unlinkSync(promptPath);
       return { success: true };
     } else if (agent === 'openclaw') {
       const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
