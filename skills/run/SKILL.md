@@ -38,13 +38,34 @@ Permission mode controls what the agent can do.
 | `plan` (default) | Read-only — research, audit, analysis. No writes, no shell side-effects. |
 | `edit` | Read + write files; prompts for shell / risky operations |
 | `auto` | Smart classifier auto-approves safe ops (incl. commit + push to the current branch) and blocks risky ones (force-push, push to `main`, `git reset --hard`). Claude/copilot only. |
-| `skip` | Bypass every permission prompt (`--dangerously-skip-permissions`). `full` is accepted as a permanent alias. |
+| `skip` | Last-resort bypass of every permission prompt through the harness's native unsafe flag. `full` remains an alias. |
 
 ```bash
 agents run claude "fix lint errors in src/" --mode edit
 agents run claude "/code:commit" --mode auto          # run a command unattended, safely
-agents run deploy-bot --mode skip "deploy api to staging"
 ```
+
+**Treat `skip` as a last resort.** agents-cli forwards the harness's native bypass
+flag; it does not add another safety layer. Prefer `auto` where the harness has a smart
+classifier (Claude Code and GitHub Copilot), or `edit` everywhere else.
+
+| Harness | `--mode skip` becomes |
+|---|---|
+| Claude Code | `--dangerously-skip-permissions` |
+| Codex | `--dangerously-bypass-approvals-and-sandbox` (equivalent to `--yolo`) |
+| Gemini | `--yolo` |
+| Cursor | `-f` |
+| OpenClaw | `--mode full` |
+| GitHub Copilot | `--allow-all` (alias: `--yolo`) |
+| Antigravity | `--dangerously-skip-permissions` |
+| Grok | `--always-approve` |
+| Kimi | `--yolo` |
+| Droid | `--skip-permissions-unsafe` |
+
+Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
+to sandboxed `edit` and can still prompt. `agents run codex --mode skip` instead
+bypasses approvals **and** removes the sandbox. Harnesses without a native bypass flag
+reject `skip`.
 
 **Headless runs need a non-`plan` mode to act.** The default `plan` is read-only, so an
 action command (e.g. `/code:commit`) run headless would otherwise stall forever at
