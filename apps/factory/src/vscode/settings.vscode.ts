@@ -65,6 +65,11 @@ import { normalizeHost } from '../core/remoteSessions';
 import { rankRepos } from '../core/repoIndex';
 import { detectProjects } from '../core/projectDetect';
 import { getSyncStatus } from '../core/repoSync';
+import {
+  isWindowsDevicePlatform,
+  encodePowershellScript,
+  buildDeviceDispatchRemoteCmd,
+} from '../core/deviceDispatchShell';
 
 let foremanSession: ForemanAudioSession | undefined;
 let foremanSessionGen = 0;
@@ -349,35 +354,63 @@ async function dispatchToDevice(input: {
   syncPolicy: 'off' | 'safe' | 'aggressive';
   mode: DispatchModeMsg;
   prompt: string;
+  /** Device registry platform (windows/macos/linux) — selects remote shell. */
+  platform?: string;
 }): Promise<string | null> {
-  const { agentType, host, secretRef, projectPath, repoSlug, syncPolicy, mode, prompt } = input;
+  const { agentType, host, secretRef, projectPath, repoSlug, syncPolicy, mode, prompt, platform } = input;
   if (!projectPath) return 'Device dispatch: no project path resolved — pick a repo/project first.';
 
   const creds = secretRef ? await resolveSecret(secretRef) : {};
-  const syncShell = buildDeviceSyncShell(syncPolicy);
-  // `agents run <agent> [prompt]` — the prompt is POSITIONAL (no -p flag).
-  // agentType is quoted too (it originates from a webview message).
-  const runCmd = `agents run ${shq(agentType)} --mode ${mode} ${shq(prompt)}`;
-  // Resolve $P on the remote (tilde expands against the remote $HOME), clone the
-  // repo there if it isn't present (a missing clone is just a sync state), then
-  // run the auto-sync policy and start the agent.
-  const pAssign =
-    projectPath === '~' ? 'P="$HOME"'
-      : projectPath.startsWith('~/') ? `P="$HOME/"${shq(projectPath.slice(2))}`
-        : `P=${shq(projectPath)}`;
-  const cloneUrl = repoSlug ? `git@github.com:${repoSlug}.git` : '';
-  const ensureClone = cloneUrl
-    ? `if [ ! -d "$P/.git" ]; then mkdir -p "$(dirname "$P")" && git clone ${shq(cloneUrl)} "$P"; fi && `
-    : '';
-  const remote =
-    `mkdir -p "$HOME/.agents/.tmp"; ${pAssign}; ${ensureClone}cd "$P" && ` +
-    (syncShell ? `${syncShell} && ` : '') +
-    `nohup ${runCmd} > "$HOME/.agents/.tmp/dispatch-$(date +%s).log" 2>&1 &`;
+  const windows = isWindowsDevicePlatform(platform);
+
+  // Windows remotes: PowerShell script (no bash). POSIX: bash snippet (unchanged).
+  let remote: string;
+  if (windows) {
+    const pAssign = projectPath === '~' || projectPath === ''
+      ? '$P = $env:USERPROFILE'
+      : projectPath.startsWith('~/')
+        ? `$P = Join-Path $env:USERPROFILE ${shq(projectPath.slice(2))}`
+        : `$P = ${shq(projectPath)}`;
+    const logDir = 'Join-Path $env:USERPROFILE ".agents\\.tmp"';
+    const runArgs = ['run', agentType, '--mode', mode, prompt]
+      .map((a) => a.replace(/'/g, "''"))
+      .map((a) => `'${a}'`)
+      .join(' ');
+    const cloneUrl = repoSlug ? `git@github.com:${repoSlug}.git` : '';
+    const ensureClone = cloneUrl
+      ? `if (-not (Test-Path (Join-Path $P '.git'))) { New-Item -ItemType Directory -Force -Path (Split-Path $P) | Out-Null; git clone '${cloneUrl.replace(/'/g, "''")}' $P }; `
+      : '';
+    // Background Start-Process so the ssh hop returns promptly (parity with nohup).
+    remote =
+      `$tmp = ${logDir}; New-Item -ItemType Directory -Force -Path $tmp | Out-Null; ` +
+      `${pAssign}; ${ensureClone}Set-Location -LiteralPath $P; ` +
+      `$log = Join-Path $tmp ("dispatch-" + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + ".log"); ` +
+      `Start-Process -FilePath agents -ArgumentList @(${runArgs}) -WorkingDirectory $P -RedirectStandardOutput $log -RedirectStandardError $log -WindowStyle Hidden`;
+  } else {
+    const syncShell = buildDeviceSyncShell(syncPolicy);
+    const runCmd = `agents run ${shq(agentType)} --mode ${mode} ${shq(prompt)}`;
+    const pAssign =
+      projectPath === '~' ? 'P="$HOME"'
+        : projectPath.startsWith('~/') ? `P="$HOME/"${shq(projectPath.slice(2))}`
+          : `P=${shq(projectPath)}`;
+    const cloneUrl = repoSlug ? `git@github.com:${repoSlug}.git` : '';
+    const ensureClone = cloneUrl
+      ? `if [ ! -d "$P/.git" ]; then mkdir -p "$(dirname "$P")" && git clone ${shq(cloneUrl)} "$P"; fi && `
+      : '';
+    remote =
+      `mkdir -p "$HOME/.agents/.tmp"; ${pAssign}; ${ensureClone}cd "$P" && ` +
+      (syncShell ? `${syncShell} && ` : '') +
+      `nohup ${runCmd} > "$HOME/.agents/.tmp/dispatch-$(date +%s).log" 2>&1 &`;
+  }
 
   if (isLocalDeviceHost(host)) {
-    // Local device: run the same snippet through the login shell, no SSH hop.
+    // Local device: run through the host's native shell, no SSH hop.
     try {
-      await deviceExecFileAsync('/bin/sh', ['-lc', remote], { timeout: 60_000 });
+      if (windows) {
+        await deviceExecFileAsync('powershell', ['-NoProfile', '-EncodedCommand', encodePowershellScript(remote)], { timeout: 60_000 });
+      } else {
+        await deviceExecFileAsync('/bin/sh', ['-lc', remote], { timeout: 60_000 });
+      }
       return null;
     } catch (err) {
       const e = err as { stderr?: string; message?: string };
@@ -388,9 +421,8 @@ async function dispatchToDevice(input: {
   const target = creds.user ? `${creds.user}@${host}` : host;
   const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new'];
   if (creds.identityFile) args.push('-i', creds.identityFile);
-  // `--` stops ssh option parsing (host/user could start with '-'); run through a
-  // login shell so agents/git resolve on PATH (ssh's default shell is non-login).
-  args.push('--', target, `bash -lc ${shq(remote)}`);
+  // `--` stops ssh option parsing; shell dialect follows device platform (RUSH-1481).
+  args.push('--', target, buildDeviceDispatchRemoteCmd(remote, platform));
   try {
     await deviceExecFileAsync('ssh', args, { timeout: 60_000 });
     return null;
@@ -2229,6 +2261,16 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
             vscode.window.showErrorMessage('Device dispatch: nothing to do — add a prompt or attach a ticket.');
             break;
           }
+          // Resolve platform from the device registry so Windows hops use
+          // PowerShell instead of bash -lc (RUSH-1481).
+          let devicePlatform: string | undefined;
+          try {
+            const devices = await listRegisteredDevices();
+            const match = devices.find(
+              (d) => d.host === deviceHost || d.name === deviceHost || d.name === deviceName,
+            );
+            devicePlatform = match?.platform;
+          } catch { /* best-effort; default POSIX */ }
           const err = await dispatchToDevice({
             agentType,
             host: deviceHost,
@@ -2238,6 +2280,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
             syncPolicy,
             mode: deviceMode,
             prompt: devicePrompt,
+            platform: devicePlatform,
           });
           if (err) vscode.window.showErrorMessage(`${deviceName}: ${err}`);
           break;
