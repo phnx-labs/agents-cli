@@ -183,17 +183,17 @@ Only hooks with `cache:` are instrumented today — that's deliberate. Opting in
 
 | Event | When it fires | Agents |
 |-------|--------------|--------|
-| `SessionStart` | Agent session begins | Claude, Codex, Gemini, Grok |
-| `SessionEnd` | Agent session ends | Claude, Grok |
-| `UserPromptSubmit` | User prompt received before model sees it | Claude, Gemini (as `BeforeAgent`), Grok |
-| `PreToolUse` | Before a tool call executes | Claude, Codex, Gemini, Antigravity (`before_tool_call`) |
-| `PostToolUse` | After a tool call completes | Claude, Codex, Gemini, Antigravity (mapped to `after_model_call`) |
-| `PreCompact` | Before context compaction | Claude, Grok |
-| `Stop` | Agent stops (final turn) | Claude, Codex, Antigravity (`on_loop_stop`), Grok |
-| `Notification` | Agent sends a notification | Claude, Grok |
-| `OnError` | Agent encounters an error | Antigravity (`on_error`) |
+| `SessionStart` | Agent session begins | Claude, Codex, Gemini, Grok, Copilot (`sessionStart`) |
+| `SessionEnd` | Agent session ends | Claude, Grok, Copilot (`sessionEnd`) |
+| `UserPromptSubmit` | User prompt received before model sees it | Claude, Gemini (as `BeforeAgent`), Grok, Copilot (`userPromptSubmitted`) |
+| `PreToolUse` | Before a tool call executes | Claude, Codex, Gemini, Antigravity (`before_tool_call`), Copilot (`preToolUse`) |
+| `PostToolUse` | After a tool call completes | Claude, Codex, Gemini, Antigravity (mapped to `after_model_call`), Copilot (`postToolUse`) |
+| `PreCompact` | Before context compaction | Claude, Grok, Copilot (`preCompact`) |
+| `Stop` | Agent stops (final turn) | Claude, Codex, Antigravity (`on_loop_stop`), Grok, Copilot (`agentStop`) |
+| `Notification` | Agent sends a notification | Claude, Grok, Copilot (`notification`) |
+| `OnError` | Agent encounters an error | Antigravity (`on_error`), Copilot (`errorOccurred`) |
 
-Event name mapping across agents is handled in `src/lib/hooks.ts`: `GEMINI_EVENT_MAP` (line 843), `ANTIGRAVITY_EVENT_MAP` (line 827), and Grok's `eventMap` (line 1328).
+Event name mapping across agents is handled in `src/lib/hooks.ts`: `GEMINI_EVENT_MAP`, `ANTIGRAVITY_EVENT_MAP`, Grok's `eventMap`, and `COPILOT_EVENT_MAP`.
 
 ## Predicate Matchers
 

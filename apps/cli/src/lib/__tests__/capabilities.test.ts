@@ -156,11 +156,15 @@ describe('capableAgents()', () => {
     expect(agents).toContain('openclaw');
   });
 
-  it('excludes cursor/opencode/copilot/amp for hooks', () => {
+  it('includes copilot for hooks (GA @github/copilot hooks system)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('copilot');
+  });
+
+  it('excludes cursor/opencode/amp for hooks', () => {
     const agents = capableAgents('hooks');
     expect(agents).not.toContain('cursor');
     expect(agents).not.toContain('opencode');
-    expect(agents).not.toContain('copilot');
     expect(agents).not.toContain('amp');
   });
 });

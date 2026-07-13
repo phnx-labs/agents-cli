@@ -350,6 +350,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsDir: path.join(HOME, '.copilot', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.copilot', 'skills'),
+    // Hooks: user-level `~/.copilot/hooks/*.json` (GA @github/copilot, every
+    // 1.x). Schema `{ "version": 1, "hooks": { event: [...] } }` with camelCase
+    // event names (sessionStart, preToolUse, …). See registerHooksForCopilot.
     hooksDir: 'hooks',
     // Copilot reads a plugin's manifest from the plugin ROOT (plugin.json),
     // not `.claude-plugin/plugin.json`. Mirror it there. Verified against the
@@ -359,8 +362,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'auto', 'skip'] },
+    supportsHooks: true,
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'auto', 'skip'] },
   },
   amp: {
     id: 'amp',

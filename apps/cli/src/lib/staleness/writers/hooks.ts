@@ -35,8 +35,10 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
       }
 
       // Native hook registration in settings.json/hooks.json. Grok auto-
-      // discovers from ~/.grok/hooks/ so the file copy is sufficient.
-      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid') {
+      // discovers from ~/.grok/hooks/ so the file copy is sufficient. Copilot
+      // loads every *.json under ~/.copilot/hooks/ — registerHooksForCopilot
+      // writes the managed agents-cli-hooks.json there.
+      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot') {
         registerHooksToSettings(agent, versionHome);
       }
       return { synced };

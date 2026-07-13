@@ -1131,6 +1131,9 @@ export function registerHooksToSettings(
   if (agentId === 'kimi') {
     return registerHooksForKimi(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'copilot') {
+    return registerHooksForCopilot(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   return { registered: [], errors: [] };
 }
 
@@ -2035,6 +2038,131 @@ function registerHooksForKimi(
     fs.writeFileSync(configPath, TOML.stringify(config as Parameters<typeof TOML.stringify>[0]), 'utf-8');
   } catch (err) {
     errors.push(`Failed to write config.toml: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical hooks.yaml event names → Copilot camelCase event names.
+ * Copilot accepts both camelCase (native) and PascalCase (VS Code-compatible).
+ * We emit camelCase, the format documented at
+ * https://docs.github.com/en/copilot/reference/hooks-configuration.
+ * Unmapped events are skipped so a Claude-only event does not land in the file.
+ */
+const COPILOT_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'sessionStart',
+  SessionEnd: 'sessionEnd',
+  UserPromptSubmit: 'userPromptSubmitted',
+  PreToolUse: 'preToolUse',
+  PostToolUse: 'postToolUse',
+  PostToolUseFailure: 'postToolUseFailure',
+  Stop: 'agentStop',
+  SubagentStart: 'subagentStart',
+  SubagentStop: 'subagentStop',
+  OnError: 'errorOccurred',
+  PreCompact: 'preCompact',
+  Notification: 'notification',
+  PermissionRequest: 'permissionRequest',
+};
+
+/**
+ * Copilot events that accept a `matcher` field (regex, full-string match).
+ * See "Matcher filtering" in the Copilot hooks reference.
+ */
+const COPILOT_MATCHER_EVENTS = new Set([
+  'preToolUse',
+  'postToolUse',
+  'permissionRequest',
+  'preCompact',
+  'notification',
+  'subagentStart',
+]);
+
+/** Managed filename under ~/.copilot/hooks/ — we own this file entirely. */
+const COPILOT_MANAGED_HOOKS_FILE = 'agents-cli-hooks.json';
+
+/**
+ * Register hooks for GitHub Copilot CLI.
+ *
+ * Copilot loads every `*.json` under `~/.copilot/hooks/` (and project
+ * `.github/hooks/`). Schema: `{ "version": 1, "hooks": { event: [entries] } }`
+ * with command entries `{ type: "command", bash|command, timeoutSec?, matcher? }`.
+ *
+ * We rewrite a single managed file (`agents-cli-hooks.json`) on every sync so
+ * GC is trivial — user-authored sibling JSON files are never touched.
+ */
+function registerHooksForCopilot(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  _managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const copilotHooksDir = path.join(versionHome, '.copilot', 'hooks');
+  fs.mkdirSync(copilotHooksDir, { recursive: true });
+
+  type CopilotEntry = {
+    type: 'command';
+    command: string;
+    timeoutSec: number;
+    matcher?: string;
+  };
+  const hooks: Record<string, CopilotEntry[]> = {};
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeoutSec = hookDef.timeout ?? 30;
+
+    for (const event of hookDef.events) {
+      const copilotEvent = COPILOT_EVENT_MAP[event];
+      if (!copilotEvent) continue; // unmapped — skip silently
+
+      if (!hooks[copilotEvent]) hooks[copilotEvent] = [];
+
+      const entry: CopilotEntry = {
+        type: 'command',
+        command: commandPath,
+        timeoutSec,
+      };
+      if (COPILOT_MATCHER_EVENTS.has(copilotEvent) && hookDef.matcher) {
+        entry.matcher = hookDef.matcher;
+      }
+
+      // De-dupe on (event, command, matcher) so repeated sync is idempotent.
+      const existingIdx = hooks[copilotEvent].findIndex(
+        (h) => h.command === entry.command && (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[copilotEvent][existingIdx] = entry;
+      } else {
+        hooks[copilotEvent].push(entry);
+      }
+
+      registered.push(`${name} -> ${copilotEvent}`);
+    }
+  }
+
+  const outPath = path.join(copilotHooksDir, COPILOT_MANAGED_HOOKS_FILE);
+  try {
+    // Always rewrite: empty manifest → empty hooks object (GC of prior managed entries).
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({ version: 1, hooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write ${COPILOT_MANAGED_HOOKS_FILE}: ${(err as Error).message}`);
   }
 
   return { registered, errors };
