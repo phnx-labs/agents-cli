@@ -31,6 +31,8 @@ export interface MailboxMessage {
   from?: string;
   /** ISO-8601 creation time. */
   ts: string;
+  /** Optional ISO-8601 expiry time. Expired messages are dropped, not delivered. */
+  expiresAt?: string;
   /** The message body. */
   text: string;
   /**
@@ -39,6 +41,11 @@ export interface MailboxMessage {
    * receipts back to the feed store.
    */
   blockId?: string;
+  /**
+   * Drop reason when a message is archived without delivery (expired, dead box, etc.).
+   * Set by the TTL/liveness layer, not by writers.
+   */
+  dropped?: string;
 }
 
 /**
@@ -95,18 +102,22 @@ function newMsgId(): string {
  * Enqueue a message into `boxDir` atomically. Returns the msgId. The `to` field
  * is stamped so a drain can refuse a message that lands in the wrong box.
  */
-export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string; blockId?: string }): string {
+export function enqueue(boxDir: string, msg: { to: string; text: string; from?: string; blockId?: string; ttlSeconds?: number }): string {
   assertValidMailboxId(msg.to);
   ensureDirs(boxDir);
   const msgId = newMsgId();
+  const now = new Date();
   const record: MailboxMessage = {
     msgId,
     to: msg.to,
     from: msg.from,
-    ts: new Date().toISOString(),
+    ts: now.toISOString(),
     text: msg.text,
     blockId: msg.blockId,
   };
+  if (msg.ttlSeconds != null && msg.ttlSeconds > 0) {
+    record.expiresAt = new Date(now.getTime() + msg.ttlSeconds * 1000).toISOString();
+  }
   const target = path.join(inboxDir(boxDir), `${msgId}.json`);
   const tmp = `${target}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(record, null, 2), 'utf-8');
@@ -115,7 +126,7 @@ export function enqueue(boxDir: string, msg: { to: string; text: string; from?: 
 }
 
 /** Parse a message file. Returns null on missing/corrupt/invalid-shape. */
-function readMessage(file: string): MailboxMessage | null {
+export function readMessage(file: string): MailboxMessage | null {
   let raw: string;
   try {
     raw = fs.readFileSync(file, 'utf-8');
@@ -132,7 +143,61 @@ function readMessage(file: string): MailboxMessage | null {
   if (typeof m?.msgId !== 'string' || typeof m?.to !== 'string' || typeof m?.text !== 'string') {
     return null;
   }
-  return { msgId: m.msgId, to: m.to, from: m.from, ts: m.ts ?? '', text: m.text, blockId: m.blockId };
+  return { msgId: m.msgId, to: m.to, from: m.from, ts: m.ts ?? '', text: m.text, expiresAt: m.expiresAt, blockId: m.blockId, dropped: m.dropped };
+}
+
+/** True when a message has a parsed expiry in the past. */
+export function isExpired(msg: MailboxMessage, now: Date = new Date()): boolean {
+  if (!msg.expiresAt) return false;
+  const ts = Date.parse(msg.expiresAt);
+  return !Number.isNaN(ts) && ts <= now.getTime();
+}
+
+function archiveDropped(boxDir: string, name: string, reason: string): void {
+  const src = path.join(inboxDir(boxDir), name);
+  const dest = path.join(consumedDir(boxDir), name);
+  try {
+    const msg = readMessage(src);
+    if (msg) {
+      msg.dropped = reason;
+      fs.writeFileSync(`${dest}.tmp`, JSON.stringify(msg, null, 2), 'utf-8');
+      fs.renameSync(`${dest}.tmp`, dest);
+      fs.unlinkSync(src);
+    } else {
+      // corrupt — just move it out of inbox
+      fs.renameSync(src, dest);
+    }
+  } catch {
+    // best-effort
+  }
+}
+
+/**
+ * Move expired messages from inbox/ and processing/ into consumed/ with a
+ * `dropped: expired` marker. Called by drain/peek before returning messages.
+ */
+export function sweepExpired(boxDir: string, boxId: string = path.basename(boxDir), now: Date = new Date()): number {
+  ensureDirs(boxDir);
+  let n = 0;
+  for (const dir of [inboxDir(boxDir), processingDir(boxDir)]) {
+    for (const name of jsonFiles(dir)) {
+      const msg = readMessage(path.join(dir, name));
+      if (msg && msg.to === boxId && isExpired(msg, now)) {
+        try {
+          const dest = path.join(consumedDir(boxDir), name);
+          msg.dropped = 'expired';
+          const tmp = `${dest}.${process.pid}.tmp`;
+          fs.writeFileSync(tmp, JSON.stringify(msg, null, 2), 'utf-8');
+          fs.renameSync(tmp, dest);
+          fs.unlinkSync(path.join(dir, name));
+          n++;
+        } catch {
+          // ignore racing claimers
+        }
+      }
+    }
+  }
+  return n;
 }
 
 function jsonFiles(dir: string): string[] {
@@ -183,8 +248,9 @@ function consumeClaimed(boxDir: string, name: string, expectedTo: string): Mailb
  *
  * `boxId` defaults to the box's directory name — the id it was created under.
  */
-export function drain(boxDir: string, boxId: string = path.basename(boxDir)): MailboxMessage[] {
+export function drain(boxDir: string, boxId: string = path.basename(boxDir), now: Date = new Date()): MailboxMessage[] {
   ensureDirs(boxDir);
+  sweepExpired(boxDir, boxId, now);
   const out: MailboxMessage[] = [];
 
   // 1. Recover orphans left in processing/ by a prior interrupted drain.
@@ -210,7 +276,8 @@ export function drain(boxDir: string, boxId: string = path.basename(boxDir)): Ma
 }
 
 /** Read pending messages (inbox + in-flight) without consuming them. FIFO. */
-export function peek(boxDir: string, boxId: string = path.basename(boxDir)): MailboxMessage[] {
+export function peek(boxDir: string, boxId: string = path.basename(boxDir), now: Date = new Date()): MailboxMessage[] {
+  sweepExpired(boxDir, boxId, now);
   const out: MailboxMessage[] = [];
   for (const dir of [processingDir(boxDir), inboxDir(boxDir)]) {
     for (const name of jsonFiles(dir)) {

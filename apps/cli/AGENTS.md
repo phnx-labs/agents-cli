@@ -132,13 +132,14 @@ Note: `src/lib/session/` here is the transcript **reader**. The live-session
 
 ## Bundled native helpers (where the tarball's `.app`s come from)
 
-Two native helpers ship **inside** this package's npm tarball; two more are
-dev-only and live at repo-root `native/`.
+Two native helpers plus the standalone signed CLI binary ship **inside** this
+package's npm tarball; two more helpers are dev-only and live at repo-root `native/`.
 
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
 | Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) | `src/lib/secrets/` |
 | Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed, no notarization) | `src/lib/menubar/install-menubar.ts` |
+| Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **Yes** (signed + notarized, arm64 Mach-O at `dist/bin/agents`) | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No (built from source) | `src/lib/computer-rpc.ts` |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/ssh-tunnel.ts` |
 
@@ -192,17 +193,18 @@ scripts/release.sh <version> --apply  # commits chore(release), tags v<version>,
 secrets`) — no 2FA prompt, no token on disk. The script's git-scope reads use
 `<ref>:apps/cli/package.json` (not root) since the package moved under `apps/cli`.
 
-**Linux-driven release (`SIGN_HOST`).** The two signed macOS helpers (below) are
+**Linux-driven release (`SIGN_HOST`).** The signed macOS artifacts (below) are
 the only reason publishing was macOS-pinned. `release.sh` now offloads producing
-them: when it runs on a **non-macOS** host and `bin/Agents CLI.app` /
-`bin/MenubarHelper.app` are absent (or when `FORCE_REMOTE_SIGN=1` on any host), it
-invokes [`scripts/remote-sign-mac.sh`](scripts/remote-sign-mac.sh), which rsyncs
-the build inputs (keychain-helper.swift, entitlements, `build-keychain-helper.sh`,
-the `menubar/` Swift package, and — if present — `bin/embedded.provisionprofile`)
-to `${SIGN_HOST:-mac-mini}`, runs both Mac build scripts there under the appliance's
+them: on every **non-macOS** release (the standalone CLI binary embeds the release
+version, so it must be rebuilt each time; `FORCE_REMOTE_SIGN=1` forces it on any
+host), it invokes [`scripts/remote-sign-mac.sh`](scripts/remote-sign-mac.sh), which
+rsyncs the build inputs (the full `src/` tree + `package.json`/`bun.lock`,
+keychain-helper.swift, entitlements, the build/sign scripts, the `menubar/` Swift
+package, and — if present — `bin/embedded.provisionprofile`)
+to `${SIGN_HOST:-mac-mini}`, runs the Mac build scripts there under the appliance's
 headless signing creds (unlock `rush-signing.keychain-db`; Apple notary creds via
-the `apple.com` secrets bundle), then pulls the signed `bin/*.app` back and
-re-verifies the keychain sha locally. `bun run build` copies the helpers into
+the `apple.com` secrets bundle), then pulls the signed `bin/*.app` +
+`bin/agents-macos` back and re-verifies both sha pins locally. `bun run build` copies the helpers into
 `dist/` on a **presence** gate now (`[ -d bin/… ]`), not `[ "$(uname)" = Darwin ]`,
 so a Linux box that has pulled the pre-signed bundles packages them; `prepack`'s
 sha gate is sha-tool-portable (`shasum` or `sha256sum`). The sign host needs a
@@ -225,6 +227,23 @@ by [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) (prese
 grant). Keep it a **separate bundle** from the keychain app — a menu-bar crash must
 never take down the secret broker. Stage a freshly-built `bin/MenubarHelper.app`
 before any release or the menu bar ships code-only (the 1.20.22 bug the gate prevents).
+
+**Standalone `agents` binary (#315).** Every release also builds `dist/bin/agents`
+(`bun build --compile`, arm64 Mach-O), signs it (Developer ID + hardened runtime +
+the JIT entitlement in `scripts/bun-jit-entitlements.plist` — bun's JavaScriptCore
+needs MAP_JIT or the binary dies on startup), and notarizes it via
+[`scripts/sign-cli-binary.sh`](scripts/sign-cli-binary.sh); on macOS `postinstall`
+points the alias shims and the `~/.local/bin/agents`/`ag` links at it, with a
+run-probe fallback to the JS entrypoint (mitigation 1 of #315 — the unsigned
+node-shebang shim is what EDR flags). Unlike the `.app` helpers it embeds the
+release version, so it is rebuilt **every** release: locally on macOS (`release.sh`
+injects Apple creds via the `apple.com` bundle) or on the sign host for
+Linux-driven releases. `prepack` gates it with
+[`scripts/verify-cli-binary.sh`](scripts/verify-cli-binary.sh): sha pin at
+`scripts/agents-cli-bin.sha256` (gitignored — a per-release artifact paired to the
+sign run, unlike the helper's committed pin), an embedded-version check so a stale
+binary can't ship, and `codesign --verify` + Developer ID authority where codesign
+exists. Bare Mach-Os can't be stapled; Gatekeeper/EDR fetch the ticket online.
 
 **The `@swarmify/agents-cli` shim is frozen at 1.19.x — do NOT "catch it up."** It's a
 legacy re-export not published since v1.20.0; `release.sh` publishes only `@phnx-labs`.

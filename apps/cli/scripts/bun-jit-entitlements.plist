@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- bun's JavaScriptCore needs MAP_JIT under the hardened runtime. Signing
+       the compiled binary with "options runtime" and no JIT entitlement does
+       not fail at sign time - it breaks at RUN time: JSC silently loses
+       SharedArrayBuffer and the CLI dies on startup with
+       "ReferenceError: SharedArrayBuffer is not defined". allow-jit alone is
+       sufficient (verified empirically; the heavier
+       allow-unsigned-executable-memory / disable-executable-page-protection
+       exceptions from bun's docs are NOT needed).
+       This is deliberately NOT keychain-entitlements.plist: the CLI never
+       touches the keychain itself - that is brokered through the separately
+       signed "Agents CLI.app" helper (scripts/build-keychain-helper.sh). -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+</dict>
+</plist>
