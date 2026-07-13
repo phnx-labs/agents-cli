@@ -302,6 +302,26 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
   }
 
+  // #416: host the secrets broker socket-first — before the scheduler and the
+  // heavy browser/session-sync services — so `agents secrets` resolves within
+  // ms of daemon start. Only host when no broker is already reachable, so we
+  // never orphan a live standalone broker's clients (that broker stays the
+  // server until it idle-exits or the daemon restarts). Best-effort: a failure
+  // here must not stop the daemon. Retiring the standalone launchd service is
+  // the follow-on (#416 step 2 / #417).
+  let hostedBroker: { close(): void } | null = null;
+  try {
+    const { agentPing, startHostedBroker } = await import('./secrets/agent.js');
+    if ((await agentPing()).reachable) {
+      log('INFO', 'Secrets broker already running (standalone); daemon not hosting it');
+    } else {
+      hostedBroker = await startHostedBroker();
+      if (hostedBroker) log('INFO', 'Secrets broker hosted in daemon (socket-first)');
+    }
+  } catch (err) {
+    log('WARN', `Secrets broker host skipped: ${(err as Error).message}`);
+  }
+
   const scheduler = new JobScheduler(async (config) => {
     log('INFO', `Triggering job '${config.name}' (agent: ${config.agent})`);
     try {
@@ -574,6 +594,7 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(tmuxReconcileKickoff);
     clearInterval(launchHealthInterval);
     clearTimeout(launchHealthKickoff);
+    hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();
     process.exit(0);

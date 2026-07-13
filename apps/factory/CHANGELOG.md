@@ -11,6 +11,12 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Factory Floor group controls now support Subgroup (RUSH-1544).**
+  The live feed and Backlog controls can render a second grouping axis, excluding
+  the primary axis to avoid duplicate grouping. Nested section headers make
+  combinations like Project -> Host and Project -> Source visible without
+  switching views. Source: `ui/settings/components/mission-control/FloorControls.tsx`,
+  `UnifiedAgentsPane.tsx`, `BacklogCenter.tsx`.
 - **Factory Floor surfaces agent-created tickets as clickable Linear artifacts (RUSH-1547).**
   Session cards and detail panes now render linked Linear badges for carried/created
   ticket refs and include commit chips in the produced-artifacts row, so PRs,

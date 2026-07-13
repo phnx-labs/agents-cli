@@ -69,10 +69,14 @@ interface FloorControlsProps {
   /** How the live feed is grouped ('none' = default phase sections). */
   group: FloorGroupBy | 'none'
   onGroup: (g: FloorGroupBy | 'none') => void
+  subgroup: FloorGroupBy | 'none'
+  onSubgroup: (g: FloorGroupBy | 'none') => void
 
   // --- backlog-mode controls ---
   ticketGroup: TicketGroupBy
   onTicketGroup: (by: TicketGroupBy) => void
+  ticketSubgroup: TicketGroupBy | 'none'
+  onTicketSubgroup: (by: TicketGroupBy | 'none') => void
   ticketSort: TicketSort
   onTicketSort: (by: TicketSort) => void
   srcFilter: Record<TicketSource, boolean>
@@ -83,12 +87,23 @@ export function FloorControls({
   mode,
   needsCount = 0,
   sidebarOpen, onToggleSidebar, rightOpen, onToggleRight, plain, onTogglePlain,
-  sort, onSort, group, onGroup,
-  ticketGroup, onTicketGroup, ticketSort, onTicketSort, srcFilter, onToggleSrc,
+  sort, onSort, group, onGroup, subgroup, onSubgroup,
+  ticketGroup, onTicketGroup, ticketSubgroup, onTicketSubgroup, ticketSort, onTicketSort, srcFilter, onToggleSrc,
 }: FloorControlsProps) {
   const groupLabel = (GROUP_OPTS.find((o) => o.value === group) ?? GROUP_OPTS[0]!).label
+  const subgroupValue = group === 'none' || subgroup === group ? 'none' : subgroup
+  const subgroupLabel = (GROUP_OPTS.find((o) => o.value === subgroupValue) ?? GROUP_OPTS[1]!).label
+  const subgroupOpts = GROUP_OPTS.filter((o) => o.value === 'none' || o.value !== group)
   const sortLabel = (SORT_OPTS.find((o) => o.value === sort) ?? SORT_OPTS[0]!).label
   const ticketGroupLabel = (TICKET_GROUP_OPTS.find((o) => o.value === ticketGroup) ?? TICKET_GROUP_OPTS[0]!).label
+  const ticketSubgroupValue = ticketSubgroup === ticketGroup ? 'none' : ticketSubgroup
+  const ticketSubgroupLabel = ticketSubgroupValue === 'none'
+    ? 'None'
+    : (TICKET_GROUP_OPTS.find((o) => o.value === ticketSubgroupValue) ?? TICKET_GROUP_OPTS[0]!).label
+  const ticketSubgroupOpts = [
+    { value: 'none' as const, label: 'None' },
+    ...TICKET_GROUP_OPTS.filter((o) => o.value !== ticketGroup),
+  ]
 
   return (
     <div className="fbar clean">
@@ -100,6 +115,19 @@ export function FloorControls({
             Group: <b>{groupLabel}</b>
             <select value={group} onChange={(e) => onGroup(e.target.value as FloorGroupBy | 'none')}>
               {GROUP_OPTS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="fpill fpill-sel" title="Subgroup the feed">
+            Subgroup: <b>{subgroupLabel}</b>
+            <select
+              value={subgroupValue}
+              disabled={group === 'none'}
+              onChange={(e) => onSubgroup(e.target.value as FloorGroupBy | 'none')}
+            >
+              {subgroupOpts.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
@@ -124,6 +152,15 @@ export function FloorControls({
             Group: <b>{ticketGroupLabel}</b>
             <select value={ticketGroup} onChange={(e) => onTicketGroup(e.target.value as TicketGroupBy)}>
               {TICKET_GROUP_OPTS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="fpill fpill-sel" title="Subgroup the backlog">
+            Subgroup: <b>{ticketSubgroupLabel}</b>
+            <select value={ticketSubgroupValue} onChange={(e) => onTicketSubgroup(e.target.value as TicketGroupBy | 'none')}>
+              {ticketSubgroupOpts.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
