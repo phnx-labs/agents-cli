@@ -14,10 +14,12 @@
  *   - soft (`soft: true`): auto-callers must never abort setup/sync because a
  *     machine has no tailscale — they get a result with `ok: false` instead.
  */
+import * as os from 'os';
 import {
   loadDevices,
   loadIgnored,
   upsertDevice,
+  type DeviceInput,
 } from './registry.js';
 import {
   nodeToDeviceInput,
@@ -26,6 +28,40 @@ import {
   type TailscaleNode,
 } from './tailscale.js';
 import type { PendingDevice } from './pending.js';
+
+/**
+ * The login user to stamp onto newly-synced devices. Tailscale status carries a
+ * node's OS and address but NOT the account you ssh in as, so we materialize the
+ * local operator's username — tailnet devices are overwhelmingly one person's
+ * boxes, and this is exactly the account ssh would already fall back to. Pinning
+ * it in the registry makes `--host <device>` dial that account no matter which
+ * machine launches the fan-out (a peer whose local user differs otherwise dials
+ * the wrong account). Returns undefined when the username isn't a safe ssh
+ * identifier, so a weird value never lands in the registry. */
+export function localLoginUser(): string | undefined {
+  let u: string | undefined;
+  try {
+    u = os.userInfo().username;
+  } catch {
+    u = process.env.USER || process.env.USERNAME || undefined;
+  }
+  return u && /^[a-zA-Z0-9._-]+$/.test(u) ? u : undefined;
+}
+
+/**
+ * Fill in a device's login user during sync WITHOUT ever clobbering an account
+ * the user pinned. Precedence: an existing registered user wins; else the local
+ * operator's username; else leave it unset (ssh's implicit local default still
+ * applies). Pure so the "never overwrite an explicit user" guard is unit-tested
+ * without a tailnet. */
+export function withDefaultUser(
+  input: DeviceInput,
+  prevUser: string | undefined,
+  localUser: string | undefined,
+): DeviceInput {
+  if (input.user || prevUser || !localUser) return input;
+  return { ...input, user: localUser };
+}
 
 /**
  * bootstrap — register every non-ignored node (opt-out). First-run `agents
@@ -113,8 +149,10 @@ export async function runDeviceSync(
     }));
 
     const toUpsert = selectNodesToUpsert(nodes, registered, ignored, mode);
+    const localUser = localLoginUser();
     for (const node of toUpsert) {
-      await upsertDevice(node.name, nodeToDeviceInput(node));
+      const input = withDefaultUser(nodeToDeviceInput(node), registeredBefore[node.name]?.user, localUser);
+      await upsertDevice(node.name, input);
     }
 
     return { ok: true, synced: toUpsert.length, pending };
