@@ -76,8 +76,12 @@ describe('supports() capability gate', () => {
       expect(supports('cursor', 'hooks', '999.0.0').ok).toBe(true);
     });
 
-    it('opencode plugins always unsupported (writer not implemented)', () => {
-      expect(supports('opencode', 'plugins', '999.0.0').ok).toBe(false);
+    it('opencode plugins are supported (TS module install path)', () => {
+      expect(supports('opencode', 'plugins').ok).toBe(true);
+    });
+
+    it('amp plugins always unsupported (writer not implemented)', () => {
+      expect(supports('amp', 'plugins', '999.0.0').ok).toBe(false);
     });
   });
 });
@@ -135,7 +139,7 @@ describe('isCapable()', () => {
 
   it('reports false for explicit false', () => {
     expect(isCapable('amp', 'hooks')).toBe(false);
-    expect(isCapable('opencode', 'plugins')).toBe(false);
+    expect(isCapable('amp', 'plugins')).toBe(false);
   });
 
   it('reports false for an unknown agent id instead of throwing (RUSH-1153)', () => {

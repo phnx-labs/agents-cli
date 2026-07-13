@@ -83,7 +83,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — |
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — |
-| ★ OpenCode | `opencode` | — | ✓ | — | ✓ | ✓ | — | — | — |
+| ★ OpenCode | `opencode` | — | ✓ | — | ✓ | ✓ | ✓ | — | — |
 | Gemini † | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — |
 | Cursor | `cursor` | ✓ | ✓ | — | ✓ | ✓ | — | — | — |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — |

@@ -1299,3 +1299,104 @@ describe('pluginResourceGroups', () => {
     expect(pluginResourceGroups(plugin)).toEqual([]);
   });
 });
+
+// ─── syncPluginToVersion: OpenCode (TS/JS modules) ───────────────────────────
+
+describe('syncPluginToVersion (opencode TS modules)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function setupOpenCodePlugin(name = 'myplugin'): {
+    pluginRoot: string;
+    versionHome: string;
+    plugin: DiscoveredPlugin;
+  } {
+    const pluginRoot = path.join(tmpDir, name);
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: 'test', author: { name: 'tester' } })
+    );
+    const versionHome = path.join(tmpDir, `${name}-home`);
+    fs.mkdirSync(versionHome, { recursive: true });
+    const plugin: DiscoveredPlugin = {
+      name,
+      root: pluginRoot,
+      manifest: { name, version: '1.0.0', description: 'test' },
+      skills: [],
+      hooks: [],
+      scripts: [],
+      commands: [],
+      agentDefs: [],
+      bin: [],
+      mcpServers: [],
+      lspServers: [],
+      monitors: [],
+      hasMcp: false,
+      hasSettings: false,
+    };
+    return { pluginRoot, versionHome, plugin };
+  }
+
+  it('copies a single opencode/*.ts module to ~/.config/opencode/plugins/<name>.ts', async () => {
+    const { pluginRoot, versionHome, plugin } = setupOpenCodePlugin();
+    fs.mkdirSync(path.join(pluginRoot, 'opencode'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, 'opencode', 'index.ts'),
+      'export const MyPlugin = async () => ({});\n'
+    );
+
+    const { syncPluginToVersion, isPluginSynced, openCodePluginsDir } = await import('./plugins.js');
+    const r = syncPluginToVersion(plugin, 'opencode', versionHome);
+    expect(r.success).toBe(true);
+
+    const dest = path.join(openCodePluginsDir(versionHome), 'myplugin.ts');
+    expect(fs.existsSync(dest)).toBe(true);
+    expect(fs.readFileSync(dest, 'utf-8')).toContain('MyPlugin');
+    expect(isPluginSynced(plugin, 'opencode', versionHome)).toBe(true);
+  });
+
+  it('copies multiple modules into a named plugin directory', async () => {
+    const { pluginRoot, versionHome, plugin } = setupOpenCodePlugin();
+    fs.mkdirSync(path.join(pluginRoot, 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, 'plugins', 'a.ts'), 'export const A = 1;\n');
+    fs.writeFileSync(path.join(pluginRoot, 'plugins', 'b.ts'), 'export const B = 2;\n');
+
+    const { syncPluginToVersion, openCodePluginsDir } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'opencode', versionHome);
+
+    const destDir = path.join(openCodePluginsDir(versionHome), 'myplugin');
+    expect(fs.existsSync(path.join(destDir, 'a.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'b.ts'))).toBe(true);
+  });
+
+  it('installs a managed marker when no TS/JS modules exist', async () => {
+    const { versionHome, plugin } = setupOpenCodePlugin();
+    const { syncPluginToVersion, isPluginSynced, openCodePluginsDir } = await import('./plugins.js');
+    const r = syncPluginToVersion(plugin, 'opencode', versionHome);
+    expect(r.success).toBe(true);
+    expect(isPluginSynced(plugin, 'opencode', versionHome)).toBe(true);
+    const marker = path.join(openCodePluginsDir(versionHome), 'myplugin', '.agents-cli-managed');
+    expect(fs.existsSync(marker)).toBe(true);
+  });
+
+  it('removePluginFromVersion deletes the installed modules', async () => {
+    const { pluginRoot, versionHome, plugin } = setupOpenCodePlugin();
+    fs.mkdirSync(path.join(pluginRoot, 'opencode'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, 'opencode', 'index.ts'), 'export const X = 1;\n');
+
+    const { syncPluginToVersion, removePluginFromVersion, isPluginSynced } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'opencode', versionHome);
+    expect(isPluginSynced(plugin, 'opencode', versionHome)).toBe(true);
+
+    removePluginFromVersion(plugin.name, pluginRoot, 'opencode', versionHome);
+    expect(isPluginSynced(plugin, 'opencode', versionHome)).toBe(false);
+  });
+});

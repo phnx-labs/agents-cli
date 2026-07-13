@@ -316,12 +316,15 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsDir: path.join(HOME, '.opencode', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.opencode', 'skills'),
+    // Plugins: TS/JS modules auto-loaded from ~/.config/opencode/plugins/ (global)
+    // and .opencode/plugins/ (project). Not Claude marketplace format — see
+    // installOpenCodePlugin in plugins.ts. No native shell hooks (plugins only).
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit'] },
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit'] },
   },
   openclaw: {
     id: 'openclaw',
