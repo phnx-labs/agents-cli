@@ -704,28 +704,45 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin:${os.homedir()}/.nvm/versions/node
 WantedBy=default.target`;
 }
 
-export function getAgentsBinPath(): string {
+const BUN_VIRTUAL_ROOT = /[/\\]\$bunfs[/\\]root[/\\]/;
+
+function resolveBunStandaloneEntry(entry: string, execPath: string): string {
+  if (!BUN_VIRTUAL_ROOT.test(entry)) return entry;
+  if (!execPath || BUN_VIRTUAL_ROOT.test(execPath) || !fs.existsSync(execPath)) {
+    throw new Error(
+      `Cannot resolve agents CLI: Bun standalone executable not found at ${execPath || '(empty path)'}`,
+    );
+  }
+  return execPath;
+}
+
+export function getAgentsBinPath(
+  argv1: string | undefined = process.argv[1],
+  execPath: string = process.execPath,
+): string {
   // Prefer the binary actively executing this code. `which agents` returns
   // whatever happens to be first on PATH, which means a side-by-side dev
   // build at ~/.local/bin would silently spawn the registry-installed
-  // daemon and run stale code. process.argv[1] is the absolute path of
-  // the JS entrypoint the user actually invoked.
-  const argv1 = process.argv[1];
-  if (argv1 && fs.existsSync(argv1)) {
+  // daemon and run stale code. For a JS install, process.argv[1] is the
+  // absolute entrypoint the user actually invoked. A Bun standalone instead
+  // exposes its embedded /$bunfs/root entry at argv[1] and its physical signed
+  // executable at process.execPath; Bun reports both as existing paths.
+  const runningEntry = argv1 ? resolveBunStandaloneEntry(argv1, execPath) : undefined;
+  if (runningEntry && fs.existsSync(runningEntry)) {
     // The package's browser/computer entrypoints are sibling shims without a
     // `daemon` command. A daemon started as their IPC side effect must launch
     // through the main agents entrypoint instead of replaying the shim path.
-    const entryName = path.basename(argv1);
+    const entryName = path.basename(runningEntry);
     const compiledShim = /^(browser|computer)\.(c|m)?js$/.test(entryName);
     const installedShim = /^(browser|computer)$/.test(entryName);
     if (compiledShim || installedShim) {
-      const agentsEntry = path.join(path.dirname(argv1), compiledShim ? 'index.js' : 'agents');
+      const agentsEntry = path.join(path.dirname(runningEntry), compiledShim ? 'index.js' : 'agents');
       if (!fs.existsSync(agentsEntry)) {
         throw new Error(`Cannot start agents daemon: main CLI entry not found at ${agentsEntry}`);
       }
       return agentsEntry;
     }
-    return argv1;
+    return runningEntry;
   }
   try {
     return execFileSync('which', ['agents'], { encoding: 'utf-8' }).trim();
@@ -916,30 +933,22 @@ export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { comma
  * (#315) `process.argv[1]` is the bun virtual entry `/$bunfs/root/agents`, so the
  * hand-rolled form becomes `agents /$bunfs/root/agents …` → the CLI receives the
  * bunfs path as a subcommand and dies with "unknown command '/$bunfs/root/agents'".
- * getAgentsBinPath() resolves past that (the bunfs path doesn't exist on disk, so
- * it falls back to `which agents`, the real installed binary).
+ * getAgentsBinPath() resolves that virtual entry to the physical process.execPath.
  */
 export function getAgentsInvocation(
   subArgs: string[],
   agentsBin: string = getAgentsBinPath(),
 ): { command: string; args: string[] } {
-  // Under the bun standalone binary (#315), argv[1]/getAgentsBinPath() resolves
-  // to the virtual entry `/$bunfs/root/agents` — bun's fs reports it as existing,
-  // so getAgentsBinPath() returns it, but the OS cannot exec it (`/bin/sh:
-  // /$bunfs/root/agents: No such file or directory`). process.execPath is the
-  // real on-disk binary, and the compiled binary IS the entry, so run it directly.
-  if (/\/\$bunfs\/root\//.test(agentsBin)) {
-    return { command: process.execPath, args: subArgs };
+  const resolvedBin = resolveBunStandaloneEntry(agentsBin, process.execPath);
+  if (/\.(c|m)?js$/.test(resolvedBin)) {
+    return { command: process.execPath, args: [resolvedBin, ...subArgs] };
   }
-  if (/\.(c|m)?js$/.test(agentsBin)) {
-    return { command: process.execPath, args: [agentsBin, ...subArgs] };
-  }
-  return { command: agentsBin, args: subArgs };
+  return { command: resolvedBin, args: subArgs };
 }
 
 export function validateDaemonBinary(binPath: string): { warnings: string[] } {
   const warnings: string[] = [];
-  if (/\/\$bunfs\/root\//.test(binPath)) {
+  if (BUN_VIRTUAL_ROOT.test(binPath)) {
     throw new Error(
       `Refusing to supervise daemon: resolved binary is a bun virtual path (${binPath}). ` +
       `Install agents globally (npm i -g @phnx-labs/agents-cli) and restart.`,

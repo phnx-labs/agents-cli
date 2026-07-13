@@ -336,6 +336,21 @@ describe('getAgentsBinPath (sibling shim resolution)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('resolves a Bun standalone virtual entry to its physical executable', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-bun-standalone-'));
+    const physicalBin = path.join(tmpDir, process.platform === 'win32' ? 'agents.exe' : 'agents');
+    fs.writeFileSync(physicalBin, '');
+    expect(getAgentsBinPath('/$bunfs/root/agents', physicalBin)).toBe(physicalBin);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses a Bun standalone virtual entry without a physical executable', () => {
+    const missingBin = path.join(os.tmpdir(), `agents-missing-${process.pid}`);
+    expect(() => getAgentsBinPath('/$bunfs/root/agents', missingBin)).toThrow(
+      `Cannot resolve agents CLI: Bun standalone executable not found at ${missingBin}`,
+    );
+  });
+
   it('refuses a sibling shim when its main entry is missing', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
     const browserJs = path.join(tmpDir, 'browser.js');
