@@ -240,15 +240,17 @@ describe('normalizeActiveSession', () => {
       ticket: { id: 'RUSH-1262' },
       branch: { id: 'abc' },
       topic: { id: 'xyz' },
+      label: { id: 'manual' },
       prUrl: { id: 'p' },
     } as unknown as RawActiveSession;
     const s = normalizeActiveSession(bad, 'this-mac', FETCHED_AT);
     expect(typeof s.branch).toBe('string');
     expect(typeof s.topic).toBe('string');
+    expect(typeof s.label).toBe('string');
     expect(s.ticket === null || typeof s.ticket === 'string').toBe(true);
     expect(s.prUrl === null || typeof s.prUrl === 'string').toBe(true);
     // No object leaked through under the guise of a string.
-    for (const v of [s.ticket, s.branch, s.topic, s.prUrl]) {
+    for (const v of [s.ticket, s.branch, s.topic, s.label, s.prUrl]) {
       expect(typeof v === 'object' && v !== null).toBe(false);
     }
   });
@@ -494,17 +496,19 @@ describe('groupByHost', () => {
 describe('normalizeActiveSession — topic', () => {
   test('carries the topic (or falls back to the cloud label) so remote cards are not blank', () => {
     const term = normalizeActiveSession(
-      { kind: 'claude', status: 'running', sessionFile: '/x/aaaaaaaa.jsonl', topic: 'Add a pre-commit hook' } as RawActiveSession,
+      { kind: 'claude', status: 'running', sessionFile: '/x/aaaaaaaa.jsonl', topic: 'Add a pre-commit hook', label: 'hooks label' } as RawActiveSession,
       'zion',
       FETCHED_AT
     );
     expect(term.topic).toBe('Add a pre-commit hook');
+    expect(term.label).toBe('hooks label');
     const cloud = normalizeActiveSession(
       { kind: 'codex', status: 'queued', cloudTaskId: 'task_e', label: 'Read README and summarize' } as RawActiveSession,
       'this-mac',
       FETCHED_AT
     );
     expect(cloud.topic).toBe('Read README and summarize');
+    expect(cloud.label).toBe('Read README and summarize');
   });
 });
 

@@ -169,6 +169,9 @@ export interface RemoteSession {
   /** The session's task/prompt line from the CLI payload (`topic`/`label`). Shown
    *  on the card when Tier-1 has no enriched activity yet (remote hosts). */
   topic: string;
+  /** User-set session label from the CLI payload. Kept separate from topic so UI
+   *  card headers can prefer explicit names over inferred task lines. */
+  label: string;
   /** Absolute session-file path, kept so the fan-out can enrich the deduped
    *  survivor without re-reading the raw record. */
   sessionFile: string;
@@ -457,6 +460,7 @@ export function normalizeActiveSession(
     // sessions. Deliberately NOT startedAtMs — start time is not activity.
     lastActivityMs: 0,
     topic: asStr(raw.topic) || asStr(raw.label),
+    label: asStr(raw.label),
     sessionFile: asStr(raw.sessionFile),
     context: asStr(raw.context),
     cloudTaskId: raw.cloudTaskId || '',
@@ -543,6 +547,7 @@ export function normalizeRecentSession(
     startedAtMs,
     lastActivityMs,
     topic: asStr(raw.topic) || asStr(raw.label),
+    label: asStr(raw.label),
     sessionFile: '',
     context: 'recent',
     cloudTaskId: '',

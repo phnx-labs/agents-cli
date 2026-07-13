@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { TaskSummary, TerminalDetail as TerminalInfo, AgentDetail, UnifiedTask, RecentToolCall, ProjectRule } from '../../types'
-import { AgentAvatar, agentShortChunk } from './AgentAvatar'
+import { AgentAvatar } from './AgentAvatar'
 import { Icon } from './icons'
 import { relTime, taskNameToTitle, swarmOverallStatus, shortDuration } from './types'
 import { postMessage, usePanelVisibility } from '../../hooks'
@@ -133,6 +133,11 @@ type FilterTab = 'all' | 'terminal' | 'cloud' | 'team'
 
 type FactoryTaskType = 'plan' | 'implement' | 'test' | 'review' | 'bugfix' | 'docs'
 
+function compactHumanLabel(text: string | null | undefined): string {
+  const line = (text || '').split('\n').map((l) => l.trim()).find(Boolean) || ''
+  return line.replace(/^#+\s+/, '').replace(/^[-*+]\s+/, '').replace(/[*_`]/g, '').slice(0, 72).trim()
+}
+
 export interface WatchdogEventUI {
   ts: number
   kind: 'tick' | 'decision' | 'nudge' | 'rotate' | 'error'
@@ -152,6 +157,7 @@ interface UnifiedAgent {
   id: string
   agentType: string
   displayName: string
+  sessionId?: string
   activity: string
   active: boolean
   duration: string
@@ -182,20 +188,19 @@ function buildUnifiedList(terminals: TerminalInfo[], tasks: TaskSummary[]): Unif
 
   const now = Date.now()
   for (const t of terminals) {
-    const chunk = agentShortChunk(t.sessionId) || (t.id ?? '').slice(-8)
     const justSpawned = isTerminalJustSpawned(t.createdAt, now)
     const isActive = isTerminalActive(t, now)
     const files: string[] = []
     if (t.recentFiles) files.push(...t.recentFiles.slice(0, 5))
     // Prefer a human label (manual > auto) so a card reads "terminal-race-fix" rather
-    // than "claude-596c4c07"; the hash still identifies the session via the sid chip.
-    const humanLabel = (t.label || t.autoLabel || '').trim()
+    // than "claude-596c4c07"; the full session id stays available on hover.
+    const humanLabel = compactHumanLabel(t.label) || compactHumanLabel(t.autoLabel) || compactHumanLabel(t.firstUserMessage)
     items.push({
       kind: 'terminal',
       id: `term-${t.id}`,
       agentType: t.agentType,
       sessionId: t.sessionId ?? undefined,
-      displayName: humanLabel || `${t.agentType}-${chunk}`,
+      displayName: humanLabel || `${t.agentType} session`,
       activity: t.currentActivity || t.label || (justSpawned ? 'Starting...' : t.status === 'idle' ? 'idle' : t.role ?? 'terminal'),
       active: isActive,
       duration: t.firstMessageTimestamp ? relTime(t.firstMessageTimestamp) : '',
@@ -258,9 +263,7 @@ function buildUnifiedList(terminals: TerminalInfo[], tasks: TaskSummary[]): Unif
         kind: isCloud ? 'cloud' : 'headless',
         id: `agent-${a.agent_id}`,
         agentType: a.agent_type,
-        displayName: isCloud
-          ? `${a.agent_type}-${a.agent_id.slice(0, 8)}`
-          : taskNameToTitle(task.task_name),
+        displayName: a.name?.trim() || promptFirstLine || taskNameToTitle(task.task_name),
         activity,
         active: a.status === 'running',
         duration: a.duration || '',
@@ -1209,7 +1212,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
       for (const a of t.agents) {
         if (a.status !== 'input_required') continue
         const existing = byTeam.get(t.task_name) ?? []
-        existing.push({ teammate: a.name ?? a.agent_id.slice(0, 8), agentId: a.agent_id })
+        existing.push({ teammate: (a.name ?? compactHumanLabel(a.prompt)) || `${a.agent_type} teammate`, agentId: a.agent_id })
         byTeam.set(t.task_name, existing)
       }
     }
@@ -2360,8 +2363,7 @@ function identityLabel(item: UnifiedAgent): IdentityLabel {
   if (item.mode === 'plan') return { text: 'PLAN', variant: 'plan' }
   if (item.mode === 'ralph') return { text: 'RALPH', variant: 'ralph' }
   if (item.mode === 'auto') return { text: 'AUTO', variant: 'auto' }
-  const chunk = agentShortChunk(item.terminal?.sessionId) || item.id.slice(-8)
-  return { text: chunk, variant: 'plain' }
+  return { text: item.terminal?.autoLabel || item.displayName || item.agentType, variant: 'plain' }
 }
 
 function statusPhrase(item: UnifiedAgent): { word: string; tone: 'running' | 'idle' | 'failed' | 'completed' | 'waiting'; when: string } {

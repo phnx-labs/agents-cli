@@ -8,6 +8,11 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Fixed
 
+- **Factory Floor cards now use human session names instead of UUID slices (RUSH-1532).**
+  Remote sessions preserve explicit labels separately from task topics, and the Floor
+  card header prefers label, topic, branch, ticket, and worktree metadata before falling
+  back to a generic agent title. Cloud single-agent rows now use their configured name
+  or prompt line instead of `agent-019e30a2`-style identifiers.
 - **NEEDS YOU precision — finished/stopped agents no longer masquerade as needing
   input (RUSH-1522).** Two gates tightened. (1) `derivePhase` now checks terminal
   statuses first: a `completed`/`stopped`/`failed` agent can no longer be lifted

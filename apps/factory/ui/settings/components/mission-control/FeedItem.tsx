@@ -73,14 +73,6 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const meta = plain
     ? a.project
     : `${a.project} · ${a.hostLabel ?? a.host}${a.ticket ? ` · ${a.ticket}` : ''}${filesLabel}${paneLabel}${viewingLabel}`
-  // Compact provenance chip next to the name: "<agent>·<short session id>", e.g.
-  // "claude·4de7b016" — so a human label ("terminal-race-fix") reads as the title
-  // while the session stays identifiable. Only when the id differs from the shown name.
-  const agentSlug = agentIdFromPrefix(a.abbr) ?? a.abbr.toLowerCase()
-  const shortSid = a.sessionId ? a.sessionId.replace(/-/g, '').slice(0, 8) : ''
-  // Suppress the chip when the name is the fallback hash label ("claude-596c4c07")
-  // that already carries the same id — only show it beside a genuine human label.
-  const sid = shortSid && !a.name.endsWith(shortSid) ? `${agentSlug}·${shortSid}` : ''
   const destructive = a.question?.kind === 'destructive'
   const attn = a.phase === 'failed' ? 'fail' : stalled ? 'stall' : a.needs ? 'attn' : ''
 
@@ -95,10 +87,11 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const taskLine = sessionTaskLine(a)
   // The ORIGINAL task anchors the card. When the session carries a prompt, the title
   // reads the task (its first line) and the prompt gets its own TASK block below; the
-  // agent name stays as context in the title's tooltip + the provenance chip. Without a
+  // agent name stays as context in the title tooltip. Without a
   // prompt, the title stays the agent's own display name (prior behavior).
   const prompt = (a.prompt ?? '').trim()
   const title = !plain && prompt ? firstLine(prompt) : a.name
+  const nameTitle = [prompt ? `${a.name} — ${prompt}` : a.name, a.sessionId ? `Session ${a.sessionId}` : ''].filter(Boolean).join('\n')
   const showTask = !plain && !!prompt
   // Only show the rolling summary line when it adds signal beyond the task block, the
   // response body, and the now-line (it merely echoes the prompt when they match).
@@ -144,8 +137,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
       <div className="head">
         <span className={`dot ${a.phase}`} />
         <AgentAvatar id={agentIdFromPrefix(a.abbr) ?? a.abbr.toLowerCase()} size={20} title={a.abbr} />
-        <span className="who" title={prompt ? `${a.name} — ${prompt}` : a.name}>{title}</span>
-        {!plain && sid && <span className="sid" title={a.sessionId}>{sid}</span>}
+        <span className="who" title={nameTitle}>{title}</span>
         <span className="path">{meta}</span>
         {!plain && wt && <span className="wtchip mono" title={a.worktreePath || wt}>{wt}</span>}
         <span className="when">
