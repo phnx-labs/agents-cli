@@ -61,13 +61,16 @@ describe('resolveDispatchRepos', () => {
 
 describe('normalizeProviderStatus', () => {
   // Each provider kept its own copy of this mapping before consolidation; these
-  // pin each one's exact vocabulary + default so a behavior-changing merge trips
-  // the suite. Guards the drift the consolidation was meant to freeze, not fix.
+  // pin each one's vocabulary + default so a behavior-changing merge trips the
+  // suite. Guards the drift the consolidation was meant to keep centralized.
   describe('rush (Factory Floor switch; default running; has allocating, no queued)', () => {
     it('maps the known Factory Floor strings', () => {
       expect(normalizeProviderStatus('rush', 'allocating')).toBe('allocating');
       expect(normalizeProviderStatus('rush', 'running')).toBe('running');
-      expect(normalizeProviderStatus('rush', 'needs_review')).toBe('input_required');
+      expect(normalizeProviderStatus('rush', 'idle')).toBe('idle');
+      expect(normalizeProviderStatus('rush', 'paused')).toBe('idle');
+      expect(normalizeProviderStatus('rush', 'needs_review')).toBe('idle');
+      expect(normalizeProviderStatus('rush', 'input_required')).toBe('input_required');
       expect(normalizeProviderStatus('rush', 'completed')).toBe('completed');
       expect(normalizeProviderStatus('rush', 'failed')).toBe('failed');
       expect(normalizeProviderStatus('rush', 'cancelled')).toBe('cancelled');
@@ -84,6 +87,8 @@ describe('normalizeProviderStatus', () => {
     it('maps a representative status per bucket', () => {
       expect(normalizeProviderStatus('codex', 'queued')).toBe('queued');
       expect(normalizeProviderStatus('codex', 'in_progress')).toBe('running');
+      expect(normalizeProviderStatus('codex', 'paused')).toBe('idle');
+      expect(normalizeProviderStatus('codex', 'needs_review')).toBe('idle');
       expect(normalizeProviderStatus('codex', 'succeeded')).toBe('completed');
       expect(normalizeProviderStatus('codex', 'error')).toBe('failed');
       expect(normalizeProviderStatus('codex', 'canceled')).toBe('cancelled');
@@ -98,6 +103,8 @@ describe('normalizeProviderStatus', () => {
     it('maps a representative status per bucket', () => {
       expect(normalizeProviderStatus('antigravity', 'pending')).toBe('queued');
       expect(normalizeProviderStatus('antigravity', 'in_progress')).toBe('running');
+      expect(normalizeProviderStatus('antigravity', 'idle')).toBe('idle');
+      expect(normalizeProviderStatus('antigravity', 'paused')).toBe('idle');
       expect(normalizeProviderStatus('antigravity', 'success')).toBe('completed');
       expect(normalizeProviderStatus('antigravity', 'fail')).toBe('failed');
       expect(normalizeProviderStatus('antigravity', 'cancel')).toBe('cancelled');
