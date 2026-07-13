@@ -6,9 +6,13 @@
  * hooks from configured registries or GitHub sources.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
+
+import { getAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 
 import {
   AGENTS,
@@ -27,8 +31,11 @@ import {
   resolvePackage,
   validatedNpmSpec,
   validatedPyPISpec,
+  buildSkillIndex,
+  verifySkillIntegrity,
+  parseOwnerRepoFromRemote,
 } from '../lib/registry.js';
-import { cloneRepo } from '../lib/git.js';
+import { cloneRepo, commitAndPush, getRemoteUrl, isGitRepo } from '../lib/git.js';
 import {
   discoverCommands,
   resolveCommandSource,
@@ -421,6 +428,109 @@ When to use:
     });
 
   // ==========================================================================
+  // PUBLISH COMMAND (self-hosted, git-index skill registry)
+  // ==========================================================================
+
+  program
+    .command('publish')
+    .description('Generate a skills-index.json for a git repo and push it, making its skills discoverable via agents search/install')
+    .option('--repo <alias>', 'Publish an extra repo added via `agents repo add` (default: your ~/.agents repo)')
+    .option('--name <name>', 'Registry name to suggest in the output (default: the repo name)')
+    .option('--branch <branch>', 'Branch the raw URL should reference', 'main')
+    .option('--dry-run', 'Write the index and print the URL without committing or pushing')
+    .addHelpText('after', `
+Publish walks a repo's skills/ directory, records a sha256 of every SKILL.md,
+and writes skills-index.json at the repo root — a flat index that 'agents search'
+and 'agents install' can consume directly from raw.githubusercontent.com. No
+hosted infrastructure: the index is just a file committed to your GitHub repo.
+
+Examples:
+  # Publish your ~/.agents repo's skills
+  agents publish
+
+  # Publish an extra repo added via 'agents repo add'
+  agents publish --repo team-skills
+
+  # Preview the index without pushing
+  agents publish --dry-run
+
+After publishing, share the printed 'agents registry add skill ...' command so
+others can search and install your skills. Installs verify each SKILL.md against
+the sha256 in the index and abort on mismatch.
+`)
+    .action(async (options: { repo?: string; name?: string; branch: string; dryRun?: boolean }) => {
+      // Resolve the target repo: an extra repo by alias, else the primary ~/.agents repo.
+      let repoDir: string;
+      if (options.repo) {
+        const extra = getEnabledExtraRepos().find((r) => r.alias === options.repo);
+        if (!extra) {
+          console.log(chalk.red(`No enabled extra repo aliased '${options.repo}'.`));
+          console.log(chalk.gray('Add one with: agents repo add <source> --as <alias>'));
+          process.exit(1);
+        }
+        repoDir = extra.dir;
+      } else {
+        repoDir = getAgentsDir();
+      }
+
+      if (!isGitRepo(repoDir)) {
+        console.log(chalk.red(`${repoDir} is not a git repository.`));
+        console.log(chalk.gray('publish commits + pushes the index, so the repo needs a GitHub remote.'));
+        process.exit(1);
+      }
+
+      const remoteUrl = await getRemoteUrl(repoDir);
+      const repoSlug = remoteUrl ? parseOwnerRepoFromRemote(remoteUrl) : null;
+      if (!repoSlug) {
+        console.log(chalk.red(`Could not resolve an 'owner/repo' from the git remote of ${repoDir}.`));
+        console.log(chalk.gray(`  Remote: ${remoteUrl || '(none)'} — publish needs a GitHub origin.`));
+        process.exit(1);
+      }
+
+      const spinner = ora('Building skills index...').start();
+      const index = buildSkillIndex(repoDir, repoSlug, { generatedAt: new Date().toISOString() });
+      spinner.stop();
+
+      if (index.skills.length === 0) {
+        console.log(chalk.yellow(`No skills found under ${repoDir}/skills.`));
+        console.log(chalk.gray('Add a skill (a directory with a SKILL.md) and re-run publish.'));
+        process.exit(1);
+      }
+
+      const indexPath = path.join(repoDir, 'skills-index.json');
+      fs.writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n', 'utf-8');
+
+      console.log(chalk.bold(`\nIndexed ${index.skills.length} skill(s) into skills-index.json:`));
+      for (const s of index.skills) {
+        console.log(`  ${chalk.cyan(s.name)} ${chalk.gray(`sha256:${s.sha256?.slice(0, 12)}…`)}`);
+      }
+
+      if (options.dryRun) {
+        console.log(chalk.gray(`\nDry run — wrote ${indexPath} but did not commit or push.`));
+      } else {
+        const pushSpinner = ora('Committing and pushing skills-index.json...').start();
+        const result = await commitAndPush(repoDir, 'chore: update skills-index.json (agents publish)');
+        if (!result.success) {
+          pushSpinner.fail(`Push failed: ${result.error}`);
+          console.log(chalk.gray('The index was written locally — commit and push it manually to publish.'));
+          process.exit(1);
+        }
+        pushSpinner.succeed('Pushed skills-index.json');
+      }
+
+      const rawUrl = `https://raw.githubusercontent.com/${repoSlug}/${options.branch}/skills-index.json`;
+      const registryName = options.name || repoSlug.split('/')[1] || 'my-skills';
+
+      console.log(chalk.bold('\nPublished. Share these with anyone who wants your skills:\n'));
+      console.log(chalk.gray('  Index URL:'));
+      console.log(`    ${rawUrl}`);
+      console.log(chalk.gray('\n  Register + search + install:'));
+      console.log(`    ${chalk.green(`agents registry add skill ${registryName} ${rawUrl}`)}`);
+      console.log(`    ${chalk.green(`agents search ${index.skills[0].name} --type skill`)}`);
+      console.log(`    ${chalk.green(`agents install skill:${index.skills[0].name} --agents claude,codex,gemini`)}`);
+    });
+
+  // ==========================================================================
   // INSTALL COMMAND (unified package installation)
   // ==========================================================================
 
@@ -563,6 +673,21 @@ When to use:
           console.log(chalk.bold(`\nInstalling from ${resolved.source}`));
 
           const { localPath } = await cloneRepo(resolved.source);
+
+          // Integrity: a published skill entry carries the sha256 of its
+          // SKILL.md. Verify the freshly cloned file against it BEFORE
+          // installing anything — a mismatch aborts rather than trusting a
+          // tampered artifact.
+          if (resolved.type === 'skill' && resolved.skillEntry) {
+            const check = verifySkillIntegrity(localPath, resolved.skillEntry);
+            if (!check.ok) {
+              console.log(chalk.red(`\n${check.error}`));
+              process.exit(1);
+            }
+            if (resolved.skillEntry.sha256) {
+              console.log(chalk.gray(`  Integrity verified (sha256) for ${resolved.skillEntry.name}`));
+            }
+          }
 
           const requestedTypes = new Set(parseCommaSeparatedList(options.types));
           const includeType = (type: string): boolean =>
