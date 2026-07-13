@@ -1068,6 +1068,44 @@ describe('registerHooksToSettings - Cursor', () => {
     const parsed = JSON.parse(fs.readFileSync(path.join(versionHome, '.cursor', 'hooks.json'), 'utf-8'));
     expect(parsed.hooks.preToolUse).toHaveLength(1);
   });
+
+  it('drops managed entries when matcher or event changes (RUSH-1615)', () => {
+    makeCursorScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const outPath = path.join(versionHome, '.cursor', 'hooks.json');
+
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Shell' } },
+      agentsDir,
+    );
+    let parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Shell');
+
+    // Matcher change — old Shell entry must not linger.
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Write' } },
+      agentsDir,
+    );
+    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Write');
+
+    // Event change — PreToolUse managed entry must go when only PostToolUse remains.
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PostToolUse'], matcher: 'Write' } },
+      agentsDir,
+    );
+    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toBeUndefined();
+    expect(parsed.hooks.postToolUse).toHaveLength(1);
+  });
 });
 
 describe('registerHooksToSettings - Antigravity', () => {

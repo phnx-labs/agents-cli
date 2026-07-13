@@ -2474,21 +2474,28 @@ function registerHooksForCursor(
     }
   }
 
-  const currentManifestPaths = new Set<string>();
+  // Desired managed entries keyed by event|command|matcher so a matcher or
+  // event change drops the stale entry instead of retaining it by command path alone.
+  const desiredManaged = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
     const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
-    if (resolved) currentManifestPaths.add(resolved);
+    if (!resolved) continue;
+    for (const event of hookDef.events) {
+      const cursorEvent = CURSOR_EVENT_MAP[event];
+      if (!cursorEvent) continue;
+      desiredManaged.add(`${cursorEvent}|${resolved}|${hookDef.matcher ?? ''}`);
+    }
   }
 
-  // GC managed entries that are no longer in the manifest
+  // GC managed entries that are no longer in the manifest (by event+command+matcher)
   const hooks: Record<string, CursorEntry[]> = {};
   for (const [event, entries] of Object.entries(existing.hooks || {})) {
     if (!Array.isArray(entries)) continue;
     hooks[event] = entries.filter((e) => {
       if (typeof e?.command !== 'string') return true;
       if (!isManagedHookCommand(e.command, managedPrefixes)) return true;
-      return currentManifestPaths.has(e.command);
+      return desiredManaged.has(`${event}|${e.command}|${e.matcher ?? ''}`);
     });
     if (hooks[event].length === 0) delete hooks[event];
   }
