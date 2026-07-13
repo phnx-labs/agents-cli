@@ -9,8 +9,8 @@
 - **Installed native CLIs supervise daemons through their physical executable.**
   Bun standalone binaries expose an embedded `/$bunfs/root/agents` entry at
   `process.argv[1]` and report that virtual entry as existing. Daemon service
-  manifests now resolve that case through the signed on-disk `process.execPath`,
-  so `agents routines start` works from the published macOS and Linux binaries
+  manifests now resolve that case through the physical on-disk `process.execPath`,
+  so `agents routines start` works from the published macOS standalone binary
   while the virtual-path safety guard remains enforced.
 
 - **Standalone self-spawns use the physical CLI binary.** `agents teams`,
