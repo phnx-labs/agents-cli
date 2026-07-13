@@ -14,6 +14,21 @@ All notable changes to the Factory extension are documented here. Format follows
 - **Feed cards get an Open/Resume-in-terminal action (RUSH-1520).** Each card shows a Terminal button that focuses an open tab, attaches a tmux rail, or runs `agents sessions focus <id>` — so the operator jumps into the session instead of only opening the side panel. Source: `ui/settings/components/mission-control/FeedItem.tsx`, `UnifiedAgentsPane.tsx` (`openTerminalForAgent`).
 - **Filter + group-by controls live in the feed header bar next to Save view (RUSH-1526).** The feed's own header (`SavedViews` / `feed-header-bar`) now carries Group + status chips (Needs you / Running / Idle / Failed) + agent-abbr chips, so operators filter and group where they are looking — not only from the top FloorControls bar. Source: `ui/settings/components/mission-control/SavedViewsBar.tsx`, `UnifiedAgentsPane.tsx`, `floor.css`.
 - **Floor Group defaults to Outcome (ticket/PR/worktree) instead of Project (RUSH-1479).** Fleet-scale floors collapse agents under the deliverable they serve so the operator sees initiatives, not ~1,100 processes. Source: `ui/settings/components/mission-control/floorModel.ts` (`outcomeLabel`, `FloorGroupBy`), `FloorControls.tsx`, `UnifiedAgentsPane.tsx`.
+- **The extension's parallel session stack is gone — live-session state now comes from the CLI (#741).**
+  Activity, waiting-for-input, awaiting reason, and tokens/sec ride the
+  `agents sessions --active --json` payload (`ActiveSession.activity` /
+  `awaitingReason` / `tokPerSec`) instead of being re-derived from per-agent
+  transcript-tail parsers; the Recent Sessions picker is backed by
+  `agents sessions --json` (fixing the stale `~/.gemini/sessions` scan — the CLI
+  scans the real `~/.gemini/tmp`); the machine-wide session watcher configures
+  its roots from `agents sessions --roots --json`; and the agent registry
+  (`BUILT_IN_AGENTS` launch commands, `.agents` config agent ids) derives from a
+  CLI-registry snapshot validated against `apps/cli` source in tests — which
+  also fixes antigravity launching a nonexistent `antigravity` binary instead of
+  `agy`, and `.agents` files silently dropping newer agents (grok, droid, …).
+  Source: `apps/factory/src/core/{session.activity,remoteSessions,agents,agents.cli,swarmifyConfig}.ts`,
+  `apps/factory/src/vscode/{remoteSessions,terminals,watchdog,settings,sessions}.vscode.ts`,
+  `apps/factory/src/monitor/{sessionParse,sessionWatcher}.ts`.
 - **Internal: `foreman.vscode.ts` reuses the shared `humanElapsed` helper (#753).** Deleted the identical private `humanElapsedFromMs` copy and imported the exported `humanElapsed` from `core/foreman.digest.ts`. No behavior change. Source: `apps/factory/src/vscode/foreman.vscode.ts`.
 - **Windows device dispatch no longer hardcodes `bash -lc`.** `dispatchToDevice` selects the remote shell from the device registry platform (PowerShell `-EncodedCommand` on windows; bash on POSIX), so Dispatch v2 works on win-mini. Source: `apps/factory/src/core/deviceDispatchShell.ts`, `apps/factory/src/vscode/settings.vscode.ts`. (RUSH-1481)
 
