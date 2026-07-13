@@ -27,13 +27,42 @@ public static class Screenshot
     public static Dictionary<string, object?> Capture(JsonElement @params)
     {
         if (@params.ValueKind != JsonValueKind.Object)
-            throw RpcError.Invalid("screenshot needs `pid`");
-        int pid = P.Int(@params, "pid");
+            throw RpcError.Invalid("screenshot needs params");
         bool listOnly = P.BoolOr(@params, "list", false);
         bool display = P.BoolOr(@params, "display", false);
         int? windowId = @params.TryGetProperty("window_id", out var wv) && wv.ValueKind == JsonValueKind.Number
             ? wv.GetInt32() : null;
+        // pid is optional for a full-display capture (mirrors the macOS
+        // `screenshot --display` path, which needs no app). Every other mode
+        // still requires it — enforced below once we know the mode.
+        int? pidOpt = @params.TryGetProperty("pid", out var pv) && pv.ValueKind == JsonValueKind.Number
+            ? pv.GetInt32() : null;
 
+        // Whole-screen capture: with a pid, grab the monitor that pid's window
+        // sits on; without one, grab the primary screen. No process needed.
+        if (display)
+        {
+            Screen screen;
+            if (pidOpt is int dpid)
+            {
+                var dwindows = TopLevelWindows(dpid);
+                if (dwindows.Count == 0) throw RpcError.AppMissing(dpid);
+                var anchor = dwindows.FirstOrDefault(w => !w.Minimized) ?? dwindows[0];
+                screen = Screen.FromHandle(anchor.Hwnd);
+            }
+            else
+            {
+                screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
+            }
+            return Encode(screen.Bounds, new()
+            {
+                ["mode"] = "display",
+                ["display_id"] = screen.DeviceName,
+            });
+        }
+
+        // list + window capture operate on a specific process's windows.
+        int pid = pidOpt ?? throw RpcError.Invalid("missing int param: pid");
         var windows = TopLevelWindows(pid);
         if (windows.Count == 0) throw RpcError.AppMissing(pid);
 
@@ -56,19 +85,6 @@ public static class Screenshot
                 ["windows"] = entries,
                 ["window_count"] = entries.Count,
             };
-        }
-
-        if (display)
-        {
-            // The display the target window sits on (mirrors the macOS
-            // captureDisplay: whole screen, composites stacked modals).
-            var anchor = windows.FirstOrDefault(w => !w.Minimized) ?? windows[0];
-            var screen = Screen.FromHandle(anchor.Hwnd);
-            return Encode(screen.Bounds, new()
-            {
-                ["mode"] = "display",
-                ["display_id"] = screen.DeviceName,
-            });
         }
 
         WindowInfo target;
