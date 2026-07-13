@@ -406,23 +406,12 @@ export function writeKimiSubagentFiles(agentsDir: string, subagentDir: string, n
 export function transformSubagentForCodex(subagentDir: string): string {
   const agentMd = path.join(subagentDir, 'AGENT.md');
   const frontmatter = parseSubagentFrontmatter(agentMd);
-  const body = getSubagentBody(agentMd);
 
   if (!frontmatter) {
     throw new Error(`Invalid AGENT.md in ${subagentDir}`);
   }
 
-  // Append other .md files into the developer_instructions body.
-  let instructions = body.trim();
-  const files = fs.readdirSync(subagentDir)
-    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
-    .sort();
-  for (const file of files) {
-    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
-    const sectionName = file.replace('.md', '');
-    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
-    instructions += `\n\n## ${title}\n\n${content}`;
-  }
+  const instructions = flattenSubagentInstructions(subagentDir);
 
   // Escape TOML multi-line string (""") content — only """ needs escaping.
   const safeInstructions = instructions.replace(/"""/g, '\\"""');
@@ -437,6 +426,37 @@ export function transformSubagentForCodex(subagentDir: string): string {
   }
   toml += `developer_instructions = """\n${safeInstructions}\n"""\n`;
   return toml;
+}
+
+function flattenSubagentInstructions(subagentDir: string): string {
+  let instructions = getSubagentBody(path.join(subagentDir, 'AGENT.md')).trim();
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    instructions += `\n\n## ${title}\n\n${content}`;
+  }
+
+  return instructions;
+}
+
+/** Transform a canonical subagent into Kiro's global JSON agent format. */
+export function transformSubagentForKiro(subagentDir: string): string {
+  const frontmatter = parseSubagentFrontmatter(path.join(subagentDir, 'AGENT.md'));
+  if (!frontmatter) {
+    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
+  }
+
+  return JSON.stringify({
+    name: frontmatter.name,
+    description: frontmatter.description,
+    prompt: flattenSubagentInstructions(subagentDir),
+    tools: ['*'],
+    ...(frontmatter.model && { model: frontmatter.model }),
+  }, null, 2) + '\n';
 }
 
 /**
@@ -515,6 +535,15 @@ export function installSubagentToAgent(
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  } else if (agent === 'kiro') {
+    const agentsDir = path.join(agentHome, '.kiro', 'agents');
+    try {
+      fs.mkdirSync(agentsDir, { recursive: true });
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.json`), transformSubagentForKiro(subagentDir));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else if (agent === 'openclaw') {
     // OpenClaw: copy full directory
     const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
@@ -553,6 +582,10 @@ export function removeSubagentFromAgent(
       const promptPath = safeJoin(agentsDir, `${subagentName}.system.md`);
       if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
       if (fs.existsSync(promptPath)) fs.unlinkSync(promptPath);
+      return { success: true };
+    } else if (agent === 'kiro') {
+      const targetPath = safeJoin(path.join(agentHome, '.kiro', 'agents'), `${subagentName}.json`);
+      if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
       return { success: true };
     } else if (agent === 'openclaw') {
       const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
@@ -607,6 +640,7 @@ export function subagentContentMatches(installedDir: string, sourceDir: string):
  * List subagents installed to a specific agent's home
  * Claude: scans ~/.claude/agents/{name}.md
  * Kimi: scans ~/.kimi-code/agents/{name}.yaml (+ sibling .system.md)
+ * Kiro: scans ~/.kiro/agents/{name}.json
  * OpenClaw: scans ~/.openclaw/{name}/AGENTS.md
  */
 export function listSubagentsForAgent(
@@ -665,6 +699,28 @@ export function listSubagentsForAgent(
         files,
         frontmatter: { name, description },
       });
+    }
+  } else if (agentId === 'kiro') {
+    const agentsDir = path.join(home, '.kiro', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.json')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+      const name = file.replace(/\.json$/, '');
+      try {
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as {
+          name?: string;
+          description?: string;
+        };
+        subagents.push({
+          name,
+          path: filePath,
+          files: [file],
+          frontmatter: { name: parsed.name ?? name, description: parsed.description ?? '' },
+        });
+      } catch { /* invalid Kiro agent config */ }
     }
   } else if (agentId === 'openclaw') {
     // OpenClaw: directories with AGENTS.md
@@ -762,6 +818,15 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
         }
       }
     }
+  } else if (agent === 'kiro') {
+    const agentsDir = path.join(versionHome, '.kiro', 'agents');
+    if (fs.existsSync(agentsDir)) {
+      for (const file of fs.readdirSync(agentsDir)) {
+        if (!file.endsWith('.json')) continue;
+        const name = path.basename(file, '.json');
+        if (!discovered.has(name)) orphans.push(name);
+      }
+    }
   } else if (agent === 'openclaw') {
     const openclawDir = path.join(versionHome, '.openclaw');
     if (fs.existsSync(openclawDir)) {
@@ -827,6 +892,12 @@ export function removeSubagentFromVersion(
         if (fs.existsSync(promptPath)) {
           fs.renameSync(promptPath, path.join(trashDir, `${subagentName}.system.md.${stamp}`));
         }
+      }
+    } else if (agent === 'kiro') {
+      const targetPath = path.join(versionHome, '.kiro', 'agents', `${subagentName}.json`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.json.${stamp}`));
       }
     } else if (agent === 'openclaw') {
       const targetDir = path.join(versionHome, '.openclaw', subagentName);

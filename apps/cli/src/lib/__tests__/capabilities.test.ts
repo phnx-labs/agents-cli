@@ -220,6 +220,22 @@ describe('kiro hooks version gate', () => {
   });
 });
 
+describe('kiro subagents version gate', () => {
+  it('gates versions below 1.23.0 as too_old', () => {
+    const result = supports('kiro', 'subagents', '1.22.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 1.23.0');
+    }
+  });
+
+  it('passes 1.23.0 and above', () => {
+    expect(supports('kiro', 'subagents', '1.23.0')).toEqual({ ok: true });
+    expect(supports('kiro', 'subagents', '2.12.1')).toEqual({ ok: true });
+  });
+});
+
 describe('explainSkip()', () => {
   it('formats unsupported message', () => {
     const r = supports('amp', 'hooks');

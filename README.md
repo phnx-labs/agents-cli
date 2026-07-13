@@ -817,7 +817,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | OpenCode | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Kiro | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| Kiro | yes | no | yes | no | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
 | Goose | yes | no | yes | no | no | no | no | no | `AGENTS.md` | no |
 | Roo Code | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 
@@ -837,13 +837,15 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Grok Build | -- | yes | yes |
 | Antigravity | -- | yes | -- |
 | Copilot | -- | -- | yes |
-| OpenClaw, Amp, Kiro, Goose, Roo | -- | -- | -- |
+| OpenClaw, Amp, Goose, Roo | -- | -- | -- |
+| Kiro | -- | -- | -- |
 
 ### Version-gated sync
 
 | Capability | Agent | Gate |
 |------------|-------|------|
 | Hooks | Codex | >= 0.116.0 |
+| Subagents | Kiro | >= 1.23.0 |
 | Hooks | Gemini | >= 0.26.0 |
 | File-based commands | Codex | < 0.117.0 (0.117+ uses command-as-skill) |
 | Plugins | Codex | >= 0.128.0 |

@@ -91,11 +91,26 @@ function buildKimiDetector(): ResourceDetector {
   };
 }
 
+function buildKiroDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'kiro',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.kiro', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace(/\.json$/, ''));
+    },
+  };
+}
+
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   grok: buildGrokDetector,
   codex: buildCodexDetector,
   kimi: buildKimiDetector,
+  kiro: buildKiroDetector,
   droid: buildDroidDetector,
   openclaw: buildOpenclawDetector,
 };

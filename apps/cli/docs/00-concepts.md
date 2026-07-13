@@ -139,7 +139,7 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 | OpenClaw | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Copilot | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Kiro | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| Kiro | no | yes | no | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
 | Goose | no | yes | no | no | no | no | no | `AGENTS.md` | no |
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |

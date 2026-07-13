@@ -96,6 +96,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.antigravity).toBeDefined();
   });
 
+  it('kiro has a subagents writer + detector', () => {
+    expect(WRITERS.subagents.kiro).toBeDefined();
+    expect(DETECTORS.subagents.kiro).toBeDefined();
+  });
+
   it('writer registry full-sync roundtrip leaves manifests non-stale', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-registry-roundtrip-'));
     try {
