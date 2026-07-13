@@ -107,16 +107,35 @@ final class ClipThumbView: NSView {
     }
 }
 
-private enum QuickDispatchAction: Int {
+enum QuickDispatchAction: Int {
     case fileTicket = 0
     case fix = 1
 }
 
-private struct PromptDraft {
+struct PromptDraft {
     let note: String
     let selectedPaths: [String]
     let selectedAgents: Set<String>
     let action: QuickDispatchAction
+
+    // Pure decision for what to preserve when the panel dismisses without
+    // submitting: a note that is empty (or only whitespace) means "nothing to keep"
+    // and yields nil so the next summon starts clean; otherwise the note and its
+    // current selections round-trip verbatim. Kept as a free function so the
+    // save/clear state machine is testable without a live NSPanel (see
+    // IssueSelfTest.testDraftPreservation).
+    static func forDismissal(note: String,
+                             selectedPaths: [String],
+                             selectedAgents: Set<String>,
+                             action: QuickDispatchAction) -> PromptDraft? {
+        if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return nil
+        }
+        return PromptDraft(note: note,
+                           selectedPaths: selectedPaths,
+                           selectedAgents: selectedAgents,
+                           action: action)
+    }
 }
 
 final class PromptPanelController: NSObject, NSTextFieldDelegate {
@@ -199,15 +218,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     private func saveDraftForDismissal() {
         guard !inFlight else { return }
-        let note = field.stringValue
-        if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            draft = nil
-            return
-        }
-        draft = PromptDraft(note: note,
-                            selectedPaths: selected,
-                            selectedAgents: selectedAgents,
-                            action: action)
+        draft = PromptDraft.forDismissal(note: field.stringValue,
+                                         selectedPaths: selected,
+                                         selectedAgents: selectedAgents,
+                                         action: action)
     }
 
     private func clearDraft() {

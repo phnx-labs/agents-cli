@@ -18,6 +18,7 @@ enum IssueSelfTest {
         testQuickFixContract()
         testQuickDispatchRoster()
         testRecentTicketsMerge()
+        testDraftPreservation()
         if failures == 0 {
             print("\nALL PASS")
             exit(0)
@@ -150,6 +151,52 @@ enum IssueSelfTest {
         var many = (1...12).map { t("RUSH-\($0)") }
         many = RecentTickets.merged(many, adding: t("RUSH-99"))
         check("capped at 10", many.count == 10 && many.first?.id == "RUSH-99")
+    }
+
+    // The draft state machine that survives a focus-steal: dismissing WITHOUT
+    // submitting preserves an in-progress note (PromptDraft.forDismissal), while
+    // submit/Escape clear it. summon() rehydrates from the saved draft, or a clean
+    // slate when it was cleared. Exercised as pure logic — no live NSPanel needed.
+    private static func testDraftPreservation() {
+        // (a) An empty or whitespace-only note preserves nothing: the panel
+        //     dismisses clean so the next summon starts fresh.
+        check("empty note clears the draft",
+              PromptDraft.forDismissal(note: "", selectedPaths: [],
+                                       selectedAgents: [], action: .fileTicket) == nil)
+        check("whitespace/newline-only note clears the draft",
+              PromptDraft.forDismissal(note: "  \n\t ", selectedPaths: ["/tmp/a.png"],
+                                       selectedAgents: ["codex"], action: .fix) == nil)
+
+        // (b) A real note round-trips every field verbatim through save→restore.
+        let saved = PromptDraft.forDismissal(note: "  cards show raw uuids  ",
+                                             selectedPaths: ["/tmp/a.png", "/tmp/b.png"],
+                                             selectedAgents: ["codex", "claude"],
+                                             action: .fix)
+        check("non-empty note preserves a draft", saved != nil,
+              detail: saved.map { $0.note } ?? "nil")
+        check("draft preserves the raw (untrimmed) note",
+              saved?.note == "  cards show raw uuids  ")
+        check("draft preserves selectedPaths in order",
+              saved?.selectedPaths == ["/tmp/a.png", "/tmp/b.png"],
+              detail: (saved?.selectedPaths ?? []).joined(separator: ","))
+        check("draft preserves selectedAgents",
+              saved?.selectedAgents == ["codex", "claude"],
+              detail: (saved?.selectedAgents ?? []).sorted().joined(separator: ","))
+        check("draft preserves the dispatch action", saved?.action == .fix)
+
+        // The restore side (summon's `draft?.field ?? default`): a saved draft
+        // rehydrates its fields; a nil draft — what submit and Escape leave behind
+        // via clearDraft — restores to a clean slate.
+        check("restore rehydrates note+action from a saved draft",
+              (saved?.note ?? "") == "  cards show raw uuids  " &&
+              (saved?.action ?? .fileTicket) == .fix)
+        let cleared: PromptDraft? = nil   // what submit/Escape (clearDraft) leave
+        check("submit/Escape leave no draft → restore yields empty note",
+              (cleared?.note ?? "") == "")
+        check("submit/Escape leave no draft → restore yields default action + no selection",
+              (cleared?.action ?? .fileTicket) == .fileTicket &&
+              (cleared?.selectedPaths ?? []).isEmpty &&
+              (cleared?.selectedAgents ?? []).isEmpty)
     }
 
     // MARK: helpers
