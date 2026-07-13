@@ -26,7 +26,6 @@ import {
   dedupeSessions,
   filterStaleSessions,
   reconcileHosts,
-  enrichWithSessionContent,
   groupByHost,
 } from '../core/remoteSessions';
 import type { ProjectRule } from '../core/settings';
@@ -166,33 +165,6 @@ export async function discoverHosts(): Promise<ReconciledHost[]> {
 
 // --- Tier-1: active fetch ---------------------------------------------------
 
-/** Read the tail of a local session file for activity/throughput enrichment, plus
- *  the file mtime (last-write epoch ms) — the real "last activity" signal used to
- *  age out stale sessions. */
-async function readSessionTail(
-  sessionFile: string,
-  agentType: string
-): Promise<{ content: string; mtimeMs: number } | null> {
-  try {
-    const stat = await fs.promises.stat(sessionFile);
-    const size = stat.size;
-    const fh = await fs.promises.open(sessionFile, 'r');
-    try {
-      // Gemini is a single JSON object — must read the whole file. Claude/Codex
-      // are JSONL; the last 256KB covers the rolling throughput window + latest
-      // activity without re-reading multi-MB logs.
-      const readStart = agentType === 'gemini' ? 0 : Math.max(0, size - 256 * 1024);
-      const buf = Buffer.alloc(size - readStart);
-      await fh.read(buf, 0, buf.length, readStart);
-      return { content: buf.toString('utf-8'), mtimeMs: stat.mtimeMs };
-    } finally {
-      await fh.close();
-    }
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Live CPU load ratio (1-min loadavg / cores) for one host. Local reads
  * os.loadavg()/os.cpus() directly (no shell-out); remote runs a single
@@ -275,20 +247,16 @@ async function fetchActiveForHost(sshTarget: string, isLocal: boolean, hostKey: 
     const unique = dedupeSessions(normalized);
     const sessions: RemoteSession[] = [];
     for (let session of unique) {
-      // Only THIS machine's own sessions have a readable local session file to
-      // enrich activity/throughput/waiting. In fanOut mode the payload is
-      // multi-machine, so gate on the resolved bucket, not the query mode —
-      // remote rows stay status-only (their file lives on another host).
+      // Activity / throughput / waiting now arrive on the CLI payload itself
+      // (ActiveSession.activity / tokPerSec / awaitingReason, issue #741) — no
+      // transcript-tail re-parse here. The one thing the payload does not carry
+      // is the file's last-write time, so stat THIS machine's own session files
+      // (remote rows have no local file) to stamp the staleness signal.
       if (session.host === LOCAL_LABEL && session.sessionFile) {
-        const tail = await readSessionTail(session.sessionFile, session.agentType);
-        if (tail) {
-          // The file's last-write time is the real last-activity signal (the CLI
-          // payload carries no timestamp for terminal sessions) — stamp it BEFORE
-          // enriching so the staleness check ages out an abandoned local agent AND
-          // enrich's prose-question decay sees the real last write (RUSH-1522).
-          session = { ...session, lastActivityMs: tail.mtimeMs };
-          session = enrichWithSessionContent(session, tail.content, fetchedAt);
-        }
+        try {
+          const stat = await fs.promises.stat(session.sessionFile);
+          session = { ...session, lastActivityMs: stat.mtimeMs };
+        } catch { /* file gone/rotated — leave the no-signal 0 */ }
       }
       sessions.push(session);
     }

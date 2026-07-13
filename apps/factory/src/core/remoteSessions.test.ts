@@ -12,7 +12,6 @@ import {
   normalizeRecentSession,
   normalizeQuestion,
   dedupeSessions,
-  enrichWithSessionContent,
   groupByHost,
   reconcileHosts,
   isStaleSession,
@@ -388,81 +387,62 @@ describe('normalizeActiveSessions', () => {
   });
 });
 
-describe('enrichWithSessionContent', () => {
-  const now = Date.parse('2026-06-30T12:00:30.000Z');
-  const base: RemoteSession = {
-    host: 'this-mac',
+describe('live signals from the CLI payload (issue #741)', () => {
+  // activity / tokPerSec / awaitingReason ride the `agents sessions --active
+  // --json` rows themselves — the extension no longer re-derives them from the
+  // transcript tail (the old enrichWithSessionContent).
+  const base: RawActiveSession = {
     sessionId: 'x',
-    agentType: 'claude',
+    kind: 'claude',
     cwd: '/repo',
-    project: 'repo',
-    phase: 'running',
-    activity: '',
-    tokPerSec: 0,
-    waitingForInput: false,
-    lastResponse: '',
-    prUrl: null,
-    ticket: null,
-    branch: '',
-    sinceMs: 0,
-    startedAtMs: 0,
+    status: 'running',
   };
 
-  test('derives activity + throughput from real Claude JSONL', () => {
-    const content = fs.readFileSync(path.join(TESTDATA, 'claude-session.jsonl'), 'utf-8');
-    const s = enrichWithSessionContent(base, content, now);
-    expect(s.activity).toBe('bun test');
-    expect(s.tokPerSec).toBe(3); // (120 + 80) / 60 rounded
-    expect(s.waitingForInput).toBe(false);
-    expect(s.phase).toBe('running');
+  test('a working session maps preview to the live now-line and rounds tokPerSec', () => {
+    const s = normalizeActiveSession(
+      { ...base, activity: 'working', preview: '$ bun test', tokPerSec: 27.9166 },
+      'this-mac',
+      1_000_000,
+    );
+    expect(s.activity).toBe('$ bun test');
+    expect(s.tokPerSec).toBe(28);
+    expect(s.lastResponse).toBe('$ bun test');
   });
 
-  test('promotes a trailing question to waiting', () => {
-    const content = fs.readFileSync(path.join(TESTDATA, 'claude-waiting.jsonl'), 'utf-8');
-    const s = enrichWithSessionContent(base, content, now);
-    expect(s.waitingForInput).toBe(true);
+  test('an idle session gets no now-line even when a stale preview is present', () => {
+    const s = normalizeActiveSession(
+      { ...base, status: 'idle', activity: 'idle', preview: 'Edit linux.ts', tokPerSec: 0 },
+      'this-mac',
+      1_000_000,
+    );
+    expect(s.activity).toBe('');
+    expect(s.lastResponse).toBe('Edit linux.ts'); // the last turn still shows as body text
+    expect(s.tokPerSec).toBe(0);
+  });
+
+  test('a waiting session carries the CLI awaitingReason and waiting phase', () => {
+    const s = normalizeActiveSession(
+      { ...base, status: 'input_required', activity: 'waiting_input', awaitingReason: 'plan_review', preview: 'Approve the plan?' },
+      'this-mac',
+      1_000_000,
+    );
     expect(s.phase).toBe('waiting');
-  });
-
-  test('a fresh last write keeps a trailing prose question waiting', () => {
-    const content = fs.readFileSync(path.join(TESTDATA, 'claude-waiting.jsonl'), 'utf-8');
-    const s = enrichWithSessionContent({ ...base, lastActivityMs: now - 60_000 }, content, now);
     expect(s.waitingForInput).toBe(true);
-    expect(s.phase).toBe('waiting');
+    expect(s.awaitingReason).toBe('plan_review');
+    expect(s.activity).toBe(''); // waiting, not working — no live now-line
   });
 
-  test('a stale prose question decays — a finished session is not waiting (RUSH-1522)', () => {
-    const content = fs.readFileSync(path.join(TESTDATA, 'claude-waiting.jsonl'), 'utf-8');
-    const s = enrichWithSessionContent({ ...base, lastActivityMs: now - 2 * 60 * 60_000 }, content, now);
+  test('absent live-signal fields default cleanly (older CLI payloads)', () => {
+    const s = normalizeActiveSession(base, 'this-mac', 1_000_000);
+    expect(s.activity).toBe('');
+    expect(s.tokPerSec).toBe(0);
+    expect(s.awaitingReason).toBe('');
     expect(s.waitingForInput).toBe(false);
-    expect(s.phase).toBe('running'); // untouched: the CLI-reported phase stands
   });
 
-  test('freshness clears a stale waiting flag and phase from an older CLI (RUSH-1522)', () => {
-    const content = fs.readFileSync(path.join(TESTDATA, 'claude-waiting.jsonl'), 'utf-8');
-    const s = enrichWithSessionContent({
-      ...base,
-      phase: 'waiting',
-      waitingForInput: true,
-      lastActivityMs: now - 2 * 60 * 60_000,
-    }, content, now);
-    expect(s.waitingForInput).toBe(false);
-    expect(s.phase).toBe('idle');
-  });
-
-  test('a structural AskUserQuestion never decays, however stale', () => {
-    const content = [
-      JSON.stringify({ type: 'assistant', timestamp: '2026-06-30T10:00:00.000Z', message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', input: { questions: [{ question: 'Prod or staging?' }] } }] } }),
-    ].join('\n');
-    const s = enrichWithSessionContent({ ...base, lastActivityMs: now - 2 * 60 * 60_000 }, content, now);
-    expect(s.waitingForInput).toBe(true);
-    expect(s.phase).toBe('waiting');
-  });
-
-  test('leaves non-parsable agent types untouched', () => {
-    const cursor = { ...base, agentType: 'cursor' };
-    const s = enrichWithSessionContent(cursor, 'irrelevant', now);
-    expect(s).toEqual(cursor);
+  test('a null awaitingReason (running rows) normalizes to empty string', () => {
+    const s = normalizeActiveSession({ ...base, awaitingReason: null }, 'this-mac', 1_000_000);
+    expect(s.awaitingReason).toBe('');
   });
 });
 
