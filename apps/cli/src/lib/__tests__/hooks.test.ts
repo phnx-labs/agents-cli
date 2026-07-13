@@ -846,6 +846,22 @@ describe('registerHooksToSettings - Claude', () => {
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
     expect(resolvedCommand(settings.hooks.UserPromptSubmit[0].hooks[0].command)).toBe(toPosix(scriptPath));
   });
+
+  it('does not rewrite settings.json when registration is already current', () => {
+    const versionHome = makeClaudeVersionHome();
+    makeScript('stable.sh');
+    const manifest: Record<string, ManifestHook> = {
+      stable: { script: 'stable.sh', events: ['PreToolUse'], matcher: 'Bash' },
+    };
+
+    expect(registerHooksToSettings('claude', versionHome, manifest, agentsDir).errors).toHaveLength(0);
+    const settingsPath = path.join(versionHome, '.claude', 'settings.json');
+    const fixedTime = new Date('2020-01-02T03:04:05.000Z');
+    fs.utimesSync(settingsPath, fixedTime, fixedTime);
+
+    expect(registerHooksToSettings('claude', versionHome, manifest, agentsDir).errors).toHaveLength(0);
+    expect(fs.statSync(settingsPath).mtimeMs).toBe(fixedTime.getTime());
+  });
 });
 
 describe('registerHooksToSettings - Droid', () => {

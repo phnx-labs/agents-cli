@@ -1176,9 +1176,11 @@ function registerHooksForClaude(
   const settingsPath = path.join(configDir, 'settings.json');
 
   let config: Record<string, unknown> = {};
+  let existingRaw: string | undefined;
   if (fs.existsSync(settingsPath)) {
     try {
-      config = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      existingRaw = fs.readFileSync(settingsPath, 'utf-8');
+      config = JSON.parse(existingRaw);
     } catch {
       errors.push('Failed to parse settings.json');
       return { registered, errors };
@@ -1278,7 +1280,10 @@ function registerHooksForClaude(
 
   try {
     fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(settingsPath, JSON.stringify(config, null, 2), 'utf-8');
+    const nextRaw = JSON.stringify(config, null, 2);
+    if (existingRaw !== nextRaw) {
+      fs.writeFileSync(settingsPath, nextRaw, 'utf-8');
+    }
   } catch (err) {
     errors.push(`Failed to write settings.json: ${(err as Error).message}`);
   }
