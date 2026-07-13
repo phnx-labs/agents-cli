@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Feed high-consequence authz uses the canonical operator registry (RUSH-1618).** `recordAnswer` no longer looks for `operators.yaml` under the feed root; it resolves operators from `~/.agents/` via `loadOperators()`. Source: `apps/cli/src/lib/feed.ts`.
 - **Menu bar groups worktree sessions under the real repo name (RUSH-1635).** Paths under `.agents/worktrees/<slug>` use the enclosing repository directory as the grouping key instead of the worktree slug. Source: `apps/cli/menubar/.../LocalState.swift`.
 
 - **PR outcome keys include repository identity (RUSH-1630).** Full GitHub pull URLs normalize to `owner/repo#N` so two repos' PR #10 no longer collide under `pr:#10`. Source: `apps/cli/src/lib/feed-outcome.ts`.
