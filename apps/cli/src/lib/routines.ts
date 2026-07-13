@@ -96,14 +96,13 @@ export interface JobConfig {
   timezone?: string;
   repo?: string;
   /**
-   * Pin this routine to one machine. `~/.agents/routines/` is synced to every
-   * device via the user repo, so without a pin an enabled routine fires on
-   * EVERY machine running the scheduler. When set, only the device whose
-   * `machineId()` matches (normalized hostname, e.g. `yosemite-s0`) schedules,
-   * fires, catches up, or counts this job as overdue; everywhere else it is
-   * inert and `run` refuses with an `agents ssh` pointer.
+   * Fleet allowlist — restrict this routine to specific devices. When omitted
+   * or empty, the routine is unrestricted and fires on every device running the
+   * scheduler. When set, only devices whose `machineId()` matches any entry
+   * (via `normalizeHost`) schedule, fire, catch up, or count this job as
+   * overdue; everywhere else it is inert and `run` refuses with a pointer.
    */
-  device?: string;
+  devices?: string[];
   variables?: Record<string, string>;
   sandbox?: boolean;
   allow?: JobAllowConfig;
@@ -132,14 +131,16 @@ export interface RunMeta {
 }
 
 /**
- * True when the job may execute on this machine: no `device` pin, or the pin
- * names this device. Both sides go through `normalizeHost` so `Yosemite-S0`,
- * `yosemite-s0.tailnet.ts.net`, and `yosemite-s0` all agree. Every fire path
- * (cron scheduler, webhook, catchup/overdue, manual run) gates on this.
+ * True when the job may execute on this machine: no `devices` allowlist (or
+ * empty), or the allowlist includes this device. Both sides go through
+ * `normalizeHost` so `Yosemite-S0`, `yosemite-s0.tailnet.ts.net`, and
+ * `yosemite-s0` all agree. Every fire path (cron scheduler, webhook,
+ * catchup/overdue, manual run) gates on this.
  */
-export function jobRunsOnThisDevice(config: Pick<JobConfig, 'device'>): boolean {
-  if (!config.device) return true;
-  return normalizeHost(config.device) === machineId();
+export function jobRunsOnThisDevice(config: Pick<JobConfig, 'devices'>): boolean {
+  if (!config.devices || config.devices.length === 0) return true;
+  const self = machineId();
+  return config.devices.some((d) => normalizeHost(d) === self);
 }
 
 /** Default values applied to every job config when fields are omitted. */
@@ -235,6 +236,8 @@ export function writeJob(config: JobConfig): void {
   if (output.timeout === '10m') delete output.timeout;
   if (output.enabled === true) delete output.enabled;
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
+  const devArr = output.devices as string[] | undefined;
+  if (!devArr || devArr.length === 0) delete output.devices;
 
   fs.writeFileSync(filePath, yaml.stringify(output), 'utf-8');
 }
@@ -319,9 +322,19 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push('endAt must be a parseable ISO 8601 / RFC3339 timestamp (e.g., 2026-12-31T23:59:00Z)');
     }
   }
-  if (config.device !== undefined) {
-    if (typeof config.device !== 'string' || config.device.trim() === '') {
-      errors.push('device must be a non-empty device name (as shown by `agents devices`, e.g. yosemite-s0)');
+  if ((config as Record<string, unknown>).device !== undefined) {
+    errors.push('singular "device" key is no longer supported — replace with devices: [<name>] (an array)');
+  }
+  if (config.devices !== undefined) {
+    if (!Array.isArray(config.devices)) {
+      errors.push('devices must be an array of device names (as shown by `agents devices`)');
+    } else {
+      for (const d of config.devices) {
+        if (typeof d !== 'string' || d.trim() === '') {
+          errors.push('each entry in devices must be a non-empty device name');
+          break;
+        }
+      }
     }
   }
 

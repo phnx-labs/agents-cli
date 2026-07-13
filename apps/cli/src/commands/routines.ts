@@ -48,6 +48,9 @@ import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
+import { loadDevices } from '../lib/devices/registry.js';
+import { normalizeHost } from '../lib/machine-id.js';
+import { addHostOption } from '../lib/hosts/option.js';
 
 /**
  * Human-friendly wall-clock a run took (e.g. "  · 3 min", "  · 45 sec"), or ""
@@ -157,11 +160,35 @@ async function pickJob(
   }
 }
 
+/**
+ * Parse a comma-separated devices string, normalize, deduplicate, and validate
+ * each entry against the registered fleet. Exits nonzero on unknown devices.
+ */
+async function parseAndValidateDevices(raw: string): Promise<string[]> {
+  const names = [...new Set(raw.split(',').map((s) => normalizeHost(s.trim())).filter(Boolean))];
+  if (names.length === 0) {
+    console.log(chalk.red('--devices requires at least one device name'));
+    process.exit(1);
+  }
+  const registry = await loadDevices();
+  const registered = new Set(Object.keys(registry).map((k) => normalizeHost(k)));
+  const unknown = names.filter((n) => !registered.has(n));
+  if (unknown.length > 0) {
+    console.log(chalk.red(`Unknown device(s): ${unknown.join(', ')}`));
+    console.log(chalk.gray(`Registered: ${[...registered].sort().join(', ') || '(none)'}`));
+    console.log(chalk.gray('Enroll devices with: agents devices sync'));
+    process.exit(1);
+  }
+  return names;
+}
+
 /** Register the `agents routines` command tree. */
 export function registerRoutinesCommands(program: Command): void {
   const routinesCmd = program
     .command('routines')
     .description('Schedule agents to run on a cron schedule or at a specific time. The scheduler auto-starts on first add.');
+
+  addHostOption(routinesCmd);
 
   setHelpSections(routinesCmd, {
     examples: `
@@ -207,11 +234,12 @@ export function registerRoutinesCommands(program: Command): void {
     `,
   });
 
-  routinesCmd
-    .command('list')
-    .description('See all scheduled jobs, when they run next, and their last execution status')
-    .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)')
-    .action((options: { json?: boolean }) => {
+  addHostOption(
+    routinesCmd
+      .command('list')
+      .description('See all scheduled jobs, when they run next, and their last execution status')
+      .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)'),
+  ).action((options: { json?: boolean }) => {
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const jobs = listAllJobs(process.cwd());
       if (jobs.length === 0) {
@@ -251,7 +279,7 @@ export function registerRoutinesCommands(program: Command): void {
             scheduleHuman: fireConditionLabel(job),
             trigger: job.trigger ?? null,
             timezone: job.timezone ?? null,
-            device: job.device ?? null,
+            devices: job.devices ?? [],
             runsHere: jobRunsOnThisDevice(job),
             enabled: job.enabled,
             overdue: overdueSet.has(job.name),
@@ -280,13 +308,13 @@ export function registerRoutinesCommands(program: Command): void {
       const NAME_W = 24;
       const AGENT_W = 10;
       const REPO_W = REPO_DISPLAY_MAX;
-      const DEVICE_W = 13;
+      const DEVICE_W = 22;
       const SCHED_W = 22;
       const ENABLED_W = 10;
       const NEXT_W = 22;
 
       const header =
-        `  ${'Name'.padEnd(NAME_W)} ${'Agent'.padEnd(AGENT_W)} ${'Repo'.padEnd(REPO_W)} ${'Device'.padEnd(DEVICE_W)} ${'Schedule'.padEnd(SCHED_W)} ${'Enabled'.padEnd(ENABLED_W)} ${'Next Run'.padEnd(NEXT_W)} Last Status`;
+        `  ${'Name'.padEnd(NAME_W)} ${'Agent'.padEnd(AGENT_W)} ${'Repo'.padEnd(REPO_W)} ${'Devices'.padEnd(DEVICE_W)} ${'Schedule'.padEnd(SCHED_W)} ${'Enabled'.padEnd(ENABLED_W)} ${'Next Run'.padEnd(NEXT_W)} Last Status`;
       console.log(chalk.gray(header));
       console.log(chalk.gray('  ' + '-'.repeat(NAME_W + AGENT_W + REPO_W + DEVICE_W + SCHED_W + ENABLED_W + NEXT_W + 20)));
 
@@ -314,10 +342,9 @@ export function registerRoutinesCommands(program: Command): void {
         const enabledWord = job.enabled ? 'yes' : 'no';
         const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
 
-        // Unpinned jobs run everywhere; a pin that names another machine is
-        // grayed — this machine never fires it.
-        const deviceWord = job.device || '-';
-        const deviceCell = !job.device
+        const deviceFull = job.devices && job.devices.length > 0 ? job.devices.join(',') : '-';
+        const deviceWord = deviceFull.length > DEVICE_W ? deviceFull.slice(0, DEVICE_W - 1) + '…' : deviceFull;
+        const deviceCell = !job.devices || job.devices.length === 0
           ? chalk.gray('-')
           : jobRunsOnThisDevice(job)
             ? deviceWord
@@ -360,7 +387,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto', 'auto')
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
-    .option('--device <name>', 'Pin to one machine (routines are fleet-synced): only the device with this name schedules and fires the job')
+    .option('--devices <names>', 'Fleet allowlist (comma-separated): only listed devices schedule and fire this routine. Omit for unrestricted.')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
@@ -412,6 +439,12 @@ export function registerRoutinesCommands(program: Command): void {
           process.exit(1);
         }
 
+        // Parse and validate --devices against the fleet registry.
+        let devices: string[] | undefined;
+        if (options.devices) {
+          devices = await parseAndValidateDevices(options.devices);
+        }
+
         const config: JobConfig = {
           name: nameOrPath,
           schedule,
@@ -423,7 +456,7 @@ export function registerRoutinesCommands(program: Command): void {
           enabled: !options.disabled,
           prompt: options.prompt,
           timezone: options.timezone,
-          ...(options.device ? { device: options.device } : {}),
+          ...(devices ? { devices } : {}),
           ...(runOnce ? { runOnce: true } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
         };
@@ -644,8 +677,9 @@ export function registerRoutinesCommands(program: Command): void {
       }
 
       if (!jobRunsOnThisDevice(job)) {
-        console.log(chalk.red(`Job '${name}' is pinned to device '${job.device}' and never runs here.`));
-        console.log(chalk.gray(`  Run it there: agents ssh ${job.device} 'agents routines run ${name}'`));
+        const allowed = (job.devices ?? []).join(', ');
+        console.log(chalk.red(`Job '${name}' can only run on: ${allowed}`));
+        console.log(chalk.gray(`  agents routines run ${name} --host ${(job.devices ?? [])[0]}`));
         process.exit(1);
       }
 
@@ -948,6 +982,89 @@ export function registerRoutinesCommands(program: Command): void {
       } catch (err) {
         console.log(chalk.red((err as Error).message));
         process.exit(1);
+      }
+    });
+
+  // Fleet allowlist management for a single routine.
+  routinesCmd
+    .command('devices [name]')
+    .description('View or change which devices may run a routine. Without flags, opens an interactive picker (requires a TTY).')
+    .option('--set <devices>', 'Replace the allowlist with this comma-separated list (strict fleet validation)')
+    .option('--clear', 'Remove the allowlist so the routine runs on every device')
+    .action(async (name: string | undefined, options: { set?: string; clear?: boolean }) => {
+      if (options.set && options.clear) {
+        console.log(chalk.red('--set and --clear are mutually exclusive'));
+        process.exit(1);
+      }
+
+      if (!name) {
+        name = await pickJob('Select routine', undefined, ['agents routines devices <name>']) ?? undefined;
+        if (!name) return;
+      }
+      const job = readJob(name);
+      if (!job) {
+        console.log(chalk.red(`Job '${name}' not found`));
+        process.exit(1);
+      }
+
+      if (options.clear) {
+        job.devices = undefined;
+        writeJob(job);
+        console.log(chalk.green(`Devices cleared for '${name}' — runs on all devices`));
+        if (isDaemonRunning()) signalDaemonReload();
+        return;
+      }
+
+      if (options.set) {
+        const devices = await parseAndValidateDevices(options.set);
+        job.devices = devices;
+        writeJob(job);
+        console.log(chalk.green(`Devices for '${name}' set to: ${devices.join(', ')}`));
+        if (isDaemonRunning()) signalDaemonReload();
+        return;
+      }
+
+      // Interactive picker
+      if (!isInteractiveTerminal()) {
+        requireInteractiveSelection('device allowlist', ['agents routines devices <name> --set a,b', 'agents routines devices <name> --clear']);
+      }
+
+      const registry = await loadDevices();
+      const registeredNames = Object.keys(registry).map((k) => normalizeHost(k)).sort();
+      if (registeredNames.length === 0) {
+        console.log(chalk.yellow('No devices registered. Enroll with: agents devices sync'));
+        return;
+      }
+
+      const currentSet = new Set((job.devices ?? []).map((d) => normalizeHost(d)));
+
+      try {
+        const { checkbox } = await import('@inquirer/prompts');
+        const selected = await checkbox({
+          message: `Devices allowed to run '${name}' (space to toggle, enter to confirm, empty = unrestricted):`,
+          choices: registeredNames.map((d) => ({
+            value: d,
+            name: d,
+            checked: currentSet.has(d),
+          })),
+        });
+
+        if (selected.length === 0) {
+          job.devices = undefined;
+          writeJob(job);
+          console.log(chalk.green(`Devices cleared for '${name}' — runs on all devices`));
+        } else {
+          job.devices = selected;
+          writeJob(job);
+          console.log(chalk.green(`Devices for '${name}' set to: ${selected.join(', ')}`));
+        }
+        if (isDaemonRunning()) signalDaemonReload();
+      } catch (err) {
+        if (isPromptCancelled(err)) {
+          console.log(chalk.gray('Cancelled'));
+          return;
+        }
+        throw err;
       }
     });
 

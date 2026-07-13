@@ -24,6 +24,7 @@ import {
   parseTimeout,
   writeRunMeta,
   getRunDir,
+  jobRunsOnThisDevice,
 } from './routines.js';
 import { getRunsDir } from './state.js';
 import type { AgentId } from './types.js';
@@ -461,6 +462,10 @@ function spawnJobAttempt(
  * failover across healthy same-agent accounts (RUSH-1016).
  */
 export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<RunResult> {
+  if (!jobRunsOnThisDevice(config)) {
+    const allowed = (config.devices ?? []).join(', ');
+    throw new Error(`Job '${config.name}' can only run on: ${allowed}`);
+  }
   maybeRotate();
 
   const launch = await resolveRoutineLaunch(config);
@@ -651,6 +656,11 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
 
 /** Spawn a job as a detached process and return immediately with run metadata. */
 export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
+  if (!jobRunsOnThisDevice(config)) {
+    const allowed = (config.devices ?? []).join(', ');
+    process.stderr.write(`[agents] daemon: skipping '${config.name}' — can only run on: ${allowed}\n`);
+    throw new Error(`Job '${config.name}' can only run on: ${allowed}`);
+  }
   // Pre-flight: pick a healthy version/account so the daemon does not launch
   // into a credit-exhausted install. Detached cannot mid-run failover (no exit
   // wait); the next schedule tick re-selects if this attempt still fails.

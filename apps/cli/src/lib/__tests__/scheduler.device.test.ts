@@ -46,37 +46,37 @@ function makeJob(overrides: Partial<JobConfig> = {}): JobConfig {
   };
 }
 
-describe('JobScheduler device pinning', () => {
-  it('loads unpinned jobs and jobs pinned to this device; skips foreign pins', () => {
+describe('JobScheduler devices allowlist', () => {
+  it('loads unpinned jobs and jobs whose allowlist includes this device; skips foreign', () => {
     writeJob(makeJob({ name: 'unpinned' }));
-    writeJob(makeJob({ name: 'pinned-here', device: 'zion' }));
-    writeJob(makeJob({ name: 'pinned-elsewhere', device: 'yosemite-s0' }));
+    writeJob(makeJob({ name: 'allowed-here', devices: ['zion'] }));
+    writeJob(makeJob({ name: 'allowed-elsewhere', devices: ['yosemite-s0'] }));
+    writeJob(makeJob({ name: 'multi-includes-here', devices: ['mac-mini', 'zion'] }));
 
     const scheduler = new JobScheduler(async () => {});
     scheduler.loadAll();
     const names = scheduler.listScheduled().map((j) => j.name).sort();
     scheduler.stopAll();
 
-    expect(names).toEqual(['pinned-here', 'unpinned']);
+    expect(names).toEqual(['allowed-here', 'multi-includes-here', 'unpinned']);
   });
 
-  it('matches a pin case-insensitively and ignores a domain suffix', () => {
-    writeJob(makeJob({ name: 'fqdn-pin', device: 'Zion.tailnet.ts.net' }));
+  it('matches an allowlist entry case-insensitively and ignores a domain suffix', () => {
+    writeJob(makeJob({ name: 'fqdn-entry', devices: ['Zion.tailnet.ts.net'] }));
 
     const scheduler = new JobScheduler(async () => {});
     scheduler.loadAll();
     const names = scheduler.listScheduled().map((j) => j.name);
     scheduler.stopAll();
 
-    expect(names).toEqual(['fqdn-pin']);
+    expect(names).toEqual(['fqdn-entry']);
   });
 });
 
-describe('detectOverdueJobs device pinning', () => {
-  it('never flags a job pinned to another device as overdue here', () => {
-    // Daily schedule with no recorded runs — overdue everywhere it may run.
-    writeJob(makeJob({ name: 'foreign-overdue', device: 'yosemite-s0' }));
-    writeJob(makeJob({ name: 'local-overdue', device: 'zion' }));
+describe('detectOverdueJobs devices allowlist', () => {
+  it('never flags a job restricted to another device as overdue here', () => {
+    writeJob(makeJob({ name: 'foreign-overdue', devices: ['yosemite-s0'] }));
+    writeJob(makeJob({ name: 'local-overdue', devices: ['zion'] }));
     writeJob(makeJob({ name: 'unpinned-overdue' }));
 
     const names = detectOverdueJobs().map((j) => j.name).sort();

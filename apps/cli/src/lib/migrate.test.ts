@@ -3,8 +3,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { migrateExtrasExtrasToAgentsExtras, repairSelfReferentialBinShims } from './migrate.js';
+import { migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, repairSelfReferentialBinShims } from './migrate.js';
 import { toPosix } from './platform/index.js';
+import * as yaml from 'yaml';
 
 const tempDirs: string[] = [];
 
@@ -283,5 +284,125 @@ describe('repairSelfReferentialBinShims', () => {
 
     // Untouched: still the same symlink target.
     expect(fs.readlinkSync(binLink)).toBe(realBin);
+  });
+});
+
+describe('migrateRoutineDeviceToDevices', () => {
+  function makeRoutinesDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-dev-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it('rewrites device: value to devices: [value]', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'a.yml'), yaml.stringify({
+      name: 'a', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'yosemite-s0',
+    }));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'a.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['yosemite-s0']);
+    expect(result.device).toBeUndefined();
+  });
+
+  it('is idempotent — no change on re-run', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'b.yml'), yaml.stringify({
+      name: 'b', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'mac-mini',
+    }));
+    migrateRoutineDeviceToDevices(dir);
+    const after1 = fs.readFileSync(path.join(dir, 'b.yml'), 'utf-8');
+    migrateRoutineDeviceToDevices(dir);
+    const after2 = fs.readFileSync(path.join(dir, 'b.yml'), 'utf-8');
+    expect(after1).toBe(after2);
+  });
+
+  it('leaves a routine that already has devices untouched', () => {
+    const dir = makeRoutinesDir();
+    const original = { name: 'c', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', devices: ['a', 'b'] };
+    fs.writeFileSync(path.join(dir, 'c.yml'), yaml.stringify(original));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'c.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['a', 'b']);
+    expect(result.device).toBeUndefined();
+  });
+
+  it('drops device when devices already present (both-field collision)', () => {
+    const dir = makeRoutinesDir();
+    const original = { name: 'd', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'old', devices: ['new'] };
+    fs.writeFileSync(path.join(dir, 'd.yml'), yaml.stringify(original));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'd.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['new']);
+    expect(result.device).toBeUndefined();
+  });
+
+  it('preserves other YAML fields', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'e.yml'), yaml.stringify({
+      name: 'e', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion', timeout: '2h', enabled: false,
+    }));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'e.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['zion']);
+    expect(result.timeout).toBe('2h');
+    expect(result.enabled).toBe(false);
+    expect(result.agent).toBe('claude');
+  });
+
+  it('is a no-op for routines without device field', () => {
+    const dir = makeRoutinesDir();
+    const raw = yaml.stringify({ name: 'f', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi' });
+    fs.writeFileSync(path.join(dir, 'f.yml'), raw);
+    migrateRoutineDeviceToDevices(dir);
+    expect(fs.readFileSync(path.join(dir, 'f.yml'), 'utf-8')).toBe(raw);
+  });
+
+  it('propagates a write failure (no silent swallowing)', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'g.yml'), yaml.stringify({
+      name: 'g', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion',
+    }));
+    // Make the directory read-only so the atomic write (temp file + rename) fails.
+    fs.chmodSync(dir, 0o555);
+    try {
+      expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
+    } finally {
+      fs.chmodSync(dir, 0o755);
+    }
+  });
+
+  it('throws on malformed legacy device value (not a nonempty string)', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'h.yml'), yaml.stringify({
+      name: 'h', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: '',
+    }));
+    expect(() => migrateRoutineDeviceToDevices(dir)).toThrow(/not a valid device name/);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'h.yml'), 'utf-8'));
+    expect(result.device).toBe('');
+  });
+
+  it('throws on non-string legacy device value (number)', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'i.yml'), yaml.stringify({
+      name: 'i', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 42,
+    }));
+    expect(() => migrateRoutineDeviceToDevices(dir)).toThrow(/not a valid device name/);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'i.yml'), 'utf-8'));
+    expect(result.device).toBe(42);
+  });
+
+  it('propagates a readFile error for candidate YAML', () => {
+    const dir = makeRoutinesDir();
+    const filePath = path.join(dir, 'j.yml');
+    fs.writeFileSync(filePath, yaml.stringify({
+      name: 'j', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion',
+    }));
+    fs.chmodSync(filePath, 0o000);
+    try {
+      expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
+    } finally {
+      fs.chmodSync(filePath, 0o644);
+    }
   });
 });

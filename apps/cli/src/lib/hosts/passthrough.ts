@@ -47,6 +47,7 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   sync: { nonInteractive: ['--yes'] },
   teams: {},
   message: {},
+  routines: {},
 };
 
 /** `--no-tty` is stripped like the routing flags but carries no value. */
@@ -128,10 +129,12 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
     return true;
   }
 
-  // `--devices` / `--hosts` fan out to every registered device locally; don't
-  // let a per-host passthrough turn it into a cascading remote fan-out.
-  const fleetFlag = allArgs.includes('--devices') || allArgs.includes('--hosts');
-  if (fleetFlag) return false;
+  // `--hosts` is always a generic fleet flag — bail for every command so the
+  // local aggregator handles it. `--devices` is fan-out on most commands but
+  // a placement flag on `routines` (which devices may run the routine), so
+  // only exempt routines from the bail.
+  if (allArgs.includes('--hosts')) return false;
+  if (allArgs.includes('--devices') && command !== 'routines') return false;
 
   const hostName = hostFlag ?? deviceFlag;
   if (!hostName) return false;
