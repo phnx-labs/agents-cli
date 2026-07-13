@@ -3,6 +3,7 @@ import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
   readAndResolveBundleEnv,
+  shouldEvictAfterBundleWrite,
   type SecretsBundle,
 } from './bundles.js';
 import { setKeychainBackendForTest, type KeychainBackend } from './index.js';
@@ -152,5 +153,27 @@ describe('assertRemoteBundleFlagsUnsupported (remote bundle guard)', () => {
         allowExpiredFlag: '--allow-expired',
       }),
     ).toThrow(/--keys and --allow-expired are not supported/);
+  });
+});
+
+describe('shouldEvictAfterBundleWrite (writes never leave a stale broker copy)', () => {
+  it('evicts after a mutating write (add / rotate / remove / policy)', () => {
+    // Pre-fix, only `secrets policy` evicted; a rotate left the broker serving
+    // the OLD value for up to the ~7d hold.
+    expect(shouldEvictAfterBundleWrite(false, undefined, false)).toBe(true);
+  });
+
+  it('skips when the writer opted out (stampLastUsed fires on every broker HIT)', () => {
+    expect(shouldEvictAfterBundleWrite(true, undefined, false)).toBe(false);
+  });
+
+  it('honors the AGENTS_SECRETS_NO_AGENT kill-switch, same as the read fast-path', () => {
+    expect(shouldEvictAfterBundleWrite(false, '1', false)).toBe(false);
+    expect(shouldEvictAfterBundleWrite(false, '0', false)).toBe(true);
+  });
+
+  it('never touches the real broker while a test keychain backend is installed', () => {
+    // A test writing bundle 'prod' must not evict the user's real 'prod' unlock.
+    expect(shouldEvictAfterBundleWrite(false, undefined, true)).toBe(false);
   });
 });
