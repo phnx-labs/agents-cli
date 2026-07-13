@@ -68,9 +68,25 @@ function buildOpenclawDetector(): ResourceDetector {
   };
 }
 
+function buildKimiDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'kimi',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      // Parent is `_agents-cli.yaml` (underscore-prefixed reserved name).
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.yaml') && !f.startsWith('_'))
+        .map(f => f.replace(/\.yaml$/, ''));
+    },
+  };
+}
+
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   codex: buildCodexDetector,
+  kimi: buildKimiDetector,
   droid: buildDroidDetector,
   openclaw: buildOpenclawDetector,
 };
