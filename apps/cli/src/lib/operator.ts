@@ -100,3 +100,20 @@ export function isHighConsequenceAllowed(blockConsequence: string | undefined, o
   if (isAdmin(operatorId, root)) return true;
   return canPerform(operatorId, blockConsequence, root);
 }
+
+/**
+ * Prove operator identity for high-consequence answers.
+ *
+ * Knowing an id listed in operators.yaml is not authentication — any same-user
+ * process can pass `--as muqsit`. Require the process environment to claim the
+ * same id via AGENTS_OPERATOR_ID (typically injected by `agents secrets` /
+ * the human's launch context).
+ */
+export function verifyOperatorIdentity(claimedId: string | undefined, root?: string): boolean {
+  if (!claimedId) return false;
+  if (!isKnownOperator(claimedId, root)) return false;
+  const envId = process.env.AGENTS_OPERATOR_ID?.trim();
+  if (!envId) return false;
+  return envId === claimedId;
+}
+

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **High-consequence answers require env-proven operator identity (RUSH-1619).** `agents message --as <id>` alone is not verification; `AGENTS_OPERATOR_ID` must match the claimed id (and the id must be in `operators.yaml`). Source: `apps/cli/src/lib/operator.ts`, `apps/cli/src/commands/message.ts`.
 - **OpenCode plugin install only writes loader-visible direct `.ts`/`.js` files (RUSH-1617).** Drop nested and `.mjs`/`.cjs` installs that OpenCode never scans; multi-module plugins flatten into `~/.config/opencode/plugins/`. Source: `apps/cli/src/lib/plugins.ts`.
 - **Routine credit-failover scans only the current attempt's log (RUSH-1616).** Each failover spawn writes `stdout.attempt-N.log` and rate-limit detection uses that file alone; prior attempts still append into `stdout.log` for the continuous trail. Source: `apps/cli/src/lib/runner.ts`.
 - **Cursor hook sync drops stale managed entries when matcher/event change (RUSH-1615).** GC keys managed hooks by `event|command|matcher` instead of command path alone, so a matcher or event edit no longer leaves dead entries. Source: `apps/cli/src/lib/hooks.ts`.

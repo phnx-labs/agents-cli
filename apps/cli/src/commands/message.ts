@@ -33,7 +33,7 @@ import {
   recordMessageReceipt,
   type OpenBlock,
 } from '../lib/feed.js';
-import { getOperator } from '../lib/operator.js';
+import { verifyOperatorIdentity } from '../lib/operator.js';
 import {
   resolveAnswerRoute,
   resumeArgv,
@@ -63,7 +63,9 @@ function claimBlockAnswer(
 ): void {
   if (!block) return;
   const operatorId = opts.as;
-  const verified = operatorId ? getOperator(operatorId) !== undefined : false;
+  // High-consequence answers require env-proven identity (AGENTS_OPERATOR_ID),
+  // not merely a caller-supplied known --as id (RUSH-1619).
+  const verified = verifyOperatorIdentity(operatorId);
   const claim = recordAnswer(block.blockId, {
     answeredBy: opts.from,
     answeredFrom: opts.surface || 'cli',
