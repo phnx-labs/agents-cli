@@ -2011,6 +2011,7 @@ export class AgentManager {
       '--quiet',
     ];
     if (model) args.push('--model', model);
+    args.push('--env', 'AGENTS_RUNTIME=teams');
     return args;
   }
 

@@ -210,9 +210,9 @@ export interface LegacyBundleCandidate {
 /** Minimum gap between last_used updates so the keychain isn't written on every secrets injection. */
 const LAST_USED_THROTTLE_MS = 60_000;
 
-const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9\-_.]{0,48}$/i;
-const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const BUNDLE_META_PREFIX = 'agents-cli.bundles.';
+export const BUNDLE_NAME_PATTERN = /^[a-z0-9][a-z0-9\-_.]{0,48}$/i;
+export const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+export const BUNDLE_META_PREFIX = 'agents-cli.bundles.';
 const SECRETS_ITEM_PREFIX = 'agents-cli.secrets.';
 
 export const RESERVED_ENV_NAMES = new Set([
@@ -899,7 +899,7 @@ export function readAndResolveBundleEnv(
       emit('secrets.get', {
         module: 'secrets',
         bundle: name,
-        caller: opts.caller,
+        operation: opts.caller,
         status: 'success',
         source: 'agent',
         keyCount: Object.keys(filtered.env).length,
@@ -997,7 +997,7 @@ export function readAndResolveBundleEnv(
     emit('secrets.get', {
       module: 'secrets',
       bundle: bundle.name,
-      caller: opts.caller,
+      operation: opts.caller,
       status,
       keyCount: keys.length,
       keys,

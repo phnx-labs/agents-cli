@@ -1,7 +1,7 @@
 /**
  * `agents events` — read the structured audit/event log.
  *
- * The event log (`~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl`) records every
+ * The event log (`~/.agents/events.jsonl`) records every
  * `agents <module> <cmd>` invocation plus richer typed events (secrets access,
  * version installs, ...), each stamped with who ran it and from where (OS user,
  * local vs SSH, remote client IP). This command reads it back — the audit trail
@@ -140,8 +140,7 @@ function collect(value: string, previous: string[]): string[] {
 
 /** Tail today's event file, printing new lines as they land. */
 async function followLog(): Promise<void> {
-  const today = new Date();
-  const file = `${getLogsPath()}/events-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}.jsonl`;
+  const file = getLogsPath();
   let offset = 0;
   try {
     offset = fs.statSync(file).size;

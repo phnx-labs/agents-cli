@@ -8,8 +8,9 @@ Separate from the fleet-state sources below (which answer "what's running *now*"
 the **audit event log** answers "who did what, and from where". Every
 `agents <module> <command>` invocation is recorded — team create/disband, agent
 run, secrets access, version installs — as a structured JSONL line at
-`~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl` (dir `0700`, files `0600`, 7-day
-rotation).
+`~/.agents/events.jsonl` (directory `0700`, file `0600`). At 10 MB the active
+file rotates losslessly to `events.1.jsonl.gz`; older archives shift to
+`events.2.jsonl.gz`, `events.3.jsonl.gz`, and so on.
 
 The recording is a single choke point — a commander `preAction`/`postAction`
 hook on the root program ([`src/index.ts`](../src/index.ts)) emits `command.start`
@@ -25,6 +26,9 @@ Every record carries **attribution** computed once per process
 - `osUser` — the OS account that ran it.
 - `transport` — `local`, or `ssh` when `$SSH_CONNECTION` is present.
 - `sshClientIp` — the remote client IP when over SSH.
+- `caller` — `claude-code`, a Factory terminal agent (`claude`, `codex`,
+  `gemini`, `cursor`, …), `terminal`, or `script`.
+- `session` — the short Factory session id when one is present.
 
 So "was this agent started on the host by a remote user?" is answerable for any
 event, not just runs. The write is a synchronous single-line append (durable
@@ -70,6 +74,7 @@ agents logs audit                          # recent activity (last 100)
 agents logs audit --level audit            # security-relevant only
 agents logs audit --module teams           # team lifecycle events
 agents logs audit --command "secrets get"  # by command path prefix
+agents logs audit --caller claude-code      # only commands invoked by Claude Code
 agents logs audit --event mcp.add         # by typed event (repeatable)
 agents logs audit --since 7d --json       # machine-readable, last 7 days
 agents logs audit --follow                # live tail of today's log
@@ -84,8 +89,9 @@ Events are classified by level:
 | `info` | Informational | `info`, `command.start`, `command.end`, `mcp.add` |
 | `debug` | Diagnostic | `debug` events |
 
-Every record includes a `caller` field (the source file that emitted the event,
-detected via stack trace) for tracing exactly where an event originated.
+Every record includes the environment-derived `caller` identity, so the audit
+trail answers which agent or human surface invoked the command rather than which
+TypeScript source file happened to emit it. Filter with `--caller`.
 
 #### Aggregate Statistics
 
@@ -97,15 +103,16 @@ agents logs stats --json           # machine-readable
 
 #### Log Rotation
 
-Files exceeding 10 MB are automatically gzip-compressed in place. Old files are
-pruned on a 14-day default; force rotation with:
+Files exceeding 10 MB rotate to numbered gzip archives without overwriting an
+earlier archive. Archives older than 7 days can be pruned explicitly with:
 
 ```bash
-agents logs rotate                 # prune files older than 14 days
+agents logs rotate                 # prune archives older than 7 days
 agents logs rotate --days 7        # prune files older than 7 days
 ```
 
-The `query()` API reads both `.jsonl` and `.jsonl.gz` files transparently.
+The `query()` API reads the active JSONL and every numbered gzip archive
+transparently.
 
 External tools (dashboards, voice assistants, CI runners, monitoring) can read
 fleet state via three canonical `--json` sources. No direct DB access, no re-parsing

@@ -83,6 +83,11 @@ import { parseDuration } from '../lib/hooks/cache.js';
 import { emit } from '../lib/events.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import {
+  discoverSyncedBundles,
+  importSyncedBundle,
+  type SyncedBundleCandidate,
+} from '../lib/secrets/icloud-import.js';
 import { registerSecretsSyncCommands } from './secrets-sync.js';
 import { registerSecretsMigrateAclCommand } from './secrets-migrate.js';
 import { registerSecretsImportKeyringCommand } from './secrets-import.js';
@@ -196,6 +201,118 @@ async function resolveVault(vaultOpt: string | undefined): Promise<string> {
  */
 export function readImportDotenv(from: string): string {
   return from === '-' ? readStdinSync() : fs.readFileSync(from, 'utf-8');
+}
+
+/** Where `secrets import` pulls keys from, parsed off the unified `--from`. */
+export type ImportSource =
+  | { kind: 'dotenv'; path: string }
+  | { kind: '1password'; vault?: string }
+  | { kind: 'icloud' };
+
+/**
+ * Parse the unified `--from <source>` value: a .env path (`-` reads stdin),
+ * `1password:<vault>` (bare `1password` prompts for the vault), or `icloud`
+ * (legacy iCloud Keychain bundles). The deprecated `--from-1password --vault`
+ * pair maps onto the 1password source. A file literally named `icloud` or
+ * `1password` can still be imported via an explicit path (`./icloud`).
+ */
+export function parseImportSource(opts: {
+  from?: string;
+  from1password?: boolean;
+  vault?: string;
+}): ImportSource {
+  if (opts.from && opts.from1password) {
+    throw new Error('--from and --from-1password are mutually exclusive.');
+  }
+  if (opts.from1password) return { kind: '1password', vault: opts.vault };
+  if (!opts.from) {
+    throw new Error(
+      "Pass --from <source>: a .env path (- reads stdin), '1password:<vault>', or 'icloud'.",
+    );
+  }
+  if (opts.from === 'icloud') return { kind: 'icloud' };
+  if (opts.from === '1password') return { kind: '1password', vault: opts.vault };
+  if (opts.from.startsWith('1password:')) {
+    const vault = opts.from.slice('1password:'.length);
+    return { kind: '1password', vault: vault || opts.vault };
+  }
+  return { kind: 'dotenv', path: opts.from };
+}
+
+/**
+ * `secrets import --from icloud` — recover bundles stranded in the iCloud
+ * Keychain by the device-local cutover. With a bundle name, imports exactly
+ * that bundle; without one, interactively multi-selects from everything
+ * discovered (all pre-checked — the common case is "bring them all back").
+ */
+async function importFromICloud(
+  bundleName: string | undefined,
+  opts: { force?: boolean; allPlaintext?: boolean; backend?: 'file'; purge?: boolean },
+): Promise<void> {
+  if (process.platform !== 'darwin') {
+    throw new Error('--from icloud reads the macOS iCloud Keychain and is only available on macOS.');
+  }
+  const candidates = discoverSyncedBundles();
+  if (candidates.length === 0) {
+    console.log('No legacy iCloud Keychain bundles found.');
+    return;
+  }
+  const describe = (c: SyncedBundleCandidate) =>
+    `${c.name} (${c.keys.length} key${c.keys.length === 1 ? '' : 's'}${c.hasMeta ? '' : ', no metadata'})`;
+  let chosen: SyncedBundleCandidate[];
+  if (bundleName) {
+    const hit = candidates.find((c) => c.name === bundleName);
+    if (!hit) {
+      throw new Error(
+        `No iCloud Keychain bundle named '${bundleName}'. Found: ${candidates.map((c) => c.name).join(', ')}`,
+      );
+    }
+    chosen = [hit];
+  } else if (!isInteractiveTerminal()) {
+    throw new Error(
+      `Found ${candidates.length} iCloud Keychain bundle(s): ${candidates.map((c) => c.name).join(', ')}. ` +
+        'Pass a bundle name to import non-interactively.',
+    );
+  } else {
+    const { checkbox } = await import('@inquirer/prompts');
+    chosen = await checkbox({
+      message: 'Which iCloud Keychain bundles to import?',
+      choices: candidates.map((c) => ({ name: describe(c), value: c, checked: true })),
+    });
+    if (chosen.length === 0) {
+      console.log('Nothing selected.');
+      return;
+    }
+  }
+  for (const candidate of chosen) {
+    const result = importSyncedBundle(candidate, opts);
+    const parts = [`imported ${result.added} key(s)`];
+    if (result.skipped) parts.push(`skipped ${result.skipped} (already set, pass --force)`);
+    if (result.missing.length) parts.push(`unreadable (left in iCloud): ${result.missing.join(', ')}`);
+    if (opts.purge) parts.push(`purged ${result.purged} iCloud item(s)`);
+    const line = `${candidate.name}: ${parts.join(', ')}`;
+    console.log(result.missing.length ? chalk.yellow(line) : chalk.green(line));
+  }
+}
+
+/**
+ * Printed under a "bundle not found" failure: if the name matches a bundle
+ * stranded in the iCloud Keychain (pre-device-local-cutover era), point at the
+ * recovery command instead of leaving a dead end.
+ */
+function maybePrintSyncedHint(name: string): void {
+  if (process.platform !== 'darwin') return;
+  try {
+    if (discoverSyncedBundles().some((c) => c.name === name)) {
+      console.error(
+        chalk.yellow(
+          `A legacy iCloud Keychain copy of '${name}' exists. Recover it with: agents secrets import ${name} --from icloud`,
+        ),
+      );
+    }
+  } catch {
+    // Hint only — never mask the original error.
+  }
 }
 
 /**
@@ -585,7 +702,8 @@ export function registerSecretsCommands(program: Command): void {
         agents secrets status                          show held bundles + when they lock
         agents secrets rotate <bundle> <key>           rotate value, preserve metadata
         agents secrets import <bundle> --from .env     bulk import from .env
-        agents secrets import <bundle> --from-1password --vault <name>
+        agents secrets import <bundle> --from 1password:<vault>
+        agents secrets import --from icloud            recover legacy iCloud Keychain bundles
         agents secrets generate [length]               generate a random password / PIN / hex
         agents secrets migrate-acl                     upgrade legacy items to the biometry ACL
     `,
@@ -670,7 +788,14 @@ export function registerSecretsCommands(program: Command): void {
           return;
         }
         const resolvedName = name ?? (await pickBundleName('view'));
-        const bundle = readBundle(resolvedName);
+        let bundle: SecretsBundle;
+        try {
+          bundle = readBundle(resolvedName);
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          maybePrintSyncedHint(resolvedName);
+          process.exit(1);
+        }
         const entries = describeBundle(bundle);
         console.log(chalk.bold(bundle.name));
         if (bundle.description) console.log(chalk.gray(safePrint(bundle.description)));
@@ -725,7 +850,7 @@ export function registerSecretsCommands(program: Command): void {
             emit('secrets.get', {
               module: 'secrets',
               bundle: bundle.name,
-              caller: 'view --reveal',
+              operation: 'view --reveal',
               source: 'reveal',
               status: 'success',
               keyCount: exposedCount,
@@ -1235,13 +1360,14 @@ Examples:
 
   cmd
     .command('import [bundle]')
-    .description('Import keys from a .env file or a 1Password vault into a bundle. The bundle is created if it does not exist. Values are stored in the bundle\'s backend (keychain by default).')
-    .option('--from <path>', 'Path to a .env file (use - to read the .env from stdin)')
-    .option('--from-1password', 'Import secrets from a 1Password vault (requires the op CLI)')
-    .option('--vault <name>', '1Password vault name (used with --from-1password)')
+    .description('Import keys into a bundle from a .env file, a 1Password vault, or legacy iCloud Keychain bundles. The bundle is created if it does not exist. Values are stored in the bundle\'s backend (keychain by default).')
+    .option('--from <source>', "Source: a .env path (- reads stdin), '1password:<vault>', or 'icloud' (legacy iCloud Keychain bundles)")
+    .addOption(new Option('--from-1password', 'deprecated alias for --from 1password:<vault>').hideHelp())
+    .addOption(new Option('--vault <name>', 'deprecated: name the vault in --from 1password:<vault>').hideHelp())
     .option('--all-plaintext', 'Store every imported value as a literal in the bundle metadata (skip keychain item creation)')
     .option('--backend <backend>', 'When creating the bundle: keychain (default) or file (passphrase-encrypted, headless-readable)', 'keychain')
     .option('--force', 'Overwrite an existing key in the bundle')
+    .option('--purge', 'With --from icloud: delete the iCloud copies after a successful import (iCloud propagates the deletion to your other devices)')
     .action(async (bundleName: string | undefined, opts: {
       from?: string;
       from1password?: boolean;
@@ -1249,17 +1375,29 @@ Examples:
       allPlaintext?: boolean;
       backend?: string;
       force?: boolean;
+      purge?: boolean;
     }) => {
       try {
-        if (!opts.from && !opts.from1password) {
-          throw new Error('Pass --from <path> to import a .env file, or --from-1password to import from a 1Password vault.');
+        const source = parseImportSource(opts);
+        if (opts.purge && source.kind !== 'icloud') {
+          throw new Error('--purge only applies to --from icloud.');
         }
-        if (opts.from && opts.from1password) {
-          throw new Error('--from and --from-1password are mutually exclusive.');
+        if (opts.from1password) {
+          console.log(chalk.yellow('--from-1password is deprecated; use --from 1password:<vault>.'));
+        }
+        const requestedBackend = parseBackendOpt(opts.backend);
+
+        if (source.kind === 'icloud') {
+          await importFromICloud(bundleName, {
+            force: opts.force,
+            allPlaintext: opts.allPlaintext,
+            backend: requestedBackend === 'file' ? 'file' : undefined,
+            purge: opts.purge,
+          });
+          return;
         }
 
         const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-        const requestedBackend = parseBackendOpt(opts.backend);
         // Read the bundle if it exists (inheriting its backend); otherwise
         // create it with the requested backend so a single `import --backend
         // file` works (this is what `export --host ... --remote-backend file`
@@ -1284,9 +1422,9 @@ Examples:
         let added = 0;
         let skipped = 0;
 
-        if (opts.from1password) {
+        if (source.kind === '1password') {
           assertOpAvailable();
-          const vault = await resolveVault(opts.vault);
+          const vault = await resolveVault(source.vault);
           const items = listItems(vault);
           const { secrets, skipped: opSkipped } = extractSecrets(items, vault);
           for (const { envKey, value } of secrets) {
@@ -1309,7 +1447,7 @@ Examples:
           }
           console.log(chalk.green(`Imported ${added} key(s) from 1Password vault '${vault}'${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
         } else {
-          const raw = readImportDotenv(opts.from!);
+          const raw = readImportDotenv(source.path);
           const pairs = parseDotenv(raw);
           for (const [key, value] of Object.entries(pairs)) {
             if (!opts.force && key in bundle.vars) {

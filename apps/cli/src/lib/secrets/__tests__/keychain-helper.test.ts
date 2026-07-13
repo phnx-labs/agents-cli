@@ -8,7 +8,7 @@ const helperSource = () => fs.readFileSync(path.join(process.cwd(), 'src/lib/sec
 // satisfied by an unrelated command elsewhere in the file. `order` lists the
 // switch cases in source order; the block runs from the named case up to the
 // next case in that list (or the `default:` for the last one).
-const order = ['list', 'has', 'get', 'get-batch', 'set', 'delete', 'migrate-acl', 'list-orphans', 'migrate-orphans', 'watch-lock'];
+const order = ['list', 'has', 'get', 'get-batch', 'set', 'delete', 'migrate-acl', 'list-orphans', 'migrate-orphans', 'watch-lock', 'list-synced', 'get-batch-synced', 'delete-synced'];
 function caseBlock(source: string, cmd: string): string {
   const idx = order.indexOf(cmd);
   const start = source.indexOf(`case "${cmd}":`);
@@ -72,10 +72,11 @@ describe('keychain-helper data-protection keychain routing', () => {
     const count = (s: string) => s.split('kSecClass: kSecClassGenericPassword').length - 1;
     const occurrences = count(source);
     const allowed =
-      3 + // dpBase + dpBaseUnpinned + fileBase
+      4 + // dpBase + dpBaseUnpinned + fileBase + syncedBase
       count(caseBlock(source, 'list')) + // fileQuery + dpQuery
       count(caseBlock(source, 'list-orphans')) + // enumQuery
-      count(caseBlock(source, 'migrate-orphans')); // enumQuery
+      count(caseBlock(source, 'migrate-orphans')) + // enumQuery
+      count(caseBlock(source, 'list-synced')); // syncedQuery
     expect(
       occurrences,
       'kSecClass only appears in dpBase/dpBaseUnpinned/fileBase and the list / orphan enumeration queries',
@@ -247,5 +248,49 @@ describe('keychain-helper orphaned-access-group recovery', () => {
     // A failed add is FAILed and skips the orphan delete.
     expect(block).toContain('print("FAIL \\(o.service) add=\\(addStatus)")');
     expect(block).toContain('print("OK \\(o.service)")');
+  });
+});
+
+describe('keychain-helper synced (iCloud) recovery verbs', () => {
+  it('syncedBase matches synchronizable items only, un-pinned', () => {
+    const source = helperSource();
+    const sbStart = source.indexOf('func syncedBase(');
+    expect(sbStart, 'syncedBase helper present').toBeGreaterThanOrEqual(0);
+    const block = source.slice(sbStart, source.indexOf('\n}', sbStart));
+    // TRUE, never Any: the device-local items are the live store and must stay
+    // invisible to the recovery path.
+    expect(block).toContain('kSecAttrSynchronizable: kCFBooleanTrue!');
+    expect(block).not.toContain('kSecAttrSynchronizableAny');
+    // Un-pinned like dpBaseUnpinned so it spans every entitled group.
+    expect(block).not.toContain('kSecAttrAccessGroup');
+    expect(block).toContain('kSecUseDataProtectionKeychain: kCFBooleanTrue!');
+  });
+
+  it('list-synced enumerates synchronizable items only, attributes-only, no prompt', () => {
+    const block = caseBlock(helperSource(), 'list-synced');
+    expect(block).toContain('kSecAttrSynchronizable: kCFBooleanTrue!');
+    expect(block).toContain('kSecReturnAttributes: kCFBooleanTrue!');
+    expect(block).not.toContain('kSecReturnData'); // attributes only — never decrypts
+    expect(block).toContain('errSecInteractionNotAllowed'); // tolerates a locked keybag
+  });
+
+  it('get-batch-synced reads via syncedBase and emits get-batch V/M records', () => {
+    const block = caseBlock(helperSource(), 'get-batch-synced');
+    expect(block).toContain('var query = syncedBase(service: service, account: account)');
+    expect(block).toContain('dieIfCancelled(status)');
+    expect(block).toContain('print("V \\(service)")');
+    expect(block).toContain('print("M \\(service)")');
+    // Never falls back to the device-local bases — the live store is off-limits.
+    expect(block).not.toContain('dpBase(');
+    expect(block).not.toContain('fileBase(');
+  });
+
+  it('delete-synced removes the synchronizable copy only', () => {
+    const block = caseBlock(helperSource(), 'delete-synced');
+    expect(block).toContain('SecItemDelete(syncedBase(service: service, account: account) as CFDictionary)');
+    // The device-local copy the import just wrote must be untouchable here.
+    expect(block).not.toContain('dpBase(');
+    expect(block).not.toContain('dpBaseUnpinned(');
+    expect(block).not.toContain('fileBase(');
   });
 });

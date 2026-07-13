@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { gzipSync } from 'node:zlib';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   emit, query, rotate, stats,
   _resetForTest,
@@ -26,10 +26,8 @@ afterEach(() => {
 
 function setupLogsDir(): string {
   const dir = makeTempDir();
-  const logsDir = path.join(dir, 'logs');
-  fs.mkdirSync(logsDir, { recursive: true });
-  _resetForTest(logsDir);
-  return logsDir;
+  _resetForTest(path.join(dir, 'events.jsonl'));
+  return dir;
 }
 
 function makeRecord(overrides: Record<string, unknown> = {}) {
@@ -44,18 +42,11 @@ function makeRecord(overrides: Record<string, unknown> = {}) {
     ppid: 0,
     event: 'info',
     level: 'info',
+    caller: 'script',
     osUser: 'testuser',
     transport: 'local',
     ...overrides,
   };
-}
-
-function todayFileName(): string {
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `events-${yyyy}-${mm}-${dd}.jsonl`;
 }
 
 describe('logs audit subcommand data path', () => {
@@ -73,7 +64,7 @@ describe('logs audit subcommand data path', () => {
   it('query reads gzipped archives transparently', () => {
     const logsDir = setupLogsDir();
     const record = makeRecord({ event: 'cloud.dispatch', level: 'audit', module: 'cloud', taskId: 'gz-task' });
-    const gzPath = path.join(logsDir, todayFileName() + '.gz');
+    const gzPath = path.join(logsDir, 'events.1.jsonl.gz');
     fs.writeFileSync(gzPath, gzipSync(Buffer.from(JSON.stringify(record) + '\n')));
 
     const results = query({ module: 'cloud' });
@@ -94,12 +85,10 @@ describe('logs audit subcommand data path', () => {
 
   it('rotate removes old files and returns count', () => {
     const logsDir = setupLogsDir();
-    const old = new Date();
-    old.setDate(old.getDate() - 30);
-    const yyyy = old.getFullYear();
-    const mm = String(old.getMonth() + 1).padStart(2, '0');
-    const dd = String(old.getDate()).padStart(2, '0');
-    fs.writeFileSync(path.join(logsDir, `events-${yyyy}-${mm}-${dd}.jsonl`), '{"event":"info"}\n');
+    const archive = path.join(logsDir, 'events.1.jsonl.gz');
+    fs.writeFileSync(archive, gzipSync(Buffer.from('{"event":"info"}\n')));
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(archive, old, old);
 
     const removed = rotate(7);
     expect(removed).toBe(1);

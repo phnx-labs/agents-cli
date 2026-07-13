@@ -128,6 +128,7 @@ import {
   loadPush,
   loadRepo,
   loadSetup,
+  loadFeed,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
@@ -188,7 +189,10 @@ program.hook('preAction', (_thisCommand, actionCommand) => {
     emit('command.start', {
       module: parts[0],
       command: parts.join(' '),
-      args: redactArgs(actionCommand.args),
+      // Commander exposes positional operands in actionCommand.args but omits
+      // parsed option values. Audit the real argv so sensitive flags are seen
+      // and redacted instead of silently bypassing the policy.
+      args: redactArgs(process.argv.slice(2, 22)),
       cwd: process.cwd(),
     });
   } catch {
@@ -825,6 +829,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadLogs);
   await reg(loadEvents);
   await reg(loadAudit);
+  await reg(loadFeed);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');

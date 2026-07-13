@@ -238,7 +238,7 @@ export async function pushBundle(name: string, opts: PushOptions): Promise<{ upd
   emit('secrets.get', {
     module: 'secrets',
     bundle: name,
-    caller: 'sync push',
+    operation: 'sync push',
     source: 'sync-push',
     status: 'success',
     keyCount: Object.keys(snap.secrets).length,

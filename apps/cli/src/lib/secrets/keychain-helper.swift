@@ -119,6 +119,25 @@ func dpBaseUnpinned(service: String, account: String) -> [CFString: Any] {
     ]
 }
 
+// Base attributes for LEGACY SYNCHRONIZABLE (iCloud Keychain) items. The
+// pre-biometry helper era defaulted bundles to iCloud Keychain sync; the
+// device-local cutover then pinned every query to kSecAttrSynchronizable
+// false, which orphaned those items — they still sync back via iCloud
+// Keychain, but no modern query can see them. This base exists ONLY for the
+// `secrets import --from icloud` recovery verbs: it matches synchronizable
+// items exclusively (true, never Any — the device-local items are the live
+// store and must stay invisible to the recovery path), and it is un-pinned
+// like dpBaseUnpinned so it spans every group the entitlement covers.
+func syncedBase(service: String, account: String) -> [CFString: Any] {
+    return [
+        kSecClass: kSecClassGenericPassword,
+        kSecAttrService: service as CFString,
+        kSecAttrAccount: account as CFString,
+        kSecUseDataProtectionKeychain: kCFBooleanTrue!,
+        kSecAttrSynchronizable: kCFBooleanTrue!,
+    ]
+}
+
 // Outcome of a protected read. `needsMigration` is set when the value came only
 // from the legacy file-based keychain (caller re-writes via migrateInline).
 // `orphanRef` is set when the value came from a data-protection item under a
@@ -288,7 +307,7 @@ func dieIfCancelled(_ status: OSStatus) {
 
 let args = CommandLine.arguments
 guard args.count >= 2 else {
-    die(2, "Usage: agents-keychain <get|get-batch|set|set-no-acl|delete|has|list|list-legacy|list-orphans|migrate-acl|migrate-orphans> ...")
+    die(2, "Usage: agents-keychain <get|get-batch|set|set-no-acl|delete|has|list|list-legacy|list-orphans|migrate-acl|migrate-orphans|list-synced|get-batch-synced|delete-synced> ...")
 }
 
 let cmd = args[1]
@@ -719,6 +738,85 @@ case "watch-lock":
         if getppid() == 1 { exit(0) }
     }
     RunLoop.current.run()
+
+case "list-synced":
+    // list-synced <prefix> — enumerate LEGACY SYNCHRONIZABLE (iCloud Keychain)
+    // generic-password items whose service starts with <prefix> for the current
+    // user. These are pre-biometry-era bundles orphaned by the device-local
+    // cutover; every modern query pins kSecAttrSynchronizable false, so this is
+    // the only verb that can see them. Attributes only — never decrypts, never
+    // prompts. Prints one service name per line.
+    guard args.count == 3 else { die(2, "Usage: agents-keychain list-synced <prefix>") }
+    let prefix = args[2]
+    guard !prefix.isEmpty else { die(2, "list-synced requires non-empty prefix") }
+    let user = ProcessInfo.processInfo.environment["USER"] ?? NSUserName()
+    let syncedQuery: [CFString: Any] = [
+        kSecClass: kSecClassGenericPassword,
+        kSecMatchLimit: kSecMatchLimitAll,
+        kSecReturnAttributes: kCFBooleanTrue!,
+        kSecUseDataProtectionKeychain: kCFBooleanTrue!,
+        kSecAttrSynchronizable: kCFBooleanTrue!,
+    ]
+    var syncedResult: AnyObject?
+    let syncedStatus = SecItemCopyMatching(syncedQuery as CFDictionary, &syncedResult)
+    // A locked keybag reports errSecInteractionNotAllowed wholesale — treat as
+    // "nothing visible right now", matching the list / list-orphans behavior.
+    if syncedStatus == errSecItemNotFound || syncedStatus == errSecInteractionNotAllowed { exit(0) }
+    guard syncedStatus == errSecSuccess else { die(2, "Failed to enumerate iCloud keychain (OSStatus \(syncedStatus))") }
+    var syncedSeen = Set<String>()
+    for item in (syncedResult as? [[String: Any]]) ?? [] {
+        guard let svce = item[kSecAttrService as String] as? String, svce.hasPrefix(prefix) else { continue }
+        guard let acct = item[kSecAttrAccount as String] as? String, acct == user else { continue }
+        if syncedSeen.insert(svce).inserted { print(svce) }
+    }
+
+case "get-batch-synced":
+    // get-batch-synced <account> <service1> [service2...] — read legacy
+    // synchronizable (iCloud Keychain) items for the import recovery path.
+    // Pre-biometry items carry no biometry ACL (synchronizable and
+    // ThisDeviceOnly accessibility are mutually exclusive), so these reads do
+    // not normally prompt; the auth context + operation prompt are attached in
+    // case an item somehow carries a user-presence gate. Output format matches
+    // get-batch:
+    //   V <service>\n<value>\n   (present)
+    //   M <service>\n            (missing)
+    // Exit 4 if the user cancels an auth prompt.
+    guard args.count >= 4 else {
+        die(2, "Usage: agents-keychain get-batch-synced <account> <service1> [service2...]")
+    }
+    let account = args[2]
+    let services = Array(args[3...])
+    for service in services {
+        var query = syncedBase(service: service, account: account)
+        query[kSecReturnData] = kCFBooleanTrue!
+        query[kSecMatchLimit] = kSecMatchLimitOne
+        query[kSecUseAuthenticationContext] = authContext
+        query[kSecUseAuthenticationUI] = kSecUseAuthenticationUIAllow
+        query[kSecUseOperationPrompt] = "Import legacy agents-cli secrets" as CFString
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        dieIfCancelled(status)
+        if status == errSecSuccess, let data = result as? Data, let value = String(data: data, encoding: .utf8) {
+            print("V \(service)")
+            print(value)
+        } else if status == errSecItemNotFound {
+            print("M \(service)")
+        } else {
+            die(2, "Failed to read iCloud keychain item \(service) (OSStatus \(status))")
+        }
+    }
+
+case "delete-synced":
+    // delete-synced <service> <account> — remove a legacy synchronizable
+    // (iCloud Keychain) item after a successful import (`--purge`). Matches
+    // synchronizable items ONLY, so the device-local copy the import just
+    // wrote is untouched. Note iCloud propagates this deletion to the user's
+    // other devices — that is the point of the purge. Deletion never decrypts,
+    // so it never prompts. Exit 0 if a copy was removed, else 1.
+    guard args.count == 4 else { die(2, "Usage: agents-keychain delete-synced <service> <account>") }
+    let (service, account) = (args[2], args[3])
+    let status = SecItemDelete(syncedBase(service: service, account: account) as CFDictionary)
+    exit(status == errSecSuccess ? 0 : 1)
 
 default:
     die(2, "Unknown command: \(cmd)")
