@@ -1717,9 +1717,11 @@ describe('registerHooksToSettings - grok + antigravity subrule hooks (RUSH-1353)
     const data = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
     const groups = data.hooks?.PreToolUse ?? [];
     const flat = groups.flatMap((g: any) =>
-      (g.hooks ?? []).map((h: any) => ({ command: h.command, matcher: g.matcher })),
+      (g.hooks ?? []).map((h: any) => ({ command: h.command as string, matcher: g.matcher as string | undefined })),
     );
-    expect(flat.some((e: any) => e.command === subruleScript && e.matcher === 'Write|Edit')).toBe(true);
+    // Command paths go through toPortableCommand (POSIX/~/ form) — match by basename.
+    expect(flat.some((e) => e.command.replace(/\\/g, '/').endsWith('main-branch-guard.sh'))).toBe(true);
+    expect(flat.some((e) => e.matcher === 'Write|Edit')).toBe(true);
   });
 
   it('registers absolute subrule script into antigravity settings with matcher', () => {
@@ -1731,6 +1733,7 @@ describe('registerHooksToSettings - grok + antigravity subrule hooks (RUSH-1353)
     expect(fs.existsSync(settingsPath)).toBe(true);
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
     const allEntries = Object.values(settings.hooks || {}).flat() as Array<{ command?: string; matcher?: string }>;
-    expect(allEntries.some((e) => e.command === subruleScript && e.matcher === 'Write|Edit')).toBe(true);
+    expect(allEntries.some((e) => (e.command || '').replace(/\\/g, '/').endsWith('main-branch-guard.sh'))).toBe(true);
+    expect(allEntries.some((e) => e.matcher === 'Write|Edit')).toBe(true);
   });
 });
