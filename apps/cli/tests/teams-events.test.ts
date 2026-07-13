@@ -40,16 +40,14 @@ function runCli(home: string, args: string[]) {
 }
 
 function readEvents(home: string): Array<Record<string, unknown>> {
-  const dir = path.join(home, '.agents', '.cache', 'logs');
-  if (!fs.existsSync(dir)) return [];
+  const eventsPath = path.join(home, '.agents', 'events.jsonl');
+  if (!fs.existsSync(eventsPath)) return [];
   const out: Array<Record<string, unknown>> = [];
-  for (const f of fs.readdirSync(dir).filter((n) => n.startsWith('events-') && n.endsWith('.jsonl'))) {
-    for (const line of fs.readFileSync(path.join(dir, f), 'utf-8').split('\n').filter(Boolean)) {
-      try {
-        out.push(JSON.parse(line));
-      } catch {
-        /* skip */
-      }
+  for (const line of fs.readFileSync(eventsPath, 'utf-8').split('\n').filter(Boolean)) {
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      /* skip */
     }
   }
   return out;
