@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.53
+
 - **`agents add <agent>@latest` resolves to a concrete version before installing (no install race).** `latest` (like `oldest`) is now resolved via `npm view` up front and installed as a pinned spec directly into `versions/<agent>/<version>/`. Previously `latest` installed into a shared, well-known `versions/<agent>/latest/` scratch dir and was renamed to the real version only after npm finished — so a concurrent `agents view` reconcile (`reconcileStaleLatestForAgent`) or a second `latest` install could rename that dir out from under npm mid-extraction, corrupting the install with `ENOENT` on the seeded `package.json`. A concrete dir per version has no shared name to race on. Source: `apps/cli/src/lib/versions.ts`.
 - **Native memory sync preserves unmanaged Markdown files (RUSH-1621).** Sync tracks managed fact names in `.agents-cli-memory.json` and only deletes those; user-authored `*.md` under the agent memory dir survive. Source: `apps/cli/src/lib/memory.ts`.
 - **Feed high-consequence authz uses the canonical operator registry (RUSH-1618).** `recordAnswer` no longer looks for `operators.yaml` under the feed root; it resolves operators from `~/.agents/` via `loadOperators()`. Source: `apps/cli/src/lib/feed.ts`.
