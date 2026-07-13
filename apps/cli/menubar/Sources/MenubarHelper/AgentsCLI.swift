@@ -131,7 +131,7 @@ enum AgentsCLI {
     // KeepAlive policy, then the app terminates.
     static func menubarDisable() { runDetached(argv(["menubar", "disable"])) }
 
-    // MARK: Quick issue capture (Cmd-Shift-O)
+    // MARK: Quick dispatch capture (Cmd-Shift-O)
 
     // Image extensions the clip hotkey / screenshot tools produce.
     static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "tiff", "webp", "bmp"]
@@ -239,6 +239,35 @@ enum AgentsCLI {
         """
     }
 
+    static func quickFixPrompt(note: String, screenshotPaths: [String]) -> String {
+        let shots: String
+        if screenshotPaths.isEmpty {
+            shots = "No screenshots were attached; work from the note alone."
+        } else if screenshotPaths.count == 1 {
+            shots = "A screenshot is attached at: \(screenshotPaths[0]) — read it first with your image tools."
+        } else {
+            let list = screenshotPaths.map { "  - \($0)" }.joined(separator: "\n")
+            shots = "\(screenshotPaths.count) screenshots are attached — read each with your image tools:\n\(list)"
+        }
+        return """
+        You are an autonomous quick-dispatch agent launched from the agents menu-bar \
+        screenshot panel. Do not ask questions — make your best call and act.
+
+        User request: \(note)
+        \(shots)
+
+        Steps:
+        1. If screenshots are attached, inspect them to understand the visible problem.
+        2. Run `agents sessions --all --limit 20` and skim the recent local sessions to \
+        identify the most likely repository / project for this request.
+        3. Work in the correct repo, follow its AGENTS.md instructions, and implement the \
+        smallest fix that satisfies the request.
+        4. Verify with the focused tests or real flow that proves the user-visible outcome.
+        5. Commit, open a PR when the repo workflow requires it, and print the final proof \
+        URL or local verification evidence.
+        """
+    }
+
     // Dispatch the ticket agent for a captured note (+ optional screenshot). This
     // is the SINGLE isolation point: swapping to a cloud pod later (uploading the
     // screenshot, serializing session context) changes only this function. The
@@ -247,9 +276,9 @@ enum AgentsCLI {
     // destructive ops still gate. It runs as a MONITORED async process (not fully
     // detached) so its `Created RUSH-###` line drives a real completion
     // notification without blocking the panel/UI.
-    static func dispatchTicketAgent(note: String, screenshotPaths: [String]) {
+    static func dispatchTicketAgent(note: String, screenshotPaths: [String], agent: String? = nil) {
         let prompt = ticketAgentPrompt(note: note, screenshotPaths: screenshotPaths)
-        let agent = env["AGENTS_ISSUE_AGENT"] ?? "claude"
+        let agent = agent ?? env["AGENTS_ISSUE_AGENT"] ?? "claude"
         Notifier.post(title: "Filing ticket…", body: shortenForNotice(note))
         runMonitored(argv(["run", agent, prompt, "--mode", "auto"])) { output, ok in
             guard ok, let id = parseCreatedTicketID(output) else {
@@ -265,6 +294,21 @@ enum AgentsCLI {
                                  createdAt: ISO8601DateFormatter().string(from: Date()))
             // Attach the ticket URL so the notification is clickable → opens it.
             Notifier.post(title: "Created \(id)", body: shortenForNotice(note), url: url)
+        }
+    }
+
+    static func dispatchQuickFix(note: String, screenshotPaths: [String], agents: [String]) {
+        let selected = agents.isEmpty ? ["claude"] : agents
+        let prompt = quickFixPrompt(note: note, screenshotPaths: screenshotPaths)
+        Notifier.post(title: "Dispatching \(selected.count) agent\(selected.count == 1 ? "" : "s")…",
+                      body: shortenForNotice(note))
+        for agent in selected {
+            let name = quickDispatchName(agent: agent)
+            runMonitored(argv(quickFixRunArgs(agent: agent, prompt: prompt, name: name))) { _, ok in
+                let label = LocalState.agentLabel(agent)
+                Notifier.post(title: ok ? "\(label) finished" : "\(label) failed",
+                              body: shortenForNotice(note))
+            }
         }
     }
 
@@ -297,6 +341,16 @@ enum AgentsCLI {
     private static func shortenForNotice(_ s: String) -> String {
         let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.count > 80 ? String(t.prefix(79)) + "…" : t
+    }
+
+    static func quickDispatchName(agent: String, date: Date = Date()) -> String {
+        let stamp = Int(date.timeIntervalSince1970)
+        let clean = LocalState.normalizeAgent(agent).replacingOccurrences(of: "[^a-z0-9-]", with: "-", options: .regularExpression)
+        return "quick-\(clean)-\(stamp)"
+    }
+
+    static func quickFixRunArgs(agent: String, prompt: String, name: String) -> [String] {
+        ["run", agent, prompt, "--mode", "auto", "--name", name]
     }
 
     // MARK: Process helpers

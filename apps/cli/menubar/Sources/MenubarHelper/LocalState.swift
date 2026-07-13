@@ -56,6 +56,20 @@ enum LocalState {
         desiredAgents.map(\.id)
     }
 
+    static func quickDispatchRoster(env: [String: String] = ProcessInfo.processInfo.environment) -> [MenuAgent] {
+        let configured = env["AGENTS_QUICK_DISPATCH_ROSTER"]?
+            .split(separator: ",")
+            .map { normalizeAgent(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) } ?? []
+        if configured.isEmpty { return desiredAgents }
+
+        var seen = Set<String>()
+        let filtered = configured.compactMap { id -> MenuAgent? in
+            guard seen.insert(id).inserted else { return nil }
+            return desiredAgents.first { $0.id == id }
+        }
+        return filtered.isEmpty ? desiredAgents : filtered
+    }
+
     static func agentLabel(_ id: String) -> String {
         desiredAgents.first { $0.id == normalizeAgent(id) }?.label ?? id
     }
