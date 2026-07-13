@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **PR outcome keys include repository identity (RUSH-1630).** Full GitHub pull URLs normalize to `owner/repo#N` so two repos' PR #10 no longer collide under `pr:#10`. Source: `apps/cli/src/lib/feed-outcome.ts`.
+
 - **Urgent OpenClaw notifications use `--target` and `--message` (RUSH-1620).** `openclaw message send` requires a destination and the `--message` flag (not `--text`); without `--target` the send was invalid. Source: `apps/cli/src/lib/notify.ts`.
 - **High-consequence answers require env-proven operator identity (RUSH-1619).** `agents message --as <id>` alone is not verification; `AGENTS_OPERATOR_ID` must match the claimed id (and the id must be in `operators.yaml`). Source: `apps/cli/src/lib/operator.ts`, `apps/cli/src/commands/message.ts`.
 - **OpenCode plugin install only writes loader-visible direct `.ts`/`.js` files (RUSH-1617).** Drop nested and `.mjs`/`.cjs` installs that OpenCode never scans; multi-module plugins flatten into `~/.config/opencode/plugins/`. Source: `apps/cli/src/lib/plugins.ts`.
