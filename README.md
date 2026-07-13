@@ -643,9 +643,12 @@ agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
 
-# Routines sync to every device; pin one to a single machine with --device
+# Routines sync to every device; restrict to an allowlist with --devices
 agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
-  --device yosemite-s0 --prompt "Drain the work queue"
+  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+
+agents routines devices nightly-drain --set yosemite-s0,mac-mini  # update allowlist
+agents routines list --host yosemite-s0                            # query another device
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
@@ -898,6 +901,8 @@ For full transparency: `agents-cli` keeps a local event log at `~/.agents/.cache
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
 **macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+
+Interactive tmux-backed runs require tmux 3.2 or newer.
 
 ### Do I need Node.js?
 

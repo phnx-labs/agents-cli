@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 1.20.56
+
+### Fixed
+
+- **Installed native CLIs supervise daemons through their physical executable.**
+  Bun standalone binaries expose an embedded `/$bunfs/root/agents` entry at
+  `process.argv[1]` and report that virtual entry as existing. Daemon service
+  manifests now resolve that case through the physical on-disk `process.execPath`,
+  so `agents routines start` works from the published macOS standalone binary
+  while the virtual-path safety guard remains enforced.
+
+- **Standalone self-spawns use the physical CLI binary.** `agents teams`,
+  `agents message`, and `agents profiles check` no longer pass Bun's virtual
+  entry back as a subcommand, restoring those flows for signed native installs.
+
+## 1.20.55
+
 ### Added
 
 - **Heartbeat watchdog** — the daemon writes a heartbeat (timestamp + pid) every

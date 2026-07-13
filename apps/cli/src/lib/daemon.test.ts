@@ -22,6 +22,7 @@ import {
   readDaemonClaudeOAuthToken,
   buildDetachedDaemonEnv,
   getDaemonLaunch,
+  getAgentsInvocation,
   getAgentsBinPath,
   startDetached,
   writeOwnerOnlyServiceManifest,
@@ -263,6 +264,33 @@ describe('getDaemonLaunch', () => {
   });
 });
 
+describe('getAgentsInvocation', () => {
+  // Regression for the #315 compiled-binary self-spawn bug: teams/message/profiles
+  // used to relaunch as `[process.execPath, process.argv[1], …]`. Under the bun
+  // standalone binary process.argv[1] is the virtual entry `/$bunfs/root/agents`,
+  // so the child became `agents /$bunfs/root/agents …` → "unknown command".
+  it('launches a .js entry through the Node runtime', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/opt/agents/dist/index.js');
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual(['/opt/agents/dist/index.js', 'run', 'claude']);
+  });
+
+  it('runs a native/compiled binary directly — never re-passes a bunfs entry', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/Users/me/.local/bin/agents');
+    expect(command).toBe('/Users/me/.local/bin/agents');
+    expect(args).toEqual(['run', 'claude']);
+    // The compiled binary is the entry; its own bunfs path must not appear as an arg.
+    expect(args.some((a) => a.includes('$bunfs'))).toBe(false);
+  });
+
+  it('resolves a bun virtual entry to the real binary (process.execPath), not the un-exec-able $bunfs path', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/$bunfs/root/agents');
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual(['run', 'claude']);
+    expect(command.includes('$bunfs')).toBe(false);
+  });
+});
+
 describe('getAgentsBinPath (sibling shim resolution)', () => {
   let savedArgv1: string | undefined;
 
@@ -306,6 +334,21 @@ describe('getAgentsBinPath (sibling shim resolution)', () => {
     process.argv[1] = agentsBin;
     expect(getAgentsBinPath()).toBe(agentsBin);
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('resolves a Bun standalone virtual entry to its physical executable', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-bun-standalone-'));
+    const physicalBin = path.join(tmpDir, process.platform === 'win32' ? 'agents.exe' : 'agents');
+    fs.writeFileSync(physicalBin, '');
+    expect(getAgentsBinPath('/$bunfs/root/agents', physicalBin)).toBe(physicalBin);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses a Bun standalone virtual entry without a physical executable', () => {
+    const missingBin = path.join(os.tmpdir(), `agents-missing-${process.pid}`);
+    expect(() => getAgentsBinPath('/$bunfs/root/agents', missingBin)).toThrow(
+      `Cannot resolve agents CLI: Bun standalone executable not found at ${missingBin}`,
+    );
   });
 
   it('refuses a sibling shim when its main entry is missing', () => {

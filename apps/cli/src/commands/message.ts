@@ -24,6 +24,7 @@ import { getActiveSessions, type ActiveSession } from '../lib/session/active.js'
 import { getTaskById, updateTaskStatus } from '../lib/cloud/store.js';
 import { resolveProvider } from '../lib/cloud/registry.js';
 import { mailboxDir, enqueue } from '../lib/mailbox.js';
+import { getAgentsInvocation } from '../lib/daemon.js';
 import { resolveMessageTarget, mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import {
   blockIdForSession,
@@ -136,11 +137,12 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
     die(`Internal error: resume route incomplete for ${mailboxId}.`);
   }
   const argv = resumeArgv(route);
-  // Spawn the same agents binary the user invoked (process.argv[1]) so version
-  // pins and wrappers stay consistent. Detach so the resume can take over a TTY
-  // when interactive; for feed answers we pass the prompt non-interactively.
-  const bin = process.argv[1] ?? 'agents';
-  const child = spawn(process.execPath, [bin, ...argv], {
+  // Relaunch the same agents CLI (via getAgentsInvocation, which resolves the
+  // real binary — not a bun /$bunfs virtual path under the compiled build) so
+  // version pins and wrappers stay consistent. Detach so the resume can take
+  // over a TTY when interactive; for feed answers we pass it non-interactively.
+  const inv = getAgentsInvocation(argv);
+  const child = spawn(inv.command, inv.args, {
     stdio: 'inherit',
     env: process.env,
   });

@@ -1,10 +1,13 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'url';
 
-import { migrateExtrasExtrasToAgentsExtras, repairSelfReferentialBinShims } from './migrate.js';
+import { migrateExtrasExtrasToAgentsExtras, migrateRoutineDeviceToDevices, repairSelfReferentialBinShims } from './migrate.js';
 import { toPosix } from './platform/index.js';
+import * as yaml from 'yaml';
 
 const tempDirs: string[] = [];
 
@@ -20,6 +23,8 @@ afterEach(() => {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 });
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function seedVersionHome(historyDir: string, agentId: string, ver: string): {
   pluginsDir: string;
@@ -283,5 +288,313 @@ describe('repairSelfReferentialBinShims', () => {
 
     // Untouched: still the same symlink target.
     expect(fs.readlinkSync(binLink)).toBe(realBin);
+  });
+});
+
+describe('migrateRoutineDeviceToDevices', () => {
+  function makeRoutinesDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-dev-'));
+    tempDirs.push(dir);
+    return dir;
+  }
+
+  it('rewrites device: value to devices: [value]', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'a.yml'), yaml.stringify({
+      name: 'a', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'yosemite-s0',
+    }));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'a.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['yosemite-s0']);
+    expect(result.device).toBeUndefined();
+  });
+
+  it('is idempotent — no change on re-run', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'b.yml'), yaml.stringify({
+      name: 'b', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'mac-mini',
+    }));
+    migrateRoutineDeviceToDevices(dir);
+    const after1 = fs.readFileSync(path.join(dir, 'b.yml'), 'utf-8');
+    migrateRoutineDeviceToDevices(dir);
+    const after2 = fs.readFileSync(path.join(dir, 'b.yml'), 'utf-8');
+    expect(after1).toBe(after2);
+  });
+
+  it('leaves a routine that already has devices untouched', () => {
+    const dir = makeRoutinesDir();
+    const original = { name: 'c', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', devices: ['a', 'b'] };
+    fs.writeFileSync(path.join(dir, 'c.yml'), yaml.stringify(original));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'c.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['a', 'b']);
+    expect(result.device).toBeUndefined();
+  });
+
+  it('drops device when devices already present (both-field collision)', () => {
+    const dir = makeRoutinesDir();
+    const original = { name: 'd', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'old', devices: ['new'] };
+    fs.writeFileSync(path.join(dir, 'd.yml'), yaml.stringify(original));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'd.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['new']);
+    expect(result.device).toBeUndefined();
+  });
+
+  it('preserves other YAML fields', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'e.yml'), yaml.stringify({
+      name: 'e', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion', timeout: '2h', enabled: false,
+    }));
+    migrateRoutineDeviceToDevices(dir);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'e.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['zion']);
+    expect(result.timeout).toBe('2h');
+    expect(result.enabled).toBe(false);
+    expect(result.agent).toBe('claude');
+  });
+
+  it('is a no-op for routines without device field', () => {
+    const dir = makeRoutinesDir();
+    const raw = yaml.stringify({ name: 'f', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi' });
+    fs.writeFileSync(path.join(dir, 'f.yml'), raw);
+    migrateRoutineDeviceToDevices(dir);
+    expect(fs.readFileSync(path.join(dir, 'f.yml'), 'utf-8')).toBe(raw);
+  });
+
+  it('propagates a write failure (POSIX)', () => {
+    // Windows read-only directory semantics do not reliably block writes, so
+    // this test is scoped to POSIX platforms where chmod(0o555) is effective.
+    if (process.platform === 'win32') {
+      return;
+    }
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'g.yml'), yaml.stringify({
+      name: 'g', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion',
+    }));
+    // Make the directory read-only so the atomic write (temp file + rename) fails.
+    fs.chmodSync(dir, 0o555);
+    try {
+      expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
+    } finally {
+      fs.chmodSync(dir, 0o755);
+    }
+  });
+
+  it('throws on malformed legacy device value (not a nonempty string)', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'h.yml'), yaml.stringify({
+      name: 'h', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: '',
+    }));
+    expect(() => migrateRoutineDeviceToDevices(dir)).toThrow(/not a valid device name/);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'h.yml'), 'utf-8'));
+    expect(result.device).toBe('');
+  });
+
+  it('throws on non-string legacy device value (number)', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'i.yml'), yaml.stringify({
+      name: 'i', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 42,
+    }));
+    expect(() => migrateRoutineDeviceToDevices(dir)).toThrow(/not a valid device name/);
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'i.yml'), 'utf-8'));
+    expect(result.device).toBe(42);
+  });
+
+  it('propagates a read error for a directory masquerading as a YAML file', () => {
+    const dir = makeRoutinesDir();
+    // A directory named with a .yml suffix causes fs.readFileSync to throw
+    // (EISDIR / EACCES) on every platform — no permission-dependent chmod needed.
+    fs.mkdirSync(path.join(dir, 'j.yml'), { recursive: true });
+    expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
+  });
+
+  it('successful migration rewrites device to devices atomically with no temp files left behind', () => {
+    const dir = makeRoutinesDir();
+    fs.writeFileSync(path.join(dir, 'k.yml'), yaml.stringify({
+      name: 'k', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion',
+    }));
+
+    migrateRoutineDeviceToDevices(dir);
+
+    const result = yaml.parse(fs.readFileSync(path.join(dir, 'k.yml'), 'utf-8'));
+    expect(result.devices).toEqual(['zion']);
+    expect(result.device).toBeUndefined();
+    const leftovers = fs.readdirSync(dir).filter((f) => f.includes('.tmp-'));
+    expect(leftovers).toEqual([]);
+  });
+});
+
+describe('v12 device migration CLI startup failure (POSIX)', () => {
+  function makeLegacyHome(schedule: string): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-startup-'));
+    tempDirs.push(home);
+    const agentsDir = path.join(home, '.agents');
+    const routinesDir = path.join(agentsDir, 'routines');
+    fs.mkdirSync(routinesDir, { recursive: true });
+    fs.writeFileSync(path.join(agentsDir, 'agents.yaml'), 'agents: {}\n');
+    fs.mkdirSync(path.join(agentsDir, '.system', '.git'), { recursive: true });
+    fs.writeFileSync(
+      path.join(routinesDir, 'legacy.yaml'),
+      yaml.stringify({ name: 'legacy', schedule, agent: 'claude', prompt: 'noop', device: 'yosemite-s0' }),
+    );
+    return home;
+  }
+
+  function run(home: string, args: string[], extraEnv: Record<string, string> = {}): ReturnType<typeof spawnSync> {
+    return spawnSync('node', ['--import', 'tsx', 'src/index.ts', 'routines', ...args], {
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        ...extraEnv,
+      },
+      encoding: 'utf-8',
+      timeout: 30_000,
+    });
+  }
+
+  it('fails closed: a stale routine with a legacy device key is absent/inert, never unrestricted', () => {
+    if (process.platform === 'win32') {
+      // Windows read-only directory semantics do not reliably block writes.
+      return;
+    }
+    const home = makeLegacyHome('0 3 * * *');
+    const routinesDir = path.join(home, '.agents', 'routines');
+    fs.chmodSync(routinesDir, 0o555);
+    try {
+      const res = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
+      // The stale routine must not surface as an unrestricted job. The safe
+      // fail-closed outcome is absence/inertness, not a process exit code.
+      const parsed = res.status === 0 ? JSON.parse(res.stdout.trim()) : [];
+      const found = parsed.find((j: Record<string, unknown>) => j.name === 'legacy');
+      expect(found).toBeUndefined();
+      expect(res.stdout + res.stderr).not.toContain('legacy');
+    } finally {
+      fs.chmodSync(routinesDir, 0o755);
+    }
+  });
+});
+
+describe('v12 device migration daemon _run failure (POSIX)', () => {
+  function makeLegacyHome(): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-migrate-daemon-'));
+    tempDirs.push(home);
+    const agentsDir = path.join(home, '.agents');
+    const routinesDir = path.join(agentsDir, 'routines');
+    fs.mkdirSync(routinesDir, { recursive: true });
+    fs.writeFileSync(path.join(agentsDir, 'agents.yaml'), 'agents: {}\n');
+    fs.mkdirSync(path.join(agentsDir, '.system', '.git'), { recursive: true });
+    fs.writeFileSync(
+      path.join(routinesDir, 'legacy.yaml'),
+      yaml.stringify({ name: 'legacy', schedule: '* * * * * *', agent: 'claude', prompt: 'noop', device: 'yosemite-s0' }),
+    );
+    return home;
+  }
+
+  function readDaemonPid(home: string): number | null {
+    const pidPath = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+    if (!fs.existsSync(pidPath)) return null;
+    const raw = fs.readFileSync(pidPath, 'utf-8').trim();
+    const pid = parseInt(raw, 10);
+    return isNaN(pid) ? null : pid;
+  }
+
+  function startDaemon(home: string): { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> } {
+    const child = spawn('node', ['--import', 'tsx', 'src/index.ts', 'daemon', '_run'], {
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+      },
+      detached: true,
+      stdio: 'ignore',
+    });
+
+    const pidPromise = new Promise<number | null>((resolve) => {
+      const deadline = Date.now() + 15_000;
+      const interval = setInterval(() => {
+        const pid = readDaemonPid(home);
+        if (pid) {
+          clearInterval(interval);
+          resolve(pid);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          clearInterval(interval);
+          resolve(null);
+        }
+      }, 50);
+    });
+
+    return { child, pidPromise };
+  }
+
+  function isProcessAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function stopDaemon(child: ReturnType<typeof spawn>): Promise<void> {
+    if (!child.pid) return;
+    const closePromise = new Promise<void>((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+      child.on('close', () => resolve());
+    });
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+    }
+    const timer = setTimeout(() => {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
+    }, 3_000);
+    await closePromise;
+    clearTimeout(timer);
+  }
+
+  it('creates no run directory when migration cannot write the legacy fixture', async () => {
+    if (process.platform === 'win32') {
+      // chmod(0o555) is not a reliable write barrier on Windows.
+      return;
+    }
+    const home = makeLegacyHome();
+    const routinesDir = path.join(home, '.agents', 'routines');
+    fs.chmodSync(routinesDir, 0o555);
+
+    let daemon: ReturnType<typeof startDaemon> | undefined;
+    let pid: number | null = null;
+    try {
+      daemon = startDaemon(home);
+      pid = await daemon.pidPromise;
+      expect(pid).not.toBeNull();
+      expect(isProcessAlive(pid!)).toBe(true);
+
+      // Wait long enough for an every-second schedule to fire if the stale job
+      // were mistakenly loaded as unrestricted.
+      await new Promise((resolve) => { setTimeout(resolve, 2_500); });
+
+      const runsDir = path.join(home, '.agents', '.history', 'runs');
+      // The top-level runs bucket is created by daemon startup; the critical
+      // failure mode is a job-specific run directory for the stale routine.
+      const jobRunDirs = fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : [];
+      expect(jobRunDirs).not.toContain('legacy');
+    } finally {
+      fs.chmodSync(routinesDir, 0o755);
+      if (daemon) await stopDaemon(daemon.child);
+      if (pid !== null) {
+        expect(isProcessAlive(pid)).toBe(false);
+      }
+    }
   });
 });

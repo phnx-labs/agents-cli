@@ -13,6 +13,7 @@ import * as yaml from 'yaml';
 import { Cron } from 'croner';
 import { getRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
 import { safeJoin } from './paths.js';
+import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import type { LoopConfig } from './loop.js';
@@ -96,14 +97,13 @@ export interface JobConfig {
   timezone?: string;
   repo?: string;
   /**
-   * Pin this routine to one machine. `~/.agents/routines/` is synced to every
-   * device via the user repo, so without a pin an enabled routine fires on
-   * EVERY machine running the scheduler. When set, only the device whose
-   * `machineId()` matches (normalized hostname, e.g. `yosemite-s0`) schedules,
-   * fires, catches up, or counts this job as overdue; everywhere else it is
-   * inert and `run` refuses with an `agents ssh` pointer.
+   * Fleet allowlist — restrict this routine to specific devices. When omitted
+   * or empty, the routine is unrestricted and fires on every device running the
+   * scheduler. When set, only devices whose `machineId()` matches any entry
+   * (via `normalizeHost`) schedule, fire, catch up, or count this job as
+   * overdue; everywhere else it is inert and `run` refuses with a pointer.
    */
-  device?: string;
+  devices?: string[];
   variables?: Record<string, string>;
   sandbox?: boolean;
   allow?: JobAllowConfig;
@@ -132,14 +132,46 @@ export interface RunMeta {
 }
 
 /**
- * True when the job may execute on this machine: no `device` pin, or the pin
- * names this device. Both sides go through `normalizeHost` so `Yosemite-S0`,
- * `yosemite-s0.tailnet.ts.net`, and `yosemite-s0` all agree. Every fire path
- * (cron scheduler, webhook, catchup/overdue, manual run) gates on this.
+ * True when the job may execute on this machine: no `devices` allowlist (or
+ * empty), or the allowlist includes this device. Both sides go through
+ * `normalizeHost` so `Yosemite-S0`, `yosemite-s0.tailnet.ts.net`, and
+ * `yosemite-s0` all agree. Every fire path (cron scheduler, webhook,
+ * catchup/overdue, manual run) gates on this.
  */
-export function jobRunsOnThisDevice(config: Pick<JobConfig, 'device'>): boolean {
-  if (!config.device) return true;
-  return normalizeHost(config.device) === machineId();
+export function jobRunsOnThisDevice(config: Pick<JobConfig, 'devices'>): boolean {
+  if (!config.devices || config.devices.length === 0) return true;
+  const self = machineId();
+  return config.devices.some((d) => normalizeHost(d) === self);
+}
+
+/** Human presentation of a device-affinity mismatch for commands and runner. */
+export interface JobEligibilityResult {
+  /** Full human message, e.g. "Job 'NAME' can only run on: a, b". */
+  message: string;
+  /** One-line copy-paste suggestion, e.g. "agents routines run NAME --host a". */
+  suggestion: string;
+  /** Comma-separated allowed devices label, e.g. "a, b". */
+  allowedLabel: string;
+  /** First allowed device (normalized), useful for the suggested host. */
+  firstHost: string;
+}
+
+/**
+ * Return null when the job may run here; otherwise return a structured,
+ * human-friendly eligibility failure. Centralizes the message/suggestion
+ * construction so manual run, executeJob, and executeJobDetached stay in
+ * sync. Scheduler/webhook/overdue paths continue to use jobRunsOnThisDevice.
+ */
+export function checkJobDeviceEligibility(
+  config: Pick<JobConfig, 'name' | 'devices'>,
+): JobEligibilityResult | null {
+  if (jobRunsOnThisDevice(config)) return null;
+  const allowed = (config.devices ?? []).map((d) => normalizeHost(d));
+  const allowedLabel = allowed.join(', ');
+  const firstHost = allowed[0] ?? 'HOST';
+  const message = `Job '${config.name}' can only run on: ${allowedLabel}`;
+  const suggestion = `agents routines run ${config.name} --host ${firstHost}`;
+  return { message, suggestion, allowedLabel, firstHost };
 }
 
 /** Default values applied to every job config when fields are omitted. */
@@ -213,6 +245,11 @@ function readJobFile(filePath: string): JobConfig | null {
     const parsed = yaml.parse(content);
     if (!parsed || typeof parsed !== 'object') return null;
 
+    // Fail closed on the legacy singular `device` key. A routine that still
+    // carries it after v12 startup migration is unmigrated state and must be
+    // treated as unavailable/inert rather than unrestricted.
+    if (Object.prototype.hasOwnProperty.call(parsed, 'device')) return null;
+
     return {
       ...JOB_DEFAULTS,
       ...parsed,
@@ -223,11 +260,27 @@ function readJobFile(filePath: string): JobConfig | null {
   }
 }
 
-/** Write a job config to disk, omitting fields that match defaults. */
+/** Write a job config to disk, omitting fields that match defaults.
+ *
+ * Updates the one existing supported extension (.yml or .yaml) atomically.
+ * New routines are written as .yml. If both extensions exist for the same
+ * name, the write fails explicitly so we never choose or drop a sibling.
+ */
 export function writeJob(config: JobConfig): void {
   ensureAgentsDir();
   const jobsDir = getRoutinesDir();
-  const filePath = safeJoin(jobsDir, config.name + '.yml');
+  const ymlPath = safeJoin(jobsDir, config.name + '.yml');
+  const yamlPath = safeJoin(jobsDir, config.name + '.yaml');
+  const ymlExists = fs.existsSync(ymlPath);
+  const yamlExists = fs.existsSync(yamlPath);
+
+  if (ymlExists && yamlExists) {
+    throw new Error(
+      `Routine '${config.name}' has both .yml and .yaml files; resolve the ambiguity before editing.`,
+    );
+  }
+
+  const filePath = ymlExists ? ymlPath : yamlExists ? yamlPath : ymlPath;
 
   const output: Record<string, unknown> = { ...config };
   if (output.mode === 'auto') delete output.mode;
@@ -235,8 +288,10 @@ export function writeJob(config: JobConfig): void {
   if (output.timeout === '10m') delete output.timeout;
   if (output.enabled === true) delete output.enabled;
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
+  const devArr = output.devices as string[] | undefined;
+  if (!devArr || devArr.length === 0) delete output.devices;
 
-  fs.writeFileSync(filePath, yaml.stringify(output), 'utf-8');
+  atomicWriteFileSync(filePath, yaml.stringify(output));
 }
 
 /** Delete a job config file by name. Returns true if the file existed. */
@@ -319,9 +374,19 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push('endAt must be a parseable ISO 8601 / RFC3339 timestamp (e.g., 2026-12-31T23:59:00Z)');
     }
   }
-  if (config.device !== undefined) {
-    if (typeof config.device !== 'string' || config.device.trim() === '') {
-      errors.push('device must be a non-empty device name (as shown by `agents devices`, e.g. yosemite-s0)');
+  if ((config as Record<string, unknown>).device !== undefined) {
+    errors.push('singular "device" key is no longer supported — replace with devices: [<name>] (an array)');
+  }
+  if (config.devices !== undefined) {
+    if (!Array.isArray(config.devices)) {
+      errors.push('devices must be an array of device names (as shown by `agents devices`)');
+    } else {
+      for (const d of config.devices) {
+        if (typeof d !== 'string' || d.trim() === '') {
+          errors.push('each entry in devices must be a non-empty device name');
+          break;
+        }
+      }
     }
   }
 
