@@ -7,7 +7,7 @@
  *   3. A genuinely-new, non-ignored node IS surfaced.
  */
 import { describe, expect, it } from 'vitest';
-import { computePendingDevices, planDeviceReconciliation, selectNodesToUpsert, withDefaultUser } from './sync.js';
+import { computePendingDevices, planDeviceReconciliation, sanitizeLoginUser, selectNodesToUpsert, withDefaultUser } from './sync.js';
 import type { TailscaleNode } from './tailscale.js';
 import type { DeviceInput } from './registry.js';
 
@@ -34,6 +34,24 @@ describe('withDefaultUser', () => {
 
   it('does not overwrite a user already present on the input', () => {
     expect(withDefaultUser({ ...base, user: 'deploy' }, undefined, 'muqsit').user).toBe('deploy');
+  });
+});
+
+describe('sanitizeLoginUser', () => {
+  it('strips a Windows COMPUTER\\user / DOMAIN\\user prefix to the bare ssh account', () => {
+    // Regression: `win-mini\muqsit` failed the charset guard on the `\`, so
+    // Windows boxes pinned no user at all.
+    expect(sanitizeLoginUser('win-mini\\muqsit')).toBe('muqsit');
+    expect(sanitizeLoginUser('CORP\\muqsit')).toBe('muqsit');
+  });
+
+  it('passes a plain POSIX username through unchanged', () => {
+    expect(sanitizeLoginUser('muqsit')).toBe('muqsit');
+  });
+
+  it('rejects an unsafe username (undefined rather than a bad pin)', () => {
+    expect(sanitizeLoginUser('bad user;rm')).toBeUndefined();
+    expect(sanitizeLoginUser(undefined)).toBeUndefined();
   });
 });
 

@@ -45,7 +45,19 @@ export function localLoginUser(): string | undefined {
   } catch {
     u = process.env.USER || process.env.USERNAME || undefined;
   }
-  return u && /^[a-zA-Z0-9._-]+$/.test(u) ? u : undefined;
+  return sanitizeLoginUser(u);
+}
+
+/**
+ * Reduce a raw OS username to a safe ssh account, or undefined. Windows reports
+ * the login as `COMPUTER\user` / `DOMAIN\user`; the ssh account is the bare name
+ * after the backslash — without this strip the `\` fails the charset guard and
+ * Windows boxes never pin a user. Pure, so the platform-specific munging is
+ * unit-tested without reading the real OS user. */
+export function sanitizeLoginUser(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const bare = raw.includes('\\') ? raw.slice(raw.lastIndexOf('\\') + 1) : raw;
+  return /^[a-zA-Z0-9._-]+$/.test(bare) ? bare : undefined;
 }
 
 /**
