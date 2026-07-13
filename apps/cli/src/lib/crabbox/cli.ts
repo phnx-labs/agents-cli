@@ -132,7 +132,7 @@ export interface WarmupOptions extends CrabboxOptions {
  * created even if warmup's stdout format changes — the new lease id is the one
  * that wasn't present before.
  */
-export function crabboxWarmup(opts: WarmupOptions = {}): CrabboxBox {
+export async function crabboxWarmup(opts: WarmupOptions = {}): Promise<CrabboxBox> {
   findCrabbox();
   const env = crabboxEnv(opts);
   const before = new Set(crabboxList(opts).map((b) => b.lease));
@@ -143,7 +143,17 @@ export function crabboxWarmup(opts: WarmupOptions = {}): CrabboxBox {
   if (opts.provider) args.push('--provider', opts.provider);
   if (opts.code) args.push('--code');
 
-  const r = spawnSync('crabbox', args, { encoding: 'utf-8', env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Async spawn (not spawnSync): provisioning takes 30-90s and a blocking call
+  // would freeze any caller's progress spinner. Output is captured, not streamed.
+  const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+    const proc = spawn('crabbox', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (c: Buffer) => (stdout += c.toString('utf-8')));
+    proc.stderr.on('data', (c: Buffer) => (stderr += c.toString('utf-8')));
+    proc.on('error', () => resolve({ status: null, stdout, stderr }));
+    proc.on('close', (code) => resolve({ status: code, stdout, stderr }));
+  });
   if (r.status !== 0) {
     const detail = (r.stderr || r.stdout || '').trim();
     throw new Error(

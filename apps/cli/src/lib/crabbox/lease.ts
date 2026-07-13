@@ -10,6 +10,13 @@
 import type { AgentId } from '../types.js';
 import { crabboxWarmup, crabboxWaitReady, crabboxRunScript, crabboxStop, type CrabboxBox } from './cli.js';
 import { buildCredentialScript, CLAUDE_TOKEN_REMOTE, type DetectedRuntime } from './runtimes.js';
+import { LEASE_AGENT_MARKER } from './progress.js';
+
+/** Phase signal for a lease run, so the command layer can drive a progress UI. */
+export type LeasePhase =
+  | { kind: 'warmup'; backend?: string }
+  | { kind: 'ready'; box: CrabboxBox; elapsedMs: number }
+  | { kind: 'teardown' };
 
 export interface LeaseRunOptions {
   agent: string;
@@ -26,6 +33,8 @@ export interface LeaseRunOptions {
   /** Secrets bundle providing crabbox's provider token. */
   secretsBundle?: string;
   onData?: (s: string) => void;
+  /** Progress phases (warmup → ready → teardown) for a command-layer spinner. */
+  onPhase?: (phase: LeasePhase) => void;
   /** Keep the box after the run instead of stopping it. */
   keep?: boolean;
   /**
@@ -105,6 +114,9 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
     ENSURE_AGENTS_CLI,
     installRuntimes,
     credScript,
+    // Marker on its own line: the command layer shows everything before this as
+    // setup progress and everything after (the agent's output) verbatim.
+    `echo ${q(LEASE_AGENT_MARKER)}`,
     `${runParts.join(' ')}`,
     'rc=$?',
     shred,
@@ -115,13 +127,16 @@ export function buildBootstrapScript(opts: LeaseRunOptions): string {
 }
 
 export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult> {
-  const box = crabboxWarmup({
+  const startedAt = Date.now();
+  opts.onPhase?.({ kind: 'warmup', backend: opts.backend });
+  const box = await crabboxWarmup({
     class: opts.boxClass,
     profile: opts.profile,
     provider: opts.backend,
     secretsBundle: opts.secretsBundle,
   });
   await crabboxWaitReady(box.slug, { secretsBundle: opts.secretsBundle });
+  opts.onPhase?.({ kind: 'ready', box, elapsedMs: Date.now() - startedAt });
 
   const script = buildBootstrapScript(opts);
   let exitCode: number | null = null;
@@ -134,7 +149,10 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   } finally {
     // Always attempt teardown (bounds credential lifetime to the run) unless the
     // caller explicitly asked to keep the box.
-    if (!opts.keep) toreDown = crabboxStop(box.slug, { secretsBundle: opts.secretsBundle });
+    if (!opts.keep) {
+      opts.onPhase?.({ kind: 'teardown' });
+      toreDown = crabboxStop(box.slug, { secretsBundle: opts.secretsBundle });
+    }
   }
   return { box, exitCode, toreDown };
 }

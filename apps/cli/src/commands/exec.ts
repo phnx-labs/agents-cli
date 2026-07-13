@@ -525,9 +525,34 @@ export function registerRunCommand(program: Command): void {
           }
         }
 
+        // Progress UI. A self-throttled spinner (NOT ora — see progress.ts) covers
+        // the otherwise-silent provisioning + box-setup phases; the agent's own
+        // output then prints verbatim. The router splits the crabbox stream at the
+        // box-side marker. Rule: only ONE spinner phase is active at a time, and no
+        // other output is written to stderr while it spins — so it can never storm.
+        const { createLeaseOutputRouter, createSpinner } = await import('../lib/crabbox/progress.js');
+        const agentName = agentSpec.split('@')[0];
+        const spinner = createSpinner({ stream: process.stderr });
+        let warmupTimer: ReturnType<typeof setInterval> | undefined;
+        const stopTimer = () => { if (warmupTimer) { clearInterval(warmupTimer); warmupTimer = undefined; } };
+        const fit = (s: string) => {
+          const w = Math.max(20, (process.stderr.columns || 80) - 24);
+          return s.length > w ? s.slice(0, w - 1) + '…' : s;
+        };
+        const router = createLeaseOutputRouter({
+          // Setup lines only ever update spinner text (no direct stderr writes),
+          // so the spinner stays the single writer during the setup phase.
+          onSetupLine: (line) => spinner.update(`Setting up box — ${fit(line)}`),
+          onAgentChunk: (chunk) => {
+            // First agent byte: stop the setup spinner, THEN stream to stdout.
+            if (spinner.active) spinner.stopAndPersist('✔', chalk.gray(`Box provisioned — ${agentName} output:`));
+            process.stdout.write(chunk);
+          },
+        });
+
         try {
           const { exitCode, box, toreDown } = await leaseAndRun({
-            agent: agentSpec.split('@')[0],
+            agent: agentName,
             prompt,
             mode: options.mode,
             model: options.model,
@@ -537,10 +562,39 @@ export function registerRunCommand(program: Command): void {
             claudeCredentialsJson,
             secretsBundle: process.env.AGENTS_LEASE_SECRETS_BUNDLE,
             keep: options.keepBox,
+            onData: (chunk) => router.push(chunk),
+            onPhase: (phase) => {
+              if (phase.kind === 'warmup') {
+                const label = `Leasing a ${phase.backend ?? 'hetzner'} box`;
+                spinner.start(`${label}…`);
+                const t0 = Date.now();
+                warmupTimer = setInterval(() => spinner.update(`${label}… (${Math.round((Date.now() - t0) / 1000)}s)`), 1000);
+              } else if (phase.kind === 'ready') {
+                stopTimer();
+                spinner.stopAndPersist('✔', `Box ${phase.box.slug} ready${phase.box.ip ? ` (${phase.box.ip})` : ''} · ${Math.round(phase.elapsedMs / 1000)}s`);
+                spinner.start('Setting up box…');
+              } else if (phase.kind === 'teardown') {
+                if (spinner.active) spinner.stop();
+              }
+            },
           });
+          router.end();
+          stopTimer();
+          if (spinner.active) spinner.stop();
+          // Safety net: if setup failed before the agent ever ran, the setup log
+          // was only shown as transient spinner text — surface it so the error is
+          // diagnosable.
+          if (exitCode !== 0 && !router.sawAgent()) {
+            const log = router.setupLines();
+            if (log.length) process.stderr.write(chalk.dim(log.join('\n')) + '\n');
+          }
           console.error(chalk.gray(toreDown ? `Box ${box.slug} destroyed.` : `Box ${box.slug} kept${box.ip ? ` (${box.ip})` : ''}. Stop it: crabbox stop ${box.slug}`));
           process.exit(exitCode === null ? 1 : exitCode);
         } catch (err) {
+          stopTimer();
+          if (spinner.active) spinner.stopAndPersist('✖', chalk.red('Lease failed'));
+          const log = router.setupLines();
+          if (log.length && !router.sawAgent()) process.stderr.write(chalk.dim(log.join('\n')) + '\n');
           console.error(chalk.red((err as Error).message));
           process.exit(1);
         }

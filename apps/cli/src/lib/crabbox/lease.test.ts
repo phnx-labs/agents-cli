@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildBootstrapScript } from './lease.js';
+import { LEASE_AGENT_MARKER } from './progress.js';
 import type { DetectedRuntime } from './runtimes.js';
 
 describe('buildBootstrapScript', () => {
@@ -20,6 +21,16 @@ describe('buildBootstrapScript', () => {
     expect(script).toContain("agents run 'claude' 'print hostname' --quiet");
     expect(script).toContain('rm -f "$HOME/.claude.json"'); // shred
     expect(script).toContain('exit $rc');
+  });
+
+  it('emits the agent-output marker immediately before the run (splits setup from output)', () => {
+    const script = buildBootstrapScript({ agent: 'claude', prompt: 'hi', runtimes: ['claude'], detected });
+    const markerAt = script.indexOf(`echo '${LEASE_AGENT_MARKER}'`);
+    const runAt = script.indexOf("agents run 'claude' 'hi' --quiet");
+    expect(markerAt).toBeGreaterThan(-1);
+    // Marker is emitted after credential setup and directly before the agent run.
+    expect(markerAt).toBeLessThan(runAt);
+    expect(script.slice(markerAt, runAt).trim()).toBe(`echo '${LEASE_AGENT_MARKER}'`);
   });
 
   it('bootstraps node user-level and fails loud when agents-cli is not runnable', () => {
