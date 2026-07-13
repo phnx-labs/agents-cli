@@ -403,14 +403,25 @@ export function parseCodex(filePath: string): SessionEvent[] {
 }
 
 /**
- * Extract the target file path from a Codex apply_patch envelope. The patch body
+ * Extract target file path(s) from a Codex apply_patch envelope. The patch body
  * opens with `*** Begin Patch` and carries one or more file ops of the form
  * `*** Update File: <path>` / `*** Add File: <path>` / `*** Delete File: <path>`.
- * Returns the first file path found, or undefined for an unparseable body.
+ * Returns every path in order (a multi-file patch emits multiple paths so
+ * artifact discovery sees each file — RUSH-1410). Empty when unparseable.
  */
+export function applyPatchTargetPaths(input: string): string[] {
+  const paths: string[] = [];
+  const re = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm;
+  for (const m of input.matchAll(re)) {
+    const p = m[1].trim();
+    if (p) paths.push(p);
+  }
+  return paths;
+}
+
+/** @deprecated Prefer applyPatchTargetPaths — kept for single-file call sites. */
 function applyPatchTargetPath(input: string): string | undefined {
-  const m = input.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/m);
-  return m ? m[1].trim() : undefined;
+  return applyPatchTargetPaths(input)[0];
 }
 
 /**
@@ -545,24 +556,32 @@ export function parseCodexContent(content: string): SessionEvent[] {
         const rawName = payload.name || 'unknown';
         const input = typeof payload.input === 'string' ? payload.input : '';
         const isApplyPatch = rawName === 'apply_patch';
-        const patchPath = isApplyPatch ? applyPatchTargetPath(input) : undefined;
-        // Normalize apply_patch to the shared Edit tool so it flows through
-        // artifact discovery (WRITE_TOOLS) and the Edit summarizer.
+        // Multi-file patches: one tool_use per file so artifact discovery sees
+        // every path (RUSH-1410). Single-file / non-patch keep one event.
+        const patchPaths = isApplyPatch ? applyPatchTargetPaths(input) : [];
         const tool = isApplyPatch ? 'Edit' : rawName;
-        const args: any = { input: input.length > 500 ? input.slice(0, 497) + '...' : input };
-        if (patchPath) args.file_path = patchPath;
+        const truncatedInput = input.length > 500 ? input.slice(0, 497) + '...' : input;
 
-        const callId = payload.call_id || payload.id;
-        if (callId) callMap.set(callId, { name: tool, args });
+        const emitOne = (patchPath: string | undefined) => {
+          const args: any = { input: truncatedInput };
+          if (patchPath) args.file_path = patchPath;
+          const callId = payload.call_id || payload.id;
+          if (callId) callMap.set(callId, { name: tool, args });
+          events.push({
+            type: 'tool_use',
+            agent: 'codex',
+            timestamp,
+            tool,
+            args,
+            path: patchPath,
+          });
+        };
 
-        events.push({
-          type: 'tool_use',
-          agent: 'codex',
-          timestamp,
-          tool,
-          args,
-          path: patchPath,
-        });
+        if (isApplyPatch && patchPaths.length > 0) {
+          for (const p of patchPaths) emitOne(p);
+        } else {
+          emitOne(undefined);
+        }
       } else if (ptype === 'custom_tool_call_output') {
         const callId = payload.call_id || payload.id;
         const callInfo = callId ? callMap.get(callId) : undefined;

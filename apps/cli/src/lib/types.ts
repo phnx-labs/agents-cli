@@ -9,7 +9,7 @@
 import type { CloudProviderId } from './cloud/types.js';
 
 /** Unique identifier for a supported AI coding agent. */
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid';
+export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode' | 'openclaw' | 'copilot' | 'amp' | 'kiro' | 'goose' | 'antigravity' | 'grok' | 'kimi' | 'droid' | 'hermes' | 'forge';
 
 /** How `agents run <agent>` chooses an installed version when none is pinned. */
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
@@ -160,6 +160,12 @@ export interface AgentConfig {
     rules: RulesCapability;
     workflows: Capability;
     /**
+     * Portable knowledge-store memory (`agents memory` / ~/.agents/memory/).
+     * Distinct from `rules` (instructions). When true, sync fans facts into
+     * the agent version home (see memoryTargetDir).
+     */
+    memory: Capability;
+    /**
      * Permission modes this agent natively supports. Modes outside this set
      * are gated by buildExecCommand: `auto` silently degrades to `edit`,
      * `skip` errors with a clear message naming the supported modes.
@@ -186,8 +192,7 @@ export type Capability = boolean | { since?: string; until?: string };
 export type RulesCapability = false | { file: string };
 
 /** Names of every gateable capability on AgentConfig. */
-export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows';
-
+export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory';
 /**
  * Permission modes controlling agent autonomy.
  *   plan  read-only investigation; no writes, no shell side-effects
@@ -487,6 +492,12 @@ export interface SkillEntry {
   tags?: string[];
   /** Registry-specific trust signal (e.g. 'builtin', 'trusted', 'community'). */
   trustLevel?: string;
+  /**
+   * Lowercase hex sha256 of the skill's SKILL.md, as recorded by
+   * `agents publish`. When present, install verifies the cloned SKILL.md
+   * against it and aborts on mismatch.
+   */
+  sha256?: string;
 }
 
 /** Paginated response from a skill registry search endpoint. */
@@ -579,6 +590,8 @@ export interface DiscoveredPlugin {
   commands: string[];
   /** Subagent .md files in the plugin's agents/ directory (names without extension). */
   agentDefs: string[];
+  /** Memory fact basenames from the plugin's memory/ directory (without .md). */
+  memory: string[];
   /** Executable files in the plugin's bin/ directory. */
   bin: string[];
   /** MCP server names parsed from .mcp.json. */
@@ -693,6 +706,12 @@ export interface Meta {
   versions?: Partial<Record<AgentId, Record<string, VersionResources>>>;
   // Git remote source URL (when ~/.agents/.system/ is a git repo)
   source?: string;
+  /**
+   * Projects root for the `agents run --project <slug>` shorthand, e.g.
+   * `~/src/github.com/<user>`. Auto-inferred from the repo you launch inside and
+   * cached here; stored home-relative (`~/…`) so it resolves on remote hosts too.
+   */
+  projectRoot?: string;
   /**
    * Extra DotAgent repos merged after ~/.agents/. Managed clones live as peer
    * dirs at ~/.agents-<alias>/; user-owned repos can point at arbitrary paths

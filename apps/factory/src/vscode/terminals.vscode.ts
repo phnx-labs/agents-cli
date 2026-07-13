@@ -10,8 +10,9 @@ import { fetchGitInfo } from '../monitor/snapshotDetector';
 import { PanelSnapshotPayload, SnapshotWatch } from '../monitor/protocol';
 import { generateTerminalId, resolveRestoredVersion, RunningCounts } from '../core/terminals';
 import * as sessionsPersist from '../core/sessions.persist';
-import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo, SessionPreviewInfo, readTailLines } from './sessions.vscode';
-import { extractCurrentActivity, formatActivity, detectWaitingForInput } from '../core/session.activity';
+import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo, SessionPreviewInfo } from './sessions.vscode';
+import { fetchLocalSessions } from './remoteSessions.vscode';
+import type { RemoteSession } from '../core/remoteSessions';
 import { extractSessionQuickDetails, SessionQuickDetails, SessionQuickSummary, SessionSummaryAgentType } from '../core/session.summary';
 import {
   CLAUDE_TITLE,
@@ -937,13 +938,16 @@ type SessionSummaryCacheEntry = {
 };
 const sessionSummaryCache = new Map<string, SessionSummaryCacheEntry>();
 
-// Read last N lines of a session file for activity extraction. Uses the
-// 64KB-backward-seek util in sessions.vscode.ts — earlier this function read
-// the entire (multi-MB) file just to slice the last 20 lines, on every
-// dashboard tab switch.
-async function readSessionTailLines(filePath: string, maxLines: number = 20): Promise<string> {
-  const lines = await readTailLines(filePath, maxLines);
-  return lines.join('\n');
+// Local CLI payload keyed by sessionId — the single source for live activity and
+// waiting-for-input (issue #741). fetchLocalSessions has its own short-TTL cache,
+// so the five per-agent-type calls of one floor poll share a single subprocess.
+async function localCliSessionsById(): Promise<Map<string, RemoteSession>> {
+  try {
+    const { sessions } = await fetchLocalSessions();
+    return new Map(sessions.filter((s) => s.sessionId).map((s) => [s.sessionId, s]));
+  } catch {
+    return new Map();
+  }
 }
 
 const SESSION_CONTENT_TAIL_BYTES = 256 * 1024;
@@ -1090,7 +1094,12 @@ export async function getTerminalsByAgentType(
   // Resolve all session paths first
   const sessionPaths = await Promise.all(sessionPromises.map(p => p.sessionPath));
 
-  // Now fetch preview info and activity in parallel for each session
+  // Live activity + waiting-for-input come from the CLI's own state engine
+  // (`agents sessions --active --json`, issue #741) — one cached poll for the
+  // whole window instead of a per-terminal transcript-tail parse.
+  const cliBySession = await localCliSessionsById();
+
+  // Now fetch preview info in parallel for each session
   const dataPromises = sessionPromises.map(async (p, i) => {
     const sessionPath = sessionPaths[i];
     debugLog(`[getTerminalsByAgentType] Session ${i}: path=${sessionPath || 'NOT FOUND'}, agentType=${p.agentType}`);
@@ -1098,7 +1107,6 @@ export async function getTerminalsByAgentType(
       index: p.index,
       preview: null,
       activity: null,
-      activityTimestamp: null,
       sessionMtimeTimestamp: null,
       quickDetails: null,
       waitingForInput: false
@@ -1114,35 +1122,26 @@ export async function getTerminalsByAgentType(
       previewPromise = getSessionPreviewInfo(sessionPath);
     }
 
-    // OpenCode and Cursor don't use JSONL tail for activity
-    const needsTail = p.agentType !== 'opencode' && p.agentType !== 'cursor';
     const summaryAgentType = (p.agentType === 'claude' || p.agentType === 'codex' || p.agentType === 'gemini') ? p.agentType : null;
-    const [preview, tail, sessionStat] = await Promise.all([
+    const [preview, sessionStat] = await Promise.all([
       previewPromise,
-      needsTail ? readSessionTailLines(sessionPath, 20) : Promise.resolve(null),
       fs.stat(sessionPath).catch(() => null)
     ]);
 
-    // Activity extraction only works for JSONL agents
-    const activity = (tail && summaryAgentType) ? extractCurrentActivity(tail, summaryAgentType) : null;
     const quickDetails = summaryAgentType
       ? await getSessionQuickDetailsCached(sessionPath, summaryAgentType)
       : null;
-    // Pass the session file's last write so a prose trailing "?" decays after
-    // PROSE_QUESTION_FRESH_MS — a finished session must not read as waiting
-    // forever (RUSH-1522). A structural AskUserQuestion never decays.
-    const waitingForInput = (tail && summaryAgentType && summaryAgentType !== 'gemini')
-      ? detectWaitingForInput(tail, summaryAgentType, sessionStat?.mtime ? { lastWriteMs: sessionStat.mtime.getTime(), nowMs: Date.now() } : undefined)
-      : false;
-
+    // The CLI row is the state engine's verdict: `activity` is the live now-line
+    // (set only while the session is working), `waitingForInput` already carries
+    // the prose-question freshness decay and the structural AskUserQuestion signal.
+    const cli = cliBySession.get(results[p.index].sessionId || '');
     return {
       index: p.index,
       preview,
-      activity: activity ? formatActivity(activity) : null,
-      activityTimestamp: activity?.timestamp ? activity.timestamp.toISOString() : null,
+      activity: cli?.activity || null,
       sessionMtimeTimestamp: sessionStat?.mtime ? sessionStat.mtime.toISOString() : null,
       quickDetails,
-      waitingForInput
+      waitingForInput: cli?.waitingForInput === true
     };
   });
 
@@ -1160,7 +1159,6 @@ export async function getTerminalsByAgentType(
       results[data.index].currentActivity = data.activity;
     }
     const mostRecentTimestamp = pickMostRecentTimestamp(
-      data.activityTimestamp || undefined,
       data.sessionMtimeTimestamp || undefined,
       data.preview?.firstUserMessageTimestamp
     );
@@ -1181,8 +1179,9 @@ export async function getTerminalsByAgentType(
     const currentStatus = results[data.index].approvalStatus;
     const currentActivity = results[data.index].currentActivity;
     if (currentActivity) {
+      // The CLI now-line is set only while the session is actively working.
       results[data.index].approvalStatus = 'running';
-      results[data.index].status = currentActivity.startsWith('Completed') ? 'completed' : 'running';
+      results[data.index].status = 'running';
     } else if (results[data.index].sessionId && currentStatus === 'pending') {
       results[data.index].approvalStatus = 'approved';
       results[data.index].status = 'idle';

@@ -116,7 +116,7 @@ describe('renderPolicyCol', () => {
   it('marks a never bundle distinctly and loudly', () => {
     const never = renderPolicyCol(bundle('never'));
     expect(never).toMatch(/never/);
-    expect(never).toMatch(/NO ACL/i);
+    expect(never).toMatch(/no prompt/i);
     // Distinct from the other tiers — the marking is not shared.
     expect(never).not.toBe(renderPolicyCol(bundle('always')));
     expect(never).not.toBe(renderPolicyCol(bundle('daily')));

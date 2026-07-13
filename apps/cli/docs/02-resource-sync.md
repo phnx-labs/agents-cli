@@ -130,6 +130,10 @@ Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
                                             · key: mcp.<name> (TOML)
                                    Grok    → <home>/.grok/config.toml
                                             · key: mcp_servers.<name> (TOML)
+                                   Hermes  → <home>/.hermes/config.yaml
+                                            · key: mcp_servers.<name> (YAML)
+                                   Forge   → <home>/.forge/.mcp.json
+                                            · key: mcpServers.<name> = {command,args,env}
 ```
 
 Behavior rules, per `src/lib/mcp.ts`:

@@ -30,6 +30,7 @@ import {
   deleteKeychainToken,
 } from '../lib/secrets/profiles.js';
 import { isInteractiveTerminal } from './utils.js';
+import { getAgentsInvocation } from '../lib/daemon.js';
 
 /**
  * Pure helper: builds a Profile from collected wizard inputs. Extracted so the
@@ -327,19 +328,15 @@ Examples:
           console.log(
             chalk.gray(`Spawning: agents run ${name} "say alive in one word" (60s timeout)`),
           );
-          const child = spawn(
-            process.argv[0],
-            [
-              process.argv[1],
-              'run',
-              name,
-              'say alive in one word',
-              '--headless',
-              '--timeout',
-              '60s',
-            ],
-            { stdio: 'inherit' },
-          );
+          const inv = getAgentsInvocation([
+            'run',
+            name,
+            'say alive in one word',
+            '--headless',
+            '--timeout',
+            '60s',
+          ]);
+          const child = spawn(inv.command, inv.args, { stdio: 'inherit' });
           child.on('exit', (code) => process.exit(code ?? 0));
         } else {
           console.log(chalk.gray(`Try later: agents run ${name} "hello"`));

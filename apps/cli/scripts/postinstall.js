@@ -16,8 +16,35 @@ const SHIMS_DIR = path.join(USER_DIR, '.cache', 'shims');
 // System repo lives inside the user repo (folded in v1.21). Legacy installs at
 // ~/.agents-system/ are migrated by src/lib/migrate.ts on first CLI invocation.
 const SYSTEM_DIR = path.join(USER_DIR, '.system');
-const AGENTS_BIN = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const AGENTS_JS_ENTRYPOINT = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+// Signed + notarized standalone Mach-O, macOS only (scripts/sign-cli-binary.sh).
+// Preferred over the node-shebang JS entrypoint on darwin: the unsigned JS shim
+// is what EDR (CrowdStrike Falcon) flags when an editor child spawns it (#315).
+const AGENTS_NATIVE_MACOS_BIN = fileURLToPath(new URL('../dist/bin/agents', import.meta.url));
+const AGENTS_BIN = resolveAgentsBin();
 const INSTALL_HELPER_SCRIPT = fileURLToPath(new URL('./install-helper.js', import.meta.url));
+
+function resolveAgentsBin() {
+  if (process.platform !== 'darwin') return AGENTS_JS_ENTRYPOINT;
+  try {
+    fs.accessSync(AGENTS_NATIVE_MACOS_BIN, fs.constants.X_OK);
+  } catch {
+    return AGENTS_JS_ENTRYPOINT; // no native binary in this install (dev build, arch without one)
+  }
+  // Real execution probe, not just a stat: catches a quarantined, EDR-blocked,
+  // or wrong-arch (Intel) binary at install time, where we can still fall back
+  // loudly, instead of breaking every later `agents` call.
+  const probe = spawnSync(AGENTS_NATIVE_MACOS_BIN, ['--version'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 15000,
+    encoding: 'utf-8',
+  });
+  if (probe.status === 0) return AGENTS_NATIVE_MACOS_BIN;
+  const why = probe.error ? probe.error.message : `exit status ${probe.status}`;
+  console.warn(`  warning: the signed agents binary at ${AGENTS_NATIVE_MACOS_BIN} failed to run (${why}).`);
+  console.warn(`  Falling back to the JS entrypoint; 'agents' still works but is not code-signed.`);
+  return AGENTS_JS_ENTRYPOINT;
+}
 
 function installKeychainHelper() {
   if (process.platform !== 'darwin') return;
@@ -276,6 +303,7 @@ To enable version-aware shims, add this to your shell config:
  */
 async function ensureAgentsResolvablePosix() {
   if (process.env.CI || process.env.AGENTS_NO_HEAL === '1') return;
+  retargetManagedLinksToNativeBin();
   try {
     const { localBinDir, ensureLocalBinSymlink, loginShellResolves, dirOnLoginPath } =
       await import('../dist/lib/platform/posixpath.js');
@@ -311,6 +339,38 @@ async function ensureAgentsResolvablePosix() {
     console.log(`  Restart your shell (or run: source ~/${path.basename(bashRc)}) to pick it up.`);
   } catch {
     /* best-effort: a failure here must never break the install */
+  }
+}
+
+/**
+ * Upgrade path for #315: an earlier install symlinked ~/.local/bin/agents at
+ * the JS entrypoint. ensureLocalBinSymlink never repoints an existing link,
+ * and the loginShellResolves() early-return means ensureAgentsResolvablePosix
+ * would not even try - so without this, a machine healed before the signed
+ * binary existed keeps the unsigned JS shim forever. Repoint ONLY symlinks
+ * that resolve exactly to OUR dist/index.js; a dev build or foreign link is
+ * never touched.
+ */
+function retargetManagedLinksToNativeBin() {
+  if (AGENTS_BIN === AGENTS_JS_ENTRYPOINT) return;
+  const binDir = path.join(HOME, '.local', 'bin');
+  // Compare realpaths: dist/index.js can be reached through path aliases
+  // (/var vs /private/var on macOS) depending on who created the link.
+  let want = AGENTS_JS_ENTRYPOINT;
+  try { want = fs.realpathSync(AGENTS_JS_ENTRYPOINT); } catch { /* keep the literal path */ }
+  for (const name of ['agents', 'ag']) {
+    const linkPath = path.join(binDir, name);
+    try {
+      const current = fs.readlinkSync(linkPath); // throws unless a symlink
+      let resolved = path.isAbsolute(current) ? current : path.resolve(binDir, current);
+      try { resolved = fs.realpathSync(resolved); } catch { /* dangling - compare as-is */ }
+      if (resolved !== want) continue;
+      fs.unlinkSync(linkPath);
+      fs.symlinkSync(AGENTS_BIN, linkPath);
+      console.log(`  Repointed ${linkPath} at the signed agents binary.`);
+    } catch {
+      /* absent, unreadable, or not a symlink - nothing to retarget */
+    }
   }
 }
 

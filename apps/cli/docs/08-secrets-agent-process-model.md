@@ -2,6 +2,16 @@
 
 > Status: **accepted** · Supersedes nothing · Related: [secrets.md](secrets.md), [03-routines.md](03-routines.md)
 
+> **Implementation (#416, step 1 — landed):** the daemon now hosts the broker
+> socket-first. `runDaemon()` calls `startHostedBroker()` before the scheduler
+> and the heavy browser/session-sync services, so `agents secrets` resolves
+> within ms of daemon start; `ensureAgentRunning()` prefers the daemon (Path 0)
+> and falls back to the standalone `com.phnx-labs.agents-secrets-agent` service.
+> The daemon only hosts when no broker is already reachable, so a live standalone
+> broker is never orphaned. **Still to do (step 2 / #417):** retire the standalone
+> launchd service via a gated `launchctl bootout` migration (only when the store
+> is idle, so no Touch ID storm) and spawn the heavy services as bounded children.
+
 A design record for *where the secrets-agent broker should live as a process* —
 its own service, or folded into the routines daemon. Written after a stretch of
 production incidents (stale daemon reading the keychain, broker cold-start

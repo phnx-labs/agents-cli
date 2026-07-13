@@ -9,7 +9,7 @@ describe('supports() capability gate', () => {
     });
 
     it('returns unsupported for capabilities marked false', () => {
-      expect(supports('cursor', 'hooks')).toEqual({ ok: false, reason: 'unsupported' });
+      expect(supports('amp', 'hooks')).toEqual({ ok: false, reason: 'unsupported' });
       expect(supports('amp', 'plugins')).toEqual({ ok: false, reason: 'unsupported' });
     });
 
@@ -71,21 +71,28 @@ describe('supports() capability gate', () => {
   });
 
   describe('unsupported agents skip regardless of version', () => {
-    it('cursor hooks always unsupported', () => {
-      expect(supports('cursor', 'hooks', '999.0.0').ok).toBe(false);
+    it('cursor hooks are supported', () => {
+      expect(supports('cursor', 'hooks').ok).toBe(true);
+      expect(supports('cursor', 'hooks', '999.0.0').ok).toBe(true);
     });
 
-    it('opencode plugins always unsupported (writer not implemented)', () => {
-      expect(supports('opencode', 'plugins', '999.0.0').ok).toBe(false);
+    it('opencode plugins are supported (TS module install path)', () => {
+      expect(supports('opencode', 'plugins').ok).toBe(true);
+    });
+
+    it('amp plugins always unsupported (writer not implemented)', () => {
+      expect(supports('amp', 'plugins', '999.0.0').ok).toBe(false);
     });
   });
 });
 
 describe('mcpHttp / mcpHeaders capability gates', () => {
-  it('mcpHttp: only claude, codex, gemini', () => {
+  it('mcpHttp: supported by HTTP MCP config writers', () => {
     expect(supports('claude', 'mcpHttp').ok).toBe(true);
     expect(supports('codex', 'mcpHttp').ok).toBe(true);
     expect(supports('gemini', 'mcpHttp').ok).toBe(true);
+    expect(supports('hermes', 'mcpHttp').ok).toBe(true);
+    expect(supports('forge', 'mcpHttp').ok).toBe(true);
     expect(supports('cursor', 'mcpHttp').ok).toBe(false);
     expect(supports('opencode', 'mcpHttp').ok).toBe(false);
     expect(supports('openclaw', 'mcpHttp').ok).toBe(false);
@@ -114,10 +121,18 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('grok', 'mcpHeaders').ok).toBe(false);
     expect(supports('kimi', 'mcpHeaders').ok).toBe(false);
     expect(supports('droid', 'mcpHeaders').ok).toBe(false);
+    expect(supports('hermes', 'mcpHeaders').ok).toBe(false);
+    expect(supports('forge', 'mcpHeaders').ok).toBe(false);
   });
 
-  it('capableAgents(mcpHttp) matches the old inline allowlist exactly', () => {
-    expect(capableAgents('mcpHttp').sort()).toEqual(['claude', 'codex', 'gemini']);
+  it('capableAgents(mcpHttp) matches direct HTTP MCP config writers', () => {
+    expect(capableAgents('mcpHttp').sort()).toEqual([
+      'claude',
+      'codex',
+      'forge',
+      'gemini',
+      'hermes',
+    ]);
   });
 
   it('capableAgents(mcpHeaders) matches the old inline claude-only check', () => {
@@ -133,8 +148,8 @@ describe('isCapable()', () => {
   });
 
   it('reports false for explicit false', () => {
-    expect(isCapable('cursor', 'hooks')).toBe(false);
-    expect(isCapable('opencode', 'plugins')).toBe(false);
+    expect(isCapable('amp', 'hooks')).toBe(false);
+    expect(isCapable('amp', 'plugins')).toBe(false);
   });
 
   it('reports false for an unknown agent id instead of throwing (RUSH-1153)', () => {
@@ -156,19 +171,69 @@ describe('capableAgents()', () => {
     expect(agents).toContain('openclaw');
   });
 
-  it('excludes cursor/opencode/copilot/amp for hooks', () => {
+  it('includes copilot for hooks (GA @github/copilot hooks system)', () => {
     const agents = capableAgents('hooks');
-    expect(agents).not.toContain('cursor');
+    expect(agents).toContain('copilot');
+  });
+
+  it('includes kiro for hooks (kiro-cli v3 hooks, since 0.10.0)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('kiro');
+  });
+
+  it('includes goose for hooks (block-goose-cli ≥ 1.34.0 Open Plugins)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('goose');
+  });
+
+  it('includes cursor for hooks (cursor-agent CLI hooks since 2026-01-16)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('cursor');
+  });
+
+  it('excludes opencode/amp for hooks', () => {
+    const agents = capableAgents('hooks');
     expect(agents).not.toContain('opencode');
-    expect(agents).not.toContain('copilot');
     expect(agents).not.toContain('amp');
+  });
+});
+
+describe('goose hooks version gate', () => {
+  it('gates versions below 1.34.0 as too_old', () => {
+    const result = supports('goose', 'hooks', '1.33.0');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 1.34.0');
+    }
+  });
+
+  it('passes 1.34.0 and above', () => {
+    expect(supports('goose', 'hooks', '1.34.0')).toEqual({ ok: true });
+    expect(supports('goose', 'hooks', '1.37.0')).toEqual({ ok: true });
+  });
+});
+
+describe('kiro hooks version gate', () => {
+  it('gates versions below 0.10.0 as too_old', () => {
+    const result = supports('kiro', 'hooks', '0.9.0');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 0.10.0');
+    }
+  });
+
+  it('passes 0.10.0 and above', () => {
+    expect(supports('kiro', 'hooks', '0.10.0')).toEqual({ ok: true });
+    expect(supports('kiro', 'hooks', '2.6.1')).toEqual({ ok: true });
   });
 });
 
 describe('explainSkip()', () => {
   it('formats unsupported message', () => {
-    const r = supports('cursor', 'hooks');
-    expect(explainSkip('cursor', 'hooks', r)).toBe('cursor: hooks not supported');
+    const r = supports('amp', 'hooks');
+    expect(explainSkip('amp', 'hooks', r)).toBe('amp: hooks not supported');
   });
 
   it('formats too_old message with version', () => {

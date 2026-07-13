@@ -15,31 +15,30 @@ import { parseClaudeContent, parseCodexContent, sanitizeEvents } from './parse.j
 const DEFAULT_MAX_BYTES = 128 * 1024;
 const DEFAULT_MAX_EVENTS = 60;
 
-/**
- * Read the last `maxBytes` of a JSONL transcript and return its last
- * `maxEvents` normalized events. A tail that begins mid-line yields one
- * malformed leading line, which the per-line JSON try/catch in the content
- * parsers skips. Only Claude and Codex are supported (the prioritized harnesses
- * for live state); other agents return `[]`.
- */
-export function readSessionTail(
-  filePath: string,
-  agent: SessionAgentId,
-  maxBytes = DEFAULT_MAX_BYTES,
-  maxEvents = DEFAULT_MAX_EVENTS,
-): SessionEvent[] {
-  if (agent !== 'claude' && agent !== 'codex') return [];
+/** A tail read: the last few normalized events plus the raw text they came from. */
+export interface SessionTail {
+  events: SessionEvent[];
+  /** The raw JSONL chunk (leading partial line dropped), for content-level math. */
+  content: string;
+}
 
+/**
+ * Read the last `maxBytes` of a JSONL transcript as cleaned text. A tail that
+ * begins mid-file yields one malformed leading line, which is dropped here so
+ * downstream per-line parsers only see whole lines. Returns '' on any error or
+ * empty file.
+ */
+export function readSessionTailContent(filePath: string, maxBytes = DEFAULT_MAX_BYTES): string {
   let fd: number;
   try {
     fd = fs.openSync(filePath, 'r');
   } catch {
-    return [];
+    return '';
   }
 
   try {
     const size = fs.fstatSync(fd).size;
-    if (size === 0) return [];
+    if (size === 0) return '';
     const start = Math.max(0, size - maxBytes);
     const len = size - start;
     const buf = Buffer.alloc(len);
@@ -51,14 +50,47 @@ export function readSessionTail(
       const nl = content.indexOf('\n');
       content = nl >= 0 ? content.slice(nl + 1) : '';
     }
-    if (!content.trim()) return [];
-
-    const events = agent === 'codex' ? parseCodexContent(content) : parseClaudeContent(content);
-    sanitizeEvents(events);
-    return events.length > maxEvents ? events.slice(-maxEvents) : events;
+    return content;
   } catch {
-    return [];
+    return '';
   } finally {
     fs.closeSync(fd);
   }
+}
+
+/**
+ * Read the last `maxBytes` of a JSONL transcript and return its last
+ * `maxEvents` normalized events *and* the raw text they were parsed from — the
+ * raw text feeds content-level readouts (e.g. token throughput) that need the
+ * lines the event model discards (Codex `token_count`). Only Claude and Codex
+ * are supported (the prioritized harnesses for live state); other agents return
+ * an empty tail.
+ */
+export function readSessionTailWithRaw(
+  filePath: string,
+  agent: SessionAgentId,
+  maxBytes = DEFAULT_MAX_BYTES,
+  maxEvents = DEFAULT_MAX_EVENTS,
+): SessionTail {
+  if (agent !== 'claude' && agent !== 'codex') return { events: [], content: '' };
+
+  const content = readSessionTailContent(filePath, maxBytes);
+  if (!content.trim()) return { events: [], content: '' };
+
+  const events = agent === 'codex' ? parseCodexContent(content) : parseClaudeContent(content);
+  sanitizeEvents(events);
+  return { events: events.length > maxEvents ? events.slice(-maxEvents) : events, content };
+}
+
+/**
+ * Read the last `maxEvents` normalized events from a JSONL transcript tail. Thin
+ * wrapper over {@link readSessionTailWithRaw} for callers that only need events.
+ */
+export function readSessionTail(
+  filePath: string,
+  agent: SessionAgentId,
+  maxBytes = DEFAULT_MAX_BYTES,
+  maxEvents = DEFAULT_MAX_EVENTS,
+): SessionEvent[] {
+  return readSessionTailWithRaw(filePath, agent, maxBytes, maxEvents).events;
 }

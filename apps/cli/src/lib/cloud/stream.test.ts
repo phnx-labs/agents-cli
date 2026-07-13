@@ -231,6 +231,21 @@ describe('renderStream', () => {
     expect(result.status).toBe('completed');
   });
 
+  it('renders idle status and returns it as the last status', async () => {
+    const stderr: string[] = [];
+    vi.spyOn(process.stderr, 'write').mockImplementation((s) => {
+      stderr.push(String(s));
+      return true;
+    });
+
+    const result = await renderStream(makeStream([
+      { type: 'status', status: 'idle' },
+    ]));
+
+    expect(result.status).toBe('idle');
+    expect(stderr.join('')).toContain('[idle]');
+  });
+
   it('emits JSON lines when json option is set', async () => {
     const lines: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation((s) => {

@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import {
   decodeJwtEmail,
   readCodexMeta,
   scanAgentsBounded,
+  getSessionRoots,
   DOTFILE_SCAN_CONCURRENCY,
   __codexAccountResolveCountForTest,
   __resetCodexAccountCacheForTest,
@@ -89,5 +91,38 @@ describe('scanAgentsBounded (mitigation 3 — no simultaneous multi-dotfile burs
     expect(DOTFILE_SCAN_CONCURRENCY).toBeGreaterThanOrEqual(1);
     expect(DOTFILE_SCAN_CONCURRENCY).toBeLessThan(agents.length); // genuinely bounded, not "all at once"
     expect(maxInFlight).toBeLessThanOrEqual(DOTFILE_SCAN_CONCURRENCY);
+  });
+});
+
+describe('getSessionRoots (the `agents sessions --roots --json` payload, issue #741)', () => {
+  const KNOWN_AGENTS = new Set(['claude', 'codex', 'gemini', 'antigravity', 'droid', 'kimi']);
+  // The subdir each agent's roots must end with — the discovery contract external
+  // watchers depend on. A drift here (e.g. gemini → 'sessions' instead of 'tmp')
+  // would silently point the extension's fs.watch at the wrong directory.
+  const EXPECTED_SUBDIR: Record<string, string> = {
+    claude: 'projects', codex: 'sessions', gemini: 'tmp',
+    antigravity: 'conversations', droid: 'sessions', kimi: 'sessions',
+  };
+
+  it('never throws and returns a well-formed SessionRoots[]', () => {
+    const roots = getSessionRoots();
+    expect(Array.isArray(roots)).toBe(true);
+    for (const entry of roots) {
+      expect(KNOWN_AGENTS.has(entry.agent)).toBe(true);
+      expect(Array.isArray(entry.dirs)).toBe(true);
+      // Only existing, absolute dirs are emitted, each under the agent's subdir.
+      for (const dir of entry.dirs) {
+        expect(path.isAbsolute(dir)).toBe(true);
+        expect(fs.existsSync(dir)).toBe(true);
+        expect(dir.split(path.sep)).toContain(EXPECTED_SUBDIR[entry.agent]);
+      }
+    }
+  });
+
+  it('emits at most one entry per agent, and never an empty dir list', () => {
+    const roots = getSessionRoots();
+    const agents = roots.map(r => r.agent);
+    expect(new Set(agents).size).toBe(agents.length); // no duplicate agents
+    for (const entry of roots) expect(entry.dirs.length).toBeGreaterThan(0);
   });
 });

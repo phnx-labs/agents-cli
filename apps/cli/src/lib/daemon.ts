@@ -25,10 +25,13 @@ import { redactSecrets } from './redact.js';
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
 const LOG_FILE = 'logs.jsonl';
+const HEARTBEAT_FILE = 'heartbeat.json';
 const LOG_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
+const MONITOR_TICK_MS = 60_000;
+const WEDGE_THRESHOLD_TICKS = 3;
 
 // A long-lived `claude setup-token` value stored in this secrets bundle/key is
 // baked into the daemon's service-manager environment so headless routine runs
@@ -122,6 +125,48 @@ export function removeDaemonPid(): void {
   if (fs.existsSync(pidPath)) {
     fs.unlinkSync(pidPath);
   }
+}
+
+export interface DaemonHeartbeat {
+  lastTick: string;
+  pid: number;
+}
+
+function getHeartbeatPath(): string {
+  return path.join(getDaemonDir(), HEARTBEAT_FILE);
+}
+
+export function writeHeartbeat(pid: number = process.pid): void {
+  const hb: DaemonHeartbeat = { lastTick: new Date().toISOString(), pid };
+  try {
+    fs.writeFileSync(getHeartbeatPath(), JSON.stringify(hb), 'utf-8');
+  } catch { /* best effort */ }
+}
+
+export function readHeartbeat(): DaemonHeartbeat | null {
+  try {
+    const raw = fs.readFileSync(getHeartbeatPath(), 'utf-8');
+    const hb = JSON.parse(raw) as DaemonHeartbeat;
+    if (!hb.lastTick || !hb.pid) return null;
+    return hb;
+  } catch {
+    return null;
+  }
+}
+
+export function removeHeartbeat(): void {
+  try { fs.unlinkSync(getHeartbeatPath()); } catch { /* already removed */ }
+}
+
+export function isDaemonWedged(): boolean {
+  const pid = readDaemonPid();
+  if (!pid) return false;
+  if (!isAlive(pid)) return false;
+  const hb = readHeartbeat();
+  if (!hb) return false;
+  if (hb.pid !== pid) return false;
+  const elapsed = Date.now() - Date.parse(hb.lastTick);
+  return elapsed > WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
 }
 
 /** Check if the daemon process is alive by sending signal 0 to the stored PID. */
@@ -257,6 +302,26 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
   }
 
+  // #416: host the secrets broker socket-first — before the scheduler and the
+  // heavy browser/session-sync services — so `agents secrets` resolves within
+  // ms of daemon start. Only host when no broker is already reachable, so we
+  // never orphan a live standalone broker's clients (that broker stays the
+  // server until it idle-exits or the daemon restarts). Best-effort: a failure
+  // here must not stop the daemon. Retiring the standalone launchd service is
+  // the follow-on (#416 step 2 / #417).
+  let hostedBroker: { close(): void } | null = null;
+  try {
+    const { agentPing, startHostedBroker } = await import('./secrets/agent.js');
+    if ((await agentPing()).reachable) {
+      log('INFO', 'Secrets broker already running (standalone); daemon not hosting it');
+    } else {
+      hostedBroker = await startHostedBroker();
+      if (hostedBroker) log('INFO', 'Secrets broker hosted in daemon (socket-first)');
+    }
+  } catch (err) {
+    log('WARN', `Secrets broker host skipped: ${(err as Error).message}`);
+  }
+
   const scheduler = new JobScheduler(async (config) => {
     log('INFO', `Triggering job '${config.name}' (agent: ${config.agent})`);
     try {
@@ -319,9 +384,11 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Browser IPC failed to start: ${(err as Error).message}`);
   }
 
+  writeHeartbeat();
   const monitorInterval = setInterval(() => {
+    writeHeartbeat();
     monitorRunningJobs();
-  }, 60_000);
+  }, MONITOR_TICK_MS);
 
   // Cross-machine session sync: push this machine's transcripts to R2 and pull
   // every other machine's, ~every 90s. Skipped silently when the r2.backups
@@ -527,7 +594,9 @@ export async function runDaemon(): Promise<void> {
     clearTimeout(tmuxReconcileKickoff);
     clearInterval(launchHealthInterval);
     clearTimeout(launchHealthKickoff);
+    hostedBroker?.close();
     removeDaemonPid();
+    removeHeartbeat();
     process.exit(0);
   };
 
@@ -592,6 +661,7 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
 /** Generate a macOS launchd plist for auto-starting the daemon. */
 export function generateLaunchdPlist(oauthToken: string | null = readDaemonClaudeOAuthToken()): string {
   const agentsBin = getAgentsBinPath();
+  const launch = getDaemonLaunch(agentsBin);
   const logPath = getLogPath();
   const oauthEntry = oauthToken
     ? `
@@ -607,9 +677,7 @@ export function generateLaunchdPlist(oauthToken: string | null = readDaemonClaud
   <string>${PLIST_NAME}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${agentsBin}</string>
-    <string>daemon</string>
-    <string>_run</string>
+${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</string>`).join('\n')}
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -622,15 +690,22 @@ export function generateLaunchdPlist(oauthToken: string | null = readDaemonClaud
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin</string>${oauthEntry}
+    <string>${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin</string>${oauthEntry}
   </dict>
 </dict>
 </plist>`;
 }
 
+/** Quote one systemd ExecStart argument without delegating parsing to a shell. */
+function systemdExecArg(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 /** Generate a Linux systemd user unit for auto-starting the daemon. */
 export function generateSystemdUnit(oauthToken: string | null = readDaemonClaudeOAuthToken()): string {
   const agentsBin = getAgentsBinPath();
+  const launch = getDaemonLaunch(agentsBin);
+  const execStart = [launch.command, ...launch.args].map(systemdExecArg).join(' ');
   const oauthLine = oauthToken
     ? `\nEnvironment=${DAEMON_OAUTH_KEY}=${oauthToken}`
     : '';
@@ -641,37 +716,54 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${agentsBin} daemon _run
+ExecStart=${execStart}
 Restart=always
 RestartSec=10
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin${oauthLine}
+Environment=PATH=${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin${oauthLine}
 
 [Install]
 WantedBy=default.target`;
 }
 
-export function getAgentsBinPath(): string {
+const BUN_VIRTUAL_ROOT = /[/\\]\$bunfs[/\\]root[/\\]/;
+
+function resolveBunStandaloneEntry(entry: string, execPath: string): string {
+  if (!BUN_VIRTUAL_ROOT.test(entry)) return entry;
+  if (!execPath || BUN_VIRTUAL_ROOT.test(execPath) || !fs.existsSync(execPath)) {
+    throw new Error(
+      `Cannot resolve agents CLI: Bun standalone executable not found at ${execPath || '(empty path)'}`,
+    );
+  }
+  return execPath;
+}
+
+export function getAgentsBinPath(
+  argv1: string | undefined = process.argv[1],
+  execPath: string = process.execPath,
+): string {
   // Prefer the binary actively executing this code. `which agents` returns
   // whatever happens to be first on PATH, which means a side-by-side dev
   // build at ~/.local/bin would silently spawn the registry-installed
-  // daemon and run stale code. process.argv[1] is the absolute path of
-  // the JS entrypoint the user actually invoked.
-  const argv1 = process.argv[1];
-  if (argv1 && fs.existsSync(argv1)) {
+  // daemon and run stale code. For a JS install, process.argv[1] is the
+  // absolute entrypoint the user actually invoked. A Bun standalone instead
+  // exposes its embedded /$bunfs/root entry at argv[1] and its physical signed
+  // executable at process.execPath; Bun reports both as existing paths.
+  const runningEntry = argv1 ? resolveBunStandaloneEntry(argv1, execPath) : undefined;
+  if (runningEntry && fs.existsSync(runningEntry)) {
     // The package's browser/computer entrypoints are sibling shims without a
     // `daemon` command. A daemon started as their IPC side effect must launch
     // through the main agents entrypoint instead of replaying the shim path.
-    const entryName = path.basename(argv1);
+    const entryName = path.basename(runningEntry);
     const compiledShim = /^(browser|computer)\.(c|m)?js$/.test(entryName);
     const installedShim = /^(browser|computer)$/.test(entryName);
     if (compiledShim || installedShim) {
-      const agentsEntry = path.join(path.dirname(argv1), compiledShim ? 'index.js' : 'agents');
+      const agentsEntry = path.join(path.dirname(runningEntry), compiledShim ? 'index.js' : 'agents');
       if (!fs.existsSync(agentsEntry)) {
         throw new Error(`Cannot start agents daemon: main CLI entry not found at ${agentsEntry}`);
       }
       return agentsEntry;
     }
-    return argv1;
+    return runningEntry;
   }
   try {
     return execFileSync('which', ['agents'], { encoding: 'utf-8' }).trim();
@@ -838,14 +930,109 @@ export function buildDetachedDaemonEnv(
  * Going through `process.execPath` means a real PE/binary is spawned with
  * `detached: true` and no console, so nothing signals the daemon after launch.
  *
- * When the entry isn't a JS file (e.g. a native launcher resolved via
- * `which agents`), run it directly — it owns its own runtime resolution.
+ * When the entry isn't a Node script (e.g. a native compiled launcher), run it
+ * directly — it owns its own runtime resolution.
  */
 export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { command: string; args: string[] } {
-  if (/\.(c|m)?js$/.test(agentsBin)) {
+  const { warnings } = validateDaemonBinary(agentsBin);
+  for (const w of warnings) process.stderr.write(`[agents] ${w}\n`);
+  if (isNodeScriptEntry(agentsBin)) {
     return { command: process.execPath, args: [agentsBin, 'daemon', '_run'] };
   }
   return { command: agentsBin, args: ['daemon', '_run'] };
+}
+
+/**
+ * A daemon entry must be launched through the Node runtime when it is a Node
+ * script — a `.js`/`.cjs`/`.mjs` file, OR a symlink/extension-less shim whose
+ * shebang names `node`. Package installs link `bin/agents` to a `dist/index.js`
+ * (a symlink) or drop an extension-less `#!/usr/bin/env node` shim, so an
+ * extension check alone misses them and they get run directly. Executing such an
+ * entry then relies on the shebang resolving `node` off the daemon's PATH — and
+ * when that PATH points at a pruned nvm version (or an ancient system node), the
+ * daemon crash-loops at import (`node:util` has no `styleText` on Node 18). A
+ * real compiled binary (Mach-O/ELF/PE) has no `#!node` shebang, so it takes the
+ * direct branch and owns its own runtime resolution.
+ */
+function isNodeScriptEntry(agentsBin: string): boolean {
+  let resolved = agentsBin;
+  try {
+    resolved = fs.realpathSync(agentsBin);
+  } catch {
+    // Unresolvable (e.g. a template path that does not exist on this box): fall
+    // back to the extension check on the path as given.
+  }
+  if (/\.(c|m)?js$/.test(resolved)) return true;
+  try {
+    const fd = fs.openSync(resolved, 'r');
+    try {
+      const buf = Buffer.alloc(128);
+      const n = fs.readSync(fd, buf, 0, 128, 0);
+      const firstLine = buf.toString('utf-8', 0, n).split('\n', 1)[0];
+      return firstLine.startsWith('#!') && /\bnode\b/.test(firstLine);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The directory of the Node runtime that generated this service manifest, kept
+ * first on the daemon's PATH. Both the shim's shebang and any child routine
+ * process then resolve the exact Node that installed the service — never an
+ * ancient system node or a pruned nvm version. Replaces the old hardcoded
+ * `~/.nvm/versions/node/v24.0.0/bin`, which went stale the moment that patch
+ * release was upgraded away and bricked the daemon fleet-wide.
+ */
+function daemonNodeBinDir(): string {
+  return path.dirname(process.execPath);
+}
+
+/**
+ * Build the argv to relaunch the `agents` CLI with the given subcommand args.
+ *
+ * Resolves the real on-disk binary via getAgentsBinPath(), then dispatches: a
+ * `.js` entry runs under node (`node <entry> …`), a native/compiled binary runs
+ * directly (`<bin> …`).
+ *
+ * Callers MUST route self-spawns through this rather than hand-rolling
+ * `[process.execPath, process.argv[1], …]`: under the compiled standalone binary
+ * (#315) `process.argv[1]` is the bun virtual entry `/$bunfs/root/agents`, so the
+ * hand-rolled form becomes `agents /$bunfs/root/agents …` → the CLI receives the
+ * bunfs path as a subcommand and dies with "unknown command '/$bunfs/root/agents'".
+ * getAgentsBinPath() resolves that virtual entry to the physical process.execPath.
+ */
+export function getAgentsInvocation(
+  subArgs: string[],
+  agentsBin: string = getAgentsBinPath(),
+): { command: string; args: string[] } {
+  const resolvedBin = resolveBunStandaloneEntry(agentsBin, process.execPath);
+  if (/\.(c|m)?js$/.test(resolvedBin)) {
+    return { command: process.execPath, args: [resolvedBin, ...subArgs] };
+  }
+  return { command: resolvedBin, args: subArgs };
+}
+
+export function validateDaemonBinary(binPath: string): { warnings: string[] } {
+  const warnings: string[] = [];
+  if (BUN_VIRTUAL_ROOT.test(binPath)) {
+    throw new Error(
+      `Refusing to supervise daemon: resolved binary is a bun virtual path (${binPath}). ` +
+      `Install agents globally (npm i -g @phnx-labs/agents-cli) and restart.`,
+    );
+  }
+  if (/[/\\]\.agents[/\\]worktrees[/\\]/.test(binPath)) {
+    warnings.push(
+      `Warning: daemon binary is inside a git worktree (${binPath}). ` +
+      `A worktree deletion will wedge the daemon. Use the globally installed binary instead.`,
+    );
+  }
+  if (!fs.existsSync(binPath) && !/\.(c|m)?js$/.test(binPath)) {
+    warnings.push(`Warning: daemon binary does not exist on disk (${binPath}).`);
+  }
+  return { warnings };
 }
 
 interface StartDetachedOptions {
@@ -960,12 +1147,16 @@ export function stopDaemon(): boolean {
 
 /** Get current daemon status including running state, PID, and enabled job count. */
 export function getDaemonStatus(): {
+  state: 'running' | 'wedged' | 'stopped';
   running: boolean;
   pid: number | null;
   jobCount: number;
   logPath: string;
+  binaryPath: string | null;
+  heartbeat: DaemonHeartbeat | null;
 } {
   const running = isDaemonRunning();
+  const wedged = running && isDaemonWedged();
   const pid = readDaemonPid();
 
   let jobCount = 0;
@@ -973,7 +1164,20 @@ export function getDaemonStatus(): {
     jobCount = listAllJobs().filter((j) => j.enabled).length;
   } catch { /* job listing failed */ }
 
-  return { running, pid, jobCount, logPath: getLogPath() };
+  let binaryPath: string | null = null;
+  try {
+    binaryPath = getAgentsBinPath();
+  } catch { /* resolution failed */ }
+
+  return {
+    state: wedged ? 'wedged' : running ? 'running' : 'stopped',
+    running,
+    pid,
+    jobCount,
+    logPath: getLogPath(),
+    binaryPath,
+    heartbeat: readHeartbeat(),
+  };
 }
 
 /** Read the daemon log, optionally limited to the last N lines. */

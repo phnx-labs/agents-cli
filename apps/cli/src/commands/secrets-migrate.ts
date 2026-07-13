@@ -34,7 +34,10 @@ import {
   listLegacyKeychainItems,
   listOrphanedKeychainItems,
   migrateOrphanedKeychainItems,
+  rekeyServiceNames,
+  rekeyStatus,
   setKeychainToken,
+  withRawKeychainServiceNames,
 } from '../lib/secrets/index.js';
 import { getBackupsDir } from '../lib/state.js';
 import { encryptBlob, MIN_PASSPHRASE_LEN } from '../lib/secrets/sync.js';
@@ -56,14 +59,17 @@ interface MigrationResult {
 
 function enumerateItems(): Array<{ item: string; sync: boolean }> {
   const seen = new Map<string, { item: string; sync: boolean }>();
-  for (const item of listKeychainItems(ITEM_PREFIX)) {
-    // hasKeychainToken with sync=false probes the non-synced keychain; the
-    // helper's list returns both. We don't try to distinguish — re-write with
-    // sync=false by default and only flip to sync=true if the value is only
-    // readable via the synced-only probe.
-    const localExists = hasKeychainToken(item);
-    seen.set(item, { item, sync: !localExists });
-  }
+  // Raw scope: operate on the literal enumerated names (see #316).
+  withRawKeychainServiceNames(() => {
+    for (const item of listKeychainItems(ITEM_PREFIX)) {
+      // hasKeychainToken with sync=false probes the non-synced keychain; the
+      // helper's list returns both. We don't try to distinguish — re-write with
+      // sync=false by default and only flip to sync=true if the value is only
+      // readable via the synced-only probe.
+      const localExists = hasKeychainToken(item);
+      seen.set(item, { item, sync: !localExists });
+    }
+  });
   return [...seen.values()];
 }
 
@@ -90,6 +96,13 @@ async function promptPassphrase(): Promise<string> {
 }
 
 function migrateOne(record: MigrationRecord): MigrationResult {
+  // Raw scope: `item` is a literal service name enumerated from the helper —
+  // possibly a pre-re-key cleartext leftover — and this rewrite must target
+  // exactly that item, never its hashed transform (see #316).
+  return withRawKeychainServiceNames(() => migrateOneRaw(record));
+}
+
+function migrateOneRaw(record: MigrationRecord): MigrationResult {
   const { item, value } = record;
   // Delete + re-add to force macOS to bind a fresh ACL on the new item.
   // SecItemUpdate preserves the existing ACL, so an in-place rewrite would
@@ -119,8 +132,10 @@ function migrateOne(record: MigrationRecord): MigrationResult {
   return { item, status: 'ok' };
 }
 
-/** Register `agents secrets migrate-acl` on the parent secrets Command. */
+/** Register the keychain-migration commands (`migrate-acl`, `rekey`) on the
+ * parent secrets Command. */
 export function registerSecretsMigrateAclCommand(secrets: Command): void {
+  registerSecretsRekeyCommand(secrets);
   secrets
     .command('migrate-acl')
     .description('Refresh legacy keychain ACLs and re-home items stranded in a stale access group. Dry-run by default.')
@@ -146,9 +161,14 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
         //       pre-#279 non-concrete group, invisible to the pinned queries.
         //       Re-homed by the helper behind a single Touch ID.
         // Default: only legacy stragglers for (a); `--all` forces a full rewrite.
-        const names = opts.all ? listKeychainItems(prefix) : listLegacyKeychainItems(prefix);
+        // Raw scope: migrate-acl operates on the literal names the helper
+        // enumerates (which may include pre-re-key cleartext leftovers) — the
+        // #316 name-hashing transform must not rewrite them.
+        const names = opts.all
+          ? withRawKeychainServiceNames(() => listKeychainItems(prefix))
+          : listLegacyKeychainItems(prefix);
         const items = names.map((item) => {
-          const localExists = hasKeychainToken(item);
+          const localExists = withRawKeychainServiceNames(() => hasKeychainToken(item));
           return { item, sync: !localExists };
         });
         const orphans = listOrphanedKeychainItems(prefix);
@@ -191,7 +211,7 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
         // read failure here counts the legacy items as failed but does NOT abort —
         // the orphan sweep (b) is independent and must still run.
         if (items.length > 0) {
-          const fetched = getKeychainTokens(items.map((i) => i.item));
+          const fetched = withRawKeychainServiceNames(() => getKeychainTokens(items.map((i) => i.item)));
           const records: MigrationRecord[] = [];
           for (const { item, sync } of items) {
             const value = fetched.get(item);
@@ -279,6 +299,64 @@ export function registerSecretsMigrateAclCommand(secrets: Command): void {
         if (isPromptCancelled(err)) return;
         console.error(chalk.red((err as Error).message));
         process.exit(1);
+      }
+    });
+}
+
+/**
+ * `agents secrets rekey` — the one-time #316 migration: replace enumerable
+ * cleartext keychain service names (`agents-cli.secrets.<bundle>.<KEY>`, …)
+ * with opaque HMAC-hashed names. Normally runs automatically on the first
+ * interactive keychain use after upgrade; this command exists for headless
+ * machines, retrying after a cancelled Touch ID, and prefix-restricted test
+ * runs. Idempotent — safe to re-run any time.
+ */
+function registerSecretsRekeyCommand(secrets: Command): void {
+  secrets
+    .command('rekey')
+    .description('Replace enumerable keychain service names with opaque HMAC-hashed names (one-time; idempotent). macOS only.')
+    .option('--status', 'Report re-key state without changing anything')
+    .option('--prefix <p...>', 'Restrict to cleartext services starting with PREFIX (partial run: moves matching items but does NOT activate hashed naming)')
+    .action((opts: { status?: boolean; prefix?: string[] }) => {
+      try {
+        if (process.platform !== 'darwin') {
+          throw new Error('secrets rekey is macOS-only. Linux/Windows service names are not enumerable via the keychain helper.');
+        }
+        if (opts.status) {
+          const st = rekeyStatus();
+          console.log(st.migrated
+            ? chalk.green('Hashed service names: ACTIVE')
+            : chalk.yellow('Hashed service names: not yet active'));
+          console.log(`  HMAC key present: ${st.hasKey ? 'yes' : 'no'}`);
+          if (!st.enumerationOk) {
+            console.log(chalk.red('  Keychain enumeration unavailable (locked keybag?) — counts below are unreliable.'));
+          }
+          console.log(`  Cleartext-named items remaining: ${st.cleartext.length}`);
+          if (st.pendingDeletes > 0) {
+            console.log(chalk.yellow(`  Pending deletes from an interrupted run: ${st.pendingDeletes} (finished automatically on next use)`));
+          }
+          return;
+        }
+        for (const p of opts.prefix ?? []) {
+          if (!p.startsWith(ITEM_PREFIX)) {
+            throw new Error(`--prefix must start with '${ITEM_PREFIX}' to avoid touching unrelated Keychain items (got '${p}').`);
+          }
+        }
+        const report = rekeyServiceNames({
+          prefixes: opts.prefix,
+          announce: true,
+          log: (line) => console.log(line),
+        });
+        if (report.failed.length > 0) process.exit(1);
+        if (report.nothingToDo && report.activated) {
+          console.log(chalk.green('Nothing to re-key — hashed service names are active.'));
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        console.error(chalk.red(msg));
+        // Touch ID cancel exits 4 (matching the helper's contract); re-running
+        // resumes where it left off.
+        process.exit(/touch id cancelled/i.test(msg) ? 4 : 1);
       }
     });
 }

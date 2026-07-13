@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
-import { readSessionTail } from './tail.js';
+import { readSessionTail, readSessionTailWithRaw, readSessionTailContent } from './tail.js';
 import { inferSessionState } from './state.js';
 
 const FIXTURE = path.join(import.meta.dirname, 'testdata', 'tail-sample-claude.jsonl');
@@ -26,6 +26,22 @@ describe('readSessionTail', () => {
 
   it('returns [] for unsupported agents', () => {
     expect(readSessionTail(FIXTURE, 'gemini')).toEqual([]);
+  });
+
+  it('readSessionTailWithRaw returns both the events and the raw JSONL they came from', () => {
+    const { events, content } = readSessionTailWithRaw(FIXTURE, 'claude');
+    // Same events the events-only wrapper produces...
+    expect(events).toEqual(readSessionTail(FIXTURE, 'claude'));
+    // ...plus the raw text, so content-level readouts (token throughput) can walk
+    // the lines the event model drops.
+    expect(content.length).toBeGreaterThan(0);
+    expect(content).toContain('"type"');
+    // The raw content is the same cleaned chunk readSessionTailContent yields.
+    expect(content).toBe(readSessionTailContent(FIXTURE));
+  });
+
+  it('readSessionTailWithRaw yields an empty tail for unsupported agents', () => {
+    expect(readSessionTailWithRaw(FIXTURE, 'gemini')).toEqual({ events: [], content: '' });
   });
 
   it('feeds inferSessionState to a waiting verdict on a trailing question', () => {

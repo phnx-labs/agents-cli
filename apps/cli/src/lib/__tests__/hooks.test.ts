@@ -626,6 +626,488 @@ describe('registerHooksToSettings - returns empty for unsupported agents', () =>
   });
 });
 
+describe('registerHooksToSettings - Copilot', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeCopilotScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  it('writes agents-cli-hooks.json with version 1 and camelCase events', () => {
+    makeCopilotScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('copilot', versionHome, manifest, agentsDir);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> userPromptSubmitted');
+    expect(result.registered).toContain('on-prompt -> sessionStart');
+
+    const outPath = path.join(versionHome, '.copilot', 'hooks', 'agents-cli-hooks.json');
+    expect(fs.existsSync(outPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.version).toBe(1);
+    expect(parsed.hooks.userPromptSubmitted).toHaveLength(1);
+    expect(parsed.hooks.sessionStart).toHaveLength(1);
+    expect(parsed.hooks.userPromptSubmitted[0].type).toBe('command');
+    expect(parsed.hooks.userPromptSubmitted[0].timeoutSec).toBe(45);
+    expect(resolvedCommand(parsed.hooks.userPromptSubmitted[0].command)).toContain('on-prompt.sh');
+  });
+
+  it('maps PreToolUse → preToolUse and emits matcher for matcher-capable events', () => {
+    makeCopilotScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      guard: {
+        script: 'guard.sh',
+        events: ['PreToolUse', 'SessionStart'],
+        matcher: 'bash|edit',
+      },
+    };
+
+    const result = registerHooksToSettings('copilot', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.copilot', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
+    );
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('bash|edit');
+    // SessionStart does not accept matcher — must not be present
+    expect(parsed.hooks.sessionStart[0].matcher).toBeUndefined();
+  });
+
+  it('does not duplicate entries on repeated sync', () => {
+    makeCopilotScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+
+    registerHooksToSettings('copilot', versionHome, manifest, agentsDir);
+    registerHooksToSettings('copilot', versionHome, manifest, agentsDir);
+
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.copilot', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
+    );
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+  });
+
+  it('rewrites managed file to empty hooks when manifest has no events', () => {
+    makeCopilotScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const withHook: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('copilot', versionHome, withHook, agentsDir);
+
+    const empty: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: [] },
+    };
+    registerHooksToSettings('copilot', versionHome, empty, agentsDir);
+
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.copilot', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
+    );
+    expect(parsed.version).toBe(1);
+    expect(Object.keys(parsed.hooks)).toHaveLength(0);
+  });
+
+  it('never touches a user-authored sibling hooks JSON file', () => {
+    makeCopilotScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const userFile = path.join(versionHome, '.copilot', 'hooks', 'my-custom.json');
+    fs.mkdirSync(path.dirname(userFile), { recursive: true });
+    const userBody = { version: 1, hooks: { sessionStart: [{ type: 'command', command: 'echo user' }] } };
+    fs.writeFileSync(userFile, JSON.stringify(userBody), 'utf-8');
+
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('copilot', versionHome, manifest, agentsDir);
+
+    expect(JSON.parse(fs.readFileSync(userFile, 'utf-8'))).toEqual(userBody);
+  });
+
+  it('skips unmapped events silently', () => {
+    makeCopilotScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['BeforeAgent' as never, 'SessionStart'] },
+    };
+    const result = registerHooksToSettings('copilot', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toEqual(['on-prompt -> sessionStart']);
+  });
+});
+
+describe('registerHooksToSettings - Kiro', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeKiroScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  it('writes agents-cli-hooks.json with version v1 and PascalCase triggers', () => {
+    makeKiroScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> UserPromptSubmit');
+    expect(result.registered).toContain('on-prompt -> SessionStart');
+
+    const outPath = path.join(versionHome, '.kiro', 'hooks', 'agents-cli-hooks.json');
+    expect(fs.existsSync(outPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.version).toBe('v1');
+    expect(parsed.hooks).toHaveLength(2);
+    const byTrigger = Object.fromEntries(parsed.hooks.map((h: { trigger: string }) => [h.trigger, h]));
+    expect(byTrigger.UserPromptSubmit.action.type).toBe('command');
+    expect(byTrigger.UserPromptSubmit.timeout).toBe(45);
+    expect(byTrigger.UserPromptSubmit.enabled).toBe(true);
+    expect(resolvedCommand(byTrigger.UserPromptSubmit.action.command)).toContain('on-prompt.sh');
+    expect(byTrigger.SessionStart).toBeDefined();
+  });
+
+  it('emits matcher for PreToolUse and omits it for SessionStart', () => {
+    makeKiroScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      guard: {
+        script: 'guard.sh',
+        events: ['PreToolUse', 'SessionStart'],
+        matcher: 'execute_bash|fs_write',
+      },
+    };
+
+    registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.kiro', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
+    );
+    const byTrigger = Object.fromEntries(parsed.hooks.map((h: { trigger: string }) => [h.trigger, h]));
+    expect(byTrigger.PreToolUse.matcher).toBe('execute_bash|fs_write');
+    expect(byTrigger.SessionStart.matcher).toBeUndefined();
+  });
+
+  it('does not duplicate entries on repeated sync', () => {
+    makeKiroScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.kiro', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
+    );
+    expect(parsed.hooks).toHaveLength(1);
+  });
+
+  it('never touches a user-authored sibling hooks JSON file', () => {
+    makeKiroScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const userFile = path.join(versionHome, '.kiro', 'hooks', 'my-custom.json');
+    fs.mkdirSync(path.dirname(userFile), { recursive: true });
+    const userBody = {
+      version: 'v1',
+      hooks: [{ name: 'user', trigger: 'SessionStart', action: { type: 'command', command: 'echo user' } }],
+    };
+    fs.writeFileSync(userFile, JSON.stringify(userBody), 'utf-8');
+
+    registerHooksToSettings(
+      'kiro',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] } },
+      agentsDir
+    );
+    expect(JSON.parse(fs.readFileSync(userFile, 'utf-8'))).toEqual(userBody);
+  });
+});
+
+describe('registerHooksToSettings - Goose', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeGooseScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  function gooseHooksPath(versionHome: string): string {
+    return path.join(versionHome, '.agents', 'plugins', 'agents-cli-hooks', 'hooks', 'hooks.json');
+  }
+
+  it('writes Open Plugins hooks.json under versionHome/.agents/plugins/agents-cli-hooks/', () => {
+    makeGooseScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> UserPromptSubmit');
+    expect(result.registered).toContain('on-prompt -> SessionStart');
+
+    const outPath = gooseHooksPath(versionHome);
+    expect(fs.existsSync(outPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(parsed.hooks.SessionStart).toHaveLength(1);
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].type).toBe('command');
+    expect(parsed.hooks.UserPromptSubmit[0].hooks[0].timeout).toBe(45);
+    expect(resolvedCommand(parsed.hooks.UserPromptSubmit[0].hooks[0].command)).toContain('on-prompt.sh');
+  });
+
+  it('groups by matcher for PreToolUse', () => {
+    makeGooseScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      guard: {
+        script: 'guard.sh',
+        events: ['PreToolUse'],
+        matcher: 'developer__shell',
+      },
+    };
+
+    registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(fs.readFileSync(gooseHooksPath(versionHome), 'utf-8'));
+    expect(parsed.hooks.PreToolUse[0].matcher).toBe('developer__shell');
+    expect(parsed.hooks.PreToolUse[0].hooks).toHaveLength(1);
+  });
+
+  it('does not duplicate entries on repeated sync', () => {
+    makeGooseScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    registerHooksToSettings('goose', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(fs.readFileSync(gooseHooksPath(versionHome), 'utf-8'));
+    expect(parsed.hooks.PreToolUse[0].hooks).toHaveLength(1);
+  });
+
+  it('writes managed marker file', () => {
+    makeGooseScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings(
+      'goose',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['SessionStart'] } },
+      agentsDir
+    );
+    const marker = path.join(versionHome, '.agents', 'plugins', 'agents-cli-hooks', '.agents-cli-managed');
+    expect(fs.existsSync(marker)).toBe(true);
+  });
+
+  it('skips SubagentStart/SubagentStop (Goose never emits them) (RUSH-1613)', () => {
+    makeGooseScript('on-subagent.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings(
+      'goose',
+      versionHome,
+      {
+        'on-subagent': {
+          script: 'on-subagent.sh',
+          events: ['SubagentStart', 'SubagentStop', 'SessionStart'],
+        },
+      },
+      agentsDir,
+    );
+    expect(result.registered).toEqual(['on-subagent -> SessionStart']);
+    const parsed = JSON.parse(fs.readFileSync(gooseHooksPath(versionHome), 'utf-8'));
+    expect(parsed.hooks.SubagentStart).toBeUndefined();
+    expect(parsed.hooks.SubagentStop).toBeUndefined();
+    expect(parsed.hooks.SessionStart).toHaveLength(1);
+  });
+});
+
+describe('registerHooksToSettings - Cursor', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeCursorScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  it('writes ~/.cursor/hooks.json with version 1 and camelCase events', () => {
+    makeCursorScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart', 'Stop'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('cursor', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> beforeSubmitPrompt');
+    expect(result.registered).toContain('on-prompt -> sessionStart');
+    expect(result.registered).toContain('on-prompt -> stop');
+
+    const outPath = path.join(versionHome, '.cursor', 'hooks.json');
+    expect(fs.existsSync(outPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.version).toBe(1);
+    expect(parsed.hooks.sessionStart).toHaveLength(1);
+    expect(parsed.hooks.beforeSubmitPrompt[0].timeout).toBe(45);
+    expect(parsed.hooks.stop[0].command).toBeTruthy();
+    expect(resolvedCommand(parsed.hooks.sessionStart[0].command)).toContain('on-prompt.sh');
+  });
+
+  it('emits matcher for preToolUse', () => {
+    makeCursorScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Shell|Write' } },
+      agentsDir
+    );
+    const parsed = JSON.parse(fs.readFileSync(path.join(versionHome, '.cursor', 'hooks.json'), 'utf-8'));
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Shell|Write');
+  });
+
+  it('preserves user-authored entries outside managed prefixes', () => {
+    makeCursorScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const outPath = path.join(versionHome, '.cursor', 'hooks.json');
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({
+        version: 1,
+        hooks: { sessionStart: [{ command: '/usr/local/bin/my-custom-hook' }] },
+      }),
+      'utf-8'
+    );
+
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['SessionStart'] } },
+      agentsDir
+    );
+
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    const cmds = parsed.hooks.sessionStart.map((h: { command: string }) => h.command);
+    expect(cmds).toContain('/usr/local/bin/my-custom-hook');
+    expect(cmds.some((c: string) => c.includes('on-prompt') || resolvedCommand(c).includes('on-prompt'))).toBe(true);
+  });
+
+  it('does not duplicate on repeated sync', () => {
+    makeCursorScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('cursor', versionHome, manifest, agentsDir);
+    registerHooksToSettings('cursor', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(fs.readFileSync(path.join(versionHome, '.cursor', 'hooks.json'), 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+  });
+
+  it('drops managed entries when matcher or event changes (RUSH-1615)', () => {
+    makeCursorScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const outPath = path.join(versionHome, '.cursor', 'hooks.json');
+
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Shell' } },
+      agentsDir,
+    );
+    let parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Shell');
+
+    // Matcher change — old Shell entry must not linger.
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Write' } },
+      agentsDir,
+    );
+    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Write');
+
+    // Event change — PreToolUse managed entry must go when only PostToolUse remains.
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PostToolUse'], matcher: 'Write' } },
+      agentsDir,
+    );
+    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toBeUndefined();
+    expect(parsed.hooks.postToolUse).toHaveLength(1);
+  });
+});
+
 describe('registerHooksToSettings - Antigravity', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
@@ -1251,5 +1733,66 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
       expect(settings.hooks.PreToolUse).toEqual([]);
     });
+  });
+});
+
+describe('registerHooksToSettings - grok + antigravity subrule hooks (RUSH-1353)', () => {
+  let localTmp: string;
+  let versionHome: string;
+  let subruleScript: string;
+
+  beforeEach(() => {
+    localTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-subrule-'));
+    versionHome = path.join(localTmp, 'version-home');
+    fs.mkdirSync(versionHome, { recursive: true });
+    const subruleDir = path.join(localTmp, 'rules', 'subrules', 'truly-agentic-git-workflow');
+    fs.mkdirSync(subruleDir, { recursive: true });
+    subruleScript = path.join(subruleDir, 'main-branch-guard.sh');
+    fs.writeFileSync(subruleScript, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  });
+
+  afterEach(() => {
+    try { fs.rmSync(localTmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  function subruleManifest(): Record<string, ManifestHook> {
+    return {
+      'truly-agentic-git-workflow__main-branch-guard': {
+        events: ['PreToolUse'],
+        matcher: 'Write|Edit',
+        script: subruleScript,
+        timeout: 10,
+      },
+    };
+  }
+
+  it('registers absolute subrule script into grok hooks.json with matcher', () => {
+    const result = registerHooksToSettings('grok', versionHome, subruleManifest(), localTmp);
+    expect(result.errors).toEqual([]);
+    expect(result.registered.some((r) => r.includes('main-branch-guard'))).toBe(true);
+
+    const hooksJson = path.join(versionHome, '.grok', 'hooks', 'hooks.json');
+    expect(fs.existsSync(hooksJson)).toBe(true);
+    const data = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
+    const groups = data.hooks?.PreToolUse ?? [];
+    const flat = groups.flatMap((g: any) =>
+      (g.hooks ?? []).map((h: any) => ({ command: h.command as string, matcher: g.matcher as string | undefined })),
+    );
+    // Command paths go through toPortableCommand (POSIX/~/ form) — match by basename.
+    expect(flat.some((e) => e.command.replace(/\\/g, '/').endsWith('main-branch-guard.sh'))).toBe(true);
+    expect(flat.some((e) => e.matcher === 'Write|Edit')).toBe(true);
+  });
+
+  it('registers absolute subrule script into antigravity settings with matcher', () => {
+    const result = registerHooksToSettings('antigravity', versionHome, subruleManifest(), localTmp);
+    expect(result.errors).toEqual([]);
+    expect(result.registered.some((r) => r.includes('main-branch-guard'))).toBe(true);
+
+    const settingsPath = path.join(versionHome, '.gemini', 'antigravity-cli', 'settings.json');
+    expect(fs.existsSync(settingsPath)).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    const allEntries = Object.values(settings.hooks || {}).flat() as Array<{ command?: string; matcher?: string }>;
+    expect(allEntries.some((e) => (e.command || '').replace(/\\/g, '/').endsWith('main-branch-guard.sh'))).toBe(true);
+    expect(allEntries.some((e) => e.matcher === 'Write|Edit')).toBe(true);
   });
 });

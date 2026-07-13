@@ -1131,6 +1131,18 @@ export function registerHooksToSettings(
   if (agentId === 'kimi') {
     return registerHooksForKimi(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'copilot') {
+    return registerHooksForCopilot(versionHome, manifest, resolveScript, managedPrefixes);
+  }
+  if (agentId === 'kiro') {
+    return registerHooksForKiro(versionHome, manifest, resolveScript, managedPrefixes);
+  }
+  if (agentId === 'goose') {
+    return registerHooksForGoose(versionHome, manifest, resolveScript, managedPrefixes);
+  }
+  if (agentId === 'cursor') {
+    return registerHooksForCursor(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   return { registered: [], errors: [] };
 }
 
@@ -1738,12 +1750,15 @@ function registerHooksForAntigravity(
       if (!hooks[agyEvent]) {
         hooks[agyEvent] = [];
       }
-      const list = hooks[agyEvent] as Array<{ command: string }>;
+      // Antigravity settings entries: command + optional matcher (tool scope).
+      // Without matcher every PreToolUse guard fires on ALL tools (RUSH-1353).
+      const list = hooks[agyEvent] as Array<{ command: string; matcher?: string }>;
 
       const existingIdx = list.findIndex(
         (e) => e && typeof e === 'object' && e.command === commandPath
       );
-      const entry = { command: commandPath };
+      const entry: { command: string; matcher?: string } = { command: commandPath };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
       if (existingIdx >= 0) {
         list[existingIdx] = entry;
       } else {
@@ -2035,6 +2050,498 @@ function registerHooksForKimi(
     fs.writeFileSync(configPath, TOML.stringify(config as Parameters<typeof TOML.stringify>[0]), 'utf-8');
   } catch (err) {
     errors.push(`Failed to write config.toml: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical hooks.yaml event names → Copilot camelCase event names.
+ * Copilot accepts both camelCase (native) and PascalCase (VS Code-compatible).
+ * We emit camelCase, the format documented at
+ * https://docs.github.com/en/copilot/reference/hooks-configuration.
+ * Unmapped events are skipped so a Claude-only event does not land in the file.
+ */
+const COPILOT_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'sessionStart',
+  SessionEnd: 'sessionEnd',
+  UserPromptSubmit: 'userPromptSubmitted',
+  PreToolUse: 'preToolUse',
+  PostToolUse: 'postToolUse',
+  PostToolUseFailure: 'postToolUseFailure',
+  Stop: 'agentStop',
+  SubagentStart: 'subagentStart',
+  SubagentStop: 'subagentStop',
+  OnError: 'errorOccurred',
+  PreCompact: 'preCompact',
+  Notification: 'notification',
+  PermissionRequest: 'permissionRequest',
+};
+
+/**
+ * Copilot events that accept a `matcher` field (regex, full-string match).
+ * See "Matcher filtering" in the Copilot hooks reference.
+ */
+const COPILOT_MATCHER_EVENTS = new Set([
+  'preToolUse',
+  'postToolUse',
+  'permissionRequest',
+  'preCompact',
+  'notification',
+  'subagentStart',
+]);
+
+/** Managed filename under ~/.copilot/hooks/ — we own this file entirely. */
+const COPILOT_MANAGED_HOOKS_FILE = 'agents-cli-hooks.json';
+
+/**
+ * Register hooks for GitHub Copilot CLI.
+ *
+ * Copilot loads every `*.json` under `~/.copilot/hooks/` (and project
+ * `.github/hooks/`). Schema: `{ "version": 1, "hooks": { event: [entries] } }`
+ * with command entries `{ type: "command", bash|command, timeoutSec?, matcher? }`.
+ *
+ * We rewrite a single managed file (`agents-cli-hooks.json`) on every sync so
+ * GC is trivial — user-authored sibling JSON files are never touched.
+ */
+function registerHooksForCopilot(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  _managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const copilotHooksDir = path.join(versionHome, '.copilot', 'hooks');
+  fs.mkdirSync(copilotHooksDir, { recursive: true });
+
+  type CopilotEntry = {
+    type: 'command';
+    command: string;
+    timeoutSec: number;
+    matcher?: string;
+  };
+  const hooks: Record<string, CopilotEntry[]> = {};
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeoutSec = hookDef.timeout ?? 30;
+
+    for (const event of hookDef.events) {
+      const copilotEvent = COPILOT_EVENT_MAP[event];
+      if (!copilotEvent) continue; // unmapped — skip silently
+
+      if (!hooks[copilotEvent]) hooks[copilotEvent] = [];
+
+      const entry: CopilotEntry = {
+        type: 'command',
+        command: commandPath,
+        timeoutSec,
+      };
+      if (COPILOT_MATCHER_EVENTS.has(copilotEvent) && hookDef.matcher) {
+        entry.matcher = hookDef.matcher;
+      }
+
+      // De-dupe on (event, command, matcher) so repeated sync is idempotent.
+      const existingIdx = hooks[copilotEvent].findIndex(
+        (h) => h.command === entry.command && (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[copilotEvent][existingIdx] = entry;
+      } else {
+        hooks[copilotEvent].push(entry);
+      }
+
+      registered.push(`${name} -> ${copilotEvent}`);
+    }
+  }
+
+  const outPath = path.join(copilotHooksDir, COPILOT_MANAGED_HOOKS_FILE);
+  try {
+    // Always rewrite: empty manifest → empty hooks object (GC of prior managed entries).
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({ version: 1, hooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write ${COPILOT_MANAGED_HOOKS_FILE}: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical hooks.yaml event names → Kiro v3 trigger names.
+ * Kiro v3 uses PascalCase triggers under `.kiro/hooks/*.json`
+ * (https://kiro.dev/docs/cli/v3/hooks/). Unmapped events are skipped.
+ */
+const KIRO_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'SessionStart',
+  Stop: 'Stop',
+  PreToolUse: 'PreToolUse',
+  PostToolUse: 'PostToolUse',
+  UserPromptSubmit: 'UserPromptSubmit',
+};
+
+/**
+ * Kiro triggers that evaluate the `matcher` regex (tool name, file path, or
+ * prompt text depending on the trigger). Lifecycle SessionStart/Stop always fire.
+ */
+const KIRO_MATCHER_EVENTS = new Set([
+  'PreToolUse',
+  'PostToolUse',
+  'UserPromptSubmit',
+]);
+
+/** Managed filename under ~/.kiro/hooks/ — we own this file entirely. */
+const KIRO_MANAGED_HOOKS_FILE = 'agents-cli-hooks.json';
+
+/**
+ * Register hooks for Kiro CLI (v3 standalone hooks format).
+ *
+ * Each file under `~/.kiro/hooks/*.json` is:
+ *   { "version": "v1", "hooks": [ { name, trigger, matcher?, action, timeout?, enabled? } ] }
+ *
+ * We rewrite a single managed file so GC is a rewrite and user-authored sibling
+ * JSON files are never touched. Embedded agent-config hooks (2.x) still work
+ * in Kiro but we only write the v3 path.
+ */
+function registerHooksForKiro(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  _managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const kiroHooksDir = path.join(versionHome, '.kiro', 'hooks');
+  fs.mkdirSync(kiroHooksDir, { recursive: true });
+
+  type KiroHook = {
+    name: string;
+    trigger: string;
+    matcher?: string;
+    action: { type: 'command'; command: string };
+    timeout: number;
+    enabled: boolean;
+  };
+  const hooks: KiroHook[] = [];
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 60;
+
+    for (const event of hookDef.events) {
+      const trigger = KIRO_EVENT_MAP[event];
+      if (!trigger) continue;
+
+      const entry: KiroHook = {
+        name,
+        trigger,
+        action: { type: 'command', command: commandPath },
+        timeout,
+        enabled: true,
+      };
+      if (KIRO_MATCHER_EVENTS.has(trigger) && hookDef.matcher) {
+        entry.matcher = hookDef.matcher;
+      }
+
+      // De-dupe on (name, trigger, matcher)
+      const existingIdx = hooks.findIndex(
+        (h) =>
+          h.name === entry.name &&
+          h.trigger === entry.trigger &&
+          (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[existingIdx] = entry;
+      } else {
+        hooks.push(entry);
+      }
+
+      registered.push(`${name} -> ${trigger}`);
+    }
+  }
+
+  const outPath = path.join(kiroHooksDir, KIRO_MANAGED_HOOKS_FILE);
+  try {
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({ version: 'v1', hooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write ${KIRO_MANAGED_HOOKS_FILE}: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical hooks.yaml event names that goose supports (Open Plugins PascalCase).
+ * Unmapped events are skipped. Goose ≥ 1.34.0.
+ */
+const GOOSE_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'SessionStart',
+  SessionEnd: 'SessionEnd',
+  Stop: 'Stop',
+  UserPromptSubmit: 'UserPromptSubmit',
+  PreToolUse: 'PreToolUse',
+  PostToolUse: 'PostToolUse',
+  PostToolUseFailure: 'PostToolUseFailure',
+  BeforeReadFile: 'BeforeReadFile',
+  AfterFileEdit: 'AfterFileEdit',
+  BeforeShellExecution: 'BeforeShellExecution',
+  AfterShellExecution: 'AfterShellExecution',
+  // SubagentStart/SubagentStop are not emitted by Goose — do not advertise them.
+};
+
+/** Managed Open Plugins directory name under ~/.agents/plugins/. */
+const GOOSE_MANAGED_PLUGIN_NAME = 'agents-cli-hooks';
+
+/**
+ * Register hooks for Goose (block-goose-cli ≥ 1.34.0).
+ *
+ * Goose auto-discovers Open Plugins under `$HOME/.agents/plugins/<name>/` that
+ * contain `hooks/hooks.json` (HOME is the version home under the agents-cli
+ * shim). Schema (Open Plugins / Claude-shaped):
+ *   { "hooks": { Event: [ { matcher?, hooks: [{ type: "command", command }] } ] } }
+ *
+ * We own a single managed plugin (`agents-cli-hooks`) under the version home
+ * and rewrite its hooks.json on every sync. Command paths are absolute
+ * (portable ~/ form) pointing at the already-copied hook scripts.
+ */
+function registerHooksForGoose(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  _managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  type GooseCmd = { type: 'command'; command: string; timeout?: number };
+  type GooseGroup = { matcher?: string; hooks: GooseCmd[] };
+  const eventHooks: Record<string, GooseGroup[]> = {};
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 60;
+    const cmd: GooseCmd = { type: 'command', command: commandPath, timeout };
+
+    for (const event of hookDef.events) {
+      const gooseEvent = GOOSE_EVENT_MAP[event];
+      if (!gooseEvent) continue;
+
+      if (!eventHooks[gooseEvent]) eventHooks[gooseEvent] = [];
+      const groups = eventHooks[gooseEvent];
+      const matcher = hookDef.matcher || undefined;
+
+      let group = groups.find((g) => (g.matcher || undefined) === matcher);
+      if (!group) {
+        group = { hooks: [] };
+        if (matcher) group.matcher = matcher;
+        groups.push(group);
+      }
+
+      const existingIdx = group.hooks.findIndex((h) => h.command === cmd.command);
+      if (existingIdx >= 0) {
+        group.hooks[existingIdx] = cmd;
+      } else {
+        group.hooks.push(cmd);
+      }
+
+      registered.push(`${name} -> ${gooseEvent}`);
+    }
+  }
+
+  // Goose discovers Open Plugins at ~/.agents/plugins/<name>/ when HOME is the
+  // version home (shim sets HOME). Write under versionHome so each installed
+  // goose version gets its own managed plugin and tests stay hermetic.
+  const pluginRoot = path.join(versionHome, '.agents', 'plugins', GOOSE_MANAGED_PLUGIN_NAME);
+  const hooksDir = path.join(pluginRoot, 'hooks');
+  const outPath = path.join(hooksDir, 'hooks.json');
+
+  try {
+    fs.mkdirSync(hooksDir, { recursive: true });
+    // Minimal plugin marker so the directory is a valid Open Plugins bundle.
+    const markerPath = path.join(pluginRoot, '.agents-cli-managed');
+    if (!fs.existsSync(markerPath)) {
+      fs.writeFileSync(markerPath, 'managed by agents-cli hooks sync\n', 'utf-8');
+    }
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({ hooks: eventHooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write goose hooks plugin: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical → Cursor CLI camelCase events.
+ *
+ * Only events verified to fire in cursor-agent CLI (not full IDE parity).
+ * Ticket RUSH-1326 note (2026-06): working = sessionStart, stop, preToolUse,
+ * postToolUse, beforeShellExecution, afterShellExecution, beforeReadFile,
+ * afterFileEdit. Also map SessionEnd / beforeSubmitPrompt / preCompact /
+ * subagent* which Cursor documents for agent hooks.
+ * Unmapped events (e.g. afterAgentResponse) are skipped.
+ */
+const CURSOR_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'sessionStart',
+  SessionEnd: 'sessionEnd',
+  Stop: 'stop',
+  UserPromptSubmit: 'beforeSubmitPrompt',
+  PreToolUse: 'preToolUse',
+  PostToolUse: 'postToolUse',
+  PostToolUseFailure: 'postToolUseFailure',
+  PreCompact: 'preCompact',
+  SubagentStart: 'subagentStart',
+  SubagentStop: 'subagentStop',
+  BeforeShellExecution: 'beforeShellExecution',
+  AfterShellExecution: 'afterShellExecution',
+  BeforeReadFile: 'beforeReadFile',
+  AfterFileEdit: 'afterFileEdit',
+};
+
+/**
+ * Register hooks for Cursor CLI (`cursor-agent`).
+ *
+ * Writes `~/.cursor/hooks.json` (under version home):
+ *   { "version": 1, "hooks": { event: [{ command, timeout?, matcher? }] } }
+ *
+ * GC: rewrite managed entries by command path under managedPrefixes; preserve
+ * user-authored entries whose command is outside managed roots.
+ */
+function registerHooksForCursor(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const configDir = path.join(versionHome, '.cursor');
+  const hooksPath = path.join(configDir, 'hooks.json');
+
+  type CursorEntry = {
+    command: string;
+    timeout?: number;
+    matcher?: string;
+  };
+
+  let existing: { version?: number; hooks?: Record<string, CursorEntry[]> } = { version: 1, hooks: {} };
+  if (fs.existsSync(hooksPath)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(hooksPath, 'utf-8'));
+      if (!existing.hooks || typeof existing.hooks !== 'object') existing.hooks = {};
+    } catch {
+      errors.push('Failed to parse existing hooks.json');
+      return { registered, errors };
+    }
+  }
+
+  // Desired managed entries keyed by event|command|matcher so a matcher or
+  // event change drops the stale entry instead of retaining it by command path alone.
+  const desiredManaged = new Set<string>();
+  for (const [hookName, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+    const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
+    if (!resolved) continue;
+    for (const event of hookDef.events) {
+      const cursorEvent = CURSOR_EVENT_MAP[event];
+      if (!cursorEvent) continue;
+      desiredManaged.add(`${cursorEvent}|${resolved}|${hookDef.matcher ?? ''}`);
+    }
+  }
+
+  // GC managed entries that are no longer in the manifest (by event+command+matcher)
+  const hooks: Record<string, CursorEntry[]> = {};
+  for (const [event, entries] of Object.entries(existing.hooks || {})) {
+    if (!Array.isArray(entries)) continue;
+    hooks[event] = entries.filter((e) => {
+      if (typeof e?.command !== 'string') return true;
+      if (!isManagedHookCommand(e.command, managedPrefixes)) return true;
+      return desiredManaged.has(`${event}|${e.command}|${e.matcher ?? ''}`);
+    });
+    if (hooks[event].length === 0) delete hooks[event];
+  }
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 30;
+
+    for (const event of hookDef.events) {
+      const cursorEvent = CURSOR_EVENT_MAP[event];
+      if (!cursorEvent) continue;
+
+      if (!hooks[cursorEvent]) hooks[cursorEvent] = [];
+
+      const entry: CursorEntry = { command: commandPath, timeout };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
+
+      const existingIdx = hooks[cursorEvent].findIndex(
+        (h) => h.command === entry.command && (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[cursorEvent][existingIdx] = entry;
+      } else {
+        hooks[cursorEvent].push(entry);
+      }
+
+      registered.push(`${name} -> ${cursorEvent}`);
+    }
+  }
+
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      hooksPath,
+      JSON.stringify({ version: 1, hooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write hooks.json: ${(err as Error).message}`);
   }
 
   return { registered, errors };

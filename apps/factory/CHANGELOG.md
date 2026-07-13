@@ -1,3 +1,8 @@
+## Unreleased
+
+- **Remote plan previews are isolated by source path (RUSH-1631).** Cache key is `host/sha1(path)/basename` so two worktrees sharing a plan basename no longer clobber each other. Source: `apps/factory/src/vscode/settings.vscode.ts`.
+- **Windows remote dispatch uses distinct PowerShell stdout/stderr log paths (RUSH-1622).** `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot share a file; use `.out.log` / `.err.log`. Source: `apps/factory/src/vscode/settings.vscode.ts`.
+
 # Changelog
 
 All notable changes to the Factory extension are documented here. Format follows
@@ -6,8 +11,57 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Factory Floor group controls now support Subgroup (RUSH-1544).**
+  The live feed and Backlog controls can render a second grouping axis, excluding
+  the primary axis to avoid duplicate grouping. Nested section headers make
+  combinations like Project -> Host and Project -> Source visible without
+  switching views. Source: `ui/settings/components/mission-control/FloorControls.tsx`,
+  `UnifiedAgentsPane.tsx`, `BacklogCenter.tsx`.
+- **Factory Floor surfaces agent-created tickets as clickable Linear artifacts (RUSH-1547).**
+  Session cards and detail panes now render linked Linear badges for carried/created
+  ticket refs and include commit chips in the produced-artifacts row, so PRs,
+  tickets, teams, plans, and commits are visible without reading the transcript.
+  Source: `ui/settings/components/mission-control/FeedItem.tsx`,
+  `UnifiedAgentsPane.tsx`.
+- **Factory tmux tabs close when their top-level pane exits (RUSH-1543).**
+  Tmux-backed agent tabs now install a guarded pane-death hook: exiting a user
+  split still closes only that split, but when the last remaining pane dies,
+  Factory detaches, kills the tmux session, and lets the VS Code
+  terminal close instead of lingering on a "Pane is dead" banner. Source:
+  `src/vscode/tmux.ts`.
+- **Per-session rate-limit badge on feed cards (RUSH-1523).** Sessions whose transcript shows a rate/usage limit render a distinct **rate limited** pill so they no longer look like healthy running agents. Source: `floorModel.ts` (`rateLimited`), `floorAdapter.ts` (`detectSessionRateLimited`), `FeedItem.tsx`.
+- **Feed cards get an Open/Resume-in-terminal action (RUSH-1520).** Each card shows a Terminal button that focuses an open tab, attaches a tmux rail, or runs `agents sessions focus <id>` — so the operator jumps into the session instead of only opening the side panel. Source: `ui/settings/components/mission-control/FeedItem.tsx`, `UnifiedAgentsPane.tsx` (`openTerminalForAgent`).
+- **Filter + group-by controls live in the feed header bar next to Save view (RUSH-1526).** The feed's own header (`SavedViews` / `feed-header-bar`) now carries Group + status chips (Needs you / Running / Idle / Failed) + agent-abbr chips, so operators filter and group where they are looking — not only from the top FloorControls bar. Source: `ui/settings/components/mission-control/SavedViewsBar.tsx`, `UnifiedAgentsPane.tsx`, `floor.css`.
+- **Floor Group defaults to Outcome (ticket/PR/worktree) instead of Project (RUSH-1479).** Fleet-scale floors collapse agents under the deliverable they serve so the operator sees initiatives, not ~1,100 processes. Source: `ui/settings/components/mission-control/floorModel.ts` (`outcomeLabel`, `FloorGroupBy`), `FloorControls.tsx`, `UnifiedAgentsPane.tsx`.
+- **The extension's parallel session stack is gone — live-session state now comes from the CLI (#741).**
+  Activity, waiting-for-input, awaiting reason, and tokens/sec ride the
+  `agents sessions --active --json` payload (`ActiveSession.activity` /
+  `awaitingReason` / `tokPerSec`) instead of being re-derived from per-agent
+  transcript-tail parsers; the Recent Sessions picker is backed by
+  `agents sessions --json` (fixing the stale `~/.gemini/sessions` scan — the CLI
+  scans the real `~/.gemini/tmp`); the machine-wide session watcher configures
+  its roots from `agents sessions --roots --json`; and the agent registry
+  (`BUILT_IN_AGENTS` launch commands, `.agents` config agent ids) derives from a
+  CLI-registry snapshot validated against `apps/cli` source in tests — which
+  also fixes antigravity launching a nonexistent `antigravity` binary instead of
+  `agy`, and `.agents` files silently dropping newer agents (grok, droid, …).
+  Source: `apps/factory/src/core/{session.activity,remoteSessions,agents,agents.cli,swarmifyConfig}.ts`,
+  `apps/factory/src/vscode/{remoteSessions,terminals,watchdog,settings,sessions}.vscode.ts`,
+  `apps/factory/src/monitor/{sessionParse,sessionWatcher}.ts`.
+- **Internal: `foreman.vscode.ts` reuses the shared `humanElapsed` helper (#753).** Deleted the identical private `humanElapsedFromMs` copy and imported the exported `humanElapsed` from `core/foreman.digest.ts`. No behavior change. Source: `apps/factory/src/vscode/foreman.vscode.ts`.
+- **Windows device dispatch no longer hardcodes `bash -lc`.** `dispatchToDevice` selects the remote shell from the device registry platform (PowerShell `-EncodedCommand` on windows; bash on POSIX), so Dispatch v2 works on win-mini. Source: `apps/factory/src/core/deviceDispatchShell.ts`, `apps/factory/src/vscode/settings.vscode.ts`. (RUSH-1481)
+
 ### Fixed
 
+- **Factory watchdog logs now use the canonical cache path documented by AGENTS.** The
+  watchdog bridge, watchdog tick writer, and Factory Floor log reader share one
+  `WATCHDOG_LOG_PATH` at `~/.agents/.cache/logs/watchdog.log`, matching the
+  post-restructure docs and CLI migration target. (RUSH-1516)
+- **Factory Floor cards now use human session names instead of UUID slices (RUSH-1532).**
+  Remote sessions preserve explicit labels separately from task topics, and the Floor
+  card header prefers label, topic, branch, ticket, and worktree metadata before falling
+  back to a generic agent title. Cloud single-agent rows now use their configured name
+  or prompt line instead of `agent-019e30a2`-style identifiers.
 - **NEEDS YOU precision — finished/stopped agents no longer masquerade as needing
   input (RUSH-1522).** Two gates tightened. (1) `derivePhase` now checks terminal
   statuses first: a `completed`/`stopped`/`failed` agent can no longer be lifted
@@ -25,6 +79,10 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Added
 
+- **Factory Floor cards now surface plan artifacts for preview (RUSH-1525).**
+  Session output, recent worktree files, and attachment refs are scanned for
+  `.html` and `ref-*.md` plan files; matching cards show plan chips that open HTML
+  plans externally and Markdown plans in the editor preview.
 - **Project rollups — one glance answers "what's happening in this project".** The
   rail's Projects flyout rows now carry dim sub-counts (open backlog tickets and
   distinct open PRs) next to the live agent count, and each card in the Projects

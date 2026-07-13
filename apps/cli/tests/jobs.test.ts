@@ -254,7 +254,7 @@ describe('job CRUD', () => {
       prompt: 'do something',
     } as JobConfig);
     const job = readJob(`${PREFIX}crud-defaults`)!;
-    expect(job.mode).toBe('plan');
+    expect(job.mode).toBe('auto');
     expect(job.effort).toBe('auto');
     expect(job.timeout).toBe('10m');
     expect(job.enabled).toBe(true);

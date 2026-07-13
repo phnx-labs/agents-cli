@@ -183,17 +183,17 @@ Only hooks with `cache:` are instrumented today — that's deliberate. Opting in
 
 | Event | When it fires | Agents |
 |-------|--------------|--------|
-| `SessionStart` | Agent session begins | Claude, Codex, Gemini, Grok |
-| `SessionEnd` | Agent session ends | Claude, Grok |
-| `UserPromptSubmit` | User prompt received before model sees it | Claude, Gemini (as `BeforeAgent`), Grok |
-| `PreToolUse` | Before a tool call executes | Claude, Codex, Gemini, Antigravity (`before_tool_call`) |
-| `PostToolUse` | After a tool call completes | Claude, Codex, Gemini, Antigravity (mapped to `after_model_call`) |
-| `PreCompact` | Before context compaction | Claude, Grok |
-| `Stop` | Agent stops (final turn) | Claude, Codex, Antigravity (`on_loop_stop`), Grok |
-| `Notification` | Agent sends a notification | Claude, Grok |
-| `OnError` | Agent encounters an error | Antigravity (`on_error`) |
+| `SessionStart` | Agent session begins | Claude, Codex, Gemini, Grok, Copilot (`sessionStart`), Kiro, Goose, Cursor (`sessionStart`) |
+| `SessionEnd` | Agent session ends | Claude, Grok, Copilot (`sessionEnd`), Goose, Cursor (`sessionEnd`) |
+| `UserPromptSubmit` | User prompt received before model sees it | Claude, Gemini (as `BeforeAgent`), Grok, Copilot (`userPromptSubmitted`), Kiro, Goose, Cursor (`beforeSubmitPrompt`) |
+| `PreToolUse` | Before a tool call executes | Claude, Codex, Gemini, Antigravity (`before_tool_call`), Copilot (`preToolUse`), Kiro, Goose, Cursor (`preToolUse`) |
+| `PostToolUse` | After a tool call completes | Claude, Codex, Gemini, Antigravity (mapped to `after_model_call`), Copilot (`postToolUse`), Kiro, Goose, Cursor (`postToolUse`) |
+| `PreCompact` | Before context compaction | Claude, Grok, Copilot (`preCompact`), Cursor (`preCompact`) |
+| `Stop` | Agent stops (final turn) | Claude, Codex, Antigravity (`on_loop_stop`), Grok, Copilot (`agentStop`), Kiro, Goose, Cursor (`stop`) |
+| `Notification` | Agent sends a notification | Claude, Grok, Copilot (`notification`) |
+| `OnError` | Agent encounters an error | Antigravity (`on_error`), Copilot (`errorOccurred`) |
 
-Event name mapping across agents is handled in `src/lib/hooks.ts`: `GEMINI_EVENT_MAP` (line 843), `ANTIGRAVITY_EVENT_MAP` (line 827), and Grok's `eventMap` (line 1328).
+Event name mapping across agents is handled in `src/lib/hooks.ts`: `GEMINI_EVENT_MAP`, `ANTIGRAVITY_EVENT_MAP`, Grok's `eventMap`, `COPILOT_EVENT_MAP`, `KIRO_EVENT_MAP`, `GOOSE_EVENT_MAP`, and `CURSOR_EVENT_MAP`.
 
 ## Predicate Matchers
 

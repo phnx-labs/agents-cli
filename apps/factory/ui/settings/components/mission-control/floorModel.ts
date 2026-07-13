@@ -14,6 +14,7 @@
 // so the port is a 1:1 translation, not a redesign.
 
 import type { UnifiedTask, RecentToolCall } from '../../types'
+import type { PlanFile } from '../../utils/planDetector'
 
 export type { RecentToolCall }
 
@@ -150,7 +151,9 @@ export interface FloorAgent {
   ci: CiStatus           // CI state of the open PR; null when no PR / unknown
   ticket: string | null  // "RUSH-812" when linked (injected/worked-on ticket from prompt or branch)
   createdTickets?: string[] // tracker refs this session CREATED (Linear create_issue / gh issue create); [] / undefined when none
+  createdCommits?: string[] // short git commit SHAs this session CREATED; [] / undefined when none
   spawnedTeam?: string   // team name this session SPAWNED via `agents teams create/add`; undefined when none
+  plans?: PlanFile[]     // detected ref-*.md / .html plan artifacts available for preview
   branch: string
   worktreeSlug: string   // "<slug>" under .agents/worktrees/; '' when not a worktree. Disambiguates sibling sessions + labels the card when topic/preview are empty.
   worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree
@@ -164,6 +167,11 @@ export interface FloorAgent {
   recent: RecentToolCall[] // rolling window of this session's recent tool calls; [] when none
   pane?: string          // tmux `%N` pane handle for unique addressing; undefined for non-tmux
   viewingIn?: string     // "Codium tab 3" / "Ghostty tab 2" / "detached"; undefined when unknown
+  /**
+   * Per-session rate/usage limit (RUSH-1523). Distinct from account-level
+   * usageStatus — set when the session transcript shows 429 / rate-limit text.
+   */
+  rateLimited?: boolean
 }
 
 // ---------- HOSTS sidebar rows ----------
@@ -373,7 +381,13 @@ export interface HostInventory {
   agents: HostAgentInfo[]
   fetchedAt: number
 }
-export type FloorGroupBy = 'host' | 'project' | 'status' | 'agent'
+/**
+ * Group axes for the live agent feed. `outcome` collapses agents under the
+ * deliverable they serve (ticket > PR > worktree > Unassigned) — the default
+ * for a fleet-scale floor so the operator sees dozens of initiatives, not
+ * ~1,100 processes (RUSH-1479).
+ */
+export type FloorGroupBy = 'outcome' | 'host' | 'project' | 'status' | 'agent'
 export type FloorSort = 'needs' | 'recent' | 'tok' | 'name'
 export type TicketGroupBy = 'project' | 'priority' | 'source' | 'status' | 'owner'
 export type TicketSort = 'priority' | 'id'
@@ -747,12 +761,49 @@ function cleanOption(raw: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s
 }
 
+/**
+ * Deliverable key for one agent: ticket > PR > worktree slug > Unassigned.
+ * Mirrors CLI `deriveOutcome` so Factory Floor and `agents feed` group the same way.
+ */
+export function outcomeLabel(a: Pick<FloorAgent, 'ticket' | 'pr' | 'worktreeSlug'>): string {
+  if (a.ticket) return a.ticket
+  if (a.pr) {
+    const n = a.pr.replace(/^#/, '')
+    return a.pr.startsWith('PR') ? a.pr : `PR#${n}`
+  }
+  if (a.worktreeSlug) return a.worktreeSlug
+  return 'Unassigned'
+}
+
+const LINEAR_ID_RE = /\b([A-Z][A-Z0-9]*-\d+)\b/
+const LINEAR_URL_ID_RE = /^https?:\/\/(?:www\.)?linear\.app\/\S*?\/issue\/([A-Z][A-Z0-9]*-\d+)\b/i
+
+/** Display label for a Linear issue ref or URL. */
+export function linearIssueLabel(ref: string): string {
+  const fromUrl = ref.match(LINEAR_URL_ID_RE)?.[1]
+  if (fromUrl) return fromUrl.toUpperCase()
+  const fromText = ref.match(LINEAR_ID_RE)?.[1]
+  return fromText ?? ref
+}
+
+/** External URL for a Linear issue ref or URL. Returns null for non-Linear refs. */
+export function linearIssueUrl(ref: string | null | undefined): string | null {
+  if (!ref) return null
+  const trimmed = ref.trim()
+  if (!trimmed) return null
+  const fromUrl = trimmed.match(LINEAR_URL_ID_RE)
+  if (fromUrl) return trimmed
+  const id = trimmed.match(LINEAR_ID_RE)?.[1]
+  return id ? `https://linear.app/issue/${encodeURIComponent(id)}` : null
+}
+
 /** Group agents by the chosen dimension. Prototype groupKey: factory-floor.html:412. */
 export function groupAgents(agents: FloorAgent[], by: FloorGroupBy): Map<string, FloorAgent[]> {
   // Coalesce empty keys to a human label (same rule as groupTickets) so a Floor
   // group header is never blank. Host groups by its DISPLAY label so 'this-mac'
   // collapses onto the real device name, matching the HOSTS sidebar.
   const accessor: Record<FloorGroupBy, (a: FloorAgent) => string> = {
+    outcome: (a) => outcomeLabel(a),
     host: (a) => (a.hostLabel ?? a.host) || 'Unknown host',
     project: (a) => a.project || 'Unlabeled',
     status: (a) => a.phase,

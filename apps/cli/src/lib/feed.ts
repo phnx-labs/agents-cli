@@ -13,11 +13,19 @@
  * A block carries enough identity (sessionId, mailboxId, host, runtime) for
  * `agents feed` to aggregate across hosts and for `agents message` to route
  * a reply back to the right agent.
+ *
+ * Answer lifecycle:
+ *   - A block may be answered from any surface (feed, terminal, tmux, cloud).
+ *   - The first answer wins: `recordAnswer` atomically checks an answered
+ *     marker so exactly one surface can claim the block.
+ *   - Answered blocks stay visible until the agent consumes the message and
+ *     continues, so the UI can show delivered/consumed/continued receipts.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { getFeedDir, getUserAgentsDir } from './state.js';
+import { isHighConsequenceAllowed } from './operator.js';
 
 export interface BlockOption {
   label: string;
@@ -29,6 +37,30 @@ export interface BlockQuestion {
   header?: string;
   options?: BlockOption[];
   multiSelect?: boolean;
+}
+
+export interface MessageReceipt {
+  /** The message id this receipt describes. */
+  msgId: string;
+  /** Delivery lifecycle state. */
+  status: 'queued' | 'consumed' | 'continued';
+  /** ISO-8601 timestamp of the state transition. */
+  at: string;
+  /** Optional sender label for the message. */
+  from?: string;
+}
+
+export interface AnswerRecord {
+  /** ISO-8601 timestamp of when the answer was recorded. */
+  answeredAt: string;
+  /** Surface that recorded the answer (e.g. 'feed', 'terminal', 'tmux', 'cloud', 'policy'). */
+  answeredFrom: string;
+  /** Optional operator/agent label recorded as the sender. */
+  answeredBy?: string;
+  /** Operator id from the local registry, if verified. */
+  operatorId?: string;
+  /** Whether the operator identity was verified against the registry. */
+  verified?: boolean;
 }
 
 export interface OpenBlock {
@@ -43,6 +75,34 @@ export interface OpenBlock {
   notificationType?: string;
   ticket?: string;
   pr?: string;
+  /** Worktree slug under `.agents/worktrees/` — soft outcome when no ticket/PR. */
+  worktreeSlug?: string;
+  /** Epic / initiative label when no ticket/PR/worktree is known. */
+  epic?: string;
+  /** Block class: approval has a safe default; decision requires human choice. */
+  blockClass?: 'approval' | 'decision';
+  /** Consequence tag for authz. 'high' gates merge/deploy/admin-style answers. */
+  consequence?: 'normal' | 'high' | string;
+  /** Operator ids allowed to answer a high-consequence block. Admins always pass. */
+  allowedOperators?: string[];
+  /** Timeout in minutes before default-on-no-answer policy fires. */
+  timeoutMinutes?: number;
+  /** Safe default answer for approval-class blocks. */
+  safeDefault?: string;
+  /** Cost-of-delay for notification routing: low/medium/high. */
+  costOfDelay?: 'low' | 'medium' | 'high';
+  /** Set once the block has been answered; see `recordAnswer`. */
+  answer?: AnswerRecord;
+  /** Per-message delivery receipts for answers to this block. */
+  receipts?: MessageReceipt[];
+  /** ISO-8601 timestamp when the agent continued past the block. */
+  continuedAt?: string;
+  /** ISO-8601 timestamp when an urgent block was paged to the phone. */
+  notifiedAt?: string;
+  /** ISO-8601 timestamp when the approval safe-default was applied. */
+  defaultedAt?: string;
+  /** ISO-8601 timestamp when a decision block was hard-parked. */
+  parkedAt?: string;
 }
 
 /**
@@ -61,7 +121,209 @@ function blockPath(root: string, blockId: string): string {
   return path.join(root, `${blockId}.json`);
 }
 
-/** Atomic write a block record to the feed store. */
+function answeredDir(root: string): string { return path.join(root, 'answered'); }
+function receiptDir(root: string): string { return path.join(root, 'receipts'); }
+
+function ensureDir(dir: string): void {
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function safeReadJson<T>(file: string): T | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf-8')) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function atomicWriteJson(file: string, value: unknown): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf-8');
+  fs.renameSync(tmp, file);
+}
+
+/** Read one block record. Returns undefined when missing or corrupt. */
+export function readBlock(blockId: string, root?: string): OpenBlock | undefined {
+  const parsed = safeReadJson<Partial<OpenBlock>>(blockPath(root ?? getFeedDir(), blockId));
+  if (!parsed || !parsed.blockId || !parsed.sessionId || !parsed.questions?.length) return undefined;
+  return parsed as OpenBlock;
+}
+
+export type RecordAnswerResult =
+  | { ok: true }
+  | { ok: false; existing: AnswerRecord }
+  | { ok: false; unauthorized: true; reason: string };
+
+/**
+ * Atomically claim the first answer for a block. Returns `{ ok: true }` when
+ * this call is the first to answer; returns `{ ok: false, existing }` when a
+ * different surface already answered the block. The marker file is created
+ * with `O_EXCL` so two concurrent claimers cannot both succeed.
+ *
+ * High-consequence blocks require a verified operator identity. Unverified
+ * answers (no operatorId or not in the registry/allowed list) are refused.
+ */
+export function recordAnswer(
+  blockId: string,
+  answer: { answeredBy?: string; answeredFrom: string; operatorId?: string; verified?: boolean },
+  root?: string,
+): RecordAnswerResult {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  const operatorId = answer.operatorId;
+
+  if (block?.consequence && block.consequence !== 'normal') {
+    // Operators live in ~/.agents/operators.yaml — never the feed store root.
+    if (!operatorId || answer.verified !== true || !isHighConsequenceAllowed(block.consequence, operatorId)) {
+      return {
+        ok: false,
+        unauthorized: true,
+        reason: `High-consequence block '${block.consequence}' requires a verified, authorized operator.`,
+      };
+    }
+  }
+
+  ensureDir(answeredDir(dir));
+  const marker = path.join(answeredDir(dir), `${blockId}.json`);
+  const record: AnswerRecord = {
+    answeredAt: new Date().toISOString(),
+    answeredFrom: answer.answeredFrom,
+    answeredBy: answer.answeredBy,
+    operatorId: answer.operatorId,
+    verified: answer.verified,
+  };
+
+  // Try to create the answered marker atomically.
+  try {
+    const fd = fs.openSync(marker, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o644);
+    try {
+      const buf = Buffer.from(JSON.stringify(record, null, 2), 'utf-8');
+      fs.writeSync(fd, buf, 0, buf.length);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') {
+      const existing = safeReadJson<AnswerRecord>(marker);
+      return { ok: false, existing: existing ?? { answeredAt: '', answeredFrom: 'unknown' } };
+    }
+    throw err;
+  }
+
+  // Marker created successfully -- mirror the answer into the block file.
+  if (block) {
+    block.answer = record;
+    publishBlock(block, dir);
+  }
+  return { ok: true };
+}
+
+/** Read the answer record for a block, if one exists. */
+export function getAnswerRecord(blockId: string, root?: string): AnswerRecord | undefined {
+  return safeReadJson<AnswerRecord>(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
+}
+
+/** True when the block has already been answered. */
+export function isBlockAnswered(blockId: string, root?: string): boolean {
+  return fs.existsSync(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
+}
+
+/** Receipt lifecycle rank — higher means further along; never regress. */
+const RECEIPT_STATUS_RANK: Record<MessageReceipt['status'], number> = {
+  queued: 0,
+  consumed: 1,
+  continued: 2,
+};
+
+/**
+ * Record a delivery-receipt transition for a message tied to a block.
+ * Updates the receipts list in the block file. Status is monotonic
+ * (queued → consumed → continued): a late `queued` write cannot overwrite
+ * an already-recorded `consumed`/`continued` (race with mailbox drain).
+ */
+export function recordMessageReceipt(
+  blockId: string,
+  receipt: MessageReceipt,
+  root?: string,
+): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  const receipts = block.receipts ?? [];
+  const idx = receipts.findIndex((r) => r.msgId === receipt.msgId);
+  if (idx >= 0) {
+    const prev = receipts[idx];
+    if (RECEIPT_STATUS_RANK[receipt.status] < RECEIPT_STATUS_RANK[prev.status]) {
+      return; // do not regress
+    }
+    receipts[idx] = receipt;
+  } else {
+    receipts.push(receipt);
+  }
+  block.receipts = receipts;
+  publishBlock(block, dir);
+}
+
+/** Read the receipt list for a block. */
+export function getBlockReceipts(blockId: string, root?: string): MessageReceipt[] {
+  return readBlock(blockId, root)?.receipts ?? [];
+}
+
+/** Mark a block as "continued" -- the agent consumed the answer and moved on. */
+export function recordContinued(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  block.continuedAt = new Date().toISOString();
+  publishBlock(block, dir);
+}
+
+/** Mark a decision-class block as hard-parked (no safe default existed). */
+export function recordParked(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  block.parkedAt = new Date().toISOString();
+  publishBlock(block, dir);
+}
+
+/** Mark that the approval safe-default was applied by policy. */
+export function recordDefaulted(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  block.defaultedAt = new Date().toISOString();
+  publishBlock(block, dir);
+}
+
+/** Mark that an urgent block was paged to the phone. */
+export function recordNotified(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  block.notifiedAt = new Date().toISOString();
+  publishBlock(block, dir);
+}
+
+/** Convenience: record that a terminal answer closed the block. */
+export function recordTerminalAnswer(blockId: string, root?: string): void {
+  recordAnswer(blockId, { answeredFrom: 'terminal' }, root);
+}
+
+/** Remove answered marker and receipts for a block (used by block removal/GC). */
+export function clearBlockLifecycle(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  for (const sub of [answeredDir(dir), receiptDir(dir)]) {
+    try {
+      fs.unlinkSync(path.join(sub, `${blockId}.json`));
+    } catch {
+      // ignore missing
+    }
+  }
+}
+
+/** Atomic write a block record to the feed store. Clears stale lifecycle state. */
 export function publishBlock(block: OpenBlock, root?: string): void {
   const dir = root ?? getFeedDir();
   fs.mkdirSync(dir, { recursive: true });
@@ -95,9 +357,10 @@ export function listBlocks(root?: string): OpenBlock[] {
   return blocks;
 }
 
-/** Remove a block record. Returns true if the file was deleted. */
+/** Remove a block record and its lifecycle sidecars. Returns true if the file was deleted. */
 export function removeBlock(blockId: string, root?: string): boolean {
   const dir = root ?? getFeedDir();
+  clearBlockLifecycle(blockId, dir);
   try {
     fs.unlinkSync(blockPath(dir, blockId));
     return true;
@@ -145,9 +408,31 @@ WAITING_NOTIFICATION_TYPES = {
 CLEAR_EVENTS = {
     "PostToolUse",
     "Stop",
-    "UserPromptSubmit",
     "SessionEnd",
 }
+
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def write_json(path, value):
+    dir_name = os.path.dirname(path)
+    os.makedirs(dir_name, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(value, f, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except Exception:
+            pass
 
 
 def main():
@@ -169,10 +454,46 @@ def main():
     block_id = f"block-{safe_session_id}"
     home = os.environ.get("HOME") or os.path.expanduser("~")
     feed_dir = os.path.join(home, ".agents", ".history", "feed")
+    answered_dir = os.path.join(feed_dir, "answered")
     target = os.path.join(feed_dir, f"{block_id}.json")
     hook_event = payload.get("hook_event_name", "PreToolUse")
 
     if hook_event in CLEAR_EVENTS:
+        try:
+            os.unlink(target)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        # Also clear the answered marker so a future question for this session
+        # is not permanently locked.
+        try:
+            os.unlink(os.path.join(answered_dir, f"{block_id}.json"))
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        return
+
+    # Terminal answers (human typed in the TUI) record an answered marker and
+    # remove the block file so the feed stops showing it within one poll cycle.
+    # The marker stays behind so a concurrent surface cannot double-answer.
+    if hook_event == "UserPromptSubmit":
+        os.makedirs(answered_dir, exist_ok=True)
+        marker = os.path.join(answered_dir, f"{block_id}.json")
+        try:
+            fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            record = {
+                "answeredAt": datetime.now(timezone.utc).isoformat(),
+                "answeredFrom": "terminal",
+            }
+            with os.fdopen(fd, "w") as f:
+                json.dump(record, f, indent=2)
+        except FileExistsError:
+            pass
+        except Exception:
+            pass
+        # Remove the visible block so the feed drops the answered question.
         try:
             os.unlink(target)
         except FileNotFoundError:
@@ -255,6 +576,37 @@ def main():
     }
     if notification_type:
         block["notificationType"] = notification_type
+
+    # Optional multi-operator control metadata passed by the agent in the
+    # AskUserQuestion tool_input. Defaults keep the existing behavior.
+    controls = payload.get("tool_input", {}) if hook_event != "Notification" else {}
+    block_class = controls.get("blockClass") if isinstance(controls, dict) else None
+    if block_class in ("approval", "decision"):
+        block["blockClass"] = block_class
+    consequence = controls.get("consequence") if isinstance(controls, dict) else None
+    if consequence:
+        block["consequence"] = consequence
+    allowed = controls.get("allowedOperators") if isinstance(controls, dict) else None
+    if isinstance(allowed, list):
+        block["allowedOperators"] = [str(a) for a in allowed]
+    timeout = controls.get("timeoutMinutes") if isinstance(controls, dict) else None
+    if isinstance(timeout, (int, float)) and timeout > 0:
+        block["timeoutMinutes"] = int(timeout)
+    safe_default = controls.get("safeDefault") if isinstance(controls, dict) else None
+    if isinstance(safe_default, str):
+        block["safeDefault"] = safe_default
+    cost = controls.get("costOfDelay") if isinstance(controls, dict) else None
+    if cost in ("low", "medium", "high"):
+        block["costOfDelay"] = cost
+
+    # Publishing a new question clears any stale answered marker from the
+    # previous question in this session.
+    try:
+        os.unlink(os.path.join(answered_dir, f"{block_id}.json"))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
 
     # Python's expanduser() ignores HOME on Windows, while agents-cli honors a
     # HOME override on every platform. Use the same anchor so hooks and the CLI

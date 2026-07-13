@@ -8,7 +8,7 @@ import type { AgentAbbr } from './floorModel'
 export interface RecapEntry {
   id: string
   abbr: AgentAbbr
-  /** Task line: topic, else worktree slug, else branch, else the session id. */
+  /** Task line: label/topic, else worktree slug, else branch, else a generic agent title. */
   title: string
   project: string
   host: string
@@ -49,6 +49,10 @@ export function recapCost(usd: number): string {
   return `$${usd.toFixed(2)}`
 }
 
+function recapTitle(s: RemoteSessionLike): string {
+  return s.label || s.topic || s.worktreeSlug || s.branch || (s.agentType ? `${s.agentType} session` : 'Session')
+}
+
 /**
  * Build the day-grouped ledger from the recap sweep. `liveIds` (session ids of
  * agents currently on the live feed) are excluded — the ledger is what FINISHED,
@@ -66,7 +70,7 @@ export function buildRecap(sessions: RemoteSessionLike[], liveIds: Set<string>, 
     entries.push({
       id: s.sessionId,
       abbr: abbrFor(s.agentType),
-      title: s.topic || s.worktreeSlug || s.branch || s.sessionId.slice(0, 8),
+      title: recapTitle(s),
       project: s.project,
       host: s.host,
       branch: s.branch,
