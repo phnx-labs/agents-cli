@@ -302,6 +302,43 @@ export function transformSubagentForDroid(subagentDir: string): string {
   return result;
 }
 
+/**
+ * Transform a subagent into an OpenCode agent markdown file.
+ *
+ * OpenCode loads agents from ~/.config/opencode/agents/*.md (global) with
+ * YAML frontmatter (description required; mode: subagent for invocable
+ * subagents) and a prompt body. File stem becomes the agent name.
+ * https://opencode.ai/docs/agents/
+ */
+export function transformSubagentForOpenCode(subagentDir: string): string {
+  const agentMd = path.join(subagentDir, 'AGENT.md');
+  const frontmatter = parseSubagentFrontmatter(agentMd);
+  const body = getSubagentBody(agentMd);
+
+  if (!frontmatter) {
+    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
+  }
+
+  const fm: Record<string, unknown> = {
+    description: frontmatter.description,
+    mode: 'subagent',
+  };
+  if (frontmatter.model) fm.model = frontmatter.model;
+
+  let systemPrompt = body.trim();
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    systemPrompt += `\n\n## ${title}\n\n${content}`;
+  }
+
+  return `---\n${yaml.stringify(fm).trim()}\n---\n\n${systemPrompt}\n`;
+}
+
 /** Managed parent agent file for Kimi (underscore prefix avoids clobbering a user subagent named agents-cli). */
 export const KIMI_SUBAGENTS_PARENT_FILE = '_agents-cli.yaml';
 
@@ -515,6 +552,16 @@ export function installSubagentToAgent(
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  } else if (agent === 'opencode') {
+    // OpenCode: markdown agents under ~/.config/opencode/agents/
+    const agentsDir = path.join(agentHome, '.config', 'opencode', 'agents');
+    if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
+    try {
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.md`), transformSubagentForOpenCode(subagentDir));
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else if (agent === 'openclaw') {
     // OpenClaw: copy full directory
     const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
@@ -553,6 +600,10 @@ export function removeSubagentFromAgent(
       const promptPath = safeJoin(agentsDir, `${subagentName}.system.md`);
       if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
       if (fs.existsSync(promptPath)) fs.unlinkSync(promptPath);
+      return { success: true };
+    } else if (agent === 'opencode') {
+      const targetPath = safeJoin(path.join(agentHome, '.config', 'opencode', 'agents'), `${subagentName}.md`);
+      if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
       return { success: true };
     } else if (agent === 'openclaw') {
       const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
@@ -666,6 +717,17 @@ export function listSubagentsForAgent(
         frontmatter: { name, description },
       });
     }
+  } else if (agentId === 'opencode') {
+    const agentsDir = path.join(home, '.config', 'opencode', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.md')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+      const name = file.replace(/\.md$/, '');
+      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
+      subagents.push({ name, path: filePath, files: [file], frontmatter });
+    }
   } else if (agentId === 'openclaw') {
     // OpenClaw: directories with AGENTS.md
     const openclawDir = path.join(home, '.openclaw');
@@ -762,6 +824,15 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
         }
       }
     }
+  } else if (agent === 'opencode') {
+    const agentsDir = path.join(versionHome, '.config', 'opencode', 'agents');
+    if (fs.existsSync(agentsDir)) {
+      for (const file of fs.readdirSync(agentsDir)) {
+        if (!file.endsWith('.md')) continue;
+        const name = path.basename(file, '.md');
+        if (!discovered.has(name)) orphans.push(name);
+      }
+    }
   } else if (agent === 'openclaw') {
     const openclawDir = path.join(versionHome, '.openclaw');
     if (fs.existsSync(openclawDir)) {
@@ -827,6 +898,12 @@ export function removeSubagentFromVersion(
         if (fs.existsSync(promptPath)) {
           fs.renameSync(promptPath, path.join(trashDir, `${subagentName}.system.md.${stamp}`));
         }
+      }
+    } else if (agent === 'opencode') {
+      const targetPath = path.join(versionHome, '.config', 'opencode', 'agents', `${subagentName}.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
       }
     } else if (agent === 'openclaw') {
       const targetDir = path.join(versionHome, '.openclaw', subagentName);
