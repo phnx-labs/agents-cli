@@ -273,7 +273,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     await setSessionHook(
       'guardsplit',
       'pane-died',
-      agentPaneDiedHook('guardsplit', agentPane, socket),
+      agentPaneDiedHook('guardsplit', agentPane),
       socket,
     );
     // User opens a split (a plain shell), then exits it.
@@ -300,7 +300,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     await setSessionHook(
       'guardagent',
       'pane-died',
-      agentPaneDiedHook('guardagent', agentPane, socket),
+      agentPaneDiedHook('guardagent', agentPane),
       socket,
     );
     await wait(400);
