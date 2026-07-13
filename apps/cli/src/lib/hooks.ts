@@ -1134,6 +1134,9 @@ export function registerHooksToSettings(
   if (agentId === 'copilot') {
     return registerHooksForCopilot(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'kiro') {
+    return registerHooksForKiro(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   return { registered: [], errors: [] };
 }
 
@@ -2163,6 +2166,122 @@ function registerHooksForCopilot(
     );
   } catch (err) {
     errors.push(`Failed to write ${COPILOT_MANAGED_HOOKS_FILE}: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical hooks.yaml event names → Kiro v3 trigger names.
+ * Kiro v3 uses PascalCase triggers under `.kiro/hooks/*.json`
+ * (https://kiro.dev/docs/cli/v3/hooks/). Unmapped events are skipped.
+ */
+const KIRO_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'SessionStart',
+  Stop: 'Stop',
+  PreToolUse: 'PreToolUse',
+  PostToolUse: 'PostToolUse',
+  UserPromptSubmit: 'UserPromptSubmit',
+};
+
+/**
+ * Kiro triggers that evaluate the `matcher` regex (tool name, file path, or
+ * prompt text depending on the trigger). Lifecycle SessionStart/Stop always fire.
+ */
+const KIRO_MATCHER_EVENTS = new Set([
+  'PreToolUse',
+  'PostToolUse',
+  'UserPromptSubmit',
+]);
+
+/** Managed filename under ~/.kiro/hooks/ — we own this file entirely. */
+const KIRO_MANAGED_HOOKS_FILE = 'agents-cli-hooks.json';
+
+/**
+ * Register hooks for Kiro CLI (v3 standalone hooks format).
+ *
+ * Each file under `~/.kiro/hooks/*.json` is:
+ *   { "version": "v1", "hooks": [ { name, trigger, matcher?, action, timeout?, enabled? } ] }
+ *
+ * We rewrite a single managed file so GC is a rewrite and user-authored sibling
+ * JSON files are never touched. Embedded agent-config hooks (2.x) still work
+ * in Kiro but we only write the v3 path.
+ */
+function registerHooksForKiro(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  _managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const kiroHooksDir = path.join(versionHome, '.kiro', 'hooks');
+  fs.mkdirSync(kiroHooksDir, { recursive: true });
+
+  type KiroHook = {
+    name: string;
+    trigger: string;
+    matcher?: string;
+    action: { type: 'command'; command: string };
+    timeout: number;
+    enabled: boolean;
+  };
+  const hooks: KiroHook[] = [];
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 60;
+
+    for (const event of hookDef.events) {
+      const trigger = KIRO_EVENT_MAP[event];
+      if (!trigger) continue;
+
+      const entry: KiroHook = {
+        name,
+        trigger,
+        action: { type: 'command', command: commandPath },
+        timeout,
+        enabled: true,
+      };
+      if (KIRO_MATCHER_EVENTS.has(trigger) && hookDef.matcher) {
+        entry.matcher = hookDef.matcher;
+      }
+
+      // De-dupe on (name, trigger, matcher)
+      const existingIdx = hooks.findIndex(
+        (h) =>
+          h.name === entry.name &&
+          h.trigger === entry.trigger &&
+          (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[existingIdx] = entry;
+      } else {
+        hooks.push(entry);
+      }
+
+      registered.push(`${name} -> ${trigger}`);
+    }
+  }
+
+  const outPath = path.join(kiroHooksDir, KIRO_MANAGED_HOOKS_FILE);
+  try {
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({ version: 'v1', hooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write ${KIRO_MANAGED_HOOKS_FILE}: ${(err as Error).message}`);
   }
 
   return { registered, errors };

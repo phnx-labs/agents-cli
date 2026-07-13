@@ -393,12 +393,15 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsDir: path.join(HOME, '.kiro', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.kiro', 'skills'),
+    // Hooks: v3 standalone files under ~/.kiro/hooks/*.json
+    // (`{ "version": "v1", "hooks": [...] }`). Fixed PreToolUse/PostToolUse
+    // firing in kiro-cli 0.10; fully stable by 2.6.1. See registerHooksForKiro.
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit'] },
+    supportsHooks: true,
+    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit'] },
   },
   goose: {
     id: 'goose',

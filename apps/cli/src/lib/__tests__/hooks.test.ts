@@ -758,6 +758,108 @@ describe('registerHooksToSettings - Copilot', () => {
   });
 });
 
+describe('registerHooksToSettings - Kiro', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeKiroScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  it('writes agents-cli-hooks.json with version v1 and PascalCase triggers', () => {
+    makeKiroScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> UserPromptSubmit');
+    expect(result.registered).toContain('on-prompt -> SessionStart');
+
+    const outPath = path.join(versionHome, '.kiro', 'hooks', 'agents-cli-hooks.json');
+    expect(fs.existsSync(outPath)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.version).toBe('v1');
+    expect(parsed.hooks).toHaveLength(2);
+    const byTrigger = Object.fromEntries(parsed.hooks.map((h: { trigger: string }) => [h.trigger, h]));
+    expect(byTrigger.UserPromptSubmit.action.type).toBe('command');
+    expect(byTrigger.UserPromptSubmit.timeout).toBe(45);
+    expect(byTrigger.UserPromptSubmit.enabled).toBe(true);
+    expect(resolvedCommand(byTrigger.UserPromptSubmit.action.command)).toContain('on-prompt.sh');
+    expect(byTrigger.SessionStart).toBeDefined();
+  });
+
+  it('emits matcher for PreToolUse and omits it for SessionStart', () => {
+    makeKiroScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      guard: {
+        script: 'guard.sh',
+        events: ['PreToolUse', 'SessionStart'],
+        matcher: 'execute_bash|fs_write',
+      },
+    };
+
+    registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.kiro', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
+    );
+    const byTrigger = Object.fromEntries(parsed.hooks.map((h: { trigger: string }) => [h.trigger, h]));
+    expect(byTrigger.PreToolUse.matcher).toBe('execute_bash|fs_write');
+    expect(byTrigger.SessionStart.matcher).toBeUndefined();
+  });
+
+  it('does not duplicate entries on repeated sync', () => {
+    makeKiroScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    registerHooksToSettings('kiro', versionHome, manifest, agentsDir);
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(versionHome, '.kiro', 'hooks', 'agents-cli-hooks.json'), 'utf-8')
+    );
+    expect(parsed.hooks).toHaveLength(1);
+  });
+
+  it('never touches a user-authored sibling hooks JSON file', () => {
+    makeKiroScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const userFile = path.join(versionHome, '.kiro', 'hooks', 'my-custom.json');
+    fs.mkdirSync(path.dirname(userFile), { recursive: true });
+    const userBody = {
+      version: 'v1',
+      hooks: [{ name: 'user', trigger: 'SessionStart', action: { type: 'command', command: 'echo user' } }],
+    };
+    fs.writeFileSync(userFile, JSON.stringify(userBody), 'utf-8');
+
+    registerHooksToSettings(
+      'kiro',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] } },
+      agentsDir
+    );
+    expect(JSON.parse(fs.readFileSync(userFile, 'utf-8'))).toEqual(userBody);
+  });
+});
+
 describe('registerHooksToSettings - Antigravity', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));

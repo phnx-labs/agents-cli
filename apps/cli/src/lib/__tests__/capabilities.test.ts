@@ -161,11 +161,32 @@ describe('capableAgents()', () => {
     expect(agents).toContain('copilot');
   });
 
+  it('includes kiro for hooks (kiro-cli v3 hooks, since 0.10.0)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('kiro');
+  });
+
   it('excludes cursor/opencode/amp for hooks', () => {
     const agents = capableAgents('hooks');
     expect(agents).not.toContain('cursor');
     expect(agents).not.toContain('opencode');
     expect(agents).not.toContain('amp');
+  });
+});
+
+describe('kiro hooks version gate', () => {
+  it('gates versions below 0.10.0 as too_old', () => {
+    const result = supports('kiro', 'hooks', '0.9.0');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 0.10.0');
+    }
+  });
+
+  it('passes 0.10.0 and above', () => {
+    expect(supports('kiro', 'hooks', '0.10.0')).toEqual({ ok: true });
+    expect(supports('kiro', 'hooks', '2.6.1')).toEqual({ ok: true });
   });
 });
 

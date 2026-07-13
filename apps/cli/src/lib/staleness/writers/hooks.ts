@@ -38,7 +38,7 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
       // discovers from ~/.grok/hooks/ so the file copy is sufficient. Copilot
       // loads every *.json under ~/.copilot/hooks/ — registerHooksForCopilot
       // writes the managed agents-cli-hooks.json there.
-      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot') {
+      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'kiro') {
         registerHooksToSettings(agent, versionHome);
       }
       return { synced };

@@ -89,7 +89,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — |
 | Copilot | `copilot` | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
-| Kiro | `kiro` | — | ✓ | — | ✓ | ✓ | — | — | — |
+| Kiro | `kiro` | ≥0.10 | ✓ | — | ✓ | ✓ | — | — | — |
 | Goose | `goose` | — | ✓ | — | — | — | — | — | — |
 | Droid | `droid` | ✓ | ✓ | — | — | ✓ | ✓ | ✓ | — |
 
