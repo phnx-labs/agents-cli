@@ -175,6 +175,11 @@ export interface FloorAgent {
   recent: RecentToolCall[] // rolling window of this session's recent tool calls; [] when none
   pane?: string          // tmux `%N` pane handle for unique addressing; undefined for non-tmux
   viewingIn?: string     // "Codium tab 3" / "Ghostty tab 2" / "detached"; undefined when unknown
+  /**
+   * Per-session rate/usage limit (RUSH-1523). Distinct from account-level
+   * usageStatus — set when the session transcript shows 429 / rate-limit text.
+   */
+  rateLimited?: boolean
 }
 
 // ---------- HOSTS sidebar rows ----------

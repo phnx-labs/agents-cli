@@ -251,6 +251,9 @@
 .swarmify-root .fitem .who { font-weight: 700; font-size: 13px; }
 .swarmify-root .fitem .path { color: var(--ds-text-dim); font-size: 11px; }
 .swarmify-root .fitem .when { margin-left: auto; color: var(--ds-text-dim); font-size: 11px; display: flex; align-items: center; gap: 8px; }
+/* Per-session rate-limit badge (RUSH-1523). */
+.swarmify-root .fitem .pill.rate { background: var(--status-pending-bg, rgba(245,179,1,0.15)); color: var(--status-pending, #c48a00); border: 1px solid rgba(245,179,1,0.35); }
+.swarmify-root .fitem.rate-limited { border-color: rgba(245,179,1,0.45); }
 /* Open/Resume-in-terminal action on feed cards (RUSH-1520). */
 .swarmify-root .fitem .open-term { display: inline-flex; align-items: center; gap: 4px; font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 700; color: var(--brand-600, var(--brand)); background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); border-radius: 20px; padding: 2px 8px; cursor: pointer; }
 .swarmify-root .fitem .open-term:hover { border-color: var(--brand); color: var(--brand); }

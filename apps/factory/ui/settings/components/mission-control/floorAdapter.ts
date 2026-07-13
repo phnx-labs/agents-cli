@@ -110,6 +110,8 @@ export interface UnifiedAgentLike {
     files_created?: string[]
     files_modified?: string[]
     attachments?: Array<Partial<SessionAttachment> & { name?: string; ref?: string } | string>
+    /** Per-session rate/usage limit from the CLI transcript (RUSH-1523). */
+    rateLimited?: boolean
   } | null
 }
 
@@ -161,6 +163,8 @@ export interface RemoteSessionLike {
   teamName: string
   pid: number
   transport: string
+  /** Per-session rate/usage limit from the CLI (RUSH-1523). */
+  rateLimited?: boolean
   replyRail: string
   replyMuxTarget: string
   replyMuxSocket: string
@@ -504,7 +508,28 @@ export function toFloorAgentFromUnified(
     // (currentActivity) when it hasn't spoken between tool calls yet.
     summary: u.terminal?.narrative || u.terminal?.currentActivity || '',
     recent: u.terminal?.recentToolCalls ?? [],
+    // Per-session rate limit (RUSH-1523): CLI flag or detect from last messages.
+    rateLimited: detectSessionRateLimited(u.agent?.rateLimited, messages, resp),
   }
+}
+
+/** True when the CLI flagged the session, or last messages match rate-limit shapes. */
+export function detectSessionRateLimited(
+  flagged: boolean | undefined,
+  messages: string[],
+  resp: string,
+): boolean | undefined {
+  if (flagged) return true
+  const blob = [...messages, resp].join('\n').toLowerCase()
+  if (!blob) return undefined
+  const hit =
+    /\brate[- ]?limit(ed|s)?\b/.test(blob) ||
+    /\btoo many requests\b/.test(blob) ||
+    /\b429\b/.test(blob) ||
+    /\busage[- ]?limit(ed)?\b/.test(blob) ||
+    /\bout of (credits|quota)\b/.test(blob) ||
+    /\bquota exceeded\b/.test(blob)
+  return hit || undefined
 }
 
 /**
@@ -591,6 +616,11 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // tmux %pane handle + where it's being viewed, surfaced on the card.
     pane: r.tmuxPane || undefined,
     viewingIn: r.viewingIn || undefined,
+    rateLimited: detectSessionRateLimited(
+      r.rateLimited,
+      r.tail && r.tail.length ? r.tail : r.lastResponse ? [r.lastResponse] : [],
+      resp,
+    ),
   }
 }
 

@@ -140,6 +140,8 @@ export interface RemoteSession {
   activity: string;
   tokPerSec: number;
   waitingForInput: boolean;
+  /** Per-session rate/usage limit from the CLI transcript (RUSH-1523). */
+  rateLimited: boolean;
   lastResponse: string;
   /** The structured decision the agent is waiting on (question/plan/permission +
    *  options), from the CLI state engine. null when the CLI supplied none — the UI
@@ -299,6 +301,8 @@ export interface RawActiveSession {
   /** Tracker refs the session CREATED + team it SPAWNED, from the CLI session scan. */
   createdTickets?: string[];
   spawnedTeam?: string;
+  /** Per-session rate/usage limit from the CLI (RUSH-1523). */
+  rateLimited?: boolean;
   /** Normalized device id the CLI attributes this session to (machineId() form,
    *  e.g. 'zion', 'yosemite-s0'). Present on every row of a fanned-out
    *  `sessions --active --json` — the load-bearing signal for which physical
@@ -491,6 +495,7 @@ export function normalizeActiveSession(
     activity: '',
     tokPerSec: 0,
     waitingForInput: phase === 'waiting',
+    rateLimited: raw.rateLimited === true,
     lastResponse: preview,
     question: normalizeQuestion(raw.question),
     tail: Array.isArray(raw.tail) ? raw.tail.map((t) => asStr(t)).filter(Boolean) : [],
@@ -587,6 +592,7 @@ export function normalizeRecentSession(
     activity: '',
     tokPerSec: 0,
     waitingForInput: false,
+    rateLimited: false,
     lastResponse: '',
     // Recent (historical) sessions are idle — no live decision to surface.
     question: null,
