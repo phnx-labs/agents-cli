@@ -42,8 +42,8 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
         const sub = map.get(name);
         if (!sub) continue;
         try {
-          if (agent === 'claude') {
-            const agentsDir = path.join(versionHome, '.claude', 'agents');
+          if (agent === 'claude' || agent === 'grok') {
+            const agentsDir = path.join(versionHome, agent === 'grok' ? '.grok' : '.claude', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForClaude(sub.path));
             synced.push(sub.name);

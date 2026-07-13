@@ -243,6 +243,37 @@ describe('kimi subagents (YAML agent files)', () => {
   });
 });
 
+
+describe('grok subagents (Claude-compatible agent defs)', () => {
+  it('is capable of subagents', () => {
+    expect(capableAgents('subagents')).toContain('grok');
+    expect(supports('grok', 'subagents').ok).toBe(true);
+  });
+
+  it('installSubagentToAgent writes ~/.grok/agents/<name>.md', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-grok-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'grok', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.grok', 'agents', 'explorer.md');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('name: explorer');
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('Explore.');
+      const listed = listSubagentsForAgent('grok', home);
+      expect(listed.map(s => s.name)).toEqual(['explorer']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('getAccountEmail', () => {
   it('returns null for a Claude version home without oauthAccount even when real home is logged in', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-claude-auth-'));

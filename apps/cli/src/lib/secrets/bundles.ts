@@ -28,6 +28,7 @@ import {
   getKeychainTokens,
   hasKeychainToken,
   isKeychainBackendOverridden,
+  keychainServiceAlias,
   keychainUsesFileFallback,
   listKeychainItems,
   parseBundleValue,
@@ -448,6 +449,10 @@ export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}
   if (!bundle.created_at) bundle.created_at = now;
   bundle.updated_at = now;
   const payload = {
+    // The bundle's own name, persisted since #316: with hashed service names
+    // the keychain item name is opaque, so listBundles recovers the display
+    // name from this field. Older CLIs drop unknown fields on read — safe.
+    name: bundle.name,
     description: bundle.description,
     allow_exec: bundle.allow_exec ? true : undefined,
     backend: backend === 'file' ? 'file' : undefined,
@@ -498,8 +503,14 @@ export function deleteBundle(name: string): boolean {
  * posture listBundles wants (skip malformed / invalid-key bundles rather than
  * throw). `backend` is authoritative from where the item was found. Returns
  * null to skip.
+ *
+ * `nameHint` is the name recovered from a cleartext service name (Linux, the
+ * file store, pre-re-key items) — authoritative when present, and the only
+ * source for legacy metadata that predates the persisted `name` field. With
+ * hashed service names (macOS, #316) the hint is undefined and the name comes
+ * from the JSON payload written by writeBundle.
  */
-function parseBundleMeta(name: string, json: string, backend: SecretsBackend): SecretsBundle | null {
+function parseBundleMeta(nameHint: string | undefined, json: string, backend: SecretsBackend): SecretsBundle | null {
   let parsed: Partial<SecretsBundle>;
   try {
     parsed = JSON.parse(json) as Partial<SecretsBundle>;
@@ -507,6 +518,8 @@ function parseBundleMeta(name: string, json: string, backend: SecretsBackend): S
     return null;
   }
   if (!parsed || typeof parsed !== 'object') return null;
+  const name = nameHint ?? (typeof parsed.name === 'string' ? parsed.name : undefined);
+  if (!name || !BUNDLE_NAME_PATTERN.test(name)) return null;
   const bundle: SecretsBundle = {
     name,
     description: parsed.description,
@@ -547,10 +560,12 @@ export function listBundles(): SecretsBundle[] {
     } catch {
       keychainServices = [];
     }
-    const keychainNames = keychainServices
-      .map((s) => s.slice(BUNDLE_META_PREFIX.length))
-      .filter((n) => BUNDLE_NAME_PATTERN.test(n));
-    if (keychainNames.length > 0) {
+    // With hashed service names (macOS, #316) the enumerated services are
+    // opaque (`agents-cli.h.<ns>.m`) — the display name is recovered from the
+    // metadata JSON after the batch read below. Cleartext services (Linux,
+    // pre-re-key items) still carry the name; it's kept as the parse hint so
+    // legacy metadata without the persisted `name` field keeps listing.
+    if (keychainServices.length > 0) {
       // Daily-policy fast-path (macOS). Bundle metadata items are biometry-gated,
       // so the getKeychainTokens batch below pops Touch ID on every `secrets
       // list` — the broker/`daily` mechanism only ever covered value reads, not
@@ -569,19 +584,22 @@ export function listBundles(): SecretsBundle[] {
         !isKeychainBackendOverridden() &&
         secretsAgentAutoEnabled();
       const nameSetHash = createHash('sha256')
-        .update([...keychainNames].sort().join('\n'))
+        .update([...keychainServices].sort().join('\n'))
         .digest('hex')
         .slice(0, 32);
       const cached = useAgent ? agentGetMetaSync(nameSetHash) : null;
       if (cached) {
         for (const bundle of cached) out.push(bundle);
       } else {
-        const fetched = getKeychainTokens(keychainNames.map(bundleMetaItem));
+        const fetched = getKeychainTokens(keychainServices);
         const keychainBundles: SecretsBundle[] = [];
-        for (const name of keychainNames) {
-          const json = fetched.get(bundleMetaItem(name));
+        for (const service of keychainServices) {
+          const json = fetched.get(service);
           if (json === undefined) continue;
-          const bundle = parseBundleMeta(name, json, 'keychain');
+          const nameHint = service.startsWith(BUNDLE_META_PREFIX)
+            ? service.slice(BUNDLE_META_PREFIX.length)
+            : undefined;
+          const bundle = parseBundleMeta(nameHint, json, 'keychain');
           if (bundle) keychainBundles.push(bundle);
         }
         for (const bundle of keychainBundles) out.push(bundle);
@@ -929,7 +947,11 @@ export function readAndResolveBundleEnv(
     : `read ${name} secrets`;
 
   void reason;
-  const fetched = store.getBatch([metaItem, ...secretItems]);
+  // secretItems are storage names as enumerated (opaque hashed names on macOS
+  // with #316 hashing active, cleartext elsewhere); metaItem is cleartext and
+  // hashed inside getBatch. Deduped because the hashed enumeration spans the
+  // bundle's whole namespace.
+  const fetched = store.getBatch([...new Set([metaItem, ...secretItems])]);
 
   const json = fetched.get(metaItem);
   if (json === undefined) {
@@ -1018,7 +1040,10 @@ export function readAndResolveBundleEnv(
       }
       if (p.ref.provider === 'keychain') {
         const item = secretsKeychainItem(bundle.name, p.ref.value);
-        const value = fetched.get(item);
+        // The batch keys results by the names it was ASKED for: the cleartext
+        // metaItem, plus enumerated storage names. Look up the cleartext name
+        // first (Linux / file store), then its hashed storage alias (macOS).
+        const value = fetched.get(item) ?? fetched.get(keychainServiceAlias(item));
         if (value === undefined) {
           throw new Error(
             `Bundle '${bundle.name}' key '${key}': stored item '${item}' not found. ` +

@@ -10,6 +10,10 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Fixed
 
+- **Factory watchdog logs now use the canonical cache path documented by AGENTS.** The
+  watchdog bridge, watchdog tick writer, and Factory Floor log reader share one
+  `WATCHDOG_LOG_PATH` at `~/.agents/.cache/logs/watchdog.log`, matching the
+  post-restructure docs and CLI migration target. (RUSH-1516)
 - **Factory Floor cards now use human session names instead of UUID slices (RUSH-1532).**
   Remote sessions preserve explicit labels separately from task topics, and the Floor
   card header prefers label, topic, branch, ticket, and worktree metadata before falling

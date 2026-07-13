@@ -21,7 +21,7 @@ import {
 } from '../core/resumeInBest';
 import { getAllTerminals, getById, EditorTerminal } from './terminals.vscode';
 import { getSessionPathBySessionId, readTailLines } from './sessions.vscode';
-import { formatEvent, trimToLast, WatchdogEvent } from '../core/watchdogLog';
+import { formatEvent, trimToLast, WatchdogEvent, WATCHDOG_LOG_PATH } from '../core/watchdogLog';
 import { detectWaitingForInput } from '../core/session.activity';
 import { summarizeWatchdogTail, TailSummary } from '../core/watchdogTail';
 import {
@@ -30,7 +30,6 @@ import {
   WatchdogWatch,
 } from '../monitor/protocol';
 
-const WATCHDOG_LOG_PATH = path.join(os.homedir(), '.agents', 'watchdog.log');
 const LOG_MAX_LINES = 500;
 
 // User-editable playbook appended to the watchdog's built-in prompt each tick.

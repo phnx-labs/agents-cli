@@ -5,11 +5,10 @@ import * as os from 'os';
 import * as vscode from 'vscode';
 import { getAllTerminals } from '../vscode/terminals.vscode';
 import { resolvePeerMessage } from '../core/peerMessaging';
-import { trimToLast } from '../core/watchdogLog';
+import { trimToLast, WATCHDOG_LOG_PATH } from '../core/watchdogLog';
 import { runOnLeaderOnly } from '../monitor/gate';
 
 const SOCKET_PATH = path.join(os.homedir(), '.agents', '.tmp', 'watchdog.sock');
-const WATCHDOG_LOG = path.join(os.homedir(), '.agents', 'watchdog.log');
 const PEER_MESSAGES_LOG = path.join(os.homedir(), '.agents', 'peer-messages.log');
 
 // Hot path: append is O(1). Each log is trimmed back to LOG_MAX_LINES only
@@ -100,7 +99,7 @@ async function logNudge(entry: {
     ...entry,
   };
   try {
-    await appendLineTrimmed(WATCHDOG_LOG, JSON.stringify(logEntry) + '\n');
+    await appendLineTrimmed(WATCHDOG_LOG_PATH, JSON.stringify(logEntry) + '\n');
   } catch (err) {
     console.warn('[WATCHDOG] Failed to log nudge:', err);
   }
