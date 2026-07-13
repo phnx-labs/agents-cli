@@ -52,6 +52,7 @@ function render(over?: Partial<Record<'LN' | 'GH', boolean>>, workers?: Record<s
     <BacklogCenter
       tickets={tickets}
       group="project"
+      subgroup="none"
       sort="priority"
       srcFilter={{ LN: true, GH: true, ...over }}
       projFilter={null}
@@ -106,5 +107,31 @@ describe('BacklogCenter in-flight chips', () => {
 
   test('no workers map renders no chips', () => {
     expect(render()).not.toContain('twork')
+  })
+})
+
+describe('BacklogCenter subgrouping', () => {
+  test('renders second-level subgroup headers inside each primary group', () => {
+    const html = renderToStaticMarkup(
+      <BacklogCenter
+        tickets={[
+          ...tickets,
+          { id: 'RUSH-2000', title: 'Second Linear ticket', project: 'rush', source: 'LN', pri: 'high', status: 'todo', desc: '', labels: [], owner: 'Grace' },
+        ]}
+        group="source"
+        subgroup="project"
+        sort="priority"
+        srcFilter={{ LN: true, GH: true }}
+        projFilter={null}
+        search=""
+        selectedTicketId={null}
+        workers={{}}
+        onSelectTicket={noop}
+        onOpenTask={noop}
+      />,
+    )
+    expect(html).toContain('Linear')
+    expect(html).toContain('feed-subsec')
+    expect(html).toContain('rush')
   })
 })

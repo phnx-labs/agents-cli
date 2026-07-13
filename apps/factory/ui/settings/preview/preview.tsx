@@ -25,7 +25,7 @@ import { TicketDetail } from '../components/mission-control/TicketDetail'
 import { ProjectsPane } from '../components/mission-control/ProjectsPane'
 import { TerminalExpandedDetail } from '../components/mission-control/TerminalDetail'
 import { AgentDecision } from '../components/mission-control/AgentDecision'
-import { ticketWorkers, type FloorAgent, type FloorTicket, type StructuredQuestion, type FloorSort, type TicketGroupBy, type TicketSort, type CenterMode, type ManagedProject, type LinearProjectLite } from '../components/mission-control/floorModel'
+import { ticketWorkers, type FloorAgent, type FloorTicket, type StructuredQuestion, type FloorGroupBy, type FloorSort, type TicketGroupBy, type TicketSort, type CenterMode, type ManagedProject, type LinearProjectLite } from '../components/mission-control/floorModel'
 import { RecapPane } from '../components/mission-control/RecapPane'
 import { buildRecap } from '../components/mission-control/recapModel'
 import type { RemoteSessionLike } from '../components/mission-control/floorAdapter'
@@ -231,7 +231,8 @@ const linearProjectList: LinearProjectLite[] = [
 ]
 
 function Feed() {
-  const [grp, setGrp] = useState<'none' | 'project' | 'host' | 'status' | 'agent'>('project')
+  const [grp, setGrp] = useState<FloorGroupBy | 'none'>('project')
+  const [subgrp, setSubgrp] = useState<FloorGroupBy | 'none'>('host')
   const [srt, setSrt] = useState<'needs' | 'recent' | 'tok' | 'name'>('needs')
   return (
     <div className="feed">
@@ -241,7 +242,9 @@ function Feed() {
         sidebarOpen rightOpen plain={false}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
         sort={srt} onSort={setSrt} group={grp} onGroup={setGrp}
+        subgroup={subgrp} onSubgroup={setSubgrp}
         ticketGroup="project" onTicketGroup={noop}
+        ticketSubgroup="none" onTicketSubgroup={noop}
         ticketSort="priority" onTicketSort={noop}
         srcFilter={{ LN: true, GH: true }} onToggleSrc={noop}
       />
@@ -296,6 +299,7 @@ function Feed() {
 // group/sort/source controls live in the shared bar now, not a per-view toolbar.
 function Backlog() {
   const [group, setGroup] = useState<TicketGroupBy>('project')
+  const [subgroup, setSubgroup] = useState<TicketGroupBy | 'none'>('source')
   const [sort, setSort] = useState<TicketSort>('priority')
   const [srcFilter, setSrcFilter] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
   const [selected, setSelected] = useState<string | null>(null)
@@ -312,13 +316,16 @@ function Backlog() {
         sidebarOpen rightOpen plain={false}
         onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
         sort="needs" onSort={noop} group="project" onGroup={noop}
+        subgroup="none" onSubgroup={noop}
         ticketGroup={group} onTicketGroup={setGroup}
+        ticketSubgroup={subgroup} onTicketSubgroup={setSubgroup}
         ticketSort={sort} onTicketSort={setSort}
         srcFilter={srcFilter} onToggleSrc={(s) => setSrcFilter((f) => ({ ...f, [s]: !f[s] }))}
       />
       <BacklogCenter
         tickets={tickets}
         group={group}
+        subgroup={subgroup}
         sort={sort}
         srcFilter={srcFilter}
         projFilter={null}
@@ -344,9 +351,11 @@ function Subtabs() {
     { id: 'RUSH-1262', title: 'PKCE token exchange uses unpinned http client', source: 'LN' },
     { id: '#418', title: 'Kanban / Deadline feed views are stubs', source: 'GH' },
   ])
-  const [grp, setGrp] = useState<'none' | 'project' | 'host' | 'status' | 'agent'>('project')
+  const [grp, setGrp] = useState<FloorGroupBy | 'none'>('project')
+  const [subgrp, setSubgrp] = useState<FloorGroupBy | 'none'>('host')
   const [srt, setSrt] = useState<FloorSort>('needs')
   const [tg, setTg] = useState<TicketGroupBy>('project')
+  const [tsg, setTsg] = useState<TicketGroupBy | 'none'>('source')
   const [ts, setTs] = useState<TicketSort>('priority')
   const [src, setSrc] = useState<Record<'LN' | 'GH', boolean>>({ LN: true, GH: true })
   const [selected, setSelected] = useState<string | null>(null)
@@ -381,7 +390,9 @@ function Subtabs() {
           sidebarOpen rightOpen plain={false}
           onToggleSidebar={noop} onToggleRight={noop} onTogglePlain={noop}
           sort={srt} onSort={setSrt} group={grp} onGroup={setGrp}
+          subgroup={subgrp} onSubgroup={setSubgrp}
           ticketGroup={tg} onTicketGroup={setTg}
+          ticketSubgroup={tsg} onTicketSubgroup={setTsg}
           ticketSort={ts} onTicketSort={setTs}
           srcFilter={src} onToggleSrc={(s) => setSrc((f) => ({ ...f, [s]: !f[s] }))}
         />
@@ -390,6 +401,7 @@ function Subtabs() {
         <BacklogCenter
           tickets={tickets}
           group={tg}
+          subgroup={tsg}
           sort={ts}
           srcFilter={src}
           projFilter={null}
