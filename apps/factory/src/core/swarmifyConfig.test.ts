@@ -56,6 +56,15 @@ describe('swarmifyConfig', () => {
       expect(isValidAgentId('opencode')).toBe(true);
     });
 
+    test('accepts every agent the CLI supports, not a hardcoded five (issue #741)', () => {
+      // The old list rejected newer CLI agents like grok and droid, so a valid
+      // `.agents` file silently lost entries on parse.
+      expect(isValidAgentId('grok')).toBe(true);
+      expect(isValidAgentId('droid')).toBe(true);
+      expect(isValidAgentId('antigravity')).toBe(true);
+      expect(isValidAgentId('openclaw')).toBe(true);
+    });
+
     test('returns false for invalid agent ids', () => {
       expect(isValidAgentId('gpt')).toBe(false);
       expect(isValidAgentId('Claude')).toBe(false); // case sensitive

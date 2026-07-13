@@ -96,6 +96,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.antigravity).toBeDefined();
   });
 
+  it('kiro has a permissions writer + detector', () => {
+    expect(WRITERS.permissions.kiro).toBeDefined();
+    expect(DETECTORS.permissions.kiro).toBeDefined();
+  });
+
   it('writer registry full-sync roundtrip leaves manifests non-stale', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-registry-roundtrip-'));
     try {

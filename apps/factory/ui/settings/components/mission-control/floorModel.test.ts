@@ -24,6 +24,8 @@ import {
   resolveProject,
   sessionTaskLine,
   todosWithFallback,
+  linearIssueLabel,
+  linearIssueUrl,
   PHASE_RANK,
   STALL_THRESHOLD_MS,
   type FloorAgent,
@@ -75,6 +77,24 @@ describe('resolveProject', () => {
   test('no rules, no repoRoot -> legacy last-segment', () => {
     expect(resolveProject('/x/y/prix-api')).toBe('prix-api')
     expect(resolveProject('')).toBe('')
+  })
+})
+
+describe('Linear issue refs', () => {
+  test('builds a Linear URL from a ticket id', () => {
+    expect(linearIssueUrl('RUSH-1545')).toBe('https://linear.app/issue/RUSH-1545')
+    expect(linearIssueLabel('RUSH-1545')).toBe('RUSH-1545')
+  })
+
+  test('preserves a Linear issue URL and extracts the display id', () => {
+    const url = 'https://linear.app/getrush/issue/RUSH-1545/file-created-ticket-links'
+    expect(linearIssueUrl(url)).toBe(url)
+    expect(linearIssueLabel(url)).toBe('RUSH-1545')
+  })
+
+  test('returns null for non-Linear refs', () => {
+    expect(linearIssueUrl('#812')).toBeNull()
+    expect(linearIssueUrl('')).toBeNull()
   })
 })
 

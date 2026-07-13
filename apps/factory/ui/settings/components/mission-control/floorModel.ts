@@ -126,6 +126,14 @@ export interface ReplyTarget {
 // string union so UI and extension code need not share an import across roots).
 export type CiStatus = 'passed' | 'failed' | 'running' | null
 
+export interface FloorAttachment {
+  path: string
+  label: string
+  mediaType: string
+  sizeBytes?: number
+  thumbnailUri?: string
+}
+
 export interface FloorAgent {
   id: string
   host: string          // 'this-mac' for local; remote hostname otherwise. ROUTING key — reply/nudge/reassign target it.
@@ -151,8 +159,10 @@ export interface FloorAgent {
   ci: CiStatus           // CI state of the open PR; null when no PR / unknown
   ticket: string | null  // "RUSH-812" when linked (injected/worked-on ticket from prompt or branch)
   createdTickets?: string[] // tracker refs this session CREATED (Linear create_issue / gh issue create); [] / undefined when none
+  createdCommits?: string[] // short git commit SHAs this session CREATED; [] / undefined when none
   spawnedTeam?: string   // team name this session SPAWNED via `agents teams create/add`; undefined when none
   plans?: PlanFile[]     // detected ref-*.md / .html plan artifacts available for preview
+  attachments?: FloorAttachment[] // session screenshots/files available for thumbnail + preview
   branch: string
   worktreeSlug: string   // "<slug>" under .agents/worktrees/; '' when not a worktree. Disambiguates sibling sessions + labels the card when topic/preview are empty.
   worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree
@@ -166,6 +176,11 @@ export interface FloorAgent {
   recent: RecentToolCall[] // rolling window of this session's recent tool calls; [] when none
   pane?: string          // tmux `%N` pane handle for unique addressing; undefined for non-tmux
   viewingIn?: string     // "Codium tab 3" / "Ghostty tab 2" / "detached"; undefined when unknown
+  /**
+   * Per-session rate/usage limit (RUSH-1523). Distinct from account-level
+   * usageStatus — set when the session transcript shows 429 / rate-limit text.
+   */
+  rateLimited?: boolean
 }
 
 // ---------- HOSTS sidebar rows ----------
@@ -767,6 +782,28 @@ export function outcomeLabel(a: Pick<FloorAgent, 'ticket' | 'pr' | 'worktreeSlug
   }
   if (a.worktreeSlug) return a.worktreeSlug
   return 'Unassigned'
+}
+
+const LINEAR_ID_RE = /\b([A-Z][A-Z0-9]*-\d+)\b/
+const LINEAR_URL_ID_RE = /^https?:\/\/(?:www\.)?linear\.app\/\S*?\/issue\/([A-Z][A-Z0-9]*-\d+)\b/i
+
+/** Display label for a Linear issue ref or URL. */
+export function linearIssueLabel(ref: string): string {
+  const fromUrl = ref.match(LINEAR_URL_ID_RE)?.[1]
+  if (fromUrl) return fromUrl.toUpperCase()
+  const fromText = ref.match(LINEAR_ID_RE)?.[1]
+  return fromText ?? ref
+}
+
+/** External URL for a Linear issue ref or URL. Returns null for non-Linear refs. */
+export function linearIssueUrl(ref: string | null | undefined): string | null {
+  if (!ref) return null
+  const trimmed = ref.trim()
+  if (!trimmed) return null
+  const fromUrl = trimmed.match(LINEAR_URL_ID_RE)
+  if (fromUrl) return trimmed
+  const id = trimmed.match(LINEAR_ID_RE)?.[1]
+  return id ? `https://linear.app/issue/${encodeURIComponent(id)}` : null
 }
 
 /** Group agents by the chosen dimension. Prototype groupKey: factory-floor.html:412. */

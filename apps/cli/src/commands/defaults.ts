@@ -13,6 +13,7 @@ import {
   unsetRunDefault,
   type RunDefaultEntry,
 } from '../lib/run-defaults.js';
+import { getProjectRoot, setProjectRoot } from '../lib/project-root.js';
 
 interface RunDefaultsSetOptions {
   mode?: string;
@@ -96,6 +97,28 @@ export function registerDefaultsCommands(program: Command): void {
         } else {
           console.log(chalk.gray(`No run default matched ${selector}`));
         }
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exit(1);
+      }
+    });
+
+  defaults
+    .command('project-root [path]')
+    .description('Show or set the projects root for `agents run --project` (auto-inferred when unset)')
+    .action((rootPath?: string) => {
+      try {
+        if (!rootPath) {
+          const current = getProjectRoot();
+          if (current) {
+            console.log(`Projects root: ${chalk.white(current)}`);
+          } else {
+            console.log(chalk.gray('Projects root not set — auto-inferred and cached on first `--project` use.'));
+          }
+          return;
+        }
+        const stored = setProjectRoot(rootPath);
+        console.log(chalk.green(`Set projects root: ${stored}`));
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);

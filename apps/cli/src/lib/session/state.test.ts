@@ -349,4 +349,16 @@ describe('inferSessionState — composed', () => {
     expect(s.worktree?.slug).toBe('rush-77');
     expect(s.ticket?.id).toBe('RUSH-77');
   });
+
+  it('carries session attachments alongside activity signals', () => {
+    const s = inferSessionState([
+      msg('user', 'use this screenshot'),
+      { type: 'attachment', agent: 'claude', timestamp: '2026-07-12T10:00:00Z', path: '/home/u/.agents/.history/attachments/shot.png', name: 'shot.png', mediaType: 'image/png', sizeBytes: 4096 },
+      msg('assistant', 'Reading the screenshot.'),
+    ]);
+
+    expect(s.attachments).toEqual([
+      { path: '/home/u/.agents/.history/attachments/shot.png', name: 'shot.png', mediaType: 'image/png', sizeBytes: 4096 },
+    ]);
+  });
 });

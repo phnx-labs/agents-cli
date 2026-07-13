@@ -13,6 +13,10 @@ import { spawn, spawnSync, type SpawnOptions } from 'child_process';
 import { existsSync } from 'fs';
 
 let cachedBin: string | null | undefined;
+let cachedVersion: string | null | undefined;
+
+/** Oldest tmux release with `run-shell -C`, required by the managed pane-died hook. */
+export const MIN_TMUX_VERSION = '3.2';
 
 /**
  * Locate the tmux binary on PATH. Cached after first call — tmux either is or
@@ -49,11 +53,26 @@ export function isTmuxInstalled(): boolean {
 
 /** Best-effort tmux version string (e.g. "tmux 3.6a"). Returns null when not installed or version probe fails. */
 export function getTmuxVersion(): string | null {
+  if (cachedVersion !== undefined) return cachedVersion;
   const bin = findTmuxBinary();
   if (!bin) return null;
   const res = spawnSync(bin, ['-V'], { encoding: 'utf8' });
-  if (res.status !== 0) return null;
-  return res.stdout.trim() || null;
+  if (res.status !== 0) {
+    cachedVersion = null;
+    return cachedVersion;
+  }
+  cachedVersion = res.stdout.trim() || null;
+  return cachedVersion;
+}
+
+/** True for a `tmux -V` string at or above the supported 3.2 floor. */
+export function isTmuxVersionSupported(version: string | null): boolean {
+  if (!version) return false;
+  const match = /^tmux\s+(\d+)\.(\d+)/.exec(version.trim());
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 3 || (major === 3 && minor >= 2);
 }
 
 /**
@@ -70,6 +89,12 @@ export function assertTmuxAvailable(): string {
         ? 'Install with: apt install tmux  (or dnf/yum/pacman equivalent)'
         : 'Install tmux from https://github.com/tmux/tmux';
     throw new TmuxUnavailableError(`tmux is not installed. ${hint}`);
+  }
+  const version = getTmuxVersion();
+  if (!isTmuxVersionSupported(version)) {
+    throw new TmuxUnavailableError(
+      `${version ?? 'tmux version unknown'} is unsupported. agents requires tmux ${MIN_TMUX_VERSION} or newer.`,
+    );
   }
   return bin;
 }

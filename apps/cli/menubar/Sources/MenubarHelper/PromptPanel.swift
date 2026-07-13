@@ -163,8 +163,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         dismissArmed = false
         position(panel)
         NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(field)
+        waitUntilReadyForTyping(panel)
         if ProcessInfo.processInfo.environment["MENUBAR_PROMPT_DEBUG"] == "1" {
             FileHandle.standardError.write(Data(
                 "summon: frame=\(panel.frame) visible=\(panel.isVisible) thumbs=\(thumbStrip.arrangedSubviews.count)\n".utf8))
@@ -179,6 +181,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         dismissArmed = false
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
+    }
+
+    private func waitUntilReadyForTyping(_ panel: PromptPanel) {
+        let deadline = Date().addingTimeInterval(0.25)
+        while Date() < deadline {
+            if panel.isKeyWindow, field.currentEditor() != nil { return }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
     }
 
     // MARK: Submit
@@ -353,7 +363,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private func buildPanel() -> PromptPanel {
         let panel = PromptPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 188),
-            styleMask: [.nonactivatingPanel, .borderless],
+            styleMask: [.borderless],
             backing: .buffered, defer: false)
         panel.level = .floating
         panel.isFloatingPanel = true

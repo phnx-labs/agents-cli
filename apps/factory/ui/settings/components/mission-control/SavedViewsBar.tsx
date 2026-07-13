@@ -40,6 +40,8 @@ interface SavedViewsProps {
   feedFilters?: {
     group: FloorGroupBy | 'none'
     onGroup: (g: FloorGroupBy | 'none') => void
+    subgroup: FloorGroupBy | 'none'
+    onSubgroup: (g: FloorGroupBy | 'none') => void
     status: StatusChip[]
     onToggleStatus: (s: StatusChip) => void
     abbrs: AgentAbbr[]
@@ -69,6 +71,15 @@ export function SavedViews({
   const groupLabel = feedFilters
     ? (FEED_GROUP_OPTS.find((o) => o.value === feedFilters.group) ?? FEED_GROUP_OPTS[0]!).label
     : ''
+  const subgroupValue = feedFilters && feedFilters.group !== 'none' && feedFilters.subgroup !== feedFilters.group
+    ? feedFilters.subgroup
+    : 'none'
+  const subgroupLabel = feedFilters
+    ? (FEED_GROUP_OPTS.find((o) => o.value === subgroupValue) ?? FEED_GROUP_OPTS[1]!).label
+    : ''
+  const subgroupOptions = feedFilters
+    ? FEED_GROUP_OPTS.filter((o) => o.value === 'none' || o.value !== feedFilters.group)
+    : []
 
   return (
     <div className="savedviews feed-header-bar" data-testid="feed-header-bar">
@@ -112,6 +123,19 @@ export function SavedViews({
               aria-label="Group feed by"
             >
               {FEED_GROUP_OPTS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="fpill fpill-sel feed-header-group" title="Subgroup the feed">
+            Subgroup: <b>{subgroupLabel}</b>
+            <select
+              value={subgroupValue}
+              disabled={feedFilters.group === 'none'}
+              onChange={(e) => feedFilters.onSubgroup(e.target.value as FloorGroupBy | 'none')}
+              aria-label="Subgroup feed by"
+            >
+              {subgroupOptions.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>

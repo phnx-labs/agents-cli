@@ -10,12 +10,6 @@
 // floorModel.ts). Field names are mirrored, but the two types are NOT shared —
 // data crosses the webview boundary via postMessage.
 
-import {
-  extractCurrentActivity,
-  detectWaitingForInput,
-  computeOutputTokensPerSec,
-  formatActivity,
-} from './session.activity';
 import { resolveProject, normalizeHost, worktreeSlugOf } from '../shared/project';
 import type { ProjectRule } from '../shared/project';
 
@@ -49,6 +43,14 @@ export interface RemoteQuestion {
   text: string;
   reason: RemoteAwaitReason;
   options: RemoteQuestionOption[];
+}
+
+export interface RemoteAttachment {
+  path: string;
+  label: string;
+  mediaType: string;
+  sizeBytes?: number;
+  thumbnailUri?: string;
 }
 
 /** Agent types whose session files session.activity.ts knows how to parse. */
@@ -129,9 +131,16 @@ export interface RemoteSession {
   cwd: string;
   project: string;
   phase: RemotePhase;
+  /** Live now-line for the card (the CLI's `preview` while the agent is working). */
   activity: string;
+  /** Output-token throughput from the CLI payload (`ActiveSession.tokPerSec`), rounded. */
   tokPerSec: number;
   waitingForInput: boolean;
+  /** Per-session rate/usage limit from the CLI transcript (RUSH-1523). */
+  rateLimited: boolean;
+  /** Why the agent handed control back ('question' | 'plan_review' | 'permission'),
+   *  from the CLI payload. '' when the session isn't waiting. */
+  awaitingReason: string;
   lastResponse: string;
   /** The structured decision the agent is waiting on (question/plan/permission +
    *  options), from the CLI state engine. null when the CLI supplied none — the UI
@@ -141,8 +150,8 @@ export interface RemoteSession {
   tail: string[];
   /** Raw CLI output text, when the active-session payload carries it. */
   output: string;
-  /** Attachment refs/names from the CLI payload, normalized to displayable strings. */
-  attachments: string[];
+  /** Attachment refs/names from the CLI payload, normalized for thumbnail + preview. */
+  attachments: RemoteAttachment[];
   prUrl: string | null;
   ticket: string | null;
   /** Tracker refs this session CREATED (Linear create_issue / gh issue create). */
@@ -277,6 +286,15 @@ export interface RawActiveSession {
    *  live preview (activity line), the structured ticket id, and the real branch —
    *  which is why remote/worktree cards showed only "Edit <file>" + a status word. */
   preview?: string;
+  /** Inferred live activity from the CLI state engine: 'working' | 'waiting_input'
+   *  | 'idle'. The single source for the "is it doing something right now" signal —
+   *  the extension no longer re-derives it from the transcript tail (issue #741). */
+  activity?: string;
+  /** Output-token throughput (tokens/sec, rolling 60s window) computed by the CLI.
+   *  Absent when no transcript is resolvable or the agent reports no usage. */
+  tokPerSec?: number;
+  /** Why the agent is waiting, when activity is waiting_input. */
+  awaitingReason?: string | null;
   /** Structured decision the agent is waiting on (CLI ActiveSession.question). Present
    *  only for waiting_input sessions; the options are the real choices (AskUserQuestion
    *  options, or canonical Approve/Deny for plan/permission). */
@@ -291,6 +309,8 @@ export interface RawActiveSession {
   /** Tracker refs the session CREATED + team it SPAWNED, from the CLI session scan. */
   createdTickets?: string[];
   spawnedTeam?: string;
+  /** Per-session rate/usage limit from the CLI (RUSH-1523). */
+  rateLimited?: boolean;
   /** Normalized device id the CLI attributes this session to (machineId() form,
    *  e.g. 'zion', 'yosemite-s0'). Present on every row of a fanned-out
    *  `sessions --active --json` — the load-bearing signal for which physical
@@ -350,6 +370,43 @@ export function normalizeQuestion(raw: RawActiveSession['question']): RemoteQues
         .filter((o) => o.label)
     : [];
   return { text, reason, options };
+}
+
+function basename(filePath: string): string {
+  const parts = filePath.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || filePath;
+}
+
+function normalizeAttachment(raw: unknown): RemoteAttachment | null {
+  if (typeof raw === 'string') {
+    const path = raw.trim();
+    return path ? { path, label: basename(path), mediaType: 'application/octet-stream' } : null;
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as {
+    path?: unknown;
+    ref?: unknown;
+    label?: unknown;
+    name?: unknown;
+    mediaType?: unknown;
+    media_type?: unknown;
+    sizeBytes?: unknown;
+    size?: unknown;
+    thumbnailUri?: unknown;
+  };
+  const path = asStr(obj.path) || asStr(obj.ref);
+  if (!path) return null;
+  const sizeBytes =
+    typeof obj.sizeBytes === 'number' ? obj.sizeBytes :
+    typeof obj.size === 'number' ? obj.size :
+    undefined;
+  return {
+    path,
+    label: asStr(obj.label) || asStr(obj.name) || basename(path),
+    mediaType: asStr(obj.mediaType) || asStr(obj.media_type) || 'application/octet-stream',
+    sizeBytes,
+    thumbnailUri: asStr(obj.thumbnailUri) || undefined,
+  };
 }
 
 /**
@@ -443,22 +500,19 @@ export function normalizeActiveSession(
     cwd,
     project: resolveProject(cwd, projectRules),
     phase,
-    activity: '',
-    tokPerSec: 0,
+    // The now-line is live only while the CLI says the agent is working; an idle
+    // or waiting session must not keep showing its last tool action as current.
+    activity: raw.activity === 'working' ? preview : '',
+    tokPerSec: Math.round(asNum(raw.tokPerSec)),
     waitingForInput: phase === 'waiting',
+    rateLimited: raw.rateLimited === true,
+    awaitingReason: asStr(raw.awaitingReason),
     lastResponse: preview,
     question: normalizeQuestion(raw.question),
     tail: Array.isArray(raw.tail) ? raw.tail.map((t) => asStr(t)).filter(Boolean) : [],
     output: asStr(raw.output),
     attachments: Array.isArray(raw.attachments)
-      ? raw.attachments.map((a: unknown) => {
-          if (typeof a === 'string') return a;
-          if (a && typeof a === 'object') {
-            const obj = a as { name?: unknown; ref?: unknown; path?: unknown };
-            return [asStr(obj.name), asStr(obj.ref), asStr(obj.path)].filter(Boolean).join(' ');
-          }
-          return '';
-        }).filter(Boolean)
+      ? raw.attachments.map(normalizeAttachment).filter((a): a is RemoteAttachment => Boolean(a))
       : [],
     // pr is a { url, number } object on the CLI payload; keep top-level prUrl as a
     // fallback for older shapes.
@@ -549,6 +603,8 @@ export function normalizeRecentSession(
     activity: '',
     tokPerSec: 0,
     waitingForInput: false,
+    rateLimited: false,
+    awaitingReason: '',
     lastResponse: '',
     // Recent (historical) sessions are idle — no live decision to surface.
     question: null,
@@ -702,51 +758,6 @@ export function normalizeActiveSessions(
   return arr
     .filter((r): r is RawActiveSession => !!r && typeof r === 'object')
     .map((r) => normalizeActiveSession(r, host, fetchedAt, projectRules));
-}
-
-/**
- * Enrich a RemoteSession with activity / throughput / waiting derived from the
- * session file's JSONL content — the same derivation local agents use. Only the
- * local host can supply content cheaply (Tier-1); remote hosts stay status-only
- * until a Tier-2 rich fetch. Non-parsable agent types are returned unchanged.
- */
-export function enrichWithSessionContent(
-  session: RemoteSession,
-  sessionContent: string,
-  now: number
-): RemoteSession {
-  const agentType = session.agentType;
-  if (agentType !== 'claude' && agentType !== 'codex' && agentType !== 'gemini') {
-    return session;
-  }
-  const parsable = agentType as ParsableAgentType;
-  const activity = extractCurrentActivity(sessionContent, parsable);
-  const tokPerSec = computeOutputTokensPerSec(sessionContent, parsable, 60, now);
-  // Apply the prose-"?" freshness decay when the fan-out stamped a last-write time
-  // (lastActivityMs > 0), so a long-finished session stops reading as waiting
-  // (RUSH-1522). A structural AskUserQuestion is exempt from the decay.
-  const hasFreshness = session.lastActivityMs > 0;
-  const waiting = detectWaitingForInput(
-    sessionContent,
-    parsable,
-    hasFreshness ? { lastWriteMs: session.lastActivityMs, nowMs: now } : undefined
-  );
-  const nextPhase: RemotePhase =
-    waiting && session.phase !== 'failed' && session.phase !== 'done'
-      ? 'waiting'
-      : hasFreshness && session.phase === 'waiting'
-        ? 'idle'
-        : session.phase;
-  return {
-    ...session,
-    activity: activity ? formatActivity(activity) : session.activity,
-    tokPerSec: Math.round(tokPerSec),
-    // A real file mtime makes the content-derived result authoritative. This lets
-    // a newer Factory correct a stale waiting flag/phase emitted by an older CLI;
-    // without freshness, retain the conservative additive behavior.
-    waitingForInput: hasFreshness ? waiting : session.waitingForInput || waiting,
-    phase: nextPhase,
-  };
 }
 
 /**
