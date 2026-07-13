@@ -1,3 +1,7 @@
+## Unreleased
+
+- **Windows remote dispatch uses distinct PowerShell stdout/stderr log paths (RUSH-1622).** `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot share a file; use `.out.log` / `.err.log`. Source: `apps/factory/src/vscode/settings.vscode.ts`.
+
 # Changelog
 
 All notable changes to the Factory extension are documented here. Format follows

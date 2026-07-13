@@ -381,11 +381,15 @@ async function dispatchToDevice(input: {
       ? `if (-not (Test-Path (Join-Path $P '.git'))) { New-Item -ItemType Directory -Force -Path (Split-Path $P) | Out-Null; git clone '${cloneUrl.replace(/'/g, "''")}' $P }; `
       : '';
     // Background Start-Process so the ssh hop returns promptly (parity with nohup).
+    // PowerShell rejects redirecting stdout and stderr to the same path — use
+    // distinct .out/.err files (RUSH-1622).
     remote =
       `$tmp = ${logDir}; New-Item -ItemType Directory -Force -Path $tmp | Out-Null; ` +
       `${pAssign}; ${ensureClone}Set-Location -LiteralPath $P; ` +
-      `$log = Join-Path $tmp ("dispatch-" + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + ".log"); ` +
-      `Start-Process -FilePath agents -ArgumentList @(${runArgs}) -WorkingDirectory $P -RedirectStandardOutput $log -RedirectStandardError $log -WindowStyle Hidden`;
+      `$stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); ` +
+      `$logOut = Join-Path $tmp ("dispatch-" + $stamp + ".out.log"); ` +
+      `$logErr = Join-Path $tmp ("dispatch-" + $stamp + ".err.log"); ` +
+      `Start-Process -FilePath agents -ArgumentList @(${runArgs}) -WorkingDirectory $P -RedirectStandardOutput $logOut -RedirectStandardError $logErr -WindowStyle Hidden`;
   } else {
     const syncShell = buildDeviceSyncShell(syncPolicy);
     const runCmd = `agents run ${shq(agentType)} --mode ${mode} ${shq(prompt)}`;
