@@ -12,7 +12,6 @@ import {
   convertToCodexFormat,
   convertToAntigravityFormat,
   convertToGrokFormat,
-  convertToKiroFormat,
   claudeToCanonical,
   openCodeToCanonical,
   codexToCanonical,
@@ -803,61 +802,6 @@ describe('applyPermissionsToVersion', () => {
     const result = applyPermissionsToVersion('cursor' as any, set, versionHome, true);
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not support permissions');
-  });
-
-  it('converts canonical permissions to Kiro v3 capability rules', () => {
-    const set: PermissionSet = {
-      name: 'kiro-rules',
-      allow: [
-        'Bash(git:*)',
-        'Read(**)',
-        'Write(src/**)',
-        'WebFetch(https://docs.example.com/*)',
-        'WebSearch(*)',
-      ],
-      deny: ['Bash(rm -rf:*)', 'Read(**/.env)'],
-    };
-
-    expect(convertToKiroFormat(set)).toEqual({
-      rules: [
-        { capability: 'shell', effect: 'allow', match: ['git *'] },
-        { capability: 'fs_read', effect: 'allow' },
-        { capability: 'fs_write', effect: 'allow', match: ['src/**'] },
-        { capability: 'web_fetch', effect: 'allow', match: ['https://docs.example.com/*'] },
-        { capability: 'web_search', effect: 'allow' },
-        { capability: 'shell', effect: 'deny', match: ['rm -rf *'] },
-        { capability: 'fs_read', effect: 'deny', match: ['**/.env'] },
-      ],
-    });
-  });
-
-  it('writes and merges Kiro permissions.yaml without replacing user rules', () => {
-    const versionHome = join(testDir, 'kiro-write');
-    const settingsDir = join(versionHome, '.kiro', 'settings');
-    mkdirSync(settingsDir, { recursive: true });
-    writeFileSync(join(settingsDir, 'permissions.yaml'), yaml.stringify({
-      rules: [
-        { capability: 'fs_write', effect: 'ask', match: ['.git/**'] },
-        { capability: 'shell', effect: 'allow', match: ['git *'] },
-      ],
-    }));
-
-    const set: PermissionSet = {
-      name: 'test',
-      allow: ['Bash(git:*)', 'Write(src/**)'],
-      deny: ['Read(**/.env)'],
-    };
-
-    const result = applyPermissionsToVersion('kiro', set, versionHome, true);
-    expect(result.success).toBe(true);
-
-    const config = yaml.parse(readFileSync(join(settingsDir, 'permissions.yaml'), 'utf-8'));
-    expect(config.rules).toEqual([
-      { capability: 'fs_write', effect: 'ask', match: ['.git/**'] },
-      { capability: 'shell', effect: 'allow', match: ['git *'] },
-      { capability: 'fs_write', effect: 'allow', match: ['src/**'] },
-      { capability: 'fs_read', effect: 'deny', match: ['**/.env'] },
-    ]);
   });
 
   it('writes Antigravity permissions to .gemini/antigravity-cli/settings.json', () => {

@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import * as TOML from 'smol-toml';
+import * as yaml from 'yaml';
 import {
   COMPUTER_APP_GATED_VERBS,
   applyPermissionsToVersion,
@@ -10,6 +11,7 @@ import {
   containsBroadGrants,
   convertDenyToCodexRules,
   convertToKimiFormat,
+  convertToKiroFormat,
   formatComputerPermissionGrantHint,
 } from './permissions.js';
 
@@ -148,5 +150,64 @@ describe('convertToKimiFormat', () => {
     ]);
     // The pre-fix bug would have left the un-matchable Claude `:*` form on disk.
     expect(raw).not.toContain(':*');
+  });
+});
+
+describe('Kiro permissions', () => {
+  it('converts canonical permissions to Kiro v3 capability rules', () => {
+    expect(convertToKiroFormat({
+      name: 'kiro-rules',
+      allow: [
+        'Bash(git:*)',
+        'Read(**)',
+        'Write(src/**)',
+        'WebFetch(domain:docs.example.com)',
+        'WebSearch(*)',
+        'MCP(corp-tools/*)',
+        'Subagent',
+        'Skill(*)',
+      ],
+      deny: ['Bash(rm -rf:*)', 'Read(**/.env)'],
+    })).toEqual({
+      rules: [
+        { capability: 'shell', effect: 'allow', match: ['git *'] },
+        { capability: 'fs_read', effect: 'allow' },
+        { capability: 'fs_write', effect: 'allow', match: ['src/**'] },
+        { capability: 'web_fetch', effect: 'allow', match: ['docs.example.com'] },
+        { capability: 'web_search', effect: 'allow' },
+        { capability: 'mcp', effect: 'allow', match: ['corp-tools/*'] },
+        { capability: 'subagent', effect: 'allow' },
+        { capability: 'skill', effect: 'allow' },
+        { capability: 'shell', effect: 'deny', match: ['rm -rf *'] },
+        { capability: 'fs_read', effect: 'deny', match: ['**/.env'] },
+      ],
+    });
+  });
+
+  it('writes and merges permissions.yaml without replacing user rules', () => {
+    const home = makeTempHome();
+    const settingsDir = path.join(home, '.kiro', 'settings');
+    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.writeFileSync(path.join(settingsDir, 'permissions.yaml'), yaml.stringify({
+      rules: [
+        { capability: 'fs_write', effect: 'ask', match: ['.git/**'] },
+        { effect: 'allow', capability: 'shell', match: ['git *'] },
+      ],
+    }));
+
+    const result = applyPermissionsToVersion('kiro', {
+      name: 'test',
+      allow: ['Bash(git:*)', 'Write(src/**)'],
+      deny: ['Read(**/.env)'],
+    }, home, true);
+    expect(result.success).toBe(true);
+
+    const config = yaml.parse(fs.readFileSync(path.join(settingsDir, 'permissions.yaml'), 'utf-8'));
+    expect(config.rules).toEqual([
+      { capability: 'fs_write', effect: 'ask', match: ['.git/**'] },
+      { effect: 'allow', capability: 'shell', match: ['git *'] },
+      { capability: 'fs_write', effect: 'allow', match: ['src/**'] },
+      { capability: 'fs_read', effect: 'deny', match: ['**/.env'] },
+    ]);
   });
 });

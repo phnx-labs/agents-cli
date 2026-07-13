@@ -653,6 +653,7 @@ export type KiroRule = {
   capability: string;
   effect: 'allow' | 'deny';
   match?: string[];
+  exclude?: string[];
 };
 
 /**
@@ -677,14 +678,20 @@ function canonicalToKiroRule(perm: string, effect: 'allow' | 'deny'): KiroRule |
     return { capability: 'shell', effect };
   }
 
-  const parsed = parseCanonicalPattern(perm);
-  if (!parsed) return null;
+  const parsed = parseCanonicalPreserveCase(perm);
 
-  const capability = KIRO_CAPABILITY_BY_TOOL[parsed.tool];
+  const capability = KIRO_CAPABILITY_BY_TOOL[parsed.tool.toLowerCase()];
   if (!capability) return null;
 
-  const pattern = parsed.tool === 'bash' ? normalizeBashPattern(parsed.pattern) : parsed.pattern;
-  if (pattern === '*' || pattern === '**') return { capability, effect };
+  if (parsed.pattern === null || parsed.pattern === '*' || parsed.pattern === '**') {
+    return { capability, effect };
+  }
+  const lowerTool = parsed.tool.toLowerCase();
+  const pattern = lowerTool === 'bash'
+    ? normalizeBashPattern(parsed.pattern)
+    : (lowerTool === 'webfetch' || lowerTool === 'websearch') && parsed.pattern.startsWith('domain:')
+      ? parsed.pattern.slice('domain:'.length)
+      : parsed.pattern;
   return { capability, effect, match: [pattern] };
 }
 
@@ -698,6 +705,9 @@ const KIRO_CAPABILITY_BY_TOOL: Record<string, string | undefined> = {
   notebookedit: 'fs_write',
   webfetch: 'web_fetch',
   websearch: 'web_search',
+  mcp: 'mcp',
+  subagent: 'subagent',
+  skill: 'skill',
 };
 
 /**
@@ -1481,7 +1491,8 @@ export function applyPermissionsToVersion(
         const seen = new Set<string>();
         config.rules = [...existingRules, ...newRules].filter((rule) => {
           if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return false;
-          const key = JSON.stringify(rule);
+          const record = rule as { capability?: unknown; effect?: unknown; match?: unknown; exclude?: unknown };
+          const key = `${String(record.effect)}|${String(record.capability)}|${JSON.stringify(record.match ?? [])}|${JSON.stringify(record.exclude ?? [])}`;
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
