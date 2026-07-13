@@ -53,6 +53,10 @@ jobs:
         working-directory: apps/cli
     env:
       AGENTS_TEST_WIN_HOST: win-mini
+      # setup-dotnet defaults to /usr/share/dotnet, which needs root the
+      # hosted runners have but this self-hosted (rootless, user-systemd)
+      # runner does not. Install into a user-writable, workspace-local dir.
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/dotnet
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
