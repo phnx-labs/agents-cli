@@ -123,7 +123,7 @@ enum LocalState {
     // name = sessionId, mtime = when flagged, content = the notification message
     // (newer hooks write it; empty for the touch-only contract). One stat + one
     // tiny read per blocked session — stays cheap on the badge poll path.
-    private static func attentionMarks() -> [String: AttentionMark] {
+    static func attentionMarks() -> [String: AttentionMark] {
         let dir = "\(home)/.agents/.cache/state/attention"
         let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
         var out: [String: AttentionMark] = [:]
@@ -152,6 +152,52 @@ enum LocalState {
         }
     }
 
+    // MARK: Sessions from the engine's active list (warm cache)
+    // Convert `agents sessions --active --local --json` rows into menu Sessions.
+    // The engine list is authoritative for coverage + running/idle; the cheap
+    // local files still contribute what the engine payload lacks: the terminal
+    // label (title) and the attention sentinel (question + wait-start).
+    static func sessions(fromActive active: [ActiveSession]) -> [Session] {
+        let attention = attentionMarks()
+        let titles = terminalTitles()
+        var out: [Session] = []
+        for a in active {
+            let sid = a.sessionId ?? ""
+            let mark = sid.isEmpty ? nil : attention[sid]
+            let repo = a.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            let status: SessionStatus = mark != nil ? .attention
+                : a.status == "running" ? .running
+                : a.status == "input_required" ? .attention
+                : a.status == "queued" ? .queued : .idle
+            out.append(Session(agent: a.kind, repo: repo, cwd: a.cwd, status: status,
+                               context: a.context ?? "terminal",
+                               title: sid.isEmpty ? "" : (titles[sid] ?? ""),
+                               question: mark?.text ?? "",
+                               attentionSinceMs: status == .attention ? mark?.sinceMs : nil))
+        }
+        return out
+    }
+
+    // sessionId -> label from live-terminals.json (the engine's active payload
+    // carries no label; the extension-registered terminals do).
+    private static func terminalTitles() -> [String: String] {
+        let path = "\(home)/.agents/.cache/terminals/live-terminals.json"
+        guard let data = fm.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (_, window) in root {
+            guard let w = window as? [String: Any],
+                  let entries = w["entries"] as? [[String: Any]] else { continue }
+            for e in entries {
+                if let sid = e["sessionId"] as? String, !sid.isEmpty,
+                   let label = e["label"] as? String, !label.isEmpty {
+                    out[sid] = label
+                }
+            }
+        }
+        return out
+    }
+
     // MARK: All active sessions
     // includeTeams is false for the periodic badge poll — the teams/agents dir
     // accumulates ALL historical agents (can be thousands of meta.json files), so
@@ -162,6 +208,26 @@ enum LocalState {
         var all = terminals(attention: attention) + cloud()
         if includeTeams { all += teams() }
         return all
+    }
+
+
+    /// Grouping key for the menu: prefer the real git repo name over a worktree
+    /// directory slug. Paths under `.../.agents/worktrees/<slug>` group as the
+    /// enclosing repository (the path component before `.agents`), not `<slug>`.
+    static func repoName(from cwd: String?) -> String? {
+        guard let cwd, !cwd.isEmpty else { return nil }
+        let ns = cwd as NSString
+        let parts = (cwd as NSString).pathComponents
+        // Match .../.agents/worktrees/<slug>[/...]
+        if let agentsIdx = parts.firstIndex(of: ".agents"),
+           agentsIdx + 2 < parts.count,
+           parts[agentsIdx + 1] == "worktrees" {
+            // Enclosing repo root is the component before `.agents`
+            if agentsIdx > 0 {
+                return parts[agentsIdx - 1]
+            }
+        }
+        return ns.lastPathComponent
     }
 
     // MARK: Terminals
@@ -183,7 +249,7 @@ enum LocalState {
                 let sid = (e["sessionId"] as? String) ?? ""
                 // repo is the grouping key — always the working-dir name; the
                 // label is the session's own title, carried separately.
-                let repo = cwd.map { ($0 as NSString).lastPathComponent } ?? label
+                let repo = Self.repoName(from: cwd) ?? label
                 let mark = sid.isEmpty ? nil : attention[sid]
                 let status = sessionStatus(sessionId: sid, kind: kind, cwd: cwd,
                                            attention: attentionIds)
@@ -210,7 +276,7 @@ enum LocalState {
             let agent = (m["agentType"] as? String) ?? "agent"
             let cwd = m["cwd"] as? String
             let task = (m["taskName"] as? String) ?? (m["name"] as? String) ?? ""
-            let repo = cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            let repo = Self.repoName(from: cwd) ?? ""
             out.append(Session(agent: agent, repo: repo, cwd: cwd,
                                status: .running, context: "teams", title: task,
                                question: "", attentionSinceMs: nil))

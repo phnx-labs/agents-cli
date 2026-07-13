@@ -108,6 +108,76 @@ describe('droid (Factory AI)', () => {
   });
 });
 
+describe('Hermes and ForgeCode install targets', () => {
+  it('registers Hermes with skills, MCP, and MEMORY.md rules', () => {
+    expect(ALL_AGENT_IDS).toContain('hermes');
+    expect(capableAgents('mcp')).toContain('hermes');
+    expect(capableAgents('skills')).toContain('hermes');
+    expect(capableAgents('commands')).not.toContain('hermes');
+    expect(capableAgents('hooks')).not.toContain('hermes');
+    expect(AGENTS.hermes.instructionsFile).toBe('MEMORY.md');
+    expect(AGENTS.hermes.capabilities.rules).toEqual({ file: 'MEMORY.md' });
+  });
+
+  it('resolves Hermes MCP config to ~/.hermes/config.yaml and parses mcp_servers YAML', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hermes-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('hermes', home);
+      expect(configPath).toBe(path.join(home, '.hermes', 'config.yaml'));
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        [
+          'model: openrouter/anthropic/claude-sonnet-4',
+          'mcp_servers:',
+          '  ctx:',
+          '    command: ctx-server',
+          '    args:',
+          '      - --stdio',
+          '',
+        ].join('\n')
+      );
+
+      const parsed = parseMcpConfig('hermes', configPath);
+      expect(parsed.ctx.command).toBe('ctx-server');
+      expect(parsed.ctx.args).toEqual(['--stdio']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('registers ForgeCode with skills, MCP, and AGENTS.md rules', () => {
+    expect(ALL_AGENT_IDS).toContain('forge');
+    expect(capableAgents('mcp')).toContain('forge');
+    expect(capableAgents('skills')).toContain('forge');
+    expect(capableAgents('commands')).not.toContain('forge');
+    expect(capableAgents('hooks')).not.toContain('forge');
+    expect(AGENTS.forge.instructionsFile).toBe('AGENTS.md');
+    expect(AGENTS.forge.capabilities.rules).toEqual({ file: 'AGENTS.md' });
+  });
+
+  it('resolves ForgeCode MCP config to ~/.forge/.mcp.json and parses mcpServers JSON', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-forge-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('forge', home);
+      expect(configPath).toBe(path.join(home, '.forge', '.mcp.json'));
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({ mcpServers: { ctx: { command: 'ctx-server', args: ['--stdio'] } } })
+      );
+
+      const parsed = parseMcpConfig('forge', configPath);
+      expect(parsed.ctx.command).toBe('ctx-server');
+      expect(parsed.ctx.args).toEqual(['--stdio']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('codex subagents (TOML custom agents)', () => {
   it('is capable of subagents since 0.117.0', () => {
     expect(capableAgents('subagents')).toContain('codex');

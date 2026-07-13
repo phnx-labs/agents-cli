@@ -10,6 +10,7 @@ import {
   toFloorAgentFromRemote,
   adaptTickets,
   cleanWorktreeSlug,
+  detectCreatedCommits,
   type UnifiedAgentLike,
   type RemoteSessionLike,
 } from './floorAdapter'
@@ -94,6 +95,22 @@ describe('floorPrLabel', () => {
   })
 })
 
+describe('detectCreatedCommits', () => {
+  test('extracts short commit shas from successful command output', () => {
+    expect(detectCreatedCommits([
+      { name: 'Bash', output: '[rush-1547-linear-artifacts 095e588093ca] RUSH-1547: surface ticket artifacts' },
+      { name: 'Bash', output: '[rush-1547-linear-artifacts 095e588093ca] duplicate line' },
+      { name: 'Bash', output: '[rush-1547-linear-artifacts 1111111] another change' },
+    ])).toEqual(['095e588093ca', '1111111'])
+  })
+
+  test('ignores failed command output', () => {
+    expect(detectCreatedCommits([
+      { name: 'Bash', output: '[rush-1547-linear-artifacts deadbee] failed change', isError: true },
+    ])).toEqual([])
+  })
+})
+
 function baseUnified(over: Partial<UnifiedAgentLike>): UnifiedAgentLike {
   return {
     id: 'term-1',
@@ -128,6 +145,22 @@ describe('toFloorAgentFromUnified', () => {
     expect(a.needs).toBe(true)
     expect(a.host).toBe('this-mac')
     expect(a.abbr).toBe('CC')
+  })
+
+  test('surfaces commit artifacts from recent terminal output', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        terminal: {
+          id: 't1',
+          recentToolCalls: [
+            { name: 'Bash', output: '[rush-1547-linear-artifacts abc1234] RUSH-1547: wire ticket links' },
+          ],
+        },
+        agent: null,
+      }),
+      { pinned: new Set(), workspaceRepo: 'agents-cli', nowMs: NOW },
+    )
+    expect(a.createdCommits).toEqual(['abc1234'])
   })
 
   test('a completed agent with a stale waiting flag lands in done, not needs-you (RUSH-1522)', () => {

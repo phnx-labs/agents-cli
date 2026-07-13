@@ -52,16 +52,31 @@ const UNASSIGNED: OutcomeRef = {
   label: 'Unassigned',
 };
 
-/** `#123`, `PR#123`, `PR 123`, full GitHub pull URL → canonical `#123`. */
+/**
+ * Normalize a PR ref.
+ * - Full GitHub URL → `owner/repo#N` (repo identity included)
+ * - Bare `#123` / `PR#123` → `#123` (no repo known)
+ */
 export function normalizePrRef(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   const trimmed = raw.trim();
   if (!trimmed) return undefined;
   const fromUrl = extractPrUrl(trimmed);
-  if (fromUrl?.number != null) return `#${fromUrl.number}`;
+  if (fromUrl?.number != null) {
+    const repo = repoFromPrUrl(fromUrl.url);
+    return repo ? `${repo}#${fromUrl.number}` : `#${fromUrl.number}`;
+  }
   const m = /(?:^|\bpr\s*#?\s*|pull\/|#)(\d{1,7})\b/i.exec(trimmed);
   if (m) return `#${m[1]}`;
   return undefined;
+}
+
+/** `https://github.com/owner/repo/pull/N` → `owner/repo`. */
+export function repoFromPrUrl(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  const m = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/\d+/i.exec(url);
+  if (!m) return undefined;
+  return `${m[1]}/${m[2]}`;
 }
 
 /** Canonical ticket id (uppercase team key). */
@@ -85,8 +100,11 @@ function prFromSignals(s: OutcomeSignals): string | undefined {
   const direct = normalizePrRef(s.pr ?? undefined);
   if (direct) return direct;
   if (s.text) {
+    // Prefer full URL so keys include owner/repo (RUSH-1630).
     const fromUrl = extractPrUrl(s.text);
-    if (fromUrl?.number != null) return `#${fromUrl.number}`;
+    if (fromUrl?.number != null) {
+      return normalizePrRef(fromUrl.url) ?? `#${fromUrl.number}`;
+    }
     const m = /(?:\bpr\s*#?\s*|#)(\d{1,7})\b/i.exec(s.text);
     if (m) return `#${m[1]}`;
   }
@@ -105,8 +123,11 @@ export function deriveOutcome(signals: OutcomeSignals): OutcomeRef {
 
   const pr = prFromSignals(signals);
   if (pr) {
-    const n = pr.replace(/^#/, '');
-    return { key: `pr:${pr}`, kind: 'pr', label: `PR#${n}` };
+    // pr is either `owner/repo#N` or `#N`
+    const hash = pr.includes('#') ? pr.slice(pr.indexOf('#')) : pr;
+    const n = hash.replace(/^#/, '');
+    const label = pr.includes('/') ? `PR ${pr}` : `PR#${n}`;
+    return { key: `pr:${pr}`, kind: 'pr', label };
   }
 
   const wt = (signals.worktreeSlug ?? '').trim();

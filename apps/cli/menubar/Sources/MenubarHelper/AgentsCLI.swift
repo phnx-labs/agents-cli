@@ -63,6 +63,15 @@ enum AgentsCLI {
         return (try? JSONDecoder().decode([RecentSession].self, from: data)) ?? []
     }
 
+    // The session engine's live view — every local session (tmux, IDE, headless),
+    // not just extension-registered terminals. Costs seconds (transcript tails
+    // across version homes), so it is ONLY called from the warm-cache refreshers,
+    // never on the menu-open click path.
+    static func activeSessions() -> [ActiveSession] {
+        guard let data = capture(argv(["sessions", "--active", "--local", "--json"])) else { return [] }
+        return (try? JSONDecoder().decode([ActiveSession].self, from: data)) ?? []
+    }
+
     static func doctorOverview() -> DoctorOverview? {
         guard let data = capture(argv(["doctor", "--json"])) else { return nil }
         return try? JSONDecoder().decode(DoctorOverview.self, from: data)

@@ -113,10 +113,13 @@ describe('remoteSecretsRaw', () => {
     expect(remoteCmd.startsWith('bash -lc ')).toBe(true);
   });
 
-  it('passes -tt when tty is requested', () => {
+  it('passes -tt and disables multiplexing when tty is requested', () => {
     sshExecMock.mockReturnValue(ok(''));
     remoteSecretsRaw('host', ['view', 'b', '--reveal'], { tty: true });
-    expect(sshExecMock.mock.calls[0][2].extraSshArgs).toEqual(['-tt']);
+    expect(sshExecMock.mock.calls[0][2]).toMatchObject({
+      extraSshArgs: ['-tt'],
+      multiplex: false,
+    });
   });
 
   it('drives the keychain export push as `import --from -` and forwards the .env over stdin', () => {

@@ -97,6 +97,7 @@ export function remoteSecretsRaw(
     timeoutMs: REMOTE_TIMEOUT_MS,
     input: opts.input,
     extraSshArgs: opts.tty ? ['-tt'] : undefined,
+    multiplex: opts.tty ? false : undefined,
   });
 }
 

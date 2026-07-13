@@ -4,6 +4,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { homedir, hostname } from 'os';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
@@ -899,7 +900,17 @@ async function openPlanPreview(pathValue: string, kind: string | undefined, host
   let resolvedPath = resolveEditorPath(target);
   if (remoteHost) {
     const safeHost = remoteHost.replace(/[^a-zA-Z0-9._-]+/g, '-');
-    const destDir = path.join(homedir(), '.agents', '.cache', 'factory-plan-previews', safeHost);
+    // Isolate by full source path (hash) so two worktrees with the same
+    // plan basename cannot overwrite each other (RUSH-1631).
+    const pathKey = createHash('sha1').update(target).digest('hex').slice(0, 12);
+    const destDir = path.join(
+      homedir(),
+      '.agents',
+      '.cache',
+      'factory-plan-previews',
+      safeHost,
+      pathKey,
+    );
     await fs.promises.mkdir(destDir, { recursive: true });
     resolvedPath = path.join(destDir, path.basename(target));
     await execFileAsync('scp', [`${remoteHost}:${target}`, resolvedPath], { timeout: 20_000 });
@@ -991,11 +1002,6 @@ let settingsPanel: vscode.WebviewPanel | undefined;
 const sessionWatchers = new Map<string, fs.FSWatcher>();
 let sessionUpdateTimeout: NodeJS.Timeout | undefined;
 let currentlySubscribedAgentType: string | null = null;
-
-// Cache for getFloorThroughput, keyed by session file path. Skip the read+
-// parse when the file's mtime+size are unchanged since the previous poll —
-// the webview polls every 2.5s and most polls hit unchanged files.
-const throughputCache = new Map<string, { mtimeMs: number; size: number; tokensPerSec: number }>();
 
 // Notify settings panel when integration status changes
 export function notifyIntegrationStatus(provider: string, connected: boolean): void {
@@ -2273,41 +2279,24 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'getFloorThroughput': {
-        const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const all = terminals.getAllTerminals();
-        const { computeOutputTokensPerSec } = await import('../core/session.activity');
+        // Throughput now rides the CLI payload (ActiveSession.tokPerSec, issue
+        // #741): sum the rows belonging to this window's live terminals instead
+        // of re-reading and re-parsing each transcript here. fetchLocalSessions
+        // is short-TTL cached, so the 2.5s webview poll shares subprocesses with
+        // the feed poll.
         let total = 0;
-        await Promise.all(all.map(async (t) => {
-          if (t.terminal.exitStatus !== undefined) return;
-          const agentType = (t.agentType || '').toLowerCase() as 'claude' | 'codex' | 'gemini';
-          if (!t.sessionId || (agentType !== 'claude' && agentType !== 'codex' && agentType !== 'gemini')) return;
-          try {
-            const sessionPath = await getSessionPathBySessionId(t.sessionId, agentType, workspacePath);
-            if (!sessionPath) return;
-            const stat = await fs.promises.stat(sessionPath);
-            const size = stat.size;
-            // Cache by (mtime, size). The webview polls every 2.5s; without
-            // this cache an idle Gemini session forced a full multi-MB JSON
-            // re-read every poll for an unchanged result.
-            const cached = throughputCache.get(sessionPath);
-            if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === size) {
-              total += cached.tokensPerSec;
-              return;
-            }
-            const fh = await fs.promises.open(sessionPath, 'r');
-            try {
-              const readStart = agentType === 'gemini' ? 0 : Math.max(0, size - 256 * 1024);
-              const buf = Buffer.alloc(size - readStart);
-              await fh.read(buf, 0, buf.length, readStart);
-              const content = buf.toString('utf-8');
-              const tps = computeOutputTokensPerSec(content, agentType, 60);
-              total += tps;
-              throughputCache.set(sessionPath, { mtimeMs: stat.mtimeMs, size, tokensPerSec: tps });
-            } finally {
-              await fh.close();
-            }
-          } catch { }
-        }));
+        try {
+          const { fetchLocalSessions } = await import('./remoteSessions.vscode');
+          const windowSessionIds = new Set(
+            terminals.getAllTerminals()
+              .filter((t) => t.terminal.exitStatus === undefined && t.sessionId)
+              .map((t) => t.sessionId as string),
+          );
+          const { sessions } = await fetchLocalSessions();
+          for (const s of sessions) {
+            if (windowSessionIds.has(s.sessionId)) total += s.tokPerSec;
+          }
+        } catch { /* CLI unavailable — report 0, same as an unreadable session file before */ }
         settingsPanel?.webview.postMessage({ type: 'floorThroughputData', tokensPerSec: Math.round(total) });
         break;
       }

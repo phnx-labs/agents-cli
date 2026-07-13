@@ -108,7 +108,8 @@ The helper assembles the menu by reading these directly — no CLI, no re-index:
 
 | Source | Path | Gives |
 |---|---|---|
-| Terminals | `~/.agents/.cache/terminals/live-terminals.json` | terminal / IDE sessions (agent, cwd, pid) |
+| Terminals | `~/.agents/.cache/terminals/live-terminals.json` | extension-registered terminals (agent, cwd, pid, label) — cold start + 10s badge poll |
+| Active sessions | `agents sessions --active --local --json` (warm cache, 30s TTL) | every local session (tmux / IDE / headless) with running-vs-idle — feeds triage + ACTIVE once loaded |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
 | Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook; empty content renders "awaiting input") |

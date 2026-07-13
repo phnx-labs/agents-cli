@@ -14,7 +14,7 @@
  * fires once with the pre-flight pick).
  */
 
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -24,6 +24,8 @@ import {
   parseTimeout,
   writeRunMeta,
   getRunDir,
+  jobRunsOnThisDevice,
+  checkJobDeviceEligibility,
 } from './routines.js';
 import { getRunsDir } from './state.js';
 import type { AgentId } from './types.js';
@@ -368,16 +370,20 @@ interface SpawnAttemptResult {
 }
 
 /**
- * Spawn one attempt, capture logs to `stdoutPath`, enforce timeout.
- * Appends to the log file so failover attempts leave a continuous trail.
+ * Spawn one attempt, capture logs to `attemptLogPath`, enforce timeout.
+ * Rate-limit scanning uses only this attempt's log (not prior failover output).
+ * The attempt log is also appended into `combinedLogPath` for a continuous trail.
  */
 function spawnJobAttempt(
   cmd: string[],
   env: Record<string, string>,
-  stdoutPath: string,
+  attemptLogPath: string,
   timeoutMs: number,
+  combinedLogPath?: string,
 ): Promise<SpawnAttemptResult> {
-  const stdoutFd = fs.openSync(stdoutPath, 'a', 0o600);
+  // Isolate this attempt's output so detectRateLimit never sees prior attempts.
+  fs.writeFileSync(attemptLogPath, '', { mode: 0o600 });
+  const stdoutFd = fs.openSync(attemptLogPath, 'a', 0o600);
   return new Promise((resolve) => {
     const child = spawn(cmd[0], cmd.slice(1), {
       stdio: ['ignore', stdoutFd, stdoutFd],
@@ -392,8 +398,13 @@ function spawnJobAttempt(
       try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
       let logText = '';
       try {
-        logText = fs.readFileSync(stdoutPath, 'utf-8');
+        logText = fs.readFileSync(attemptLogPath, 'utf-8');
       } catch { /* missing log */ }
+      if (combinedLogPath) {
+        try {
+          fs.appendFileSync(combinedLogPath, logText);
+        } catch { /* best-effort trail */ }
+      }
       resolve({ ...result, logText });
     };
 
@@ -452,6 +463,10 @@ function spawnJobAttempt(
  * failover across healthy same-agent accounts (RUSH-1016).
  */
 export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<RunResult> {
+  const eligibility = checkJobDeviceEligibility(config);
+  if (eligibility) {
+    throw new Error(eligibility.message);
+  }
   maybeRotate();
 
   const launch = await resolveRoutineLaunch(config);
@@ -489,6 +504,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     agent: effectiveAgent,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
+    spawnedAt: Date.now(),
     status: 'running',
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -570,7 +586,8 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     const elapsed = Date.now() - Date.parse(meta.startedAt);
     const remaining = Math.max(1_000, timeoutMs - (Number.isFinite(elapsed) ? elapsed : 0));
 
-    const attempt = await spawnJobAttempt(cmd, spawnEnv, stdoutPath, remaining);
+    const attemptLogPath = path.join(runDir, `stdout.attempt-${i}.log`);
+    const attempt = await spawnJobAttempt(cmd, spawnEnv, attemptLogPath, remaining, stdoutPath);
     meta.pid = attempt.pid;
     writeRunMeta(meta);
 
@@ -640,6 +657,11 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
 
 /** Spawn a job as a detached process and return immediately with run metadata. */
 export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
+  const eligibility = checkJobDeviceEligibility(config);
+  if (eligibility) {
+    process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
+    throw new Error(eligibility.message);
+  }
   // Pre-flight: pick a healthy version/account so the daemon does not launch
   // into a credit-exhausted install. Detached cannot mid-run failover (no exit
   // wait); the next schedule tick re-selects if this attempt still fails.
@@ -681,6 +703,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     agent: effectiveAgent,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
+    spawnedAt: Date.now(),
     status: 'running',
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -811,6 +834,39 @@ function inferFinalStatusFromLog(
   }
 }
 
+const MAX_WALL_CLOCK_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Verify that a PID still belongs to the process we spawned, not a recycled
+ * OS PID. Uses the recorded `spawnedAt` (epoch ms) from meta.json and
+ * compares against the process's actual start time via `ps`. Returns true
+ * when the PID is alive AND plausibly ours.
+ */
+function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  if (spawnedAt === undefined) return true;
+  if (process.platform === 'win32') return true;
+  try {
+    const etime = execFileSync('ps', ['-p', String(pid), '-o', 'etime='],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (!etime) return true;
+    const parts = etime.replace(/-/g, ':').split(':').reverse();
+    let uptimeSec = 0;
+    if (parts[0]) uptimeSec += parseInt(parts[0], 10);
+    if (parts[1]) uptimeSec += parseInt(parts[1], 10) * 60;
+    if (parts[2]) uptimeSec += parseInt(parts[2], 10) * 3600;
+    if (parts[3]) uptimeSec += parseInt(parts[3], 10) * 86400;
+    const processStartMs = Date.now() - uptimeSec * 1000;
+    return Math.abs(processStartMs - spawnedAt) < 30_000;
+  } catch {
+    return true;
+  }
+}
+
 /** Scan all runs marked "running" and finalize any whose process has exited. */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
@@ -833,14 +889,19 @@ export function monitorRunningJobs(): void {
         if (meta.status !== 'running') continue;
         if (!meta.pid) continue;
 
-        try {
-          process.kill(meta.pid, 0);
-        } catch { /* process no longer running */
-          const runDirPath = path.join(jobRunsPath, runDirEntry.name);
-          const stdoutPath = path.join(runDirPath, 'stdout.log');
+        const runDirPath = path.join(jobRunsPath, runDirEntry.name);
+        const stdoutPath = path.join(runDirPath, 'stdout.log');
 
-          // Prefer the agent's own success/error marker; fall back to "failed"
-          // only when the stream ended without one (process killed mid-run).
+        const wallClockMs = Date.now() - Date.parse(meta.startedAt);
+        if (Number.isFinite(wallClockMs) && wallClockMs > MAX_WALL_CLOCK_MS) {
+          meta.status = 'timeout';
+          meta.completedAt = new Date().toISOString();
+          writeRunMeta(meta);
+          extractAndSaveReport(stdoutPath, meta.agent, runDirPath);
+          continue;
+        }
+
+        if (!isPidOurs(meta.pid, meta.spawnedAt)) {
           const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent);
           if (inferred) {
             meta.status = inferred.status;

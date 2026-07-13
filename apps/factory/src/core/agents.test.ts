@@ -11,10 +11,21 @@ import {
   planTextToSteps
 } from './agents';
 import { CLAUDE_TITLE, CODEX_TITLE, GEMINI_TITLE, OPENCODE_TITLE, CURSOR_TITLE, SHELL_TITLE } from './utils';
+import { CLI_AGENT_META, CliAgentId, isCliAgentId } from './agents.cli';
 
 describe('BUILT_IN_AGENTS', () => {
-  test('has 8 built-in agents', () => {
-    expect(BUILT_IN_AGENTS).toHaveLength(8);
+  test('every non-shell agent is a CLI agent and launches its CLI binary', () => {
+    for (const agent of BUILT_IN_AGENTS) {
+      if (agent.key === 'shell') continue;
+      expect(isCliAgentId(agent.key)).toBe(true);
+      expect(agent.command).toBe(CLI_AGENT_META[agent.key as CliAgentId].cliCommand);
+    }
+  });
+
+  test('antigravity launches the CLI-canonical agy binary, not a phantom "antigravity"', () => {
+    const ag = BUILT_IN_AGENTS.find(a => a.key === 'antigravity');
+    expect(ag).toBeDefined();
+    expect(ag!.command).toBe('agy');
   });
 
   test('claude agent has correct properties', () => {

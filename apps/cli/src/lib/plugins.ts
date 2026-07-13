@@ -906,13 +906,17 @@ export function openCodePluginsDir(versionHome: string): string {
   return path.join(versionHome, '.config', 'opencode', 'plugins');
 }
 
-const OPENCODE_MODULE_RE = /\.(ts|js|mjs|cjs)$/i;
+// OpenCode's local-plugin loader only auto-loads direct *.ts / *.js files under
+// plugins/ — not nested dirs and not .mjs/.cjs (see opencode.ai/docs/plugins).
+const OPENCODE_MODULE_RE = /\.(ts|js)$/i;
 const OPENCODE_TEST_RE = /\.(test|spec)\./i;
 
 function listOpenCodeModules(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter((f) => OPENCODE_MODULE_RE.test(f) && !OPENCODE_TEST_RE.test(f) && !f.startsWith('.'));
+  // readdir without recursion — only loader-visible direct children.
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && OPENCODE_MODULE_RE.test(e.name) && !OPENCODE_TEST_RE.test(e.name) && !e.name.startsWith('.'))
+    .map((e) => e.name);
 }
 
 /** Resolve source module files for an agents-cli plugin to install into OpenCode. */
@@ -953,21 +957,25 @@ export function installOpenCodePlugin(plugin: DiscoveredPlugin, versionHome: str
     return true;
   }
 
-  if (sources.length === 1) {
-    const src = sources[0];
+  // Install each module as a direct file under plugins/ so the loader sees it.
+  // Multi-module plugins get `<name>` or `<name>-<stem>` basenames (never a
+  // nested directory — OpenCode does not scan nested plugin dirs).
+  for (let i = 0; i < sources.length; i++) {
+    const src = sources[i];
     const ext = path.extname(src);
-    const dest = path.join(destDir, `${plugin.name}${ext}`);
-    fs.copyFileSync(src, dest);
-    return true;
+    const stem = path.basename(src, ext);
+    const destName = sources.length === 1
+      ? `${plugin.name}${ext}`
+      : (stem === 'index' || stem === plugin.name
+          ? `${plugin.name}${ext}`
+          : `${plugin.name}-${stem}${ext}`);
+    fs.copyFileSync(src, path.join(destDir, destName));
   }
-
+  // Marker file so isOpenCodePluginInstalled / remove can track multi-file installs.
   fs.mkdirSync(destPluginDir, { recursive: true });
-  for (const src of sources) {
-    fs.copyFileSync(src, path.join(destPluginDir, path.basename(src)));
-  }
   fs.writeFileSync(
     path.join(destPluginDir, '.agents-cli-managed'),
-    `plugin=${plugin.name}\n`,
+    `plugin=${plugin.name}\nfiles=${sources.map((s) => path.basename(s)).join(',')}\n`,
     'utf-8'
   );
   return true;
@@ -994,13 +1002,22 @@ export function removeOpenCodePlugin(pluginName: string, versionHome: string): b
   for (const candidate of [
     path.join(destDir, `${pluginName}.ts`),
     path.join(destDir, `${pluginName}.js`),
-    path.join(destDir, `${pluginName}.mjs`),
-    path.join(destDir, `${pluginName}.cjs`),
     path.join(destDir, pluginName),
   ]) {
     if (fs.existsSync(candidate)) {
       fs.rmSync(candidate, { recursive: true, force: true });
       removed = true;
+    }
+  }
+  // Flat multi-module installs: <name>-<stem>.ts/js next to the marker dir.
+  if (fs.existsSync(destDir)) {
+    for (const entry of fs.readdirSync(destDir)) {
+      if (entry.startsWith(`${pluginName}-`) && /\.(ts|js)$/i.test(entry)) {
+        try {
+          fs.rmSync(path.join(destDir, entry), { force: true });
+          removed = true;
+        } catch { /* ignore */ }
+      }
     }
   }
   return removed;

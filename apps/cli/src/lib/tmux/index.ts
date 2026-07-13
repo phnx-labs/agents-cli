@@ -8,6 +8,8 @@ export {
   findTmuxBinary,
   isTmuxInstalled,
   getTmuxVersion,
+  isTmuxVersionSupported,
+  MIN_TMUX_VERSION,
   assertTmuxAvailable,
   TmuxUnavailableError,
   TmuxCommandError,

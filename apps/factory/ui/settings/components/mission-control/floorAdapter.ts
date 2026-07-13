@@ -40,6 +40,7 @@ import { detectPlanFiles, extractPlanCandidates, type PlanFile, type PlanFileCan
 // threading a store through every adapter call. Empty parses fall back to the remembered
 // set; a fresh non-empty parse overwrites it.
 const lastTodosById = new Map<string, TodoItem[]>()
+const GIT_COMMIT_OUTPUT_RE = /^\[[^\]\n]*\s([0-9a-f]{7,40})\]\s+(.+)$/gm
 
 /** Parse fresh todos, remembering the last non-empty set so the checklist doesn't vanish. */
 function stickyTodos(id: string, toolCalls: RecentToolCall[] | undefined): TodoItem[] {
@@ -278,6 +279,23 @@ function collectAttachments(...sources: Array<AttachmentLike[] | undefined>): Fl
   return out
 }
 
+export function detectCreatedCommits(toolCalls: RecentToolCall[] | undefined): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const call of toolCalls ?? []) {
+    if (call.isError || typeof call.output !== 'string') continue
+    GIT_COMMIT_OUTPUT_RE.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = GIT_COMMIT_OUTPUT_RE.exec(call.output)) !== null) {
+      const sha = match[1].slice(0, 12)
+      if (seen.has(sha)) continue
+      seen.add(sha)
+      out.push(sha)
+    }
+  }
+  return out
+}
+
 function detectUnifiedPlans(u: UnifiedAgentLike, worktreePath: string): PlanFile[] {
   const candidates: PlanFileCandidate[] = []
   candidates.push(...extractPlanCandidates(u.terminal?.narrative, 'output'))
@@ -454,6 +472,7 @@ export function toFloorAgentFromUnified(
   const worktreePath = worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd) ? (u.terminal?.cwd ?? u.agent?.cwd ?? '') : ''
   const plans = detectUnifiedPlans(u, worktreePath)
   const attachments = collectAttachments(u.terminal?.attachments, u.agent?.attachments)
+  const createdCommits = detectCreatedCommits(u.terminal?.recentToolCalls)
   // Local unified agents ARE this window's terminal tabs, so sendText into the live
   // terminal is the exact reply channel; fall back to 'none' for a tab-less headless row.
   const reply: ReplyTarget = u.terminal?.id
@@ -488,6 +507,7 @@ export function toFloorAgentFromUnified(
     ci,
     ticket: u.linearIssue ?? null,
     createdTickets: u.createdTickets ?? [],
+    createdCommits,
     spawnedTeam: u.spawnedTeam || undefined,
     attachments,
     branch: u.terminal?.branch ?? u.agent?.branch ?? '',
@@ -589,6 +609,7 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     ci,
     ticket: r.ticket,
     createdTickets: r.createdTickets ?? [],
+    createdCommits: [],
     spawnedTeam: r.spawnedTeam || undefined,
     attachments,
     branch: r.branch,

@@ -642,6 +642,13 @@ agents routines add daily-digest \
 agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
+
+# Routines sync to every device; restrict to an allowlist with --devices
+agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
+  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+
+agents routines devices nightly-drain --set yosemite-s0,mac-mini  # update allowlist
+agents routines list --host yosemite-s0                            # query another device
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
@@ -818,7 +825,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | OpenCode | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Kiro | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| Kiro | yes | no | yes | >= 2.8.0 | yes | yes | no | no | `AGENTS.md` | no |
 | Goose | yes | no | yes | no | no | no | no | no | `AGENTS.md` | no |
 | Roo Code | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 
@@ -846,6 +853,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 |------------|-------|------|
 | Hooks | Codex | >= 0.116.0 |
 | Hooks | Gemini | >= 0.26.0 |
+| Permissions | Kiro | >= 2.8.0 |
 | File-based commands | Codex | < 0.117.0 (0.117+ uses command-as-skill) |
 | Plugins | Codex | >= 0.128.0 |
 
@@ -894,6 +902,8 @@ For full transparency: `agents-cli` keeps a local event log at `~/.agents/.cache
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
 **macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+
+Interactive tmux-backed runs require tmux 3.2 or newer.
 
 ### Do I need Node.js?
 
