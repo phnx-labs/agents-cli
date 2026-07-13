@@ -68,6 +68,23 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams
 (`migrateLegacySwarmToTeams()` in `src/lib/migrate.ts`). Don't reach for Swarm — gone.
 
+### 7. Self-updating agents are ONE binary, not fictional version-homes
+
+Some harnesses (droid, grok, antigravity, cursor, hermes, forge, kiro, goose) install
+via an official `curl … | sh` / `brew install` script that carries no version token —
+the installer only ever fetches the *current* release and the binary self-updates in
+place. `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](src/lib/agents.ts)) is the single
+predicate for "no pinnable semver"; route every such decision through it, never a
+scattered `=== 'droid'`. Its narrower cousin `isGlobalBinaryAgent()`
+([`src/lib/versions.ts`](src/lib/versions.ts)) — computed by probing whether
+`getBinaryPath` ignores the version arg — is true only when the agent resolves to ONE
+global binary (droid). For those, `listInstalledVersions` collapses the phantom
+per-version dirs to a single canonical entry, `reconcileStaleLatestForAgent` folds the
+stale dirs into the survivor, `agents view` shows the live `--version`, and
+`agents add droid@1.2.3` gracefully installs the current release instead of erroring.
+grok is self-updating but stores a real per-version binary under each version-home, so
+it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
+
 ## Supported harnesses
 
 14 harnesses ship support today. The full id list is `AgentId`

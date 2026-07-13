@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Self-updating agents (droid et al.) are modeled as a single binary, not
+  fictional version-homes.** droid installs one global self-updating binary, so
+  `agents view` no longer shows phantom duplicate droid versions (e.g. `0.19.3`
+  AND `0.21.0` for the same binary) — it collapses to a single row showing the
+  live `droid --version`, and stale per-version dirs are folded away on sight.
+  `agents add droid@<version>` no longer errors with "does not support
+  version-pinned installs" — it gracefully installs the current release (a no-op
+  when already installed). Applies to every VERSION-less curl/brew installer
+  (droid, grok, antigravity, cursor, hermes, forge, kiro, goose). npm-packaged
+  agents (claude, codex, kimi) are unaffected. (RUSH-1321)
+
 ## 1.20.56
 
 ### Fixed
