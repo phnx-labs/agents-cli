@@ -12,8 +12,17 @@ import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { AgentManager, AgentProcess, AgentStatus, captureProcessStartTime } from './agents.js';
+import {
+  AgentManager,
+  AgentProcess,
+  AgentStatus,
+  beginResumeLogTransaction,
+  captureProcessStartTime,
+  commitResumeLogTransaction,
+  terminateSpawnedProcess,
+} from './agents.js';
 import { IS_WINDOWS } from '../platform/index.js';
+import { shellQuote } from '../ssh-exec.js';
 
 function tmpBase(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resume-test-'));
@@ -211,6 +220,52 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       fs.rmSync(base, { recursive: true, force: true });
     }
   });
+
+  it('kills a TERM-resistant process-group child after the wrapper exits', async () => {
+    const base = tmpBase();
+    const childPidPath = path.join(base, 'child.pid');
+    const childCommand = `echo $$ > ${shellQuote(childPidPath)}; trap '' TERM; sleep 30`;
+    const wrapperCommand = `trap 'exit 0' TERM; /bin/sh -c ${shellQuote(childCommand)} & wait`;
+    const wrapper = spawn('/bin/sh', ['-c', wrapperCommand], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    const wrapperPid = wrapper.pid as number;
+    let childPid = 0;
+
+    try {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (fs.existsSync(childPidPath)) {
+          childPid = Number.parseInt(fs.readFileSync(childPidPath, 'utf-8').trim(), 10);
+          if (Number.isFinite(childPid) && childPid > 0) break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(childPid).toBeGreaterThan(0);
+
+      await terminateSpawnedProcess(wrapperPid);
+
+      const isAlive = (pid: number): boolean => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      for (let attempt = 0; attempt < 20 && (isAlive(-wrapperPid) || isAlive(childPid)); attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(isAlive(-wrapperPid)).toBe(false);
+      expect(isAlive(childPid)).toBe(false);
+    } finally {
+      try { process.kill(-wrapperPid, 'SIGKILL'); } catch { /* group gone */ }
+      if (childPid > 0) {
+        try { process.kill(childPid, 'SIGKILL'); } catch { /* child gone */ }
+      }
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
 });
 
 /**
@@ -270,6 +325,33 @@ describe.skipIf(IS_WINDOWS)('resume log-truncation hazard', () => {
     } finally {
       try { process.kill(-(child.pid as number)); } catch { /* group gone */ }
       try { process.kill(child.pid as number); } catch { /* gone */ }
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('reads a shorter successful-resume log from byte zero', async () => {
+    const base = tmpBase();
+    const id = 'cursor-reset';
+    const dir = path.join(base, id);
+    const stdoutPath = path.join(dir, 'stdout.log');
+    fs.mkdirSync(dir, { recursive: true });
+    const agent = new AgentProcess(
+      id, 't', 'claude', 'x', null, 'edit', null,
+      AgentStatus.COMPLETED, new Date(), new Date(), base,
+    );
+
+    try {
+      fs.writeFileSync(stdoutPath, 'prior-turn-event-that-is-longer-than-the-new-log\n');
+      await agent.readNewEvents();
+      expect(agent.events.at(-1)).toMatchObject({ type: 'raw', content: 'prior-turn-event-that-is-longer-than-the-new-log' });
+
+      const transaction = await beginResumeLogTransaction(agent);
+      fs.writeFileSync(stdoutPath, 'new\n');
+      await commitResumeLogTransaction(transaction);
+      await agent.readNewEvents();
+
+      expect(agent.events.at(-1)).toMatchObject({ type: 'raw', content: 'new' });
+    } finally {
       fs.rmSync(base, { recursive: true, force: true });
     }
   });

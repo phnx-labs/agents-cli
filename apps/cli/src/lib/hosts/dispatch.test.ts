@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as os from 'os';
 import { randomUUID } from 'crypto';
-import { sshExec } from '../ssh-exec.js';
+import { shellQuote, sshExec } from '../ssh-exec.js';
 import {
+  buildDetachedLaunchCommand,
   buildRunForwardedArgs,
   buildInteractiveRunForwardedArgs,
   remoteCdPrefix,
@@ -143,19 +144,42 @@ describe('remoteCdPrefix', () => {
 const remoteTarget = process.env.AGENTS_TEST_REMOTE_TARGET;
 
 describe.skipIf(!remoteTarget)('terminateDispatchedTask — real remote process', () => {
-  it('terminates a launched remote process before returning', () => {
+  it('terminates the production wrapper and a TERM-resistant child before returning', () => {
     const id = randomUUID().slice(0, 8);
     const marker = `agents-dispatch-rollback-${id}`;
     const remoteLog = `/tmp/${marker}.log`;
     const remoteExit = `/tmp/${marker}.exit`;
+    const childPidPath = `/tmp/${marker}.child-pid`;
+    const childCommand = `echo $$ > ${childPidPath}; trap '' TERM; exec -a ${marker}-child sleep 30`;
+    const inner =
+      `trap 'exit 0' TERM; ` +
+      `bash -lc ${shellQuote(childCommand)} > ${remoteLog} 2>&1; ` +
+      `echo $? > ${remoteExit}`;
     const launch = sshExec(
       remoteTarget!,
-      `nohup bash -lc 'exec -a ${marker} sleep 30' >${remoteLog} 2>&1 & echo $!`,
+      `rm -f ${remoteLog} ${remoteExit} ${childPidPath}; ${buildDetachedLaunchCommand(inner)}`,
       { timeoutMs: 10000, multiplex: true },
     );
     expect(launch.code).toBe(0);
     const pid = Number.parseInt(launch.stdout.trim().split('\n').pop() ?? '', 10);
     expect(Number.isFinite(pid)).toBe(true);
+
+    const identity = sshExec(
+      remoteTarget!,
+      `for i in 1 2 3 4 5 6 7 8 9 10; do ` +
+        `child=$(cat ${childPidPath} 2>/dev/null || true); ` +
+        `if test -n "$child"; then ` +
+          `pgid=$(ps -o pgid= -p ${pid} | tr -d ' '); ` +
+          `printf '%s %s\n' "$child" "$pgid"; exit 0; ` +
+        `fi; sleep 0.1; ` +
+      `done; exit 1`,
+      { timeoutMs: 10000, multiplex: true },
+    );
+    expect(identity.code).toBe(0);
+    const [childPidText, groupIdText] = identity.stdout.trim().split(/\s+/);
+    const childPid = Number.parseInt(childPidText ?? '', 10);
+    expect(Number.isFinite(childPid)).toBe(true);
+    expect(Number.parseInt(groupIdText ?? '', 10)).toBe(pid);
 
     const task: HostTask = {
       id,
@@ -174,14 +198,19 @@ describe.skipIf(!remoteTarget)('terminateDispatchedTask — real remote process'
       terminateDispatchedTask(task);
       const probe = sshExec(
         remoteTarget!,
-        `kill -0 ${pid} 2>/dev/null && echo ALIVE || echo DEAD`,
+        `for process in ${pid} ${childPid}; do ` +
+          `if kill -0 "$process" 2>/dev/null; then echo "ALIVE:$process"; exit 1; fi; ` +
+        `done; echo DEAD`,
         { timeoutMs: 10000, multiplex: true },
       );
+      expect(probe.code).toBe(0);
       expect(probe.stdout.trim()).toBe('DEAD');
     } finally {
       sshExec(
         remoteTarget!,
-        `kill -KILL ${pid} 2>/dev/null || true; rm -f ${remoteLog} ${remoteExit}`,
+        `kill -KILL -- -${pid} 2>/dev/null || true; ` +
+          `kill -KILL ${pid} ${childPid} 2>/dev/null || true; ` +
+          `rm -f ${remoteLog} ${remoteExit} ${childPidPath}`,
         { timeoutMs: 10000, multiplex: true },
       );
     }
