@@ -12,13 +12,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getRuntimeStateDir } from './state.js';
+import type { SelfHealReport } from './self-heal/types.js';
+
+export interface InteractiveShimHealResult {
+  noticeLines: string[] | null;
+  report: SelfHealReport;
+}
 
 /**
- * Heal the shim/shadow/PATH conditions silently, then return the notice lines to
- * print ONCE for whatever is left (a real-binary shadow we won't move; a PATH entry
- * that was just added / needs a reload), or null when there's nothing new to say.
+ * Heal the shim/shadow/PATH conditions silently, then return both the raw report
+ * and the notice lines to print ONCE for whatever is left (a real-binary shadow we
+ * won't move; a PATH entry that was just added / needs a reload).
  */
-export async function healShimsInteractive(): Promise<string[] | null> {
+export async function runInteractiveShimHeal(): Promise<InteractiveShimHealResult> {
   const { runSelfHeal } = await import('./self-heal/registry.js');
   const report = await runSelfHeal({ checks: ['shims', 'shadowing', 'path'], mode: 'safe' });
 
@@ -36,7 +42,7 @@ export async function healShimsInteractive(): Promise<string[] | null> {
 
   const pathState: PathNoticeState = pathAdded ? 'added' : pathReload ? 'reload' : 'ok';
   const signature = computeShimNoticeSignature({ shadowNotes, pathState });
-  if (!shouldSurfaceShimNotice(signature)) return null;
+  if (!shouldSurfaceShimNotice(signature)) return { noticeLines: null, report };
 
   const lines: string[] = [];
   if (pathAdded) {
@@ -50,7 +56,14 @@ export async function healShimsInteractive(): Promise<string[] | null> {
     for (const note of shadowNotes) lines.push(`  ${note}`);
     lines.push("It's a real binary (not a symlink), so agents-cli won't move it — reorder PATH or remove it to hand it over.");
   }
-  return lines.length > 0 ? lines : null;
+  return { noticeLines: lines.length > 0 ? lines : null, report };
+}
+
+/**
+ * Back-compat wrapper for callers that only need the persistent one-time notice.
+ */
+export async function healShimsInteractive(): Promise<string[] | null> {
+  return (await runInteractiveShimHeal()).noticeLines;
 }
 
 // ─── Persistent notice-state (replaces the per-PPID sentinel) ──────────────────

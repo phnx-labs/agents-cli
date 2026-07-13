@@ -8,6 +8,7 @@
 import * as vscode from 'vscode';
 import {
   buildForemanDigest,
+  humanElapsed,
   ForemanDigest,
   ForemanTerminal,
   ForemanCloudTask,
@@ -265,8 +266,8 @@ export async function computeFocus(who: string, _workspacePath?: string): Promis
     project: match.project ?? null,
     git_branch: match.gitBranch ?? null,
     open_in_ide: openIds.has(match.id),
-    elapsed: humanElapsedFromMs(Date.now() - startedMs),
-    since_last_activity: humanElapsedFromMs(Date.now() - lastActivityMs),
+    elapsed: humanElapsed(Date.now() - startedMs),
+    since_last_activity: humanElapsed(Date.now() - lastActivityMs),
     status: tail.status,
     task: match.topic ?? null,
     token_count: match.tokenCount ?? null,
@@ -323,7 +324,7 @@ async function computeQuota(): Promise<unknown> {
         status: u.usageStatus ?? undefined,
         used_percent: u.maxUsedPercent,
         resets_in: Number.isFinite(resetMs) && resetMs > now
-          ? humanElapsedFromMs(resetMs - now)
+          ? humanElapsed(resetMs - now)
           : undefined,
       };
     }),
@@ -427,17 +428,6 @@ function dedup<T>(xs: T[]): T[] {
     out.push(x);
   }
   return out;
-}
-
-function humanElapsedFromMs(ms: number): string {
-  if (ms < 0 || !Number.isFinite(ms)) return 'just now';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return 'just now';
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const rem = m % 60;
-  return rem === 0 ? `${h}h` : `${h}h ${rem}m`;
 }
 
 // Convenience: read the OpenAI key from settings exactly once. Matches the

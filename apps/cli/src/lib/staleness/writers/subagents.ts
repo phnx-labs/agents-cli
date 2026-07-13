@@ -21,6 +21,7 @@ import {
   writeKimiSubagentFiles,
   buildKimiSubagentsParentYaml,
   KIMI_SUBAGENTS_PARENT_FILE,
+  transformSubagentForOpenCode,
   transformSubagentForDroid,
   syncSubagentToOpenclaw,
   parseSubagentFrontmatter,
@@ -54,6 +55,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             synced.push(sub.name);
           } else if (agent === 'kimi') {
             writeKimiSubagentFiles(path.join(versionHome, '.kimi-code', 'agents'), sub.path, sub.name);
+            synced.push(sub.name);
+          } else if (agent === 'opencode') {
+            const agentsDir = path.join(versionHome, '.config', 'opencode', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForOpenCode(sub.path));
             synced.push(sub.name);
           } else if (agent === 'droid') {
             const droidsDir = path.join(versionHome, '.factory', 'droids');

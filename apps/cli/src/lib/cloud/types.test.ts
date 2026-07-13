@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveDispatchRepos } from './types.js';
+import { resolveDispatchRepos, normalizeProviderStatus } from './types.js';
 
 describe('resolveDispatchRepos', () => {
   it('returns [] when neither repo nor repos is set', () => {
@@ -56,5 +56,55 @@ describe('resolveDispatchRepos', () => {
         repo: 'fourth/one',
       }),
     ).toEqual(['second/one', 'third/one', 'fourth/one']);
+  });
+});
+
+describe('normalizeProviderStatus', () => {
+  // Each provider kept its own copy of this mapping before consolidation; these
+  // pin each one's exact vocabulary + default so a behavior-changing merge trips
+  // the suite. Guards the drift the consolidation was meant to freeze, not fix.
+  describe('rush (Factory Floor switch; default running; has allocating, no queued)', () => {
+    it('maps the known Factory Floor strings', () => {
+      expect(normalizeProviderStatus('rush', 'allocating')).toBe('allocating');
+      expect(normalizeProviderStatus('rush', 'running')).toBe('running');
+      expect(normalizeProviderStatus('rush', 'needs_review')).toBe('input_required');
+      expect(normalizeProviderStatus('rush', 'completed')).toBe('completed');
+      expect(normalizeProviderStatus('rush', 'failed')).toBe('failed');
+      expect(normalizeProviderStatus('rush', 'cancelled')).toBe('cancelled');
+    });
+    it('defaults unknown/empty to running (no queued, exact-match only)', () => {
+      expect(normalizeProviderStatus('rush', 'queued')).toBe('running');
+      expect(normalizeProviderStatus('rush', 'weird')).toBe('running');
+      expect(normalizeProviderStatus('rush', '')).toBe('running');
+      expect(normalizeProviderStatus('rush', undefined)).toBe('running');
+    });
+  });
+
+  describe('codex (substring match; default running)', () => {
+    it('maps a representative status per bucket', () => {
+      expect(normalizeProviderStatus('codex', 'queued')).toBe('queued');
+      expect(normalizeProviderStatus('codex', 'in_progress')).toBe('running');
+      expect(normalizeProviderStatus('codex', 'succeeded')).toBe('completed');
+      expect(normalizeProviderStatus('codex', 'error')).toBe('failed');
+      expect(normalizeProviderStatus('codex', 'canceled')).toBe('cancelled');
+    });
+    it('defaults unknown/empty to running', () => {
+      expect(normalizeProviderStatus('codex', 'weird')).toBe('running');
+      expect(normalizeProviderStatus('codex', '')).toBe('running');
+    });
+  });
+
+  describe('antigravity (substring match; undefined-safe; default completed)', () => {
+    it('maps a representative status per bucket', () => {
+      expect(normalizeProviderStatus('antigravity', 'pending')).toBe('queued');
+      expect(normalizeProviderStatus('antigravity', 'in_progress')).toBe('running');
+      expect(normalizeProviderStatus('antigravity', 'success')).toBe('completed');
+      expect(normalizeProviderStatus('antigravity', 'fail')).toBe('failed');
+      expect(normalizeProviderStatus('antigravity', 'cancel')).toBe('cancelled');
+    });
+    it('defaults unknown/undefined to completed (terminal synchronous response)', () => {
+      expect(normalizeProviderStatus('antigravity', 'weird')).toBe('completed');
+      expect(normalizeProviderStatus('antigravity', undefined)).toBe('completed');
+    });
   });
 });

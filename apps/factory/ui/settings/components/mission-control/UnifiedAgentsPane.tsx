@@ -636,12 +636,12 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // sweep is expensive (SSH fan-out), so it runs lazily when the Recap center opens.
   const [recapSessions, setRecapSessions] = useState<RemoteSessionLike[] | null>(null)
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
-  // Group the live feed by an axis (project/host/status/agent). Defaults to 'project'
-  // so sessions cluster under the repo/Linear project they're working on (NEEDS YOU
-  // stays pinned above the groups); 'none' falls back to flat phase sections
-  // (NEEDS YOU -> RUNNING -> DONE). Reuses the same groupAgents() the Backlog's group
-  // control uses, so the two bars behave alike.
-  const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('project')
+  // Group the live feed by an axis. Defaults to 'outcome' (ticket/PR/worktree) so a
+  // fleet-scale floor shows deliverables, not ~1,100 agents (RUSH-1479). NEEDS YOU
+  // stays pinned above the groups; 'none' falls back to flat phase sections
+  // (NEEDS YOU -> RUNNING -> DONE). Reuses groupAgents() so the control bar and
+  // the feed share one grouping implementation.
+  const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('outcome')
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
   // Collapsed = the icon rail (mockup default); expanded = the full text sidebar.
@@ -1619,6 +1619,36 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // no-op (no fake success) rather than pretending it worked. TODO: wire capture path.
   const onAttachScreenshot = useCallback((_a: FloorAgent) => { /* TODO: screenshot transport pending */ }, [])
 
+  /**
+   * Open/resume the session in a real terminal (RUSH-1520). Prefers an already-
+   * open local tab, then a remote tmux rail, then `agents sessions focus <id>`.
+   */
+  const openTerminalForAgent = useCallback((a: FloorAgent) => {
+    if (a.reply.kind === 'terminal' && a.reply.terminalId) {
+      postMessage({ type: 'focusTerminal', terminalId: a.reply.terminalId })
+      return
+    }
+    if (a.reply.kind === 'tmux' && a.reply.muxTarget) {
+      postMessage({
+        type: 'focusRemoteSession',
+        host: a.reply.host,
+        muxSocket: a.reply.muxSocket,
+        muxTarget: a.reply.muxTarget,
+        sessionId: a.reply.sessionId ?? a.sessionId,
+        label: a.name,
+      })
+      return
+    }
+    if (a.sessionId) {
+      postMessage({ type: 'focusSession', sessionId: a.sessionId, host: a.host })
+      return
+    }
+    const u = unifiedById.get(a.id)
+    if (u?.terminal) {
+      postMessage({ type: 'focusTerminal', terminalId: u.terminal.id })
+    }
+  }, [unifiedById])
+
   const onBatchReply = useCallback((cluster: FloorAgent[], option: string) => {
     for (const a of cluster) replyToAgent(a, option)
   }, [replyToAgent])
@@ -1993,6 +2023,19 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         onApply={applyView}
         onSave={saveView}
         onDelete={deleteView}
+        feedFilters={{
+          group: floorGroup,
+          onGroup: setFloorGroup,
+          status: statusChips,
+          onToggleStatus: (s) => setStatusChips((cur) => (
+            cur.includes(s) ? cur.filter((c) => c !== s) : [...cur, s]
+          )),
+          abbrs: abbrChips,
+          availableAbbrs: Array.from(new Set(floorAgents.map((a) => a.abbr))).sort(),
+          onToggleAbbr: (a) => setAbbrChips((cur) => (
+            cur.includes(a) ? cur.filter((c) => c !== a) : [...cur, a]
+          )),
+        }}
       />
       {(needsAgents.length > 0 || pendingPlans.length > 0) && (
         <>
@@ -2025,6 +2068,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
               onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
           {failedAgents.map((a) => (
@@ -2048,6 +2092,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
               onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
         </>
@@ -2080,6 +2125,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
               onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))
         : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => {
@@ -2110,6 +2156,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                   onAttach={onAttachScreenshot}
                   onOpenPlan={openPlanPreview}
                   onOpenAttachment={openAttachmentPreview}
+                  onOpenTerminal={openTerminalForAgent}
                 />
               ))}
             </React.Fragment>
@@ -2130,6 +2177,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
               onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
         </>
@@ -2152,6 +2200,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onAttach={onAttachScreenshot}
               onOpenPlan={openPlanPreview}
               onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
         </>

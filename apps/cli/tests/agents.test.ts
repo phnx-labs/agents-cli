@@ -12,6 +12,7 @@ import {
   buildKimiSubagentsParentYaml,
   installSubagentToAgent,
   listSubagentsForAgent,
+  transformSubagentForOpenCode,
   KIMI_SUBAGENTS_PARENT_FILE,
 } from '../src/lib/subagents.js';
 
@@ -306,6 +307,52 @@ describe('opencode allowlist (permission in opencode.jsonc)', () => {
       const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
       expect(cfg.permission.bash['git *']).toBe('allow');
       expect(cfg.permission.bash['rm *']).toBe('deny');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('opencode subagents (markdown mode: subagent)', () => {
+  it('is capable of subagents', () => {
+    expect(capableAgents('subagents')).toContain('opencode');
+    expect(supports('opencode', 'subagents').ok).toBe(true);
+  });
+
+  it('transformSubagentForOpenCode emits mode subagent frontmatter', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-sub-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'AGENT.md'),
+        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: anthropic/claude-sonnet-4\n---\n\nYou review code.\n`
+      );
+      const out = transformSubagentForOpenCode(dir);
+      expect(out).toContain('mode: subagent');
+      expect(out).toContain('description: Reviews diffs');
+      expect(out).toContain('model: anthropic/claude-sonnet-4');
+      expect(out).toContain('You review code.');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('installSubagentToAgent writes ~/.config/opencode/agents/<name>.md', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'opencode', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.config', 'opencode', 'agents', 'explorer.md');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('mode: subagent');
+      expect(listSubagentsForAgent('opencode', home).map(s => s.name)).toEqual(['explorer']);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

@@ -39,6 +39,79 @@ export type CloudTaskStatus =
   | 'failed'
   | 'cancelled';
 
+/** Cloud backends whose wire status is normalized by `normalizeProviderStatus`. */
+export type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity';
+
+/**
+ * Normalize a provider's raw wire status into the canonical `CloudTaskStatus`.
+ *
+ * Each cloud backend speaks its own status vocabulary and had its own copy of
+ * this mapping, which had drifted. This dispatches per provider, preserving
+ * each one's exact vocabulary AND default byte-for-byte:
+ *   - `rush`        — switch over the Factory Floor's known strings; includes
+ *                     `allocating`, has no `queued`, default `running`.
+ *   - `codex`       — substring match on the lowercased CLI status; default
+ *                     `running`.
+ *   - `antigravity` — substring match on the (possibly `undefined`) Interactions
+ *                     API status; default `completed` (its synchronous response
+ *                     is terminal), and `undefined`-safe.
+ *
+ * Factory's `mapResultStatus` is structurally different (it maps a droid *exit*
+ * result, not a lifecycle string) and deliberately stays in `factory.ts`.
+ */
+export function normalizeProviderStatus(
+  provider: StatusNormalizingProvider,
+  wireStatus: string | undefined,
+): CloudTaskStatus {
+  switch (provider) {
+    case 'rush':
+      return normalizeRushStatus(wireStatus ?? '');
+    case 'codex':
+      return normalizeCodexStatus(wireStatus ?? '');
+    case 'antigravity':
+      return normalizeAntigravityStatus(wireStatus);
+  }
+}
+
+/** Rush Factory Floor status → canonical enum. Default `running`; no `queued`. */
+function normalizeRushStatus(s: string): CloudTaskStatus {
+  switch (s) {
+    case 'allocating': return 'allocating';
+    case 'running': return 'running';
+    case 'needs_review': return 'input_required';
+    case 'completed': return 'completed';
+    case 'failed': return 'failed';
+    case 'cancelled': return 'cancelled';
+    default: return 'running';
+  }
+}
+
+/** Codex Cloud CLI status → canonical enum. Substring match; default `running`. */
+function normalizeCodexStatus(s: string): CloudTaskStatus {
+  const lower = s.toLowerCase();
+  if (lower.includes('queued') || lower.includes('pending')) return 'queued';
+  if (lower.includes('running') || lower.includes('in_progress')) return 'running';
+  if (lower.includes('completed') || lower.includes('succeeded') || lower.includes('success')) return 'completed';
+  if (lower.includes('failed') || lower.includes('error')) return 'failed';
+  if (lower.includes('cancelled') || lower.includes('canceled')) return 'cancelled';
+  return 'running';
+}
+
+/**
+ * Antigravity Interactions API status → canonical enum. Substring match,
+ * `undefined`-safe; default `completed` because the synchronous response is
+ * already terminal.
+ */
+function normalizeAntigravityStatus(s: string | undefined): CloudTaskStatus {
+  const lower = (s ?? '').toLowerCase();
+  if (lower.includes('queue') || lower.includes('pending')) return 'queued';
+  if (lower.includes('run') || lower.includes('progress')) return 'running';
+  if (lower.includes('complete') || lower.includes('success')) return 'completed';
+  if (lower.includes('fail') || lower.includes('error')) return 'failed';
+  if (lower.includes('cancel')) return 'cancelled';
+  return 'completed';
+}
+
 /** Snapshot of a dispatched task, stored locally and refreshed from the provider. */
 export interface CloudTask {
   id: string;

@@ -422,6 +422,20 @@ describe('groupAgents', () => {
     expect([...groupAgents(agents, 'status').keys()]).toEqual(['running', 'waiting'])
     expect([...groupAgents(agents, 'agent').keys()]).toEqual(['CC', 'CX'])
   })
+
+  test('groups by outcome: ticket > PR > worktree > Unassigned (RUSH-1479)', () => {
+    const mixed = [
+      makeAgent({ id: 't1', ticket: 'RUSH-1125', pr: '#9', worktreeSlug: 'rush-1125' }),
+      makeAgent({ id: 't2', ticket: 'RUSH-1125' }),
+      makeAgent({ id: 'p1', ticket: null, pr: '#534' }),
+      makeAgent({ id: 'w1', ticket: null, pr: null, worktreeSlug: 'ship-1-20' }),
+      makeAgent({ id: 'u1', ticket: null, pr: null, worktreeSlug: '' }),
+    ]
+    const g = groupAgents(mixed, 'outcome')
+    expect([...g.keys()]).toEqual(['RUSH-1125', 'PR#534', 'ship-1-20', 'Unassigned'])
+    expect(g.get('RUSH-1125')!.map((a) => a.id)).toEqual(['t1', 't2'])
+    expect(g.get('Unassigned')!.map((a) => a.id)).toEqual(['u1'])
+  })
 })
 
 describe('sortAgents', () => {

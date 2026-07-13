@@ -190,7 +190,7 @@ describe('importSyncedBundle', () => {
     expect(readBundle('hetzner').vars.HETZNER_USERNAME).toBe('keychain:HETZNER_USERNAME');
   });
 
-  it('purge deletes only the iCloud items whose value was read', () => {
+  it('purge deletes imported items but keeps the meta while a key is missing', () => {
     seedHetzner();
     // A phantom secret service that lists but does not read back (sync raced).
     const phantom = 'agents-cli.secrets.hetzner.PHANTOM_KEY';
@@ -200,10 +200,62 @@ describe('importSyncedBundle', () => {
 
     const result = importSyncedBundle(candidate, { purge: true });
     expect(result.missing).toEqual(['PHANTOM_KEY']);
-    expect(result.purged).toBe(3); // meta + two read secret items
+    // Only the two read-and-imported secret items go; the metadata item stays
+    // behind as the sole record of the missing key.
+    expect(result.purged).toBe(2);
+    expect([...synced.store.keys()]).toEqual(['agents-cli.bundles.hetzner']);
+  });
+
+  it('purge removes everything, meta included, when the import is complete', () => {
+    seedHetzner();
+    const [candidate] = discoverSyncedBundles();
+    const result = importSyncedBundle(candidate, { purge: true });
+    expect(result.missing).toEqual([]);
+    expect(result.purged).toBe(3); // meta + two secret items
     expect(synced.store.size).toBe(0);
     // Re-listing discovers nothing left to import.
     expect(discoverSyncedBundles()).toEqual([]);
+  });
+
+  it('purge treats skipped-because-present keys as safe to remove', () => {
+    synced.store.set('agents-cli.secrets.skippy.ONLY_KEY', 'icloud-v');
+    writeBundle({ name: 'skippy', vars: { ONLY_KEY: { value: 'local-v' } } });
+    const [candidate] = discoverSyncedBundles();
+    const result = importSyncedBundle(candidate, { purge: true });
+    expect(result.skipped).toBe(1);
+    expect(result.purged).toBe(1); // the local bundle owns the key — iCloud copy redundant
+    expect(synced.store.size).toBe(0);
+  });
+
+  it('reserved keys are reported unimportable, never abort the bundle, never purge', () => {
+    synced.store.set(
+      'agents-cli.bundles.legacy',
+      JSON.stringify({
+        vars: {
+          GOOD_KEY: 'keychain:GOOD_KEY',
+          USERNAME: 'keychain:USERNAME', // reserved in the modern store
+          DYLD_INSERT_LIBRARIES: { value: 'evil.dylib' }, // loader var, also refused
+        },
+      }),
+    );
+    synced.store.set('agents-cli.secrets.legacy.GOOD_KEY', 'good-v');
+    synced.store.set('agents-cli.secrets.legacy.USERNAME', 'muqsit');
+    const [candidate] = discoverSyncedBundles();
+
+    const result = importSyncedBundle(candidate, { purge: true });
+    expect(result.added).toBe(1);
+    expect(result.unimportable.sort()).toEqual(['DYLD_INSERT_LIBRARIES', 'USERNAME']);
+    // The bundle still lands with the importable key — no abort.
+    const bundle = readBundle('legacy');
+    expect(bundle.vars.GOOD_KEY).toBe('keychain:GOOD_KEY');
+    expect('USERNAME' in bundle.vars).toBe(false);
+    // Purge removed only the imported key; the reserved item and the metadata
+    // (its only record) survive.
+    expect(result.purged).toBe(1);
+    expect([...synced.store.keys()].sort()).toEqual([
+      'agents-cli.bundles.legacy',
+      'agents-cli.secrets.legacy.USERNAME',
+    ]);
   });
 
   it('all-plaintext stores values as literals without touching the local keychain', () => {

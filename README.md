@@ -241,13 +241,14 @@ agents message tester "also cover the null case"
 ### See every open block
 
 ```bash
-agents feed                         # this machine + every registered online device
+agents feed                         # grouped by outcome (ticket/PR/worktree) across the fleet
+agents feed --flat                  # one row per agent (legacy)
 agents feed --host mac-mini         # scope the view to one or more hosts
 agents feed --local                 # skip the SSH fan-out
-agents feed --json                  # the same merged view as structured data
+agents feed --json                  # blocks stamped with their outcome key
 ```
 
-Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents message`, so the decision routes back to the agent that asked it.
+Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. The default view collapses agents under the **outcome** they serve (Linear ticket, PR, worktree slug, or Unassigned) so a 1,100-agent fleet reads as dozens of deliverables. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents message`, so the decision routes back to the agent that asked it.
 
 ### Auto-nudge stalls
 

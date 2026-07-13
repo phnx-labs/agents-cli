@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { OpenBlock } from '../lib/feed.js';
 import {
+  formatOutcomeHeader,
   mergeFeedBlocks,
   parseRemoteFeed,
   remoteFeedHostsToDial,
+  sessionHintsFromActive,
   shouldIncludeLocalFeed,
 } from './feed.js';
+import { groupBlocksByOutcome } from '../lib/feed-outcome.js';
 
-function block(id: string, host: string, ts: string): OpenBlock {
+function block(id: string, host: string, ts: string, extra?: Partial<OpenBlock>): OpenBlock {
   return {
     blockId: `block-${id}`,
     sessionId: id,
@@ -16,6 +19,7 @@ function block(id: string, host: string, ts: string): OpenBlock {
     runtime: 'headless',
     ts,
     questions: [{ text: `${id}?` }],
+    ...extra,
   };
 }
 
@@ -65,5 +69,40 @@ describe('feed host scoping', () => {
   it('dials every peer by default and removes self from explicit lists', () => {
     expect(remoteFeedHostsToDial(undefined, 'zion')).toBeUndefined();
     expect(remoteFeedHostsToDial(['zion', 'mac-mini'], 'zion')).toEqual(['mac-mini']);
+  });
+});
+
+describe('formatOutcomeHeader', () => {
+  it('renders the rollup the operator sees at a glance', () => {
+    const groups = groupBlocksByOutcome([
+      block('a', 'zion', '2026-07-13T00:00:00Z', { ticket: 'RUSH-1125' }),
+      block('b', 'zion', '2026-07-13T00:00:00Z', {
+        ticket: 'RUSH-1125',
+        answer: { answeredAt: 't', answeredFrom: 'cli' },
+      }),
+    ]);
+    expect(formatOutcomeHeader(groups[0])).toBe('RUSH-1125 · 2 agents · 1 needs you · 1 answered');
+  });
+});
+
+describe('sessionHintsFromActive', () => {
+  it('maps session ticket/PR/worktree into enrichment hints', () => {
+    const hints = sessionHintsFromActive([
+      {
+        sessionId: 'sess-1',
+        agentId: 'agent-1',
+        ticket: { id: 'RUSH-9' },
+        pr: { number: 12, url: 'https://github.com/x/y/pull/12' },
+        worktree: { slug: 'rush-9-fix' },
+      },
+    ]);
+    expect(hints[0]).toMatchObject({
+      sessionId: 'sess-1',
+      agentId: 'agent-1',
+      mailboxId: 'agent-1',
+      ticketId: 'RUSH-9',
+      prNumber: 12,
+      worktreeSlug: 'rush-9-fix',
+    });
   });
 });

@@ -18,6 +18,7 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { die } from '../lib/format.js';
+import { getGitRoot } from '../lib/git.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs/promises';
@@ -37,10 +38,11 @@ function isValidTerminalId(id: string): boolean {
   return /^[A-Za-z0-9._-]+$/.test(id) && id.length > 0 && id.length <= 128;
 }
 
+// Thin command-layer wrapper over the shared lib/git.ts `getGitRoot`: turns its
+// throw into a clean `die()` message. The git plumbing lives in one place now.
 async function gitRoot(cwd: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd });
-    return stdout.trim();
+    return await getGitRoot(cwd);
   } catch {
     die(`Not inside a git repo: ${cwd}`);
   }

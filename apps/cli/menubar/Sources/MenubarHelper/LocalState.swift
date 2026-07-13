@@ -22,11 +22,22 @@ enum SessionStatus: String {
 
 struct Session {
     let agent: String
-    let repo: String
+    let repo: String      // grouping key: working-dir name (falls back to the label)
     let cwd: String?
     let status: SessionStatus
     let context: String   // terminal | teams | cloud
-    let detail: String
+    let title: String     // what it's doing: terminal label / teams task / cloud prompt
+    let question: String  // what it's waiting on — attention-sentinel content ("" when empty)
+    let attentionSinceMs: Double?  // sentinel mtime — when it started waiting
+}
+
+// One attention sentinel: mtime = when the session flagged, content = the
+// notification message (the question), empty for hooks that only touch the file.
+// sinceMs is nil when the stat fails (sentinel raced away, permissions) — the
+// row then renders without an elapsed suffix instead of an epoch-0 "20000d".
+struct AttentionMark {
+    let sinceMs: Double?
+    let text: String
 }
 
 // A newly-discovered tailnet node awaiting the user's Register / Ignore.
@@ -109,10 +120,22 @@ enum LocalState {
     }
 
     // MARK: Attention sentinels (written by the Notification hook)
-    private static func attentionSessionIds() -> Set<String> {
+    // name = sessionId, mtime = when flagged, content = the notification message
+    // (newer hooks write it; empty for the touch-only contract). One stat + one
+    // tiny read per blocked session — stays cheap on the badge poll path.
+    private static func attentionMarks() -> [String: AttentionMark] {
         let dir = "\(home)/.agents/.cache/state/attention"
         let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
-        return Set(names.filter { !$0.hasPrefix(".") })
+        var out: [String: AttentionMark] = [:]
+        for name in names where !name.hasPrefix(".") {
+            let path = "\(dir)/\(name)"
+            let attrs = try? fm.attributesOfItem(atPath: path)
+            let since = (attrs?[.modificationDate] as? Date).map { $0.timeIntervalSince1970 * 1000 }
+            let raw = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+            out[name] = AttentionMark(sinceMs: since,
+                                      text: raw.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return out
     }
 
     // MARK: Pending devices (written by the daemon device probe)
@@ -135,19 +158,20 @@ enum LocalState {
     // scanning it every few seconds is too costly. Terminals + cloud + attention
     // are cheap. The full scan (with teams) runs only when the menu opens.
     static func sessions(includeTeams: Bool = true) -> [Session] {
-        let attention = attentionSessionIds()
+        let attention = attentionMarks()
         var all = terminals(attention: attention) + cloud()
-        if includeTeams { all += teams(attention: attention) }
+        if includeTeams { all += teams() }
         return all
     }
 
     // MARK: Terminals
-    private static func terminals(attention: Set<String>) -> [Session] {
+    private static func terminals(attention: [String: AttentionMark]) -> [Session] {
         let path = "\(home)/.agents/.cache/terminals/live-terminals.json"
         guard let data = fm.contents(atPath: path),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
 
         var out: [Session] = []
+        let attentionIds = Set(attention.keys)
         for (_, window) in root {
             guard let w = window as? [String: Any],
                   let entries = w["entries"] as? [[String: Any]] else { continue }
@@ -155,18 +179,25 @@ enum LocalState {
                 guard let pid = e["pid"] as? Int, pidAlive(pid) else { continue }
                 let kind = (e["kind"] as? String) ?? "session"
                 let cwd = e["cwd"] as? String
-                let label = e["label"] as? String
+                let label = (e["label"] as? String) ?? ""
                 let sid = (e["sessionId"] as? String) ?? ""
-                let repo = label?.isEmpty == false ? label! : (cwd.map { ($0 as NSString).lastPathComponent } ?? "")
-                let status = sessionStatus(sessionId: sid, kind: kind, cwd: cwd, attention: attention)
-                out.append(Session(agent: kind, repo: repo, cwd: cwd, status: status, context: "terminal", detail: ""))
+                // repo is the grouping key — always the working-dir name; the
+                // label is the session's own title, carried separately.
+                let repo = cwd.map { ($0 as NSString).lastPathComponent } ?? label
+                let mark = sid.isEmpty ? nil : attention[sid]
+                let status = sessionStatus(sessionId: sid, kind: kind, cwd: cwd,
+                                           attention: attentionIds)
+                out.append(Session(agent: kind, repo: repo, cwd: cwd, status: status,
+                                   context: "terminal", title: label,
+                                   question: mark?.text ?? "",
+                                   attentionSinceMs: status == .attention ? mark?.sinceMs : nil))
             }
         }
         return out
     }
 
     // MARK: Teams (filter to running + pid alive; the dir holds all history)
-    private static func teams(attention: Set<String>) -> [Session] {
+    private static func teams() -> [Session] {
         let base = "\(home)/.agents/.history/teams/agents"
         let ids = (try? fm.contentsOfDirectory(atPath: base)) ?? []
         var out: [Session] = []
@@ -181,7 +212,8 @@ enum LocalState {
             let task = (m["taskName"] as? String) ?? (m["name"] as? String) ?? ""
             let repo = cwd.map { ($0 as NSString).lastPathComponent } ?? ""
             out.append(Session(agent: agent, repo: repo, cwd: cwd,
-                               status: .running, context: "teams", detail: task))
+                               status: .running, context: "teams", title: task,
+                               question: "", attentionSinceMs: nil))
         }
         return out
     }
@@ -210,7 +242,10 @@ enum LocalState {
             let status: SessionStatus = raw == "running" ? .running
                 : (raw == "input_required" || raw == "needs_review") ? .attention : .queued
             out.append(Session(agent: agent, repo: repo, cwd: nil,
-                               status: status, context: "cloud", detail: String(prompt.prefix(40))))
+                               status: status, context: "cloud",
+                               title: String(prompt.prefix(60)),
+                               question: status == .attention ? "needs review" : "",
+                               attentionSinceMs: nil))
         }
         return out
     }

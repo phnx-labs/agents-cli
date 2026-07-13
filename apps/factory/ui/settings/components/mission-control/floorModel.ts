@@ -384,7 +384,13 @@ export interface HostInventory {
   agents: HostAgentInfo[]
   fetchedAt: number
 }
-export type FloorGroupBy = 'host' | 'project' | 'status' | 'agent'
+/**
+ * Group axes for the live agent feed. `outcome` collapses agents under the
+ * deliverable they serve (ticket > PR > worktree > Unassigned) — the default
+ * for a fleet-scale floor so the operator sees dozens of initiatives, not
+ * ~1,100 processes (RUSH-1479).
+ */
+export type FloorGroupBy = 'outcome' | 'host' | 'project' | 'status' | 'agent'
 export type FloorSort = 'needs' | 'recent' | 'tok' | 'name'
 export type TicketGroupBy = 'project' | 'priority' | 'source' | 'status' | 'owner'
 export type TicketSort = 'priority' | 'id'
@@ -758,12 +764,27 @@ function cleanOption(raw: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s
 }
 
+/**
+ * Deliverable key for one agent: ticket > PR > worktree slug > Unassigned.
+ * Mirrors CLI `deriveOutcome` so Factory Floor and `agents feed` group the same way.
+ */
+export function outcomeLabel(a: Pick<FloorAgent, 'ticket' | 'pr' | 'worktreeSlug'>): string {
+  if (a.ticket) return a.ticket
+  if (a.pr) {
+    const n = a.pr.replace(/^#/, '')
+    return a.pr.startsWith('PR') ? a.pr : `PR#${n}`
+  }
+  if (a.worktreeSlug) return a.worktreeSlug
+  return 'Unassigned'
+}
+
 /** Group agents by the chosen dimension. Prototype groupKey: factory-floor.html:412. */
 export function groupAgents(agents: FloorAgent[], by: FloorGroupBy): Map<string, FloorAgent[]> {
   // Coalesce empty keys to a human label (same rule as groupTickets) so a Floor
   // group header is never blank. Host groups by its DISPLAY label so 'this-mac'
   // collapses onto the real device name, matching the HOSTS sidebar.
   const accessor: Record<FloorGroupBy, (a: FloorAgent) => string> = {
+    outcome: (a) => outcomeLabel(a),
     host: (a) => (a.hostLabel ?? a.host) || 'Unknown host',
     project: (a) => a.project || 'Unlabeled',
     status: (a) => a.phase,

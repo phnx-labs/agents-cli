@@ -75,6 +75,10 @@ export interface OpenBlock {
   notificationType?: string;
   ticket?: string;
   pr?: string;
+  /** Worktree slug under `.agents/worktrees/` — soft outcome when no ticket/PR. */
+  worktreeSlug?: string;
+  /** Epic / initiative label when no ticket/PR/worktree is known. */
+  epic?: string;
   /** Block class: approval has a safe default; decision requires human choice. */
   blockClass?: 'approval' | 'decision';
   /** Consequence tag for authz. 'high' gates merge/deploy/admin-style answers. */

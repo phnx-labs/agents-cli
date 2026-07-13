@@ -45,6 +45,38 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private var watchdogInFlight = false
     private var watchdogFetchedAt: Date?
 
+    // Density: rich rows carry the session title / question / routine schedule
+    // inline; compact folds them to one-liners. `auto` (the default) is rich
+    // while something needs the user and compact on a calm machine.
+    private enum Density: String, CaseIterable {
+        case auto, rich, compact
+        var label: String {
+            switch self {
+            case .auto: return "Auto"
+            case .rich: return "Rich"
+            case .compact: return "Compact"
+            }
+        }
+    }
+
+    private var densitySetting: Density {
+        get {
+            // Env override so dump mode can probe a fixed density.
+            if let env = ProcessInfo.processInfo.environment["MENUBAR_DENSITY"],
+               let d = Density(rawValue: env) { return d }
+            return Density(rawValue: UserDefaults.standard.string(forKey: "menubarDensity") ?? "") ?? .auto
+        }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "menubarDensity") }
+    }
+
+    private func isRich(attention: Int) -> Bool {
+        switch densitySetting {
+        case .rich: return true
+        case .compact: return false
+        case .auto: return attention > 0
+        }
+    }
+
     func install() {
         if let button = statusItem.button {
             button.image = Icon.make()
@@ -218,16 +250,31 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refreshWatchdog()
     }
 
+    // The one rule: attention floats to the top triage strip (wait-time sorted,
+    // cross-project) and is never nested inside a project group; live work
+    // groups by repo below; routines / tickets / recents stay dedicated,
+    // glanceable sections; setup + watchdog noise collapses into one System row.
     private func rebuild(_ menu: NSMenu, sessions: [Session], browserTasks: [BrowserTask],
                          recentSessions: [RecentSession], routines: [Routine],
                          doctor: DoctorOverview?, daemonPid: Int?, pending: [PendingDevice]) {
         menu.removeAllItems()
 
+        // Auto density keys off the FULL needs-you set — blocked sessions plus
+        // failing/overdue routines and a stopped scheduler — so the menu is rich
+        // whenever the triage strip has anything to say, not only when a session
+        // is blocked.
+        let attention = sessions.filter { $0.status == .attention }.count
+        let routinesFailing = routines.contains { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let schedulerStopped = daemonPid == nil && !routines.isEmpty
+        let needsYou = attention + (routinesFailing ? 1 : 0) + (schedulerStopped ? 1 : 0)
+        let rich = isRich(attention: needsYou)
+
         addHeader(menu, sessions: sessions)
         menu.addItem(.separator())
 
         // What needs me now — rendered only when there's something actionable.
-        if addNeedsAttention(menu, sessions: sessions, routines: routines, daemonPid: daemonPid) {
+        if addNeedsAttention(menu, sessions: sessions, routines: routines,
+                             daemonPid: daemonPid, rich: rich) {
             menu.addItem(.separator())
         }
 
@@ -239,14 +286,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         addNewSession(menu)
         menu.addItem(.separator())
 
-        // Live work — skipped entirely on a calm, idle machine.
-        let live = sessions.filter { $0.status == .running || $0.status == .idle || $0.status == .attention }
+        // Live work grouped by repo — attention rows live in the triage strip,
+        // not here. Skipped entirely on a calm, idle machine.
+        let live = sessions.filter { $0.status == .running || $0.status == .idle }
         if !live.isEmpty || !browserTasks.isEmpty {
-            addActive(menu, live: live, browserTasks: browserTasks)
+            addActive(menu, live: live, browserTasks: browserTasks, rich: rich)
             menu.addItem(.separator())
         }
 
-        addRecent(menu, recentSessions: recentSessions)
+        addRoutines(menu, routines: routines, rich: rich)
         menu.addItem(.separator())
 
         // Tickets filed via the quick-issue bar (Cmd-Shift-O), clickable → open.
@@ -254,9 +302,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             menu.addItem(.separator())
         }
 
-        addRoutinesRow(menu, routines: routines)
-        addSetup(menu, doctor: doctor)
-        addWatchdog(menu)
+        addRecent(menu, recentSessions: recentSessions, rich: rich)
+        menu.addItem(.separator())
+
+        addSystem(menu, doctor: doctor)
 
         menu.addItem(.separator())
         addFooter(menu, daemonPid: daemonPid)
@@ -299,15 +348,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     // Returns true if anything was rendered (caller adds the trailing separator).
-    // Order mirrors the Factory Floor phase rank: waiting first, then failed.
+    // Triage strip: blocked sessions sorted by wait-time (most-stalled first,
+    // regardless of repo), each carrying the actual question it's waiting on
+    // plus how long it's been waiting. Waiting first, then failed.
     private func addNeedsAttention(_ menu: NSMenu, sessions: [Session],
-                                   routines: [Routine], daemonPid: Int?) -> Bool {
+                                   routines: [Routine], daemonPid: Int?, rich: Bool) -> Bool {
         var rows: [(String, NSColor, String, NSMenu?)] = []   // glyph, color, text, submenu
 
-        for s in sessions where s.status == .attention {
-            let detail = s.detail.isEmpty ? "awaiting input" : trim(s.detail, 34)
-            rows.append(("⚠", wait, "\(LocalState.agentLabel(s.agent)) · \(s.repo) — \(detail)",
-                         s.cwd.map { revealSubmenu($0) }))
+        let blocked = sessions.filter { $0.status == .attention }.sorted {
+            ($0.attentionSinceMs ?? .greatestFiniteMagnitude) < ($1.attentionSinceMs ?? .greatestFiniteMagnitude)
+        }
+        for s in blocked {
+            let q = s.question.isEmpty ? "awaiting input" : trim(s.question, rich ? 48 : 34)
+            var text = "\(LocalState.agentLabel(s.agent)) · \(s.repo) — \(q)"
+            if let since = s.attentionSinceMs { text += "  ·  \(elapsedShort(since))" }
+            rows.append(("⚠", wait, text, s.cwd.map { revealSubmenu($0) }))
         }
 
         if daemonPid == nil && !routines.isEmpty {
@@ -330,7 +385,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
 
         if rows.isEmpty { return false }
-        addSectionTitle(menu, "⚠ NEEDS YOU", color: wait)
+        addSectionTitle(menu, "⚠ NEEDS YOU (\(rows.count))", color: wait)
         for (glyph, color, text, sub) in rows {
             let it = statusRow(glyph, color, text)
             it.submenu = sub
@@ -376,35 +431,63 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(newItem)
     }
 
-    private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask]) {
-        let running = live.filter { $0.status == .running }.count
-        let idle = live.filter { $0.status == .idle }.count
-        var title = "ACTIVE"
-        if running > 0 || idle > 0 { title += "  ·  \(running) running · \(idle) idle" }
-        addSectionTitle(menu, title, color: .secondaryLabelColor)
+    // Live work grouped by repo: one `ACTIVE · <repo>` header per project, the
+    // repo's sessions clustered under it. Rich rows carry the session's own
+    // title inline (the repo lives in the header, so rows don't repeat it).
+    private func addActive(_ menu: NSMenu, live: [Session], browserTasks: [BrowserTask], rich: Bool) {
+        let groups = Dictionary(grouping: live) { $0.repo.isEmpty ? "other" : $0.repo }
+        for (repo, group) in groups.sorted(by: { $0.key.lowercased() < $1.key.lowercased() }) {
+            let running = group.filter { $0.status == .running }.count
+            let idle = group.count - running
+            var title = "ACTIVE · \(repo)"
+            var counts: [String] = []
+            if running > 0 { counts.append("\(running) running") }
+            if idle > 0 { counts.append("\(idle) idle") }
+            if !counts.isEmpty { title += "  ·  " + counts.joined(separator: " · ") }
+            addSectionTitle(menu, title, color: .secondaryLabelColor)
 
-        for s in live {
-            let glyph = s.status == .attention ? "⚠" : (s.status == .running ? "●" : "◐")
-            let color = s.status == .attention ? wait : (s.status == .running ? run : idleC)
-            let detail = s.detail.isEmpty ? "" : " — \(trim(s.detail, 32))"
-            let row = statusRow(glyph, color, "\(LocalState.agentLabel(s.agent))   \(s.repo)\(detail)")
-            if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
-            menu.addItem(row)
+            for s in group {
+                let glyph = s.status == .running ? "●" : "◐"
+                let color = s.status == .running ? run : idleC
+                let detail = (rich && !s.title.isEmpty) ? " — \(trim(s.title, 36))" : ""
+                let row = statusRow(glyph, color, "\(LocalState.agentLabel(s.agent))\(detail)")
+                if let cwd = s.cwd { row.submenu = revealSubmenu(cwd) }
+                menu.addItem(row)
+            }
         }
-        for task in browserTasks {
-            let tabs = task.tabCount == 1 ? "1 tab" : "\(task.tabCount) tabs"
-            let row = statusRow("◦", idleC, "Browser   \(trim(task.name, 24)) · \(shortProfile(task.profile)) · \(tabs)")
-            row.submenu = browserTaskSubmenu(task)
-            menu.addItem(row)
+        if !browserTasks.isEmpty {
+            addSectionTitle(menu, "ACTIVE · Browser", color: .secondaryLabelColor)
+            for task in browserTasks {
+                let tabs = task.tabCount == 1 ? "1 tab" : "\(task.tabCount) tabs"
+                let row = statusRow("◦", idleC, "\(trim(task.name, 24)) · \(shortProfile(task.profile)) · \(tabs)")
+                row.submenu = browserTaskSubmenu(task)
+                menu.addItem(row)
+            }
         }
     }
 
-    private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession]) {
-        addSectionTitle(menu, "RECENT", color: .secondaryLabelColor)
+    private func addRecent(_ menu: NSMenu, recentSessions: [RecentSession], rich: Bool) {
         let visible = Array(recentSessions.filter {
             let id = LocalState.normalizeAgent($0.agent)
             return LocalState.desiredAgents.contains { $0.id == id }
         }.prefix(3))
+        // Compact: the long tail folds behind one row instead of three.
+        if !rich {
+            let item = NSMenuItem(title: pad("Recent") + (visible.isEmpty ? "none" : "\(visible.count) sessions"),
+                                  action: nil, keyEquivalent: "")
+            if !visible.isEmpty {
+                let sub = NSMenu()
+                for session in visible {
+                    let it = NSMenuItem(title: recentSessionTitle(session), action: nil, keyEquivalent: "")
+                    it.submenu = recentSessionSubmenu(session)
+                    sub.addItem(it)
+                }
+                item.submenu = sub
+            }
+            menu.addItem(item)
+            return
+        }
+        addSectionTitle(menu, "RECENT", color: .secondaryLabelColor)
         if visible.isEmpty {
             menu.addItem(disabled(recentSessionsLoaded ? "  No recent sessions" : "  Recent sessions checking…"))
             return
@@ -437,36 +520,65 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         return true
     }
 
-    private func addRoutinesRow(_ menu: NSMenu, routines: [Routine]) {
-        let detail: String
+    // Routines stay a dedicated, glanceable section. Compact: one summary row
+    // (submenu = all). Rich: a section with the next few upcoming + any failing
+    // routine inline, then "All routines…" for the rest.
+    private func addRoutines(_ menu: NSMenu, routines: [Routine], rich: Bool) {
+        let summary: String
         if routines.isEmpty {
-            detail = routinesLoaded ? "none" : "checking…"
+            summary = routinesLoaded ? "none" : "checking…"
         } else {
             let next = routines.compactMap { $0.enabled ? $0.nextRunHuman : nil }.first(where: { $0 != "-" }) ?? "—"
             let paused = routines.filter { !$0.enabled }.count
             var parts = ["\(routines.count)", "next \(next)"]
             if paused > 0 { parts.append("\(paused) paused") }
-            detail = parts.joined(separator: " · ")
+            summary = parts.joined(separator: " · ")
         }
-        let item = NSMenuItem(title: "\(pad("Routines"))\(detail)", action: nil, keyEquivalent: "")
-        if !routines.isEmpty { item.submenu = allRoutinesSubmenu(routines) }
-        menu.addItem(item)
+
+        if !rich || routines.isEmpty {
+            let item = NSMenuItem(title: "\(pad("Routines"))\(summary)", action: nil, keyEquivalent: "")
+            if !routines.isEmpty { item.submenu = allRoutinesSubmenu(routines) }
+            menu.addItem(item)
+            return
+        }
+
+        addSectionTitle(menu, "ROUTINES · \(summary)", color: .secondaryLabelColor)
+        let failing = routines.filter { $0.lastStatus == "failed" || $0.lastStatus == "timeout" || $0.overdue }
+        let upcoming = routines
+            .filter { r in r.enabled && !failing.contains(where: { $0.name == r.name }) && r.nextRun != nil }
+            .sorted { ($0.nextRun ?? "") < ($1.nextRun ?? "") }
+            .prefix(3)
+        for r in upcoming {
+            let row = statusRow("◔", idleC, "\(r.name)  \(r.nextRunHuman ?? r.schedule)")
+            row.submenu = routineSubmenu(r)
+            menu.addItem(row)
+        }
+        for r in failing {
+            let why = r.overdue ? "overdue" : (r.lastStatus ?? "failed")
+            let row = statusRow("✕", fail, "\(r.name)  \(why)")
+            row.submenu = routineSubmenu(r)
+            menu.addItem(row)
+        }
+        let all = NSMenuItem(title: "  All routines…", action: nil, keyEquivalent: "")
+        all.submenu = allRoutinesSubmenu(routines)
+        menu.addItem(all)
     }
 
-    private func addSetup(_ menu: NSMenu, doctor: DoctorOverview?) {
-        let item = NSMenuItem(title: "\(pad("Setup"))\(setupSummary(doctor))", action: nil, keyEquivalent: "")
-        item.submenu = setupSubmenu(doctor)
-        menu.addItem(item)
-    }
-
-    // RUSH-1415: a checkable row that toggles global auto-nudge. Checked = the tick
-    // injects "Continue." into stalled+addressable splits; unchecked = detect-only.
-    private func addWatchdog(_ menu: NSMenu) {
-        let toggle = NSMenuItem(title: "\(pad("Auto-nudge"))\(watchdogSummary())",
+    // Setup + watchdog collapsed into one System row — the health noise lives in
+    // the submenu, not the flat tail. The auto-nudge toggle keeps working there.
+    private func addSystem(_ menu: NSMenu, doctor: DoctorOverview?) {
+        let nudge = "auto-nudge \(watchdogSummary())"
+        let item = NSMenuItem(title: "\(pad("System"))\(setupSummary(doctor)) · \(nudge)",
+                              action: nil, keyEquivalent: "")
+        let sub = setupSubmenu(doctor)
+        sub.addItem(.separator())
+        let toggle = NSMenuItem(title: "Auto-nudge stalled sessions",
                                 action: #selector(onToggleWatchdog), keyEquivalent: "")
         toggle.target = self
         toggle.state = watchdogEnabled ? .on : .off
-        menu.addItem(toggle)
+        sub.addItem(toggle)
+        item.submenu = sub
+        menu.addItem(item)
     }
 
     private func watchdogSummary() -> String {
@@ -478,6 +590,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func addFooter(_ menu: NSMenu, daemonPid: Int?) {
+        let density = NSMenuItem(title: "Density: \(densitySetting.label)",
+                                 action: #selector(onCycleDensity), keyEquivalent: "")
+        density.target = self
+        menu.addItem(density)
+
         if daemonPid != nil {
             let stop = NSMenuItem(title: "Stop scheduler", action: #selector(onStopScheduler), keyEquivalent: "")
             stop.target = self
@@ -657,6 +774,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         watchdogEnabled.toggle()
         AgentsCLI.watchdogSetEnabled(watchdogEnabled)
     }
+    // Cycle auto → rich → compact; the next menu open renders at the new density.
+    @objc private func onCycleDensity() {
+        let all = Density.allCases
+        let idx = all.firstIndex(of: densitySetting) ?? 0
+        densitySetting = all[(idx + 1) % all.count]
+    }
     @objc private func onRoutineRun(_ s: NSMenuItem) { withName(s, AgentsCLI.routineRun) }
     @objc private func onRoutinePause(_ s: NSMenuItem) { withName(s, AgentsCLI.routinePause) }
     @objc private func onRoutineResume(_ s: NSMenuItem) { withName(s, AgentsCLI.routineResume) }
@@ -730,6 +853,16 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private func trim(_ value: String, _ max: Int) -> String {
         if value.count <= max { return value }
         return String(value.prefix(max - 1)) + "…"
+    }
+
+    // "3m" / "1h 12m" / "2d" — how long a session has been waiting (sentinel mtime).
+    private func elapsedShort(_ sinceMs: Double) -> String {
+        let mins = max(0, Int((LocalState.nowMs() - sinceMs) / 60_000))
+        if mins < 1 { return "now" }
+        if mins < 60 { return "\(mins)m" }
+        let hours = mins / 60
+        if hours < 24 { return mins % 60 == 0 ? "\(hours)h" : "\(hours)h \(mins % 60)m" }
+        return "\(hours / 24)d"
     }
 
     private func shortProfile(_ profile: String) -> String {

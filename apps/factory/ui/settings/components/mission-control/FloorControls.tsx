@@ -27,9 +27,10 @@ const SORT_OPTS: { value: FloorSort; label: string }[] = [
   { value: 'name', label: 'Name' },
 ]
 
-// Group the live feed by an axis; 'none' keeps the default phase sections. Same axes
-// as the Backlog's group control (TICKET_GROUP_OPTS) so the two modes match.
+// Group the live feed by an axis; 'none' keeps the default phase sections.
+// `outcome` (ticket/PR/worktree) is the fleet-scale default (RUSH-1479).
 const GROUP_OPTS: { value: FloorGroupBy | 'none'; label: string }[] = [
+  { value: 'outcome', label: 'Outcome' },
   { value: 'none', label: 'None' },
   { value: 'project', label: 'Project' },
   { value: 'host', label: 'Host' },
