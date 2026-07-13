@@ -690,7 +690,7 @@ ${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin</string>${oauthEntry}
+    <string>${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${os.homedir()}/.bun/bin</string>${oauthEntry}
   </dict>
 </dict>
 </plist>`;
@@ -719,7 +719,7 @@ Type=simple
 ExecStart=${execStart}
 Restart=always
 RestartSec=10
-Environment=PATH=/usr/local/bin:/usr/bin:/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin${oauthLine}
+Environment=PATH=${daemonNodeBinDir()}:/usr/local/bin:/usr/bin:/bin${oauthLine}
 
 [Install]
 WantedBy=default.target`;
@@ -930,16 +930,64 @@ export function buildDetachedDaemonEnv(
  * Going through `process.execPath` means a real PE/binary is spawned with
  * `detached: true` and no console, so nothing signals the daemon after launch.
  *
- * When the entry isn't a JS file (e.g. a native launcher resolved via
- * `which agents`), run it directly — it owns its own runtime resolution.
+ * When the entry isn't a Node script (e.g. a native compiled launcher), run it
+ * directly — it owns its own runtime resolution.
  */
 export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { command: string; args: string[] } {
   const { warnings } = validateDaemonBinary(agentsBin);
   for (const w of warnings) process.stderr.write(`[agents] ${w}\n`);
-  if (/\.(c|m)?js$/.test(agentsBin)) {
+  if (isNodeScriptEntry(agentsBin)) {
     return { command: process.execPath, args: [agentsBin, 'daemon', '_run'] };
   }
   return { command: agentsBin, args: ['daemon', '_run'] };
+}
+
+/**
+ * A daemon entry must be launched through the Node runtime when it is a Node
+ * script — a `.js`/`.cjs`/`.mjs` file, OR a symlink/extension-less shim whose
+ * shebang names `node`. Package installs link `bin/agents` to a `dist/index.js`
+ * (a symlink) or drop an extension-less `#!/usr/bin/env node` shim, so an
+ * extension check alone misses them and they get run directly. Executing such an
+ * entry then relies on the shebang resolving `node` off the daemon's PATH — and
+ * when that PATH points at a pruned nvm version (or an ancient system node), the
+ * daemon crash-loops at import (`node:util` has no `styleText` on Node 18). A
+ * real compiled binary (Mach-O/ELF/PE) has no `#!node` shebang, so it takes the
+ * direct branch and owns its own runtime resolution.
+ */
+function isNodeScriptEntry(agentsBin: string): boolean {
+  let resolved = agentsBin;
+  try {
+    resolved = fs.realpathSync(agentsBin);
+  } catch {
+    // Unresolvable (e.g. a template path that does not exist on this box): fall
+    // back to the extension check on the path as given.
+  }
+  if (/\.(c|m)?js$/.test(resolved)) return true;
+  try {
+    const fd = fs.openSync(resolved, 'r');
+    try {
+      const buf = Buffer.alloc(128);
+      const n = fs.readSync(fd, buf, 0, 128, 0);
+      const firstLine = buf.toString('utf-8', 0, n).split('\n', 1)[0];
+      return firstLine.startsWith('#!') && /\bnode\b/.test(firstLine);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The directory of the Node runtime that generated this service manifest, kept
+ * first on the daemon's PATH. Both the shim's shebang and any child routine
+ * process then resolve the exact Node that installed the service — never an
+ * ancient system node or a pruned nvm version. Replaces the old hardcoded
+ * `~/.nvm/versions/node/v24.0.0/bin`, which went stale the moment that patch
+ * release was upgraded away and bricked the daemon fleet-wide.
+ */
+function daemonNodeBinDir(): string {
+  return path.dirname(process.execPath);
 }
 
 /**
