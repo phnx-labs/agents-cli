@@ -604,6 +604,7 @@ export function subagentContentMatches(installedDir: string, sourceDir: string):
 /**
  * List subagents installed to a specific agent's home
  * Claude: scans ~/.claude/agents/{name}.md
+ * Kimi: scans ~/.kimi-code/agents/{name}.yaml (+ sibling .system.md)
  * OpenClaw: scans ~/.openclaw/{name}/AGENTS.md
  */
 export function listSubagentsForAgent(
@@ -631,6 +632,36 @@ export function listSubagentsForAgent(
         path: filePath,
         files: [file],
         frontmatter,
+      });
+    }
+  } else if (agentId === 'kimi') {
+    // Kimi: flat YAML under .kimi-code/agents/ (exclude managed parent _*.yaml)
+    const agentsDir = path.join(home, '.kimi-code', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.yaml') || file.startsWith('_')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+
+      const name = file.replace(/\.yaml$/, '');
+      let description = '';
+      try {
+        const parsed = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as {
+          agent?: { description?: string; name?: string };
+        } | null;
+        description = parsed?.agent?.description ?? '';
+      } catch { /* leave description empty */ }
+
+      const files = [file];
+      const promptFile = `${name}.system.md`;
+      if (fs.existsSync(path.join(agentsDir, promptFile))) files.push(promptFile);
+
+      subagents.push({
+        name,
+        path: filePath,
+        files,
+        frontmatter: { name, description },
       });
     }
   } else if (agentId === 'openclaw') {
@@ -718,6 +749,17 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
         }
       }
     }
+  } else if (agent === 'kimi') {
+    const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
+    if (fs.existsSync(agentsDir)) {
+      for (const file of fs.readdirSync(agentsDir)) {
+        if (!file.endsWith('.yaml') || file.startsWith('_')) continue;
+        const name = path.basename(file, '.yaml');
+        if (!discovered.has(name)) {
+          orphans.push(name);
+        }
+      }
+    }
   } else if (agent === 'openclaw') {
     const openclawDir = path.join(versionHome, '.openclaw');
     if (fs.existsSync(openclawDir)) {
@@ -769,6 +811,19 @@ export function removeSubagentFromVersion(
       if (fs.existsSync(targetPath)) {
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
+      }
+    } else if (agent === 'kimi') {
+      const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
+      const yamlPath = path.join(agentsDir, `${subagentName}.yaml`);
+      const promptPath = path.join(agentsDir, `${subagentName}.system.md`);
+      if (fs.existsSync(yamlPath) || fs.existsSync(promptPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        if (fs.existsSync(yamlPath)) {
+          fs.renameSync(yamlPath, path.join(trashDir, `${subagentName}.yaml.${stamp}`));
+        }
+        if (fs.existsSync(promptPath)) {
+          fs.renameSync(promptPath, path.join(trashDir, `${subagentName}.system.md.${stamp}`));
+        }
       }
     } else if (agent === 'openclaw') {
       const targetDir = path.join(versionHome, '.openclaw', subagentName);

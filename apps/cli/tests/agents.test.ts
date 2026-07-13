@@ -10,6 +10,7 @@ import {
   transformSubagentForKimi,
   buildKimiSubagentsParentYaml,
   installSubagentToAgent,
+  listSubagentsForAgent,
   KIMI_SUBAGENTS_PARENT_FILE,
 } from '../src/lib/subagents.js';
 
@@ -210,6 +211,32 @@ describe('kimi subagents (YAML agent files)', () => {
       expect(fs.existsSync(prompt)).toBe(true);
       expect(fs.readFileSync(dest, 'utf-8')).toContain('system_prompt_path: ./explorer.system.md');
       expect(fs.readFileSync(prompt, 'utf-8')).toContain('Explore.');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('listSubagentsForAgent finds installed kimi yaml (excludes managed parent)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-list-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      expect(installSubagentToAgent(subDir, 'explorer', 'kimi', home).success).toBe(true);
+      // managed parent must not show as an installed subagent
+      fs.writeFileSync(
+        path.join(home, '.kimi-code', 'agents', KIMI_SUBAGENTS_PARENT_FILE),
+        'version: 1\nagent:\n  name: agents-cli\n'
+      );
+      const listed = listSubagentsForAgent('kimi', home);
+      expect(listed.map(s => s.name)).toEqual(['explorer']);
+      expect(listed[0].files).toContain('explorer.yaml');
+      expect(listed[0].files).toContain('explorer.system.md');
+      expect(listed[0].frontmatter.description).toBe('Explores code');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
