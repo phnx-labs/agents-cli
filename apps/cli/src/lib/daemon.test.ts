@@ -162,6 +162,10 @@ describe('generateLaunchdPlist', () => {
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     // The PATH entry is always present so EnvironmentVariables is never empty.
     expect(plist).toContain('<key>PATH</key>');
+    // PATH pins the running Node's bin dir first and drops the stale hardcoded
+    // nvm version that bricked the daemon fleet-wide when it was pruned.
+    expect(plist).toContain(`<string>${path.dirname(process.execPath)}:`);
+    expect(plist).not.toContain('v24.0.0');
   });
 
   it('injects the token into EnvironmentVariables when configured', () => {
@@ -194,6 +198,12 @@ describe('generateSystemdUnit', () => {
     expect(generateSystemdUnit(readDaemonClaudeOAuthToken({ allowPrompt: true }))).toContain(
       'Environment=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc123',
     );
+  });
+
+  it('pins the running Node bin dir first on PATH and drops the stale hardcoded nvm version', () => {
+    const unit = generateSystemdUnit();
+    expect(unit).toContain(`Environment=PATH=${path.dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`);
+    expect(unit).not.toContain('v24.0.0');
   });
 
   it('pins a JavaScript install to the Node runtime that installed the service', () => {
@@ -261,6 +271,53 @@ describe('getDaemonLaunch', () => {
     const { command, args } = getDaemonLaunch('/usr/local/bin/agents');
     expect(command).toBe('/usr/local/bin/agents');
     expect(args).toEqual(['daemon', '_run']);
+  });
+
+  // The fleet-wide crash-loop: `bin/agents` is a symlink to `dist/index.js`, so
+  // an extension check on the *link name* (`agents`) misses it, the daemon runs
+  // the shim's shebang, and `env node` lands on a pruned/ancient node.
+  it('launches an extension-less symlink to a .js entry through the Node runtime', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-symlink-'));
+    const indexJs = path.join(tmpDir, 'index.js');
+    fs.writeFileSync(indexJs, '#!/usr/bin/env node\n');
+    const link = path.join(tmpDir, 'agents');
+    fs.symlinkSync(indexJs, link);
+    try {
+      const { command, args } = getDaemonLaunch(link);
+      expect(command).toBe(process.execPath);
+      expect(args).toEqual([link, 'daemon', '_run']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // A real extension-less `#!/usr/bin/env node` shim (dev install) must also be
+  // pinned to process.execPath, not run bare off PATH.
+  it('launches an extension-less node-shebang shim through the Node runtime', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
+    const shim = path.join(tmpDir, 'agents');
+    fs.writeFileSync(shim, '#!/usr/bin/env -S node --no-warnings\nrequire("./index.js");\n');
+    try {
+      const { command, args } = getDaemonLaunch(shim);
+      expect(command).toBe(process.execPath);
+      expect(args).toEqual([shim, 'daemon', '_run']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // A real compiled binary (no #!node shebang) runs directly — it owns its runtime.
+  it('runs a real compiled launcher (no node shebang) directly', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-native-'));
+    const bin = path.join(tmpDir, 'agents');
+    fs.writeFileSync(bin, '\x7fELF\x02\x01\x01\x00binary-not-a-script');
+    try {
+      const { command, args } = getDaemonLaunch(bin);
+      expect(command).toBe(bin);
+      expect(args).toEqual(['daemon', '_run']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
