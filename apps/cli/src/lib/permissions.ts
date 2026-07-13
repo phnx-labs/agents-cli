@@ -17,6 +17,7 @@ import type {
   PermissionSet,
   InstalledPermission,
   ClaudePermissions,
+  CursorPermissions,
   OpenCodePermissions,
   CodexPermissions,
 } from './types.js';
@@ -493,6 +494,35 @@ export function convertToClaudeFormat(set: PermissionSet): ClaudePermissions {
     permissions.additionalDirectories = [...set.additionalDirectories];
   }
   return { permissions };
+}
+
+/**
+ * Map a canonical rule to Cursor CLI syntax.
+ * Cursor uses Shell(...) instead of Bash(...); other tools keep TitleCase names.
+ * https://cursor.com/docs/cli/reference/permissions
+ */
+function canonicalToCursorRule(perm: string): string {
+  if (perm === 'Bash' || perm.startsWith('Bash(')) {
+    return perm.replace(/^Bash/, 'Shell');
+  }
+  // Canonical WebSearch maps to WebFetch family for network allow.
+  if (perm.startsWith('WebSearch(')) {
+    return perm.replace(/^WebSearch/, 'WebFetch');
+  }
+  return perm;
+}
+
+/**
+ * Convert canonical permission set to Cursor CLI format
+ * (`~/.cursor/cli-config.json` permissions.allow/deny).
+ */
+export function convertToCursorFormat(set: PermissionSet): CursorPermissions {
+  return {
+    permissions: {
+      allow: set.allow.map(canonicalToCursorRule),
+      deny: (set.deny ?? []).map(canonicalToCursorRule),
+    },
+  };
 }
 
 /**
@@ -1411,6 +1441,29 @@ export function applyPermissionsToVersion(
 
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, TOML.stringify(config as any), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'cursor') {
+      // Cursor CLI permissions live in ~/.cursor/cli-config.json
+      const configPath = path.join(configDir, 'cli-config.json');
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try {
+          config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+        } catch { /* start fresh */ }
+      }
+      const converted = convertToCursorFormat(set);
+      if (merge && config.permissions && typeof config.permissions === 'object') {
+        const existing = config.permissions as { allow?: string[]; deny?: string[] };
+        const allow = new Set([...(existing.allow || []), ...converted.permissions.allow]);
+        const deny = new Set([...(existing.deny || []), ...converted.permissions.deny]);
+        config.permissions = { allow: [...allow], deny: [...deny] };
+      } else {
+        config.permissions = converted.permissions;
+      }
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
       return { success: true };
     }
 

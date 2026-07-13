@@ -799,9 +799,29 @@ describe('applyPermissionsToVersion', () => {
       allow: ['Bash(git *)'],
     };
 
-    const result = applyPermissionsToVersion('cursor' as any, set, versionHome, true);
+    // amp has no allowlist writer path
+    const result = applyPermissionsToVersion('amp' as any, set, versionHome, true);
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not support permissions');
+  });
+
+  it('writes Cursor permissions to .cursor/cli-config.json (Bash→Shell)', () => {
+    const versionHome = join(testDir, 'cursor-write');
+    mkdirSync(versionHome, { recursive: true });
+
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Bash(git *)', 'Read(src/**)'],
+      deny: ['Bash(rm *)'],
+    };
+
+    const result = applyPermissionsToVersion('cursor' as any, set, versionHome, false);
+    expect(result.success).toBe(true);
+    const configPath = join(versionHome, '.cursor', 'cli-config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.permissions.allow).toContain('Shell(git *)');
+    expect(config.permissions.allow).toContain('Read(src/**)');
+    expect(config.permissions.deny).toContain('Shell(rm *)');
   });
 
   it('writes Antigravity permissions to .gemini/antigravity-cli/settings.json', () => {

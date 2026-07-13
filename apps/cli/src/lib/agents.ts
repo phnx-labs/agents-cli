@@ -311,7 +311,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',
@@ -331,7 +331,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] }, // subagents: ~/.config/opencode/agents/*.md
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
   },
   openclaw: {
     id: 'openclaw',

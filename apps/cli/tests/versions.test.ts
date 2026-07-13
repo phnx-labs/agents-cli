@@ -617,8 +617,10 @@ describe('hasNewResources', () => {
     const diff = { ...emptyResources(), permissions: ['01-core'] };
     // claude supports permissions
     expect(hasNewResources(diff, 'claude')).toBe(true);
-    // cursor does NOT support permissions
-    expect(hasNewResources(diff, 'cursor')).toBe(false);
+    // cursor supports permissions (cli-config.json allowlist)
+    expect(hasNewResources(diff, 'cursor')).toBe(true);
+    // amp does NOT support permissions
+    expect(hasNewResources(diff, 'amp')).toBe(false);
   });
 
   it('filters plugins by agent capability', () => {

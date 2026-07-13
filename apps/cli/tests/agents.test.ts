@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
-import { convertToOpenCodeFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
+import { convertToOpenCodeFormat, convertToCursorFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
 import {
   transformSubagentForDroid,
@@ -12,7 +12,6 @@ import {
   buildKimiSubagentsParentYaml,
   installSubagentToAgent,
   listSubagentsForAgent,
-  transformSubagentForOpenCode,
   KIMI_SUBAGENTS_PARENT_FILE,
 } from '../src/lib/subagents.js';
 
@@ -314,45 +313,35 @@ describe('opencode allowlist (permission in opencode.jsonc)', () => {
 });
 
 
-describe('opencode subagents (markdown mode: subagent)', () => {
-  it('is capable of subagents', () => {
-    expect(capableAgents('subagents')).toContain('opencode');
-    expect(supports('opencode', 'subagents').ok).toBe(true);
+describe('cursor allowlist (cli-config.json)', () => {
+  it('is capable of allowlist', () => {
+    expect(capableAgents('allowlist')).toContain('cursor');
+    expect(supports('cursor', 'allowlist').ok).toBe(true);
   });
 
-  it('transformSubagentForOpenCode emits mode subagent frontmatter', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-sub-'));
-    try {
-      fs.writeFileSync(
-        path.join(dir, 'AGENT.md'),
-        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: anthropic/claude-sonnet-4\n---\n\nYou review code.\n`
-      );
-      const out = transformSubagentForOpenCode(dir);
-      expect(out).toContain('mode: subagent');
-      expect(out).toContain('description: Reviews diffs');
-      expect(out).toContain('model: anthropic/claude-sonnet-4');
-      expect(out).toContain('You review code.');
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+  it('convertToCursorFormat maps Bash to Shell', () => {
+    const out = convertToCursorFormat({ name: 't', allow: ['Bash(git *)', 'Read(src/**)'], deny: ['Bash(rm *)'] });
+    expect(out.permissions.allow).toContain('Shell(git *)');
+    expect(out.permissions.allow).toContain('Read(src/**)');
+    expect(out.permissions.deny).toContain('Shell(rm *)');
   });
 
-  it('installSubagentToAgent writes ~/.config/opencode/agents/<name>.md', () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-inst-'));
+  it('applyPermissionsToVersion writes ~/.cursor/cli-config.json', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cur-perm-'));
     try {
-      const subDir = path.join(root, 'sub');
-      fs.mkdirSync(subDir);
-      fs.writeFileSync(
-        path.join(subDir, 'AGENT.md'),
-        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
-      );
       const home = path.join(root, 'home');
-      const r = installSubagentToAgent(subDir, 'explorer', 'opencode', home);
+      const r = applyPermissionsToVersion(
+        'cursor',
+        { name: 't', allow: ['Bash(ls)'], deny: ['Bash(rm)'] },
+        home,
+        false,
+      );
       expect(r.success).toBe(true);
-      const dest = path.join(home, '.config', 'opencode', 'agents', 'explorer.md');
+      const dest = path.join(home, '.cursor', 'cli-config.json');
       expect(fs.existsSync(dest)).toBe(true);
-      expect(fs.readFileSync(dest, 'utf-8')).toContain('mode: subagent');
-      expect(listSubagentsForAgent('opencode', home).map(s => s.name)).toEqual(['explorer']);
+      const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      expect(cfg.permissions.allow).toContain('Shell(ls)');
+      expect(cfg.permissions.deny).toContain('Shell(rm)');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

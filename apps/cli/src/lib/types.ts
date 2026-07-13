@@ -828,6 +828,14 @@ export interface ClaudePermissions {
   };
 }
 
+/** Cursor CLI native format in ~/.cursor/cli-config.json (Shell/Read/Write/WebFetch/Mcp). */
+export interface CursorPermissions {
+  permissions: {
+    allow: string[];
+    deny: string[];
+  };
+}
+
 /** OpenCode's native permission format (per-command allow/deny/ask). */
 export interface OpenCodePermissions {
   permission: {
