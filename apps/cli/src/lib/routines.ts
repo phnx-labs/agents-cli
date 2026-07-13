@@ -142,7 +142,7 @@ export function jobRunsOnThisDevice(config: Pick<JobConfig, 'device'>): boolean 
 
 /** Default values applied to every job config when fields are omitted. */
 const JOB_DEFAULTS: Partial<JobConfig> = {
-  mode: 'plan',
+  mode: 'auto',
   effort: 'auto',
   timeout: '10m',
   enabled: true,
@@ -228,7 +228,7 @@ export function writeJob(config: JobConfig): void {
   const filePath = safeJoin(jobsDir, config.name + '.yml');
 
   const output: Record<string, unknown> = { ...config };
-  if (output.mode === 'plan') delete output.mode;
+  if (output.mode === 'auto') delete output.mode;
   if (output.effort === 'auto') delete output.effort;
   if (output.timeout === '10m') delete output.timeout;
   if (output.enabled === true) delete output.enabled;
