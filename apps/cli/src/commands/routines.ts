@@ -206,7 +206,7 @@ export function registerRoutinesCommands(program: Command): void {
       # List all routines and their next run times
       agents routines list
 
-      # List routines as seen from a specific host (local --host fallback)
+      # List routines on a specific device
       agents routines list --host yosemite-s0
 
       # Create a routine restricted to specific devices
@@ -352,12 +352,13 @@ export function registerRoutinesCommands(program: Command): void {
         const enabledWord = job.enabled ? 'yes' : 'no';
         const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
 
-        const deviceWord = !job.devices || job.devices.length === 0
+        const deviceFull = job.devices?.join(',') ?? '';
+        const deviceWord = deviceFull.length === 0
           ? 'all'
-          : job.devices.join(',').length > DEVICE_W
-            ? job.devices.join(',').slice(0, DEVICE_W - 1) + '…'
-            : job.devices.join(',');
-        const deviceCell = !job.devices || job.devices.length === 0
+          : deviceFull.length > DEVICE_W
+            ? deviceFull.slice(0, DEVICE_W - 1) + '…'
+            : deviceFull;
+        const deviceCell = deviceFull.length === 0
           ? chalk.gray('all')
           : jobRunsOnThisDevice(job)
             ? deviceWord

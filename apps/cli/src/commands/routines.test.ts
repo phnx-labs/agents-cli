@@ -110,28 +110,46 @@ function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; p
   return { child, pidPromise };
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Terminate a daemon process started by startIsolatedDaemon and wait for it to exit. */
 async function stopIsolatedDaemon(child: ReturnType<typeof spawn>): Promise<void> {
   if (!child.pid) return;
-  try {
-    process.kill(-child.pid, 'SIGTERM');
-  } catch {
-    // already gone
-  }
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      try {
-        process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        // already gone
-      }
+
+  const closePromise = new Promise<void>((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
       resolve();
-    }, 3_000);
-    child.on('close', () => {
-      clearTimeout(timer);
-      resolve();
-    });
+      return;
+    }
+    child.on('close', () => resolve());
   });
+
+  if (child.exitCode !== null || child.signalCode !== null) return;
+
+  const signalProcessGroup = process.platform !== 'win32';
+  const signal = (sig: NodeJS.Signals) => {
+    try {
+      if (signalProcessGroup) {
+        process.kill(-child.pid!, sig);
+      } else {
+        child.kill(sig);
+      }
+    } catch {
+      // already gone
+    }
+  };
+
+  signal('SIGTERM');
+  const timer = setTimeout(() => signal('SIGKILL'), 3_000);
+  await closePromise;
+  clearTimeout(timer);
 }
 
 const baseJob = {
@@ -303,10 +321,16 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
       const res = run(home, ['list']);
       expect(res.status).toBe(0);
       const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
-      const line = stripped.split('\n').find((l) => l.includes('test-job'));
+      const lines = stripped.split('\n');
+      const line = lines.find((l) => l.includes('test-job'));
       expect(line).toBeDefined();
-      // Column layout: 2 spaces + Name(24) + Agent(10) + Repo(24) + Devices(22).
-      const deviceField = line!.slice(60, 82).trim();
+      const headerLine = lines.find((l) => l.includes('Devices') && l.includes('Schedule'));
+      expect(headerLine).toBeDefined();
+      const deviceStart = headerLine!.indexOf('Devices');
+      const scheduleStart = headerLine!.indexOf('Schedule');
+      expect(deviceStart).toBeGreaterThan(-1);
+      expect(scheduleStart).toBeGreaterThan(deviceStart);
+      const deviceField = line!.slice(deviceStart, scheduleStart).trim();
       expect(deviceField).toBe('all');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -417,9 +441,10 @@ describe('routines add --devices empty/whitespace fails closed', () => {
   it('successfully persists --devices with valid names against a running daemon', async () => {
     const home = makeHome({ registry });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
+    let pid: number | null = null;
     try {
       daemon = startIsolatedDaemon(home);
-      const pid = await daemon.pidPromise;
+      pid = await daemon.pidPromise;
       expect(pid).not.toBeNull();
 
       const res = run(home, [
@@ -435,6 +460,7 @@ describe('routines add --devices empty/whitespace fails closed', () => {
       expect(doc!.devices).toEqual(['yosemite-s0', 'mac-mini']);
     } finally {
       if (daemon) await stopIsolatedDaemon(daemon.child);
+      if (typeof pid === 'number') expect(isProcessAlive(pid)).toBe(false);
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
@@ -518,7 +544,7 @@ function directSubcommandNames(home: string): string[] {
   if (!commandsMatch) return [];
   return commandsMatch[1]
     .split('\n')
-    .map((line) => line.trim().match(/^([a-z][a-z0-9-]*)/)?.[1])
+    .map((line) => line.match(/^  ([a-z][a-z0-9-]*)/)?.[1])
     .filter((name): name is string => Boolean(name));
 }
 
