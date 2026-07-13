@@ -141,6 +141,9 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // panel's resignKey, which would otherwise dismiss the bar and drop the typed
     // note. Cleared when the bar regains key focus.
     private var suppressDismiss = false
+    private var activationKeyMonitor: Any?
+    private var activationKeyTimeout: DispatchWorkItem?
+    private var activationBufferedText = ""
 
     // MARK: Summon / dismiss
 
@@ -161,10 +164,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         panel.setContentSize(NSSize(width: Self.panelWidth, height: hasThumbs ? 248 : 156))
 
         dismissArmed = false
+        startActivationKeyBuffer()
         position(panel)
         NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(field)
+        waitUntilReadyForTyping(panel)
+        replayActivationKeysIfReady()
         if ProcessInfo.processInfo.environment["MENUBAR_PROMPT_DEBUG"] == "1" {
             FileHandle.standardError.write(Data(
                 "summon: frame=\(panel.frame) visible=\(panel.isVisible) thumbs=\(thumbStrip.arrangedSubviews.count)\n".utf8))
@@ -177,8 +184,69 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     private func dismiss() {
         dismissArmed = false
+        stopActivationKeyBuffer()
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
+    }
+
+    private func startActivationKeyBuffer() {
+        stopActivationKeyBuffer()
+        activationBufferedText = ""
+        activationKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                guard self.activationKeyMonitor != nil, self.panel?.isKeyWindow != true,
+                      let text = Self.activationBufferText(characters: event.characters,
+                                                           modifierFlags: event.modifierFlags,
+                                                           keyCode: event.keyCode) else { return }
+                self.activationBufferedText += text
+            }
+        }
+        let timeout = DispatchWorkItem { [weak self] in self?.stopActivationKeyBuffer() }
+        activationKeyTimeout = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: timeout)
+    }
+
+    private func stopActivationKeyBuffer() {
+        activationKeyTimeout?.cancel()
+        activationKeyTimeout = nil
+        if let activationKeyMonitor {
+            NSEvent.removeMonitor(activationKeyMonitor)
+            self.activationKeyMonitor = nil
+        }
+        activationBufferedText = ""
+    }
+
+    private func replayActivationKeysIfReady() {
+        guard panel?.isKeyWindow == true else { return }
+        let text = activationBufferedText
+        stopActivationKeyBuffer()
+        guard !text.isEmpty else { return }
+        if let editor = field.currentEditor() {
+            editor.insertText(text)
+        } else {
+            field.stringValue += text
+        }
+    }
+
+    static func activationBufferText(characters: String?,
+                                     modifierFlags: NSEvent.ModifierFlags,
+                                     keyCode: UInt16) -> String? {
+        let blocked: NSEvent.ModifierFlags = [.command, .control, .option]
+        guard modifierFlags.intersection(blocked).isEmpty,
+              let characters, !characters.isEmpty else { return nil }
+        if characters.unicodeScalars.allSatisfy({ CharacterSet.controlCharacters.contains($0) }) {
+            return nil
+        }
+        return characters
+    }
+
+    private func waitUntilReadyForTyping(_ panel: PromptPanel) {
+        let deadline = Date().addingTimeInterval(0.25)
+        while Date() < deadline {
+            if panel.isKeyWindow, field.currentEditor() != nil { return }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
     }
 
     // MARK: Submit
@@ -353,7 +421,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private func buildPanel() -> PromptPanel {
         let panel = PromptPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 188),
-            styleMask: [.nonactivatingPanel, .borderless],
+            styleMask: [.borderless],
             backing: .buffered, defer: false)
         panel.level = .floating
         panel.isFloatingPanel = true
@@ -367,7 +435,10 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             self.dismiss()
         }
         // Returning to the bar after a preview re-arms click-outside dismissal.
-        panel.onBecomeKey = { [weak self] in self?.suppressDismiss = false }
+        panel.onBecomeKey = { [weak self] in
+            self?.suppressDismiss = false
+            self?.replayActivationKeysIfReady()
+        }
 
         let bg = NSVisualEffectView()
         bg.material = .hudWindow
