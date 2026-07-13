@@ -1624,10 +1624,67 @@ export class AgentManager {
   }
 
   /**
+   * Resume a STOPPED teammate (completed / failed / stopped) by re-entering its
+   * own session with `message` as the next user turn. Re-launches through the
+   * SAME backend the teammate first used (local process or remote host), reusing
+   * its stored cwd / worktree / host / version / model / effort, and flips it
+   * back to RUNNING so the team tracks it live again.
+   *
+   * The resume target is the teammate's underlying agent session id: for Claude
+   * that IS its agent_id (unified identity, pinned via --session-id at first
+   * launch); other harnesses only expose their session/thread id after their
+   * first stream event, captured as `remoteSessionId`.
+   *
+   * Callers branch on status first — a RUNNING teammate is steered via its
+   * mailbox, never re-launched — so this method assumes a non-running teammate.
+   */
+  async resumeTeammate(agentId: string, message: string): Promise<AgentProcess> {
+    await this.initialize();
+    const agent = await this.get(agentId);
+    if (!agent) throw new Error(`No teammate with id ${agentId}`);
+
+    const who = agent.name ?? agent.agentId.slice(0, 8);
+
+    // Cloud-backed teammates run on remote provider infrastructure with no local
+    // or host process to re-launch; continuing them goes through the provider.
+    if (agent.cloudProvider) {
+      throw new Error(
+        `Teammate '${who}' is a ${agent.cloudProvider} cloud task — resume it with ` +
+        `\`agents message ${agent.cloudSessionId ?? agent.agentId} "<message>"\` instead.`,
+      );
+    }
+
+    // For non-Claude teammates the agent_id is NOT the harness session id — that
+    // is only known once the agent emitted its first stream event. If it never
+    // did (e.g. it failed before its first turn), there is no resumable handle.
+    if (agent.agentType !== 'claude' && !agent.remoteSessionId) {
+      throw new Error(
+        `No resumable session id was captured for ${agent.agentType} teammate '${who}' — ` +
+        `its session id is discovered from the agent's own output, which never arrived ` +
+        `(it may have failed before its first turn). Start a fresh teammate instead.`,
+      );
+    }
+
+    const resume = { id: agent.remoteSessionId ?? agent.agentId, message };
+    // Flip to RUNNING up front so a concurrent status poll can't reap the
+    // teammate between the exit-sentinel clear and the new PID landing; the
+    // launch re-persists with the fresh pid/startTime.
+    agent.status = AgentStatus.RUNNING;
+    agent.completedAt = null;
+
+    if (agent.hostName) {
+      await this.launchRemoteProcess(agent, resume);
+    } else {
+      await this.launchProcess(agent, resume);
+    }
+    return agent;
+  }
+
+  /**
    * Actually spawn the OS process for a teammate. Extracted from spawn() so
    * staged teammates can be launched later by startReady().
    */
-  private async launchProcess(agent: AgentProcess): Promise<void> {
+  private async launchProcess(agent: AgentProcess, resume?: { id: string; message: string }): Promise<void> {
     const running = await this.listRunning();
     warnIfMemoryLow(running.length);
 
@@ -1646,13 +1703,17 @@ export class AgentManager {
       effort,
       agent.version,
       agent.profileName,
+      resume,
     );
 
-    debug(`Launching ${agent.agentType} agent ${agent.agentId} [${agent.mode}]: ${cmd.slice(0, 3).join(' ')}...`);
+    debug(`Launching ${agent.agentType} agent ${agent.agentId} [${agent.mode}]${resume ? ' (resume)' : ''}: ${cmd.slice(0, 3).join(' ')}...`);
 
     try {
       const stdoutPath = await agent.getStdoutPath();
-      const stdoutFile = await fs.open(stdoutPath, 'w');
+      // Resume APPENDS so the prior turn's stream survives in the log (teammate
+      // status re-reads the whole file each poll, so the fresh terminal event
+      // still wins); a fresh launch truncates.
+      const stdoutFile = await fs.open(stdoutPath, resume ? 'a' : 'w');
       const stdoutFd = stdoutFile.fd;
 
       // Wrap the teammate command in a shell that records the underlying CLI's
@@ -1708,7 +1769,7 @@ export class AgentManager {
    * created ON THE HOST off the freshly-fetched default branch; the teammate runs
    * there. Otherwise it runs in the host repo path directly.
    */
-  private async launchRemoteProcess(agent: AgentProcess): Promise<void> {
+  private async launchRemoteProcess(agent: AgentProcess, resume?: { id: string; message: string }): Promise<void> {
     if (!agent.hostName || !agent.hostTarget || !agent.repoPath) {
       throw new Error(`Remote teammate ${agent.agentId} is missing host placement (host/target/repo).`);
     }
@@ -1733,11 +1794,18 @@ export class AgentManager {
 
     // Worktree isolation on the host, if the team enables it. createRemoteWorktree
     // fetches origin and branches off origin/<default>, returning the host path.
+    // On RESUME the worktree already exists from the original launch — reuse it
+    // (its path is persisted) instead of re-creating (which would fail on the
+    // existing branch and would also discard the teammate's in-progress work).
     let remoteCwd = agent.repoPath;
     if (agent.worktreeName) {
-      const worktreePath = createRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
-      agent.worktreePath = worktreePath;
-      remoteCwd = worktreePath;
+      if (resume && agent.worktreePath) {
+        remoteCwd = agent.worktreePath;
+      } else {
+        const worktreePath = createRemoteWorktree(agent.hostTarget, agent.repoPath, agent.worktreeName);
+        agent.worktreePath = worktreePath;
+        remoteCwd = worktreePath;
+      }
     }
 
     // Same run argv the local path builds (shared buildRunArgv keeps the prompt
@@ -1752,6 +1820,7 @@ export class AgentManager {
       effort,
       agent.version,
       agent.profileName,
+      resume,
     );
 
     try {
@@ -1986,13 +2055,22 @@ export class AgentManager {
     effort: EffortLevel,
     version: string | null,
     profileName: string | null,
+    resume?: { id: string; message: string },
   ): string[] {
-    // Compose the prompt: a plan-mode prefix for Claude (clarifying headless
-    // plan-mode restrictions) and a universal summary suffix. These are
-    // team-specific prompt scaffolding — `agents run` does not apply them.
-    let fullPrompt = prompt + PROMPT_SUFFIX;
-    if (agentType === 'claude' && mode === 'plan') {
-      fullPrompt = CLAUDE_PLAN_MODE_PREFIX + fullPrompt;
+    // Compose the prompt. On RESUME the message is the teammate's next user turn,
+    // not a fresh brief — so skip the original brief and the plan-mode prefix, but
+    // keep PROMPT_SUFFIX so the resumed run still emits a final summary the team
+    // parser reads. On a fresh launch, add the plan-mode prefix for Claude and the
+    // universal summary suffix. These are team-specific prompt scaffolding —
+    // `agents run` does not apply them.
+    let fullPrompt: string;
+    if (resume) {
+      fullPrompt = resume.message + PROMPT_SUFFIX;
+    } else {
+      fullPrompt = prompt + PROMPT_SUFFIX;
+      if (agentType === 'claude' && mode === 'plan') {
+        fullPrompt = CLAUDE_PLAN_MODE_PREFIX + fullPrompt;
+      }
     }
 
     // Profile target takes precedence — `agents run <profile>` resolves the
@@ -2000,16 +2078,15 @@ export class AgentManager {
     // version pins only apply when no profile is selected.
     const target = profileName ?? (version ? `${agentType}@${version}` : agentType);
 
-    const args: string[] = [
-      'run',
-      target,
-      fullPrompt,
-      '--mode', mode,
-      '--effort', effort,
-      '--json',
-      '--headless',
-      '--quiet',
-    ];
+    // Keep the prompt as the first positional (right after target), matching the
+    // fresh-launch shape, and add `--resume <id>` among the flags. `agents run`
+    // continues the teammate's own session natively (claude `--resume`, codex
+    // `resume`) or via the universal `/continue` replay for other harnesses.
+    const args: string[] = ['run', target, fullPrompt];
+    if (resume) {
+      args.push('--resume', resume.id);
+    }
+    args.push('--mode', mode, '--effort', effort, '--json', '--headless', '--quiet');
     if (model) args.push('--model', model);
     args.push('--env', 'AGENTS_RUNTIME=teams');
     return args;
@@ -2025,12 +2102,13 @@ export class AgentManager {
     effort: EffortLevel = 'medium',
     version: string | null = null,
     profileName: string | null = null,
+    resume?: { id: string; message: string },
   ): string[] {
     const agentsCli = process.argv[1];
     const cmd: string[] = [
       process.execPath,
       agentsCli,
-      ...this.buildRunArgv(agentType, prompt, mode, model, effort, version, profileName),
+      ...this.buildRunArgv(agentType, prompt, mode, model, effort, version, profileName, resume),
     ];
 
     if (cwd) cmd.push('--cwd', cwd);
@@ -2039,7 +2117,9 @@ export class AgentManager {
     // AGENTS_MAILBOX_DIR by the same id mailboxIdForActiveSession returns.
     // Claude also forwards --session-id to its CLI (unified identity);
     // other agents ignore the flag but still get the correct mailbox dir.
-    if (sessionId) {
+    // On RESUME we continue an existing session — `--session-id` CREATES one and
+    // `agents run` rejects it alongside `--resume`, so it must be omitted.
+    if (sessionId && !resume) {
       cmd.push('--session-id', sessionId);
     }
 
