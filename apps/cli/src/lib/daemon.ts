@@ -904,6 +904,39 @@ export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { comma
   return { command: agentsBin, args: ['daemon', '_run'] };
 }
 
+/**
+ * Build the argv to relaunch the `agents` CLI with the given subcommand args.
+ *
+ * Resolves the real on-disk binary via getAgentsBinPath(), then dispatches: a
+ * `.js` entry runs under node (`node <entry> …`), a native/compiled binary runs
+ * directly (`<bin> …`).
+ *
+ * Callers MUST route self-spawns through this rather than hand-rolling
+ * `[process.execPath, process.argv[1], …]`: under the compiled standalone binary
+ * (#315) `process.argv[1]` is the bun virtual entry `/$bunfs/root/agents`, so the
+ * hand-rolled form becomes `agents /$bunfs/root/agents …` → the CLI receives the
+ * bunfs path as a subcommand and dies with "unknown command '/$bunfs/root/agents'".
+ * getAgentsBinPath() resolves past that (the bunfs path doesn't exist on disk, so
+ * it falls back to `which agents`, the real installed binary).
+ */
+export function getAgentsInvocation(
+  subArgs: string[],
+  agentsBin: string = getAgentsBinPath(),
+): { command: string; args: string[] } {
+  // Under the bun standalone binary (#315), argv[1]/getAgentsBinPath() resolves
+  // to the virtual entry `/$bunfs/root/agents` — bun's fs reports it as existing,
+  // so getAgentsBinPath() returns it, but the OS cannot exec it (`/bin/sh:
+  // /$bunfs/root/agents: No such file or directory`). process.execPath is the
+  // real on-disk binary, and the compiled binary IS the entry, so run it directly.
+  if (/\/\$bunfs\/root\//.test(agentsBin)) {
+    return { command: process.execPath, args: subArgs };
+  }
+  if (/\.(c|m)?js$/.test(agentsBin)) {
+    return { command: process.execPath, args: [agentsBin, ...subArgs] };
+  }
+  return { command: agentsBin, args: subArgs };
+}
+
 export function validateDaemonBinary(binPath: string): { warnings: string[] } {
   const warnings: string[] = [];
   if (/\/\$bunfs\/root\//.test(binPath)) {

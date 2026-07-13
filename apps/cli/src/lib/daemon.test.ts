@@ -22,6 +22,7 @@ import {
   readDaemonClaudeOAuthToken,
   buildDetachedDaemonEnv,
   getDaemonLaunch,
+  getAgentsInvocation,
   getAgentsBinPath,
   startDetached,
   writeOwnerOnlyServiceManifest,
@@ -260,6 +261,33 @@ describe('getDaemonLaunch', () => {
     const { command, args } = getDaemonLaunch('/usr/local/bin/agents');
     expect(command).toBe('/usr/local/bin/agents');
     expect(args).toEqual(['daemon', '_run']);
+  });
+});
+
+describe('getAgentsInvocation', () => {
+  // Regression for the #315 compiled-binary self-spawn bug: teams/message/profiles
+  // used to relaunch as `[process.execPath, process.argv[1], …]`. Under the bun
+  // standalone binary process.argv[1] is the virtual entry `/$bunfs/root/agents`,
+  // so the child became `agents /$bunfs/root/agents …` → "unknown command".
+  it('launches a .js entry through the Node runtime', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/opt/agents/dist/index.js');
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual(['/opt/agents/dist/index.js', 'run', 'claude']);
+  });
+
+  it('runs a native/compiled binary directly — never re-passes a bunfs entry', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/Users/me/.local/bin/agents');
+    expect(command).toBe('/Users/me/.local/bin/agents');
+    expect(args).toEqual(['run', 'claude']);
+    // The compiled binary is the entry; its own bunfs path must not appear as an arg.
+    expect(args.some((a) => a.includes('$bunfs'))).toBe(false);
+  });
+
+  it('resolves a bun virtual entry to the real binary (process.execPath), not the un-exec-able $bunfs path', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/$bunfs/root/agents');
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual(['run', 'claude']);
+    expect(command.includes('$bunfs')).toBe(false);
   });
 });
 

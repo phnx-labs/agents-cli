@@ -8,6 +8,7 @@
  * multiple permission modes (plan, edit, full).
  */
 import { spawn, execSync, execFileSync, ChildProcess } from 'child_process';
+import { getAgentsInvocation } from '../daemon.js';
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
@@ -2026,12 +2027,13 @@ export class AgentManager {
     version: string | null = null,
     profileName: string | null = null,
   ): string[] {
-    const agentsCli = process.argv[1];
-    const cmd: string[] = [
-      process.execPath,
-      agentsCli,
-      ...this.buildRunArgv(agentType, prompt, mode, model, effort, version, profileName),
-    ];
+    // Route through getAgentsInvocation so a teammate launched by the compiled
+    // standalone binary (#315) doesn't relaunch as `agents /$bunfs/root/agents …`
+    // (process.argv[1] is the bun virtual entry there) → "unknown command".
+    const inv = getAgentsInvocation(
+      this.buildRunArgv(agentType, prompt, mode, model, effort, version, profileName),
+    );
+    const cmd: string[] = [inv.command, ...inv.args];
 
     if (cwd) cmd.push('--cwd', cwd);
 
