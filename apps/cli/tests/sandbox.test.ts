@@ -387,6 +387,19 @@ describe('buildSpawnEnv', () => {
     delete process.env.OPENAI_API_KEY;
   });
 
+  // RUSH-1016: daemon-injected headless Claude OAuth must survive sandbox strip.
+  it('forwards CLAUDE_CODE_OAUTH_TOKEN (daemon headless auth)', () => {
+    const original = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-test';
+    try {
+      const env = buildSpawnEnv('/fake/overlay');
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-test');
+    } finally {
+      if (original) process.env.CLAUDE_CODE_OAUTH_TOKEN = original;
+      else delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    }
+  });
+
   it('does not include SSH_AUTH_SOCK', () => {
     const original = process.env.SSH_AUTH_SOCK;
     process.env.SSH_AUTH_SOCK = '/tmp/ssh-agent.sock';
