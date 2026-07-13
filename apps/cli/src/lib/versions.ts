@@ -31,7 +31,7 @@ import { resolveResource, listResources } from './resources.js';
 // (single source of truth). Re-exported below so existing importers of
 // `compareVersions` from './versions.js' keep working.
 import { VERSION_RE, compareVersions } from './agent-spec/primitives.js';
-import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath } from './agents.js';
+import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent } from './agents.js';
 import { getDefaultPermissionSet, applyPermissionsToVersion as applyPermsToVersion, discoverPermissionGroups, getTotalPermissionRuleCount, buildPermissionsFromGroups, CODEX_RULES_FILENAME, getActivePermissionPresetName, readPermissionPresetRecipe, PERMISSION_PRESET_ENV_VAR } from './permissions.js';
 import { installMcpServers, parseMcpServerConfig } from './mcp.js';
 import { markdownToToml } from './convert.js';
@@ -915,6 +915,66 @@ export function getBinaryPath(agent: AgentId, version: string): string {
 }
 
 /**
+ * Does this agent resolve to ONE global binary that is the same file regardless
+ * of the `version` argument? (droid → always `~/.local/bin/droid`.) Computed
+ * generically by probing `getBinaryPath` with two distinct versions rather than
+ * hardcoding an agent id, so it stays correct if another global-binary agent is
+ * added.
+ *
+ * This is the narrower cousin of `isSelfUpdatingAgent`: every global-binary
+ * agent is self-updating, but grok is self-updating WITHOUT a global binary — it
+ * stores a real per-version binary copy under each version-home
+ * (`versions/grok/<v>/home/.grok/downloads/grok-<v>`), so its version-homes are
+ * genuinely distinct and must NOT be collapsed. Gate the single-binary
+ * collapse/live-version logic on THIS predicate; gate pin-refusal / "switch
+ * profile" copy on `isSelfUpdatingAgent`.
+ */
+export function isGlobalBinaryAgent(agent: AgentId): boolean {
+  return getBinaryPath(agent, '0.0.0-probe-a') === getBinaryPath(agent, '0.0.0-probe-b');
+}
+
+// Live-version cache for self-updating global binaries. `<cli> --version` is a
+// ~real shell-out, so hold the result briefly: the same `agents view` render
+// asks for it from both listInstalledVersions (sync) and the label path (async).
+const LIVE_VERSION_TTL_MS = 5000;
+const liveVersionCache = new Map<AgentId, { at: number; version: string | null }>();
+
+/** Drop the live-version cache (call after an install/remove that changes the
+ * running binary, e.g. `agents add droid@latest`). */
+export function invalidateLiveVersionCache(agent?: AgentId): void {
+  if (agent) liveVersionCache.delete(agent);
+  else liveVersionCache.clear();
+}
+
+/**
+ * Resolve the version the ONE globally-installed binary actually reports via
+ * `<cli> --version`, cached for {@link LIVE_VERSION_TTL_MS}. For a self-updating
+ * global-binary agent (droid) this is the single source of truth for "which
+ * version is installed" — the on-disk version-dir NAMES are just stale labels
+ * left behind by successive `agents add`/self-update cycles. Returns null when
+ * the binary isn't on PATH or the probe fails.
+ */
+export async function getLiveVersion(agent: AgentId): Promise<string | null> {
+  const cached = liveVersionCache.get(agent);
+  if (cached && Date.now() - cached.at < LIVE_VERSION_TTL_MS) return cached.version;
+  const version = await getCliVersionFromPath(agent);
+  liveVersionCache.set(agent, { at: Date.now(), version });
+  return version;
+}
+
+/**
+ * Synchronous, non-blocking read of the live-version cache — returns the value
+ * only if a recent {@link getLiveVersion} call already warmed it, else null.
+ * `listInstalledVersions` is sync and must not shell out, so it prefers this
+ * warm value (accurate) and otherwise falls back to the newest on-disk dir.
+ */
+export function getCachedLiveVersion(agent: AgentId): string | null {
+  const cached = liveVersionCache.get(agent);
+  if (cached && Date.now() - cached.at < LIVE_VERSION_TTL_MS) return cached.version;
+  return null;
+}
+
+/**
  * Get the isolated HOME directory for a specific agent version.
  * Each version has its own config isolation (like jobs sandbox).
  */
@@ -1050,7 +1110,40 @@ export function invalidateInstalledVersionsCache(agent?: AgentId): void {
 }
 
 /**
+ * Choose the single canonical version-dir to represent a self-updating
+ * global-binary agent (droid). All its version dirs map to ONE binary, so
+ * exactly one is real; the rest are stale labels. Prefer, in order: the dir the
+ * live config symlink points at (what actually runs), the recorded global
+ * default, the live `--version` (when the cache is warm), else the newest dir.
+ * `versions` MUST be sorted ascending. Callers guarantee it is non-empty.
+ */
+function pickCanonicalGlobalBinaryVersion(agent: AgentId, versions: string[]): string {
+  const symlinkVersion = getConfigSymlinkVersion(agent);
+  if (symlinkVersion && versions.includes(symlinkVersion)) return symlinkVersion;
+  const globalDefault = getGlobalDefault(agent);
+  if (globalDefault && versions.includes(globalDefault)) return globalDefault;
+  const live = getCachedLiveVersion(agent);
+  if (live && versions.includes(live)) return live;
+  return versions[versions.length - 1];
+}
+
+/**
+ * Collapse a global-binary agent's phantom version dirs to the single canonical
+ * one (see {@link pickCanonicalGlobalBinaryVersion}). No-op for npm-packaged and
+ * per-version agents (claude/codex/grok/…), whose version dirs are genuinely
+ * distinct installs.
+ */
+function collapseGlobalBinaryVersions(agent: AgentId, versions: string[]): string[] {
+  if (!isGlobalBinaryAgent(agent) || versions.length === 0) return versions;
+  return [pickCanonicalGlobalBinaryVersion(agent, versions)];
+}
+
+/**
  * List all installed versions for an agent (cached by versions-dir mtime).
+ *
+ * For a self-updating global-binary agent (droid) every version dir resolves to
+ * the SAME binary, so this collapses them to a single canonical entry — one
+ * install, one row in `agents view`, never the phantom set of semver dir names.
  */
 export function listInstalledVersions(agent: AgentId): string[] {
   const agentVersionsDir = path.join(getVersionsDir(), agent);
@@ -1064,7 +1157,9 @@ export function listInstalledVersions(agent: AgentId): string[] {
 
   const cached = installedVersionsCache.get(agent);
   if (cached && cached.stamp === stamp) {
-    return cached.versions;
+    // Collapse is applied per-call (not cached): it depends on the live-version
+    // cache + config symlink, which can change without the versions-dir mtime.
+    return collapseGlobalBinaryVersions(agent, cached.versions);
   }
 
   const entries = fs.readdirSync(agentVersionsDir, { withFileTypes: true });
@@ -1083,7 +1178,7 @@ export function listInstalledVersions(agent: AgentId): string[] {
 
   versions.sort(compareVersions);
   installedVersionsCache.set(agent, { stamp, versions });
-  return versions;
+  return collapseGlobalBinaryVersions(agent, versions);
 }
 
 /**
@@ -1159,19 +1254,31 @@ export async function installVersion(
       return { success: false, installedVersion: version, error: 'Agent has no npm package' };
     }
 
-    if (version !== 'latest' && !agentConfig.installScript.includes('VERSION')) {
-      return {
-        success: false,
-        installedVersion: version,
-        error: `${agentConfig.name} installer does not support version-pinned installs. Use ${agent}@latest.`,
-      };
+    // A self-updating agent (droid, grok, …) is a single global binary whose
+    // installer only ever fetches the CURRENT release — there is no semver to
+    // pin. Rather than hard-refuse `<agent>@1.2.3` (the old behavior):
+    //   - if the binary is already installed, a pin is a no-op — it self-updates
+    //     in place, so skip the installer and just refresh our bookkeeping;
+    //   - otherwise redirect the pin to a current-release install.
+    let runInstaller = true;
+    if (version !== 'latest' && isSelfUpdatingAgent(agent)) {
+      const liveVersion = await getLiveVersion(agent);
+      if (liveVersion) {
+        onProgress?.(`${agentConfig.name} is a single self-updating binary — @${version} maps to the already-installed current release (${liveVersion}); nothing to install.`);
+        runInstaller = false;
+      } else {
+        onProgress?.(`${agentConfig.name} is a single self-updating binary with no pinnable versions — installing the current release (ignoring @${version}).`);
+      }
+      version = 'latest';
     }
 
     let installedVersion = version;
     try {
-      const script = agentConfig.installScript.replaceAll('VERSION', version);
-      onProgress?.(`Installing ${agentConfig.name}@${version} via official installer...`);
-      await execAsync(script, { timeout: 120000 });
+      if (runInstaller) {
+        const script = agentConfig.installScript.replaceAll('VERSION', version);
+        onProgress?.(`Installing ${agentConfig.name}@${version} via official installer...`);
+        await execAsync(script, { timeout: 120000 });
+      }
 
       if (version === 'latest') {
         installedVersion = await getCliVersionFromPath(agent) || version;
@@ -1227,6 +1334,9 @@ export async function installVersion(
     }
 
     createVersionedAlias(agent, installedVersion);
+    // The self-updating binary just changed on disk — drop the cached
+    // `--version` so `agents view` reflects the freshly-installed release.
+    invalidateLiveVersionCache(agent);
     emit('version.install', { agent, version: installedVersion });
     return { success: true, installedVersion };
   }
@@ -1431,11 +1541,87 @@ function removeInstallArtifacts(versionDir: string): void {
  * renaming that dir would dangle the live symlink.
  */
 export async function reconcileStaleLatestForAgent(agent: AgentId): Promise<void> {
+  // Global-binary agents (droid) can accumulate MANY stale semver dirs — not
+  // just a literal `latest` — because every `agents add` after an in-place
+  // self-update creates a fresh dir for the same one binary. Fold them all.
+  if (isGlobalBinaryAgent(agent)) {
+    await reconcileGlobalBinaryVersions(agent);
+    return;
+  }
   if (!fs.existsSync(getVersionDir(agent, 'latest'))) return;
   if (getConfigSymlinkVersion(agent) === 'latest') return;
   const concrete = await getCliVersionFromPath(agent);
   if (concrete && concrete !== 'latest') {
     await reconcileStaleLatestDir(agent, concrete);
+  }
+}
+
+/**
+ * Fold every stale version-dir of a global-binary agent (droid) into the single
+ * canonical survivor. All its dirs point at ONE binary, so the extras — left by
+ * successive `agents add` + in-place self-updates, and by probe-failed installs
+ * that created a literal `latest` dir — are phantom labels. Soft-delete each
+ * non-survivor dir (its `home/` stays recoverable via `agents restore`) so disk
+ * converges to a single install matching what `agents view` shows.
+ *
+ * Survivor selection matches listInstalledVersions' canonical choice
+ * (config-symlink target → global default → live version → newest). The survivor
+ * is NOT renamed: droid's ~/.factory symlink points inside its home, and the
+ * live version label is surfaced by the view renderer via getLiveVersion.
+ */
+async function reconcileGlobalBinaryVersions(agent: AgentId): Promise<void> {
+  // Step 1 — preserve the original literal-`latest` reconcile: a probe-failed
+  // install leaves a `versions/<agent>/latest/` dir; fold it onto the concrete
+  // live version (rename if that dir is absent, else trash). Skipped while the
+  // config symlink still points at `latest` (renaming would dangle it).
+  if (fs.existsSync(getVersionDir(agent, 'latest')) && getConfigSymlinkVersion(agent) !== 'latest') {
+    const concrete = await getCliVersionFromPath(agent);
+    if (concrete && concrete !== 'latest') {
+      await reconcileStaleLatestDir(agent, concrete);
+    }
+  }
+
+  // Step 2 — collapse any remaining phantom SEMVER dirs (successive `agents add`
+  // after in-place self-updates) into a single survivor.
+  const agentVersionsDir = path.join(getVersionsDir(), agent);
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(agentVersionsDir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort(compareVersions);
+  if (dirs.length <= 1) return;
+
+  // Warm the live-version cache so the survivor pick (and later view labels) can
+  // prefer the version the binary actually reports.
+  await getLiveVersion(agent);
+  const survivor = pickCanonicalGlobalBinaryVersion(agent, dirs);
+  const symlinkVersion = getConfigSymlinkVersion(agent);
+
+  let foldedAny = false;
+  for (const version of dirs) {
+    if (version === survivor) continue;
+    // Never trash the dir the live config symlink points at — that would dangle
+    // the symlink. pickCanonical already prefers it as survivor; this guards the
+    // rare mismatch.
+    if (version === symlinkVersion) continue;
+    const staleDir = getVersionDir(agent, version);
+    const trashPath = softDeleteVersionDir(agent, version);
+    if (trashPath) {
+      const { updateSessionFilePaths } = await import('./session/db.js');
+      updateSessionFilePaths(staleDir, trashPath);
+      foldedAny = true;
+    }
+  }
+
+  if (foldedAny) {
+    invalidateInstalledVersionsCache(agent);
+    // Keep the recorded default pointing at a dir that still exists on disk.
+    const def = getGlobalDefault(agent);
+    if (!def || !fs.existsSync(getVersionDir(agent, def))) {
+      setGlobalDefault(agent, survivor);
+    }
   }
 }
 

@@ -686,6 +686,31 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
 /** All registered agent IDs derived from the AGENTS registry. */
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 
+/**
+ * A self-updating agent is a single global binary installed by an official
+ * `curl … | sh` / `brew install` script that carries NO version token — the
+ * installer can only ever fetch the *current* release, and the binary then keeps
+ * itself up to date in place (droid, grok, antigravity, cursor, hermes, forge,
+ * kiro, goose). There is no semver to pin, so agents-cli must not model these as
+ * having multiple installable version-homes the way it does for npm-packaged
+ * agents (claude, codex, kimi, …).
+ *
+ * The predicate is `!npmPackage && installScript && !installScript.includes('VERSION')`:
+ *   - `npmPackage` empty       → not installed from npm, so `agents add x@1.2.3`
+ *                                can't resolve a registry version.
+ *   - `installScript` present  → it IS installed by a script (not unmanaged).
+ *   - no `VERSION` placeholder → the script has no slot for a pinned version
+ *                                (contrast: an installer templated with `VERSION`
+ *                                could pin, and is NOT self-updating).
+ *
+ * Route every "is this a pinnable, multi-version agent?" decision through here —
+ * never a scattered `agent === 'droid'`.
+ */
+export function isSelfUpdatingAgent(agent: AgentId): boolean {
+  const cfg = AGENTS[agent];
+  return !cfg.npmPackage && !!cfg.installScript && !cfg.installScript.includes('VERSION');
+}
+
 // Capability-filtered agent lists used to live here as `*_CAPABLE_AGENTS`
 // constants. They were a frequent source of silent-skip bugs (e.g. grok
 // rules sync gated on `COMMANDS_CAPABLE_AGENTS`). Use `capableAgents(cap)`
