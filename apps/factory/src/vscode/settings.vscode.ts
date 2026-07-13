@@ -4,6 +4,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { homedir, hostname } from 'os';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
@@ -867,7 +868,17 @@ async function openPlanPreview(pathValue: string, kind: string | undefined, host
   let resolvedPath = resolveEditorPath(target);
   if (remoteHost) {
     const safeHost = remoteHost.replace(/[^a-zA-Z0-9._-]+/g, '-');
-    const destDir = path.join(homedir(), '.agents', '.cache', 'factory-plan-previews', safeHost);
+    // Isolate by full source path (hash) so two worktrees with the same
+    // plan basename cannot overwrite each other (RUSH-1631).
+    const pathKey = createHash('sha1').update(target).digest('hex').slice(0, 12);
+    const destDir = path.join(
+      homedir(),
+      '.agents',
+      '.cache',
+      'factory-plan-previews',
+      safeHost,
+      pathKey,
+    );
     await fs.promises.mkdir(destDir, { recursive: true });
     resolvedPath = path.join(destDir, path.basename(target));
     await execFileAsync('scp', [`${remoteHost}:${target}`, resolvedPath], { timeout: 20_000 });
