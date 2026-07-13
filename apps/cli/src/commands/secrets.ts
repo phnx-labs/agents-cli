@@ -467,15 +467,16 @@ function compactRemaining(expiresAt: number): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-/** The POLICY column for `secrets list`: the prompt policy, plus a "Nh left"
- * hint when a `daily` bundle is currently held by the secrets-agent. `held`
+/** The POLICY column for `secrets list`: the prompt policy, plus a concise
+ * state hint. `daily` shows `held Nh` when the secrets-agent is currently
+ * caching the bundle; `always` and `never` show whether they prompt. `held`
  * maps bundle name → expiry epoch-ms (from agentStatus()). */
 export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
   // `never` is loud on purpose — it's the only tier with no user-presence gate.
-  if (bundlePolicy(b) === 'never') return chalk.red.bold('never · NO ACL');
-  if (bundlePolicy(b) === 'always') return chalk.yellow('always ask');
+  if (bundlePolicy(b) === 'never') return chalk.red.bold('never · no prompt');
+  if (bundlePolicy(b) === 'always') return chalk.yellow('always · prompt');
   const exp = held?.get(b.name);
-  return exp ? chalk.green(`daily · ${compactRemaining(exp)} left`) : chalk.gray('daily');
+  return exp ? chalk.green(`daily · held ${compactRemaining(exp)}`) : chalk.gray('daily');
 }
 
 /** Below this width the fixed date columns no longer fit; `list` uses cards. */
@@ -739,7 +740,7 @@ export function registerSecretsCommands(program: Command): void {
         return;
       }
       // Cross-reference the secrets-agent so `daily` bundles that are currently
-      // held can show "· Nh left". Soft-fails to no hint if the broker is down.
+      // held can show "· held Nh". Soft-fails to no hint if the broker is down.
       const held = new Map<string, number>();
       if (process.platform === 'darwin') {
         try {
