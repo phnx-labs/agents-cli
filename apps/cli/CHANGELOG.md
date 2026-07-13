@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Native memory sync preserves unmanaged Markdown files (RUSH-1621).** Sync tracks managed fact names in `.agents-cli-memory.json` and only deletes those; user-authored `*.md` under the agent memory dir survive. Source: `apps/cli/src/lib/memory.ts`.
 - **Feed high-consequence authz uses the canonical operator registry (RUSH-1618).** `recordAnswer` no longer looks for `operators.yaml` under the feed root; it resolves operators from `~/.agents/` via `loadOperators()`. Source: `apps/cli/src/lib/feed.ts`.
 - **Menu bar groups worktree sessions under the real repo name (RUSH-1635).** Paths under `.agents/worktrees/<slug>` use the enclosing repository directory as the grouping key instead of the worktree slug. Source: `apps/cli/menubar/.../LocalState.swift`.
 

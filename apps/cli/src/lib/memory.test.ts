@@ -95,4 +95,25 @@ describe('memory resource (RUSH-1330)', () => {
     expect(fs.readFileSync(target, 'utf-8')).toContain('Always run tests');
     expect(fs.existsSync(path.join(versionHome, memoryTargetDir('claude'), 'MEMORY.md'))).toBe(true);
   });
+
+  it('preserves unmanaged native memory markdown during sync (RUSH-1621)', () => {
+    const home = makeTempHome();
+    runMemory(home, `memory.addMemoryFact('team-conventions', 'Always run tests before push')`);
+    const versionHome = path.join(home, 'version-home');
+    const targetDir = path.join(versionHome, memoryTargetDir('claude'));
+    fs.mkdirSync(targetDir, { recursive: true });
+    const userFact = path.join(targetDir, 'my-personal-notes.md');
+    fs.writeFileSync(userFact, '# personal notes\nkeep me\n', 'utf-8');
+
+    runMemory(
+      home,
+      `memory.syncMemoryToVersionHome('claude', ${JSON.stringify(versionHome)}, ${JSON.stringify(home)})`,
+    );
+
+    expect(fs.existsSync(userFact)).toBe(true);
+    expect(fs.readFileSync(userFact, 'utf-8')).toContain('keep me');
+    expect(fs.existsSync(path.join(targetDir, 'team-conventions.md'))).toBe(true);
+    expect(fs.existsSync(path.join(targetDir, '.agents-cli-memory.json'))).toBe(true);
+  });
+
 });
