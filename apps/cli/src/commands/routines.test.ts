@@ -198,7 +198,7 @@ describe('routines devices --set on .yaml-only routine', () => {
       const doc = yaml.parse(fs.readFileSync(yamlPath, 'utf-8'));
       expect(doc.devices).toEqual(['yosemite-s0']);
 
-      const listRes = run(home, ['list', '--json']);
+      const listRes = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
       expect(listRes.status).toBe(0);
       const parsed = JSON.parse(listRes.stdout.trim());
       const entry = parsed.find((j: Record<string, unknown>) => j.name === 'yaml-only');

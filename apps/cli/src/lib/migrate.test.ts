@@ -577,6 +577,8 @@ describe('v12 device migration daemon _run failure (POSIX)', () => {
     try {
       daemon = startDaemon(home);
       pid = await daemon.pidPromise;
+      expect(pid).not.toBeNull();
+      expect(isProcessAlive(pid!)).toBe(true);
 
       // Wait long enough for an every-second schedule to fire if the stale job
       // were mistakenly loaded as unrestricted.
@@ -590,7 +592,9 @@ describe('v12 device migration daemon _run failure (POSIX)', () => {
     } finally {
       fs.chmodSync(routinesDir, 0o755);
       if (daemon) await stopDaemon(daemon.child);
-      if (typeof pid === 'number') expect(isProcessAlive(pid)).toBe(false);
+      if (pid !== null) {
+        expect(isProcessAlive(pid)).toBe(false);
+      }
     }
   });
 });
