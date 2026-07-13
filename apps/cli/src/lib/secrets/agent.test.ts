@@ -288,6 +288,29 @@ describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker 
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('never clobbers a live broker — a second startHostedBroker returns null', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosted-broker2-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    let first: { close(): void } | null = null;
+    try {
+      first = await startHostedBroker();
+      expect(first).not.toBeNull();
+      expect((await agentPing()).reachable).toBe(true);
+      // A second host attempt while the first is live must back off (EADDRINUSE
+      // + the socket answers agentPing) rather than unlink + steal the socket.
+      const second = await startHostedBroker();
+      expect(second).toBeNull();
+      // The first broker is still serving — not orphaned.
+      expect((await agentPing()).reachable).toBe(true);
+    } finally {
+      first?.close();
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('shouldTeardownVersionSkewedBroker (client-side #435 twin: never wipe a hot cache)', () => {

@@ -532,11 +532,9 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
 
   const store = new Map<string, StoredBundle>();
   const sock = socketPath(); // agentDir() creates the 0700 dir as a side effect
-  try { fs.unlinkSync(sock); } catch { /* no stale socket */ }
 
   const handle = (req: Request): Response => handleAgentRequest(store, req);
-
-  const server = net.createServer((conn) => {
+  const onConn = (conn: net.Socket) => {
     conn.setEncoding('utf-8');
     let buf = '';
     conn.on('data', (chunk) => {
@@ -556,15 +554,35 @@ export async function startHostedBroker(): Promise<{ close(): void } | null> {
       }
     });
     conn.on('error', () => { /* client vanished mid-request; ignore */ });
-  });
+  };
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject); // e.g. EADDRINUSE if a broker raced us
-    server.listen(sock, () => {
-      try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
-      resolve();
+  // Bind race-safely: never clobber a LIVE standalone broker. Try to listen; if
+  // the socket is already bound, a broker raced us after runDaemon's ping — if
+  // it answers, back off and let it serve (return null); if it's a stale socket
+  // file with no live listener, reclaim it and retry once. (Unconditionally
+  // unlinking before bind — as an earlier draft did — could remove a live
+  // broker's socket in the sub-ms window after runDaemon's reachability check.)
+  const listenOnce = (): Promise<net.Server | 'inuse'> =>
+    new Promise((resolve, reject) => {
+      const s = net.createServer(onConn);
+      s.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') resolve('inuse');
+        else reject(err);
+      });
+      s.listen(sock, () => {
+        try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
+        resolve(s);
+      });
     });
-  });
+
+  let bound = await listenOnce();
+  if (bound === 'inuse') {
+    if ((await agentPing()).reachable) return null; // a live broker holds it — don't clobber
+    try { fs.unlinkSync(sock); } catch { /* gone */ }
+    bound = await listenOnce();
+    if (bound === 'inuse') return null; // still contended — the standalone fallback covers it
+  }
+  const server = bound;
 
   // TTL eviction ONLY. Unlike the standalone broker's sweep, there is no
   // self-heal-exit or idle-exit here — the daemon is always-on and owns the
