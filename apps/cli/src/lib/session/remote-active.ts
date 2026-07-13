@@ -14,19 +14,8 @@
  * laptop must not blank the whole view. SSH runs are async + parallel (a fresh
  * `spawn`, not the sync `sshExec`) so N peers cost one round-trip, not N.
  */
-import { spawn } from 'child_process';
-import chalk from 'chalk';
-import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from '../ssh-exec.js';
-import { sshTargetFor } from '../devices/connect.js';
-import { resolveExplicitTargets } from '../devices/resolve-target.js';
-import { loadDevices, type DeviceProfile } from '../devices/registry.js';
-import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
-import { machineId, normalizeHost } from './sync/config.js';
+import { gatherRemoteAgentsJson } from '../remote-agents-json.js';
 import type { ActiveSession } from './active.js';
-
-/** Per-host SSH budget. Slightly above SSH_OPTS' ConnectTimeout=10 so a
- * reachable-but-slow remote still answers before we give up. */
-const REMOTE_TIMEOUT_MS = 12_000;
 
 /**
  * Recursion guard, passed as an env var (not a CLI flag) so an OLDER remote
@@ -34,20 +23,6 @@ const REMOTE_TIMEOUT_MS = 12_000;
  * on an unknown option. A remote new enough to fan out reads it and stays local.
  */
 export const NO_FANOUT_ENV = 'AGENTS_SESSIONS_LOCAL';
-
-/** The command run on each peer: answer for itself, as JSON, without recursing.
- * A Windows peer gets a PowerShell invocation (ssh lands in cmd.exe/PowerShell
- * there, where `bash -lc` is not a command); every other OS keeps `bash -lc`. */
-function remoteActiveCommand(os?: string): string {
-  if (remoteShellFor(os) === 'powershell') {
-    return buildWindowsAgentsCommand({
-      args: ['sessions', '--active', '--json'],
-      env: { [NO_FANOUT_ENV]: '1' },
-    });
-  }
-  const inner = `${NO_FANOUT_ENV}=1 agents sessions --active --json`;
-  return `bash -lc ${shellQuote(inner)}`;
-}
 
 /**
  * Parse a peer's `--active --json` stdout into active sessions, tagging each
@@ -72,37 +47,6 @@ export function parseRemoteActive(stdout: string, machine: string): ActiveSessio
   return out;
 }
 
-/** Run one remote `agents sessions --active --json --local` and capture stdout.
- * Resolves `{ code: null }` on spawn error or timeout (host treated as dead). */
-function sshCapture(target: string, remoteCmd: string, timeoutMs: number): Promise<{ code: number | null; stdout: string }> {
-  assertValidSshTarget(target);
-  return new Promise((resolve) => {
-    const args = [...SSH_OPTS, ...controlOpts(), target, remoteCmd];
-    const child = spawn('ssh', args, { stdio: ['ignore', 'pipe', 'ignore'] });
-    let stdout = '';
-    let settled = false;
-    const done = (code: number | null) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve({ code, stdout });
-    };
-    const timer = setTimeout(() => { child.kill('SIGKILL'); done(null); }, timeoutMs);
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
-    child.on('error', () => done(null));
-    child.on('close', (code) => done(code));
-  });
-}
-
-async function fetchByTarget(target: string, machine: string, display: string, os?: string): Promise<ActiveSession[]> {
-  const { code, stdout } = await sshCapture(target, remoteActiveCommand(os), REMOTE_TIMEOUT_MS);
-  if (code !== 0) {
-    process.stderr.write(chalk.gray(`  ${display}: unreachable or no agents CLI — skipped\n`));
-    return [];
-  }
-  return parseRemoteActive(stdout, machine);
-}
-
 export interface RemoteActiveResult {
   sessions: ActiveSession[];
   /** How many peer machines we attempted to reach (drives the empty-fleet tip). */
@@ -116,35 +60,11 @@ export interface RemoteActiveResult {
  * address. Results from all peers run in parallel and are flattened.
  */
 export async function gatherRemoteActive(hosts?: string[]): Promise<RemoteActiveResult> {
-  const self = machineId();
-  const targets: Array<{ target: string; machine: string; name: string; os?: string }> = [];
-
-  if (hosts && hosts.length > 0) {
-    // Resolve each token through the device registry so an explicit --host/--device
-    // dials the exact same address (and machine id) as the auto-discovery sweep.
-    targets.push(...await resolveExplicitTargets(hosts));
-  } else {
-    let reg: Record<string, DeviceProfile>;
-    try {
-      reg = await loadDevices();
-    } catch {
-      return { sessions: [], deviceCount: 0 };
-    }
-    for (const d of Object.values(reg)) {
-      if (d.tailscale?.online !== true) continue;
-      if (normalizeHost(d.name) === self) continue;
-      // Only machines that can actually run the CLI. iOS/tablet nodes register as
-      // `unknown` platform and can never answer, so skip them rather than burn a
-      // full ConnectTimeout on each.
-      if (d.platform !== 'windows' && d.platform !== 'linux' && d.platform !== 'macos') continue;
-      try {
-        targets.push({ target: sshTargetFor(d), machine: normalizeHost(d.name), name: d.name, os: d.platform });
-      } catch {
-        // No address on the profile — nothing to dial; skip silently.
-      }
-    }
-  }
-
-  const results = await Promise.all(targets.map((t) => fetchByTarget(t.target, t.machine, t.name, t.os)));
-  return { sessions: results.flat(), deviceCount: targets.length };
+  const result = await gatherRemoteAgentsJson({
+    args: ['sessions', '--active', '--json'],
+    noFanoutEnv: NO_FANOUT_ENV,
+    hosts,
+    parse: parseRemoteActive,
+  });
+  return { sessions: result.items, deviceCount: result.deviceCount };
 }

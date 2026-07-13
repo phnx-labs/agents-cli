@@ -12,9 +12,9 @@
  * long-running case — `teams start --watch` — dispatches detached so the remote
  * supervisor outlives a dropped connection.
  *
- * `run` and `sessions` are deliberately absent from the table below: they own
- * richer `--host` handling in their own command actions (detached run dispatch;
- * multi-host session fan-out) and must fall through to it.
+ * `run`, `sessions`, and `feed` are deliberately absent from the table below:
+ * they own richer `--host` handling in their own command actions (detached run
+ * dispatch or multi-host fan-out) and must fall through to it.
  */
 
 import chalk from 'chalk';
@@ -47,7 +47,6 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   sync: { nonInteractive: ['--yes'] },
   teams: {},
   message: {},
-  feed: {},
 };
 
 /** `--no-tty` is stripped like the routing flags but carries no value. */
