@@ -253,6 +253,41 @@ describe('PermissionsHandler', () => {
       expect(config.permissions.deny).toContain('Bash(rm -rf *)');
     });
 
+    it('merges all permissions and writes to Codex config.toml', () => {
+      const home = makeTempHome();
+      const versionHome = makeTempHome();
+
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+
+      writePermissionYaml(home, path.join('.agents', '.system'), 'base', {
+        name: 'base',
+        allow: ['Bash(**)', 'WebSearch(**)'],
+      });
+
+      writePermissionYaml(home, '.agents', 'extra', {
+        name: 'extra',
+        allow: ['Read(**)'],
+        deny: ['Bash(rm -rf *)'],
+      });
+
+      runPermissionsExpression(home, `PermissionsHandler.sync('codex', ${JSON.stringify(versionHome)})`);
+
+      const configPath = path.join(versionHome, '.codex', 'config.toml');
+      expect(fs.existsSync(configPath)).toBe(true);
+
+      const config = fs.readFileSync(configPath, 'utf-8');
+      expect(config).toContain('approval_policy = "never"');
+      expect(config).toContain('sandbox_mode = "workspace-write"');
+      expect(config).toContain('network_access = true');
+
+      const rulesPath = path.join(versionHome, '.codex', 'rules', 'agents-deny.rules');
+      expect(fs.existsSync(rulesPath)).toBe(true);
+      const rules = fs.readFileSync(rulesPath, 'utf-8');
+      expect(rules).toContain('"rm"');
+      expect(rules).toContain('"-rf"');
+    });
+
     it('skips non-permission-capable agents', () => {
       const home = makeTempHome();
       const versionHome = makeTempHome();
