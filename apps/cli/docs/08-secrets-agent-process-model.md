@@ -2,15 +2,21 @@
 
 > Status: **accepted** · Supersedes nothing · Related: [secrets.md](secrets.md), [03-routines.md](03-routines.md)
 
-> **Implementation (#416, step 1 — landed):** the daemon now hosts the broker
+> **Implementation (#416, steps 1 & 2 — landed):** the daemon hosts the broker
 > socket-first. `runDaemon()` calls `startHostedBroker()` before the scheduler
 > and the heavy browser/session-sync services, so `agents secrets` resolves
-> within ms of daemon start; `ensureAgentRunning()` prefers the daemon (Path 0)
-> and falls back to the standalone `com.phnx-labs.agents-secrets-agent` service.
-> The daemon only hosts when no broker is already reachable, so a live standalone
-> broker is never orphaned. **Still to do (step 2 / #417):** retire the standalone
-> launchd service via a gated `launchctl bootout` migration (only when the store
-> is idle, so no Touch ID storm) and spawn the heavy services as bounded children.
+> within ms of daemon start; it only hosts when no broker is already reachable,
+> so a live standalone broker is never orphaned.
+>
+> Step 2 retires the standalone `com.phnx-labs.agents-secrets-agent` service:
+> `ensureAgentRunning()` no longer installs it — it retires any leftover plist
+> (`retireLegacySecretsAgentService()`) and then relies on the daemon (Path 0),
+> with a one-off detached broker as the only fallback. The upgrade migration
+> (`scripts/postinstall.js` → `healLongRunningProcesses`) boots out the legacy
+> service first, then (re)starts the daemon so it takes over the socket. `secrets
+> start` is now a thin alias that brings the daemon up; `secrets stop` locks all
+> bundles and retires any leftover legacy service, leaving the always-on daemon
+> running. **Still to do (#417):** spawn the heavy services as bounded children.
 
 A design record for *where the secrets-agent broker should live as a process* —
 its own service, or folded into the routines daemon. Written after a stretch of
