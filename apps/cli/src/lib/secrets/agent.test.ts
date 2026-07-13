@@ -1,6 +1,10 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, realBundleCount, shouldWipeOnWatchEvent, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -192,5 +196,81 @@ describe('shouldWipeOnWatchEvent (screen-lock survives, sleep wipes)', () => {
 
   it('still wipes when SLEEP arrives batched with a LOCK line', () => {
     expect(shouldWipeOnWatchEvent('LOCK\nSLEEP\n')).toBe(true);
+  });
+});
+
+// Unlike the store tests above, this one exercises the real socket transport:
+// agentEvictSync is the synchronous write-path eviction (writeBundle calls it
+// after a mutating write), and its failure mode — silently never evicting —
+// is exactly the stale-broker bug it exists to fix. The broker stand-in must
+// be a SEPARATE process (like the real broker): agentEvictSync is spawnSync
+// and blocks the caller's event loop, so an in-process server could never
+// reply. It records each request to a file this test then reads. Darwin-only,
+// like the production path (agentEvictSync no-ops off darwin).
+const RECORDING_BROKER = `
+const net = require('net'); const fs = require('fs');
+const sock = process.argv[1], out = process.argv[2];
+net.createServer((c) => {
+  c.setEncoding('utf-8'); let buf = '';
+  c.on('data', (d) => {
+    buf += d;
+    const nl = buf.indexOf('\\n');
+    if (nl < 0) return;
+    fs.appendFileSync(out, buf.slice(0, nl) + '\\n');
+    c.write(JSON.stringify({ ok: true, cmd: 'lock', wiped: 0 }) + '\\n');
+  });
+}).listen(sock);
+`;
+
+describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket round-trip)', () => {
+  it('sends one lock-by-name request to the broker socket', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-evict-test-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    const sock = path.join(dir, 'agent.sock');
+    const out = path.join(dir, 'received.jsonl');
+    const broker = spawn(process.execPath, ['-e', RECORDING_BROKER, sock, out], { stdio: 'ignore' });
+    try {
+      const deadline = Date.now() + 5000;
+      while (!fs.existsSync(sock)) {
+        if (Date.now() > deadline) throw new Error('recording broker never bound its socket');
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      agentEvictSync('prod');
+      const received = fs.readFileSync(out, 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as Request);
+      expect(received).toEqual([{ cmd: 'lock', name: 'prod' }]);
+    } finally {
+      broker.kill();
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('is a silent no-op when no broker socket exists', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-evict-test-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    try {
+      expect(() => agentEvictSync('prod')).not.toThrow();
+    } finally {
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('shouldTeardownVersionSkewedBroker (client-side #435 twin: never wipe a hot cache)', () => {
+  it('keeps a version-skewed broker that holds real unlocks', () => {
+    // Tearing it down would wipe every held bundle and re-prompt Touch ID for
+    // each — the storm on machines where installed versions churn (dev builds
+    // stamping a new 0.0.0-dev.<sha> per install, npm + dev copies alternating).
+    expect(shouldTeardownVersionSkewedBroker(1)).toBe(false);
+    expect(shouldTeardownVersionSkewedBroker(5)).toBe(false);
+  });
+
+  it('tears down an empty version-skewed broker so it relaunches on new code', () => {
+    expect(shouldTeardownVersionSkewedBroker(0)).toBe(true);
   });
 });
