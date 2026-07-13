@@ -29,7 +29,8 @@ import { buildClaudeLabelMap } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
-import { readSessionTail } from './tail.js';
+import { readSessionTailWithRaw } from './tail.js';
+import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { mapBounded } from '../concurrency.js';
@@ -67,6 +68,12 @@ export interface ActiveSession {
   preview?: string;
   /** Inferred activity: working / waiting_input / idle (from the transcript tail). */
   activity?: SessionActivity;
+  /**
+   * Output-token throughput (tokens/sec) over a rolling 60s window, from the
+   * transcript tail. The number the Factory Floor shows next to a running agent;
+   * absent when no transcript is resolvable or the agent format reports no usage.
+   */
+  tokPerSec?: number;
   /** Why the agent is waiting, when activity is waiting_input. */
   awaitingReason?: AwaitingReason;
   /** The structured decision (question/plan/permission + options) the agent is waiting on. */
@@ -326,15 +333,31 @@ function sessionIdFromFile(file?: string): string | undefined {
   return path.basename(file).match(UUID_RE)?.[0];
 }
 
-/** Infer live state from a session file's tail (Claude/Codex). Undefined when unreadable. */
-function computeLiveState(kind: string, sessionFile: string | undefined, cwd: string | undefined, pidAlive: boolean): SessionState | undefined {
-  if (!sessionFile) return undefined;
+/** Live per-session signals derived from one transcript-tail read. */
+interface LiveSignals {
+  /** Rich inferred state (activity/preview/badges). Undefined when unreadable. */
+  state?: SessionState;
+  /** Rolling output-token throughput (tokens/sec). Undefined when no usage in the tail. */
+  tokPerSec?: number;
+}
+
+/**
+ * Read a session file's tail ONCE and derive both the inferred state and the
+ * output-token throughput from it. State needs the normalized event model;
+ * throughput needs the raw lines the event model drops (Codex `token_count`), so
+ * both come off the same {@link readSessionTailWithRaw} read. Only Claude/Codex
+ * carry live state; other kinds yield an empty signal set.
+ */
+function computeLiveSignals(kind: string, sessionFile: string | undefined, cwd: string | undefined, pidAlive: boolean): LiveSignals {
+  if (!sessionFile) return {};
   const agent = kind === 'codex' ? 'codex' : 'claude';
-  const events = readSessionTail(sessionFile, agent);
-  if (events.length === 0) return undefined;
+  const { events, content } = readSessionTailWithRaw(sessionFile, agent);
+  if (events.length === 0) return {};
   let mtimeMs: number | undefined;
   try { mtimeMs = fs.statSync(sessionFile).mtimeMs; } catch { /* vanished between calls */ }
-  return inferSessionState(events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS });
+  const state = inferSessionState(events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS });
+  const tokPerSec = computeTokPerSec(content, agent);
+  return { state, tokPerSec: tokPerSec > 0 ? tokPerSec : undefined };
 }
 
 /** Map inferred activity onto the coarse ActiveStatus used by the renderer and counts. */
@@ -448,7 +471,7 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
     const sessionId = a.parentSessionId ?? a.remoteSessionId ?? undefined;
     const sessionFile = findSessionFileForKind(a.agentType, a.cwd ?? undefined, sessionId ?? undefined);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const state = computeLiveState(a.agentType, sessionFile, a.cwd ?? undefined, a.pid ? isPidAlive(a.pid) : true);
+    const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, a.pid ? isPidAlive(a.pid) : true);
     return applyState({
       context: 'teams',
       kind: a.agentType,
@@ -457,6 +480,7 @@ export async function listTeamsActive(): Promise<ActiveSession[]> {
       cwd: a.cwd ?? undefined,
       label: a.name ?? undefined,
       topic,
+      tokPerSec,
       sessionFile,
       startedAtMs: a.startedAt.getTime(),
       teamName: a.taskName,
@@ -499,7 +523,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     // Extract topic from session file (first meaningful user message)
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const state = computeLiveState(t.kind, sessionFile, t.cwd ?? undefined, isPidAlive(t.pid));
+    const { state, tokPerSec } = computeLiveSignals(t.kind, sessionFile, t.cwd ?? undefined, isPidAlive(t.pid));
     return applyState({
       context: 'terminal',
       kind: t.kind,
@@ -511,6 +535,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       label,
       name,
       topic,
+      tokPerSec,
       sessionFile,
       startedAtMs: t.startedAtMs,
       windowId: t.windowId,
@@ -878,7 +903,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
-    const state = computeLiveState(kind, sessionFile, cwd, true);
+    const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
     out.push(applyState({
       context,
       kind,
@@ -888,6 +913,7 @@ export async function listUnattributedActive(attributed: Set<number>): Promise<A
       cwd,
       sessionId: entry?.sessionId ?? sessionIdFromFile(sessionFile),
       topic,
+      tokPerSec,
       sessionFile,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
     }, state, sessionFile));
@@ -943,7 +969,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const cwd = meta?.cwd ?? (curPath || undefined);
     const sessionFile = findSessionFileForKind(agent, cwd, sessionId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
-    const state = computeLiveState(agent, sessionFile, cwd, pid ? isPidAlive(pid) : true);
+    const { state, tokPerSec } = computeLiveSignals(agent, sessionFile, cwd, pid ? isPidAlive(pid) : true);
     // Provenance is known exactly here (the pane IS a tmux pane) — set it so
     // enrichProvenance skips it and the locator/reply rails resolve off the pane.
     const provenance: SessionProvenance = {
@@ -960,6 +986,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       sessionId,
       cwd,
       topic,
+      tokPerSec,
       sessionFile,
       provenance,
     }, state, sessionFile));

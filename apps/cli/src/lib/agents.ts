@@ -255,7 +255,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
     cloudProvider: 'codex',
-    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'skip'] },
+    // Subagents: multi-agent plumbing since 0.117.0; custom agents as
+    // ~/.codex/agents/*.toml (name, description, developer_instructions).
+    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'skip'] },
   },
   gemini: {
     id: 'gemini',

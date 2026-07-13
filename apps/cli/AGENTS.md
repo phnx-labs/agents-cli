@@ -79,7 +79,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | Harness | `id` | hooks | mcp | allowlist | skills | commands | plugins | subagents | workflows |
 |---|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | ★ Claude Code | `claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| ★ Codex CLI | `codex` | ≥0.116 | ✓ | — | ✓ | <0.117 | ≥0.128 | — | — |
+| ★ Codex CLI | `codex` | ≥0.116 | ✓ | — | ✓ | <0.117 | ≥0.128 | ≥0.117 | — |
 | ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — |
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | — | — |

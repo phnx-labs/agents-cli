@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
-import { capableAgents } from '../src/lib/capabilities.js';
-import { transformSubagentForDroid } from '../src/lib/subagents.js';
+import { capableAgents, supports } from '../src/lib/capabilities.js';
+import { transformSubagentForDroid, transformSubagentForCodex, installSubagentToAgent } from '../src/lib/subagents.js';
 
 describe('capableAgents("commands")', () => {
   it('excludes openclaw since it uses Gateway-based slash commands', () => {
@@ -94,6 +94,52 @@ describe('droid (Factory AI)', () => {
       expect(out).toContain('You review code.');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('codex subagents (TOML custom agents)', () => {
+  it('is capable of subagents since 0.117.0', () => {
+    expect(capableAgents('subagents')).toContain('codex');
+    expect(supports('codex', 'subagents', '0.116.0').ok).toBe(false);
+    expect(supports('codex', 'subagents', '0.117.0').ok).toBe(true);
+  });
+
+  it('transformSubagentForCodex emits required TOML fields', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-codex-sub-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'AGENT.md'),
+        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: gpt-5.4\n---\n\nYou review code.\n`
+      );
+      const out = transformSubagentForCodex(dir);
+      expect(out).toContain('name = "reviewer"');
+      expect(out).toContain('description = "Reviews diffs"');
+      expect(out).toContain('model = "gpt-5.4"');
+      expect(out).toContain('developer_instructions = """');
+      expect(out).toContain('You review code.');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('installSubagentToAgent writes ~/.codex/agents/<name>.toml', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-codex-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'codex', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.codex', 'agents', 'explorer.toml');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('name = "explorer"');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });
