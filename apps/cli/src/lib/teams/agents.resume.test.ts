@@ -8,12 +8,21 @@
  * builders; resumeTeammate drives a real AgentProcess loaded from disk.
  */
 import { describe, it, expect } from 'vitest';
-import { spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { AgentManager, AgentProcess, AgentStatus, captureProcessStartTime } from './agents.js';
+import {
+  AgentManager,
+  AgentProcess,
+  AgentStatus,
+  beginResumeLogTransaction,
+  captureProcessStartTime,
+  commitResumeLogTransaction,
+  terminateSpawnedProcess,
+} from './agents.js';
 import { IS_WINDOWS } from '../platform/index.js';
+import { shellQuote } from '../ssh-exec.js';
 
 function tmpBase(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resume-test-'));
@@ -161,6 +170,104 @@ describe('resumeTeammate — resume-id guard', () => {
   });
 });
 
+describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
+  it('terminates the replacement and restores all prior state when persistence fails after spawn', async () => {
+    const base = tmpBase();
+    const id = 'claude-agent-relaunch-failure';
+    const dir = path.join(base, id);
+    const marker = `resume-transaction-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const startedAt = new Date('2026-07-13T12:00:00.000Z');
+    const completedAt = new Date('2026-07-13T12:34:56.000Z');
+    fs.mkdirSync(dir, { recursive: true });
+
+    const agent = new AgentProcess(
+      id, 'failure-team', 'claude', 'do a thing',
+      null, 'edit', null, AgentStatus.COMPLETED, startedAt, completedAt, base,
+    );
+    await agent.saveMeta();
+    fs.writeFileSync(path.join(dir, 'prior-turn.log'), 'preserve me');
+    const stdoutPath = path.join(dir, 'stdout.log');
+    fs.writeFileSync(stdoutPath, 'prior stdout');
+    const metaPath = path.join(dir, 'meta.json');
+    const metaTarget = path.join(dir, 'meta-original.json');
+    fs.renameSync(metaPath, metaTarget);
+    fs.chmodSync(metaTarget, 0o400);
+    fs.symlinkSync(path.basename(metaTarget), metaPath);
+
+    const mgr = new AgentManager(50, base);
+    try {
+      // The real local launcher reaches spawn, then saveMeta follows the
+      // read-only symlink and fails. The transactional catch must terminate the
+      // detached process before resumeTeammate restores the original lifecycle.
+      await expect(mgr.resumeTeammate(id, marker)).rejects.toThrow();
+
+      const retained = (mgr as any).agents.get(id) as AgentProcess | undefined;
+      expect(retained).toBeDefined();
+      expect(retained!.status).toBe(AgentStatus.COMPLETED);
+      expect(retained!.completedAt?.toISOString()).toBe(completedAt.toISOString());
+      expect(retained!.startedAt.toISOString()).toBe(startedAt.toISOString());
+      expect(retained!.pid).toBeNull();
+      expect(retained!.startTime).toBeNull();
+      expect(fs.readFileSync(path.join(dir, 'prior-turn.log'), 'utf-8')).toBe('preserve me');
+      expect(fs.readFileSync(stdoutPath, 'utf-8')).toBe('prior stdout');
+      const restored = await AgentProcess.loadFromDisk(id, base);
+      expect(restored).not.toBeNull();
+      expect(restored!.status).toBe(AgentStatus.COMPLETED);
+      expect(restored!.completedAt?.toISOString()).toBe(completedAt.toISOString());
+      expect(() => execFileSync('pgrep', ['-f', marker], { stdio: 'ignore' })).toThrow();
+    } finally {
+      if (fs.existsSync(metaTarget)) fs.chmodSync(metaTarget, 0o600);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('kills a TERM-resistant process-group child after the wrapper exits', async () => {
+    const base = tmpBase();
+    const childPidPath = path.join(base, 'child.pid');
+    const childCommand = `echo $$ > ${shellQuote(childPidPath)}; trap '' TERM; sleep 30`;
+    const wrapperCommand = `trap 'exit 0' TERM; /bin/sh -c ${shellQuote(childCommand)} & wait`;
+    const wrapper = spawn('/bin/sh', ['-c', wrapperCommand], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    const wrapperPid = wrapper.pid as number;
+    let childPid = 0;
+
+    try {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        if (fs.existsSync(childPidPath)) {
+          childPid = Number.parseInt(fs.readFileSync(childPidPath, 'utf-8').trim(), 10);
+          if (Number.isFinite(childPid) && childPid > 0) break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(childPid).toBeGreaterThan(0);
+
+      await terminateSpawnedProcess(wrapperPid);
+
+      const isAlive = (pid: number): boolean => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      for (let attempt = 0; attempt < 20 && (isAlive(-wrapperPid) || isAlive(childPid)); attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(isAlive(-wrapperPid)).toBe(false);
+      expect(isAlive(childPid)).toBe(false);
+    } finally {
+      try { process.kill(-wrapperPid, 'SIGKILL'); } catch { /* group gone */ }
+      if (childPid > 0) {
+        try { process.kill(childPid, 'SIGKILL'); } catch { /* child gone */ }
+      }
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
 /**
  * The resume hazard: the status reader re-reads the whole stdout.log from byte 0
  * every poll and marks terminal status from the last `result` event it sees, with
@@ -218,6 +325,33 @@ describe.skipIf(IS_WINDOWS)('resume log-truncation hazard', () => {
     } finally {
       try { process.kill(-(child.pid as number)); } catch { /* group gone */ }
       try { process.kill(child.pid as number); } catch { /* gone */ }
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('reads a shorter successful-resume log from byte zero', async () => {
+    const base = tmpBase();
+    const id = 'cursor-reset';
+    const dir = path.join(base, id);
+    const stdoutPath = path.join(dir, 'stdout.log');
+    fs.mkdirSync(dir, { recursive: true });
+    const agent = new AgentProcess(
+      id, 't', 'claude', 'x', null, 'edit', null,
+      AgentStatus.COMPLETED, new Date(), new Date(), base,
+    );
+
+    try {
+      fs.writeFileSync(stdoutPath, 'prior-turn-event-that-is-longer-than-the-new-log\n');
+      await agent.readNewEvents();
+      expect(agent.events.at(-1)).toMatchObject({ type: 'raw', content: 'prior-turn-event-that-is-longer-than-the-new-log' });
+
+      const transaction = await beginResumeLogTransaction(agent);
+      fs.writeFileSync(stdoutPath, 'new\n');
+      await commitResumeLogTransaction(transaction);
+      await agent.readNewEvents();
+
+      expect(agent.events.at(-1)).toMatchObject({ type: 'raw', content: 'new' });
+    } finally {
       fs.rmSync(base, { recursive: true, force: true });
     }
   });

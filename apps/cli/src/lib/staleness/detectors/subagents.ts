@@ -76,6 +76,20 @@ function buildOpenclawDetector(): ResourceDetector {
   };
 }
 
+function buildKiroDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'kiro',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.kiro', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace('.json', ''));
+    },
+  };
+}
+
 function buildKimiDetector(): ResourceDetector {
   return {
     kind: 'subagents',
@@ -113,6 +127,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   opencode: buildOpenCodeDetector,
   droid: buildDroidDetector,
   openclaw: buildOpenclawDetector,
+  kiro: buildKiroDetector,
 };
 
 export const subagentsDetectors = lazyAgentMap<ResourceDetector>(() => {

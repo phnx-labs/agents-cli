@@ -1,0 +1,102 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  installSubagentToAgent,
+  listSubagentsForAgent,
+  transformSubagentForKiro,
+} from './subagents.js';
+
+const tempDirs: string[] = [];
+
+function makeTempHome(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-subagents-'));
+  tempDirs.push(dir);
+  return dir;
+}
+
+function writeAgentMd(dir: string, body: string, extra?: Record<string, string>): void {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'AGENT.md'), body, 'utf-8');
+  if (extra) {
+    for (const [name, content] of Object.entries(extra)) {
+      fs.writeFileSync(path.join(dir, `${name}.md`), content, 'utf-8');
+    }
+  }
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe('transformSubagentForKiro', () => {
+  it('emits a Kiro custom-agent JSON with name, description, prompt, and tools', () => {
+    const home = makeTempHome();
+    const dir = path.join(home, 'subagent');
+    writeAgentMd(dir, '---\nname: reviewer\ndescription: Reviews code changes\nmodel: claude-sonnet-4\n---\n\nYou are a careful code reviewer.');
+
+    const json = transformSubagentForKiro(dir);
+    const config = JSON.parse(json) as { name: string; description: string; prompt: string; tools: string[]; model: string };
+
+    expect(config.name).toBe('reviewer');
+    expect(config.description).toBe('Reviews code changes');
+    expect(config.model).toBe('claude-sonnet-4');
+    expect(config.prompt).toContain('You are a careful code reviewer.');
+    expect(config.tools).toEqual(['read', 'write', 'shell', 'web_search', 'web_fetch']);
+  });
+
+  it('appends sibling .md files as sections in the prompt', () => {
+    const home = makeTempHome();
+    const dir = path.join(home, 'subagent');
+    writeAgentMd(
+      dir,
+      '---\nname: writer\ndescription: Writes docs\n---\n\nYou write docs.',
+      { style: 'Use short sentences.', examples: 'Example: ...' }
+    );
+
+    const json = transformSubagentForKiro(dir);
+    const config = JSON.parse(json) as { prompt: string };
+
+    expect(config.prompt).toContain('## Style');
+    expect(config.prompt).toContain('Use short sentences.');
+    expect(config.prompt).toContain('## Examples');
+    expect(config.prompt).toContain('Example: ...');
+  });
+});
+
+describe('installSubagentToAgent for Kiro', () => {
+  it('writes a JSON custom-agent file to ~/.kiro/agents/', () => {
+    const sourceHome = makeTempHome();
+    const agentHome = makeTempHome();
+    const dir = path.join(sourceHome, 'subagent');
+    writeAgentMd(dir, '---\nname: tester\ndescription: Runs tests\n---\n\nYou run tests.');
+
+    const result = installSubagentToAgent(dir, 'tester', 'kiro', agentHome);
+    expect(result.success).toBe(true);
+
+    const targetPath = path.join(agentHome, '.kiro', 'agents', 'tester.json');
+    expect(fs.existsSync(targetPath)).toBe(true);
+
+    const config = JSON.parse(fs.readFileSync(targetPath, 'utf-8')) as { name: string; prompt: string };
+    expect(config.name).toBe('tester');
+    expect(config.prompt).toContain('You run tests.');
+  });
+
+  it('lists installed Kiro subagents from JSON files', () => {
+    const agentHome = makeTempHome();
+    const agentsDir = path.join(agentHome, '.kiro', 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(agentsDir, 'docbot.json'),
+      JSON.stringify({ name: 'docbot', description: 'Docs bot', prompt: 'hi' }),
+      'utf-8'
+    );
+
+    const installed = listSubagentsForAgent('kiro', agentHome);
+    expect(installed.map(s => s.name)).toContain('docbot');
+    expect(installed.find(s => s.name === 'docbot')?.frontmatter.description).toBe('Docs bot');
+  });
+});
