@@ -16,6 +16,7 @@ import { safeJoin } from './paths.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import type { LoopConfig } from './loop.js';
+import { machineId, normalizeHost } from './machine-id.js';
 
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
@@ -94,6 +95,15 @@ export interface JobConfig {
   prompt: string;
   timezone?: string;
   repo?: string;
+  /**
+   * Pin this routine to one machine. `~/.agents/routines/` is synced to every
+   * device via the user repo, so without a pin an enabled routine fires on
+   * EVERY machine running the scheduler. When set, only the device whose
+   * `machineId()` matches (normalized hostname, e.g. `yosemite-s0`) schedules,
+   * fires, catches up, or counts this job as overdue; everywhere else it is
+   * inert and `run` refuses with an `agents ssh` pointer.
+   */
+  device?: string;
   variables?: Record<string, string>;
   sandbox?: boolean;
   allow?: JobAllowConfig;
@@ -117,6 +127,17 @@ export interface RunMeta {
   startedAt: string;
   completedAt: string | null;
   exitCode: number | null;
+}
+
+/**
+ * True when the job may execute on this machine: no `device` pin, or the pin
+ * names this device. Both sides go through `normalizeHost` so `Yosemite-S0`,
+ * `yosemite-s0.tailnet.ts.net`, and `yosemite-s0` all agree. Every fire path
+ * (cron scheduler, webhook, catchup/overdue, manual run) gates on this.
+ */
+export function jobRunsOnThisDevice(config: Pick<JobConfig, 'device'>): boolean {
+  if (!config.device) return true;
+  return normalizeHost(config.device) === machineId();
 }
 
 /** Default values applied to every job config when fields are omitted. */
@@ -294,6 +315,11 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.endAt !== undefined) {
     if (typeof config.endAt !== 'string' || !isParseableDate(config.endAt)) {
       errors.push('endAt must be a parseable ISO 8601 / RFC3339 timestamp (e.g., 2026-12-31T23:59:00Z)');
+    }
+  }
+  if (config.device !== undefined) {
+    if (typeof config.device !== 'string' || config.device.trim() === '') {
+      errors.push('device must be a non-empty device name (as shown by `agents devices`, e.g. yosemite-s0)');
     }
   }
 

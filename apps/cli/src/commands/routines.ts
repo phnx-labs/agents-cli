@@ -34,6 +34,7 @@ import {
   getRunDir,
   getJobPath,
   parseAtTime,
+  jobRunsOnThisDevice,
 } from '../lib/routines.js';
 import type { JobConfig } from '../lib/routines.js';
 import { fireWebhookJobs, matchJobsToWebhook, type GithubWebhook } from '../lib/triggers/webhook.js';
@@ -247,6 +248,8 @@ export function registerRoutinesCommands(program: Command): void {
             scheduleHuman: fireConditionLabel(job),
             trigger: job.trigger ?? null,
             timezone: job.timezone ?? null,
+            device: job.device ?? null,
+            runsHere: jobRunsOnThisDevice(job),
             enabled: job.enabled,
             overdue: overdueSet.has(job.name),
             nextRun: nextRun ? nextRun.toISOString() : null,
@@ -274,14 +277,15 @@ export function registerRoutinesCommands(program: Command): void {
       const NAME_W = 24;
       const AGENT_W = 10;
       const REPO_W = REPO_DISPLAY_MAX;
+      const DEVICE_W = 13;
       const SCHED_W = 22;
       const ENABLED_W = 10;
       const NEXT_W = 22;
 
       const header =
-        `  ${'Name'.padEnd(NAME_W)} ${'Agent'.padEnd(AGENT_W)} ${'Repo'.padEnd(REPO_W)} ${'Schedule'.padEnd(SCHED_W)} ${'Enabled'.padEnd(ENABLED_W)} ${'Next Run'.padEnd(NEXT_W)} Last Status`;
+        `  ${'Name'.padEnd(NAME_W)} ${'Agent'.padEnd(AGENT_W)} ${'Repo'.padEnd(REPO_W)} ${'Device'.padEnd(DEVICE_W)} ${'Schedule'.padEnd(SCHED_W)} ${'Enabled'.padEnd(ENABLED_W)} ${'Next Run'.padEnd(NEXT_W)} Last Status`;
       console.log(chalk.gray(header));
-      console.log(chalk.gray('  ' + '-'.repeat(NAME_W + AGENT_W + REPO_W + SCHED_W + ENABLED_W + NEXT_W + 20)));
+      console.log(chalk.gray('  ' + '-'.repeat(NAME_W + AGENT_W + REPO_W + DEVICE_W + SCHED_W + ENABLED_W + NEXT_W + 20)));
 
       for (const job of jobs) {
         const nextRun = scheduler.getNextRun(job.name);
@@ -307,6 +311,16 @@ export function registerRoutinesCommands(program: Command): void {
         const enabledWord = job.enabled ? 'yes' : 'no';
         const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
 
+        // Unpinned jobs run everywhere; a pin that names another machine is
+        // grayed — this machine never fires it.
+        const deviceWord = job.device || '-';
+        const deviceCell = !job.device
+          ? chalk.gray('-')
+          : jobRunsOnThisDevice(job)
+            ? deviceWord
+            : chalk.gray(deviceWord);
+        const devicePad = Math.max(0, DEVICE_W - deviceWord.length);
+
         const statusColor =
           lastStatus === 'completed' ? chalk.green
           : lastStatus === 'failed' ? chalk.red
@@ -319,7 +333,7 @@ export function registerRoutinesCommands(program: Command): void {
           ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
           : (job.agent || '').padEnd(10);
         console.log(
-          `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
+          `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
         );
       }
 
@@ -343,6 +357,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto', 'auto')
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
+    .option('--device <name>', 'Pin to one machine (routines are fleet-synced): only the device with this name schedules and fires the job')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
@@ -405,6 +420,7 @@ export function registerRoutinesCommands(program: Command): void {
           enabled: !options.disabled,
           prompt: options.prompt,
           timezone: options.timezone,
+          ...(options.device ? { device: options.device } : {}),
           ...(runOnce ? { runOnce: true } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
         };
@@ -621,6 +637,12 @@ export function registerRoutinesCommands(program: Command): void {
       const job = readJob(name);
       if (!job) {
         console.log(chalk.red(`Job '${name}' not found`));
+        process.exit(1);
+      }
+
+      if (!jobRunsOnThisDevice(job)) {
+        console.log(chalk.red(`Job '${name}' is pinned to device '${job.device}' and never runs here.`));
+        console.log(chalk.gray(`  Run it there: agents ssh ${job.device} 'agents routines run ${name}'`));
         process.exit(1);
       }
 

@@ -642,6 +642,10 @@ agents routines add daily-digest \
 agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
+
+# Routines sync to every device; pin one to a single machine with --device
+agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
+  --device yosemite-s0 --prompt "Drain the work queue"
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.

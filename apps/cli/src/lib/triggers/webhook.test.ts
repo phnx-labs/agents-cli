@@ -103,6 +103,27 @@ describe('matchJobsToWebhook', () => {
     });
     expect(matchJobsToWebhook([disabled], pullRequestWebhook('x/y'))).toEqual([]);
   });
+
+  it('skips jobs pinned to another device, keeps jobs pinned here', () => {
+    const saved = process.env.AGENTS_SYNC_MACHINE_ID;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+    try {
+      const foreign = job({
+        name: 'foreign',
+        device: 'yosemite-s0',
+        trigger: { type: 'github_event', event: 'pull_request', repo: 'x/y' },
+      });
+      const local = job({
+        name: 'local',
+        device: 'zion',
+        trigger: { type: 'github_event', event: 'pull_request', repo: 'x/y' },
+      });
+      expect(matchJobsToWebhook([foreign, local], pullRequestWebhook('x/y')).map((j) => j.name)).toEqual(['local']);
+    } finally {
+      if (saved === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+      else process.env.AGENTS_SYNC_MACHINE_ID = saved;
+    }
+  });
 });
 
 describe('payload extraction helpers', () => {

@@ -49,6 +49,7 @@ effort: default               # fast, default, or detailed
 timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
+device: yosemite-s0           # optional: pin to one machine (see Device Pinning)
 
 prompt: |
   Review open PRs and summarize status.
@@ -69,6 +70,31 @@ agents routines add reminder --at "14:30" --agent claude --prompt "Remind Muqsit
 ```
 
 `--at` accepts `"14:30"` (today at that time) or `"2026-02-24 09:00"` (absolute). The daemon converts it to a cron expression with `runOnce: true`.
+
+### Device Pinning
+
+`~/.agents/routines/` rides the user repo, so every routine syncs to every machine —
+and without a pin, an enabled routine fires on **every** device running the
+scheduler. Set `device:` (or `--device` on `add`) to make a routine belong to one
+machine:
+
+```bash
+agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
+  --device yosemite-s0 --prompt "Drain the work queue"
+```
+
+The pin is compared against the local device id (`machineId()` — normalized
+hostname, the same name `agents devices` shows), so `Yosemite-S0` and
+`yosemite-s0.tailnet.ts.net` both match `yosemite-s0`. On every other machine the
+job is fully inert:
+
+- the cron scheduler never loads it
+- webhook triggers never match it
+- it is never counted overdue, so `catchup` won't fire it and the daemon won't nag
+- `agents routines run <name>` refuses, pointing at `agents ssh <device> ...`
+
+`agents routines list` shows the pin in a Device column (grayed when it names
+another machine) and in `--json` as `device` + `runsHere`.
 
 ## Sandbox Isolation
 

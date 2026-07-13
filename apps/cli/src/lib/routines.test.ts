@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { validateJob, validateTrigger, normalizeTriggerEvent, type JobConfig } from './routines.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import { validateJob, validateTrigger, normalizeTriggerEvent, jobRunsOnThisDevice, type JobConfig } from './routines.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
@@ -77,5 +77,51 @@ describe('normalizeTriggerEvent', () => {
 
   it('returns null for unknown events', () => {
     expect(normalizeTriggerEvent('deploy')).toBeNull();
+  });
+});
+
+describe('validateJob — device', () => {
+  it('accepts a job pinned to a device', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', device: 'yosemite-s0' }))).toEqual([]);
+  });
+
+  it('rejects an empty device', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', device: '  ' }));
+    expect(errors.some((e) => /device must be a non-empty device name/.test(e))).toBe(true);
+  });
+
+  it('rejects a non-string device', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', device: 42 as never }));
+    expect(errors.some((e) => /device must be a non-empty device name/.test(e))).toBe(true);
+  });
+});
+
+describe('jobRunsOnThisDevice', () => {
+  const savedId = process.env.AGENTS_SYNC_MACHINE_ID;
+
+  afterEach(() => {
+    if (savedId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = savedId;
+  });
+
+  it('unpinned jobs run everywhere', () => {
+    expect(jobRunsOnThisDevice({})).toBe(true);
+    expect(jobRunsOnThisDevice({ device: undefined })).toBe(true);
+  });
+
+  it('matches when the pin names this machine', () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s0';
+    expect(jobRunsOnThisDevice({ device: 'yosemite-s0' })).toBe(true);
+  });
+
+  it('normalizes case and domain suffix on the pin', () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s0';
+    expect(jobRunsOnThisDevice({ device: 'Yosemite-S0' })).toBe(true);
+    expect(jobRunsOnThisDevice({ device: 'yosemite-s0.tailnet.ts.net' })).toBe(true);
+  });
+
+  it('rejects a pin naming another machine', () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+    expect(jobRunsOnThisDevice({ device: 'yosemite-s0' })).toBe(false);
   });
 });
