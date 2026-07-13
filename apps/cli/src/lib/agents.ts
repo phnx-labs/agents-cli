@@ -498,7 +498,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       skills: true,
       commands: false, // covered by skills
       plugins: true,
-      subagents: false,
+      subagents: true, // ~/.grok/agents/*.md (Claude-compatible agent defs)
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: true,

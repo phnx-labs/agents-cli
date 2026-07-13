@@ -12,18 +12,26 @@ import { capableAgents } from '../../capabilities.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
 import { lazyAgentMap } from '../writers/lazy-map.js';
 
-function buildClaudeDetector(): ResourceDetector {
+function buildFlatMdAgentsDetector(agent: AgentId, agentsRoot: string): ResourceDetector {
   return {
     kind: 'subagents',
-    agent: 'claude',
+    agent,
     list({ versionHome }: DetectArgs): string[] {
-      const agentsDir = path.join(versionHome, '.claude', 'agents');
+      const agentsDir = path.join(versionHome, agentsRoot, 'agents');
       if (!fs.existsSync(agentsDir)) return [];
       return fs.readdirSync(agentsDir)
         .filter(f => f.endsWith('.md'))
         .map(f => f.replace('.md', ''));
     },
   };
+}
+
+function buildClaudeDetector(): ResourceDetector {
+  return buildFlatMdAgentsDetector('claude', '.claude');
+}
+
+function buildGrokDetector(): ResourceDetector {
+  return buildFlatMdAgentsDetector('grok', '.grok');
 }
 
 function buildCodexDetector(): ResourceDetector {
@@ -85,6 +93,7 @@ function buildKimiDetector(): ResourceDetector {
 
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
+  grok: buildGrokDetector,
   codex: buildCodexDetector,
   kimi: buildKimiDetector,
   droid: buildDroidDetector,
