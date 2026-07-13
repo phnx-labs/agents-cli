@@ -144,6 +144,10 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
+| Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | no |
+| Droid | yes | yes | no | no | yes | yes | yes | `AGENTS.md` | no |
+| Hermes | no | yes | no | yes | no | no | no | `MEMORY.md` | no |
+| ForgeCode | no | yes | no | yes | no | no | no | `AGENTS.md` | no |
 
 **† Gemini is deprecated.** Google retired the Gemini CLI for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI (`antigravity`) is the successor. agents-cli still manages existing Gemini installs but warns on `agents add gemini` / `agents teams add … gemini`.
 

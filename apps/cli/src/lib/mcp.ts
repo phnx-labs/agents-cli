@@ -353,6 +353,25 @@ function registerMcpCommand(
 ): { success: boolean; error?: string } {
   try {
     validateMcpServerName(name);
+    if (agentId === 'hermes' || agentId === 'forge') {
+      const server: InstalledMcpServer = {
+        name,
+        path: '',
+        config: {
+          name,
+          transport: transport === 'http' ? 'http' : 'stdio',
+          ...(transport === 'http'
+            ? { url: commandSpec.command }
+            : { command: commandSpec.command, args: commandSpec.args }),
+        },
+      };
+      if (agentId === 'hermes') {
+        installMcpToHermesConfig(server, options.home || os.homedir());
+      } else {
+        installMcpToForgeConfig(server, options.home || os.homedir());
+      }
+      return { success: true };
+    }
     const bin = options.binary || AGENTS[agentId].cliCommand;
     const commandArgs = [commandSpec.command, ...commandSpec.args];
     const args = agentId === 'claude'
@@ -494,6 +513,67 @@ function installMcpToFactoryConfig(server: InstalledMcpServer, versionHome: stri
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
 }
 
+function installMcpToHermesConfig(server: InstalledMcpServer, versionHome: string): void {
+  const configPath = path.join(versionHome, '.hermes', 'config.yaml');
+
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      config = parsed as Record<string, unknown>;
+    }
+  }
+
+  if (!config.mcp_servers || typeof config.mcp_servers !== 'object' || Array.isArray(config.mcp_servers)) {
+    config.mcp_servers = {};
+  }
+
+  const mcpServers = config.mcp_servers as Record<string, unknown>;
+  if (server.config.transport === 'stdio') {
+    mcpServers[server.name] = {
+      command: server.config.command,
+      args: server.config.args || [],
+      ...(server.config.env && { env: server.config.env }),
+    };
+  } else {
+    mcpServers[server.name] = {
+      url: server.config.url,
+    };
+  }
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+}
+
+function installMcpToForgeConfig(server: InstalledMcpServer, versionHome: string): void {
+  const configPath = path.join(versionHome, '.forge', '.mcp.json');
+
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  }
+
+  if (!config.mcpServers || typeof config.mcpServers !== 'object' || Array.isArray(config.mcpServers)) {
+    config.mcpServers = {};
+  }
+
+  const mcpServers = config.mcpServers as Record<string, unknown>;
+  if (server.config.transport === 'stdio') {
+    mcpServers[server.name] = {
+      command: server.config.command,
+      args: server.config.args || [],
+      ...(server.config.env && { env: server.config.env }),
+    };
+  } else {
+    mcpServers[server.name] = {
+      url: server.config.url,
+    };
+  }
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+}
+
 function installMcpToOpenCodeConfig(server: InstalledMcpServer, versionHome: string): void {
   const configPath = path.join(versionHome, '.opencode', 'opencode.jsonc');
 
@@ -594,6 +674,12 @@ export function installMcpServers(
         applied.push(server.name);
       } else if (agentId === 'droid') {
         installMcpToFactoryConfig(server, versionHome);
+        applied.push(server.name);
+      } else if (agentId === 'hermes') {
+        installMcpToHermesConfig(server, versionHome);
+        applied.push(server.name);
+      } else if (agentId === 'forge') {
+        installMcpToForgeConfig(server, versionHome);
         applied.push(server.name);
       }
     } catch (err) {

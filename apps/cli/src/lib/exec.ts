@@ -590,6 +590,21 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     jsonFlags: ['-o', 'stream-json'],
     modelFlag: '-m',
   },
+  hermes: {
+    base: ['hermes', 'chat'],
+    promptFlag: 'positional',
+    modeFlags: {
+      edit: [],
+    },
+    modelFlag: '--model',
+  },
+  forge: {
+    base: ['forge'],
+    promptFlag: 'positional',
+    modeFlags: {
+      edit: [],
+    },
+  },
 };
 
 /**

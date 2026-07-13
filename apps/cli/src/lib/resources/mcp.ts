@@ -158,6 +158,10 @@ export function getMcpConfigPath(agent: AgentId, versionHome: string): string | 
       return path.join(versionHome, '.gemini', 'antigravity-cli', 'mcp_config.json');
     case 'grok':
       return path.join(versionHome, '.grok', 'mcp.json');
+    case 'hermes':
+      return path.join(versionHome, '.hermes', 'config.yaml');
+    case 'forge':
+      return path.join(versionHome, '.forge', '.mcp.json');
     default:
       return null;
   }
@@ -320,6 +324,40 @@ function syncToGrokConfig(configPath: string, items: McpItem[]): void {
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, TOML.stringify(config), 'utf-8');
+}
+
+function syncToHermesConfig(configPath: string, items: McpItem[]): void {
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        config = parsed as Record<string, unknown>;
+      }
+    } catch {
+      config = {};
+    }
+  }
+
+  const mcpServers: Record<string, unknown> = {};
+  for (const item of items) {
+    if (item.transport === 'stdio') {
+      mcpServers[item.name] = {
+        command: item.command,
+        args: item.args || [],
+        ...(item.env && { env: item.env }),
+      };
+    } else {
+      mcpServers[item.name] = {
+        url: item.url,
+      };
+    }
+  }
+
+  config.mcp_servers = mcpServers;
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
 }
 
 /**
@@ -575,6 +613,12 @@ export const McpHandler: ResourceHandler<McpItem> = {
       case 'grok':
         syncToGrokConfig(configPath, mcpItems);
         break;
+      case 'hermes':
+        syncToHermesConfig(configPath, mcpItems);
+        break;
+      case 'forge':
+        syncToCursorConfig(configPath, mcpItems);
+        break;
     }
   },
 
@@ -583,6 +627,8 @@ export const McpHandler: ResourceHandler<McpItem> = {
       case 'codex':
       case 'grok':
         return 'toml';
+      case 'hermes':
+        return 'yaml';
       default:
         return 'json';
     }

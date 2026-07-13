@@ -62,6 +62,16 @@ describe('getMcpConfigPath', () => {
     expect(configPath).toBe(path.join('/home/user', '.openclaw', 'openclaw.json'));
   });
 
+  it('returns correct config path for Hermes', () => {
+    const configPath = getMcpConfigPath('hermes', '/home/user');
+    expect(configPath).toBe(path.join('/home/user', '.hermes', 'config.yaml'));
+  });
+
+  it('returns correct config path for ForgeCode', () => {
+    const configPath = getMcpConfigPath('forge', '/home/user');
+    expect(configPath).toBe(path.join('/home/user', '.forge', '.mcp.json'));
+  });
+
 });
 
 describe('McpHandler.format', () => {
@@ -79,6 +89,10 @@ describe('McpHandler.format', () => {
 
   it('returns json for Cursor', () => {
     expect(McpHandler.format('cursor')).toBe('json');
+  });
+
+  it('returns yaml for Hermes', () => {
+    expect(McpHandler.format('hermes')).toBe('yaml');
   });
 });
 
