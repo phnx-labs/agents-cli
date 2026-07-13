@@ -1137,6 +1137,9 @@ export function registerHooksToSettings(
   if (agentId === 'kiro') {
     return registerHooksForKiro(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'goose') {
+    return registerHooksForGoose(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   return { registered: [], errors: [] };
 }
 
@@ -2282,6 +2285,119 @@ function registerHooksForKiro(
     );
   } catch (err) {
     errors.push(`Failed to write ${KIRO_MANAGED_HOOKS_FILE}: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical hooks.yaml event names that goose supports (Open Plugins PascalCase).
+ * Unmapped events are skipped. Goose ≥ 1.34.0.
+ */
+const GOOSE_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'SessionStart',
+  SessionEnd: 'SessionEnd',
+  Stop: 'Stop',
+  UserPromptSubmit: 'UserPromptSubmit',
+  PreToolUse: 'PreToolUse',
+  PostToolUse: 'PostToolUse',
+  PostToolUseFailure: 'PostToolUseFailure',
+  BeforeReadFile: 'BeforeReadFile',
+  AfterFileEdit: 'AfterFileEdit',
+  BeforeShellExecution: 'BeforeShellExecution',
+  AfterShellExecution: 'AfterShellExecution',
+  SubagentStart: 'SubagentStart',
+  SubagentStop: 'SubagentStop',
+};
+
+/** Managed Open Plugins directory name under ~/.agents/plugins/. */
+const GOOSE_MANAGED_PLUGIN_NAME = 'agents-cli-hooks';
+
+/**
+ * Register hooks for Goose (block-goose-cli ≥ 1.34.0).
+ *
+ * Goose auto-discovers Open Plugins under `$HOME/.agents/plugins/<name>/` that
+ * contain `hooks/hooks.json` (HOME is the version home under the agents-cli
+ * shim). Schema (Open Plugins / Claude-shaped):
+ *   { "hooks": { Event: [ { matcher?, hooks: [{ type: "command", command }] } ] } }
+ *
+ * We own a single managed plugin (`agents-cli-hooks`) under the version home
+ * and rewrite its hooks.json on every sync. Command paths are absolute
+ * (portable ~/ form) pointing at the already-copied hook scripts.
+ */
+function registerHooksForGoose(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  _managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  type GooseCmd = { type: 'command'; command: string; timeout?: number };
+  type GooseGroup = { matcher?: string; hooks: GooseCmd[] };
+  const eventHooks: Record<string, GooseGroup[]> = {};
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 60;
+    const cmd: GooseCmd = { type: 'command', command: commandPath, timeout };
+
+    for (const event of hookDef.events) {
+      const gooseEvent = GOOSE_EVENT_MAP[event];
+      if (!gooseEvent) continue;
+
+      if (!eventHooks[gooseEvent]) eventHooks[gooseEvent] = [];
+      const groups = eventHooks[gooseEvent];
+      const matcher = hookDef.matcher || undefined;
+
+      let group = groups.find((g) => (g.matcher || undefined) === matcher);
+      if (!group) {
+        group = { hooks: [] };
+        if (matcher) group.matcher = matcher;
+        groups.push(group);
+      }
+
+      const existingIdx = group.hooks.findIndex((h) => h.command === cmd.command);
+      if (existingIdx >= 0) {
+        group.hooks[existingIdx] = cmd;
+      } else {
+        group.hooks.push(cmd);
+      }
+
+      registered.push(`${name} -> ${gooseEvent}`);
+    }
+  }
+
+  // Goose discovers Open Plugins at ~/.agents/plugins/<name>/ when HOME is the
+  // version home (shim sets HOME). Write under versionHome so each installed
+  // goose version gets its own managed plugin and tests stay hermetic.
+  const pluginRoot = path.join(versionHome, '.agents', 'plugins', GOOSE_MANAGED_PLUGIN_NAME);
+  const hooksDir = path.join(pluginRoot, 'hooks');
+  const outPath = path.join(hooksDir, 'hooks.json');
+
+  try {
+    fs.mkdirSync(hooksDir, { recursive: true });
+    // Minimal plugin marker so the directory is a valid Open Plugins bundle.
+    const markerPath = path.join(pluginRoot, '.agents-cli-managed');
+    if (!fs.existsSync(markerPath)) {
+      fs.writeFileSync(markerPath, 'managed by agents-cli hooks sync\n', 'utf-8');
+    }
+    fs.writeFileSync(
+      outPath,
+      JSON.stringify({ hooks: eventHooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write goose hooks plugin: ${(err as Error).message}`);
   }
 
   return { registered, errors };
