@@ -25,9 +25,12 @@ import { getUserAgentsDir } from './state.js';
 
 // Resolved lazily: events.ts is imported transitively by most CLI surfaces, and
 // import itself must stay side-effect free. Tests may override the exact path.
+// AGENTS_EVENTS_PATH redirects the sink — a test seam like AGENTS_SECRETS_AGENT_DIR:
+// unlike _resetForTest it survives a bare reset AND propagates to CLI subprocesses
+// a test spawns, so fixture events can never land in the user's real log (#910).
 let _eventsPath: string | undefined;
 function eventsPath(): string {
-  return (_eventsPath ??= path.join(getUserAgentsDir(), 'events.jsonl'));
+  return (_eventsPath ??= process.env.AGENTS_EVENTS_PATH || path.join(getUserAgentsDir(), 'events.jsonl'));
 }
 
 function eventsDir(): string {
