@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+## 1.20.58
+
+### Added
+
+- **Kiro CLI allowlists sync as v3 capability rules.** Shell, filesystem, and
+  web permissions now merge into Kiro 2.8.0+ while preserving user-authored
+  rules and removing duplicate generated entries.
+
+- **Remote runs honor `--cwd`, with `--project` as a project-name shortcut.**
+  Host dispatch re-roots home-anchored paths on the remote machine, while
+  `--project <slug>[@worktree]` resolves configured project roots locally or
+  over `--host`.
+
+### Fixed
+
+- **Interactive remote secret reveals do not leave an SSH control master
+  behind.** The one-shot TTY reveal path now disables multiplexing, so it exits
+  immediately after Touch ID or passphrase authorization.
+
+- **Global npm upgrades restart the scheduler through the installed CLI.** The
+  macOS postinstall self-heal now passes the resolved signed CLI path into daemon
+  startup explicitly, so launchd never records `scripts/postinstall.js` as the
+  scheduler command.
+
+- **Daemon-hosted and standalone secrets brokers share one race-safe socket
+  binder.** Either startup order now preserves the live owner; the losing broker
+  stays quiescent without triggering launchd restart churn, takes over if the
+  owner stops, releases its standby PID on service shutdown, and only reclaims
+  an unreachable stale socket.
+
+- **Daemon service manifests pin the active Node runtime.** Symlinked and
+  extension-less Node entrypoints launch through `process.execPath`, and service
+  PATHs no longer hardcode a removable nvm patch version.
+
+## 1.20.57
+
+### Added
+
+- **Stopped teammates can resume with a follow-up message.**
+  `agents teams resume` re-enters the teammate's captured session, while
+  `agents teams message` routes to a live mailbox or resumes a stopped teammate.
+
+- **The always-on daemon hosts the secrets broker socket-first.** Secret reads
+  can use the supervised daemon immediately after start without changing the
+  broker wire protocol.
+
+### Changed
+
+- **Secret policy labels use one `policy · state` vocabulary.**
+  `agents secrets list` now reports `daily`, `daily · held 7d`,
+  `always · prompt`, and `never · no prompt`.
+
 ## 1.20.56
 
 ### Fixed
