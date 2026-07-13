@@ -228,9 +228,18 @@ export function isBlockAnswered(blockId: string, root?: string): boolean {
   return fs.existsSync(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
 }
 
+/** Receipt lifecycle rank — higher means further along; never regress. */
+const RECEIPT_STATUS_RANK: Record<MessageReceipt['status'], number> = {
+  queued: 0,
+  consumed: 1,
+  continued: 2,
+};
+
 /**
  * Record a delivery-receipt transition for a message tied to a block.
- * Updates the receipts list in the block file (last receipt per msgId wins).
+ * Updates the receipts list in the block file. Status is monotonic
+ * (queued → consumed → continued): a late `queued` write cannot overwrite
+ * an already-recorded `consumed`/`continued` (race with mailbox drain).
  */
 export function recordMessageReceipt(
   blockId: string,
@@ -242,8 +251,15 @@ export function recordMessageReceipt(
   if (!block) return;
   const receipts = block.receipts ?? [];
   const idx = receipts.findIndex((r) => r.msgId === receipt.msgId);
-  if (idx >= 0) receipts[idx] = receipt;
-  else receipts.push(receipt);
+  if (idx >= 0) {
+    const prev = receipts[idx];
+    if (RECEIPT_STATUS_RANK[receipt.status] < RECEIPT_STATUS_RANK[prev.status]) {
+      return; // do not regress
+    }
+    receipts[idx] = receipt;
+  } else {
+    receipts.push(receipt);
+  }
   block.receipts = receipts;
   publishBlock(block, dir);
 }

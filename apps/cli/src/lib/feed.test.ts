@@ -470,6 +470,20 @@ describe('feed store', () => {
     expect(block.continuedAt).toBeTruthy();
   });
 
+  it('recordMessageReceipt is monotonic — queued cannot overwrite consumed (RUSH-1614)', () => {
+    const dir = tmpFeedDir();
+    publishBlock(makeBlock('sess-mono', 'Confirm?'), dir);
+    const blockId = blockIdForSession('sess-mono');
+
+    recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'consumed', at: '2026-01-01T00:00:01.000Z' }, dir);
+    // Late enqueue writer races after drain already recorded consumed.
+    recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'queued', at: '2026-01-01T00:00:02.000Z' }, dir);
+
+    const block = readBlock(blockId, dir)!;
+    expect(block.receipts).toHaveLength(1);
+    expect(block.receipts![0].status).toBe('consumed');
+  });
+
   it('removeBlock clears answered markers and receipts', () => {
     const dir = tmpFeedDir();
     publishBlock(makeBlock('sess-cleanup', 'Clean me?'), dir);
