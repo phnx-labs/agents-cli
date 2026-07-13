@@ -643,9 +643,12 @@ agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
 
-# Routines sync to every device; pin one to a single machine with --device
+# Routines sync to every device; restrict to an allowlist with --devices
 agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
-  --device yosemite-s0 --prompt "Drain the work queue"
+  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+
+agents routines devices nightly-drain --set yosemite-s0,mac-mini  # update allowlist
+agents routines list --host yosemite-s0                            # query another device
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
