@@ -167,6 +167,7 @@ enum LocalState {
             let repo = a.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
             let status: SessionStatus = mark != nil ? .attention
                 : a.status == "running" ? .running
+                : a.status == "input_required" ? .attention
                 : a.status == "queued" ? .queued : .idle
             out.append(Session(agent: a.kind, repo: repo, cwd: a.cwd, status: status,
                                context: a.context ?? "terminal",

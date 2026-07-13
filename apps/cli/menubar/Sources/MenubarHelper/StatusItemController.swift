@@ -118,9 +118,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             let s = LocalState.sessions(includeTeams: false)
             let pending = LocalState.pendingDevices()
             DispatchQueue.main.async {
-                self?.badgeSessions = s
-                self?.badgePending = pending
-                self?.refreshBadge()
+                guard let self else { return }
+                self.badgeSessions = self.merged(s)
+                self.badgePending = pending
+                self.refreshBadge()
             }
         }
         refreshRoutines()
@@ -269,7 +270,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let browserTasks = LocalState.browserTasks(limit: 3)
         let daemonPid = AgentsCLI.daemonPid()
         let pending = LocalState.pendingDevices()
-        badgeSessions = sessions
+        badgeSessions = merged(sessions)
         badgePending = pending
         rebuild(menu, sessions: sessions, browserTasks: browserTasks,
                 recentSessions: cachedRecentSessions, routines: cachedRoutines,
@@ -293,13 +294,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         // Prefer the engine's active list once the warm cache has it — full
         // coverage (tmux/IDE/headless), correct running/idle. The cheap
-        // live-terminals view (`sessions` param) covers the cold start. Cloud +
-        // teams rows always come from the cheap sources.
-        var sessions = sessions
-        if activeSessionsLoaded && !cachedActiveSessions.isEmpty {
-            let nonTerminal = sessions.filter { $0.context != "terminal" }
-            sessions = LocalState.sessions(fromActive: cachedActiveSessions) + nonTerminal
-        }
+        // live-terminals view (`sessions` param) covers the cold start.
+        let sessions = merged(sessions)
 
         // Auto density keys off the FULL needs-you set — blocked sessions plus
         // failing/overdue routines and a stopped scheduler — so the menu is rich
@@ -351,6 +347,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         addFooter(menu, daemonPid: daemonPid)
+    }
+
+    // Swap the cheap terminal rows for the engine's list once the warm cache
+    // has it. The engine list also carries teams/cloud contexts — those are
+    // dropped here because the cheap sources own them (titles from meta.json /
+    // tasks.db that the engine payload lacks); keeping both would double-count.
+    private func merged(_ cheap: [Session]) -> [Session] {
+        guard activeSessionsLoaded, !cachedActiveSessions.isEmpty else { return cheap }
+        let engineTerminals = cachedActiveSessions.filter {
+            $0.context != "teams" && $0.context != "cloud"
+        }
+        return LocalState.sessions(fromActive: engineTerminals)
+            + cheap.filter { $0.context != "terminal" }
     }
 
     // MARK: Sections
