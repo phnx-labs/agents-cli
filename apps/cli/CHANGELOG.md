@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Menu-bar Quick Dispatch preserves typed drafts when focus is stolen (RUSH-1592).** If another app activates while the `Cmd-Shift-O` capture panel is open, the panel can hide without destroying the note; the next summon restores the draft text plus selected screenshots, action, and agents. Return submits and clears the draft; Escape clears without dispatching. Source: `apps/cli/menubar/Sources/MenubarHelper/PromptPanel.swift`, `apps/cli/docs/menubar.md`.
 - **Urgent OpenClaw notifications use `--target` and `--message` (RUSH-1620).** `openclaw message send` requires a destination and the `--message` flag (not `--text`); without `--target` the send was invalid. Source: `apps/cli/src/lib/notify.ts`.
 - **High-consequence answers require env-proven operator identity (RUSH-1619).** `agents message --as <id>` alone is not verification; `AGENTS_OPERATOR_ID` must match the claimed id (and the id must be in `operators.yaml`). Source: `apps/cli/src/lib/operator.ts`, `apps/cli/src/commands/message.ts`.
 - **OpenCode plugin install only writes loader-visible direct `.ts`/`.js` files (RUSH-1617).** Drop nested and `.mjs`/`.cjs` installs that OpenCode never scans; multi-module plugins flatten into `~/.config/opencode/plugins/`. Source: `apps/cli/src/lib/plugins.ts`.

@@ -34,6 +34,11 @@ filter which agents appear in the picker, and
 preselected. Without a roster override, the picker uses the same roster as the
 menu bar's New Session submenu.
 
+If another app steals focus while you are typing, the panel hides but keeps the
+draft note plus the selected screenshots, action, and agents for the next
+`Cmd-Shift-O` summon. Return submits and clears the draft; Escape clears it
+without dispatching.
+
 ## The dropdown
 
 One rule shapes the menu: **attention floats up, context groups down.**
