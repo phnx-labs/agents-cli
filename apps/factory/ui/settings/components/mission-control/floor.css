@@ -250,6 +250,9 @@
 .swarmify-root .fitem .who { font-weight: 700; font-size: 13px; }
 .swarmify-root .fitem .path { color: var(--ds-text-dim); font-size: 11px; }
 .swarmify-root .fitem .when { margin-left: auto; color: var(--ds-text-dim); font-size: 11px; display: flex; align-items: center; gap: 8px; }
+/* Open/Resume-in-terminal action on feed cards (RUSH-1520). */
+.swarmify-root .fitem .open-term { display: inline-flex; align-items: center; gap: 4px; font-family: "Geist Mono", monospace; font-size: 10.5px; font-weight: 700; color: var(--brand-600, var(--brand)); background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); border-radius: 20px; padding: 2px 8px; cursor: pointer; }
+.swarmify-root .fitem .open-term:hover { border-color: var(--brand); color: var(--brand); }
 .swarmify-root .fitem .resp { font-size: 12.5px; color: var(--ds-text); line-height: 1.5; margin: 2px 0 8px; border-left: 2px solid var(--ds-border); padding-left: 10px; }
 .swarmify-root .fitem .resp .q { color: var(--status-pending); font-weight: 600; }
 /* Produced-artifact chips: what the agent SPAWNED (a team) or CREATED (tickets),

@@ -49,9 +49,14 @@ interface FeedItemProps {
   onFreeText: (agent: FloorAgent, text: string) => void
   onAttach: (agent: FloorAgent) => void
   onOpenPlan: (agent: FloorAgent, plan: PlanFile) => void
+  /**
+   * Open/resume this session in a live terminal (RUSH-1520). Present when the
+   * agent carries a sessionId (or a local terminal id) the host can focus.
+   */
+  onOpenTerminal?: (agent: FloorAgent) => void
 }
 
-function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeText, onAttach, onOpenPlan }: FeedItemProps) {
+function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeText, onAttach, onOpenPlan, onOpenTerminal }: FeedItemProps) {
   // Live heartbeat: only a running / stalled agent with a known last-activity stamp ticks.
   // The shared 1s ticker re-renders just this leaf, never the parent list.
   const now = useNow(1000)
@@ -146,6 +151,16 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
           {marker}
           {bgBadge}
           {ciBadge}
+          {onOpenTerminal && (a.sessionId || a.reply.kind === 'terminal' || a.reply.kind === 'tmux') && (
+            <button
+              type="button"
+              className="open-term"
+              title="Open / resume session in a terminal"
+              onClick={(e) => { e.stopPropagation(); onOpenTerminal(a) }}
+            >
+              <Icon name="external" size={11} /> Terminal
+            </button>
+          )}
           {tok && (
             <span className="tps">{!plain && <Icon name="zap" size={11} />}{tok}</span>
           )}
