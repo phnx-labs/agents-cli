@@ -79,6 +79,8 @@ let restore: KeychainBackend | null = null;
 let store: Map<string, StoredItem>;
 let fileTmpDir: string;
 
+let prevNoUsageTrack: string | undefined;
+
 beforeEach(() => {
   const m = makeMemoryBackend();
   store = m.store;
@@ -89,12 +91,19 @@ beforeEach(() => {
   // the secret-service fallback), leaking those into the counts asserted here.
   fileTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-bundles-storage-'));
   _resetFileStoreForTest({ fileDir: fileTmpDir });
+  // The timestamps suite asserts last_used stamping, which the hermetic
+  // default (tests/setup.ts) disables suite-wide. Stamping here only reaches
+  // the injected in-memory backend above, so it is safe to re-enable.
+  prevNoUsageTrack = process.env.AGENTS_NO_USAGE_TRACK;
+  delete process.env.AGENTS_NO_USAGE_TRACK;
 });
 
 afterEach(() => {
   setKeychainBackendForTest(restore);
   _resetFileStoreForTest();
   fs.rmSync(fileTmpDir, { recursive: true, force: true });
+  if (prevNoUsageTrack === undefined) delete process.env.AGENTS_NO_USAGE_TRACK;
+  else process.env.AGENTS_NO_USAGE_TRACK = prevNoUsageTrack;
 });
 
 describe('writeBundle + readBundle round-trip', () => {

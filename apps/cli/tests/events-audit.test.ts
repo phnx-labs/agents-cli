@@ -38,7 +38,10 @@ function makeTempHome(): string {
 function runCli(home: string, args: string[], extraEnv: Record<string, string> = {}) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', ...extraEnv },
+    // AGENTS_EVENTS_PATH is inherited from the hermetic fork default
+    // (tests/setup.ts); blank it so the child resolves the canonical
+    // HOME-derived log this suite asserts on ('' is falsy in the resolver).
+    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', AGENTS_EVENTS_PATH: '', ...extraEnv },
     encoding: 'utf-8',
   });
 }
