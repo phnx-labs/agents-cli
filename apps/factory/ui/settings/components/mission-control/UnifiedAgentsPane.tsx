@@ -1977,6 +1977,19 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         onApply={applyView}
         onSave={saveView}
         onDelete={deleteView}
+        feedFilters={{
+          group: floorGroup,
+          onGroup: setFloorGroup,
+          status: statusChips,
+          onToggleStatus: (s) => setStatusChips((cur) => (
+            cur.includes(s) ? cur.filter((c) => c !== s) : [...cur, s]
+          )),
+          abbrs: abbrChips,
+          availableAbbrs: Array.from(new Set(floorAgents.map((a) => a.abbr))).sort(),
+          onToggleAbbr: (a) => setAbbrChips((cur) => (
+            cur.includes(a) ? cur.filter((c) => c !== a) : [...cur, a]
+          )),
+        }}
       />
       {(needsAgents.length > 0 || pendingPlans.length > 0) && (
         <>

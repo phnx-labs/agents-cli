@@ -296,6 +296,13 @@
 .swarmify-root .pill.cirun { background: var(--status-pending-bg); color: var(--status-pending); }
 .swarmify-root .pill.bg { background: var(--status-pending-bg); color: var(--status-pending); border: 1px solid color-mix(in srgb, var(--status-pending) 45%, transparent); }
 .swarmify-root .savedviews { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 12px; align-items: center; }
+/* Feed header bar (RUSH-1526): Save view + group-by + status/agent filters in one row. */
+.swarmify-root .savedviews.feed-header-bar { gap: 6px; }
+.swarmify-root .savedviews .sv-sep { width: 1px; height: 16px; background: var(--ds-border-subtle); margin: 0 2px; flex: 0 0 auto; }
+.swarmify-root .savedviews .fpill { padding: 4px 10px; font-size: 11px; }
+.swarmify-root .savedviews .chip { font-family: "Geist Mono", monospace; font-size: 11px; color: var(--ds-text-muted); background: var(--ds-bg-recessed); border: 1px solid var(--ds-border); border-radius: 20px; padding: 4px 10px; cursor: pointer; user-select: none; }
+.swarmify-root .savedviews .chip:hover { border-color: var(--ds-text-dim); color: var(--ds-text); }
+.swarmify-root .savedviews .chip.on { color: var(--ds-text); border-color: var(--ds-text-dim); background: var(--ds-bg-elevated, var(--ds-bg)); font-weight: 700; }
 .swarmify-root .svchip { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--ds-border); color: var(--ds-text-muted); background: var(--ds-bg-panel); cursor: pointer; }
 .swarmify-root .svchip:hover { color: var(--ds-text); border-color: var(--ds-text-muted); }
 .swarmify-root .svchip.on { color: var(--brand); border-color: var(--brand); background: rgba(232, 93, 93, 0.1); }
