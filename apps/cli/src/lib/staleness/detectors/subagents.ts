@@ -1,5 +1,6 @@
 /**
  * Subagents detector. Claude: flat .md files under `<agentDir>/agents/`.
+ * Codex: flat .toml files under `<versionHome>/.codex/agents/`.
  * Droid: flat .md files under `<versionHome>/.factory/droids/`.
  * OpenClaw: subdirectories containing AGENTS.md under `<versionHome>/.openclaw/`.
  * Mirrors versions.ts:521-539.
@@ -11,16 +12,38 @@ import { capableAgents } from '../../capabilities.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
 import { lazyAgentMap } from '../writers/lazy-map.js';
 
-function buildClaudeDetector(): ResourceDetector {
+function buildFlatMdAgentsDetector(agent: AgentId, agentsRoot: string): ResourceDetector {
   return {
     kind: 'subagents',
-    agent: 'claude',
+    agent,
     list({ versionHome }: DetectArgs): string[] {
-      const agentsDir = path.join(versionHome, '.claude', 'agents');
+      const agentsDir = path.join(versionHome, agentsRoot, 'agents');
       if (!fs.existsSync(agentsDir)) return [];
       return fs.readdirSync(agentsDir)
         .filter(f => f.endsWith('.md'))
         .map(f => f.replace('.md', ''));
+    },
+  };
+}
+
+function buildClaudeDetector(): ResourceDetector {
+  return buildFlatMdAgentsDetector('claude', '.claude');
+}
+
+function buildGrokDetector(): ResourceDetector {
+  return buildFlatMdAgentsDetector('grok', '.grok');
+}
+
+function buildCodexDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'codex',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.codex', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.toml'))
+        .map(f => f.replace(/\.toml$/, ''));
     },
   };
 }
@@ -67,9 +90,42 @@ function buildOpenclawDetector(): ResourceDetector {
   };
 }
 
+function buildKimiDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'kimi',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      // Parent is `_agents-cli.yaml` (underscore-prefixed reserved name).
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.yaml') && !f.startsWith('_'))
+        .map(f => f.replace(/\.yaml$/, ''));
+    },
+  };
+}
+
+function buildOpenCodeDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'opencode',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.config', 'opencode', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.md'))
+        .map(f => f.replace(/\.md$/, ''));
+    },
+  };
+}
+
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   copilot: buildCopilotDetector,
+  grok: buildGrokDetector,
+  codex: buildCodexDetector,
+  kimi: buildKimiDetector,
+  opencode: buildOpenCodeDetector,
   droid: buildDroidDetector,
   openclaw: buildOpenclawDetector,
 };

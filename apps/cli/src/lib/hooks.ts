@@ -1140,6 +1140,9 @@ export function registerHooksToSettings(
   if (agentId === 'goose') {
     return registerHooksForGoose(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'cursor') {
+    return registerHooksForCursor(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   return { registered: [], errors: [] };
 }
 
@@ -1747,12 +1750,15 @@ function registerHooksForAntigravity(
       if (!hooks[agyEvent]) {
         hooks[agyEvent] = [];
       }
-      const list = hooks[agyEvent] as Array<{ command: string }>;
+      // Antigravity settings entries: command + optional matcher (tool scope).
+      // Without matcher every PreToolUse guard fires on ALL tools (RUSH-1353).
+      const list = hooks[agyEvent] as Array<{ command: string; matcher?: string }>;
 
       const existingIdx = list.findIndex(
         (e) => e && typeof e === 'object' && e.command === commandPath
       );
-      const entry = { command: commandPath };
+      const entry: { command: string; matcher?: string } = { command: commandPath };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
       if (existingIdx >= 0) {
         list[existingIdx] = entry;
       } else {
@@ -2307,8 +2313,7 @@ const GOOSE_EVENT_MAP: Record<string, string> = {
   AfterFileEdit: 'AfterFileEdit',
   BeforeShellExecution: 'BeforeShellExecution',
   AfterShellExecution: 'AfterShellExecution',
-  SubagentStart: 'SubagentStart',
-  SubagentStop: 'SubagentStop',
+  // SubagentStart/SubagentStop are not emitted by Goose — do not advertise them.
 };
 
 /** Managed Open Plugins directory name under ~/.agents/plugins/. */
@@ -2398,6 +2403,145 @@ function registerHooksForGoose(
     );
   } catch (err) {
     errors.push(`Failed to write goose hooks plugin: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical → Cursor CLI camelCase events.
+ *
+ * Only events verified to fire in cursor-agent CLI (not full IDE parity).
+ * Ticket RUSH-1326 note (2026-06): working = sessionStart, stop, preToolUse,
+ * postToolUse, beforeShellExecution, afterShellExecution, beforeReadFile,
+ * afterFileEdit. Also map SessionEnd / beforeSubmitPrompt / preCompact /
+ * subagent* which Cursor documents for agent hooks.
+ * Unmapped events (e.g. afterAgentResponse) are skipped.
+ */
+const CURSOR_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'sessionStart',
+  SessionEnd: 'sessionEnd',
+  Stop: 'stop',
+  UserPromptSubmit: 'beforeSubmitPrompt',
+  PreToolUse: 'preToolUse',
+  PostToolUse: 'postToolUse',
+  PostToolUseFailure: 'postToolUseFailure',
+  PreCompact: 'preCompact',
+  SubagentStart: 'subagentStart',
+  SubagentStop: 'subagentStop',
+  BeforeShellExecution: 'beforeShellExecution',
+  AfterShellExecution: 'afterShellExecution',
+  BeforeReadFile: 'beforeReadFile',
+  AfterFileEdit: 'afterFileEdit',
+};
+
+/**
+ * Register hooks for Cursor CLI (`cursor-agent`).
+ *
+ * Writes `~/.cursor/hooks.json` (under version home):
+ *   { "version": 1, "hooks": { event: [{ command, timeout?, matcher? }] } }
+ *
+ * GC: rewrite managed entries by command path under managedPrefixes; preserve
+ * user-authored entries whose command is outside managed roots.
+ */
+function registerHooksForCursor(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const configDir = path.join(versionHome, '.cursor');
+  const hooksPath = path.join(configDir, 'hooks.json');
+
+  type CursorEntry = {
+    command: string;
+    timeout?: number;
+    matcher?: string;
+  };
+
+  let existing: { version?: number; hooks?: Record<string, CursorEntry[]> } = { version: 1, hooks: {} };
+  if (fs.existsSync(hooksPath)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(hooksPath, 'utf-8'));
+      if (!existing.hooks || typeof existing.hooks !== 'object') existing.hooks = {};
+    } catch {
+      errors.push('Failed to parse existing hooks.json');
+      return { registered, errors };
+    }
+  }
+
+  // Desired managed entries keyed by event|command|matcher so a matcher or
+  // event change drops the stale entry instead of retaining it by command path alone.
+  const desiredManaged = new Set<string>();
+  for (const [hookName, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+    const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
+    if (!resolved) continue;
+    for (const event of hookDef.events) {
+      const cursorEvent = CURSOR_EVENT_MAP[event];
+      if (!cursorEvent) continue;
+      desiredManaged.add(`${cursorEvent}|${resolved}|${hookDef.matcher ?? ''}`);
+    }
+  }
+
+  // GC managed entries that are no longer in the manifest (by event+command+matcher)
+  const hooks: Record<string, CursorEntry[]> = {};
+  for (const [event, entries] of Object.entries(existing.hooks || {})) {
+    if (!Array.isArray(entries)) continue;
+    hooks[event] = entries.filter((e) => {
+      if (typeof e?.command !== 'string') return true;
+      if (!isManagedHookCommand(e.command, managedPrefixes)) return true;
+      return desiredManaged.has(`${event}|${e.command}|${e.matcher ?? ''}`);
+    });
+    if (hooks[event].length === 0) delete hooks[event];
+  }
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 30;
+
+    for (const event of hookDef.events) {
+      const cursorEvent = CURSOR_EVENT_MAP[event];
+      if (!cursorEvent) continue;
+
+      if (!hooks[cursorEvent]) hooks[cursorEvent] = [];
+
+      const entry: CursorEntry = { command: commandPath, timeout };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
+
+      const existingIdx = hooks[cursorEvent].findIndex(
+        (h) => h.command === entry.command && (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[cursorEvent][existingIdx] = entry;
+      } else {
+        hooks[cursorEvent].push(entry);
+      }
+
+      registered.push(`${name} -> ${cursorEvent}`);
+    }
+  }
+
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      hooksPath,
+      JSON.stringify({ version: 1, hooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write hooks.json: ${(err as Error).message}`);
   }
 
   return { registered, errors };

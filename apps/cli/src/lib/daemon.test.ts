@@ -22,6 +22,7 @@ import {
   readDaemonClaudeOAuthToken,
   buildDetachedDaemonEnv,
   getDaemonLaunch,
+  getAgentsInvocation,
   getAgentsBinPath,
   startDetached,
   writeOwnerOnlyServiceManifest,
@@ -161,6 +162,10 @@ describe('generateLaunchdPlist', () => {
     expect(plist).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
     // The PATH entry is always present so EnvironmentVariables is never empty.
     expect(plist).toContain('<key>PATH</key>');
+    // PATH pins the running Node's bin dir first and drops the stale hardcoded
+    // nvm version that bricked the daemon fleet-wide when it was pruned.
+    expect(plist).toContain(`<string>${path.dirname(process.execPath)}:`);
+    expect(plist).not.toContain('v24.0.0');
   });
 
   it('injects the token into EnvironmentVariables when configured', () => {
@@ -193,6 +198,57 @@ describe('generateSystemdUnit', () => {
     expect(generateSystemdUnit(readDaemonClaudeOAuthToken({ allowPrompt: true }))).toContain(
       'Environment=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc123',
     );
+  });
+
+  it('pins the running Node bin dir first on PATH and drops the stale hardcoded nvm version', () => {
+    const unit = generateSystemdUnit();
+    expect(unit).toContain(`Environment=PATH=${path.dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`);
+    expect(unit).not.toContain('v24.0.0');
+  });
+
+  it('pins a JavaScript install to the Node runtime that installed the service', () => {
+    const savedArgv1 = process.argv[1];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents daemon runtime '));
+    const indexJs = path.join(tmpDir, 'index.js');
+    fs.writeFileSync(indexJs, '');
+    process.argv[1] = indexJs;
+    try {
+      // Mirror systemdExecArg's quoting (backslashes escape for systemd) so
+      // the expectation holds on Windows paths too, not just POSIX ones.
+      const quote = (v: string) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+      expect(generateSystemdUnit()).toContain(
+        `ExecStart=${[process.execPath, indexJs, 'daemon', '_run'].map(quote).join(' ')}`,
+      );
+    } finally {
+      process.argv[1] = savedArgv1;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('service manifest CLI entry injection', () => {
+  it('uses the explicitly installed CLI entry instead of the lifecycle script entry', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-postinstall-'));
+    const installedEntry = path.join(tmpDir, 'dist', 'index.js');
+    const postinstallEntry = path.join(tmpDir, 'scripts', 'postinstall.js');
+    fs.mkdirSync(path.dirname(installedEntry), { recursive: true });
+    fs.mkdirSync(path.dirname(postinstallEntry), { recursive: true });
+    fs.writeFileSync(installedEntry, '');
+    fs.writeFileSync(postinstallEntry, '');
+
+    const savedArgv1 = process.argv[1];
+    process.argv[1] = postinstallEntry;
+    try {
+      const plist = generateLaunchdPlist(null, installedEntry);
+      const unit = generateSystemdUnit(null, installedEntry);
+      expect(plist).toContain(`<string>${installedEntry}</string>`);
+      expect(unit).toContain(installedEntry);
+      expect(plist).not.toContain(postinstallEntry);
+      expect(unit).not.toContain(postinstallEntry);
+    } finally {
+      process.argv[1] = savedArgv1;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -242,6 +298,80 @@ describe('getDaemonLaunch', () => {
     expect(command).toBe('/usr/local/bin/agents');
     expect(args).toEqual(['daemon', '_run']);
   });
+
+  // The fleet-wide crash-loop: `bin/agents` is a symlink to `dist/index.js`, so
+  // an extension check on the *link name* (`agents`) misses it, the daemon runs
+  // the shim's shebang, and `env node` lands on a pruned/ancient node.
+  it('launches an extension-less symlink to a .js entry through the Node runtime', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-symlink-'));
+    const indexJs = path.join(tmpDir, 'index.js');
+    fs.writeFileSync(indexJs, '#!/usr/bin/env node\n');
+    const link = path.join(tmpDir, 'agents');
+    fs.symlinkSync(indexJs, link);
+    try {
+      const { command, args } = getDaemonLaunch(link);
+      expect(command).toBe(process.execPath);
+      expect(args).toEqual([link, 'daemon', '_run']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // A real extension-less `#!/usr/bin/env node` shim (dev install) must also be
+  // pinned to process.execPath, not run bare off PATH.
+  it('launches an extension-less node-shebang shim through the Node runtime', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
+    const shim = path.join(tmpDir, 'agents');
+    fs.writeFileSync(shim, '#!/usr/bin/env -S node --no-warnings\nrequire("./index.js");\n');
+    try {
+      const { command, args } = getDaemonLaunch(shim);
+      expect(command).toBe(process.execPath);
+      expect(args).toEqual([shim, 'daemon', '_run']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  // A real compiled binary (no #!node shebang) runs directly — it owns its runtime.
+  it('runs a real compiled launcher (no node shebang) directly', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-native-'));
+    const bin = path.join(tmpDir, 'agents');
+    fs.writeFileSync(bin, '\x7fELF\x02\x01\x01\x00binary-not-a-script');
+    try {
+      const { command, args } = getDaemonLaunch(bin);
+      expect(command).toBe(bin);
+      expect(args).toEqual(['daemon', '_run']);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('getAgentsInvocation', () => {
+  // Regression for the #315 compiled-binary self-spawn bug: teams/message/profiles
+  // used to relaunch as `[process.execPath, process.argv[1], …]`. Under the bun
+  // standalone binary process.argv[1] is the virtual entry `/$bunfs/root/agents`,
+  // so the child became `agents /$bunfs/root/agents …` → "unknown command".
+  it('launches a .js entry through the Node runtime', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/opt/agents/dist/index.js');
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual(['/opt/agents/dist/index.js', 'run', 'claude']);
+  });
+
+  it('runs a native/compiled binary directly — never re-passes a bunfs entry', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/Users/me/.local/bin/agents');
+    expect(command).toBe('/Users/me/.local/bin/agents');
+    expect(args).toEqual(['run', 'claude']);
+    // The compiled binary is the entry; its own bunfs path must not appear as an arg.
+    expect(args.some((a) => a.includes('$bunfs'))).toBe(false);
+  });
+
+  it('resolves a bun virtual entry to the real binary (process.execPath), not the un-exec-able $bunfs path', () => {
+    const { command, args } = getAgentsInvocation(['run', 'claude'], '/$bunfs/root/agents');
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual(['run', 'claude']);
+    expect(command.includes('$bunfs')).toBe(false);
+  });
 });
 
 describe('getAgentsBinPath (sibling shim resolution)', () => {
@@ -289,6 +419,21 @@ describe('getAgentsBinPath (sibling shim resolution)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('resolves a Bun standalone virtual entry to its physical executable', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-bun-standalone-'));
+    const physicalBin = path.join(tmpDir, process.platform === 'win32' ? 'agents.exe' : 'agents');
+    fs.writeFileSync(physicalBin, '');
+    expect(getAgentsBinPath('/$bunfs/root/agents', physicalBin)).toBe(physicalBin);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses a Bun standalone virtual entry without a physical executable', () => {
+    const missingBin = path.join(os.tmpdir(), `agents-missing-${process.pid}`);
+    expect(() => getAgentsBinPath('/$bunfs/root/agents', missingBin)).toThrow(
+      `Cannot resolve agents CLI: Bun standalone executable not found at ${missingBin}`,
+    );
+  });
+
   it('refuses a sibling shim when its main entry is missing', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-shim-'));
     const browserJs = path.join(tmpDir, 'browser.js');
@@ -311,6 +456,7 @@ describe('getAgentsBinPath (sibling shim resolution)', () => {
     for (const file of [indexJs, browserJs, agentsBin, browserBin]) fs.writeFileSync(file, '');
     process.argv[1] = browserJs;
     let plist = generateLaunchdPlist();
+    expect(plist).toContain(`<string>${process.execPath}</string>`);
     expect(plist).toContain(`<string>${indexJs}</string>`);
     expect(plist).not.toContain(`<string>${browserJs}</string>`);
     process.argv[1] = browserBin;

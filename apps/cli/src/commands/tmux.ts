@@ -35,9 +35,11 @@ import {
   getTmuxVersion,
   hasSession,
   isTmuxInstalled,
+  isTmuxVersionSupported,
   killAll,
   killSession,
   listSessions,
+  MIN_TMUX_VERSION,
   readSessionMeta,
   sendKeys,
   splitPane,
@@ -96,13 +98,19 @@ export function registerTmuxCommands(program: Command): void {
   checkCmd.action((opts) => {
     const installed = isTmuxInstalled();
     const version = installed ? getTmuxVersion() : null;
+    const supported = isTmuxVersionSupported(version);
     if (opts.json) {
-      console.log(JSON.stringify({ installed, version, socket: getDefaultSocketPath() }));
+      console.log(JSON.stringify({ installed, supported, version, minimumVersion: MIN_TMUX_VERSION, socket: getDefaultSocketPath() }));
+      if (installed && !supported) process.exitCode = 1;
       return;
     }
-    if (installed) {
+    if (installed && supported) {
       console.log(chalk.green('tmux:'), version ?? '(version unknown)');
       console.log(chalk.gray(`socket: ${getDefaultSocketPath()}`));
+    } else if (installed) {
+      console.log(chalk.yellow('tmux:'), `${version ?? '(version unknown)'} — unsupported`);
+      console.log(chalk.gray(`  agents requires tmux ${MIN_TMUX_VERSION} or newer.`));
+      process.exitCode = 1;
     } else {
       console.log(chalk.yellow('tmux is not installed.'));
       console.log(chalk.gray(process.platform === 'darwin'

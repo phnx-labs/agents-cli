@@ -14,6 +14,14 @@ const execFileAsync = promisify(execFile);
 
 const WORKTREE_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
+/**
+ * Check if `dir` is inside a git repository (**async, worktree-correct**).
+ *
+ * Shells out to `git rev-parse --git-dir`, so it returns true from any
+ * subdirectory and for linked worktrees. Distinct from the synchronous,
+ * root-only `isGitRepo` in `lib/git.ts` (a `.git`-existence check): different
+ * semantics, so the two are intentionally **not** merged.
+ */
 export async function isGitRepo(dir: string): Promise<boolean> {
   try {
     await execFileAsync('git', ['rev-parse', '--git-dir'], { cwd: dir });

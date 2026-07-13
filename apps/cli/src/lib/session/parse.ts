@@ -55,11 +55,71 @@ function sanitizeEvent(e: SessionEvent): void {
   if (e.content) e.content = sanitizeForTerminal(e.content);
   if (e.command) e.command = sanitizeForTerminal(e.command);
   if (e.path) e.path = sanitizeForTerminal(e.path);
+  if (e.name) e.name = sanitizeForTerminal(e.name);
   if (e.output) e.output = sanitizeForTerminal(e.output);
   if (e.tool) e.tool = sanitizeForTerminal(e.tool);
   if (e.model) e.model = sanitizeForTerminal(e.model);
   if (e.mediaType) e.mediaType = sanitizeForTerminal(e.mediaType);
   if (e.args) e.args = sanitizeArgsDeep(e.args);
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function attachmentPath(block: any, source: any): string | undefined {
+  return firstString(
+    source?.path,
+    source?.file_path,
+    source?.filePath,
+    source?.url,
+    source?.ref,
+    block?.path,
+    block?.file_path,
+    block?.filePath,
+    block?.ref,
+  );
+}
+
+function attachmentName(block: any, source: any, filePath: string | undefined): string | undefined {
+  return firstString(
+    block?.name,
+    block?.title,
+    source?.name,
+    source?.filename,
+    source?.file_name,
+    source?.fileName,
+    filePath ? path.basename(filePath) : undefined,
+  );
+}
+
+function normalizedAttachmentEvent(
+  agent: SessionAgentId,
+  timestamp: string,
+  block: any,
+  source: any,
+  defaultMediaType: string,
+  sizeBytes: number,
+): SessionEvent {
+  const filePath = attachmentPath(block, source);
+  const name = attachmentName(block, source, filePath);
+  const explicitSize =
+    typeof source?.sizeBytes === 'number' ? source.sizeBytes :
+    typeof source?.size === 'number' ? source.size :
+    typeof block?.sizeBytes === 'number' ? block.sizeBytes :
+    undefined;
+  return {
+    type: 'attachment',
+    agent,
+    timestamp,
+    path: filePath,
+    name,
+    mediaType: firstString(source?.media_type, source?.mediaType, block?.media_type, block?.mediaType) || defaultMediaType,
+    sizeBytes: sizeBytes || explicitSize || 0,
+  };
 }
 
 /**
@@ -323,23 +383,13 @@ export function parseClaudeContent(content: string): SessionEvent[] {
             const source = block.source || {};
             if (source.type === 'base64') {
               const sizeBytes = Math.ceil(((source.data as string)?.length || 0) * 0.75);
-              events.push({
-                type: 'attachment',
-                agent: 'claude',
-                timestamp,
-                mediaType: source.media_type || 'image/png',
-                sizeBytes,
-              });
+              events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'image/png', sizeBytes));
+            } else {
+              events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'image/png', 0));
             }
           } else if (block.type === 'document') {
             const source = block.source || {};
-            events.push({
-              type: 'attachment',
-              agent: 'claude',
-              timestamp,
-              mediaType: source.media_type || 'application/pdf',
-              sizeBytes: 0,
-            });
+            events.push(normalizedAttachmentEvent('claude', timestamp, block, source, 'application/pdf', 0));
           } else if (block.type === 'tool_result') {
             const toolId = block.tool_use_id;
             const toolInfo = toolId ? toolUseMap.get(toolId) : undefined;
@@ -403,14 +453,25 @@ export function parseCodex(filePath: string): SessionEvent[] {
 }
 
 /**
- * Extract the target file path from a Codex apply_patch envelope. The patch body
+ * Extract target file path(s) from a Codex apply_patch envelope. The patch body
  * opens with `*** Begin Patch` and carries one or more file ops of the form
  * `*** Update File: <path>` / `*** Add File: <path>` / `*** Delete File: <path>`.
- * Returns the first file path found, or undefined for an unparseable body.
+ * Returns every path in order (a multi-file patch emits multiple paths so
+ * artifact discovery sees each file — RUSH-1410). Empty when unparseable.
  */
+export function applyPatchTargetPaths(input: string): string[] {
+  const paths: string[] = [];
+  const re = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm;
+  for (const m of input.matchAll(re)) {
+    const p = m[1].trim();
+    if (p) paths.push(p);
+  }
+  return paths;
+}
+
+/** @deprecated Prefer applyPatchTargetPaths — kept for single-file call sites. */
 function applyPatchTargetPath(input: string): string | undefined {
-  const m = input.match(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/m);
-  return m ? m[1].trim() : undefined;
+  return applyPatchTargetPaths(input)[0];
 }
 
 /**
@@ -545,24 +606,32 @@ export function parseCodexContent(content: string): SessionEvent[] {
         const rawName = payload.name || 'unknown';
         const input = typeof payload.input === 'string' ? payload.input : '';
         const isApplyPatch = rawName === 'apply_patch';
-        const patchPath = isApplyPatch ? applyPatchTargetPath(input) : undefined;
-        // Normalize apply_patch to the shared Edit tool so it flows through
-        // artifact discovery (WRITE_TOOLS) and the Edit summarizer.
+        // Multi-file patches: one tool_use per file so artifact discovery sees
+        // every path (RUSH-1410). Single-file / non-patch keep one event.
+        const patchPaths = isApplyPatch ? applyPatchTargetPaths(input) : [];
         const tool = isApplyPatch ? 'Edit' : rawName;
-        const args: any = { input: input.length > 500 ? input.slice(0, 497) + '...' : input };
-        if (patchPath) args.file_path = patchPath;
+        const truncatedInput = input.length > 500 ? input.slice(0, 497) + '...' : input;
 
-        const callId = payload.call_id || payload.id;
-        if (callId) callMap.set(callId, { name: tool, args });
+        const emitOne = (patchPath: string | undefined) => {
+          const args: any = { input: truncatedInput };
+          if (patchPath) args.file_path = patchPath;
+          const callId = payload.call_id || payload.id;
+          if (callId) callMap.set(callId, { name: tool, args });
+          events.push({
+            type: 'tool_use',
+            agent: 'codex',
+            timestamp,
+            tool,
+            args,
+            path: patchPath,
+          });
+        };
 
-        events.push({
-          type: 'tool_use',
-          agent: 'codex',
-          timestamp,
-          tool,
-          args,
-          path: patchPath,
-        });
+        if (isApplyPatch && patchPaths.length > 0) {
+          for (const p of patchPaths) emitOne(p);
+        } else {
+          emitOne(undefined);
+        }
       } else if (ptype === 'custom_tool_call_output') {
         const callId = payload.call_id || payload.id;
         const callInfo = callId ? callMap.get(callId) : undefined;
@@ -1564,7 +1633,7 @@ export function parseDroid(filePath: string): SessionEvent[] {
       } else if (block.type === 'image') {
         const source = block.source || {};
         const sizeBytes = source.type === 'base64' ? Math.ceil(((source.data as string)?.length || 0) * 0.75) : 0;
-        events.push({ type: 'attachment', agent: 'droid', timestamp, mediaType: source.media_type || 'image/png', sizeBytes });
+        events.push(normalizedAttachmentEvent('droid', timestamp, block, source, 'image/png', sizeBytes));
       }
     }
   }

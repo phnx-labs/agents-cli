@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, type MailboxMessage } from './mailbox.js';
+import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, isExpired, sweepExpired, type MailboxMessage } from './mailbox.js';
 import { blockIdForSession, getBlockReceipts, publishBlock } from './feed.js';
 
 function tmpRoot(): string {
@@ -134,6 +134,40 @@ describe('mailbox', () => {
     const [msg] = drain(box);
     expect(msg.from).toBe('operator@s0');
     expect(msg.text).toContain('zion:/Users/m/mock.png');
+  });
+
+  it('stamps expiresAt when ttlSeconds is provided', () => {
+    const box = mailboxDir(BOX, tmpRoot());
+    const msgId = enqueue(box, { to: BOX, text: 'ttl', ttlSeconds: 60 });
+    const pending = peek(box);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].expiresAt).toBeTruthy();
+    expect(Date.parse(pending[0].expiresAt!)).toBeGreaterThan(Date.now());
+  });
+
+  it('drain/peek drop expired messages to consumed with a dropped marker', () => {
+    const box = mailboxDir(BOX, tmpRoot());
+    const now = new Date('2026-01-01T00:00:00.000Z');
+    const msgId = enqueue(box, { to: BOX, text: 'fresh', ttlSeconds: 30 });
+    // backdate the record so it is already expired
+    const file = path.join(box, 'inbox', `${msgId}.json`);
+    const record = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    record.ts = new Date(now.getTime() - 60_000).toISOString();
+    record.expiresAt = new Date(now.getTime() - 1).toISOString();
+    fs.writeFileSync(file, JSON.stringify(record, null, 2), 'utf-8');
+
+    expect(drain(box, BOX, now)).toEqual([]);
+    const consumed = fs.readdirSync(path.join(box, 'consumed'));
+    expect(consumed).toHaveLength(1);
+    const archived = JSON.parse(fs.readFileSync(path.join(box, 'consumed', consumed[0]), 'utf-8'));
+    expect(archived.dropped).toBe('expired');
+    expect(archived.text).toBe('fresh');
+  });
+
+  it('isExpired checks expiry against a provided time', () => {
+    const msg: MailboxMessage = { msgId: 'x', to: BOX, ts: '', text: '', expiresAt: '2026-01-01T00:00:00.000Z' };
+    expect(isExpired(msg, new Date('2026-01-01T00:00:01.000Z'))).toBe(true);
+    expect(isExpired(msg, new Date('2025-12-31T23:59:59.000Z'))).toBe(false);
   });
 
   it('surfaces consumed receipts to the feed store when a message carries blockId', () => {

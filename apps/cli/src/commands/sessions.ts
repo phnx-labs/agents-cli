@@ -29,10 +29,10 @@ import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.
 import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
-import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
+import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
-import { runRemoteSessions, buildForwardedArgs } from '../lib/session/remote.js';
+import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, type FilterOptions } from '../lib/session/render.js';
 import { renderMarkdown } from '../lib/markdown.js';
@@ -74,6 +74,8 @@ interface SessionsOptions extends SessionFilterOptions {
   artifacts?: boolean;
   artifact?: string;
   active?: boolean;
+  /** Emit the on-disk session-scan directories (requires --json); for watchers. */
+  roots?: boolean;
   cloud?: boolean;
   host?: string[];
   /** Group the listing by directory and drop the id/version columns. */
@@ -664,8 +666,10 @@ export function serializeSessionsJson(sessions: SessionMeta[]): string {
  */
 async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
   // Forward the caller's own filters (query, --limit, --since, …) minus --host,
-  // and guarantee --json so each peer answers with a parseable array.
-  const forwarded = buildForwardedArgs(process.argv, new Set(hosts));
+  // and guarantee --json so each peer answers with a parseable array. Force
+  // whole-index scope: an explicit --host means "that box's index", not the
+  // slice that happens to sit under the peer's SSH-login home dir.
+  const forwarded = ensureWholeIndex(buildForwardedArgs(process.argv, new Set(hosts)));
   if (!forwarded.includes('--json')) forwarded.push('--json');
   const { sessions } = await gatherRemoteList(forwarded, hosts);
   process.stdout.write(serializeSessionsJson(sessions));
@@ -907,6 +911,15 @@ async function sessionsAction(query: string | undefined, options: SessionsOption
   applyAgentShorthands(options);
   if (options.device && options.device.length > 0) {
     options.host = [...(options.host ?? []), ...options.device];
+  }
+
+  // --roots: emit the local session-scan directories, per agent, as JSON. A pure
+  // machine-readable query (no listing/render) — external watchers (the Factory
+  // extension's fs.watch) read it to track the same dirs the CLI scans, instead
+  // of hardcoding `~/.claude|.codex|.gemini`. Always local; ignores other flags.
+  if (options.roots) {
+    process.stdout.write(JSON.stringify(getSessionRoots(), null, 2) + '\n');
+    return;
   }
 
   // --host WITHOUT --active. `--json` fans the recent listing out and emits ONE
@@ -2291,6 +2304,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--artifacts', 'List all files written or edited during a session')
     .option('--artifact <name>', 'Read a specific artifact by filename or path (outputs to stdout)')
     .option('--active', 'Show only sessions running right now across terminals, teams, cloud, and headless agents')
+    .option('--roots', 'With --json: emit the on-disk directories scanned for session transcripts, per agent (for external watchers)')
     .option('--local', 'Only this machine — skip the cross-machine SSH fan-out (default listing and --active)')
     .option('--waiting', 'With --active: show only sessions waiting on your input (exits non-zero if any)')
     .option('--tree', 'Group the listing by directory; drops the id/version columns for readability')

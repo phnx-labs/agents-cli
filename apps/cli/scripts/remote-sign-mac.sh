@@ -61,10 +61,17 @@ log "remote apps/cli:  $SIGN_HOST:$HOST_CLI"
 log "staging build inputs on $SIGN_HOST ..."
 ssh "$SIGN_HOST" "mkdir -p '$HOST_CLI/src/lib/secrets' '$HOST_CLI/scripts' '$HOST_CLI/bin' '$HOST_CLI/menubar'"
 
-rsync -az "$LOCAL_CLI/src/lib/secrets/keychain-helper.swift" \
-          "$SIGN_HOST:$HOST_CLI/src/lib/secrets/"
+# Full src tree + package manifest: the standalone CLI binary is compiled from
+# src/ with `bun build --compile` (scripts/build-bin.sh), which resolves its
+# npm imports from node_modules — the remote script runs `bun install` first.
+rsync -az --delete --exclude '__tests__/' --exclude '*.test.ts' \
+          "$LOCAL_CLI/src/" "$SIGN_HOST:$HOST_CLI/src/"
+rsync -az "$LOCAL_CLI/package.json" "$LOCAL_CLI/bun.lock" "$SIGN_HOST:$HOST_CLI/"
 rsync -az "$LOCAL_CLI/scripts/keychain-entitlements.plist" \
           "$LOCAL_CLI/scripts/build-keychain-helper.sh" \
+          "$LOCAL_CLI/scripts/build-bin.sh" \
+          "$LOCAL_CLI/scripts/sign-cli-binary.sh" \
+          "$LOCAL_CLI/scripts/bun-jit-entitlements.plist" \
           "$SIGN_HOST:$HOST_CLI/scripts/"
 # Menu-bar Swift package — exclude build outputs so we don't ship stale artifacts.
 rsync -az --delete --exclude '.build/' --exclude 'dist/' \
@@ -115,6 +122,9 @@ agents secrets exec apple.com -- bash -c '
   echo "== pin sha256 of the notarized keychain binary =="
   shasum -a 256 "bin/Agents CLI.app/Contents/MacOS/Agents CLI" > "scripts/Agents CLI.app.sha256"
   cat "scripts/Agents CLI.app.sha256"
+  echo "== standalone agents binary: bun build + codesign + notarize =="
+  bun install --frozen-lockfile
+  scripts/sign-cli-binary.sh
 '
 REMOTE_EOF
 } > "$BUILD_SCRIPT"
@@ -132,6 +142,8 @@ mkdir -p "$LOCAL_CLI/bin"
 rsync -az --delete "$SIGN_HOST:$HOST_CLI/bin/Agents CLI.app"   "$LOCAL_CLI/bin/"
 rsync -az --delete "$SIGN_HOST:$HOST_CLI/bin/MenubarHelper.app" "$LOCAL_CLI/bin/"
 rsync -az "$SIGN_HOST:$HOST_CLI/scripts/Agents CLI.app.sha256" "$LOCAL_CLI/scripts/Agents CLI.app.sha256"
+rsync -az "$SIGN_HOST:$HOST_CLI/bin/agents-macos" "$LOCAL_CLI/bin/agents-macos"
+rsync -az "$SIGN_HOST:$HOST_CLI/scripts/agents-cli-bin.sha256" "$LOCAL_CLI/scripts/agents-cli-bin.sha256"
 ok "bundles pulled back"
 
 # ----- 4. Local sanity: recompute the sha over the pulled Mach-O and assert match -----
@@ -148,5 +160,13 @@ ok "keychain helper sha verified: $actual"
 
 [[ -d "$LOCAL_CLI/bin/MenubarHelper.app" ]] || die "menu-bar helper bundle missing after pull-back"
 ok "menu-bar helper bundle present: bin/MenubarHelper.app"
+
+# Same integrity assert for the standalone CLI binary (issue #315): the pulled
+# bin/agents-macos must match the sha pin its sign run produced.
+expected_cli="$(cut -d ' ' -f 1 "$LOCAL_CLI/scripts/agents-cli-bin.sha256")"
+actual_cli="$("${SHA_TOOL[@]}" "$LOCAL_CLI/bin/agents-macos" | cut -d ' ' -f 1)"
+[[ "$actual_cli" == "$expected_cli" ]] \
+  || die "standalone agents binary sha mismatch after pull-back: expected $expected_cli, got $actual_cli"
+ok "standalone agents binary sha verified: $actual_cli"
 
 ok "signed bundles ready in $LOCAL_CLI/bin — 'bun run build' will package them."

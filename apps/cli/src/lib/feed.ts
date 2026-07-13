@@ -25,6 +25,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { getFeedDir, getUserAgentsDir } from './state.js';
+import { isHighConsequenceAllowed } from './operator.js';
 
 export interface BlockOption {
   label: string;
@@ -52,10 +53,14 @@ export interface MessageReceipt {
 export interface AnswerRecord {
   /** ISO-8601 timestamp of when the answer was recorded. */
   answeredAt: string;
-  /** Surface that recorded the answer (e.g. 'feed', 'terminal', 'tmux', 'cloud'). */
+  /** Surface that recorded the answer (e.g. 'feed', 'terminal', 'tmux', 'cloud', 'policy'). */
   answeredFrom: string;
   /** Optional operator/agent label recorded as the sender. */
   answeredBy?: string;
+  /** Operator id from the local registry, if verified. */
+  operatorId?: string;
+  /** Whether the operator identity was verified against the registry. */
+  verified?: boolean;
 }
 
 export interface OpenBlock {
@@ -70,12 +75,34 @@ export interface OpenBlock {
   notificationType?: string;
   ticket?: string;
   pr?: string;
+  /** Worktree slug under `.agents/worktrees/` — soft outcome when no ticket/PR. */
+  worktreeSlug?: string;
+  /** Epic / initiative label when no ticket/PR/worktree is known. */
+  epic?: string;
+  /** Block class: approval has a safe default; decision requires human choice. */
+  blockClass?: 'approval' | 'decision';
+  /** Consequence tag for authz. 'high' gates merge/deploy/admin-style answers. */
+  consequence?: 'normal' | 'high' | string;
+  /** Operator ids allowed to answer a high-consequence block. Admins always pass. */
+  allowedOperators?: string[];
+  /** Timeout in minutes before default-on-no-answer policy fires. */
+  timeoutMinutes?: number;
+  /** Safe default answer for approval-class blocks. */
+  safeDefault?: string;
+  /** Cost-of-delay for notification routing: low/medium/high. */
+  costOfDelay?: 'low' | 'medium' | 'high';
   /** Set once the block has been answered; see `recordAnswer`. */
   answer?: AnswerRecord;
   /** Per-message delivery receipts for answers to this block. */
   receipts?: MessageReceipt[];
   /** ISO-8601 timestamp when the agent continued past the block. */
   continuedAt?: string;
+  /** ISO-8601 timestamp when an urgent block was paged to the phone. */
+  notifiedAt?: string;
+  /** ISO-8601 timestamp when the approval safe-default was applied. */
+  defaultedAt?: string;
+  /** ISO-8601 timestamp when a decision block was hard-parked. */
+  parkedAt?: string;
 }
 
 /**
@@ -122,24 +149,48 @@ export function readBlock(blockId: string, root?: string): OpenBlock | undefined
   return parsed as OpenBlock;
 }
 
+export type RecordAnswerResult =
+  | { ok: true }
+  | { ok: false; existing: AnswerRecord }
+  | { ok: false; unauthorized: true; reason: string };
+
 /**
  * Atomically claim the first answer for a block. Returns `{ ok: true }` when
  * this call is the first to answer; returns `{ ok: false, existing }` when a
  * different surface already answered the block. The marker file is created
  * with `O_EXCL` so two concurrent claimers cannot both succeed.
+ *
+ * High-consequence blocks require a verified operator identity. Unverified
+ * answers (no operatorId or not in the registry/allowed list) are refused.
  */
 export function recordAnswer(
   blockId: string,
-  answer: { answeredBy?: string; answeredFrom: string },
+  answer: { answeredBy?: string; answeredFrom: string; operatorId?: string; verified?: boolean },
   root?: string,
-): { ok: true } | { ok: false; existing: AnswerRecord } {
+): RecordAnswerResult {
   const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  const operatorId = answer.operatorId;
+
+  if (block?.consequence && block.consequence !== 'normal') {
+    // Operators live in ~/.agents/operators.yaml — never the feed store root.
+    if (!operatorId || answer.verified !== true || !isHighConsequenceAllowed(block.consequence, operatorId)) {
+      return {
+        ok: false,
+        unauthorized: true,
+        reason: `High-consequence block '${block.consequence}' requires a verified, authorized operator.`,
+      };
+    }
+  }
+
   ensureDir(answeredDir(dir));
   const marker = path.join(answeredDir(dir), `${blockId}.json`);
   const record: AnswerRecord = {
     answeredAt: new Date().toISOString(),
     answeredFrom: answer.answeredFrom,
     answeredBy: answer.answeredBy,
+    operatorId: answer.operatorId,
+    verified: answer.verified,
   };
 
   // Try to create the answered marker atomically.
@@ -161,7 +212,6 @@ export function recordAnswer(
   }
 
   // Marker created successfully -- mirror the answer into the block file.
-  const block = readBlock(blockId, dir);
   if (block) {
     block.answer = record;
     publishBlock(block, dir);
@@ -179,9 +229,18 @@ export function isBlockAnswered(blockId: string, root?: string): boolean {
   return fs.existsSync(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
 }
 
+/** Receipt lifecycle rank — higher means further along; never regress. */
+const RECEIPT_STATUS_RANK: Record<MessageReceipt['status'], number> = {
+  queued: 0,
+  consumed: 1,
+  continued: 2,
+};
+
 /**
  * Record a delivery-receipt transition for a message tied to a block.
- * Updates the receipts list in the block file (last receipt per msgId wins).
+ * Updates the receipts list in the block file. Status is monotonic
+ * (queued → consumed → continued): a late `queued` write cannot overwrite
+ * an already-recorded `consumed`/`continued` (race with mailbox drain).
  */
 export function recordMessageReceipt(
   blockId: string,
@@ -193,8 +252,15 @@ export function recordMessageReceipt(
   if (!block) return;
   const receipts = block.receipts ?? [];
   const idx = receipts.findIndex((r) => r.msgId === receipt.msgId);
-  if (idx >= 0) receipts[idx] = receipt;
-  else receipts.push(receipt);
+  if (idx >= 0) {
+    const prev = receipts[idx];
+    if (RECEIPT_STATUS_RANK[receipt.status] < RECEIPT_STATUS_RANK[prev.status]) {
+      return; // do not regress
+    }
+    receipts[idx] = receipt;
+  } else {
+    receipts.push(receipt);
+  }
   block.receipts = receipts;
   publishBlock(block, dir);
 }
@@ -210,6 +276,33 @@ export function recordContinued(blockId: string, root?: string): void {
   const block = readBlock(blockId, dir);
   if (!block) return;
   block.continuedAt = new Date().toISOString();
+  publishBlock(block, dir);
+}
+
+/** Mark a decision-class block as hard-parked (no safe default existed). */
+export function recordParked(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  block.parkedAt = new Date().toISOString();
+  publishBlock(block, dir);
+}
+
+/** Mark that the approval safe-default was applied by policy. */
+export function recordDefaulted(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  block.defaultedAt = new Date().toISOString();
+  publishBlock(block, dir);
+}
+
+/** Mark that an urgent block was paged to the phone. */
+export function recordNotified(blockId: string, root?: string): void {
+  const dir = root ?? getFeedDir();
+  const block = readBlock(blockId, dir);
+  if (!block) return;
+  block.notifiedAt = new Date().toISOString();
   publishBlock(block, dir);
 }
 
@@ -483,6 +576,28 @@ def main():
     }
     if notification_type:
         block["notificationType"] = notification_type
+
+    # Optional multi-operator control metadata passed by the agent in the
+    # AskUserQuestion tool_input. Defaults keep the existing behavior.
+    controls = payload.get("tool_input", {}) if hook_event != "Notification" else {}
+    block_class = controls.get("blockClass") if isinstance(controls, dict) else None
+    if block_class in ("approval", "decision"):
+        block["blockClass"] = block_class
+    consequence = controls.get("consequence") if isinstance(controls, dict) else None
+    if consequence:
+        block["consequence"] = consequence
+    allowed = controls.get("allowedOperators") if isinstance(controls, dict) else None
+    if isinstance(allowed, list):
+        block["allowedOperators"] = [str(a) for a in allowed]
+    timeout = controls.get("timeoutMinutes") if isinstance(controls, dict) else None
+    if isinstance(timeout, (int, float)) and timeout > 0:
+        block["timeoutMinutes"] = int(timeout)
+    safe_default = controls.get("safeDefault") if isinstance(controls, dict) else None
+    if isinstance(safe_default, str):
+        block["safeDefault"] = safe_default
+    cost = controls.get("costOfDelay") if isinstance(controls, dict) else None
+    if cost in ("low", "medium", "high"):
+        block["costOfDelay"] = cost
 
     # Publishing a new question clears any stale answered marker from the
     # previous question in this session.

@@ -9,12 +9,14 @@ using System.Windows.Forms;
 namespace ComputerHelperWin;
 
 /// <summary>
-/// Screen capture, scoped like the macOS helper (Screenshot.swift): the target
-/// pid is required, and the same params pick the mode —
-///   list=true        -> enumerate the pid's top-level windows (no image)
-///   display=true     -> capture the whole display the target window is on
-///   window_id=&lt;hwnd&gt; -> capture exactly that window
-///   (default)        -> capture the pid's largest on-screen window
+/// Screen capture, scoped like the macOS helper (Screenshot.swift). The params
+/// pick the mode; pid is required for every mode EXCEPT a full-display capture,
+/// which needs no target app (mirrors macOS `screenshot --display`) —
+///   list=true        -> enumerate the pid's top-level windows (no image); pid required
+///   display=true     -> capture a whole display: the monitor the target window is
+///                       on when pid is given, else the primary screen (pid optional)
+///   window_id=&lt;hwnd&gt; -> capture exactly that window; pid required
+///   (default)        -> capture the pid's largest on-screen window; pid required
 /// Result keys match what the CLI consumes from the macOS helper
 /// (src/commands/computer.ts): image_data (base64 PNG), width, height,
 /// origin [x,y], scale — plus mode/window_id/title for scoped captures, and
@@ -27,13 +29,42 @@ public static class Screenshot
     public static Dictionary<string, object?> Capture(JsonElement @params)
     {
         if (@params.ValueKind != JsonValueKind.Object)
-            throw RpcError.Invalid("screenshot needs `pid`");
-        int pid = P.Int(@params, "pid");
+            throw RpcError.Invalid("screenshot needs params");
         bool listOnly = P.BoolOr(@params, "list", false);
         bool display = P.BoolOr(@params, "display", false);
         int? windowId = @params.TryGetProperty("window_id", out var wv) && wv.ValueKind == JsonValueKind.Number
             ? wv.GetInt32() : null;
+        // pid is optional for a full-display capture (mirrors the macOS
+        // `screenshot --display` path, which needs no app). Every other mode
+        // still requires it — enforced below once we know the mode.
+        int? pidOpt = @params.TryGetProperty("pid", out var pv) && pv.ValueKind == JsonValueKind.Number
+            ? pv.GetInt32() : null;
 
+        // Whole-screen capture: with a pid, grab the monitor that pid's window
+        // sits on; without one, grab the primary screen. No process needed.
+        if (display)
+        {
+            Screen screen;
+            if (pidOpt is int dpid)
+            {
+                var dwindows = TopLevelWindows(dpid);
+                if (dwindows.Count == 0) throw RpcError.AppMissing(dpid);
+                var anchor = dwindows.FirstOrDefault(w => !w.Minimized) ?? dwindows[0];
+                screen = Screen.FromHandle(anchor.Hwnd);
+            }
+            else
+            {
+                screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
+            }
+            return Encode(screen.Bounds, new()
+            {
+                ["mode"] = "display",
+                ["display_id"] = screen.DeviceName,
+            });
+        }
+
+        // list + window capture operate on a specific process's windows.
+        int pid = pidOpt ?? throw RpcError.Invalid("missing int param: pid");
         var windows = TopLevelWindows(pid);
         if (windows.Count == 0) throw RpcError.AppMissing(pid);
 
@@ -56,19 +87,6 @@ public static class Screenshot
                 ["windows"] = entries,
                 ["window_count"] = entries.Count,
             };
-        }
-
-        if (display)
-        {
-            // The display the target window sits on (mirrors the macOS
-            // captureDisplay: whole screen, composites stacked modals).
-            var anchor = windows.FirstOrDefault(w => !w.Minimized) ?? windows[0];
-            var screen = Screen.FromHandle(anchor.Hwnd);
-            return Encode(screen.Bounds, new()
-            {
-                ["mode"] = "display",
-                ["display_id"] = screen.DeviceName,
-            });
         }
 
         WindowInfo target;

@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { parseCodex, parseCodexContent, summarizeToolUse } from '../parse.js';
+import { parseCodex, parseCodexContent, summarizeToolUse, applyPatchTargetPaths } from '../parse.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = path.join(here, '..', 'testdata', 'codex-custom-tools.jsonl');
@@ -32,6 +32,46 @@ describe('parseCodex apply_patch (custom_tool_call)', () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({ success: true });
     expect(results[0].output).toContain('Updated the following files');
+  });
+
+  // RUSH-1410: a single apply_patch body may touch many files — each must surface.
+  test('multi-file apply_patch emits one Edit tool_use per file path', () => {
+    const patch = [
+      '*** Begin Patch',
+      '*** Update File: /tmp/proj/a.ts',
+      '@@',
+      '-a',
+      '+A',
+      '*** Add File: /tmp/proj/b.ts',
+      '+export const b = 1;',
+      '*** Delete File: /tmp/proj/c.ts',
+      '*** End Patch',
+    ].join('\n');
+    expect(applyPatchTargetPaths(patch)).toEqual([
+      '/tmp/proj/a.ts',
+      '/tmp/proj/b.ts',
+      '/tmp/proj/c.ts',
+    ]);
+
+    const content = JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-07-01T00:00:00Z',
+      payload: {
+        type: 'custom_tool_call',
+        id: 'ctc_multi',
+        call_id: 'call_multi',
+        name: 'apply_patch',
+        input: patch,
+      },
+    });
+    const events = parseCodexContent(content);
+    const edits = events.filter((e) => e.type === 'tool_use' && e.tool === 'Edit');
+    expect(edits).toHaveLength(3);
+    expect(edits.map((e) => e.path)).toEqual([
+      '/tmp/proj/a.ts',
+      '/tmp/proj/b.ts',
+      '/tmp/proj/c.ts',
+    ]);
   });
 });
 

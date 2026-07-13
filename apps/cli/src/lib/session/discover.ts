@@ -458,6 +458,45 @@ export function getAgentSessionDirs(agent: string, subdir: string): string[] {
   return dirs;
 }
 
+/**
+ * The (agent, subdir) pairs `discoverSessions` walks for JSONL transcripts —
+ * the single source of truth for which directories hold live session files.
+ * `getSessionRoots` expands each pair to its concrete directories so a consumer
+ * (the Factory extension's fs.watch, see issue #741) can configure its watcher
+ * from the CLI instead of hardcoding `~/.claude|.codex|.gemini`. Adding a new
+ * on-disk agent here makes every consumer watch it automatically.
+ */
+const SESSION_ROOT_SPECS: ReadonlyArray<{ agent: SessionAgentId; subdir: string }> = [
+  { agent: 'claude', subdir: 'projects' },
+  { agent: 'codex', subdir: 'sessions' },
+  { agent: 'gemini', subdir: 'tmp' },
+  { agent: 'antigravity', subdir: 'conversations' },
+  { agent: 'droid', subdir: 'sessions' },
+  { agent: 'kimi', subdir: 'sessions' },
+];
+
+/** A session-agent's on-disk watch roots (every version home + backup mirror). */
+export interface SessionRoots {
+  agent: SessionAgentId;
+  /** Absolute directories that hold this agent's transcripts, existing right now. */
+  dirs: string[];
+}
+
+/**
+ * The directories `agents sessions` scans for each on-disk session agent,
+ * resolved to what exists on this machine. Emitted by `agents sessions --roots
+ * --json` so external watchers stay in lockstep with the CLI's discovery paths.
+ * Agents with no directories present are omitted.
+ */
+export function getSessionRoots(): SessionRoots[] {
+  const out: SessionRoots[] = [];
+  for (const { agent, subdir } of SESSION_ROOT_SPECS) {
+    const dirs = getAgentSessionDirs(agent, subdir);
+    if (dirs.length > 0) out.push({ agent, dirs });
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Claude account info
 // ---------------------------------------------------------------------------
