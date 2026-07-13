@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, jobRunsOnThisDevice, type JobConfig } from './routines.js';
+import * as yaml from 'yaml';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, jobRunsOnThisDevice, checkJobDeviceEligibility, type JobConfig } from './routines.js';
 import { getRoutinesDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
@@ -110,6 +112,39 @@ describe('default execution mode (RUSH-1595: plan -> auto)', () => {
   });
 });
 
+describe('writeJob atomic persistence', () => {
+  it('round-trips a job through an atomic write and leaves no temp files', () => {
+    ensureAgentsDir();
+    const name = '__test-atomic-write-routine__';
+    const routinesDir = getRoutinesDir();
+    const file = path.join(routinesDir, `${name}.yml`);
+    const config: JobConfig = {
+      name,
+      schedule: '0 3 * * *',
+      agent: 'claude',
+      prompt: 'round-trip check',
+      mode: 'plan',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+    } as JobConfig;
+    try {
+      writeJob(config);
+      const read = readJob(name);
+      expect(read).not.toBeNull();
+      expect(read!.name).toBe(name);
+      expect(read!.agent).toBe('claude');
+      expect(read!.schedule).toBe('0 3 * * *');
+      expect(read!.prompt).toBe('round-trip check');
+
+      const leftovers = fs.readdirSync(routinesDir).filter((f) => f.startsWith(`${name}.yml.tmp-`));
+      expect(leftovers).toEqual([]);
+    } finally {
+      deleteJob(name);
+    }
+  });
+});
+
 describe('normalizeTriggerEvent', () => {
   it('maps canonical names and aliases', () => {
     expect(normalizeTriggerEvent('pull_request')).toBe('pull_request');
@@ -125,19 +160,29 @@ describe('normalizeTriggerEvent', () => {
   });
 });
 
-describe('validateJob — device', () => {
-  it('accepts a job pinned to a device', () => {
-    expect(validateJob(baseJob({ schedule: '0 3 * * *', device: 'yosemite-s0' }))).toEqual([]);
+describe('validateJob — devices', () => {
+  it('accepts a job with a devices allowlist', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0'] }))).toEqual([]);
   });
 
-  it('rejects an empty device', () => {
-    const errors = validateJob(baseJob({ schedule: '0 3 * * *', device: '  ' }));
-    expect(errors.some((e) => /device must be a non-empty device name/.test(e))).toBe(true);
+  it('accepts a job with multiple devices', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', devices: ['yosemite-s0', 'mac-mini'] }))).toEqual([]);
   });
 
-  it('rejects a non-string device', () => {
-    const errors = validateJob(baseJob({ schedule: '0 3 * * *', device: 42 as never }));
-    expect(errors.some((e) => /device must be a non-empty device name/.test(e))).toBe(true);
+  it('rejects a non-array devices', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', devices: 'yosemite-s0' as never }));
+    expect(errors.some((e) => /devices must be an array/.test(e))).toBe(true);
+  });
+
+  it('rejects an empty-string entry', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', devices: [''] }));
+    expect(errors.some((e) => /each entry in devices/.test(e))).toBe(true);
+  });
+
+  it('rejects a stale singular "device" key after v12', () => {
+    const config = { ...baseJob({ schedule: '0 3 * * *' }), device: 'yosemite-s0' } as Record<string, unknown>;
+    const errors = validateJob(config as Partial<JobConfig>);
+    expect(errors.some((e) => /singular "device" key is no longer supported/.test(e) && /devices:/.test(e))).toBe(true);
   });
 });
 
@@ -149,24 +194,141 @@ describe('jobRunsOnThisDevice', () => {
     else process.env.AGENTS_SYNC_MACHINE_ID = savedId;
   });
 
-  it('unpinned jobs run everywhere', () => {
+  it('unrestricted jobs run everywhere', () => {
     expect(jobRunsOnThisDevice({})).toBe(true);
-    expect(jobRunsOnThisDevice({ device: undefined })).toBe(true);
+    expect(jobRunsOnThisDevice({ devices: undefined })).toBe(true);
+    expect(jobRunsOnThisDevice({ devices: [] })).toBe(true);
   });
 
-  it('matches when the pin names this machine', () => {
+  it('matches when the allowlist includes this machine', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s0';
-    expect(jobRunsOnThisDevice({ device: 'yosemite-s0' })).toBe(true);
+    expect(jobRunsOnThisDevice({ devices: ['yosemite-s0'] })).toBe(true);
+    expect(jobRunsOnThisDevice({ devices: ['mac-mini', 'yosemite-s0'] })).toBe(true);
   });
 
-  it('normalizes case and domain suffix on the pin', () => {
+  it('normalizes case and domain suffix', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'yosemite-s0';
-    expect(jobRunsOnThisDevice({ device: 'Yosemite-S0' })).toBe(true);
-    expect(jobRunsOnThisDevice({ device: 'yosemite-s0.tailnet.ts.net' })).toBe(true);
+    expect(jobRunsOnThisDevice({ devices: ['Yosemite-S0'] })).toBe(true);
+    expect(jobRunsOnThisDevice({ devices: ['yosemite-s0.tailnet.ts.net'] })).toBe(true);
   });
 
-  it('rejects a pin naming another machine', () => {
+  it('rejects when allowlist names other machines', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
-    expect(jobRunsOnThisDevice({ device: 'yosemite-s0' })).toBe(false);
+    expect(jobRunsOnThisDevice({ devices: ['yosemite-s0'] })).toBe(false);
+    expect(jobRunsOnThisDevice({ devices: ['yosemite-s0', 'mac-mini'] })).toBe(false);
+  });
+});
+
+describe('checkJobDeviceEligibility', () => {
+  const savedId = process.env.AGENTS_SYNC_MACHINE_ID;
+
+  afterEach(() => {
+    if (savedId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = savedId;
+  });
+
+  it('returns null for unrestricted jobs', () => {
+    expect(checkJobDeviceEligibility({ name: 'j' })).toBeNull();
+    expect(checkJobDeviceEligibility({ name: 'j', devices: [] })).toBeNull();
+  });
+
+  it('returns null when this machine is in the allowlist', () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+    expect(checkJobDeviceEligibility({ name: 'j', devices: ['zion'] })).toBeNull();
+  });
+
+  it('returns normalized message, suggestion, and allowed label for foreign jobs', () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
+    const result = checkJobDeviceEligibility({ name: 'backup', devices: ['Yosemite-S0.tailnet.ts.net', 'mac-mini'] });
+    expect(result).not.toBeNull();
+    expect(result!.message).toBe("Job 'backup' can only run on: yosemite-s0, mac-mini");
+    expect(result!.allowedLabel).toBe('yosemite-s0, mac-mini');
+    expect(result!.firstHost).toBe('yosemite-s0');
+    expect(result!.suggestion).toBe("agents routines run backup --host yosemite-s0");
+  });
+});
+
+describe('readJobFile fails closed on legacy singular device key', () => {
+  it('returns null for a YAML file that still contains device:', () => {
+    ensureAgentsDir();
+    const name = '__test-readjob-device__';
+    const file = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      fs.writeFileSync(file, yaml.stringify({
+        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'yosemite-s0',
+      }));
+      expect(readJob(name)).toBeNull();
+    } finally {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  });
+});
+
+describe('writeJob extension handling', () => {
+  function fullConfig(name: string): JobConfig {
+    return {
+      name,
+      schedule: '0 3 * * *',
+      agent: 'claude',
+      prompt: 'extension test',
+      mode: 'auto',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+    } as JobConfig;
+  }
+
+  it('updates an existing .yaml file and does not create a .yml sibling', () => {
+    ensureAgentsDir();
+    const name = '__test-writejob-yaml__';
+    const yamlFile = path.join(getRoutinesDir(), `${name}.yaml`);
+    const ymlFile = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      fs.writeFileSync(yamlFile, yaml.stringify({
+        name, schedule: '0 4 * * *', agent: 'codex', prompt: 'original',
+      }));
+      writeJob(fullConfig(name));
+      expect(fs.existsSync(yamlFile)).toBe(true);
+      expect(fs.existsSync(ymlFile)).toBe(false);
+      const read = readJob(name);
+      expect(read).not.toBeNull();
+      expect(read!.agent).toBe('claude');
+    } finally {
+      if (fs.existsSync(yamlFile)) fs.unlinkSync(yamlFile);
+      if (fs.existsSync(ymlFile)) fs.unlinkSync(ymlFile);
+    }
+  });
+
+  it('creates a new routine as .yml when neither extension exists', () => {
+    ensureAgentsDir();
+    const name = '__test-writejob-new__';
+    const yamlFile = path.join(getRoutinesDir(), `${name}.yaml`);
+    const ymlFile = path.join(getRoutinesDir(), `${name}.yml`);
+    try {
+      writeJob(fullConfig(name));
+      expect(fs.existsSync(ymlFile)).toBe(true);
+      expect(fs.existsSync(yamlFile)).toBe(false);
+      const read = readJob(name);
+      expect(read).not.toBeNull();
+      expect(read!.name).toBe(name);
+    } finally {
+      if (fs.existsSync(yamlFile)) fs.unlinkSync(yamlFile);
+      if (fs.existsSync(ymlFile)) fs.unlinkSync(ymlFile);
+    }
+  });
+
+  it('throws when both .yml and .yaml files exist for the same name', () => {
+    ensureAgentsDir();
+    const name = '__test-writejob-both__';
+    const ymlFile = path.join(getRoutinesDir(), `${name}.yml`);
+    const yamlFile = path.join(getRoutinesDir(), `${name}.yaml`);
+    try {
+      fs.writeFileSync(ymlFile, yaml.stringify({ name, schedule: '0 3 * * *', agent: 'claude', prompt: 'a' }));
+      fs.writeFileSync(yamlFile, yaml.stringify({ name, schedule: '0 4 * * *', agent: 'codex', prompt: 'b' }));
+      expect(() => writeJob(fullConfig(name))).toThrow(/both \.yml and \.yaml/);
+    } finally {
+      if (fs.existsSync(ymlFile)) fs.unlinkSync(ymlFile);
+      if (fs.existsSync(yamlFile)) fs.unlinkSync(yamlFile);
+    }
   });
 });

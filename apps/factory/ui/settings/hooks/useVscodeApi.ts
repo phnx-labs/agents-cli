@@ -62,6 +62,7 @@ export type VsCodeMessageType =
   | 'openContextFile'
   | 'openTerminalFile'
   | 'openPlanPreview'
+  | 'openAttachmentPreview'
   | 'openSession'
   | 'spawnAgentForTask'
   | 'installSwarmAgent'

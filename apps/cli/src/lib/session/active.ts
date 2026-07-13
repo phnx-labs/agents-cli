@@ -33,6 +33,7 @@ import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import type { SessionAttachment } from './types.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { mapBounded } from '../concurrency.js';
 
@@ -99,6 +100,8 @@ export interface ActiveSession {
   createdTickets?: string[];
   /** Team name the session SPAWNED via `agents teams create/add`. */
   spawnedTeam?: string;
+  /** Files/screenshots attached to the session prompt. */
+  attachments?: SessionAttachment[];
   sessionFile?: string;
   startedAtMs?: number;
   status: ActiveStatus;
@@ -412,6 +415,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     ticket: state.ticket,
     createdTickets: state.createdTickets,
     spawnedTeam: state.spawnedTeam,
+    attachments: state.attachments,
     rateLimited: state.rateLimited,
   };
 }

@@ -126,6 +126,14 @@ export interface ReplyTarget {
 // string union so UI and extension code need not share an import across roots).
 export type CiStatus = 'passed' | 'failed' | 'running' | null
 
+export interface FloorAttachment {
+  path: string
+  label: string
+  mediaType: string
+  sizeBytes?: number
+  thumbnailUri?: string
+}
+
 export interface FloorAgent {
   id: string
   host: string          // 'this-mac' for local; remote hostname otherwise. ROUTING key — reply/nudge/reassign target it.
@@ -154,6 +162,7 @@ export interface FloorAgent {
   createdCommits?: string[] // short git commit SHAs this session CREATED; [] / undefined when none
   spawnedTeam?: string   // team name this session SPAWNED via `agents teams create/add`; undefined when none
   plans?: PlanFile[]     // detected ref-*.md / .html plan artifacts available for preview
+  attachments?: FloorAttachment[] // session screenshots/files available for thumbnail + preview
   branch: string
   worktreeSlug: string   // "<slug>" under .agents/worktrees/; '' when not a worktree. Disambiguates sibling sessions + labels the card when topic/preview are empty.
   worktreePath: string   // absolute worktree path, for the Reveal-worktree action; '' when not a worktree

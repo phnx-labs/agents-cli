@@ -37,7 +37,7 @@ import {
   tailscaleStatusJson,
 } from '../lib/devices/tailscale.js';
 import { localLoginUser, planDeviceReconciliation, runDeviceSync, withDefaultUser } from '../lib/devices/sync.js';
-import { resolveDeviceTarget } from '../lib/devices/resolve-target.js';
+import { resolveDeviceTarget, splitUserHost } from '../lib/devices/resolve-target.js';
 import { clearPendingSentinel } from '../lib/devices/pending.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { hostNameFor, renderSshConfig } from '../lib/devices/ssh-config.js';
@@ -47,13 +47,6 @@ import {
   buildSshInvocation,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
-
-/** Parse `user@host` or `host` into pieces. */
-function parseTarget(target: string): { host: string; user?: string } {
-  const at = target.indexOf('@');
-  if (at === -1) return { host: target };
-  return { user: target.slice(0, at), host: target.slice(at + 1) };
-}
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet. */
@@ -268,7 +261,7 @@ Typical workflow:
     .option('--platform <platform>', 'windows | linux | macos')
     .action(async (name: string, target: string, opts: { platform?: string }) => {
       try {
-        const { host, user } = parseTarget(target);
+        const { host, user } = splitUserHost(target);
         const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
         const d = await upsertDevice(name, {
           platform: (opts.platform as DevicePlatform) ?? undefined,

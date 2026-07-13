@@ -44,12 +44,14 @@ name: daily-review
 schedule: "0 9 * * *"         # 9am daily (cron syntax)
 agent: claude
 version: 2.0.65               # Optional, uses global default if omitted
-mode: plan                    # plan (read-only) or edit
+mode: auto                    # auto (default), plan (read-only), edit, or skip
 effort: default               # fast, default, or detailed
 timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
-device: yosemite-s0           # optional: pin to one machine (see Device Pinning)
+devices:                      # optional: allowlist — each listed device fires independently
+  - yosemite-s0               # omit entirely (or --clear) for unrestricted
+  - mac-mini
 
 prompt: |
   Review open PRs and summarize status.
@@ -71,30 +73,105 @@ agents routines add reminder --at "14:30" --agent claude --prompt "Remind Muqsit
 
 `--at` accepts `"14:30"` (today at that time) or `"2026-02-24 09:00"` (absolute). The daemon converts it to a cron expression with `runOnce: true`.
 
-### Device Pinning
+### Device Allowlist
 
 `~/.agents/routines/` rides the user repo, so every routine syncs to every machine —
-and without a pin, an enabled routine fires on **every** device running the
-scheduler. Set `device:` (or `--device` on `add`) to make a routine belong to one
-machine:
+and without a restriction, an enabled routine fires on **every** device running the
+scheduler. Set `devices:` to restrict which machines may execute the job:
 
-```bash
-agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
-  --device yosemite-s0 --prompt "Drain the work queue"
+```yaml
+# ~/.agents/routines/drain.yml
+name: drain
+schedule: "0 3 * * *"
+agent: claude
+devices:
+  - yosemite-s0
+  - mac-mini
+prompt: "Drain the local work queue"
 ```
 
-The pin is compared against the local device id (`machineId()` — normalized
-hostname, the same name `agents devices` shows), so `Yosemite-S0` and
-`yosemite-s0.tailnet.ts.net` both match `yosemite-s0`. On every other machine the
-job is fully inert:
+Each listed machine fires the job **independently** on its own schedule — both
+`yosemite-s0` and `mac-mini` run their own copy, with their own run history.
+A single-entry list is equivalent to an exclusive pin: `devices: [yosemite-s0]`
+restricts the job to one machine.
 
-- the cron scheduler never loads it
+Or set the allowlist at creation with `--devices`:
+
+```bash
+agents routines add drain --schedule "0 3 * * *" --agent claude \
+  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+```
+
+`--devices` is validated against the registered fleet (`agents devices sync`).
+
+Device names are compared against the local `machineId()` (normalized hostname, as
+shown by `agents devices`), so `Yosemite-S0` and `yosemite-s0.tailnet.ts.net` both
+match `yosemite-s0`.
+
+**Omitting `devices:` means unrestricted** — the job fires on every device running
+the scheduler. `--clear` restores unrestricted behavior (see below).
+
+On a device not in the allowlist the job is fully inert:
+
+- the cron scheduler skips it
 - webhook triggers never match it
 - it is never counted overdue, so `catchup` won't fire it and the daemon won't nag
-- `agents routines run <name>` refuses, pointing at `agents ssh <device> ...`
+- detached daemon fires and one-shot `--at` jobs skip it
+- `agents routines run <name>` errors, naming the allowed devices and offering a
+  ready-to-paste `--host <device>` command to run it remotely
 
-`agents routines list` shows the pin in a Device column (grayed when it names
-another machine) and in `--json` as `device` + `runsHere`.
+`agents routines list` shows the allowlist in a **Devices** column. Unrestricted
+jobs display the word `all`; restricted lists are grayed when the local machine
+is not in the list. `--json` includes a `devices` array and `runsHere` boolean.
+
+#### v12 migration
+
+Existing routines that use the legacy singular `device: X` field are automatically
+migrated to `devices: [X]` on the next load. No manual edit is required.
+
+#### Managing the allowlist
+
+`agents routines devices <name>` opens a preselected multi-select so you can toggle
+devices without editing the YAML:
+
+```bash
+agents routines devices drain
+```
+
+The picker starts with the current allowlist pre-checked. Confirm to overwrite.
+`--set` and `--clear` are mutually exclusive.
+
+For scripting:
+
+```bash
+agents routines devices drain --set yosemite-s0,mac-mini  # replace allowlist
+agents routines devices drain --clear                      # remove allowlist (unrestricted)
+```
+
+### Remote Routing
+
+`--host <device>` (alias: `--device`) routes any `routines` subcommand to a remote
+machine over SSH, so you can query or trigger a job on another box without an
+explicit `agents ssh` call:
+
+```bash
+# List another device's routines
+agents routines list --host yosemite-s0
+
+# Trigger a job on a specific machine right now
+agents routines run drain --host yosemite-s0
+
+# Create a job pre-assigned to two hosts, then confirm it looks right on one
+agents routines add drain --schedule "0 3 * * *" --agent claude \
+  --devices yosemite-s0,mac-mini --prompt "Drain queue" --host yosemite-s0
+```
+
+When you try to run a job on a host outside its allowlist, the CLI prints:
+
+```
+Job 'drain' can only run on: yosemite-s0, mac-mini
+  agents routines run drain --host yosemite-s0
+```
 
 ## Sandbox Isolation
 
@@ -329,7 +406,10 @@ Each execution creates a run directory with structured output:
 ```bash
 # Lifecycle
 agents routines list                  # List all jobs with next run + status
+agents routines list --host yosemite-s0  # List another device's routines
 agents routines add <name> --schedule "0 9 * * *" --agent claude --prompt "..."  # Inline
+agents routines add <name> --devices yosemite-s0,mac-mini --schedule "0 3 * * *" \
+  --agent claude --prompt "..."       # Add with device allowlist
 agents routines add <path.yml>        # Add from YAML file
 agents routines add <name> --at "14:30" --agent claude --prompt "..."            # One-shot
 agents routines edit <name>           # Open job in $EDITOR
@@ -337,8 +417,14 @@ agents routines remove <name>         # Delete a job
 agents routines pause <name>          # Disable a job
 agents routines resume <name>         # Re-enable a paused job
 
+# Device allowlist management
+agents routines devices <name>                         # Interactive multi-select picker
+agents routines devices <name> --set yosemite-s0,mac-mini  # Replace allowlist
+agents routines devices <name> --clear                 # Remove allowlist (unrestricted)
+
 # Execution
 agents routines run <name>            # Run immediately in foreground
+agents routines run <name> --host yosemite-s0  # Run on a specific remote device
 agents routines view <name>           # Show job config
 agents routines runs <name>           # View execution history (last 10)
 agents routines logs <name>           # Show stdout from latest run
@@ -378,10 +464,14 @@ A background scheduler (historically called "the daemon" internally) watches for
 ```bash
 agents routines start     # Start manually (usually unnecessary)
 agents routines stop      # Stop
-agents routines status    # Check PID, uptime, and upcoming runs
+agents routines status    # Check health, PID, binary, heartbeat, and upcoming runs
 ```
 
 The scheduler **auto-starts on the first `agents routines add`**, so in most cases you never invoke `start` manually. When you `add`, `remove`, `pause`, or `resume` a job, it auto-reloads -- no manual restart needed.
+
+`agents routines status` reports the scheduler as `running`, `wedged`, or `stopped`. A live PID whose heartbeat is more than three monitor ticks old is `wedged`; the status output includes the restart command. Both `routines list` and `routines status` also finalize orphaned `running` records before rendering. Run metadata records process birth time to reject recycled PIDs, and any run still active after 24 hours is finalized as a timeout.
+
+The status output includes the resolved daemon binary. Startup rejects bun virtual-filesystem paths and warns when the binary lives inside `.agents/worktrees/`, because deleting that worktree would strand the service.
 
 The legacy `agents daemon <cmd>` subcommands still work but print a deprecation warning and will be removed in v2.0.
 
@@ -397,3 +487,4 @@ The legacy `agents daemon <cmd>` subcommands still work but print a deprecation 
 | `signalDaemonReload()` | daemon.ts | Notify daemon to reload config |
 | `parseAtTime()` | routines.ts | Parse --at time strings to cron |
 | `getLatestRun()` / `listRuns()` | routines.ts | Query execution history |
+| `jobRunsOnThisDevice()` | routines.ts | Check if job is eligible on current machine |

@@ -649,6 +649,67 @@ function canonicalToGrokRule(perm: string, action: 'allow' | 'deny'): GrokRule |
 
 export type KimiRule = { decision: 'allow' | 'deny'; pattern: string };
 
+export type KiroRule = {
+  capability: string;
+  effect: 'allow' | 'deny';
+  match?: string[];
+  exclude?: string[];
+};
+
+/**
+ * Convert canonical permissions to Kiro CLI v3 capability rules.
+ * Kiro stores these rules in ~/.kiro/settings/permissions.yaml.
+ */
+export function convertToKiroFormat(set: PermissionSet): { rules: KiroRule[] } {
+  const rules: KiroRule[] = [];
+  for (const perm of set.allow) {
+    const rule = canonicalToKiroRule(perm, 'allow');
+    if (rule) rules.push(rule);
+  }
+  for (const perm of set.deny ?? []) {
+    const rule = canonicalToKiroRule(perm, 'deny');
+    if (rule) rules.push(rule);
+  }
+  return { rules };
+}
+
+function canonicalToKiroRule(perm: string, effect: 'allow' | 'deny'): KiroRule | null {
+  if (BLANKET_BASH_FORMS.has(perm)) {
+    return { capability: 'shell', effect };
+  }
+
+  const parsed = parseCanonicalPreserveCase(perm);
+
+  const capability = KIRO_CAPABILITY_BY_TOOL[parsed.tool.toLowerCase()];
+  if (!capability) return null;
+
+  if (parsed.pattern === null || parsed.pattern === '*' || parsed.pattern === '**') {
+    return { capability, effect };
+  }
+  const lowerTool = parsed.tool.toLowerCase();
+  const pattern = lowerTool === 'bash'
+    ? normalizeBashPattern(parsed.pattern)
+    : (lowerTool === 'webfetch' || lowerTool === 'websearch') && parsed.pattern.startsWith('domain:')
+      ? parsed.pattern.slice('domain:'.length)
+      : parsed.pattern;
+  return { capability, effect, match: [pattern] };
+}
+
+const KIRO_CAPABILITY_BY_TOOL: Record<string, string | undefined> = {
+  bash: 'shell',
+  read: 'fs_read',
+  grep: 'fs_read',
+  glob: 'fs_read',
+  write: 'fs_write',
+  edit: 'fs_write',
+  notebookedit: 'fs_write',
+  webfetch: 'web_fetch',
+  websearch: 'web_search',
+  mcp: 'mcp',
+  subagent: 'subagent',
+  skill: 'skill',
+};
+
 /**
  * Parse a canonical permission string preserving the tool's original casing.
  * `parseCanonicalPattern` lowercases the tool name, which is fine for Grok
@@ -1411,6 +1472,37 @@ export function applyPermissionsToVersion(
 
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, TOML.stringify(config as any), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'kiro') {
+      const permissionsPath = path.join(versionHome, '.kiro', 'settings', 'permissions.yaml');
+      let config: { rules?: unknown[] } = {};
+      if (fs.existsSync(permissionsPath)) {
+        const parsed = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          config = parsed as { rules?: unknown[] };
+        }
+      }
+
+      const newRules = convertToKiroFormat(set).rules;
+      if (merge) {
+        const existingRules = Array.isArray(config.rules) ? config.rules : [];
+        const seen = new Set<string>();
+        config.rules = [...existingRules, ...newRules].filter((rule) => {
+          if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return false;
+          const record = rule as { capability?: unknown; effect?: unknown; match?: unknown; exclude?: unknown };
+          const key = `${String(record.effect)}|${String(record.capability)}|${JSON.stringify(record.match ?? [])}|${JSON.stringify(record.exclude ?? [])}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      } else {
+        config.rules = newRules;
+      }
+
+      fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
+      fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
       return { success: true };
     }
 

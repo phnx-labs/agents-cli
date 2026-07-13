@@ -13,7 +13,7 @@ For the conceptual model — what a DotAgents repo is, what resources are, and h
 | Hooks | `…/.agents/hooks/*.sh` (same layering) | `.{agent}/hooks/` | Symlink |
 | Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
 | MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
-| Permissions | `…/.agents/permissions/groups/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
+| Permissions | `…/.agents/permissions/groups/*.yaml` (same layering) | Agent-native config (`settings.json`, TOML, YAML, or `.rules`) | Convert + merge |
 | Plugins | `…/.agents/plugins/{name}/` (same layering, Claude + OpenClaw only) | `.{agent}/plugins/marketplaces/agents-cli/plugins/<name>/` | Copy + synthetic marketplace + enable in settings |
 
 `resolveResource(kind, name)` returns the single winner; `listResources(kind)` returns the union with `source: 'project' \| 'user' \| 'system'`. Same name in a higher layer overrides lower layers; otherwise everything unions.
@@ -204,6 +204,9 @@ Per-agent conversion is lossy in both directions:
 - Codex emits Starlark deny rules to a generated `agents-deny.rules` file
   (`permissions.ts:38-56`). Allow rules aren't expressed; Codex defaults to
   deny-unless-allowed elsewhere.
+- Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
+  capability rules under `.kiro/settings/permissions.yaml`. Existing user
+  rules are preserved when managed rules are merged.
 
 ## Plugins: Synthetic Marketplace + Exec-Surface Gate
 

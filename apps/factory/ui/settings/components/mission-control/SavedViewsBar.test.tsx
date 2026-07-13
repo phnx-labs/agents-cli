@@ -26,6 +26,8 @@ describe('SavedViews feed header bar (RUSH-1526)', () => {
         feedFilters={{
           group: 'outcome',
           onGroup: noop,
+          subgroup: 'project',
+          onSubgroup: noop,
           status: ['needs'],
           onToggleStatus: noop,
           abbrs: [],
@@ -36,7 +38,9 @@ describe('SavedViews feed header bar (RUSH-1526)', () => {
     )
     expect(html).toContain('Save view')
     expect(html).toContain('Group:')
+    expect(html).toContain('Subgroup:')
     expect(html).toContain('Outcome')
+    expect(html).toContain('Project')
     expect(html).toContain('Needs you')
     expect(html).toContain('Running')
     expect(html).toContain('feed-header-status on') // needs active
@@ -62,6 +66,8 @@ describe('SavedViews feed header bar (RUSH-1526)', () => {
         feedFilters={{
           group: 'project',
           onGroup: noop,
+          subgroup: 'host',
+          onSubgroup: noop,
           status: [],
           onToggleStatus: noop,
           abbrs: ['CC'],

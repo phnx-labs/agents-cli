@@ -11,6 +11,12 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Factory Floor group controls now support Subgroup (RUSH-1544).**
+  The live feed and Backlog controls can render a second grouping axis, excluding
+  the primary axis to avoid duplicate grouping. Nested section headers make
+  combinations like Project -> Host and Project -> Source visible without
+  switching views. Source: `ui/settings/components/mission-control/FloorControls.tsx`,
+  `UnifiedAgentsPane.tsx`, `BacklogCenter.tsx`.
 - **Factory Floor surfaces agent-created tickets as clickable Linear artifacts (RUSH-1547).**
   Session cards and detail panes now render linked Linear badges for carried/created
   ticket refs and include commit chips in the produced-artifacts row, so PRs,
@@ -73,6 +79,11 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Added
 
+- **Factory Floor cards now show session screenshots and attachments as previewable artifacts (RUSH-1524).**
+  Session parsers carry structured attachment metadata from prompt image/document
+  blocks through the CLI JSON, remote session bridge, VS Code webview resource
+  roots, and Floor cards. Image attachments render as thumbnails; any attachment
+  opens through the host preview bridge.
 - **Factory Floor cards now surface plan artifacts for preview (RUSH-1525).**
   Session output, recent worktree files, and attachment refs are scanned for
   `.html` and `ref-*.md` plan files; matching cards show plan chips that open HTML

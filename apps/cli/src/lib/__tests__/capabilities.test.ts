@@ -230,6 +230,22 @@ describe('kiro hooks version gate', () => {
   });
 });
 
+describe('kiro allowlist version gate', () => {
+  it('gates versions below 2.8.0 as too_old', () => {
+    const result = supports('kiro', 'allowlist', '2.7.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 2.8.0');
+    }
+  });
+
+  it('passes 2.8.0 and above', () => {
+    expect(supports('kiro', 'allowlist', '2.8.0')).toEqual({ ok: true });
+    expect(supports('kiro', 'allowlist', '2.10.0')).toEqual({ ok: true });
+  });
+});
+
 describe('explainSkip()', () => {
   it('formats unsupported message', () => {
     const r = supports('amp', 'hooks');
