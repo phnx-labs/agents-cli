@@ -492,6 +492,12 @@ export interface SkillEntry {
   tags?: string[];
   /** Registry-specific trust signal (e.g. 'builtin', 'trusted', 'community'). */
   trustLevel?: string;
+  /**
+   * Lowercase hex sha256 of the skill's SKILL.md, as recorded by
+   * `agents publish`. When present, install verifies the cloned SKILL.md
+   * against it and aborts on mismatch.
+   */
+  sha256?: string;
 }
 
 /** Paginated response from a skill registry search endpoint. */
