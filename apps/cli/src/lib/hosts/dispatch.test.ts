@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildRunForwardedArgs, buildInteractiveRunForwardedArgs } from './dispatch.js';
+import * as os from 'os';
+import { buildRunForwardedArgs, buildInteractiveRunForwardedArgs, remoteCdPrefix } from './dispatch.js';
+
+const LOCAL_HOME = process.env.HOME ?? os.homedir();
 
 describe('buildRunForwardedArgs', () => {
   it('forwards --session-id for a fresh run so the remote session gets our id', () => {
@@ -89,5 +92,43 @@ describe('buildInteractiveRunForwardedArgs', () => {
   it('drops the prompt when interactive mode is not forced', () => {
     const args = buildInteractiveRunForwardedArgs({ agent: 'claude', prompt: 'do a thing' });
     expect(args).toEqual(['run', 'claude']);
+  });
+});
+
+describe('remoteCdPrefix', () => {
+  it('returns no prefix when no cwd is given', () => {
+    expect(remoteCdPrefix(undefined)).toBe('');
+    expect(remoteCdPrefix('')).toBe('');
+  });
+
+  it('re-roots a `~/…` path at the REMOTE home via unquoted "$HOME"', () => {
+    // The whole point: local `~` mustn't leak the local home to the remote.
+    expect(remoteCdPrefix('~/src/github.com/muqsitnawaz/agents-cli')).toBe(
+      'cd "$HOME"/src/github.com/muqsitnawaz/agents-cli && ',
+    );
+  });
+
+  it('re-roots a `$HOME/…` path the same way', () => {
+    expect(remoteCdPrefix('$HOME/src/x')).toBe('cd "$HOME"/src/x && ');
+  });
+
+  it('re-roots a LOCAL-home-expanded absolute path (the shell expanded ~ before we saw it)', () => {
+    // This is exactly `--cwd ~/x` on macOS: arrives as /Users/<me>/x.
+    expect(remoteCdPrefix(`${LOCAL_HOME}/src/x`)).toBe('cd "$HOME"/src/x && ');
+  });
+
+  it('maps the bare home dir to "$HOME"', () => {
+    expect(remoteCdPrefix('~')).toBe('cd "$HOME" && ');
+    expect(remoteCdPrefix('$HOME')).toBe('cd "$HOME" && ');
+    expect(remoteCdPrefix(LOCAL_HOME)).toBe('cd "$HOME" && ');
+  });
+
+  it('quotes a non-home absolute path verbatim (used as-is on the host)', () => {
+    expect(remoteCdPrefix('/opt/work')).toBe("cd /opt/work && ");
+    expect(remoteCdPrefix('/data/a b')).toBe("cd '/data/a b' && ");
+  });
+
+  it('shell-quotes a home remainder containing spaces', () => {
+    expect(remoteCdPrefix('~/my projects/repo')).toBe(`cd "$HOME"/'my projects/repo' && `);
   });
 });

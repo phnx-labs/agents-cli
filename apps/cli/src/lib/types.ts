@@ -707,6 +707,12 @@ export interface Meta {
   // Git remote source URL (when ~/.agents/.system/ is a git repo)
   source?: string;
   /**
+   * Projects root for the `agents run --project <slug>` shorthand, e.g.
+   * `~/src/github.com/<user>`. Auto-inferred from the repo you launch inside and
+   * cached here; stored home-relative (`~/…`) so it resolves on remote hosts too.
+   */
+  projectRoot?: string;
+  /**
    * Extra DotAgent repos merged after ~/.agents/. Managed clones live as peer
    * dirs at ~/.agents-<alias>/; user-owned repos can point at arbitrary paths
    * via the `path` field.

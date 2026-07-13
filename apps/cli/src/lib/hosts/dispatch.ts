@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import * as os from 'os';
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { sshTargetFor } from './types.js';
@@ -23,6 +24,40 @@ import { followHostTask } from './progress.js';
 // regardless of the run's cwd. Task ids are 8 hex chars, so these paths are
 // injection-safe to interpolate unquoted into remote commands.
 const REMOTE_DIR = '$HOME/.agents/.cache/hosts';
+
+const LOCAL_HOME = process.env.HOME ?? os.homedir();
+
+/**
+ * If `p` is anchored at the home dir — a leading `~`, `$HOME`, or the LOCAL home
+ * path — return the remainder (no leading slash), else null. The local shell
+ * expands `~` before commander ever sees it, so a `--cwd ~/x` on macOS arrives
+ * as `/Users/<me>/x`; matching that lets us re-root it at the remote home.
+ */
+function homeRemainder(p: string): string | null {
+  if (p === '~' || p === '$HOME') return '';
+  if (p.startsWith('~/')) return p.slice(2);
+  if (p.startsWith('$HOME/')) return p.slice(6);
+  if (p === LOCAL_HOME) return '';
+  if (p.startsWith(LOCAL_HOME + '/')) return p.slice(LOCAL_HOME.length + 1);
+  return null;
+}
+
+/**
+ * Build a `cd <dir> && ` prefix that resolves on the REMOTE host.
+ *
+ * `--cwd`/`--remote-cwd`/`--project` name a directory on the HOST, but a
+ * home-anchored path must resolve against the REMOTE user's home, not the local
+ * one (`/home/<me>` vs `/Users/<me>`). We emit an unquoted `"$HOME"` for that
+ * segment — the remote login shell expands it — and shell-quote the remainder.
+ * A path not under home is quoted verbatim (used as-is on the host).
+ */
+export function remoteCdPrefix(remoteCwd?: string): string {
+  if (!remoteCwd) return '';
+  const rest = homeRemainder(remoteCwd);
+  if (rest === '') return 'cd "$HOME" && ';
+  if (rest !== null) return `cd "$HOME"/${shellQuote(rest)} && `;
+  return `cd ${shellQuote(remoteCwd)} && `;
+}
 
 export interface DispatchResult {
   task: HostTask;
@@ -75,7 +110,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 
   // Inner command run under a login shell so PATH resolves `agents`.
   const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
-  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const cwd = remoteCdPrefix(opts.remoteCwd);
   const inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
 
   // Outer: ensure dir, launch detached under bash -lc, print the PID.
@@ -210,7 +245,7 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
   const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
-  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const cwd = remoteCdPrefix(opts.remoteCwd);
   const remoteCmd = `${cwd}${invocation}`;
   return sshStream(target, remoteCmd, { tty: process.stdin.isTTY, multiplex: true });
 }
