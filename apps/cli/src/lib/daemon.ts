@@ -592,6 +592,7 @@ export function writeOwnerOnlyServiceManifest(filePath: string, content: string)
 /** Generate a macOS launchd plist for auto-starting the daemon. */
 export function generateLaunchdPlist(oauthToken: string | null = readDaemonClaudeOAuthToken()): string {
   const agentsBin = getAgentsBinPath();
+  const launch = getDaemonLaunch(agentsBin);
   const logPath = getLogPath();
   const oauthEntry = oauthToken
     ? `
@@ -607,9 +608,7 @@ export function generateLaunchdPlist(oauthToken: string | null = readDaemonClaud
   <string>${PLIST_NAME}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${agentsBin}</string>
-    <string>daemon</string>
-    <string>_run</string>
+${[launch.command, ...launch.args].map((arg) => `    <string>${xmlEscape(arg)}</string>`).join('\n')}
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -628,9 +627,16 @@ export function generateLaunchdPlist(oauthToken: string | null = readDaemonClaud
 </plist>`;
 }
 
+/** Quote one systemd ExecStart argument without delegating parsing to a shell. */
+function systemdExecArg(value: string): string {
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 /** Generate a Linux systemd user unit for auto-starting the daemon. */
 export function generateSystemdUnit(oauthToken: string | null = readDaemonClaudeOAuthToken()): string {
   const agentsBin = getAgentsBinPath();
+  const launch = getDaemonLaunch(agentsBin);
+  const execStart = [launch.command, ...launch.args].map(systemdExecArg).join(' ');
   const oauthLine = oauthToken
     ? `\nEnvironment=${DAEMON_OAUTH_KEY}=${oauthToken}`
     : '';
@@ -641,7 +647,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=${agentsBin} daemon _run
+ExecStart=${execStart}
 Restart=always
 RestartSec=10
 Environment=PATH=/usr/local/bin:/usr/bin:/bin:${os.homedir()}/.nvm/versions/node/v24.0.0/bin${oauthLine}

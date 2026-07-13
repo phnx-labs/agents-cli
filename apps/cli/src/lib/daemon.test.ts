@@ -194,6 +194,22 @@ describe('generateSystemdUnit', () => {
       'Environment=CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-abc123',
     );
   });
+
+  it('pins a JavaScript install to the Node runtime that installed the service', () => {
+    const savedArgv1 = process.argv[1];
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents daemon runtime '));
+    const indexJs = path.join(tmpDir, 'index.js');
+    fs.writeFileSync(indexJs, '');
+    process.argv[1] = indexJs;
+    try {
+      expect(generateSystemdUnit()).toContain(
+        `ExecStart="${process.execPath}" "${indexJs}" "daemon" "_run"`,
+      );
+    } finally {
+      process.argv[1] = savedArgv1;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('buildDetachedDaemonEnv', () => {
@@ -311,6 +327,7 @@ describe('getAgentsBinPath (sibling shim resolution)', () => {
     for (const file of [indexJs, browserJs, agentsBin, browserBin]) fs.writeFileSync(file, '');
     process.argv[1] = browserJs;
     let plist = generateLaunchdPlist();
+    expect(plist).toContain(`<string>${process.execPath}</string>`);
     expect(plist).toContain(`<string>${indexJs}</string>`);
     expect(plist).not.toContain(`<string>${browserJs}</string>`);
     process.argv[1] = browserBin;
