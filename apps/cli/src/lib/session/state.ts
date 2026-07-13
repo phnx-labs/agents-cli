@@ -15,7 +15,7 @@
  * shape + mtime — same function, driven off the normalized events.
  */
 
-import type { SessionEvent } from './types.js';
+import type { SessionAttachment, SessionEvent } from './types.js';
 import { summarizeToolUse } from './parse.js';
 
 export type SessionActivity = 'working' | 'waiting_input' | 'idle';
@@ -120,6 +120,8 @@ export interface SessionState {
   createdTickets?: string[];
   /** Team name this session SPAWNED via `agents teams create/add`. */
   spawnedTeam?: string;
+  /** Displayable files/screenshots attached to the session prompt. */
+  attachments?: SessionAttachment[];
 }
 
 export interface StateContext {
@@ -460,6 +462,7 @@ export function detectDurableSignals(events: SessionEvent[]): {
   ticket?: DetectedTicket;
   createdTickets?: string[];
   spawnedTeam?: string;
+  attachments?: SessionAttachment[];
 } {
   let pr: DetectedPr | undefined;
   let sawPrCreate = false;
@@ -467,6 +470,8 @@ export function detectDurableSignals(events: SessionEvent[]): {
   let sawTicketCreate = false;
   let spawnedTeam: string | undefined;
   const createdTickets = new Set<string>();
+  const attachments: SessionAttachment[] = [];
+  const seenAttachments = new Set<string>();
 
   for (const e of events) {
     // Structural PR signal: a real `gh pr create` tool call, then the pull URL
@@ -493,19 +498,33 @@ export function detectDurableSignals(events: SessionEvent[]): {
     if (!ticket && e.type === 'message' && e.role === 'user') {
       ticket = detectTicket(e.content);
     }
+    if (e.type === 'attachment') {
+      const mediaType = e.mediaType || 'application/octet-stream';
+      const key = e.path || e.name || `${mediaType}:${e.sizeBytes ?? 0}:${e.timestamp}`;
+      if (key && !seenAttachments.has(key)) {
+        seenAttachments.add(key);
+        attachments.push({
+          path: e.path,
+          name: e.name,
+          mediaType,
+          sizeBytes: e.sizeBytes,
+        });
+      }
+    }
   }
   return {
     pr,
     ticket,
     createdTickets: createdTickets.size > 0 ? [...createdTickets] : undefined,
     spawnedTeam,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
 }
 
 /** Full inference: activity + preview + durable signals + worktree/ticket from ctx. */
 export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}): SessionState {
   const state = inferActivity(events, ctx);
-  const { pr, ticket, createdTickets, spawnedTeam } = detectDurableSignals(events);
+  const { pr, ticket, createdTickets, spawnedTeam, attachments } = detectDurableSignals(events);
   const worktree = detectWorktree(ctx.cwd, ctx.gitBranch);
   // Rate-limit: scan the most recent assistant messages + tool errors (tail-first).
   let rateLimited = false;
@@ -529,6 +548,7 @@ export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}
     ticket: ticket ?? detectTicket(undefined, ctx.gitBranch) ?? state.ticket,
     createdTickets,
     spawnedTeam,
+    attachments,
     rateLimited: rateLimited || undefined,
   };
 }

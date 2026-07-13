@@ -857,6 +857,38 @@ function resolveEditorPath(pathValue: string): string | null {
   return path.join(workspacePath, pathValue);
 }
 
+function webviewLocalResourceRoots(context: vscode.ExtensionContext): vscode.Uri[] {
+  return [
+    vscode.Uri.joinPath(context.extensionUri, 'out', 'ui'),
+    vscode.Uri.joinPath(context.extensionUri, 'assets'),
+    vscode.Uri.file(path.join(homedir(), '.agents', '.history', 'attachments')),
+    vscode.Uri.file(path.join(homedir(), '.agents', '.cache')),
+  ];
+}
+
+function withAttachmentThumbnailUris(rows: terminals.TerminalDetail[]): terminals.TerminalDetail[] {
+  if (!settingsPanel) return rows;
+  return rows.map((row) => {
+    if (!row.attachments?.length) return row;
+    return {
+      ...row,
+      attachments: row.attachments.map((attachment) => {
+        if (!attachment.mediaType.startsWith('image/')) return attachment;
+        const resolvedPath = resolveEditorPath(attachment.path);
+        if (!resolvedPath || !fs.existsSync(resolvedPath)) return attachment;
+        return {
+          ...attachment,
+          thumbnailUri: settingsPanel!.webview.asWebviewUri(vscode.Uri.file(resolvedPath)).toString(),
+        };
+      }),
+    };
+  });
+}
+
+async function getFloorTerminalDetailsForWebview(workspacePath?: string): Promise<terminals.TerminalDetail[]> {
+  return withAttachmentThumbnailUris(await terminals.getFloorTerminalDetails(workspacePath));
+}
+
 async function openPlanPreview(pathValue: string, kind: string | undefined, host: string | undefined): Promise<void> {
   const target = pathValue.trim();
   if (!target) return;
@@ -891,6 +923,27 @@ async function openPlanPreview(pathValue: string, kind: string | undefined, host
   }
   await vscode.env.openExternal(uri);
 }
+
+async function openAttachmentPreview(pathValue: string, host: string | undefined): Promise<void> {
+  const target = pathValue.trim();
+  if (!target) return;
+  if (/^https?:\/\//i.test(target)) {
+    await vscode.env.openExternal(vscode.Uri.parse(target));
+    return;
+  }
+  const remoteHost = host && host !== 'this-mac' ? host : '';
+  let resolvedPath = resolveEditorPath(target);
+  if (remoteHost) {
+    const safeHost = remoteHost.replace(/[^a-zA-Z0-9._-]+/g, '-');
+    const destDir = path.join(homedir(), '.agents', '.cache', 'factory-attachment-previews', safeHost);
+    await fs.promises.mkdir(destDir, { recursive: true });
+    resolvedPath = path.join(destDir, path.basename(target));
+    await execFileAsync('scp', [`${remoteHost}:${target}`, resolvedPath], { timeout: 20_000 });
+  }
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) return;
+  await vscode.env.openExternal(vscode.Uri.file(resolvedPath));
+}
+
 
 async function openFileOrDiffInEditor(pathValue: string): Promise<void> {
   const resolvedPath = resolveEditorPath(pathValue);
@@ -1096,7 +1149,7 @@ let lastFloorTasks: swarm.TaskSummary[] = [];
 async function pushFloorUpdate(workspacePath?: string): Promise<void> {
   if (!settingsPanel || !floorSubscribed) return;
   const [floorTerminals, floorTasks] = await Promise.all([
-    terminals.getFloorTerminalDetails(workspacePath),
+    getFloorTerminalDetailsForWebview(workspacePath),
     swarm.fetchTasks(undefined, workspacePath),
   ]);
   if (!settingsPanel || !floorSubscribed) return;
@@ -1445,10 +1498,7 @@ export function openPanel(context: vscode.ExtensionContext): void {
     {
       enableScripts: true,
       retainContextWhenHidden: true, // Prevent full reload when panel loses focus
-      localResourceRoots: [
-        vscode.Uri.joinPath(context.extensionUri, 'out', 'ui'),
-        vscode.Uri.joinPath(context.extensionUri, 'assets')
-      ]
+      localResourceRoots: webviewLocalResourceRoots(context)
     }
   );
   wirePanel(panel, context);
@@ -1463,10 +1513,7 @@ export function registerPanelSerializer(context: vscode.ExtensionContext): void 
       async deserializeWebviewPanel(webviewPanel: vscode.WebviewPanel) {
         webviewPanel.webview.options = {
           enableScripts: true,
-          localResourceRoots: [
-            vscode.Uri.joinPath(context.extensionUri, 'out', 'ui'),
-            vscode.Uri.joinPath(context.extensionUri, 'assets')
-          ]
+          localResourceRoots: webviewLocalResourceRoots(context)
         };
         wirePanel(webviewPanel, context);
       }
@@ -2857,6 +2904,11 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           await openPlanPreview(message.path, typeof message.kind === 'string' ? message.kind : undefined, typeof message.host === 'string' ? message.host : undefined);
         }
         break;
+      case 'openAttachmentPreview':
+        if (typeof message.path === 'string') {
+          await openAttachmentPreview(message.path, typeof message.host === 'string' ? message.host : undefined);
+        }
+        break;
       case 'revealFolder':
         if (message.path) {
           try {
@@ -2873,7 +2925,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         const allWs = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         settingsPanel?.webview.postMessage({
           type: 'allTerminalsData',
-          terminals: await terminals.getFloorTerminalDetails(allWs),
+          terminals: await getFloorTerminalDetailsForWebview(allWs),
         });
         break;
       }
@@ -3280,7 +3332,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         if (settingsPanel) {
           settingsPanel?.webview.postMessage({
             type: 'allTerminalsData',
-            terminals: await terminals.getFloorTerminalDetails(wsPath),
+            terminals: await getFloorTerminalDetailsForWebview(wsPath),
           });
 
           const updatedTasks = await swarm.fetchTasks(undefined, wsPath);

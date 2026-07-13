@@ -226,6 +226,32 @@ describe('generateSystemdUnit', () => {
   });
 });
 
+describe('service manifest CLI entry injection', () => {
+  it('uses the explicitly installed CLI entry instead of the lifecycle script entry', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-postinstall-'));
+    const installedEntry = path.join(tmpDir, 'dist', 'index.js');
+    const postinstallEntry = path.join(tmpDir, 'scripts', 'postinstall.js');
+    fs.mkdirSync(path.dirname(installedEntry), { recursive: true });
+    fs.mkdirSync(path.dirname(postinstallEntry), { recursive: true });
+    fs.writeFileSync(installedEntry, '');
+    fs.writeFileSync(postinstallEntry, '');
+
+    const savedArgv1 = process.argv[1];
+    process.argv[1] = postinstallEntry;
+    try {
+      const plist = generateLaunchdPlist(null, installedEntry);
+      const unit = generateSystemdUnit(null, installedEntry);
+      expect(plist).toContain(`<string>${installedEntry}</string>`);
+      expect(unit).toContain(installedEntry);
+      expect(plist).not.toContain(postinstallEntry);
+      expect(unit).not.toContain(postinstallEntry);
+    } finally {
+      process.argv[1] = savedArgv1;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('buildDetachedDaemonEnv', () => {
   it('injects the token when configured and absent from the base env', () => {
     seedKeychainBacked('sk-ant-oat01-detached');

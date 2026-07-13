@@ -79,6 +79,11 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ### Added
 
+- **Factory Floor cards now show session screenshots and attachments as previewable artifacts (RUSH-1524).**
+  Session parsers carry structured attachment metadata from prompt image/document
+  blocks through the CLI JSON, remote session bridge, VS Code webview resource
+  roots, and Floor cards. Image attachments render as thumbnails; any attachment
+  opens through the host preview bridge.
 - **Factory Floor cards now surface plan artifacts for preview (RUSH-1525).**
   Session output, recent worktree files, and attachment refs are scanned for
   `.html` and `ref-*.md` plan files; matching cards show plan chips that open HTML

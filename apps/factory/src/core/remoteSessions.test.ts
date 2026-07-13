@@ -274,6 +274,31 @@ describe('normalizeActiveSession', () => {
     expect(typeof bad.spawnedTeam).toBe('string');
   });
 
+  test('normalizes structured attachment metadata for preview', () => {
+    const base = ACTIVE.find((r) => r.context === 'terminal')!;
+    const s = normalizeActiveSession({
+      ...base,
+      attachments: [
+        {
+          path: '/home/muqsit/.agents/.history/attachments/factory-floor.png',
+          name: 'factory-floor.png',
+          mediaType: 'image/png',
+          sizeBytes: 12345,
+        },
+      ],
+    } as RawActiveSession, 'this-mac', FETCHED_AT);
+
+    expect(s.attachments).toEqual([
+      {
+        path: '/home/muqsit/.agents/.history/attachments/factory-floor.png',
+        label: 'factory-floor.png',
+        mediaType: 'image/png',
+        sizeBytes: 12345,
+        thumbnailUri: undefined,
+      },
+    ]);
+  });
+
   test('input_required becomes waiting + waitingForInput', () => {
     const terminal = ACTIVE.find((r) => r.status === 'input_required')!;
     const s = normalizeActiveSession(terminal, 'this-mac', FETCHED_AT);

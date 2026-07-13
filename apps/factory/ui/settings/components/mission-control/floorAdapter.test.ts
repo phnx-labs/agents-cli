@@ -465,6 +465,52 @@ describe('toFloorAgentFromRemote', () => {
     ])
   })
 
+  test('carries structured remote attachments onto the Floor card', () => {
+    const r: RemoteSessionLike = {
+      host: 'yosemite-s0',
+      sessionId: 'shot123',
+      agentType: 'codex',
+      cwd: '/home/u/src/agents-cli',
+      project: 'agents-cli',
+      phase: 'running',
+      activity: 'Reading screenshot',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      output: '',
+      attachments: [{
+        path: '/home/u/.agents/.history/attachments/factory-floor.png',
+        label: 'factory-floor.png',
+        mediaType: 'image/png',
+        sizeBytes: 12345,
+        thumbnailUri: 'vscode-resource://factory-floor.png',
+      }],
+      prUrl: null,
+      ticket: 'RUSH-1524',
+      branch: 'rush-1524',
+      sinceMs: 1000,
+      startedAtMs: NOW - 1000,
+      topic: 'Preview session attachments',
+      context: 'terminal',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 4321,
+      transport: 'ssh',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.attachments).toEqual([{
+      path: '/home/u/.agents/.history/attachments/factory-floor.png',
+      label: 'factory-floor.png',
+      mediaType: 'image/png',
+      sizeBytes: 12345,
+      thumbnailUri: 'vscode-resource://factory-floor.png',
+    }])
+  })
+
   test('ignores remote plan-like paths that are only labels or task topics', () => {
     const r: RemoteSessionLike = {
       host: 'yosemite-s0',
