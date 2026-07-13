@@ -24,6 +24,7 @@ import {
   KIMI_SUBAGENTS_PARENT_FILE,
   transformSubagentForOpenCode,
   transformSubagentForDroid,
+  transformSubagentForKiro,
   syncSubagentToOpenclaw,
   parseSubagentFrontmatter,
 } from '../../subagents.js';
@@ -76,6 +77,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             const target = safeJoin(path.join(versionHome, '.openclaw'), sub.name);
             const r = syncSubagentToOpenclaw(sub.path, target);
             if (r.success) synced.push(sub.name);
+          } else if (agent === 'kiro') {
+            const agentsDir = path.join(versionHome, '.kiro', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.json`), transformSubagentForKiro(sub.path));
+            synced.push(sub.name);
           }
         } catch { /* per-item sync failure: skip */ }
       }
