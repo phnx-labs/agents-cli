@@ -509,6 +509,97 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   }
 }
 
+/**
+ * Host the secrets broker inside the always-on daemon (#416).
+ *
+ * Serves the SAME socket and wire protocol as the standalone `runSecretsAgent`
+ * — so every existing client (`agentGetSync`, `agentPing`, `agentAutoLoadSync`)
+ * keeps working unchanged, no PROTOCOL_VERSION bump — but it is daemon-safe:
+ *
+ *   - no pid-file single-instance guard (the daemon owns the instance);
+ *   - no `process.exit`, no SIGTERM/SIGINT handlers, no self-heal/idle-exit
+ *     (those would kill the daemon — the daemon is the always-on backbone and
+ *     manages its own version/lifecycle). The sweep only TTL-evicts.
+ *
+ * The caller (`runDaemon`) must only invoke this when NO broker is already
+ * reachable (ping first) — this function clears a stale socket before binding,
+ * so calling it while a live standalone broker holds the socket would orphan
+ * that broker's clients. Returns a handle the daemon closes on shutdown, or
+ * null off-darwin (nothing to broker without biometry).
+ */
+export async function startHostedBroker(): Promise<{ close(): void } | null> {
+  if (!onDarwin()) return null;
+
+  const store = new Map<string, StoredBundle>();
+  const sock = socketPath(); // agentDir() creates the 0700 dir as a side effect
+  try { fs.unlinkSync(sock); } catch { /* no stale socket */ }
+
+  const handle = (req: Request): Response => handleAgentRequest(store, req);
+
+  const server = net.createServer((conn) => {
+    conn.setEncoding('utf-8');
+    let buf = '';
+    conn.on('data', (chunk) => {
+      buf += chunk;
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        let resp: Response;
+        try {
+          resp = handle(JSON.parse(line) as Request);
+        } catch (err) {
+          resp = { ok: false, error: (err as Error).message };
+        }
+        conn.write(JSON.stringify(resp) + '\n');
+      }
+    });
+    conn.on('error', () => { /* client vanished mid-request; ignore */ });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject); // e.g. EADDRINUSE if a broker raced us
+    server.listen(sock, () => {
+      try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
+      resolve();
+    });
+  });
+
+  // TTL eviction ONLY. Unlike the standalone broker's sweep, there is no
+  // self-heal-exit or idle-exit here — the daemon is always-on and owns the
+  // upgrade/lifecycle path; a broker that called process.exit() would take the
+  // whole daemon down with it.
+  const sweepTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
+  }, SWEEP_INTERVAL_MS);
+
+  // Auto-lock on sleep, same as the standalone broker: the signed helper emits
+  // LOCK/SLEEP lines; wipe the in-memory store on a wipe-worthy event.
+  let watcher: ChildProcess | null = null;
+  try {
+    watcher = spawn(getKeychainHelperPath(), ['watch-lock'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    watcher.stdout?.setEncoding('utf-8');
+    watcher.stdout?.on('data', (chunk: string) => {
+      if (shouldWipeOnWatchEvent(chunk)) store.clear();
+    });
+    watcher.on('error', () => { watcher = null; });
+  } catch {
+    watcher = null;
+  }
+
+  return {
+    close() {
+      store.clear();
+      clearInterval(sweepTimer);
+      try { watcher?.kill(); } catch { /* already gone */ }
+      try { server.close(); } catch { /* not listening */ }
+      try { fs.unlinkSync(sock); } catch { /* gone */ }
+    },
+  };
+}
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 /** Open the socket, send one request, resolve the one response. Async path —
@@ -773,7 +864,7 @@ export async function agentStatus(): Promise<AgentStatusEntry[]> {
 
 /** Ping result: whether a broker is reachable + speaking our protocol, and the
  * version of the code it's running (for staleness detection). */
-async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
+export async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
   if (!agentSocketExists()) return { reachable: false };
   const r = await request({ cmd: 'ping' });
   if (r?.ok === true && r.cmd === 'ping' && r.version === PROTOCOL_VERSION) {
@@ -807,6 +898,22 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
     if (!shouldTeardownVersionSkewedBroker((await agentStatus()).length)) return true;
     await teardownStaleBroker();
   }
+
+  // Path 0 (#416): prefer the always-on daemon — it hosts the broker socket
+  // (one supervised backbone rather than a separate launchd service). If
+  // bringing the daemon up makes the broker answer, we're done. Fall through to
+  // the standalone-service paths below when the daemon path isn't available
+  // (kept as a fallback until the standalone service is retired, #416 step 2).
+  try {
+    const { ensureDaemonStarted } = await import('../daemon.js');
+    if (ensureDaemonStarted()) {
+      const d0 = Date.now() + timeoutMs;
+      while (Date.now() < d0) {
+        if ((await agentPing()).reachable) return true;
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    }
+  } catch { /* daemon path unavailable — fall through to the standalone service */ }
 
   // Path 1: the persistent service. installSecretsAgentService is idempotent and
   // waits for the socket; for an already-installed service we kickstart and wait.

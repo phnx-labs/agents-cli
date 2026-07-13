@@ -4,7 +4,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, agentPing, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -254,6 +254,35 @@ describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket roun
     try {
       expect(() => agentEvictSync('prod')).not.toThrow();
     } finally {
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker hosted in the daemon)', () => {
+  it('binds the socket, answers agentPing over the wire, and close() tears it down', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosted-broker-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    const sock = path.join(dir, 'agent.sock');
+    let broker: { close(): void } | null = null;
+    try {
+      broker = await startHostedBroker();
+      // Real socket bound on the isolated temp dir — same wire protocol as the
+      // standalone broker, so agentPing (a real socket round-trip) succeeds.
+      expect(broker).not.toBeNull();
+      expect(fs.existsSync(sock)).toBe(true);
+      expect((await agentPing()).reachable).toBe(true);
+
+      // Daemon-safe teardown: no process.exit — close() just releases the socket.
+      broker!.close();
+      broker = null;
+      expect(fs.existsSync(sock)).toBe(false);
+      expect((await agentPing()).reachable).toBe(false);
+    } finally {
+      broker?.close();
       if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
       else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
       fs.rmSync(dir, { recursive: true, force: true });
