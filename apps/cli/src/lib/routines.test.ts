@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { validateJob, validateTrigger, normalizeTriggerEvent, type JobConfig } from './routines.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, type JobConfig } from './routines.js';
+import { getRoutinesDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
@@ -62,6 +65,48 @@ describe('validateTrigger', () => {
   it('rejects a malformed repo', () => {
     const errors = validateTrigger({ type: 'github_event', event: 'push', repo: 'not-a-repo' });
     expect(errors).toContain('trigger.repo must be in owner/name form');
+  });
+});
+
+describe('default execution mode (RUSH-1595: plan -> auto)', () => {
+  it('a routine YAML with no explicit mode defaults to auto', () => {
+    ensureAgentsDir();
+    const name = '__test-default-mode-rush1595__';
+    const file = path.join(getRoutinesDir(), name + '.yml');
+    try {
+      // Write a raw config that omits `mode` entirely, exercising JOB_DEFAULTS.
+      fs.writeFileSync(file, `name: ${name}\nschedule: '0 3 * * *'\nagent: claude\nprompt: do it\n`, 'utf-8');
+      const read = readJob(name);
+      expect(read).not.toBeNull();
+      expect(read!.mode).toBe('auto');
+    } finally {
+      deleteJob(name);
+    }
+  });
+
+  it('writeJob omits mode when it equals the auto default, but persists a non-default plan', () => {
+    ensureAgentsDir();
+    const name = '__test-mode-serialize-rush1595__';
+    const file = path.join(getRoutinesDir(), name + '.yml');
+    const base: JobConfig = {
+      name,
+      schedule: '0 3 * * *',
+      agent: 'claude',
+      prompt: 'do it',
+      mode: 'auto',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+    } as JobConfig;
+    try {
+      writeJob({ ...base, mode: 'auto' });
+      expect(fs.readFileSync(file, 'utf-8')).not.toMatch(/^mode:/m);
+
+      writeJob({ ...base, mode: 'plan' });
+      expect(fs.readFileSync(file, 'utf-8')).toMatch(/^mode:\s*plan/m);
+    } finally {
+      deleteJob(name);
+    }
   });
 });
 
