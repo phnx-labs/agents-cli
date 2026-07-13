@@ -289,9 +289,11 @@ async function importFromICloud(
     const parts = [`imported ${result.added} key(s)`];
     if (result.skipped) parts.push(`skipped ${result.skipped} (already set, pass --force)`);
     if (result.missing.length) parts.push(`unreadable (left in iCloud): ${result.missing.join(', ')}`);
+    if (result.unimportable.length) parts.push(`reserved, not importable (left in iCloud): ${result.unimportable.join(', ')}`);
     if (opts.purge) parts.push(`purged ${result.purged} iCloud item(s)`);
     const line = `${candidate.name}: ${parts.join(', ')}`;
-    console.log(result.missing.length ? chalk.yellow(line) : chalk.green(line));
+    const warn = result.missing.length > 0 || result.unimportable.length > 0;
+    console.log(warn ? chalk.yellow(line) : chalk.green(line));
   }
 }
 
