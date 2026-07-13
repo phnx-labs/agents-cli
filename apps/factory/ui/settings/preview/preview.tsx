@@ -150,6 +150,7 @@ const running: FloorAgent[] = [
       { path: '/repo/.agents/worktrees/bench-saved-views/ref-review.md', label: 'ref-review.md', kind: 'markdown', source: 'worktree' },
     ],
     createdTickets: ['RUSH-1519', 'RUSH-1520'],
+    createdCommits: ['095e588093ca'],
     todos: [
       { content: 'Merge ticket surfaces', status: 'completed' },
       { content: 'Port group-by control', status: 'in_progress' },

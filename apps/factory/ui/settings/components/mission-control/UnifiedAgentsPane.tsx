@@ -60,6 +60,8 @@ import {
   type CiStatus,
   type ManagedProject,
   type LinearProjectLite,
+  linearIssueLabel,
+  linearIssueUrl,
 } from './floorModel'
 import { SavedViews } from './SavedViewsBar'
 import { loadSavedViews, persistSavedViews, upsertView, removeView, viewMatches, type SavedView } from './savedViews'
@@ -1805,7 +1807,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
               {/* Artifacts row: the agent's outputs at a glance — the PR (click-through),
                   CI, the team it spawned, and tickets it created. Mirrors the card chips. */}
-              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
+              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.createdCommits?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
                 <div className="arts">
                   {(a.plans ?? []).map((plan) => (
                     <button
@@ -1825,8 +1827,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                   )}
                   {a.ci && <span className={`art ci ${a.ci}`}>CI {a.ci}</span>}
                   {a.spawnedTeam && <span className="art team"><Icon name="grip" size={10} /> team · {a.spawnedTeam}</span>}
-                  {(a.createdTickets ?? []).map((t) => (
-                    <span key={t} className="art tk"><Icon name="plus" size={10} /> {t}</span>
+                  {(a.createdTickets ?? []).map((t) => {
+                    const href = linearIssueUrl(t)
+                    const label = linearIssueLabel(t)
+                    return href
+                      ? <ExtLink key={t} href={href} className="art tk" style={{ textDecoration: 'none' }}><Icon name="plus" size={10} /> {label}</ExtLink>
+                      : <span key={t} className="art tk"><Icon name="plus" size={10} /> {label}</span>
+                  })}
+                  {(a.createdCommits ?? []).map((sha) => (
+                    <span key={sha} className="art commit"><Icon name="gitBranch" size={10} /> commit {sha}</span>
                   ))}
                 </div>
               )}

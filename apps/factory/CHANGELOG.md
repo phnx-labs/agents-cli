@@ -11,6 +11,12 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Factory Floor surfaces agent-created tickets as clickable Linear artifacts (RUSH-1547).**
+  Session cards and detail panes now render linked Linear badges for carried/created
+  ticket refs and include commit chips in the produced-artifacts row, so PRs,
+  tickets, teams, plans, and commits are visible without reading the transcript.
+  Source: `ui/settings/components/mission-control/FeedItem.tsx`,
+  `UnifiedAgentsPane.tsx`.
 - **Factory tmux tabs close when their top-level pane exits (RUSH-1543).**
   Tmux-backed agent tabs now install a guarded pane-death hook: exiting a user
   split still closes only that split, but when the last remaining pane dies,

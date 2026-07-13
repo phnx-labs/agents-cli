@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { Icon } from './icons'
 import { AgentAvatar, agentIdFromPrefix } from './AgentAvatar'
 import { StructuredReply, type ReplyCallbacks } from './StructuredReply'
-import { heartbeatLevel, sessionTaskLine, type FloorAgent, type FloorTicket } from './floorModel'
+import { heartbeatLevel, linearIssueLabel, linearIssueUrl, sessionTaskLine, type FloorAgent, type FloorTicket } from './floorModel'
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
 import { CardChecklist } from './TodoChecklist'
@@ -32,6 +32,14 @@ function firstLine(text: string): string {
 function plainTok(tok: number, plain: boolean): string {
   if (plain) return tok > 120 ? 'fast' : tok > 0 ? 'working' : ''
   return tok ? `${tok} tok/s` : ''
+}
+
+function TicketArtifact({ ticket, className }: { ticket: string; className: string }) {
+  const href = linearIssueUrl(ticket)
+  const label = linearIssueLabel(ticket)
+  return href
+    ? <ExtLink href={href} className={className} title={`Open ${label}`} style={{ textDecoration: 'none' }}><Icon name="plus" size={10} /> {label}</ExtLink>
+    : <span className={className} title={`Created ticket ${label}`}><Icon name="plus" size={10} /> {label}</span>
 }
 
 // Reply callbacks are agent-scoped (they take the FloorAgent, not a pre-bound closure)
@@ -138,6 +146,12 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const rateBadge = a.rateLimited
     ? <span className="pill rate" title="This session hit a rate or usage limit">rate limited</span>
     : null
+  const ticketHref = linearIssueUrl(a.ticket)
+  const ticketBadge = a.ticket
+    ? ticketHref
+      ? <ExtLink href={ticketHref} className="pill ticket" title={`Open ${linearIssueLabel(a.ticket)}`} style={{ textDecoration: 'none' }}>{linearIssueLabel(a.ticket)}</ExtLink>
+      : <span className="pill ticket">{linearIssueLabel(a.ticket)}</span>
+    : null
 
   return (
     <div
@@ -153,6 +167,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         {!plain && wt && <span className="wtchip mono" title={a.worktreePath || wt}>{wt}</span>}
         <span className="when">
           {marker}
+          {ticketBadge}
           {bgBadge}
           {rateBadge}
           {ciBadge}
@@ -185,7 +200,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
       {a.resp && !(a.needs && a.question && a.question.kind !== 'retry' && a.question.text.trim() === a.resp.trim()) && (
         <div className={`resp${destructive ? ' q' : ''}`}>{renderMarkdown(a.resp, { clamp: true })}</div>
       )}
-      {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
+      {!plain && (a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.createdCommits?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0) && (
         <div className="artifacts" onClick={(e) => e.stopPropagation()}>
           {(a.plans ?? []).map((plan) => (
             <button
@@ -204,8 +219,11 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
             </span>
           )}
           {(a.createdTickets ?? []).map((t) => (
-            <span key={t} className="artifact ticket" title={`Created ticket ${t}`}>
-              <Icon name="plus" size={10} /> {t}
+            <TicketArtifact key={t} ticket={t} className="artifact ticket" />
+          ))}
+          {(a.createdCommits ?? []).map((sha) => (
+            <span key={sha} className="artifact commit" title={`Created commit ${sha}`}>
+              <Icon name="gitBranch" size={10} /> {sha}
             </span>
           ))}
         </div>

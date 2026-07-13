@@ -151,6 +151,7 @@ export interface FloorAgent {
   ci: CiStatus           // CI state of the open PR; null when no PR / unknown
   ticket: string | null  // "RUSH-812" when linked (injected/worked-on ticket from prompt or branch)
   createdTickets?: string[] // tracker refs this session CREATED (Linear create_issue / gh issue create); [] / undefined when none
+  createdCommits?: string[] // short git commit SHAs this session CREATED; [] / undefined when none
   spawnedTeam?: string   // team name this session SPAWNED via `agents teams create/add`; undefined when none
   plans?: PlanFile[]     // detected ref-*.md / .html plan artifacts available for preview
   branch: string
@@ -772,6 +773,28 @@ export function outcomeLabel(a: Pick<FloorAgent, 'ticket' | 'pr' | 'worktreeSlug
   }
   if (a.worktreeSlug) return a.worktreeSlug
   return 'Unassigned'
+}
+
+const LINEAR_ID_RE = /\b([A-Z][A-Z0-9]*-\d+)\b/
+const LINEAR_URL_ID_RE = /^https?:\/\/(?:www\.)?linear\.app\/\S*?\/issue\/([A-Z][A-Z0-9]*-\d+)\b/i
+
+/** Display label for a Linear issue ref or URL. */
+export function linearIssueLabel(ref: string): string {
+  const fromUrl = ref.match(LINEAR_URL_ID_RE)?.[1]
+  if (fromUrl) return fromUrl.toUpperCase()
+  const fromText = ref.match(LINEAR_ID_RE)?.[1]
+  return fromText ?? ref
+}
+
+/** External URL for a Linear issue ref or URL. Returns null for non-Linear refs. */
+export function linearIssueUrl(ref: string | null | undefined): string | null {
+  if (!ref) return null
+  const trimmed = ref.trim()
+  if (!trimmed) return null
+  const fromUrl = trimmed.match(LINEAR_URL_ID_RE)
+  if (fromUrl) return trimmed
+  const id = trimmed.match(LINEAR_ID_RE)?.[1]
+  return id ? `https://linear.app/issue/${encodeURIComponent(id)}` : null
 }
 
 /** Group agents by the chosen dimension. Prototype groupKey: factory-floor.html:412. */
