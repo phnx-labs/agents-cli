@@ -36,35 +36,56 @@ menu bar's New Session submenu.
 
 ## The dropdown
 
+One rule shapes the menu: **attention floats up, context groups down.**
+
 ```
  a !                      icon + badge (red ! = needs you, green N = N running)
- ┌─ agents ─────────────────────────────┐
- │ NEEDS YOU (2)                         │   sessions awaiting input +
- │   ! claude  api  awaiting input    ›  │   failed / overdue routines
- │   ! routine nightly-sync  failed   ›  │
- ├────────────────────────────────────────┤
- │ New session                       ⌘N  │   submenu: one entry per installed agent
- ├────────────────────────────────────────┤
- │ AGENTS · 2 running · 3 idle           │
- │   claude    ● 2 running            ›  │   per-agent counts; submenu lists the
- │   codex     ○ idle                ›  │   sessions and a "New <agent>" launcher
- │   …                                   │
- ├────────────────────────────────────────┤
- │ routines  next 9:00am · 1 failed   ›  │   one compact line (secondary)
- ├────────────────────────────────────────┤
- │ Stop scheduler                        │   shown when the routines daemon is up
- │ Quit menu bar                     ⌘Q  │   disables the launchd service
- └────────────────────────────────────────┘
+ ┌─ agents ──────────────────────────────────────┐
+ │ ⚠ NEEDS YOU (3)                               │   triage strip: wait-time sorted
+ │   ⚠ Claude · api — Apply rename?    ·  2h 25m ›│   across ALL projects, question
+ │   ⚠ Claude · web — awaiting input   ·  3m     ›│   + how long it's waited
+ │   ✕ 2 routines failing                        ›│
+ ├────────────────────────────────────────────────┤
+ │ New Session                                ⌘N │   submenu: one entry per agent
+ ├────────────────────────────────────────────────┤
+ │ ACTIVE · api  ·  1 running                    │   live work grouped by repo;
+ │   ● Claude — draining Linear queue          ›  │   rich rows carry the session's
+ │ ACTIVE · web  ·  1 running                    │   own title inline
+ │   ● Codex — building hero section           ›  │
+ ├────────────────────────────────────────────────┤
+ │ ROUTINES · 16 · next 7:00 PM · 2 paused       │   next few upcoming + failing
+ │   ◔ triage-tickets  in 22m                  ›  │   inline; All routines… for
+ │   ✕ crm-brief  failed                       ›  │   the rest
+ │   All routines…                             ›  │
+ ├────────────────────────────────────────────────┤
+ │ RECENT TICKETS / RECENT                       │   dedicated, glanceable
+ ├────────────────────────────────────────────────┤
+ │ System    all set · auto-nudge off          ›  │   setup + watchdog collapsed
+ ├────────────────────────────────────────────────┤
+ │ Density: Auto                                 │   Auto → Rich → Compact
+ │ Stop scheduler · Settings · Quit          ⌘Q  │
+ └────────────────────────────────────────────────┘
 ```
 
-- **NEEDS YOU** — pinned on top. Sessions blocked waiting for you, plus routines
-  whose last run failed, timed out, or that are overdue. Empty when nothing needs
-  attention.
-- **New session** — launches `agents run <agent>` in a new Terminal window.
-- **AGENTS** — every installed agent with running / idle counts. A session is
-  *running* if its transcript was written in the last 2 minutes, else *idle*.
-- **routines** — next run and failed count; the submenu lists all routines with
-  Run now / Logs.
+- **⚠ NEEDS YOU** — the triage strip, pinned on top and never nested in a project
+  group. Blocked sessions sorted by wait-time (most-stalled first, regardless of
+  repo), each showing the actual question it's waiting on (attention-sentinel
+  content) and elapsed wait (sentinel mtime). Failed / overdue routines and a
+  stopped scheduler append here. Empty when nothing needs attention.
+- **New Session** — launches `agents run <agent>` in a new Terminal window.
+- **ACTIVE · \<repo\>** — live work grouped by repo. A session is *running* if
+  its transcript was written in the last 2 minutes, else *idle*. Rich rows show
+  the session's title inline; the row's submenu reveals the working dir.
+- **ROUTINES** — kept glanceable: the next few upcoming plus any failing routine
+  inline (Run now / Pause / Logs in each submenu), `All routines…` for the rest.
+- **RECENT TICKETS / RECENT** — tickets filed via quick dispatch and recent
+  sessions, unchanged dedicated sections.
+- **System** — setup staleness + the auto-nudge watchdog collapsed into one row;
+  the submenu keeps the doctor items and the auto-nudge toggle.
+- **Density** — cycles Auto → Rich → Compact (persisted as `menubarDensity` in
+  UserDefaults; `MENUBAR_DENSITY` env overrides for probes). Compact folds rows
+  to one-liners and tucks Routines / Recent behind submenus. Auto is rich while
+  something needs you, compact on a calm machine.
 
 The icon badges **red `!`** when anything needs you and **green with a count**
 when sessions are running; otherwise it is the bare mark.
@@ -90,7 +111,7 @@ The helper assembles the menu by reading these directly — no CLI, no re-index:
 | Terminals | `~/.agents/.cache/terminals/live-terminals.json` | terminal / IDE sessions (agent, cwd, pid) |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
-| Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input (written by the Notification hook) |
+| Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook; empty content renders "awaiting input") |
 | Installed agents | `~/.agents/.history/versions/<agent>/` | the agent roster |
 
 Liveness is a `kill(pid, 0)` check; running-vs-idle is the transcript file's
