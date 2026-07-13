@@ -33,6 +33,14 @@ import type { UnifiedTask, TerminalDetail } from '../types'
 import type { InstalledAgent, DispatchHost, DispatchTarget } from '../components/mission-control/dispatch.types'
 
 const noop = () => {}
+const feedHandlers = {
+  onSelect: noop,
+  onOption: noop,
+  onFreeText: noop,
+  onAttach: noop,
+  onOpenPlan: noop,
+  onOpenAttachment: noop,
+}
 
 function agent(p: Partial<FloorAgent>): FloorAgent {
   return {
@@ -117,6 +125,15 @@ const idleThinkingAgent = agent({
   plans: [
     { path: '/repo/.agents/worktrees/agent-readiness/ref-plan.html', label: 'ref-plan.html', kind: 'html', source: 'output' },
     { path: '/repo/.agents/worktrees/agent-readiness/ref-review.md', label: 'ref-review.md', kind: 'markdown', source: 'worktree' },
+  ],
+  attachments: [
+    {
+      path: '/Users/muqsit/.agents/.history/attachments/factory-floor-readiness.png',
+      label: 'factory-floor-readiness.png',
+      mediaType: 'image/png',
+      sizeBytes: 184_320,
+      thumbnailUri: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 96 64%22%3E%3Crect width=%2296%22 height=%2264%22 fill=%22%230a0a0a%22/%3E%3Crect x=%226%22 y=%226%22 width=%2284%22 height=%2252%22 rx=%224%22 fill=%22%23151613%22 stroke=%22%23a3e635%22/%3E%3Cpath d=%22M13 44l17-18 14 12 11-9 28 23H13z%22 fill=%22%235a7d1b%22/%3E%3Ccircle cx=%2268%22 cy=%2220%22 r=%226%22 fill=%22%23a3e635%22/%3E%3C/svg%3E',
+    },
   ],
   recent: [
     { name: 'Bash', input: { command: 'cd /Users/muqsit/src/github.com/muqsitnawaz/agents-cli' }, timestamp: new Date(Date.now() - 86_400_000).toISOString() },
@@ -264,17 +281,17 @@ function Feed() {
         <Icon name="alert" size={11} /> NEEDS YOU · 5
         <span className="ln" />
       </div>
-      <FeedItem agent={idleThinkingAgent} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
-      <FeedItem agent={twinA} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
-      <FeedItem agent={twinB} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
-      <FeedItem agent={askAgent} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
-      <FeedItem agent={reviewAgent} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
+      <FeedItem agent={idleThinkingAgent} selected={false} plain={false} {...feedHandlers} />
+      <FeedItem agent={twinA} selected={false} plain={false} {...feedHandlers} />
+      <FeedItem agent={twinB} selected={false} plain={false} {...feedHandlers} />
+      <FeedItem agent={askAgent} selected={false} plain={false} {...feedHandlers} />
+      <FeedItem agent={reviewAgent} selected={false} plain={false} {...feedHandlers} />
 
       <div className="feed-sec">RUNNING · {running.length}<span className="ln" />
         <span className="fresh"><span className="rot"><Icon name="refresh" size={11} /></span>hosts synced 4s ago</span>
       </div>
       {running.map((a) => (
-        <FeedItem key={a.id} agent={a} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
+        <FeedItem key={a.id} agent={a} selected={false} plain={false} {...feedHandlers} />
       ))}
 
       <div className="backlog">
@@ -289,7 +306,7 @@ function Feed() {
 
       <div className="feed-sec">DONE TODAY · {done.length}<span className="ln" /></div>
       {done.map((a) => (
-        <FeedItem key={a.id} agent={a} selected={false} plain={false} onSelect={noop} onOption={noop} onFreeText={noop} onAttach={noop} />
+        <FeedItem key={a.id} agent={a} selected={false} plain={false} {...feedHandlers} />
       ))}
     </div>
   )
@@ -518,6 +535,15 @@ const detailTerminal: TerminalDetail = {
     '/Users/muqsit/src/github.com/muqsitnawaz/rush/supabase/migrations/20260708_policy.sql',
     '/Users/muqsit/src/github.com/muqsitnawaz/rush/tests/rls_policy.test.ts',
     '/Users/muqsit/src/github.com/muqsitnawaz/rush/src/db/policy.ts',
+  ],
+  attachments: [
+    {
+      path: '/Users/muqsit/.agents/.history/attachments/rls-policy-error.png',
+      label: 'rls-policy-error.png',
+      mediaType: 'image/png',
+      sizeBytes: 96_512,
+      thumbnailUri: 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 160 100%22%3E%3Crect width=%22160%22 height=%22100%22 fill=%22%230d1117%22/%3E%3Crect x=%2212%22 y=%2214%22 width=%22136%22 height=%2272%22 rx=%226%22 fill=%22%23161b22%22 stroke=%22%233b82f6%22/%3E%3Cpath d=%22M24 70l28-28 22 18 18-14 44 35H24z%22 fill=%22%23214b7a%22/%3E%3Ccircle cx=%22118%22 cy=%2236%22 r=%2210%22 fill=%22%23a3e635%22/%3E%3C/svg%3E',
+    },
   ],
   recentFileTimes: {
     '/Users/muqsit/src/github.com/muqsitnawaz/rush/supabase/migrations/20260708_policy.sql': Date.now() - 8_000,

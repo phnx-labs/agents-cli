@@ -23,7 +23,9 @@ optionally attach recent screenshots from the thumbnail strip, then pick one
 agent for **File Ticket** or one or more agents for **Fix**.
 
 - **File Ticket** sends the note and selected screenshots to the selected ticket
-  agent, which investigates and files one Linear ticket.
+  agent, which investigates and files one Linear ticket. Selected screenshot
+  paths are identified as user-provided ticket material, and the agent uploads
+  every selected file using whichever issue placement communicates it best.
 - **Fix** fans out to every selected agent with `agents run <agent> --mode auto
   --name quick-<agent>-<timestamp>`, so the resulting sessions appear in normal
   `agents sessions` and menu-bar surfaces instead of as opaque background work.

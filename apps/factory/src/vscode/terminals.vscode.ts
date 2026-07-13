@@ -13,7 +13,7 @@ import * as sessionsPersist from '../core/sessions.persist';
 import { getSessionPathBySessionId, getSessionPreviewInfo, getOpenCodeSessionPreviewInfo, getCursorSessionPreviewInfo, SessionPreviewInfo } from './sessions.vscode';
 import { fetchLocalSessions } from './remoteSessions.vscode';
 import type { RemoteSession } from '../core/remoteSessions';
-import { extractSessionQuickDetails, SessionQuickDetails, SessionQuickSummary, SessionSummaryAgentType } from '../core/session.summary';
+import { extractSessionQuickDetails, SessionAttachment, SessionQuickDetails, SessionQuickSummary, SessionSummaryAgentType } from '../core/session.summary';
 import {
   CLAUDE_TITLE,
   CODEX_TITLE,
@@ -798,6 +798,7 @@ export interface TerminalDetail {
   recentFileTimes?: Record<string, number>;
   recentTools?: string[];
   recentToolCalls?: import('../core/session.summary').RecentToolCall[];
+  attachments?: SessionAttachment[];
   lastFilePath?: string | null;
   narrative?: string; // Agent's most recent substantive assistant prose (rolling summary line)
   cwd?: string | null;
@@ -1171,6 +1172,7 @@ export async function getTerminalsByAgentType(
       results[data.index].recentFileTimes = data.quickDetails.recentFileTimes;
       results[data.index].recentTools = data.quickDetails.recentTools;
       results[data.index].recentToolCalls = data.quickDetails.recentToolCalls;
+      results[data.index].attachments = data.quickDetails.attachments;
       results[data.index].lastFilePath = data.quickDetails.lastFilePath;
       results[data.index].narrative = data.quickDetails.narrative;
     }
