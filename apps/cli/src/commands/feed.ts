@@ -21,6 +21,11 @@ import {
   type OutcomeGroup,
   type SessionOutcomeHint,
 } from '../lib/feed-outcome.js';
+import {
+  classifyBlock,
+  filterBlocksForFeed,
+  suppressionDigest,
+} from '../lib/ask-classifier.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { relTime } from '../lib/format.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
@@ -174,15 +179,17 @@ export function registerFeedCommand(program: Command): void {
   program
     .command('feed')
     .description('List open blocks -- decisions agents are waiting on (grouped by outcome)')
-    .option('--json', 'Output as JSON (each block stamped with its outcome)')
+    .option('--json', 'Output as JSON (each block stamped with its outcome + ask class)')
     .option('--flat', 'List one block per agent instead of grouping by outcome')
+    .option('--all', 'Include stalls/FYIs that policy would suppress (default: hide them)')
     .option('--local', 'Only this machine -- skip the cross-machine SSH fan-out')
     .option('-H, --host <target...>', 'Scope to remote machine(s) over SSH; repeatable')
     .option('--device <target...>', 'Alias for --host; repeatable')
-    .option('--dispatch', 'Run default-on-no-answer policy and urgent notifications')
+    .option('--dispatch', 'Run stall suppression + default-on-no-answer policy and urgent notifications')
     .action(async (opts: {
       json?: boolean;
       flat?: boolean;
+      all?: boolean;
       local?: boolean;
       host?: string[];
       device?: string[];
@@ -252,6 +259,20 @@ export function registerFeedCommand(program: Command): void {
         blocks = enrichBlocksFromSessions(blocks, sessionHintsFromActive(sessions));
       }
 
+      // Stall suppression (RUSH-1477): auto-answer "should I…?" / "what's next?"
+      // so they never render. Applied on every feed read unless --all; --dispatch
+      // also applies so unattended ticks drain the stall backlog.
+      const filter = filterBlocksForFeed(blocks, {
+        apply: !opts.all || opts.dispatch === true,
+      });
+      if (!opts.all) {
+        blocks = filter.surfaced;
+      }
+      const digest = suppressionDigest(filter);
+      if (digest && !opts.json) {
+        console.log(chalk.dim(digest));
+      }
+
       if (opts.dispatch) {
         const policy = loadPolicy();
         const now = new Date();
@@ -277,14 +298,18 @@ export function registerFeedCommand(program: Command): void {
       }
 
       if (opts.json) {
-        // Always a block array (stamped with outcome) so remote fan-out, scripts,
-        // and older peers keep a stable contract. Human grouping is text-only.
-        console.log(JSON.stringify(stampBlockOutcomes(blocks), null, 2));
+        // Always a block array (stamped with outcome + ask class) so remote fan-out
+        // and scripts keep a stable contract. Human grouping is text-only.
+        const stamped = stampBlockOutcomes(blocks).map((b) => ({
+          ...b,
+          ask: classifyBlock(b),
+        }));
+        console.log(JSON.stringify(stamped, null, 2));
         return;
       }
 
       if (blocks.length === 0) {
-        console.log(chalk.gray('No open blocks.'));
+        console.log(chalk.gray(digest ? 'No open blocks after stall suppression.' : 'No open blocks.'));
         return;
       }
 
