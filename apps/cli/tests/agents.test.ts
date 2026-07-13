@@ -10,6 +10,7 @@ import {
   transformSubagentForKimi,
   buildKimiSubagentsParentYaml,
   installSubagentToAgent,
+  KIMI_SUBAGENTS_PARENT_FILE,
 } from '../src/lib/subagents.js';
 
 describe('capableAgents("commands")', () => {
@@ -156,27 +157,30 @@ describe('kimi subagents (YAML agent files)', () => {
     expect(supports('kimi', 'subagents').ok).toBe(true);
   });
 
-  it('transformSubagentForKimi emits YAML agent with system_prompt', () => {
+  it('transformSubagentForKimi emits system_prompt_path (not inline system_prompt)', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-sub-'));
     try {
       fs.writeFileSync(
         path.join(dir, 'AGENT.md'),
         `---\nname: reviewer\ndescription: Reviews diffs\nmodel: kimi-k2\n---\n\nYou review code.\n`
       );
-      const out = transformSubagentForKimi(dir);
-      expect(out).toContain('version: 1');
-      expect(out).toContain('name: reviewer');
-      expect(out).toContain('description: Reviews diffs');
-      expect(out).toContain('model: kimi-k2');
-      expect(out).toContain('extend: default');
-      expect(out).toContain('system_prompt:');
-      expect(out).toContain('You review code.');
+      const out = transformSubagentForKimi(dir, 'reviewer');
+      expect(out.yaml).toContain('version: 1');
+      expect(out.yaml).toContain('name: reviewer');
+      expect(out.yaml).toContain('description: Reviews diffs');
+      expect(out.yaml).toContain('model: kimi-k2');
+      expect(out.yaml).toContain('extend: default');
+      expect(out.yaml).toContain('system_prompt_path: ./reviewer.system.md');
+      expect(out.yaml).not.toContain('system_prompt:');
+      expect(out.systemPromptFileName).toBe('reviewer.system.md');
+      expect(out.systemPrompt).toContain('You review code.');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
   it('buildKimiSubagentsParentYaml lists subagents for --agent-file', () => {
+    expect(KIMI_SUBAGENTS_PARENT_FILE).toBe('_agents-cli.yaml');
     const out = buildKimiSubagentsParentYaml([
       { name: 'reviewer', description: 'Reviews diffs', relativePath: './reviewer.yaml' },
       { name: 'explorer', description: 'Explores', relativePath: './explorer.yaml' },
@@ -188,7 +192,7 @@ describe('kimi subagents (YAML agent files)', () => {
     expect(out).toContain('explorer:');
   });
 
-  it('installSubagentToAgent writes ~/.kimi-code/agents/<name>.yaml', () => {
+  it('installSubagentToAgent writes yaml + sibling system prompt md', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-inst-'));
     try {
       const subDir = path.join(root, 'sub');
@@ -201,8 +205,11 @@ describe('kimi subagents (YAML agent files)', () => {
       const r = installSubagentToAgent(subDir, 'explorer', 'kimi', home);
       expect(r.success).toBe(true);
       const dest = path.join(home, '.kimi-code', 'agents', 'explorer.yaml');
+      const prompt = path.join(home, '.kimi-code', 'agents', 'explorer.system.md');
       expect(fs.existsSync(dest)).toBe(true);
-      expect(fs.readFileSync(dest, 'utf-8')).toContain('name: explorer');
+      expect(fs.existsSync(prompt)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('system_prompt_path: ./explorer.system.md');
+      expect(fs.readFileSync(prompt, 'utf-8')).toContain('Explore.');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
