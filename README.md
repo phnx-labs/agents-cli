@@ -159,12 +159,13 @@ Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON outpu
 
 ### What does `--mode skip` actually do?
 
-Treat `skip` as a last-resort escape hatch. agents-cli forwards the harness's native
-no-prompt flag; it does not add another safety layer. Prefer `auto` where the harness
-has a smart classifier (Claude Code and GitHub Copilot), or `edit` everywhere else.
-Harnesses without a native bypass flag reject `skip`.
+Treat `skip` as a last-resort escape hatch. In direct-exec runs (without `--acp`),
+agents-cli forwards the harness's native no-prompt flag; it does not add another
+safety layer. Prefer `auto` where the harness has a smart classifier (Claude Code and
+GitHub Copilot), or `edit` everywhere else. Harnesses without a native bypass flag
+reject direct-exec `skip`.
 
-| Harness | `--mode skip` becomes |
+| Harness | Direct-exec `--mode skip` becomes |
 |---|---|
 | Claude Code | `--dangerously-skip-permissions` |
 | Codex | `--dangerously-bypass-approvals-and-sandbox` (equivalent to `--yolo`) |
@@ -176,6 +177,10 @@ Harnesses without a native bypass flag reject `skip`.
 | Grok | `--always-approve` |
 | Kimi | `--yolo` interactively; no extra flag in headless `-p` runs, which already auto-approve |
 | Droid | `--skip-permissions-unsafe` |
+
+With `--acp`, these native flags are not used. agents-cli instead grants `skip`
+permission requests at the ACP protocol layer with `allow_always`; the same
+last-resort warning applies.
 
 Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
 to sandboxed `edit` and can still prompt. `agents run codex --mode skip` is different:
@@ -457,7 +462,7 @@ tools:
 ---
 ```
 
-Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit` or `--mode full`. `agents run` defaults to `--mode plan` (read-only), which deadlocks at `ExitPlanMode` in headless runs.
+Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit`, or `--mode auto` on Claude Code and GitHub Copilot. Reserve `--mode skip` (legacy alias: `full`) for last-resort bypasses. `agents run` defaults to `--mode plan` (read-only), which deadlocks at `ExitPlanMode` in headless runs.
 
 Resolution is project > user > system: a `<repo>/.agents/workflows/<name>/` overrides a same-named workflow in `~/.agents/workflows/`. Commit project workflows with your repo so teammates get the same pipeline.
 
