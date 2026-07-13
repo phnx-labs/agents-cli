@@ -10,7 +10,6 @@
  */
 
 import { randomUUID } from 'crypto';
-import * as os from 'os';
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import type { Host } from './types.js';
 import { sshTargetFor } from './types.js';
@@ -25,31 +24,27 @@ import { followHostTask } from './progress.js';
 // injection-safe to interpolate unquoted into remote commands.
 const REMOTE_DIR = '$HOME/.agents/.cache/hosts';
 
-const LOCAL_HOME = process.env.HOME ?? os.homedir();
-
 /**
- * If `p` is anchored at the home dir — a leading `~`, `$HOME`, or the LOCAL home
- * path — return the remainder (no leading slash), else null. The local shell
- * expands `~` before commander ever sees it, so a `--cwd ~/x` on macOS arrives
- * as `/Users/<me>/x`; matching that lets us re-root it at the remote home.
+ * If `p` is anchored at the home dir — a leading `~` or `$HOME` — return the
+ * remainder (no leading slash), else null. Callers that want a local-home
+ * absolute (`/Users/<me>/x`, from a shell-expanded `--cwd ~/x`) re-rooted at the
+ * remote home normalize it to `~/x` first (`toRemotePortable`); explicit
+ * `--remote-cwd` is left literal and so is never re-rooted here.
  */
 function homeRemainder(p: string): string | null {
   if (p === '~' || p === '$HOME') return '';
   if (p.startsWith('~/')) return p.slice(2);
   if (p.startsWith('$HOME/')) return p.slice(6);
-  if (p === LOCAL_HOME) return '';
-  if (p.startsWith(LOCAL_HOME + '/')) return p.slice(LOCAL_HOME.length + 1);
   return null;
 }
 
 /**
  * Build a `cd <dir> && ` prefix that resolves on the REMOTE host.
  *
- * `--cwd`/`--remote-cwd`/`--project` name a directory on the HOST, but a
- * home-anchored path must resolve against the REMOTE user's home, not the local
- * one (`/home/<me>` vs `/Users/<me>`). We emit an unquoted `"$HOME"` for that
- * segment — the remote login shell expands it — and shell-quote the remainder.
- * A path not under home is quoted verbatim (used as-is on the host).
+ * A `~`/`$HOME`-anchored path must resolve against the REMOTE user's home, not
+ * the local one (`/home/<me>` vs `/Users/<me>`). We emit an unquoted `"$HOME"`
+ * for that segment — the remote login shell expands it — and shell-quote the
+ * remainder. Any other path (absolute or relative) is quoted verbatim.
  */
 export function remoteCdPrefix(remoteCwd?: string): string {
   if (!remoteCwd) return '';

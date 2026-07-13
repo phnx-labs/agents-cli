@@ -6,6 +6,7 @@ import { execFileSync } from 'child_process';
 import {
   toHomeRelative,
   expandLocalHome,
+  toRemotePortable,
   parseProjectRef,
   buildProjectPath,
   inferProjectRoot,
@@ -34,6 +35,22 @@ describe('expandLocalHome', () => {
   it('passes non-home paths through unchanged', () => {
     expect(expandLocalHome('/opt/x')).toBe('/opt/x');
     expect(expandLocalHome('rel/path')).toBe('rel/path');
+  });
+});
+
+describe('toRemotePortable', () => {
+  it('rewrites a local-home absolute to ~/… so the remote re-roots it', () => {
+    expect(toRemotePortable(path.join(HOME, 'src/x'))).toBe('~/src/x');
+  });
+  it('leaves ~/$HOME-anchored paths as-is', () => {
+    expect(toRemotePortable('~/src/x')).toBe('~/src/x');
+    expect(toRemotePortable('$HOME/src/x')).toBe('$HOME/src/x');
+  });
+  it('leaves a non-home absolute path verbatim (used literally on the host)', () => {
+    expect(toRemotePortable('/opt/work')).toBe('/opt/work');
+  });
+  it('leaves a relative path as-is', () => {
+    expect(toRemotePortable('sub/dir')).toBe('sub/dir');
   });
 });
 
@@ -76,7 +93,15 @@ describe('inferProjectRoot', () => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'proot-'));
     repo = path.join(tmp, 'my-repo');
     fs.mkdirSync(path.join(repo, 'sub', 'deep'), { recursive: true });
-    execFileSync('git', ['init', '-q'], { cwd: repo });
+    const git = (args: string[]) =>
+      execFileSync('git', args, {
+        cwd: repo,
+        env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' },
+      });
+    git(['init', '-q']);
+    fs.writeFileSync(path.join(repo, 'README'), 'x');
+    git(['add', '-A']);
+    git(['commit', '-qm', 'init']);
   });
   afterAll(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -86,6 +111,14 @@ describe('inferProjectRoot', () => {
     const root = await inferProjectRoot(path.join(repo, 'sub', 'deep'));
     // tmp is outside $HOME, so it stays absolute — realpath to dodge /var → /private/var on macOS.
     expect(root).toBe(fs.realpathSync(tmp));
+  });
+
+  it('resolves the MAIN repo root from inside a linked worktree (not the worktree dir)', async () => {
+    const wt = path.join(repo, '.agents', 'worktrees', 'feat');
+    fs.mkdirSync(path.dirname(wt), { recursive: true });
+    execFileSync('git', ['worktree', 'add', '-q', wt], { cwd: repo });
+    // Regression: naive --show-toplevel would yield <repo>/.agents/worktrees here.
+    expect(await inferProjectRoot(wt)).toBe(fs.realpathSync(tmp));
   });
 
   it('returns undefined when cwd is not inside a git repo', async () => {

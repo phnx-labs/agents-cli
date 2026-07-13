@@ -16,7 +16,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { readMeta, updateMeta } from './state.js';
-import { getGitRoot } from './git.js';
+import { getMainRepoRoot } from './git.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 
@@ -33,6 +33,20 @@ export function expandLocalHome(p: string): string {
   if (p === '~' || p === '$HOME') return HOME;
   if (p.startsWith('~/')) return path.join(HOME, p.slice(2));
   if (p.startsWith('$HOME/')) return path.join(HOME, p.slice(6));
+  return p;
+}
+
+/**
+ * Make a `--cwd`/`--project` value portable to a remote host: an absolute path
+ * under the LOCAL home (which the local shell already expanded from `~`) becomes
+ * `~/…` so the *remote* shell re-roots it at its own home. Paths already anchored
+ * at `~`/`$HOME` pass through; other absolute or relative paths are left as-is
+ * (used verbatim on the host). Explicit `--remote-cwd` is NOT run through this —
+ * it is a literal remote path by contract.
+ */
+export function toRemotePortable(p: string): string {
+  if (p.startsWith('~') || p.startsWith('$HOME')) return p;
+  if (path.isAbsolute(p)) return toHomeRelative(p);
   return p;
 }
 
@@ -55,8 +69,8 @@ export function setProjectRoot(rootPath: string): string {
  */
 export async function inferProjectRoot(cwd: string): Promise<string | undefined> {
   try {
-    const gitRoot = await getGitRoot(cwd);
-    return toHomeRelative(path.dirname(gitRoot));
+    const mainRoot = await getMainRepoRoot(cwd);
+    return toHomeRelative(path.dirname(mainRoot));
   } catch {
     return undefined;
   }

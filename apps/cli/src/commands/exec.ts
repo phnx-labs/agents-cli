@@ -611,23 +611,17 @@ export function registerRunCommand(program: Command): void {
       const hostGiven = [options.host, options.device, options.on, options.computer].filter((v): v is string => !!v);
 
       // --project <slug>[@worktree]: resolve the projects-root shorthand into a
-      // cwd. On a host run it feeds --remote-cwd (kept home-relative so the host
-      // expands `~`); locally it becomes an absolute --cwd. Explicit --cwd and
-      // --project are mutually exclusive; an explicit --remote-cwd still wins.
+      // cwd. On a host run it resolves home-relative (`~/…`, so the host expands
+      // it); locally it becomes an absolute path. It owns the working directory,
+      // so it is mutually exclusive with both --cwd and --remote-cwd.
       if (options.project) {
-        if (options.cwd) {
-          console.error(chalk.red('Pass --project or --cwd, not both.'));
+        if (options.cwd || options.remoteCwd) {
+          console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
           process.exit(1);
         }
         const { resolveProjectRef } = await import('../lib/project-root.js');
-        const onHost = hostGiven.length > 0;
         try {
-          const resolved = await resolveProjectRef(options.project, { forRemote: onHost });
-          if (onHost) {
-            if (!options.remoteCwd) options.remoteCwd = resolved;
-          } else {
-            options.cwd = resolved;
-          }
+          options.cwd = await resolveProjectRef(options.project, { forRemote: hostGiven.length > 0 });
         } catch (err) {
           console.error(chalk.red((err as Error).message));
           process.exit(1);
@@ -667,6 +661,11 @@ export function registerRunCommand(program: Command): void {
         }
         try {
           const runAgent = agentSpec.split('@')[0];
+          // Working directory on the host: an explicit --remote-cwd is used
+          // verbatim; --cwd/--project are made portable (a local-home absolute
+          // becomes `~/…` so the remote shell re-roots it at ITS home).
+          const { toRemotePortable } = await import('../lib/project-root.js');
+          const hostCwd = options.remoteCwd ?? (options.cwd ? toRemotePortable(options.cwd) : undefined);
           // `--resume [id]`: commander yields the string id, or `true` when the
           // flag is passed bare. A bare resume needs the interactive picker,
           // which can't run over a detached remote dispatch — only forward a
@@ -709,8 +708,7 @@ export function registerRunCommand(program: Command): void {
               prompt,
               mode: options.mode,
               model: options.model,
-              // --cwd falls back to the host cwd (--remote-cwd stays the explicit form).
-              remoteCwd: options.remoteCwd ?? options.cwd,
+              remoteCwd: hostCwd,
               sessionId: hostSessionId,
               name: options.name,
               resume: resumeId,
@@ -733,8 +731,7 @@ export function registerRunCommand(program: Command): void {
             prompt,
             mode: options.mode,
             model: options.model,
-            // --cwd falls back to the host cwd (--remote-cwd stays the explicit form).
-            remoteCwd: options.remoteCwd ?? options.cwd,
+            remoteCwd: hostCwd,
             sessionId: hostSessionId,
             name: options.name,
             resume: resumeId,

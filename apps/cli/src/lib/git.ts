@@ -499,6 +499,19 @@ export async function getGitRoot(dir: string): Promise<string> {
 }
 
 /**
+ * Return the absolute path to the **main** working-tree root for `dir`.
+ *
+ * Unlike {@link getGitRoot}, this stays correct when `dir` is inside a *linked*
+ * worktree: `--show-toplevel` there returns the worktree's own path, but the
+ * common git dir (`--git-common-dir`) always points at the primary repo's
+ * `.git`, whose parent is the main checkout. Throws if `dir` is not in a repo.
+ */
+export async function getMainRepoRoot(dir: string): Promise<string> {
+  const common = await simpleGit(dir).raw(['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  return path.dirname(common.trim());
+}
+
+/**
  * Initialize a git repo in an existing directory.
  */
 export async function initRepo(dir: string): Promise<void> {

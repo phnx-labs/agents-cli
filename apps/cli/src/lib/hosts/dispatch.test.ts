@@ -112,15 +112,14 @@ describe('remoteCdPrefix', () => {
     expect(remoteCdPrefix('$HOME/src/x')).toBe('cd "$HOME"/src/x && ');
   });
 
-  it('re-roots a LOCAL-home-expanded absolute path (the shell expanded ~ before we saw it)', () => {
-    // This is exactly `--cwd ~/x` on macOS: arrives as /Users/<me>/x.
-    expect(remoteCdPrefix(`${LOCAL_HOME}/src/x`)).toBe('cd "$HOME"/src/x && ');
+  it('does NOT re-root a raw local-home absolute — only ~/$HOME anchor here (exec.ts makes --cwd portable)', () => {
+    const p = `${LOCAL_HOME}/src/x`;
+    expect(remoteCdPrefix(p)).toBe(`cd ${p} && `);
   });
 
-  it('maps the bare home dir to "$HOME"', () => {
+  it('maps bare ~ / $HOME to "$HOME"', () => {
     expect(remoteCdPrefix('~')).toBe('cd "$HOME" && ');
     expect(remoteCdPrefix('$HOME')).toBe('cd "$HOME" && ');
-    expect(remoteCdPrefix(LOCAL_HOME)).toBe('cd "$HOME" && ');
   });
 
   it('quotes a non-home absolute path verbatim (used as-is on the host)', () => {
