@@ -134,7 +134,9 @@ function keychainItemRequiresUserPresence(item: string): boolean {
 export interface KeychainBackend {
   has(item: string): boolean;
   get(item: string): string;
-  set(item: string, value: string): void;
+  /** `opts.noAcl` mirrors setKeychainToken's no-ACL write path so tests can
+   * assert which path a write took; in-memory backends may ignore it. */
+  set(item: string, value: string, opts?: { noAcl?: boolean }): void;
   delete(item: string): boolean;
   list(prefix: string): string[];
 }
@@ -524,7 +526,12 @@ export interface RekeyPlanItem {
  * `tier` token, where `none`/`never` means the item must be re-written through
  * the no-ACL path — and (b) inject the cleartext `name` into the JSON, because
  * after hashing the service name can no longer carry it (listBundles reads it
- * back from the payload). Exported for unit tests.
+ * back from the payload). A value item's tier is resolved from its bundle's
+ * metadata PAYLOAD in `values` — under the cleartext metadata name or its
+ * hashed transform — never from the metadata item being part of the same
+ * `services` batch: a --prefix run can scope a bundle's value items alone, and
+ * rekeyServiceNames supplies the out-of-scope metadata reads (see the
+ * supplemental batch there). Exported for unit tests.
  */
 export function computeRekeyPlan(
   services: string[],
@@ -533,7 +540,18 @@ export function computeRekeyPlan(
 ): { items: RekeyPlanItem[]; unreadable: string[] } {
   const items: RekeyPlanItem[] = [];
   const unreadable: string[] = [];
-  const noAclBundles = new Set<string>();
+  const bundleNoAcl = (bundle: string): boolean => {
+    const meta = `${BUNDLES_ITEM_PREFIX}${bundle}`;
+    const raw = values.get(meta) ?? values.get(hashedServiceName(meta, key));
+    if (raw === undefined) return false;
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown> | null;
+      if (parsed && typeof parsed === 'object') return parsed.tier === 'none' || parsed.tier === 'never';
+    } catch {
+      /* malformed JSON — ACL'd */
+    }
+    return false;
+  };
   for (const service of services) {
     if (!service.startsWith(BUNDLES_ITEM_PREFIX)) continue;
     const value = values.get(service);
@@ -554,7 +572,6 @@ export function computeRekeyPlan(
     } catch {
       /* malformed JSON — copy verbatim, ACL'd */
     }
-    if (noAcl) noAclBundles.add(name);
     items.push({ oldService: service, newService: hashedServiceName(service, key), noAcl, payload });
   }
   for (const service of services) {
@@ -568,7 +585,7 @@ export function computeRekeyPlan(
     if (service.startsWith(SECRETS_ITEM_PREFIX)) {
       const rest = service.slice(SECRETS_ITEM_PREFIX.length);
       const dot = rest.lastIndexOf('.');
-      if (dot > 0) noAcl = noAclBundles.has(rest.slice(0, dot));
+      if (dot > 0) noAcl = bundleNoAcl(rest.slice(0, dot));
     }
     items.push({ oldService: service, newService: hashedServiceName(service, key), noAcl });
   }
@@ -646,7 +663,29 @@ export function rekeyServiceNames(
       log('Touch ID will prompt twice (read + verify). Cancelling is safe — the re-key resumes on a later run.');
     }
 
-    const values = withRawKeychainServiceNames(() => getKeychainTokens(cleartext));
+    // A --prefix run can scope a bundle's value items WITHOUT its metadata
+    // item (`agents-cli.bundles.<bundle>`); the tier decision must still come
+    // from the keychain, not from batch membership — otherwise a partial
+    // re-key of a `never`-policy bundle would silently re-attach a biometry
+    // ACL to its values (and delete the cleartext originals, one-way). Read
+    // every such bundle's metadata alongside the values in the same batch:
+    // the cleartext name for a not-yet-moved metadata item, its hashed
+    // transform for one an earlier partial run already moved. Absent both (a
+    // standalone item with no backing bundle), the value stays ACL'd. A full
+    // run adds nothing here — every metadata item is already in scope.
+    const inScope = new Set(cleartext);
+    const supplementalMetaReads = new Set<string>();
+    for (const service of cleartext) {
+      if (!service.startsWith(SECRETS_ITEM_PREFIX)) continue;
+      const rest = service.slice(SECRETS_ITEM_PREFIX.length);
+      const dot = rest.lastIndexOf('.');
+      if (dot <= 0) continue;
+      const meta = `${BUNDLES_ITEM_PREFIX}${rest.slice(0, dot)}`;
+      if (inScope.has(meta)) continue;
+      supplementalMetaReads.add(meta);
+      supplementalMetaReads.add(hashedServiceName(meta, key));
+    }
+    const values = withRawKeychainServiceNames(() => getKeychainTokens([...cleartext, ...supplementalMetaReads]));
     const { items, unreadable } = computeRekeyPlan(cleartext, values, key);
     const failed: Array<{ item: string; detail: string }> = unreadable.map((item) => ({
       item,
@@ -891,7 +930,7 @@ export function setKeychainToken(item: string, value: string, opts?: { noAcl?: b
   // resolve the storage name.
   if (/[\x00=\r\n]/.test(item)) throw new Error('Secret item name contains invalid characters.');
   item = prepareServiceName(item, { autoRekey: true });
-  if (backend) { backend.set(item, value); return; }
+  if (backend) { backend.set(item, value, opts); return; }
   assertSupportedPlatform();
   assertValueStorable(value);
 

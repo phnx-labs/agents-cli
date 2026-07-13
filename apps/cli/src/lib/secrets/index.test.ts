@@ -95,14 +95,17 @@ class MemBackend implements KeychainBackend {
   store = new Map<string, string>();
   /** Item name whose `set` should throw (injects a mid-re-key write failure). */
   failOnSet: string | null = null;
+  /** Items written through the no-ACL path (setKeychainToken `opts.noAcl`). */
+  noAclWrites = new Set<string>();
   has(item: string) { return this.store.has(item); }
   get(item: string) {
     const v = this.store.get(item);
     if (v === undefined) throw new Error(`missing ${item}`);
     return v;
   }
-  set(item: string, value: string) {
+  set(item: string, value: string, opts?: { noAcl?: boolean }) {
     if (this.failOnSet !== null && item === this.failOnSet) throw new Error(`injected write failure for '${item}'`);
+    if (opts?.noAcl) this.noAclWrites.add(item);
     this.store.set(item, value);
   }
   delete(item: string) { return this.store.delete(item); }
@@ -256,6 +259,43 @@ describe('computeRekeyPlan', () => {
     expect(byOld['agents-cli.anthropic.token'].noAcl).toBe(false);
     expect(JSON.parse(byOld['agents-cli.bundles.prod'].payload!).name).toBe('prod');
     expect(byOld['agents-cli.anthropic.token'].newService).toMatch(HASHED_OTHER);
+  });
+
+  it("resolves a value item's tier from a metadata payload outside the batch (cleartext or hashed name)", () => {
+    // A --prefix run scopes only the value items; rekeyServiceNames supplies
+    // the bundle-metadata reads. The plan must find the tier whether the
+    // metadata still sits at its cleartext name or was already moved to its
+    // hashed name by an earlier partial run.
+    const meta = JSON.stringify({ tier: 'never', vars: { T: 'keychain:T' } });
+    const viaCleartext = computeRekeyPlan(
+      ['agents-cli.secrets.autobot.T'],
+      new Map([
+        ['agents-cli.secrets.autobot.T', 'silent'],
+        ['agents-cli.bundles.autobot', meta],
+      ]),
+      key,
+    );
+    expect(viaCleartext.items).toHaveLength(1);
+    expect(viaCleartext.items[0].noAcl).toBe(true);
+
+    const viaHashed = computeRekeyPlan(
+      ['agents-cli.secrets.autobot.T'],
+      new Map([
+        ['agents-cli.secrets.autobot.T', 'silent'],
+        [hashedServiceName('agents-cli.bundles.autobot', key), meta],
+      ]),
+      key,
+    );
+    expect(viaHashed.items).toHaveLength(1);
+    expect(viaHashed.items[0].noAcl).toBe(true);
+
+    // No metadata anywhere (standalone item, no backing bundle) → ACL'd.
+    const standalone = computeRekeyPlan(
+      ['agents-cli.secrets.wallet.3f2a9c1d4e5b'],
+      new Map([['agents-cli.secrets.wallet.3f2a9c1d4e5b', 'cvv']]),
+      key,
+    );
+    expect(standalone.items[0].noAcl).toBe(false);
   });
 
   it('reports unreadable services instead of dropping them', () => {
@@ -414,5 +454,41 @@ describe('rekeyServiceNames (one-time migration)', () => {
     // Unmatched items untouched.
     expect(mem.store.has('agents-cli.secrets.prod.API_KEY')).toBe(true);
     expect(mem.store.has('agents-cli.secrets.wallet.3f2a9c1d4e5b')).toBe(false);
+  });
+
+  it("a --prefix run scoping only a never-bundle's value items preserves the no-ACL tier (metadata resolved from the keychain, not the batch)", () => {
+    // Regression (PR #900 review): scoping `agents-cli.secrets.autobot.`
+    // WITHOUT `agents-cli.bundles.autobot` used to re-write the never-policy
+    // bundle's values WITH a biometry ACL — silently breaking headless reads,
+    // one-way, because the cleartext originals were already deleted.
+    seedCleartext();
+    const report = rekeyServiceNames({ prefixes: ['agents-cli.secrets.autobot.'] });
+    expect(report.migrated).toEqual(['agents-cli.secrets.autobot.T']);
+    expect(report.activated).toBe(false);
+
+    const key = Buffer.from(storedRecord().k, 'hex');
+    const hashedValue = hashedServiceName('agents-cli.secrets.autobot.T', key);
+    expect(mem.store.get(hashedValue)).toBe('silent');
+    expect(mem.store.has('agents-cli.secrets.autobot.T')).toBe(false);
+    // The tier survived: the hashed copy went through the no-ACL write path.
+    expect(mem.noAclWrites.has(hashedValue)).toBe(true);
+    // The metadata item was only READ for its tier — this run never moved it.
+    expect(mem.store.has('agents-cli.bundles.autobot')).toBe(true);
+    // Contrast: the session-tier bundle's value keeps its ACL on a later scope.
+    rekeyServiceNames({ prefixes: ['agents-cli.secrets.prod.'] });
+    expect(mem.noAclWrites.has(hashedServiceName('agents-cli.secrets.prod.API_KEY', key))).toBe(false);
+  });
+
+  it('a --prefix run finds the tier even when the metadata item was moved by an earlier partial run', () => {
+    seedCleartext();
+    // First partial run moves ONLY the metadata item to its hashed name.
+    rekeyServiceNames({ prefixes: ['agents-cli.bundles.autobot'] });
+    expect(mem.store.has('agents-cli.bundles.autobot')).toBe(false);
+    // Second partial run scopes only the value items — the tier must come
+    // from the already-hashed metadata copy.
+    const report = rekeyServiceNames({ prefixes: ['agents-cli.secrets.autobot.'] });
+    expect(report.migrated).toEqual(['agents-cli.secrets.autobot.T']);
+    const key = Buffer.from(storedRecord().k, 'hex');
+    expect(mem.noAclWrites.has(hashedServiceName('agents-cli.secrets.autobot.T', key))).toBe(true);
   });
 });
