@@ -171,6 +171,15 @@ const LIVE_TERMINALS_FILE = path.join(getTerminalsDir(), 'live-terminals.json');
  */
 const ACTIVE_MTIME_WINDOW_MS = 2 * 60_000;
 
+/**
+ * A live process can only borrow an indexed session file if that transcript
+ * has been touched recently enough to plausibly belong to the process. This is
+ * deliberately wider than ACTIVE_MTIME_WINDOW_MS: an inactive-but-live CLI can
+ * be idle for longer than 2 minutes, but it must not attach to a weeks-old
+ * transcript just because a GUI app service with the same basename is alive.
+ */
+export const ACTIVE_SESSION_STALE_MS = 24 * 60 * 60_000;
+
 /** Executables we recognize as agent CLIs when scanning the process table. */
 const AGENT_CLI_NAMES: Record<string, string> = {
   claude: 'claude',
@@ -322,7 +331,7 @@ function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
 export function findSessionFileForKind(kind: string, cwd?: string, sessionId?: string): string | undefined {
   if (!cwd) return undefined;
   if (kind === 'claude') return findClaudeSessionFile(cwd, sessionId);
-  if (kind === 'codex') return latestSessionFileForCwd('codex', cwd);
+  if (kind === 'codex') return latestSessionFileForCwd('codex', cwd, { maxAgeMs: ACTIVE_SESSION_STALE_MS });
   return undefined;
 }
 
