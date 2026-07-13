@@ -34,22 +34,23 @@ function makeTempHome(): string {
 function runCli(home: string, args: string[]) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', SSH_CONNECTION: '' },
+    // AGENTS_EVENTS_PATH is inherited from the hermetic fork default
+    // (tests/setup.ts); blank it so the child resolves the canonical
+    // HOME-derived log this suite asserts on ('' is falsy in the resolver).
+    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', SSH_CONNECTION: '', AGENTS_EVENTS_PATH: '' },
     encoding: 'utf-8',
   });
 }
 
 function readEvents(home: string): Array<Record<string, unknown>> {
-  const dir = path.join(home, '.agents', '.cache', 'logs');
-  if (!fs.existsSync(dir)) return [];
+  const eventsPath = path.join(home, '.agents', 'events.jsonl');
+  if (!fs.existsSync(eventsPath)) return [];
   const out: Array<Record<string, unknown>> = [];
-  for (const f of fs.readdirSync(dir).filter((n) => n.startsWith('events-') && n.endsWith('.jsonl'))) {
-    for (const line of fs.readFileSync(path.join(dir, f), 'utf-8').split('\n').filter(Boolean)) {
-      try {
-        out.push(JSON.parse(line));
-      } catch {
-        /* skip */
-      }
+  for (const line of fs.readFileSync(eventsPath, 'utf-8').split('\n').filter(Boolean)) {
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      /* skip */
     }
   }
   return out;

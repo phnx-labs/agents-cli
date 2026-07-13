@@ -390,6 +390,15 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     env: spawnEnv,
   });
 
+  child.on('error', (err) => {
+    try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
+    meta.status = 'failed';
+    meta.exitCode = 1;
+    meta.completedAt = new Date().toISOString();
+    writeRunMeta(meta);
+    process.stderr.write(`[agents] daemon: spawn failed for job "${config.name}": ${err.message}\n`);
+  });
+
   child.unref();
   try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
 

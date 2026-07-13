@@ -115,7 +115,7 @@ automatically.
 | `agents browser profiles create <name>` | Create a new profile (see flags below) |
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles set-default [name]` | Set the profile a bare `start` (and `--profile default`) uses; `--unset` to clear; no name prints the current value. Device-local. |
-| `agents browser profiles logins` | Show which login-gated services each profile has a live session for (reads cookie presence only) |
+| `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
 | `agents browser profiles delete <name>` | Delete profile config and chrome-data cache |
 | `agents browser profiles doctor <name>` | Diagnose binary, port, user-data-dir, onboarding state |
 
@@ -125,7 +125,7 @@ automatically.
 |------|-------------|
 | `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `custom` |
 | `-e, --endpoint <url>` | CDP endpoint URL (repeatable). Auto-assigned if omitted |
-| `-s, --secrets <bundle>` | Secrets bundle to inject at browser start |
+| `-s, --secrets <bundle>` | Secrets bundle for this profile: injected as env vars at launch, AND the credential store for `browser type --secret` (keys `<PREFIX>_USERNAME`/`<PREFIX>_PASSWORD`). Warns if the bundle doesn't exist yet |
 | `-d, --description <text>` | Human-readable description |
 | `--headless` | Run in headless mode |
 | `--window <WxH>` | Window size in CSS pixels (default: 1512x982, MacBook Pro 14") |
@@ -177,6 +177,7 @@ automatically.
 | `agents browser refs` | Get numbered refs for interactive DOM elements |
 | `agents browser click <ref>` | Click element by ref |
 | `agents browser type <ref> --text <text>` | Type text into element; `--clear` to empty first |
+| `agents browser type <ref> --secret <bundle>/<KEY>` | Type a credential resolved in-process from a secrets bundle — the value never crosses stdout or the transcript (leak-free login) |
 | `agents browser press <key>` | Press a key (Enter, Tab, Escape, etc.) |
 | `agents browser hover <ref>` | Hover over element by ref |
 | `agents browser scroll` | Scroll by pixels; `--dx` horizontal, `--dy` vertical, `--at-x/--at-y` origin |

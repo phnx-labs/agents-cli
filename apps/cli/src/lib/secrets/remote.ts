@@ -176,7 +176,7 @@ export async function remoteResolveEnv(target: string, bundle: string): Promise<
   emit('secrets.get', {
     module: 'secrets',
     bundle,
-    caller: 'remote resolve',
+    operation: 'remote resolve',
     source: 'remote',
     host: target,
     status: 'success',

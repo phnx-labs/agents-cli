@@ -125,7 +125,19 @@ agents secrets export x.com --plaintext | grep '^SOCIAL_GETRUSH_'
 agents secrets import prod --from .env.prod
 ```
 
-Every key goes into Keychain.
+Every key goes into Keychain. The same `--from` axis imports from other
+sources: `--from 1password:<vault>` (needs the `op` CLI) and `--from icloud`.
+
+## "A bundle exists in Keychain Access but `secrets list` can't see it"
+
+Bundles from the pre-biometry era live in the iCloud Keychain and are invisible
+to every modern query. Recover them (macOS):
+
+```bash
+agents secrets import --from icloud            # interactive multi-select
+agents secrets import <bundle> --from icloud   # one specific bundle
+agents secrets import --from icloud --purge    # also delete the iCloud copies
+```
 
 ## "I need a secret that reads from a file or command at runtime"
 

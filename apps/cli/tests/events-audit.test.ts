@@ -38,23 +38,24 @@ function makeTempHome(): string {
 function runCli(home: string, args: string[], extraEnv: Record<string, string> = {}) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', ...extraEnv },
+    // AGENTS_EVENTS_PATH is inherited from the hermetic fork default
+    // (tests/setup.ts); blank it so the child resolves the canonical
+    // HOME-derived log this suite asserts on ('' is falsy in the resolver).
+    env: { ...process.env, HOME: home, SHELL: '/bin/zsh', AGENTS_EVENTS_PATH: '', ...extraEnv },
     encoding: 'utf-8',
   });
 }
 
-/** Read every event record written under a temp HOME's log dir. */
+/** Read every event record written to the canonical log under a temp HOME. */
 function readEvents(home: string): Array<Record<string, unknown>> {
-  const dir = path.join(home, '.agents', '.cache', 'logs');
-  if (!fs.existsSync(dir)) return [];
+  const eventsPath = path.join(home, '.agents', 'events.jsonl');
+  if (!fs.existsSync(eventsPath)) return [];
   const out: Array<Record<string, unknown>> = [];
-  for (const f of fs.readdirSync(dir).filter((n) => n.startsWith('events-') && n.endsWith('.jsonl'))) {
-    for (const line of fs.readFileSync(path.join(dir, f), 'utf-8').split('\n').filter(Boolean)) {
-      try {
-        out.push(JSON.parse(line));
-      } catch {
-        /* skip */
-      }
+  for (const line of fs.readFileSync(eventsPath, 'utf-8').split('\n').filter(Boolean)) {
+    try {
+      out.push(JSON.parse(line));
+    } catch {
+      /* skip */
     }
   }
   return out;
@@ -135,16 +136,7 @@ describe('audit event log', () => {
     // the invocation; the token-shaped positional must be masked, not stored.
     runCli(home, ['secrets', 'get', 'ghp_FAKETOKENVALUE123'], { SSH_CONNECTION: '' });
 
-    // Read whatever file the writer actually produced — it names the file from
-    // the LOCAL date, so reconstructing it here from a UTC toISOString() would
-    // point at the wrong day (and ENOENT) whenever the runner's local date and
-    // UTC date straddle midnight. Glob the dir instead, like readEvents does.
-    const logsDir = path.join(home, '.agents', '.cache', 'logs');
-    const raw = fs
-      .readdirSync(logsDir)
-      .filter((n) => n.startsWith('events-') && n.endsWith('.jsonl'))
-      .map((n) => fs.readFileSync(path.join(logsDir, n), 'utf-8'))
-      .join('');
+    const raw = fs.readFileSync(path.join(home, '.agents', 'events.jsonl'), 'utf-8');
     expect(raw).not.toContain('ghp_FAKETOKENVALUE123');
     expect(raw).toContain('[REDACTED]');
   });
@@ -153,8 +145,7 @@ describe('audit event log', () => {
     const home = makeTempHome();
     runCli(home, ['secrets', 'list']);
 
-    // Regression: query() used to skip today's file when startDate was later
-    // than midnight, so a 2h window returned nothing on the day it was written.
+    // Regression: a sub-day query must filter records by timestamp.
     const res = runCli(home, ['events', '--since', '2h', '--json']);
     expect(res.status).toBe(0);
     const records = JSON.parse(res.stdout) as Array<Record<string, unknown>>;

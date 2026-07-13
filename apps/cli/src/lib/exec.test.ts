@@ -39,6 +39,22 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
   });
 });
 
+describe('buildExecEnv — outbound feed runtime identity', () => {
+  it('labels interactive runs as terminal and prompt runs as headless', () => {
+    expect(buildExecEnv(execOpts({ agent: 'claude' })).AGENTS_RUNTIME).toBe('terminal');
+    expect(buildExecEnv(execOpts({ agent: 'claude', prompt: 'work' })).AGENTS_RUNTIME).toBe('headless');
+  });
+
+  it('lets orchestrators override the runtime identity', () => {
+    const env = buildExecEnv(execOpts({
+      agent: 'claude',
+      prompt: 'team task',
+      env: { AGENTS_RUNTIME: 'teams' },
+    }));
+    expect(env.AGENTS_RUNTIME).toBe('teams');
+  });
+});
+
 describe('buildExecEnv — Claude Code auto-updater suppression for pinned managed installs', () => {
   it('injects DISABLE_AUTOUPDATER=1 for a managed (pinned) claude version', () => {
     // Pinned per-version installs must never self-mutate: Claude Code's own

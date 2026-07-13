@@ -89,6 +89,7 @@ export const loadSessions: ModuleLoader = async () => (await import('../../comma
 export const loadTeams: ModuleLoader = async () => (await import('../../commands/teams.js')).registerTeamsCommands;
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
+export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
 
@@ -184,6 +185,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   teams: [loadTeams],
   cloud: [loadCloud],
   message: [loadMessage],
+  feed: [loadFeed],
   serve: [loadServe],
   audit: [loadAudit],
 };

@@ -1,13 +1,13 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { gzipSync } from 'node:zlib';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   emit, emitStart, emitCommand, query, rotate, stats,
   redactPrompt, redactArgs, truncate,
+  detectCaller,
   _resetForTest,
-  type EventRecord,
 } from './events.js';
 
 const tempDirs: string[] = [];
@@ -29,10 +29,9 @@ afterEach(() => {
 
 function setupLogsDir(): string {
   const dir = makeTempDir();
-  const logsDir = path.join(dir, 'logs');
-  fs.mkdirSync(logsDir, { recursive: true });
-  _resetForTest(logsDir);
-  return logsDir;
+  const eventsPath = path.join(dir, 'events.jsonl');
+  _resetForTest(eventsPath);
+  return dir;
 }
 
 describe('events', () => {
@@ -41,16 +40,17 @@ describe('events', () => {
       const logsDir = setupLogsDir();
       emit('info', { module: 'test', input: 'hello' });
 
-      const files = fs.readdirSync(logsDir).filter(f => f.endsWith('.jsonl'));
-      expect(files.length).toBe(1);
+      const files = fs.readdirSync(logsDir).filter(f => f === 'events.jsonl');
+      expect(files).toEqual(['events.jsonl']);
 
-      const content = fs.readFileSync(path.join(logsDir, files[0]), 'utf-8');
+      const content = fs.readFileSync(path.join(logsDir, 'events.jsonl'), 'utf-8');
       const record = JSON.parse(content.trim().split('\n').pop()!);
       expect(record.event).toBe('info');
       expect(record.level).toBe('info');
       expect(record.ts).toBeDefined();
       expect(record.hostname).toBeDefined();
       expect(record.pid).toBe(process.pid);
+      expect(record.caller).toBe(detectCaller().kind);
       expect(record.osUser).toBeDefined();
       expect(['local', 'ssh']).toContain(record.transport);
     });
@@ -81,13 +81,12 @@ describe('events', () => {
       expect(records[0].level).toBe('debug');
     });
 
-    it('includes caller in the record', () => {
+    it('does not let payload metadata override the detected caller', () => {
       setupLogsDir();
-      emit('info', { module: 'test' });
+      emit('info', { module: 'test', caller: 'forged' });
 
       const records = query({});
-      expect(records[0].caller).toBeDefined();
-      expect(records[0].caller).toContain('events.test.ts');
+      expect(records[0].caller).toBe(detectCaller().kind);
     });
 
     it('respects AGENTS_DISABLE_EVENT_LOG', () => {
@@ -130,6 +129,70 @@ describe('events', () => {
 
     it('redactArgs masks GitHub tokens', () => {
       expect(redactArgs(['ghp_xxxxxxxxxxxx'])).toEqual(['[REDACTED]']);
+    });
+
+    it('redactArgs masks sensitive flag values regardless of token format', () => {
+      const sentinel = 'plain-value-that-does-not-look-like-a-token';
+      expect(redactArgs([
+        '--value', sentinel,
+        `--body=${sentinel}`,
+        '--password', sentinel,
+        `--api-key=${sentinel}`,
+        '--auth', sentinel,
+      ])).toEqual([
+        '--value', '[REDACTED]',
+        '--body=[REDACTED]',
+        '--password', '[REDACTED]',
+        '--api-key=[REDACTED]',
+        '--auth', '[REDACTED]',
+      ]);
+    });
+
+    it('redactArgs hashes long prompt values without retaining raw text', () => {
+      const prompt = 'sensitive prompt '.repeat(20);
+      const result = redactArgs(['--prompt', prompt])!;
+      expect(result[1]).toMatch(/^\[REDACTED prompt length=340 sha256=[a-f0-9]{16}\]$/);
+      expect(result.join(' ')).not.toContain(prompt);
+    });
+
+    it('emit strips raw secrets and prompts from arbitrary payload fields', () => {
+      const dir = setupLogsDir();
+      const sentinel = 'known-secret-sentinel-460';
+      emit('secrets.get', {
+        module: 'secrets',
+        apiToken: sentinel,
+        prompt: `decide using ${sentinel}`,
+        nested: { auth: sentinel },
+      });
+
+      const raw = fs.readFileSync(path.join(dir, 'events.jsonl'), 'utf-8');
+      expect(raw).not.toContain(sentinel);
+      const record = JSON.parse(raw);
+      expect(record.apiToken).toBe('[REDACTED]');
+      expect(record.nested.auth).toBe('[REDACTED]');
+      expect(record.prompt_length).toBeDefined();
+      expect(record.prompt_sha256).toBeDefined();
+    });
+  });
+
+  describe('caller detection', () => {
+    it('detects Claude Code and preserves its short session', () => {
+      expect(detectCaller({ CLAUDECODE: '1', AGENT_SESSION_ID: '12345678-rest' }, true))
+        .toEqual({ kind: 'claude-code', session: '12345678' });
+    });
+
+    it.each([
+      ['CX-123', 'codex'],
+      ['GX-123', 'gemini'],
+      ['CR-123', 'cursor'],
+      ['CC-123', 'claude'],
+    ])('maps swarmify terminal %s to %s', (terminalId, kind) => {
+      expect(detectCaller({ AGENT_TERMINAL_ID: terminalId }, true)).toEqual({ kind });
+    });
+
+    it('distinguishes direct terminal and script invocations', () => {
+      expect(detectCaller({}, true)).toEqual({ kind: 'terminal' });
+      expect(detectCaller({}, false)).toEqual({ kind: 'script' });
     });
   });
 
@@ -186,6 +249,14 @@ describe('events', () => {
       expect(results[0].module).toBe('secrets');
     });
 
+    it('filters by environment-derived caller identity', () => {
+      setupLogsDir();
+      emit('info', { module: 'test' });
+
+      expect(query({ caller: detectCaller().kind })).toHaveLength(1);
+      expect(query({ caller: 'not-this-caller' })).toHaveLength(0);
+    });
+
     it('filters by command prefix', () => {
       setupLogsDir();
       emit('command.start', { command: 'teams create', module: 'teams' });
@@ -215,11 +286,7 @@ describe('events', () => {
         osUser: 'test', transport: 'local',
         module: 'gztest',
       };
-      const today = new Date();
-      const yyyy = today.getFullYear();
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const dd = String(today.getDate()).padStart(2, '0');
-      const gzPath = path.join(logsDir, `events-${yyyy}-${mm}-${dd}.jsonl.gz`);
+      const gzPath = path.join(logsDir, 'events.1.jsonl.gz');
       fs.writeFileSync(gzPath, gzipSync(Buffer.from(JSON.stringify(record) + '\n')));
 
       const results = query({ module: 'gztest' });
@@ -229,38 +296,30 @@ describe('events', () => {
   });
 
   describe('rotation', () => {
-    it('removes old log files', () => {
+    it('rotates repeatedly at 10 MB without overwriting older archives', () => {
       const logsDir = setupLogsDir();
-      const old = new Date();
-      old.setDate(old.getDate() - 30);
-      const yyyy = old.getFullYear();
-      const mm = String(old.getMonth() + 1).padStart(2, '0');
-      const dd = String(old.getDate()).padStart(2, '0');
-      const oldFile = path.join(logsDir, `events-${yyyy}-${mm}-${dd}.jsonl`);
-      fs.writeFileSync(oldFile, '{"event":"info"}\n');
+      const active = path.join(logsDir, 'events.jsonl');
+      const oversized = (marker: string) => JSON.stringify({ marker, padding: 'x'.repeat(10 * 1024 * 1024) }) + '\n';
 
-      const now = new Date();
-      const ny = now.getFullYear();
-      const nm = String(now.getMonth() + 1).padStart(2, '0');
-      const nd = String(now.getDate()).padStart(2, '0');
-      const newFile = path.join(logsDir, `events-${ny}-${nm}-${nd}.jsonl`);
-      fs.writeFileSync(newFile, '{"event":"info"}\n');
+      fs.writeFileSync(active, oversized('first'));
+      emit('info', { module: 'rotation', marker: 'first-trigger' });
+      expect(fs.existsSync(path.join(logsDir, 'events.1.jsonl.gz'))).toBe(true);
 
-      const removed = rotate(7);
-      expect(removed).toBe(1);
-      expect(fs.existsSync(oldFile)).toBe(false);
-      expect(fs.existsSync(newFile)).toBe(true);
+      fs.writeFileSync(active, oversized('second'));
+      emit('info', { module: 'rotation', marker: 'second-trigger' });
+      const newest = gunzipSync(fs.readFileSync(path.join(logsDir, 'events.1.jsonl.gz'))).toString('utf-8');
+      const older = gunzipSync(fs.readFileSync(path.join(logsDir, 'events.2.jsonl.gz'))).toString('utf-8');
+      expect(newest).toContain('second');
+      expect(older).toContain('first');
+      expect(fs.statSync(active).size).toBe(0);
     });
 
-    it('removes old .gz files too', () => {
+    it('removes archives older than the retention period', () => {
       const logsDir = setupLogsDir();
-      const old = new Date();
-      old.setDate(old.getDate() - 30);
-      const yyyy = old.getFullYear();
-      const mm = String(old.getMonth() + 1).padStart(2, '0');
-      const dd = String(old.getDate()).padStart(2, '0');
-      const gzFile = path.join(logsDir, `events-${yyyy}-${mm}-${dd}.jsonl.gz`);
+      const gzFile = path.join(logsDir, 'events.1.jsonl.gz');
       fs.writeFileSync(gzFile, gzipSync(Buffer.from('{"event":"info"}\n')));
+      const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      fs.utimesSync(gzFile, old, old);
 
       const removed = rotate(7);
       expect(removed).toBe(1);

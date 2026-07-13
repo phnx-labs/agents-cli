@@ -30,6 +30,10 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(await maybeRunOnHost('secrets', ['secrets', 'list', '--host', 'mac'])).toBe(false);
   });
 
+  it('leaves feed host lists to the command-level fleet aggregator', async () => {
+    expect(await maybeRunOnHost('feed', ['feed', '--host', 'mac', '--json'])).toBe(false);
+  });
+
   it('returns false when no --host is given', async () => {
     expect(await maybeRunOnHost('view', ['view', 'claude'])).toBe(false);
   });

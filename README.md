@@ -238,6 +238,17 @@ agents message tester "also cover the null case"
 
 `agents message <target> <text>` reaches any running agent by name or id -- a live local run, a teammate, a loop agent, or a cloud task -- and the text lands at its next tool call. Tag the sender with `--from <who>`.
 
+### See every open block
+
+```bash
+agents feed                         # this machine + every registered online device
+agents feed --host mac-mini         # scope the view to one or more hosts
+agents feed --local                 # skip the SSH fan-out
+agents feed --json                  # the same merged view as structured data
+```
+
+Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents message`, so the decision routes back to the agent that asked it.
+
 ### Auto-nudge stalls
 
 ```bash

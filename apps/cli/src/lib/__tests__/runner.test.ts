@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'vitest';
-import { buildJobCommand } from '../runner.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import { buildJobCommand, executeJobDetached } from '../runner.js';
+import { readRunMeta } from '../routines.js';
+import { getRunsDir } from '../state.js';
 import type { JobConfig } from '../routines.js';
 
 function baseJob(overrides: Partial<JobConfig> = {}): JobConfig {
@@ -64,5 +68,44 @@ describe('buildJobCommand', () => {
 
   it('kimi plan mode throws (no headless read-only mode)', () => {
     expect(() => buildJobCommand(baseJob({ agent: 'kimi', mode: 'plan' }), 'Do the task.')).toThrow(/read-only/);
+  });
+});
+
+describe('executeJobDetached — spawn error handling', () => {
+  const cleanupJobDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of cleanupJobDirs.splice(0)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  });
+
+  it('marks run failed in meta.json on spawn ENOENT without throwing', async () => {
+    // Use 'codex' which is not on PATH in this environment — guaranteed ENOENT.
+    const config: JobConfig = {
+      name: '__runner-test-enoent__',
+      schedule: '0 0 * * *',
+      agent: 'codex',
+      mode: 'plan',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+      prompt: 'test prompt',
+      sandbox: false,
+    };
+
+    cleanupJobDirs.push(path.join(getRunsDir(), config.name));
+
+    const meta = await executeJobDetached(config);
+    expect(meta.status).toBe('running');
+
+    // Give the async error event time to fire and rewrite meta.json.
+    await new Promise<void>((r) => setTimeout(r, 200));
+
+    const updated = readRunMeta(config.name, meta.runId);
+    expect(updated).not.toBeNull();
+    expect(updated!.status).toBe('failed');
+    expect(updated!.exitCode).toBe(1);
+    expect(updated!.completedAt).not.toBeNull();
   });
 });
