@@ -78,6 +78,7 @@ import {
   loadHooks,
   loadSkills,
   loadRules,
+  loadMemory,
   loadPermissions,
   loadMcp,
   loadCli,
@@ -612,17 +613,8 @@ async function maybeBootstrapShimIntegration(
 // upgrade helpers). The lazy registrar and the all-commands fallback below both
 // call them, so the behavior is identical to the old eager registration.
 
-/** Deprecated `memory` command — hard error pointing users at `rules`. */
-function registerMemoryCommand(p: Command): void {
-  p.command('memory', { hidden: true })
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(() => {
-      console.error(chalk.red('"agents memory" has been renamed to "agents rules".'));
-      console.error(chalk.gray('Run "agents rules --help" for usage.\n'));
-      process.exit(1);
-    });
-}
+// memory is a first-class resource command (see commands/memory.ts via
+// COMMAND_LOADERS). The old memory→rules tombstone was removed in RUSH-1330.
 
 /** Deprecated `perms` alias — re-parses as `permissions`. */
 function registerPermsAliasCommand(p: Command): void {
@@ -738,9 +730,6 @@ async function reg(loader: ModuleLoader): Promise<void> {
  */
 async function registerEagerForRequest(name: string): Promise<boolean> {
   switch (name) {
-    case 'memory':
-      registerMemoryCommand(program);
-      return true;
     case 'perms':
       // The action re-parses as `permissions`, so that target must exist too.
       registerPermsAliasCommand(program);
@@ -781,7 +770,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadHooks);
   await reg(loadSkills);
   await reg(loadRules);
-  registerMemoryCommand(program);
+  await reg(loadMemory);
   await reg(loadPermissions);
   registerPermsAliasCommand(program);
   await reg(loadMcp);

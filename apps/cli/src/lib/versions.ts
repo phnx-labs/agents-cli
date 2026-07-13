@@ -49,6 +49,7 @@ import { emit } from './events.js';
 import { safeJoin } from './paths.js';
 import { installCommandSkillToVersion, listCommandSkillsInVersion, readSkillSourceCommandMarker, shouldInstallCommandAsSkill } from './command-skills.js';
 import { getWriter, getDetector } from './staleness/registry.js';
+import { syncMemoryToVersionHome } from './memory.js';
 
 /** Promisified exec for running shell commands. */
 const execAsync = promisify(exec);
@@ -2511,6 +2512,13 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   if (workflowsToSync.length > 0 && workflowsWriter) {
     const r = workflowsWriter.write({ version, versionHome, selection: workflowsToSync, cwd });
     result.workflows.push(...r.synced);
+  }
+
+  // Knowledge memory (RUSH-1330) — distinct from selection.memory which still
+  // means the composed *rules* file. Always fan out ~/.agents/memory/ facts
+  // into capable agent version homes on every full or partial sync.
+  if (supports(agent, 'memory', version).ok) {
+    syncMemoryToVersionHome(agent, versionHome, cwd);
   }
 
   // Write manifest after a full sync (no user-passed selection) so the next

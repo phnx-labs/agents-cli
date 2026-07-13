@@ -51,6 +51,8 @@ function makeDiscoveredPlugin(root: string, manifest: PluginManifest): Discovere
     scripts: [],
     commands: [],
     agentDefs: [],
+    memory: [],
+
     bin: [],
     mcpServers: [],
     lspServers: [],
@@ -791,6 +793,8 @@ describe('syncPluginToVersion (native marketplace install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      memory: [],
+
       bin: [],
       mcpServers: [],
       lspServers: [],
@@ -944,6 +948,8 @@ describe('syncPluginToVersion (droid native marketplace install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      memory: [],
+
       bin: [],
       mcpServers: [],
       lspServers: [],
@@ -1073,7 +1079,8 @@ describe('syncPluginToVersion (per-marketplace routing)', () => {
     const plugin: DiscoveredPlugin = {
       name, root: pluginRoot,
       manifest: { name, version: '1.0.0', description: 'routed' },
-      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], bin: [],
+      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], memory: [],
+ bin: [],
       mcpServers: [], lspServers: [], monitors: [],
       hasMcp: false, hasSettings: false,
       marketplace,
@@ -1143,7 +1150,8 @@ describe('syncPluginToVersion (per-marketplace routing)', () => {
         {
           name: 'code', root: pluginRoot,
           manifest: { name: 'code', version: '1.0.0', description: marketplace },
-          skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], bin: [],
+          skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], memory: [],
+ bin: [],
           mcpServers: [], lspServers: [], monitors: [], hasMcp: false, hasSettings: false,
           marketplace,
         },
@@ -1186,7 +1194,8 @@ describe('removePluginFromVersion', () => {
     const plugin: DiscoveredPlugin = {
       name: 'mp', root: pluginRoot,
       manifest: { name: 'mp', version: '1.0.0', description: 'test' },
-      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], bin: [],
+      skills: [], hooks: [], scripts: [], commands: [], agentDefs: [], memory: [],
+ bin: [],
       mcpServers: [], lspServers: [], monitors: [],
       hasMcp: false, hasSettings: false,
     };
@@ -1335,6 +1344,8 @@ describe('syncPluginToVersion (opencode TS modules)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      memory: [],
+
       bin: [],
       mcpServers: [],
       lspServers: [],
@@ -1436,6 +1447,8 @@ describe('syncPluginToVersion (cursor native marketplace install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      memory: [],
+
       bin: [],
       mcpServers: [],
       lspServers: [],
@@ -1529,6 +1542,8 @@ describe('syncPluginToVersion (goose Open Plugins install)', () => {
       scripts: [],
       commands: [],
       agentDefs: [],
+      memory: [],
+
       bin: [],
       mcpServers: [],
       lspServers: [],
