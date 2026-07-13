@@ -1231,19 +1231,28 @@ export async function installVersion(
     return { success: true, installedVersion };
   }
 
-  // Resolve the `oldest` alias to a concrete npm version up front so the rest
-  // of the install path treats it as an ordinary pinned install. (`latest`
-  // keeps its bare-package-name + post-install-rename handling below.)
-  if (version === 'oldest') {
-    const oldest = await getOldestNpmVersion(agent);
-    if (!oldest) {
+  // Resolve the `latest`/`oldest` aliases to a concrete npm version up front so
+  // the rest of the install path treats them as an ordinary pinned install.
+  // This is what keeps concurrent installs safe: resolving `latest` only AFTER
+  // npm finished meant the install ran in a shared, well-known
+  // `versions/<agent>/latest/` scratch dir that was renamed to the real version
+  // at the end — so a concurrent `agents view` reconcile
+  // (reconcileStaleLatestForAgent) or a second `latest` install could rename
+  // that dir out from under npm mid-extraction and corrupt the install (the
+  // seeded package.json and half-extracted node_modules would vanish, yielding
+  // ENOENT). A concrete dir per version has no shared name to race on.
+  if (version === 'latest' || version === 'oldest') {
+    const resolved = version === 'latest'
+      ? await getLatestNpmVersion(agent)
+      : await getOldestNpmVersion(agent);
+    if (!resolved) {
       return {
         success: false,
         installedVersion: version,
-        error: `Could not resolve the oldest published version for ${agentConfig.name} from npm.`,
+        error: `Could not resolve the ${version} published version for ${agentConfig.name} from npm.`,
       };
     }
-    version = oldest;
+    version = resolved;
   }
 
   ensureAgentsDir();
@@ -1270,12 +1279,11 @@ export async function installVersion(
   };
   fs.writeFileSync(path.join(versionDir, 'package.json'), JSON.stringify(packageJson, null, 2));
 
-  // Install the package
-  const packageSpec = version === 'latest'
-    ? agentConfig.npmPackage
-    : `${agentConfig.npmPackage}@${version}`;
-  // The `${agentConfig.npmPackage}@` prefix is load-bearing: it ensures `version`
-  // (which VERSION_RE permits to start with `-`) is never passed as a standalone npm CLI flag.
+  // Install the package. `version` is always concrete here (`latest`/`oldest`
+  // were resolved above), so the spec is always pinned. The `@` prefix is
+  // load-bearing: it ensures `version` (which VERSION_RE permits to start with
+  // `-`) is never passed as a standalone npm CLI flag.
+  const packageSpec = `${agentConfig.npmPackage}@${version}`;
 
   try {
     // Check npm is available
@@ -1291,37 +1299,13 @@ export async function installVersion(
     }
 
     onProgress?.(`Installing ${packageSpec}...`);
-    const { stdout } = await execFileAsync('npm', ['install', packageSpec, '--ignore-scripts'], { cwd: versionDir, shell: winShell });
+    await execFileAsync('npm', ['install', packageSpec, '--ignore-scripts'], { cwd: versionDir, shell: winShell });
 
-    // Determine the actual installed version
-    let installedVersion = version;
-    if (version === 'latest') {
-      const pkgJsonPath = path.join(versionDir, 'node_modules', agentConfig.npmPackage.replace(/^@/, '').split('/')[0], 'package.json');
-      // Try to read the actual version from installed package
-      try {
-        const installedPkgPath = path.join(versionDir, 'node_modules', agentConfig.npmPackage, 'package.json');
-        if (fs.existsSync(installedPkgPath)) {
-          const installedPkg = JSON.parse(fs.readFileSync(installedPkgPath, 'utf-8'));
-          installedVersion = installedPkg.version;
-
-          // Rename the directory to the actual version
-          if (installedVersion !== 'latest') {
-            const actualVersionDir = getVersionDir(agent, installedVersion);
-            if (!fs.existsSync(actualVersionDir)) {
-              fs.renameSync(versionDir, actualVersionDir);
-            } else {
-              // Already exists — drop the 'latest' install artifacts but keep
-              // `home/` (may contain conversation history from sessions that
-              // ran while the user was on `latest`).
-              removeInstallArtifacts(versionDir);
-            }
-          }
-        }
-      } catch (e) {
-        // Failed to determine version - this shouldn't happen
-        throw new Error(`Failed to determine installed version: ${(e as Error).message}`);
-      }
-    }
+    // `version` is concrete (the `latest`/`oldest` aliases were resolved up
+    // front), so the package installed directly into its final versioned dir —
+    // no post-install rename, and no shared `latest/` dir for a concurrent
+    // process to move out from under us.
+    const installedVersion = version;
 
     // Create versioned alias (e.g., claude@2.0.65)
     createVersionedAlias(agent, installedVersion);
