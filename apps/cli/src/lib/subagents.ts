@@ -303,6 +303,46 @@ export function transformSubagentForDroid(subagentDir: string): string {
 }
 
 /**
+ * Transform a subagent into a GitHub Copilot CLI custom agent `.agent.md` file.
+ *
+ * Copilot custom agents are Markdown profiles with YAML frontmatter stored in
+ * `~/.copilot/agents/` (user) or `.github/agents/` (project). The file name
+ * ends in `.agent.md` and the frontmatter carries `name`, `description`, and
+ * optionally `model` and `tools`. See GitHub docs for custom agents.
+ */
+export function transformSubagentForCopilot(subagentDir: string): string {
+  const agentMd = path.join(subagentDir, 'AGENT.md');
+  const frontmatter = parseSubagentFrontmatter(agentMd);
+  const body = getSubagentBody(agentMd);
+
+  if (!frontmatter) {
+    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
+  }
+
+  const frontmatterYaml = yaml.stringify({
+    name: frontmatter.name,
+    description: frontmatter.description,
+    ...(frontmatter.model && { model: frontmatter.model }),
+  }).trim();
+
+  let result = `---\n${frontmatterYaml}\n---\n\n${body}`;
+
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+
+  for (const file of files) {
+    const filePath = path.join(subagentDir, file);
+    const content = fs.readFileSync(filePath, 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    result += `\n\n## ${title}\n\n${content}`;
+  }
+
+  return result;
+}
+
+/**
  * Sync a subagent to an OpenClaw workspace
  * Copies full directory, renames AGENT.md to AGENTS.md
  */
