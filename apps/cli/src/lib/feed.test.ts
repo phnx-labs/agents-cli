@@ -18,6 +18,7 @@ import {
   isBlockAnswered,
   type OpenBlock,
 } from './feed.js';
+import { loadOperators } from './operator.js';
 
 const hasPython = spawnSync('python3', ['--version']).status === 0;
 
@@ -346,6 +347,38 @@ describe('feed store', () => {
     expect(listBlocks(feedDir)).toEqual([]);
   });
 
+  it.runIf(hasPython)('real hook captures multi-operator control metadata', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-controls-'));
+    const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-controls',
+        hook_event_name: 'PreToolUse',
+        tool_input: {
+          questions: [{ question: 'Merge this PR?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+          blockClass: 'approval',
+          consequence: 'merge',
+          allowedOperators: ['muqsit'],
+          timeoutMinutes: 15,
+          safeDefault: 'No',
+          costOfDelay: 'high',
+        },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    const blocks = listBlocks(path.join(home, '.agents', '.history', 'feed'));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      blockClass: 'approval',
+      consequence: 'merge',
+      allowedOperators: ['muqsit'],
+      timeoutMinutes: 15,
+      safeDefault: 'No',
+      costOfDelay: 'high',
+    });
+  });
+
   it.runIf(hasPython)('real hook gates Task subagents out', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-subagent-'));
     const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
@@ -383,16 +416,42 @@ describe('feed store', () => {
     const blockId = blockIdForSession('sess-answer');
 
     const first = recordAnswer(blockId, { answeredBy: 'operator-a', answeredFrom: 'feed' }, dir);
-    expect(first).toEqual({ ok: true });
+    expect(first.ok).toBe(true);
     expect(isBlockAnswered(blockId, dir)).toBe(true);
     expect(getAnswerRecord(blockId, dir)).toMatchObject({ answeredFrom: 'feed', answeredBy: 'operator-a' });
     expect(readBlock(blockId, dir)?.answer).toMatchObject({ answeredFrom: 'feed', answeredBy: 'operator-a' });
 
     const second = recordAnswer(blockId, { answeredBy: 'operator-b', answeredFrom: 'feed' }, dir);
     expect(second.ok).toBe(false);
-    if (!second.ok) {
+    if (!second.ok && 'existing' in second) {
       expect(second.existing.answeredBy).toBe('operator-a');
     }
+  });
+
+  it('recordAnswer refuses unverified answers to high-consequence blocks', () => {
+    const dir = tmpFeedDir();
+    fs.writeFileSync(path.join(dir, 'operators.yaml'), 'operators:\n  muqsit:\n    admin: true\n', 'utf-8');
+    publishBlock(makeBlock('sess-authz', 'Deploy to prod?', {
+      consequence: 'merge',
+      allowedOperators: ['muqsit'],
+    }), dir);
+    const blockId = blockIdForSession('sess-authz');
+
+    const unverified = recordAnswer(blockId, { answeredFrom: 'feed', answeredBy: 'stranger' }, dir);
+    expect(unverified.ok).toBe(false);
+    if (!unverified.ok) {
+      expect('unauthorized' in unverified).toBe(true);
+    }
+
+    const verified = recordAnswer(blockId, { answeredFrom: 'feed', answeredBy: 'Muqsit', operatorId: 'muqsit', verified: true }, dir);
+    expect(verified.ok).toBe(true);
+  });
+
+  it('recordAnswer permits any answer to normal-consequence blocks', () => {
+    const dir = tmpFeedDir();
+    publishBlock(makeBlock('sess-normal', 'Which color?', { consequence: 'normal' }), dir);
+    const blockId = blockIdForSession('sess-normal');
+    expect(recordAnswer(blockId, { answeredFrom: 'feed', answeredBy: 'anyone' }, dir).ok).toBe(true);
   });
 
   it('recordMessageReceipt tracks queued → consumed → continued lifecycle', () => {

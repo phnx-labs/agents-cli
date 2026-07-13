@@ -32,6 +32,7 @@ import {
   recordMessageReceipt,
   type OpenBlock,
 } from '../lib/feed.js';
+import { getOperator } from '../lib/operator.js';
 
 /** Find the still-open block addressed to `mailboxId`, if any. */
 function findOpenBlockForMailbox(mailboxId: string): OpenBlock | undefined {
@@ -48,8 +49,9 @@ export function registerMessageCommand(program: Command): void {
     .command('message <target> <text>')
     .description('Send a message to a running agent (delivered at its next tool call) or a cloud task.')
     .option('--from <who>', 'Label recorded as the sender of this message')
+    .option('--as <operator>', 'Verified operator id answering a high-consequence block')
     .option('--surface <surface>', 'Surface that is sending this answer (feed, terminal, etc.)', 'cli')
-    .action(async (target: string, text: string, opts: { from?: string; surface?: string }) => {
+    .action(async (target: string, text: string, opts: { from?: string; as?: string; surface?: string }) => {
       if (!target.trim()) {
         die('Target must be a session/agent id or cloud task id. Run `agents sessions --active` to list running agents.');
       }
@@ -72,12 +74,19 @@ export function registerMessageCommand(program: Command): void {
         case 'local': {
           try {
             const block = findOpenBlockForMailbox(res.id);
+            const operatorId = opts.as;
+            const verified = operatorId ? getOperator(operatorId) !== undefined : false;
             if (block) {
               const claim = recordAnswer(block.blockId, {
                 answeredBy: opts.from,
                 answeredFrom: opts.surface || 'cli',
+                operatorId,
+                verified,
               });
               if (!claim.ok) {
+                if ('unauthorized' in claim) {
+                  die(`Not authorized: ${claim.reason}`);
+                }
                 const who = claim.existing.answeredFrom + (claim.existing.answeredBy ? ` (${claim.existing.answeredBy})` : '');
                 die(`This question was already answered by ${who}.`);
               }

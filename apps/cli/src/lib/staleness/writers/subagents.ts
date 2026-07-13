@@ -1,8 +1,9 @@
 /**
  * Subagents writer. Claude flattens each subagent into a single .md file
- * under `<agentDir>/agents/`. Droid (Factory AI) flattens each into a custom
- * droid .md under `<versionHome>/.factory/droids/`. OpenClaw copies the full
- * subagent directory (with AGENT.md renamed to AGENTS.md) into
+ * under `<agentDir>/agents/`. Codex writes TOML under `.codex/agents/`.
+ * Droid (Factory AI) flattens each into a custom droid .md under
+ * `<versionHome>/.factory/droids/`. OpenClaw copies the full subagent
+ * directory (with AGENT.md renamed to AGENTS.md) into
  * `<versionHome>/.openclaw/<name>/`.
  *
  * Source-side discovery is `listInstalledSubagents` from lib/subagents.ts —
@@ -13,7 +14,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
-import { listInstalledSubagents, transformSubagentForClaude, transformSubagentForDroid, syncSubagentToOpenclaw } from '../../subagents.js';
+import {
+  listInstalledSubagents,
+  transformSubagentForClaude,
+  transformSubagentForCodex,
+  transformSubagentForDroid,
+  syncSubagentToOpenclaw,
+} from '../../subagents.js';
 import { safeJoin } from '../../paths.js';
 import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
 import { lazyAgentMap } from './lazy-map.js';
@@ -35,6 +42,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             const agentsDir = path.join(versionHome, '.claude', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForClaude(sub.path));
+            synced.push(sub.name);
+          } else if (agent === 'codex') {
+            const agentsDir = path.join(versionHome, '.codex', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.toml`), transformSubagentForCodex(sub.path));
             synced.push(sub.name);
           } else if (agent === 'droid') {
             const droidsDir = path.join(versionHome, '.factory', 'droids');
