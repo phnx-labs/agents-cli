@@ -40,7 +40,7 @@ import {
 import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
-import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
+import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
 import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
@@ -387,7 +387,40 @@ export function bundlePolicy(bundle: SecretsBundle): SecretsPolicy {
   return bundle.policy ?? secretsDefaultPolicy();
 }
 
-export function writeBundle(bundle: SecretsBundle): void {
+/** Options for writeBundle. */
+export interface WriteBundleOptions {
+  /**
+   * Skip evicting the bundle from the secrets-agent broker after the write.
+   * Only for writers that change nothing the broker serves — today that is
+   * stampLastUsed (a usage-telemetry timestamp, fired on every broker HIT):
+   * evicting there would make the cache destroy itself on first use. Every
+   * mutating writer (add / rotate / remove / rename / policy / import) must
+   * leave this unset so a broker-held copy never serves stale values for up
+   * to the ~7d hold.
+   */
+  skipBrokerEviction?: boolean;
+}
+
+/**
+ * Whether a bundle write should evict the broker-held copy. Pure + exported
+ * for regression coverage. Skips when the writer opted out (stampLastUsed),
+ * when the broker integration is disabled (AGENTS_SECRETS_NO_AGENT — the same
+ * kill-switch the read fast-path honors), or when a test keychain backend is
+ * installed (an in-memory backend has no real keychain behind it, and a test
+ * writing bundle 'prod' must never evict the user's real 'prod' unlock).
+ */
+export function shouldEvictAfterBundleWrite(
+  skipRequested: boolean,
+  noAgentEnv: string | undefined,
+  backendOverridden: boolean,
+): boolean {
+  if (skipRequested) return false;
+  if (noAgentEnv === '1') return false;
+  if (backendOverridden) return false;
+  return true;
+}
+
+export function writeBundle(bundle: SecretsBundle, opts: WriteBundleOptions = {}): void {
   validateBundleName(bundle.name);
   const backend: SecretsBackend = bundle.backend ?? 'keychain';
   if (backend === 'file') assertFileBackendUsable(bundle.name);
@@ -441,6 +474,11 @@ export function writeBundle(bundle: SecretsBundle): void {
   // no-ACL command is missing) rather than silently landing an ACL'd item.
   itemStore(backend).set(bundleMetaItem(bundle.name), json, { noAcl: bundle.policy === 'never' });
   emit('secrets.set', { module: 'secrets', bundle: bundle.name });
+  // A broker-held snapshot predates this write; evict it so the next read
+  // re-resolves from the keychain instead of serving stale values.
+  if (shouldEvictAfterBundleWrite(Boolean(opts.skipBrokerEviction), process.env.AGENTS_SECRETS_NO_AGENT, isKeychainBackendOverridden())) {
+    agentEvictSync(bundle.name);
+  }
 }
 
 export function deleteBundle(name: string): boolean {
@@ -448,6 +486,9 @@ export function deleteBundle(name: string): boolean {
   const deleted = itemStore(bundleBackend(name)).delete(bundleMetaItem(name));
   if (deleted) {
     emit('secrets.delete', { module: 'secrets', bundle: name });
+    if (shouldEvictAfterBundleWrite(false, process.env.AGENTS_SECRETS_NO_AGENT, isKeychainBackendOverridden())) {
+      agentEvictSync(name);
+    }
   }
   return deleted;
 }
@@ -614,7 +655,9 @@ function stampLastUsed(bundle: SecretsBundle): void {
   }
   try {
     bundle.last_used = new Date(nowMs).toISOString();
-    writeBundle(bundle);
+    // skipBrokerEviction: this stamp fires on every broker HIT; letting it
+    // evict would make the cache destroy itself on first use.
+    writeBundle(bundle, { skipBrokerEviction: true });
   } catch {
     // Swallow — telemetry must never block secret resolution.
   }
