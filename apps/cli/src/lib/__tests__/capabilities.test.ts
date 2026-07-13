@@ -87,10 +87,12 @@ describe('supports() capability gate', () => {
 });
 
 describe('mcpHttp / mcpHeaders capability gates', () => {
-  it('mcpHttp: only claude, codex, gemini', () => {
+  it('mcpHttp: supported by HTTP MCP config writers', () => {
     expect(supports('claude', 'mcpHttp').ok).toBe(true);
     expect(supports('codex', 'mcpHttp').ok).toBe(true);
     expect(supports('gemini', 'mcpHttp').ok).toBe(true);
+    expect(supports('hermes', 'mcpHttp').ok).toBe(true);
+    expect(supports('forge', 'mcpHttp').ok).toBe(true);
     expect(supports('cursor', 'mcpHttp').ok).toBe(false);
     expect(supports('opencode', 'mcpHttp').ok).toBe(false);
     expect(supports('openclaw', 'mcpHttp').ok).toBe(false);
@@ -119,10 +121,18 @@ describe('mcpHttp / mcpHeaders capability gates', () => {
     expect(supports('grok', 'mcpHeaders').ok).toBe(false);
     expect(supports('kimi', 'mcpHeaders').ok).toBe(false);
     expect(supports('droid', 'mcpHeaders').ok).toBe(false);
+    expect(supports('hermes', 'mcpHeaders').ok).toBe(false);
+    expect(supports('forge', 'mcpHeaders').ok).toBe(false);
   });
 
-  it('capableAgents(mcpHttp) matches the old inline allowlist exactly', () => {
-    expect(capableAgents('mcpHttp').sort()).toEqual(['claude', 'codex', 'gemini']);
+  it('capableAgents(mcpHttp) matches direct HTTP MCP config writers', () => {
+    expect(capableAgents('mcpHttp').sort()).toEqual([
+      'claude',
+      'codex',
+      'forge',
+      'gemini',
+      'hermes',
+    ]);
   });
 
   it('capableAgents(mcpHeaders) matches the old inline claude-only check', () => {
