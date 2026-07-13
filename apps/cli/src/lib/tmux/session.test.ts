@@ -260,6 +260,12 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(screen).toContain('BRIEF');
   });
 
+  it('setSessionHook reports whether tmux accepted the hook', async () => {
+    await createSession({ name: 'hook-result', cmd: 'sleep 30', socket });
+    expect(await setSessionHook('hook-result', 'pane-died', 'display-message accepted', socket)).toBe(true);
+    expect(await setSessionHook('missing-session', 'pane-died', 'display-message rejected', socket)).toBe(false);
+  });
+
   it('pane-guarded pane-died hook: exiting a user split closes only that split, agent pane survives', async () => {
     // Replicates runInTmux()'s hook wiring: a pane-died hook scoped to the AGENT
     // pane via #{hook_pane}. Exiting a user-created split must close that split in

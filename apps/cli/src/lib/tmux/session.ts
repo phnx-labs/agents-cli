@@ -326,12 +326,18 @@ export async function paneExitStatus(pane: string, socket?: string): Promise<Pan
  * Bind a per-session hook. Used by the spawn-wrap path to install a `pane-died`
  * hook that detaches the attach client the instant the wrapped agent exits (the
  * global `remain-on-exit on` otherwise leaves the client staring at a dead pane).
- * Best-effort — a failed hook just means the user Ctrl-b d's out manually.
+ * Best-effort — returns false when tmux rejects the hook so callers do not
+ * stamp a schema marker and daemon reconciliation can retry later.
  */
-export async function setSessionHook(name: string, hook: string, command: string, socket?: string): Promise<void> {
+export async function setSessionHook(name: string, hook: string, command: string, socket?: string): Promise<boolean> {
   assertValidSessionName(name);
   const sock = socket ?? getDefaultSocketPath();
-  await runTmux({ socket: sock, args: ['set-hook', '-t', name, hook, command], throwOnError: false }).catch(() => {});
+  const result = await runTmux({
+    socket: sock,
+    args: ['set-hook', '-t', name, hook, command],
+    throwOnError: false,
+  }).catch(() => null);
+  return result?.code === 0;
 }
 
 /**
@@ -432,7 +438,8 @@ export async function reconcileSessionHooks(socket?: string): Promise<{ scanned:
     if (await readHookSchema(s.name, sock) === String(AGENT_HOOK_SCHEMA)) continue;
     const agentPane = s.meta?.pane ?? await lowestPaneId(s.name, sock);
     if (!agentPane) continue;
-    await setSessionHook(s.name, 'pane-died', agentPaneDiedHook(s.name, agentPane), sock);
+    const installed = await setSessionHook(s.name, 'pane-died', agentPaneDiedHook(s.name, agentPane), sock);
+    if (!installed) continue;
     await markSessionHookSchema(s.name, sock);
     reconciled++;
   }

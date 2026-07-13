@@ -899,6 +899,8 @@ macOS and Linux. Windows via WSL works but isn't first-class yet.
 
 **macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
 
+Interactive tmux-backed runs require tmux 3.2 or newer.
+
 ### Do I need Node.js?
 
 The installer tries Bun first (faster), falls back to npm. Node 22.5+ required at runtime.

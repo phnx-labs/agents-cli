@@ -1095,10 +1095,10 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     // targeted kill inside tmux's server command queue, avoiding a second
     // client racing the same socket under load, #965). Without the guard,
     // exiting any split kicked the user clean out of tmux.
-    await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane), socket);
-    // Stamp the schema marker so the daemon reconcile (which retrofits older
-    // sessions) recognizes this one as already current and skips it.
-    await markSessionHookSchema(name, socket);
+    const hookInstalled = await setSessionHook(name, 'pane-died', agentPaneDiedHook(name, pane), socket);
+    // Stamp the schema marker only after tmux accepted the hook. A failed
+    // install stays unmarked so daemon reconciliation retries it later.
+    if (hookInstalled) await markSessionHookSchema(name, socket);
 
     // Record the agent's OS pid (the pane leaf, thanks to `exec`) WITH its tmux
     // pane so the active-scan attributes it exactly and shows the %pane.
