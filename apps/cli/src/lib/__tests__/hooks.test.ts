@@ -1676,3 +1676,64 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
     });
   });
 });
+
+describe('registerHooksToSettings - grok + antigravity subrule hooks (RUSH-1353)', () => {
+  let localTmp: string;
+  let versionHome: string;
+  let subruleScript: string;
+
+  beforeEach(() => {
+    localTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-subrule-'));
+    versionHome = path.join(localTmp, 'version-home');
+    fs.mkdirSync(versionHome, { recursive: true });
+    const subruleDir = path.join(localTmp, 'rules', 'subrules', 'truly-agentic-git-workflow');
+    fs.mkdirSync(subruleDir, { recursive: true });
+    subruleScript = path.join(subruleDir, 'main-branch-guard.sh');
+    fs.writeFileSync(subruleScript, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  });
+
+  afterEach(() => {
+    try { fs.rmSync(localTmp, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  function subruleManifest(): Record<string, ManifestHook> {
+    return {
+      'truly-agentic-git-workflow__main-branch-guard': {
+        events: ['PreToolUse'],
+        matcher: 'Write|Edit',
+        script: subruleScript,
+        timeout: 10,
+      },
+    };
+  }
+
+  it('registers absolute subrule script into grok hooks.json with matcher', () => {
+    const result = registerHooksToSettings('grok', versionHome, subruleManifest(), localTmp);
+    expect(result.errors).toEqual([]);
+    expect(result.registered.some((r) => r.includes('main-branch-guard'))).toBe(true);
+
+    const hooksJson = path.join(versionHome, '.grok', 'hooks', 'hooks.json');
+    expect(fs.existsSync(hooksJson)).toBe(true);
+    const data = JSON.parse(fs.readFileSync(hooksJson, 'utf-8'));
+    const groups = data.hooks?.PreToolUse ?? [];
+    const flat = groups.flatMap((g: any) =>
+      (g.hooks ?? []).map((h: any) => ({ command: h.command as string, matcher: g.matcher as string | undefined })),
+    );
+    // Command paths go through toPortableCommand (POSIX/~/ form) — match by basename.
+    expect(flat.some((e) => e.command.replace(/\\/g, '/').endsWith('main-branch-guard.sh'))).toBe(true);
+    expect(flat.some((e) => e.matcher === 'Write|Edit')).toBe(true);
+  });
+
+  it('registers absolute subrule script into antigravity settings with matcher', () => {
+    const result = registerHooksToSettings('antigravity', versionHome, subruleManifest(), localTmp);
+    expect(result.errors).toEqual([]);
+    expect(result.registered.some((r) => r.includes('main-branch-guard'))).toBe(true);
+
+    const settingsPath = path.join(versionHome, '.gemini', 'antigravity-cli', 'settings.json');
+    expect(fs.existsSync(settingsPath)).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    const allEntries = Object.values(settings.hooks || {}).flat() as Array<{ command?: string; matcher?: string }>;
+    expect(allEntries.some((e) => (e.command || '').replace(/\\/g, '/').endsWith('main-branch-guard.sh'))).toBe(true);
+    expect(allEntries.some((e) => e.matcher === 'Write|Edit')).toBe(true);
+  });
+});

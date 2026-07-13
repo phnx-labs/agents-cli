@@ -16,6 +16,24 @@ session, running a routine).
 macOS only. It is auto-enabled for every user (see [Lifecycle](#lifecycle)); opt
 out with `agents menubar disable`.
 
+## Quick dispatch
+
+`Cmd-Shift-O` opens the Spotlight-style capture panel. Type a short request,
+optionally attach recent screenshots from the thumbnail strip, then pick one
+agent for **File Ticket** or one or more agents for **Fix**.
+
+- **File Ticket** sends the note and selected screenshots to the selected ticket
+  agent, which investigates and files one Linear ticket.
+- **Fix** fans out to every selected agent with `agents run <agent> --mode auto
+  --name quick-<agent>-<timestamp>`, so the resulting sessions appear in normal
+  `agents sessions` and menu-bar surfaces instead of as opaque background work.
+
+Set `AGENTS_QUICK_DISPATCH_ROSTER=claude,codex` in the helper environment to
+filter which agents appear in the picker, and
+`AGENTS_QUICK_DISPATCH_AGENTS=claude,codex` to change which visible agents are
+preselected. Without a roster override, the picker uses the same roster as the
+menu bar's New Session submenu.
+
 ## The dropdown
 
 ```

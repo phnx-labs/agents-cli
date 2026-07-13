@@ -1750,12 +1750,15 @@ function registerHooksForAntigravity(
       if (!hooks[agyEvent]) {
         hooks[agyEvent] = [];
       }
-      const list = hooks[agyEvent] as Array<{ command: string }>;
+      // Antigravity settings entries: command + optional matcher (tool scope).
+      // Without matcher every PreToolUse guard fires on ALL tools (RUSH-1353).
+      const list = hooks[agyEvent] as Array<{ command: string; matcher?: string }>;
 
       const existingIdx = list.findIndex(
         (e) => e && typeof e === 'object' && e.command === commandPath
       );
-      const entry = { command: commandPath };
+      const entry: { command: string; matcher?: string } = { command: commandPath };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
       if (existingIdx >= 0) {
         list[existingIdx] = entry;
       } else {

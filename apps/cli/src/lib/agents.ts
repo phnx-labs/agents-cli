@@ -235,7 +235,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // Claude Code has no headless Anthropic-hosted dispatch CLI (only
     // --remote-control, which bridges a *local* session). Its cloud is Rush.
     cloudProvider: 'rush',
-    capabilities: { hooks: true, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true },
+    capabilities: { hooks: true, mcp: true, mcpHttp: true, mcpHeaders: true, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'CLAUDE.md' }, workflows: true, memory: true, modes: ['plan', 'edit', 'auto', 'skip'], rulesImports: true },
   },
   // codex hooks: gated to >= 0.116.0 (introduced [features] codex_hooks flag).
   codex: {
@@ -257,7 +257,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     cloudProvider: 'codex',
     // Subagents: multi-agent plumbing since 0.117.0; custom agents as
     // ~/.codex/agents/*.toml (name, description, developer_instructions).
-    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'skip'] },
+    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
   },
   gemini: {
     id: 'gemini',
@@ -286,7 +286,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       url: 'https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/',
     },
     // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
-    capabilities: { hooks: { since: '0.26.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'GEMINI.md' }, workflows: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
+    capabilities: { hooks: { since: '0.26.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'GEMINI.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
   },
   cursor: {
     id: 'cursor',
@@ -311,7 +311,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, modes: ['edit', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] },
   },
   opencode: {
     id: 'opencode',
@@ -331,7 +331,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit'] },
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
   },
   openclaw: {
     id: 'openclaw',
@@ -350,7 +350,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
   },
   copilot: {
     id: 'copilot',
@@ -375,7 +375,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit', 'auto', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'] },
   },
   amp: {
     id: 'amp',
@@ -392,7 +392,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['plan', 'edit'] },
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
   },
   kiro: {
     id: 'kiro',
@@ -413,7 +413,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
   },
   goose: {
     id: 'goose',
@@ -436,7 +436,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: false, commands: false, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: false, commands: false, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -465,7 +465,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     cloudProvider: 'antigravity',
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, modes: ['edit', 'skip'], rulesImports: false },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit', 'skip'], rulesImports: false },
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
   // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
@@ -501,6 +501,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
+      memory: true,
       modes: ['plan', 'edit', 'skip'],
       rulesImports: true,
     },
@@ -539,6 +540,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
+      memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,
     },
@@ -600,6 +602,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       subagents: true,
       rules: { file: 'AGENTS.md' },
       workflows: false,
+      memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,
     },

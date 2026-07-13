@@ -273,13 +273,34 @@ green "Type check clean."
 NEED_REMOTE_SIGN=false
 if [[ "${FORCE_REMOTE_SIGN:-}" == "1" ]]; then
   NEED_REMOTE_SIGN=true
-elif [[ "$(uname)" != "Darwin" ]] && { [[ ! -d "bin/Agents CLI.app" ]] || [[ ! -d "bin/MenubarHelper.app" ]]; }; then
+elif [[ "$(uname)" != "Darwin" ]]; then
+  # Always remote-sign off macOS: unlike the .app helpers (stable across
+  # releases once staged), the standalone CLI binary embeds the release
+  # version, so every release needs a freshly built + signed + notarized
+  # bin/agents-macos (see scripts/sign-cli-binary.sh).
   NEED_REMOTE_SIGN=true
 fi
 if $NEED_REMOTE_SIGN; then
   bold "Offloading macOS helper build + sign to ${SIGN_HOST:-mac-mini}..."
   scripts/remote-sign-mac.sh || die "remote sign failed -- cannot package signed helpers"
   green "Signed helpers pulled back into bin/."
+fi
+
+# ----- Sign + notarize the standalone macOS `agents` binary (issue #315) -----
+# Runs on every macOS release (dry-run included: `npm pack --dry-run` below
+# fires prepack, whose verify-cli-binary.sh gate needs the fresh artifact).
+# Off macOS, the remote-sign step above already produced bin/agents-macos on
+# the sign host and pulled it back.
+if [[ "$(uname)" == "Darwin" ]]; then
+  bold "Signing + notarizing the standalone agents binary..."
+  if [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]; then
+    scripts/sign-cli-binary.sh || die "CLI binary sign/notarize failed"
+  elif command -v agents >/dev/null 2>&1; then
+    agents secrets exec apple.com -- scripts/sign-cli-binary.sh || die "CLI binary sign/notarize failed"
+  else
+    die "cannot sign dist/bin/agents: export APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID, or install agents-cli so 'agents secrets exec apple.com -- scripts/sign-cli-binary.sh' can inject them"
+  fi
+  green "Standalone binary signed + notarized."
 fi
 
 # ----- Build (real artifacts) -----

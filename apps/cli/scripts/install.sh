@@ -136,6 +136,16 @@ for bin in agents ag browser; do
   ln -sf "$src" "$LINK_DIR/$bin"
 done
 
+# Prefer the standalone Mach-O when the staged dist carries one (macOS): the
+# node-shebang shim is what EDR flags (#315). Runnable-probe first - an
+# unsigned or wrong-arch artifact must not brick the dev install.
+NATIVE_BIN="$PREFIX/lib/node_modules/$PKG_NAME/dist/bin/agents"
+if [[ "$(uname)" == "Darwin" && -x "$NATIVE_BIN" ]] && "$NATIVE_BIN" --version >/dev/null 2>&1; then
+  ln -sf "$NATIVE_BIN" "$LINK_DIR/agents"
+  ln -sf "$NATIVE_BIN" "$LINK_DIR/ag"
+  dim "  Linked agents/ag to the standalone binary (dist/bin/agents)"
+fi
+
 # Confirm the dev binary is runnable.
 LINKED_PATH="$LINK_DIR/agents"
 [[ -L "$LINKED_PATH" ]] || die "agents not installed at $LINKED_PATH"

@@ -15,6 +15,8 @@ enum IssueSelfTest {
         testImageFilePick()
         testTicketIDParse()
         testPromptContract()
+        testQuickFixContract()
+        testQuickDispatchRoster()
         testRecentTicketsMerge()
         if failures == 0 {
             print("\nALL PASS")
@@ -93,6 +95,47 @@ enum IssueSelfTest {
         check("no-screenshot prompt has no /tmp path", !noShot.contains("/tmp/"))
     }
 
+    // The autonomous fix path must carry screenshots through and name runs with
+    // a stable quick-dispatch handle so the tray/session index can surface them.
+    private static func testQuickFixContract() {
+        let prompt = AgentsCLI.quickFixPrompt(note: "button is off-screen",
+                                              screenshotPaths: ["/tmp/panel.png"])
+        check("quick-fix prompt embeds the request", prompt.contains("button is off-screen"))
+        check("quick-fix prompt embeds the screenshot", prompt.contains("/tmp/panel.png"))
+        check("quick-fix prompt requires repo discovery", prompt.contains("agents sessions --all --limit 20"))
+        check("quick-fix prompt requires verification", prompt.contains("Verify with the focused tests"))
+
+        let name = AgentsCLI.quickDispatchName(agent: "Codex_Cli", date: Date(timeIntervalSince1970: 1234))
+        check("quick-dispatch names are durable and normalized", name == "quick-codex-cli-1234", detail: name)
+
+        let args = AgentsCLI.quickFixRunArgs(agent: "codex", prompt: "<prompt>", name: "quick-codex-1234")
+        check("quick-fix runs in autonomous mode",
+              args == ["run", "codex", "<prompt>", "--mode", "auto", "--name", "quick-codex-1234"],
+              detail: args.joined(separator: " "))
+    }
+
+    // The picker roster is configurable but remains pinned to supported agents.
+    private static func testQuickDispatchRoster() {
+        let defaultRoster = LocalState.quickDispatchRoster(env: [:])
+        check("default quick-dispatch roster uses desired agents",
+              defaultRoster.map(\.id) == LocalState.desiredAgents.map(\.id))
+
+        let filtered = LocalState.quickDispatchRoster(env: ["AGENTS_QUICK_DISPATCH_ROSTER": "codex,claude,missing,codex"])
+        check("configured quick-dispatch roster preserves valid configured order and dedups",
+              filtered.map(\.id) == ["codex", "claude"], detail: filtered.map(\.id).joined(separator: ","))
+
+        let invalid = LocalState.quickDispatchRoster(env: ["AGENTS_QUICK_DISPATCH_ROSTER": "missing"])
+        check("invalid quick-dispatch roster falls back to desired agents",
+              invalid.map(\.id) == LocalState.desiredAgents.map(\.id))
+
+        let preselected = IssueSelfTest.preselectedAgents(
+            env: ["AGENTS_QUICK_DISPATCH_AGENTS": "codex,claude,missing,codex"],
+            roster: filtered
+        )
+        check("configured quick-dispatch preselection stays visible and deduped",
+              preselected == ["codex", "claude"], detail: preselected.joined(separator: ","))
+    }
+
     // The recent-tickets ledger merge: newest-first, dedup by id, capped.
     private static func testRecentTicketsMerge() {
         func t(_ id: String) -> RecentTicket { RecentTicket(id: id, title: id, url: nil, createdAt: id) }
@@ -125,5 +168,14 @@ enum IssueSelfTest {
             failures += 1
             print("  FAIL  \(name)" + (detail.map { "  (got: \($0))" } ?? ""))
         }
+    }
+
+    private static func preselectedAgents(env: [String: String], roster: [MenuAgent]) -> [String] {
+        let visible = Set(roster.map(\.id))
+        var seen = Set<String>()
+        return env["AGENTS_QUICK_DISPATCH_AGENTS"]?
+            .split(separator: ",")
+            .map { LocalState.normalizeAgent(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .filter { visible.contains($0) && seen.insert($0).inserted } ?? []
     }
 }
