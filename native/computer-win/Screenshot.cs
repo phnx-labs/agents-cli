@@ -9,12 +9,14 @@ using System.Windows.Forms;
 namespace ComputerHelperWin;
 
 /// <summary>
-/// Screen capture, scoped like the macOS helper (Screenshot.swift): the target
-/// pid is required, and the same params pick the mode —
-///   list=true        -> enumerate the pid's top-level windows (no image)
-///   display=true     -> capture the whole display the target window is on
-///   window_id=&lt;hwnd&gt; -> capture exactly that window
-///   (default)        -> capture the pid's largest on-screen window
+/// Screen capture, scoped like the macOS helper (Screenshot.swift). The params
+/// pick the mode; pid is required for every mode EXCEPT a full-display capture,
+/// which needs no target app (mirrors macOS `screenshot --display`) —
+///   list=true        -> enumerate the pid's top-level windows (no image); pid required
+///   display=true     -> capture a whole display: the monitor the target window is
+///                       on when pid is given, else the primary screen (pid optional)
+///   window_id=&lt;hwnd&gt; -> capture exactly that window; pid required
+///   (default)        -> capture the pid's largest on-screen window; pid required
 /// Result keys match what the CLI consumes from the macOS helper
 /// (src/commands/computer.ts): image_data (base64 PNG), width, height,
 /// origin [x,y], scale — plus mode/window_id/title for scoped captures, and
