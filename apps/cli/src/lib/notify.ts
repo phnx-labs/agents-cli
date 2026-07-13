@@ -15,6 +15,8 @@ const execFileAsync = promisify(execFile);
 export interface NotifyOptions {
   channel?: string;
   account?: string;
+  /** OpenClaw destination (Telegram chat id). Defaults to Muqsit's chat. */
+  target?: string;
   dryRun?: boolean;
 }
 
@@ -32,6 +34,28 @@ function formatBlock(block: OpenBlock): string {
   const cls = block.blockClass ?? 'approval';
   const cost = block.costOfDelay ?? 'low';
   return `🚨 ${cls.toUpperCase()}${host} — ${header}${text} (cost: ${cost}, id: ${block.blockId})`;
+}
+
+/** Build openclaw argv for urgent notify (exported for tests). */
+export function buildOpenClawNotifyArgs(
+  text: string,
+  options: Pick<NotifyOptions, 'channel' | 'account' | 'target'> = {},
+): string[] {
+  const channel = options.channel ?? 'telegram';
+  const account = options.account ?? 'default';
+  const target = options.target ?? '6078999250';
+  return [
+    'message',
+    'send',
+    '--channel',
+    channel,
+    '--account',
+    account,
+    '--target',
+    target,
+    '--message',
+    text,
+  ];
 }
 
 export async function notifyUrgentBlock(
@@ -53,21 +77,10 @@ export async function notifyUrgentBlock(
     return { ok: false, error: 'openclaw CLI not found on PATH' };
   }
 
-  const channel = options.channel ?? 'telegram';
-  const account = options.account ?? 'default';
   const text = formatBlock(block);
 
   try {
-    await execFileAsync('openclaw', [
-      'message',
-      'send',
-      '--channel',
-      channel,
-      '--account',
-      account,
-      '--text',
-      text,
-    ]);
+    await execFileAsync('openclaw', buildOpenClawNotifyArgs(text, options));
     return { ok: true };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
