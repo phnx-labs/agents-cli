@@ -14,7 +14,7 @@
  * fires once with the pre-flight pick).
  */
 
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -498,6 +498,7 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
     agent: effectiveAgent,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
+    spawnedAt: Date.now(),
     status: 'running',
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -691,6 +692,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     agent: effectiveAgent,
     ...(config.workflow ? { workflow: config.workflow } : {}),
     pid: null,
+    spawnedAt: Date.now(),
     status: 'running',
     startedAt: new Date().toISOString(),
     completedAt: null,
@@ -821,6 +823,39 @@ function inferFinalStatusFromLog(
   }
 }
 
+const MAX_WALL_CLOCK_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Verify that a PID still belongs to the process we spawned, not a recycled
+ * OS PID. Uses the recorded `spawnedAt` (epoch ms) from meta.json and
+ * compares against the process's actual start time via `ps`. Returns true
+ * when the PID is alive AND plausibly ours.
+ */
+function isPidOurs(pid: number, spawnedAt: number | undefined): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  if (spawnedAt === undefined) return true;
+  if (process.platform === 'win32') return true;
+  try {
+    const etime = execFileSync('ps', ['-p', String(pid), '-o', 'etime='],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    if (!etime) return true;
+    const parts = etime.replace(/-/g, ':').split(':').reverse();
+    let uptimeSec = 0;
+    if (parts[0]) uptimeSec += parseInt(parts[0], 10);
+    if (parts[1]) uptimeSec += parseInt(parts[1], 10) * 60;
+    if (parts[2]) uptimeSec += parseInt(parts[2], 10) * 3600;
+    if (parts[3]) uptimeSec += parseInt(parts[3], 10) * 86400;
+    const processStartMs = Date.now() - uptimeSec * 1000;
+    return Math.abs(processStartMs - spawnedAt) < 30_000;
+  } catch {
+    return true;
+  }
+}
+
 /** Scan all runs marked "running" and finalize any whose process has exited. */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
@@ -843,14 +878,19 @@ export function monitorRunningJobs(): void {
         if (meta.status !== 'running') continue;
         if (!meta.pid) continue;
 
-        try {
-          process.kill(meta.pid, 0);
-        } catch { /* process no longer running */
-          const runDirPath = path.join(jobRunsPath, runDirEntry.name);
-          const stdoutPath = path.join(runDirPath, 'stdout.log');
+        const runDirPath = path.join(jobRunsPath, runDirEntry.name);
+        const stdoutPath = path.join(runDirPath, 'stdout.log');
 
-          // Prefer the agent's own success/error marker; fall back to "failed"
-          // only when the stream ended without one (process killed mid-run).
+        const wallClockMs = Date.now() - Date.parse(meta.startedAt);
+        if (Number.isFinite(wallClockMs) && wallClockMs > MAX_WALL_CLOCK_MS) {
+          meta.status = 'timeout';
+          meta.completedAt = new Date().toISOString();
+          writeRunMeta(meta);
+          extractAndSaveReport(stdoutPath, meta.agent, runDirPath);
+          continue;
+        }
+
+        if (!isPidOurs(meta.pid, meta.spawnedAt)) {
           const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent);
           if (inferred) {
             meta.status = inferred.status;

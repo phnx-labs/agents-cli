@@ -25,10 +25,13 @@ import { redactSecrets } from './redact.js';
 const PID_FILE = 'daemon.pid';
 const LOCK_FILE = 'daemon.lock';
 const LOG_FILE = 'logs.jsonl';
+const HEARTBEAT_FILE = 'heartbeat.json';
 const LOG_MAX_SIZE = 5 * 1024 * 1024; // 5 MB
 const LOG_ROTATE_COUNT = 3;
 const PLIST_NAME = 'com.phnx-labs.agents-daemon';
 const SYSTEMD_UNIT = 'agents-daemon.service';
+const MONITOR_TICK_MS = 60_000;
+const WEDGE_THRESHOLD_TICKS = 3;
 
 // A long-lived `claude setup-token` value stored in this secrets bundle/key is
 // baked into the daemon's service-manager environment so headless routine runs
@@ -122,6 +125,48 @@ export function removeDaemonPid(): void {
   if (fs.existsSync(pidPath)) {
     fs.unlinkSync(pidPath);
   }
+}
+
+export interface DaemonHeartbeat {
+  lastTick: string;
+  pid: number;
+}
+
+function getHeartbeatPath(): string {
+  return path.join(getDaemonDir(), HEARTBEAT_FILE);
+}
+
+export function writeHeartbeat(pid: number = process.pid): void {
+  const hb: DaemonHeartbeat = { lastTick: new Date().toISOString(), pid };
+  try {
+    fs.writeFileSync(getHeartbeatPath(), JSON.stringify(hb), 'utf-8');
+  } catch { /* best effort */ }
+}
+
+export function readHeartbeat(): DaemonHeartbeat | null {
+  try {
+    const raw = fs.readFileSync(getHeartbeatPath(), 'utf-8');
+    const hb = JSON.parse(raw) as DaemonHeartbeat;
+    if (!hb.lastTick || !hb.pid) return null;
+    return hb;
+  } catch {
+    return null;
+  }
+}
+
+export function removeHeartbeat(): void {
+  try { fs.unlinkSync(getHeartbeatPath()); } catch { /* already removed */ }
+}
+
+export function isDaemonWedged(): boolean {
+  const pid = readDaemonPid();
+  if (!pid) return false;
+  if (!isAlive(pid)) return false;
+  const hb = readHeartbeat();
+  if (!hb) return false;
+  if (hb.pid !== pid) return false;
+  const elapsed = Date.now() - Date.parse(hb.lastTick);
+  return elapsed > WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
 }
 
 /** Check if the daemon process is alive by sending signal 0 to the stored PID. */
@@ -319,9 +364,11 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Browser IPC failed to start: ${(err as Error).message}`);
   }
 
+  writeHeartbeat();
   const monitorInterval = setInterval(() => {
+    writeHeartbeat();
     monitorRunningJobs();
-  }, 60_000);
+  }, MONITOR_TICK_MS);
 
   // Cross-machine session sync: push this machine's transcripts to R2 and pull
   // every other machine's, ~every 90s. Skipped silently when the r2.backups
@@ -528,6 +575,7 @@ export async function runDaemon(): Promise<void> {
     clearInterval(launchHealthInterval);
     clearTimeout(launchHealthKickoff);
     removeDaemonPid();
+    removeHeartbeat();
     process.exit(0);
   };
 
@@ -848,10 +896,32 @@ export function buildDetachedDaemonEnv(
  * `which agents`), run it directly — it owns its own runtime resolution.
  */
 export function getDaemonLaunch(agentsBin: string = getAgentsBinPath()): { command: string; args: string[] } {
+  const { warnings } = validateDaemonBinary(agentsBin);
+  for (const w of warnings) process.stderr.write(`[agents] ${w}\n`);
   if (/\.(c|m)?js$/.test(agentsBin)) {
     return { command: process.execPath, args: [agentsBin, 'daemon', '_run'] };
   }
   return { command: agentsBin, args: ['daemon', '_run'] };
+}
+
+export function validateDaemonBinary(binPath: string): { warnings: string[] } {
+  const warnings: string[] = [];
+  if (/\/\$bunfs\/root\//.test(binPath)) {
+    throw new Error(
+      `Refusing to supervise daemon: resolved binary is a bun virtual path (${binPath}). ` +
+      `Install agents globally (npm i -g @phnx-labs/agents-cli) and restart.`,
+    );
+  }
+  if (/[/\\]\.agents[/\\]worktrees[/\\]/.test(binPath)) {
+    warnings.push(
+      `Warning: daemon binary is inside a git worktree (${binPath}). ` +
+      `A worktree deletion will wedge the daemon. Use the globally installed binary instead.`,
+    );
+  }
+  if (!fs.existsSync(binPath) && !/\.(c|m)?js$/.test(binPath)) {
+    warnings.push(`Warning: daemon binary does not exist on disk (${binPath}).`);
+  }
+  return { warnings };
 }
 
 interface StartDetachedOptions {
@@ -966,12 +1036,16 @@ export function stopDaemon(): boolean {
 
 /** Get current daemon status including running state, PID, and enabled job count. */
 export function getDaemonStatus(): {
+  state: 'running' | 'wedged' | 'stopped';
   running: boolean;
   pid: number | null;
   jobCount: number;
   logPath: string;
+  binaryPath: string | null;
+  heartbeat: DaemonHeartbeat | null;
 } {
   const running = isDaemonRunning();
+  const wedged = running && isDaemonWedged();
   const pid = readDaemonPid();
 
   let jobCount = 0;
@@ -979,7 +1053,20 @@ export function getDaemonStatus(): {
     jobCount = listAllJobs().filter((j) => j.enabled).length;
   } catch { /* job listing failed */ }
 
-  return { running, pid, jobCount, logPath: getLogPath() };
+  let binaryPath: string | null = null;
+  try {
+    binaryPath = getAgentsBinPath();
+  } catch { /* resolution failed */ }
+
+  return {
+    state: wedged ? 'wedged' : running ? 'running' : 'stopped',
+    running,
+    pid,
+    jobCount,
+    logPath: getLogPath(),
+    binaryPath,
+    heartbeat: readHeartbeat(),
+  };
 }
 
 /** Read the daemon log, optionally limited to the last N lines. */

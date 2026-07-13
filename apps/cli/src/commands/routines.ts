@@ -15,11 +15,13 @@ import * as yaml from 'yaml';
 
 import {
   isDaemonRunning,
+  isDaemonWedged,
   signalDaemonReload,
   startDaemon,
   stopDaemon,
   readDaemonPid,
   readDaemonLog,
+  getDaemonStatus,
 } from '../lib/daemon.js';
 import { humanizeCron, humanizeNextRun, formatRepoLink, REPO_DISPLAY_MAX } from '../lib/routines-format.js';
 import {
@@ -41,7 +43,7 @@ import { fireWebhookJobs, matchJobsToWebhook, type GithubWebhook } from '../lib/
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';
-import { executeJob, executeJobDetached } from '../lib/runner.js';
+import { executeJob, executeJobDetached, monitorRunningJobs } from '../lib/runner.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
@@ -210,6 +212,7 @@ export function registerRoutinesCommands(program: Command): void {
     .description('See all scheduled jobs, when they run next, and their last execution status')
     .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)')
     .action((options: { json?: boolean }) => {
+      try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const jobs = listAllJobs(process.cwd());
       if (jobs.length === 0) {
         if (options.json) {
@@ -980,18 +983,32 @@ export function registerRoutinesCommands(program: Command): void {
     .command('status')
     .description('Show scheduler status, enabled routines, and when each one fires next.')
     .action(() => {
-      const running = isDaemonRunning();
-      const pid = readDaemonPid();
+      try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
+      const status = getDaemonStatus();
 
       console.log(chalk.bold('Scheduler\n'));
-      console.log(`  Status:    ${running ? chalk.green('running') : chalk.gray('stopped')}`);
-      if (pid) console.log(`  PID:       ${pid}`);
+      const stateLabel = status.state === 'running'
+        ? chalk.green('running')
+        : status.state === 'wedged'
+          ? chalk.red('wedged')
+          : chalk.gray('stopped');
+      console.log(`  Status:    ${stateLabel}`);
+      if (status.pid) console.log(`  PID:       ${status.pid}`);
+      if (status.binaryPath) console.log(`  Binary:    ${chalk.gray(status.binaryPath)}`);
+      if (status.heartbeat) {
+        const ago = Math.round((Date.now() - Date.parse(status.heartbeat.lastTick)) / 1000);
+        console.log(`  Heartbeat: ${chalk.gray(`${ago} sec ago`)}`);
+      }
 
       const jobs = listAllJobs();
       const enabled = jobs.filter((j) => j.enabled);
       console.log(`  Routines:  ${enabled.length} enabled / ${jobs.length} total`);
 
-      if (running && enabled.length > 0) {
+      if (status.state === 'wedged') {
+        console.log(chalk.red('\n  The daemon is wedged (heartbeat stale). Restart with: agents routines stop && agents routines start'));
+      }
+
+      if (status.running && enabled.length > 0) {
         const scheduler = new JobScheduler(async () => {});
         scheduler.loadAll();
         const scheduled = scheduler.listScheduled();
@@ -1001,7 +1018,7 @@ export function registerRoutinesCommands(program: Command): void {
           console.log(`    ${chalk.cyan(job.name.padEnd(24))} next: ${chalk.gray(next)}`);
         }
         scheduler.stopAll();
-      } else if (!running && jobs.length > 0) {
+      } else if (!status.running && jobs.length > 0) {
         console.log(chalk.gray('\n  Start the scheduler to begin firing routines: agents routines start'));
       }
     });

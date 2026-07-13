@@ -123,6 +123,8 @@ export interface RunMeta {
   agent: AgentId;  // undefined at runtime for workflow jobs
   workflow?: string;
   pid: number | null;
+  /** Process birth time (epoch ms) recorded at spawn for pid-reuse detection. */
+  spawnedAt?: number;
   status: 'running' | 'completed' | 'failed' | 'timeout';
   startedAt: string;
   completedAt: string | null;
