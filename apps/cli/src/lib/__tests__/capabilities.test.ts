@@ -220,6 +220,19 @@ describe('kiro hooks version gate', () => {
   });
 });
 
+describe('droid skills version gate', () => {
+  it('gates versions below 0.26.0 as too_old', () => {
+    const result = supports('droid', 'skills', '0.25.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.need).toBe('>= 0.26.0');
+  });
+
+  it('passes 0.26.0 and above', () => {
+    expect(supports('droid', 'skills', '0.26.0')).toEqual({ ok: true });
+    expect(supports('droid', 'skills', '0.161.0')).toEqual({ ok: true });
+  });
+});
+
 describe('explainSkip()', () => {
   it('formats unsupported message', () => {
     const r = supports('amp', 'hooks');

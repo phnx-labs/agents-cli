@@ -96,6 +96,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.antigravity).toBeDefined();
   });
 
+  it('droid has a generic skills writer + detector', () => {
+    expect(WRITERS.skills.droid).toBeDefined();
+    expect(DETECTORS.skills.droid).toBeDefined();
+  });
+
   it('writer registry full-sync roundtrip leaves manifests non-stale', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'staleness-registry-roundtrip-'));
     try {

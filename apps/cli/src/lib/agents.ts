@@ -580,7 +580,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     authFiles: ['auth.v2.file', 'auth.v2.key'],
     commandsDir: path.join(HOME, '.factory', 'commands'),
     commandsSubdir: 'commands',
-    skillsDir: '', // no skills concept
+    skillsDir: path.join(HOME, '.factory', 'skills'),
     hooksDir: 'hooks',
     pluginManifestDir: '.factory-plugin',
     instructionsFile: 'AGENTS.md',
@@ -596,7 +596,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcpHttp: false,
       mcpHeaders: false,
       allowlist: false,
-      skills: false,
+      skills: { since: '0.26.0' },
       commands: true,
       plugins: true,
       subagents: true,
