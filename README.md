@@ -155,7 +155,32 @@ agents run claude "Review PRs merged this week, summarize risks" \
   | agents run codex "Write regression tests for the top 3 risks"
 ```
 
-Supports plan (read-only) and edit modes, effort levels, JSON output for scripting, and timeout limits.
+Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON output for scripting, and timeout limits.
+
+### What does `--mode skip` actually do?
+
+Treat `skip` as a last-resort escape hatch. agents-cli forwards the harness's native
+no-prompt flag; it does not add another safety layer. Prefer `auto` where the harness
+has a smart classifier (Claude Code and GitHub Copilot), or `edit` everywhere else.
+Harnesses without a native bypass flag reject `skip`.
+
+| Harness | `--mode skip` becomes |
+|---|---|
+| Claude Code | `--dangerously-skip-permissions` |
+| Codex | `--dangerously-bypass-approvals-and-sandbox` (equivalent to `--yolo`) |
+| Gemini | `--yolo` |
+| Cursor | `-f` |
+| OpenClaw | `--mode full` |
+| GitHub Copilot | `--allow-all` (alias: `--yolo`) |
+| Antigravity | `--dangerously-skip-permissions` |
+| Grok | `--always-approve` |
+| Kimi | `--yolo` |
+| Droid | `--skip-permissions-unsafe` |
+
+Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
+to sandboxed `edit` and can still prompt. `agents run codex --mode skip` is different:
+it bypasses approvals **and** removes the sandbox. `full` remains an alias for `skip`,
+but new scripts should use the explicit `skip` name.
 
 ### One protocol, every harness
 
