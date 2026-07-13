@@ -188,7 +188,10 @@ program.hook('preAction', (_thisCommand, actionCommand) => {
     emit('command.start', {
       module: parts[0],
       command: parts.join(' '),
-      args: redactArgs(actionCommand.args),
+      // Commander exposes positional operands in actionCommand.args but omits
+      // parsed option values. Audit the real argv so sensitive flags are seen
+      // and redacted instead of silently bypassing the policy.
+      args: redactArgs(process.argv.slice(2, 22)),
       cwd: process.cwd(),
     });
   } catch {

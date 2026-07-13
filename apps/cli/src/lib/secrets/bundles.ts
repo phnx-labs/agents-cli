@@ -856,7 +856,7 @@ export function readAndResolveBundleEnv(
       emit('secrets.get', {
         module: 'secrets',
         bundle: name,
-        caller: opts.caller,
+        operation: opts.caller,
         status: 'success',
         source: 'agent',
         keyCount: Object.keys(filtered.env).length,
@@ -954,7 +954,7 @@ export function readAndResolveBundleEnv(
     emit('secrets.get', {
       module: 'secrets',
       bundle: bundle.name,
-      caller: opts.caller,
+      operation: opts.caller,
       status,
       keyCount: keys.length,
       keys,

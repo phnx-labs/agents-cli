@@ -725,7 +725,7 @@ export function registerSecretsCommands(program: Command): void {
             emit('secrets.get', {
               module: 'secrets',
               bundle: bundle.name,
-              caller: 'view --reveal',
+              operation: 'view --reveal',
               source: 'reveal',
               status: 'success',
               keyCount: exposedCount,

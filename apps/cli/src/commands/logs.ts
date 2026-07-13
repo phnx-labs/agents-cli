@@ -168,6 +168,7 @@ interface AuditOptions {
   command?: string;
   event?: string[];
   agent?: string;
+  caller?: string;
   level?: string;
   since?: string;
   limit?: string;
@@ -222,7 +223,8 @@ function renderAuditRow(r: EventRecord): string {
   const ev = r.event.startsWith('error') ? chalk.red(r.event) : chalk.cyan(r.event);
   const lvl = levelColor(r.level ?? levelFor(r.event as EventType));
   const agent = r.agent ? chalk.gray(` ${r.agent}`) : '';
-  return `${time}  ${lvl.padEnd(14)} ${originLabel(r).padEnd(24)} ${user.padEnd(22)} ${ev.padEnd(26)}${agent}  ${auditDetailFor(r)}`;
+  const caller = chalk.gray(`via ${r.caller ?? 'unknown'}${r.session ? ` ${r.session}` : ''}`);
+  return `${time}  ${lvl.padEnd(14)} ${originLabel(r).padEnd(24)} ${user.padEnd(22)} ${caller.padEnd(28)} ${ev.padEnd(26)}${agent}  ${auditDetailFor(r)}`;
 }
 
 function collect(value: string, previous: string[]): string[] {
@@ -249,6 +251,7 @@ async function runAudit(opts: AuditOptions): Promise<void> {
     eventTypes: opts.event?.length ? (opts.event as EventType[]) : undefined,
     level: opts.level as EventLevel | undefined,
     agent: opts.agent,
+    caller: opts.caller,
     command: opts.command,
     module: opts.module,
     limit,
@@ -269,8 +272,7 @@ async function runAudit(opts: AuditOptions): Promise<void> {
 }
 
 async function followAuditLog(): Promise<void> {
-  const today = new Date();
-  const file = `${getLogsPath()}/events-${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}.jsonl`;
+  const file = getLogsPath();
   let offset = 0;
   try {
     offset = fs.statSync(file).size;
@@ -391,6 +393,7 @@ export function registerLogsCommand(program: Command): void {
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
     .option('--event <type>', 'Only this typed event (repeatable)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')
+    .option('--caller <kind>', 'Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)')
     .option('--level <level>', 'Only this level: audit, warn, info, debug')
     .option('--since <time>', 'Only events newer than this (e.g. 2h, 7d, or ISO date)')
     .option('--limit <n>', 'Max records to show (default 50)', '50')
