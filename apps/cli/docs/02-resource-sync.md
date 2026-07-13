@@ -9,7 +9,7 @@ For the conceptual model — what a DotAgents repo is, what resources are, and h
 | Resource | Source layers (resolved project > user > system) | Version Home Location | Sync Method |
 |----------|-----------------|----------------------|-------------|
 | Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents-system/commands/*.md` | `.{agent}/commands/` | Symlink (copy+convert for Gemini) |
-| Skills | `…/.agents/skills/{name}/` (same layering) | `.{agent}/skills/` | Symlink |
+| Skills | `…/.agents/skills/{name}/` (same layering) | `.{agent}/skills/` | Symlink (Gemini/Goose read central `~/.agents/skills/` natively) |
 | Hooks | `…/.agents/hooks/*.sh` (same layering) | `.{agent}/hooks/` | Symlink |
 | Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
 | MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |

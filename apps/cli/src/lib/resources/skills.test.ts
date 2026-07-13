@@ -315,6 +315,20 @@ describe('SkillsHandler', () => {
       const content = fs.readFileSync(syncedPath, 'utf-8');
       expect(content).toContain('User version');
     });
+
+    test('skips per-version copy for agents that read central skills natively', () => {
+      const versionHome = path.join(testRoot, 'version-home');
+      fs.mkdirSync(versionHome, { recursive: true });
+
+      createSkill(userDir, 'goose-skill', {
+        name: 'goose-skill',
+        description: 'Skill for Goose',
+      });
+
+      handler.sync('goose', versionHome);
+
+      expect(fs.existsSync(path.join(versionHome, '.config', 'goose', 'skills', 'goose-skill'))).toBe(false);
+    });
   });
 
   describe('format and targetDir', () => {
