@@ -1760,8 +1760,44 @@ function registerHooksForAntigravity(
 }
 
 /**
+ * Grok events that accept a `matcher` field. Per the Grok hooks guide
+ * (docs/user-guide/10-hooks.md, "Key Fields"): the matcher applies to the tool
+ * events — `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionDenied`
+ * (matches the tool name) — and to `Notification` (matches the notification
+ * type). The lifecycle events `SessionStart`, `SessionEnd`, `Stop`,
+ * `UserPromptSubmit` REJECT a matcher (they raise loading errors); other events
+ * ignore it. Of the events this registrar emits (see GROK_EVENT_MAP), only these
+ * three accept a matcher, so we emit it for these alone.
+ */
+const GROK_MATCHER_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'Notification']);
+
+/**
+ * Tool-name matcher aliases for tools Grok does NOT auto-alias. Grok maps common
+ * Claude tool names to its own (Bash → run_terminal_command, Read → read_file,
+ * etc. — docs/user-guide/10-hooks.md, "Tool Name Aliases") and "a matcher keeps
+ * its original name too", so most matchers need no translation. But there is no
+ * alias for `ExitPlanMode`: Grok's plan tools are `enter_plan_mode` /
+ * `exit_plan_mode` (docs/user-guide/19-plan-mode.md line 14), so a bare
+ * `ExitPlanMode` matcher would never fire. Broaden it to a regex that matches
+ * both names. Keep this an explicit, minimal map — not a general translation
+ * engine.
+ */
+const GROK_MATCHER_ALIASES: Record<string, string> = {
+  ExitPlanMode: 'ExitPlanMode|exit_plan_mode',
+};
+
+/**
  * Register hooks for Grok Build.
- * Grok uses per-event JSON files under .grok/hooks/ (e.g. session-start.json).
+ *
+ * Grok merges ALL of `~/.grok/hooks/*.json` (docs/user-guide/10-hooks.md, "Hook
+ * Locations"), so this registrar writes exactly ONE manifest file, `hooks.json`,
+ * and prunes any stale per-event files (`pretooluse.json`, …) that an older
+ * build wrote — otherwise every hook would run twice per event, forever, on
+ * already-synced installs.
+ *
+ * Matchers are grouped one-per-distinct-matcher (like the Claude writer) and are
+ * emitted only for the events that accept them (GROK_MATCHER_EVENTS); tool-name
+ * matchers Grok does not auto-alias are translated via GROK_MATCHER_ALIASES.
  */
 function registerHooksForGrok(
   versionHome: string,
@@ -1786,7 +1822,11 @@ function registerHooksForGrok(
     Notification: 'Notification',
   };
 
-  const grokHooks: Record<string, any> = { hooks: {} };
+  type GrokGroup = {
+    matcher?: string;
+    hooks: Array<{ type: 'command'; command: string; timeout: number }>;
+  };
+  const grokHooks: { hooks: Record<string, GrokGroup[]> } = { hooks: {} };
 
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
@@ -1805,15 +1845,37 @@ function registerHooksForGrok(
       if (!grokHooks.hooks[grokEvent]) {
         grokHooks.hooks[grokEvent] = [];
       }
+      const groups = grokHooks.hooks[grokEvent];
 
-      grokHooks.hooks[grokEvent].push({
-        hooks: [{ type: 'command' as const, command: commandPath, timeout }],
-      });
+      // Emit the matcher only for events that accept one; translate tool names
+      // Grok does not auto-alias. Empty/omitted matcher matches everything.
+      let matcher: string | undefined;
+      if (GROK_MATCHER_EVENTS.has(grokEvent) && hookDef.matcher) {
+        matcher = GROK_MATCHER_ALIASES[hookDef.matcher] ?? hookDef.matcher;
+      }
+
+      // Group by matcher the way the Claude writer does: one group per distinct
+      // matcher, hooks appended into the group — not one group per hook.
+      let group = groups.find((g) => (g.matcher ?? '') === (matcher ?? ''));
+      if (!group) {
+        group = matcher ? { matcher, hooks: [] } : { hooks: [] };
+        groups.push(group);
+      }
+
+      const hookEntry = { type: 'command' as const, command: commandPath, timeout };
+      const existingIdx = group.hooks.findIndex((h) => h.command === commandPath);
+      if (existingIdx >= 0) {
+        group.hooks[existingIdx] = hookEntry;
+      } else {
+        group.hooks.push(hookEntry);
+      }
 
       registered.push(`${name} -> ${grokEvent}`);
     }
   }
 
+  // Single source of truth: hooks.json. Written fresh from the manifest every
+  // sync, so the registrar owns it outright.
   const mainHooksPath = path.join(grokHooksDir, 'hooks.json');
   try {
     fs.writeFileSync(mainHooksPath, JSON.stringify(grokHooks, null, 2));
@@ -1821,17 +1883,59 @@ function registerHooksForGrok(
     errors.push(`Failed to write hooks.json: ${(e as Error).message}`);
   }
 
-  for (const [eventName, groups] of Object.entries(grokHooks.hooks)) {
-    const fileName = eventName.toLowerCase().replace(/([a-z])([A-Z])/g, '$1-$2') + '.json';
-    const eventFile = path.join(grokHooksDir, fileName);
-    try {
-      fs.writeFileSync(eventFile, JSON.stringify({ hooks: { [eventName]: groups } }, null, 2));
-    } catch (e) {
-      errors.push(`Failed to write ${fileName}: ${(e as Error).message}`);
+  // Clean up stale per-event files (pretooluse.json, session-start.json, …) that
+  // older builds double-wrote. Grok merges every *.json in this dir, so leaving
+  // them would run each hook twice per event. Only remove files whose contents
+  // are entirely managed by us (a lone `hooks` object referencing our managed
+  // command paths); a user's own custom *.json is left untouched.
+  try {
+    for (const file of fs.readdirSync(grokHooksDir)) {
+      if (!file.endsWith('.json') || file === 'hooks.json') continue;
+      const filePath = path.join(grokHooksDir, file);
+      if (isManagedGrokHookFile(filePath, managedPrefixes)) {
+        fs.rmSync(filePath, { force: true });
+      }
     }
+  } catch (e) {
+    errors.push(`Failed to prune stale grok hook files: ${(e as Error).message}`);
   }
 
   return { registered, errors };
+}
+
+/**
+ * A per-event Grok hook file is "ours" (safe to prune) when it is a
+ * `{ hooks: { <Event>: [...] } }` document in which every command entry points
+ * at a managed path (see isManagedHookCommand). This is exactly the shape older
+ * builds double-wrote; a user's hand-authored *.json that mixes in unmanaged
+ * commands is preserved. A file we can't parse is treated as not-ours.
+ */
+function isManagedGrokHookFile(filePath: string, managedPrefixes: string[]): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object') return false;
+  const hooks = (parsed as { hooks?: unknown }).hooks;
+  if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return false;
+
+  const commands: string[] = [];
+  for (const groups of Object.values(hooks as Record<string, unknown>)) {
+    if (!Array.isArray(groups)) return false;
+    for (const group of groups) {
+      const entries = (group as { hooks?: unknown }).hooks;
+      if (!Array.isArray(entries)) return false;
+      for (const entry of entries) {
+        const cmd = (entry as { command?: unknown }).command;
+        if (typeof cmd !== 'string') return false;
+        commands.push(cmd);
+      }
+    }
+  }
+  if (commands.length === 0) return false;
+  return commands.every((cmd) => isManagedHookCommand(cmd, managedPrefixes));
 }
 
 function registerHooksForKimi(

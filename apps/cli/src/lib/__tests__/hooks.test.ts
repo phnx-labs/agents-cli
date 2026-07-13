@@ -517,6 +517,113 @@ describe('registerHooksToSettings - returns empty for unsupported agents', () =>
     expect(parsed.hooks.PreToolUse).toBeDefined();
     expect(parsed.hooks.PreToolUse[0].hooks[0].type).toBe('command');
   });
+
+  function grokHooksDir(versionHome: string): string {
+    return path.join(versionHome, '.grok', 'hooks');
+  }
+
+  function readGrokHooks(versionHome: string): Record<string, any> {
+    return JSON.parse(fs.readFileSync(path.join(grokHooksDir(versionHome), 'hooks.json'), 'utf-8'));
+  }
+
+  it('emits the matcher on PreToolUse', () => {
+    makeScript('gate.sh');
+    const manifest: Record<string, ManifestHook> = {
+      gate: { script: 'gate.sh', events: ['PreToolUse'], matcher: 'Bash' },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings('grok', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    const parsed = readGrokHooks(versionHome);
+    expect(parsed.hooks.PreToolUse).toHaveLength(1);
+    expect(parsed.hooks.PreToolUse[0].matcher).toBe('Bash');
+    expect(parsed.hooks.PreToolUse[0].hooks[0].command).toBe(
+      resolvedCommand(parsed.hooks.PreToolUse[0].hooks[0].command)
+    );
+  });
+
+  it('omits the matcher on SessionStart / Stop / UserPromptSubmit (lifecycle events reject it)', () => {
+    makeScript('life.sh');
+    const manifest: Record<string, ManifestHook> = {
+      // A matcher on the manifest must NOT leak onto lifecycle events.
+      life: {
+        script: 'life.sh',
+        events: ['SessionStart', 'Stop', 'UserPromptSubmit'],
+        matcher: 'Bash',
+      },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings('grok', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    const parsed = readGrokHooks(versionHome);
+    for (const ev of ['SessionStart', 'Stop', 'UserPromptSubmit']) {
+      expect(parsed.hooks[ev]).toHaveLength(1);
+      expect(parsed.hooks[ev][0]).not.toHaveProperty('matcher');
+    }
+  });
+
+  it('translates the ExitPlanMode matcher to also match Grok exit_plan_mode', () => {
+    makeScript('plan.sh');
+    const manifest: Record<string, ManifestHook> = {
+      plan: { script: 'plan.sh', events: ['PreToolUse'], matcher: 'ExitPlanMode' },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings('grok', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    const parsed = readGrokHooks(versionHome);
+    expect(parsed.hooks.PreToolUse[0].matcher).toBe('ExitPlanMode|exit_plan_mode');
+  });
+
+  it('groups multiple hooks with the same matcher into one group', () => {
+    makeScript('a.sh');
+    makeScript('b.sh');
+    const manifest: Record<string, ManifestHook> = {
+      a: { script: 'a.sh', events: ['PreToolUse'], matcher: 'Bash' },
+      b: { script: 'b.sh', events: ['PreToolUse'], matcher: 'Bash' },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings('grok', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    const parsed = readGrokHooks(versionHome);
+    expect(parsed.hooks.PreToolUse).toHaveLength(1);
+    expect(parsed.hooks.PreToolUse[0].matcher).toBe('Bash');
+    expect(parsed.hooks.PreToolUse[0].hooks).toHaveLength(2);
+  });
+
+  it('writes a single file — no per-event files alongside hooks.json', () => {
+    makeScript('gate.sh');
+    const manifest: Record<string, ManifestHook> = {
+      gate: { script: 'gate.sh', events: ['PreToolUse'], matcher: 'Bash' },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings('grok', versionHome, manifest, agentsDir);
+    const files = fs.readdirSync(grokHooksDir(versionHome)).filter((f) => f.endsWith('.json'));
+    expect(files).toEqual(['hooks.json']);
+  });
+
+  it('prunes stale managed per-event files left by an older build on re-sync', () => {
+    const scriptPath = makeScript('gate.sh');
+    const manifest: Record<string, ManifestHook> = {
+      gate: { script: 'gate.sh', events: ['PreToolUse'], matcher: 'Bash' },
+    };
+    const versionHome = path.join(tmpDir, 'home');
+    const dir = grokHooksDir(versionHome);
+    fs.mkdirSync(dir, { recursive: true });
+
+    // Simulate the old double-registration output: a per-event file whose
+    // command is a managed path (under agentsDir/hooks).
+    const stale = { hooks: { PreToolUse: [{ hooks: [{ type: 'command', command: scriptPath, timeout: 30 }] }] } };
+    fs.writeFileSync(path.join(dir, 'pretooluse.json'), JSON.stringify(stale));
+    // A user's own hand-authored file with an unmanaged command must survive.
+    const userFile = { hooks: { PostToolUse: [{ hooks: [{ type: 'command', command: '/usr/local/bin/mine.sh', timeout: 5 }] }] } };
+    fs.writeFileSync(path.join(dir, 'user-custom.json'), JSON.stringify(userFile));
+
+    const result = registerHooksToSettings('grok', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+    expect(files).toEqual(['hooks.json', 'user-custom.json']);
+    expect(fs.existsSync(path.join(dir, 'pretooluse.json'))).toBe(false);
+  });
 });
 
 describe('registerHooksToSettings - Antigravity', () => {
