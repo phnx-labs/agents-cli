@@ -59,7 +59,7 @@ classifier (Claude Code and GitHub Copilot), or `edit` everywhere else.
 | GitHub Copilot | `--allow-all` (alias: `--yolo`) |
 | Antigravity | `--dangerously-skip-permissions` |
 | Grok | `--always-approve` |
-| Kimi | `--yolo` |
+| Kimi | `--yolo` interactively; no extra flag in headless `-p` runs, which already auto-approve |
 | Droid | `--skip-permissions-unsafe` |
 
 Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
