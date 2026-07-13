@@ -164,6 +164,26 @@ enum LocalState {
         return all
     }
 
+
+    /// Grouping key for the menu: prefer the real git repo name over a worktree
+    /// directory slug. Paths under `.../.agents/worktrees/<slug>` group as the
+    /// enclosing repository (the path component before `.agents`), not `<slug>`.
+    static func repoName(from cwd: String?) -> String? {
+        guard let cwd, !cwd.isEmpty else { return nil }
+        let ns = cwd as NSString
+        let parts = (cwd as NSString).pathComponents
+        // Match .../.agents/worktrees/<slug>[/...]
+        if let agentsIdx = parts.firstIndex(of: ".agents"),
+           agentsIdx + 2 < parts.count,
+           parts[agentsIdx + 1] == "worktrees" {
+            // Enclosing repo root is the component before `.agents`
+            if agentsIdx > 0 {
+                return parts[agentsIdx - 1]
+            }
+        }
+        return ns.lastPathComponent
+    }
+
     // MARK: Terminals
     private static func terminals(attention: [String: AttentionMark]) -> [Session] {
         let path = "\(home)/.agents/.cache/terminals/live-terminals.json"
@@ -183,7 +203,7 @@ enum LocalState {
                 let sid = (e["sessionId"] as? String) ?? ""
                 // repo is the grouping key — always the working-dir name; the
                 // label is the session's own title, carried separately.
-                let repo = cwd.map { ($0 as NSString).lastPathComponent } ?? label
+                let repo = Self.repoName(from: cwd) ?? label
                 let mark = sid.isEmpty ? nil : attention[sid]
                 let status = sessionStatus(sessionId: sid, kind: kind, cwd: cwd,
                                            attention: attentionIds)
@@ -210,7 +230,7 @@ enum LocalState {
             let agent = (m["agentType"] as? String) ?? "agent"
             let cwd = m["cwd"] as? String
             let task = (m["taskName"] as? String) ?? (m["name"] as? String) ?? ""
-            let repo = cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            let repo = Self.repoName(from: cwd) ?? ""
             out.append(Session(agent: agent, repo: repo, cwd: cwd,
                                status: .running, context: "teams", title: task,
                                question: "", attentionSinceMs: nil))

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Menu bar groups worktree sessions under the real repo name (RUSH-1635).** Paths under `.agents/worktrees/<slug>` use the enclosing repository directory as the grouping key instead of the worktree slug. Source: `apps/cli/menubar/.../LocalState.swift`.
+
 - **PR outcome keys include repository identity (RUSH-1630).** Full GitHub pull URLs normalize to `owner/repo#N` so two repos' PR #10 no longer collide under `pr:#10`. Source: `apps/cli/src/lib/feed-outcome.ts`.
 
 - **Urgent OpenClaw notifications use `--target` and `--message` (RUSH-1620).** `openclaw message send` requires a destination and the `--message` flag (not `--text`); without `--target` the send was invalid. Source: `apps/cli/src/lib/notify.ts`.
