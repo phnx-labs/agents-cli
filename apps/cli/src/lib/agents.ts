@@ -297,12 +297,14 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     commandsDir: path.join(HOME, '.cursor', 'commands'),
     commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.cursor', 'skills'),
+    // Hooks: ~/.cursor/hooks.json (`{ "version": 1, "hooks": { event: [{ command }] } }`).
+    // CLI hooks since 2026-01-16. See registerHooksForCursor — only CLI-fired events.
     hooksDir: 'hooks',
     instructionsFile: '.cursorrules',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: '.cursorrules' }, workflows: false, modes: ['edit', 'skip'] },
+    supportsHooks: true,
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: '.cursorrules' }, workflows: false, modes: ['edit', 'skip'] },
   },
   opencode: {
     id: 'opencode',

@@ -1140,6 +1140,9 @@ export function registerHooksToSettings(
   if (agentId === 'goose') {
     return registerHooksForGoose(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'cursor') {
+    return registerHooksForCursor(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   return { registered: [], errors: [] };
 }
 
@@ -2398,6 +2401,138 @@ function registerHooksForGoose(
     );
   } catch (err) {
     errors.push(`Failed to write goose hooks plugin: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+
+/**
+ * Canonical → Cursor CLI camelCase events.
+ *
+ * Only events verified to fire in cursor-agent CLI (not full IDE parity).
+ * Ticket RUSH-1326 note (2026-06): working = sessionStart, stop, preToolUse,
+ * postToolUse, beforeShellExecution, afterShellExecution, beforeReadFile,
+ * afterFileEdit. Also map SessionEnd / beforeSubmitPrompt / preCompact /
+ * subagent* which Cursor documents for agent hooks.
+ * Unmapped events (e.g. afterAgentResponse) are skipped.
+ */
+const CURSOR_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'sessionStart',
+  SessionEnd: 'sessionEnd',
+  Stop: 'stop',
+  UserPromptSubmit: 'beforeSubmitPrompt',
+  PreToolUse: 'preToolUse',
+  PostToolUse: 'postToolUse',
+  PostToolUseFailure: 'postToolUseFailure',
+  PreCompact: 'preCompact',
+  SubagentStart: 'subagentStart',
+  SubagentStop: 'subagentStop',
+  BeforeShellExecution: 'beforeShellExecution',
+  AfterShellExecution: 'afterShellExecution',
+  BeforeReadFile: 'beforeReadFile',
+  AfterFileEdit: 'afterFileEdit',
+};
+
+/**
+ * Register hooks for Cursor CLI (`cursor-agent`).
+ *
+ * Writes `~/.cursor/hooks.json` (under version home):
+ *   { "version": 1, "hooks": { event: [{ command, timeout?, matcher? }] } }
+ *
+ * GC: rewrite managed entries by command path under managedPrefixes; preserve
+ * user-authored entries whose command is outside managed roots.
+ */
+function registerHooksForCursor(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const configDir = path.join(versionHome, '.cursor');
+  const hooksPath = path.join(configDir, 'hooks.json');
+
+  type CursorEntry = {
+    command: string;
+    timeout?: number;
+    matcher?: string;
+  };
+
+  let existing: { version?: number; hooks?: Record<string, CursorEntry[]> } = { version: 1, hooks: {} };
+  if (fs.existsSync(hooksPath)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(hooksPath, 'utf-8'));
+      if (!existing.hooks || typeof existing.hooks !== 'object') existing.hooks = {};
+    } catch {
+      errors.push('Failed to parse existing hooks.json');
+      return { registered, errors };
+    }
+  }
+
+  const currentManifestPaths = new Set<string>();
+  for (const [hookName, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+    const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
+    if (resolved) currentManifestPaths.add(resolved);
+  }
+
+  // GC managed entries that are no longer in the manifest
+  const hooks: Record<string, CursorEntry[]> = {};
+  for (const [event, entries] of Object.entries(existing.hooks || {})) {
+    if (!Array.isArray(entries)) continue;
+    hooks[event] = entries.filter((e) => {
+      if (typeof e?.command !== 'string') return true;
+      if (!isManagedHookCommand(e.command, managedPrefixes)) return true;
+      return currentManifestPaths.has(e.command);
+    });
+    if (hooks[event].length === 0) delete hooks[event];
+  }
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = hookDef.timeout ?? 30;
+
+    for (const event of hookDef.events) {
+      const cursorEvent = CURSOR_EVENT_MAP[event];
+      if (!cursorEvent) continue;
+
+      if (!hooks[cursorEvent]) hooks[cursorEvent] = [];
+
+      const entry: CursorEntry = { command: commandPath, timeout };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
+
+      const existingIdx = hooks[cursorEvent].findIndex(
+        (h) => h.command === entry.command && (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[cursorEvent][existingIdx] = entry;
+      } else {
+        hooks[cursorEvent].push(entry);
+      }
+
+      registered.push(`${name} -> ${cursorEvent}`);
+    }
+  }
+
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(
+      hooksPath,
+      JSON.stringify({ version: 1, hooks }, null, 2) + '\n',
+      'utf-8'
+    );
+  } catch (err) {
+    errors.push(`Failed to write hooks.json: ${(err as Error).message}`);
   }
 
   return { registered, errors };

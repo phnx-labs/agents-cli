@@ -9,7 +9,7 @@ describe('supports() capability gate', () => {
     });
 
     it('returns unsupported for capabilities marked false', () => {
-      expect(supports('cursor', 'hooks')).toEqual({ ok: false, reason: 'unsupported' });
+      expect(supports('amp', 'hooks')).toEqual({ ok: false, reason: 'unsupported' });
       expect(supports('amp', 'plugins')).toEqual({ ok: false, reason: 'unsupported' });
     });
 
@@ -71,8 +71,9 @@ describe('supports() capability gate', () => {
   });
 
   describe('unsupported agents skip regardless of version', () => {
-    it('cursor hooks always unsupported', () => {
-      expect(supports('cursor', 'hooks', '999.0.0').ok).toBe(false);
+    it('cursor hooks are supported', () => {
+      expect(supports('cursor', 'hooks').ok).toBe(true);
+      expect(supports('cursor', 'hooks', '999.0.0').ok).toBe(true);
     });
 
     it('opencode plugins always unsupported (writer not implemented)', () => {
@@ -133,7 +134,7 @@ describe('isCapable()', () => {
   });
 
   it('reports false for explicit false', () => {
-    expect(isCapable('cursor', 'hooks')).toBe(false);
+    expect(isCapable('amp', 'hooks')).toBe(false);
     expect(isCapable('opencode', 'plugins')).toBe(false);
   });
 
@@ -171,9 +172,13 @@ describe('capableAgents()', () => {
     expect(agents).toContain('goose');
   });
 
-  it('excludes cursor/opencode/amp for hooks', () => {
+  it('includes cursor for hooks (cursor-agent CLI hooks since 2026-01-16)', () => {
     const agents = capableAgents('hooks');
-    expect(agents).not.toContain('cursor');
+    expect(agents).toContain('cursor');
+  });
+
+  it('excludes opencode/amp for hooks', () => {
+    const agents = capableAgents('hooks');
     expect(agents).not.toContain('opencode');
     expect(agents).not.toContain('amp');
   });
@@ -213,8 +218,8 @@ describe('kiro hooks version gate', () => {
 
 describe('explainSkip()', () => {
   it('formats unsupported message', () => {
-    const r = supports('cursor', 'hooks');
-    expect(explainSkip('cursor', 'hooks', r)).toBe('cursor: hooks not supported');
+    const r = supports('amp', 'hooks');
+    expect(explainSkip('amp', 'hooks', r)).toBe('amp: hooks not supported');
   });
 
   it('formats too_old message with version', () => {
