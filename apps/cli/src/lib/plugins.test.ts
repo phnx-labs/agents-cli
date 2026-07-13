@@ -1400,3 +1400,91 @@ describe('syncPluginToVersion (opencode TS modules)', () => {
     expect(isPluginSynced(plugin, 'opencode', versionHome)).toBe(false);
   });
 });
+
+// ─── syncPluginToVersion: Cursor (.cursor + .cursor-plugin manifest) ─────────
+
+describe('syncPluginToVersion (cursor native marketplace install)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function setupCursorPlugin(name = 'myplugin'): {
+    pluginRoot: string;
+    versionHome: string;
+    plugin: DiscoveredPlugin;
+  } {
+    const pluginRoot = path.join(tmpDir, name);
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: 'test', author: { name: 'tester' } })
+    );
+    const versionHome = path.join(tmpDir, `${name}-home`);
+    fs.mkdirSync(path.join(versionHome, '.cursor'), { recursive: true });
+    const plugin: DiscoveredPlugin = {
+      name,
+      root: pluginRoot,
+      manifest: { name, version: '1.0.0', description: 'test' },
+      skills: [],
+      hooks: [],
+      scripts: [],
+      commands: [],
+      agentDefs: [],
+      bin: [],
+      mcpServers: [],
+      lspServers: [],
+      monitors: [],
+      hasMcp: false,
+      hasSettings: false,
+    };
+    return { pluginRoot, versionHome, plugin };
+  }
+
+  it('copies plugin into .cursor/plugins/marketplaces/agents-cli/plugins/<name>/', async () => {
+    const { pluginRoot, versionHome, plugin } = setupCursorPlugin();
+    fs.writeFileSync(path.join(pluginRoot, 'README.md'), '# hi');
+
+    const { syncPluginToVersion } = await import('./plugins.js');
+    const r = syncPluginToVersion(plugin, 'cursor', versionHome);
+    expect(r.success).toBe(true);
+
+    const installDir = path.join(
+      versionHome,
+      '.cursor',
+      'plugins',
+      'marketplaces',
+      'agents-cli',
+      'plugins',
+      'myplugin'
+    );
+    expect(fs.existsSync(path.join(installDir, '.claude-plugin', 'plugin.json'))).toBe(true);
+    expect(fs.existsSync(path.join(installDir, 'README.md'))).toBe(true);
+  });
+
+  it('mirrors the manifest into .cursor-plugin/plugin.json', async () => {
+    const { versionHome, plugin } = setupCursorPlugin();
+    const { syncPluginToVersion, isPluginSynced } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'cursor', versionHome);
+
+    const installDir = path.join(
+      versionHome,
+      '.cursor',
+      'plugins',
+      'marketplaces',
+      'agents-cli',
+      'plugins',
+      'myplugin'
+    );
+    const cursorManifest = path.join(installDir, '.cursor-plugin', 'plugin.json');
+    expect(fs.existsSync(cursorManifest)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(cursorManifest, 'utf-8'));
+    expect(parsed.name).toBe('myplugin');
+    expect(isPluginSynced(plugin, 'cursor', versionHome)).toBe(true);
+  });
+});

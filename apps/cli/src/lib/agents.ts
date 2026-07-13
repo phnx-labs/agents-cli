@@ -300,11 +300,16 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // Hooks: ~/.cursor/hooks.json (`{ "version": 1, "hooks": { event: [{ command }] } }`).
     // CLI hooks since 2026-01-16. See registerHooksForCursor — only CLI-fired events.
     hooksDir: 'hooks',
+    // Plugins: `.cursor-plugin/plugin.json` (re-enabled in CLI 2026-05). Mirror the
+    // Claude marketplace layout into ~/.cursor/plugins/ and copy the manifest into
+    // pluginManifestDir so Cursor's native loader sees it (same pattern as droid/
+    // codex).
+    pluginManifestDir: '.cursor-plugin',
     instructionsFile: '.cursorrules',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: '.cursorrules' }, workflows: false, modes: ['edit', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, modes: ['edit', 'skip'] },
   },
   opencode: {
     id: 'opencode',
