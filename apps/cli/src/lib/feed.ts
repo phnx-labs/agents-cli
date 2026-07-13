@@ -39,6 +39,8 @@ export interface OpenBlock {
   runtime: string;
   ts: string;
   questions: BlockQuestion[];
+  kind?: 'question' | 'notification';
+  notificationType?: string;
   ticket?: string;
   pr?: string;
 }
@@ -114,12 +116,12 @@ export function removeBlock(blockId: string, root?: string): boolean {
  * CLI-writable user hooks dir without a separate file in the npm tarball.
  */
 export const FEED_PUBLISH_HOOK_SCRIPT = `#!/usr/bin/env python3
-"""PreToolUse hook: publish an open-block record when the agent calls
-AskUserQuestion, so \`agents feed\` can aggregate pending decisions.
+"""Publish and clear open-block records for \`agents feed\`.
 
-Outbound counterpart to the inbound mailbox-inject hook. Fires only on
-AskUserQuestion (matcher-gated in agents.yaml). Writes one block per session
-to ~/.agents/.history/feed/. A new question replaces the previous block.
+The manifest invokes this script for top-level AskUserQuestion calls, waiting
+notifications, question answers, and session lifecycle events. One atomic file
+per session means a new block replaces the previous block. Answer/resume/stop
+events remove it so \`agents feed\` only lists decisions that are still open.
 
 Sub-agent gate: when the PreToolUse payload carries \`agent_type\`, this is a
 Task/Agent subagent -- skip. Only the top-level agent publishes. Verified on
@@ -135,6 +137,18 @@ import socket
 import tempfile
 from datetime import datetime, timezone
 
+WAITING_NOTIFICATION_TYPES = {
+    "permission_prompt",
+    "idle_prompt",
+    "elicitation_dialog",
+}
+CLEAR_EVENTS = {
+    "PostToolUse",
+    "Stop",
+    "UserPromptSubmit",
+    "SessionEnd",
+}
+
 
 def main():
     raw = sys.stdin.read()
@@ -147,34 +161,65 @@ def main():
     if payload.get("agent_type"):
         return
 
-    tool_input = payload.get("tool_input", {})
-    questions = tool_input.get("questions", [])
-    if not questions:
-        return
-
     session_id = payload.get("session_id", "")
     if not session_id:
         return
 
-    normalized_questions = []
-    for q in questions:
-        if not isinstance(q, dict):
-            continue
-        question = {
-            "text": q.get("question", q.get("header", "")),
-            "header": q.get("header"),
-            "multiSelect": q.get("multiSelect", False),
-        }
-        raw_opts = q.get("options", [])
-        if raw_opts:
-            question["options"] = [
-                {"label": o.get("label", ""), "description": o.get("description")}
-                for o in raw_opts
-                if isinstance(o, dict)
-            ]
-        normalized_questions.append(question)
-    if not normalized_questions:
+    safe_session_id = re.sub(r"[^A-Za-z0-9._-]", "-", session_id)
+    block_id = f"block-{safe_session_id}"
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    feed_dir = os.path.join(home, ".agents", ".history", "feed")
+    target = os.path.join(feed_dir, f"{block_id}.json")
+    hook_event = payload.get("hook_event_name", "PreToolUse")
+
+    if hook_event in CLEAR_EVENTS:
+        try:
+            os.unlink(target)
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
         return
+
+    notification_type = None
+    if hook_event == "Notification":
+        notification_type = payload.get("notification_type", "")
+        if notification_type not in WAITING_NOTIFICATION_TYPES:
+            return
+        message = payload.get("message", "")
+        if not message:
+            return
+        normalized_questions = [{
+            "text": message,
+            "header": payload.get("title") or notification_type.replace("_", " ").title(),
+            "multiSelect": False,
+        }]
+        kind = "notification"
+    else:
+        tool_input = payload.get("tool_input", {})
+        questions = tool_input.get("questions", [])
+        if not questions:
+            return
+        normalized_questions = []
+        for q in questions:
+            if not isinstance(q, dict):
+                continue
+            question = {
+                "text": q.get("question", q.get("header", "")),
+                "header": q.get("header"),
+                "multiSelect": q.get("multiSelect", False),
+            }
+            raw_opts = q.get("options", [])
+            if raw_opts:
+                question["options"] = [
+                    {"label": o.get("label", ""), "description": o.get("description")}
+                    for o in raw_opts
+                    if isinstance(o, dict)
+                ]
+            normalized_questions.append(question)
+        if not normalized_questions:
+            return
+        kind = "question"
 
     # Identity from env (set by agents-cli at spawn).
     mailbox_id = os.path.basename(
@@ -187,8 +232,6 @@ def main():
 
     runtime = os.environ.get("AGENTS_RUNTIME", "headless")
 
-    safe_session_id = re.sub(r"[^A-Za-z0-9._-]", "-", session_id)
-    block_id = f"block-{safe_session_id}"
     block = {
         "blockId": block_id,
         "sessionId": session_id,
@@ -197,21 +240,21 @@ def main():
         "runtime": runtime,
         "ts": datetime.now(timezone.utc).isoformat(),
         "questions": normalized_questions,
+        "kind": kind,
     }
+    if notification_type:
+        block["notificationType"] = notification_type
 
     # Python's expanduser() ignores HOME on Windows, while agents-cli honors a
     # HOME override on every platform. Use the same anchor so hooks and the CLI
     # always read/write one feed store (including temp-home and sandbox runs).
-    home = os.environ.get("HOME") or os.path.expanduser("~")
-    feed_dir = os.path.join(home, ".agents", ".history", "feed")
     os.makedirs(feed_dir, exist_ok=True)
 
-    target = os.path.join(feed_dir, f"{block_id}.json")
     fd, tmp = tempfile.mkstemp(dir=feed_dir, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(block, f, indent=2)
-        os.rename(tmp, target)
+        os.replace(tmp, target)
     except Exception:
         try:
             os.unlink(tmp)
@@ -231,6 +274,29 @@ export const FEED_PUBLISH_HOOK_MANIFEST = {
   name: 'feed-publish',
   events: ['PreToolUse'],
   matcher: 'AskUserQuestion',
+  script: '10-feed-publish.py',
+  timeout: 5,
+};
+
+export const FEED_NOTIFICATION_HOOK_MANIFEST = {
+  name: 'feed-publish-notification',
+  events: ['Notification'],
+  matcher: 'permission_prompt|idle_prompt|elicitation_dialog',
+  script: '10-feed-publish.py',
+  timeout: 5,
+};
+
+export const FEED_ANSWERED_HOOK_MANIFEST = {
+  name: 'feed-clear-answered',
+  events: ['PostToolUse'],
+  matcher: 'AskUserQuestion',
+  script: '10-feed-publish.py',
+  timeout: 5,
+};
+
+export const FEED_LIFECYCLE_HOOK_MANIFEST = {
+  name: 'feed-clear-lifecycle',
+  events: ['Stop', 'UserPromptSubmit', 'SessionEnd'],
   script: '10-feed-publish.py',
   timeout: 5,
 };
@@ -262,18 +328,45 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
     if (yamlDoc.errors.length > 0) {
       throw new Error(`Cannot install feed hook: ${agentsYamlPath} is invalid YAML`);
     }
-    if (!yamlDoc.getIn(['hooks', 'feed-publish'])) {
-      yamlDoc.setIn(['hooks', 'feed-publish'], {
+    const desiredHooks: Record<string, Record<string, unknown>> = {
+      'feed-publish': {
         agents: ['claude'],
         events: ['PreToolUse'],
         matcher: 'AskUserQuestion',
         script: '10-feed-publish.py',
         timeout: 5,
-      });
+      },
+      'feed-publish-notification': {
+        agents: ['claude'],
+        events: ['Notification'],
+        matcher: 'permission_prompt|idle_prompt|elicitation_dialog',
+        script: '10-feed-publish.py',
+        timeout: 5,
+      },
+      'feed-clear-answered': {
+        agents: ['claude'],
+        events: ['PostToolUse'],
+        matcher: 'AskUserQuestion',
+        script: '10-feed-publish.py',
+        timeout: 5,
+      },
+      'feed-clear-lifecycle': {
+        agents: ['claude'],
+        events: ['Stop', 'UserPromptSubmit', 'SessionEnd'],
+        script: '10-feed-publish.py',
+        timeout: 5,
+      },
+    };
+    for (const [name, definition] of Object.entries(desiredHooks)) {
+      if (!yamlDoc.getIn(['hooks', name])) {
+        yamlDoc.setIn(['hooks', name], definition);
+        installed = true;
+      }
+    }
+    if (installed) {
       const tmpYaml = `${agentsYamlPath}.${process.pid}.tmp`;
       fs.writeFileSync(tmpYaml, String(yamlDoc));
       fs.renameSync(tmpYaml, agentsYamlPath);
-      installed = true;
     }
 
     return { installed };

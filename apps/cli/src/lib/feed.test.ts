@@ -176,7 +176,120 @@ describe('feed store', () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0].mailboxId).toBe('session-123');
     expect(blocks[0].runtime).toBe('teams');
+    expect(blocks[0].kind).toBe('question');
     expect(blocks[0].questions.map((q) => q.text)).toEqual(['First?', 'Second?']);
+
+    const replace = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-123',
+        tool_input: { questions: [{ question: 'Replacement?', header: 'New' }] },
+      }),
+      env: { ...process.env, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'teams' },
+      encoding: 'utf-8',
+    });
+    expect(replace.status).toBe(0);
+    expect(listBlocks(path.join(home, '.agents', '.history', 'feed'))).toMatchObject([
+      { questions: [{ text: 'Replacement?' }] },
+    ]);
+  });
+
+  it.runIf(hasPython)('real hook publishes waiting notifications with routing identity', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-notification-'));
+    const mailbox = path.join(home, '.agents', '.history', 'mailbox', 'session-notify');
+    const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-notify',
+        hook_event_name: 'Notification',
+        notification_type: 'permission_prompt',
+        title: 'Permission needed',
+        message: 'Claude needs permission to use Bash',
+      }),
+      env: { ...process.env, HOME: home, AGENTS_MAILBOX_DIR: mailbox, AGENTS_RUNTIME: 'headless' },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    const blocks = listBlocks(path.join(home, '.agents', '.history', 'feed'));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      mailboxId: 'session-notify',
+      runtime: 'headless',
+      kind: 'notification',
+      notificationType: 'permission_prompt',
+    });
+    expect(blocks[0].questions).toEqual([{
+      text: 'Claude needs permission to use Bash',
+      header: 'Permission needed',
+      multiSelect: false,
+    }]);
+  });
+
+  it.runIf(hasPython)('real hook ignores notifications that do not represent a wait', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-notification-ignore-'));
+    const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-auth',
+        hook_event_name: 'Notification',
+        notification_type: 'auth_success',
+        message: 'Authentication succeeded',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(result.status).toBe(0);
+    expect(listBlocks(path.join(home, '.agents', '.history', 'feed'))).toEqual([]);
+  });
+
+  it.runIf(hasPython)('real hook clears a question after AskUserQuestion completes', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-answer-clear-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-answer',
+        hook_event_name: 'PreToolUse',
+        tool_input: { questions: [{ question: 'Choose?', options: [{ label: 'A' }] }] },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+    expect(listBlocks(feedDir)).toHaveLength(1);
+
+    const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-answer',
+        hook_event_name: 'PostToolUse',
+        tool_name: 'AskUserQuestion',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(clear.status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
+  });
+
+  it.runIf(hasPython)('real hook clears an idle notification when the user resumes', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-resume-clear-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-idle',
+        hook_event_name: 'Notification',
+        notification_type: 'idle_prompt',
+        message: 'Claude is waiting for your next prompt',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+    expect(listBlocks(feedDir)).toHaveLength(1);
+
+    const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({ session_id: 'session-idle', hook_event_name: 'UserPromptSubmit' }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(clear.status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
   });
 
   it.runIf(hasPython)('real hook gates Task subagents out', () => {
@@ -204,6 +317,9 @@ describe('feed store', () => {
     const updated = fs.readFileSync(agentsYaml, 'utf-8');
     expect(updated).toContain('# keep this comment');
     expect(updated).toContain('feed-publish:');
+    expect(updated).toContain('feed-publish-notification:');
+    expect(updated).toContain('feed-clear-answered:');
+    expect(updated).toContain('feed-clear-lifecycle:');
     expect(fs.readFileSync(path.join(userDir, 'hooks', '10-feed-publish.py'), 'utf-8')).toBe(FEED_PUBLISH_HOOK_SCRIPT);
   });
 });
