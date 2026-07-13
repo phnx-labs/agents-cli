@@ -12,8 +12,8 @@ All notable changes to the Factory extension are documented here. Format follows
 
 - **Factory tmux tabs close when their top-level pane exits (RUSH-1543).**
   Tmux-backed agent tabs now install a guarded pane-death hook: exiting a user
-  split still closes only that split, but when the original pane is the last pane
-  and dies, Factory detaches, kills the tmux session, and lets the VS Code
+  split still closes only that split, but when the last remaining pane dies,
+  Factory detaches, kills the tmux session, and lets the VS Code
   terminal close instead of lingering on a "Pane is dead" banner. Source:
   `src/vscode/tmux.ts`.
 - **Per-session rate-limit badge on feed cards (RUSH-1523).** Sessions whose transcript shows a rate/usage limit render a distinct **rate limited** pill so they no longer look like healthy running agents. Source: `floorModel.ts` (`rateLimited`), `floorAdapter.ts` (`detectSessionRateLimited`), `FeedItem.tsx`.

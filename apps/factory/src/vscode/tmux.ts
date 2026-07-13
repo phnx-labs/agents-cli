@@ -35,7 +35,6 @@ interface TmuxTerminal {
 }
 
 const tmuxTerminals = new Map<vscode.Terminal, TmuxTerminal>();
-const FACTORY_AGENT_PANE_OPTION = '@factory_agent_pane';
 
 let tmuxAvailable: Promise<boolean> | null = null;
 
@@ -84,8 +83,8 @@ function shq(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-function factoryPaneDiedHook(session: string): string {
-  return `if -F '#{&&:#{==:#{hook_pane},#{${FACTORY_AGENT_PANE_OPTION}}},#{==:#{window_panes},1}}' 'detach-client -s =${session}' 'kill-pane'`;
+export function __factoryPaneDiedHookForTests(session: string): string {
+  return `if -F '#{==:#{window_panes},1}' 'detach-client -s =${session}' 'kill-pane'`;
 }
 
 /** agents-cli session slug rule: [A-Za-z0-9_-]{1,64}. */
@@ -149,22 +148,23 @@ export function createTmuxTerminal(
   ].join(' \\; ');
   parts.push(`{ ${styling} || true; }`);
 
-  // Record the original pane and install the same guarded `pane-died` behavior
-  // Factory expects from agent tabs: exiting a user-created split closes only
-  // that split, while the original pane dying as the last pane detaches the tmux
-  // client so the VS Code terminal can close instead of parking on "Pane is dead".
+  // Install the guarded `pane-died` behavior Factory expects from tmux tabs:
+  // exiting a pane while another pane remains closes only that pane; the last
+  // pane dying detaches the tmux client so VS Code can close instead of parking
+  // on "Pane is dead".
   const lifecycle = [
-    `FACTORY_AGENT_PANE=$(tmux -S ${shq(socket)} list-panes -t ${shq(session)} -F '#{pane_id}' | head -n 1)`,
-    `tmux -S ${shq(socket)} set-option -t ${shq(session)} ${FACTORY_AGENT_PANE_OPTION} "$FACTORY_AGENT_PANE" \\; set-hook -t ${shq(session)} pane-died ${shq(factoryPaneDiedHook(session))}`,
+    `tmux -S ${shq(socket)} set-hook -t ${shq(session)} pane-died ${shq(__factoryPaneDiedHookForTests(session))}`,
   ].join(' && ');
   parts.push(`{ ${lifecycle} || true; }`);
 
-  const closeWhenOriginalPaneDead = [
+  const closeWhenNoLivePanes = [
     `agents tmux attach ${shq(session)}`,
     'FACTORY_ATTACH_STATUS=$?',
-    `if [ -n "$FACTORY_AGENT_PANE" ] && tmux -S ${shq(socket)} display-message -pt "$FACTORY_AGENT_PANE" -p '#{pane_dead}' 2>/dev/null | grep -q '^1$'; then agents tmux kill ${shq(session)} >/dev/null 2>&1 || true; exit "$FACTORY_ATTACH_STATUS"; fi`,
+    `if ! agents tmux has ${shq(session)} >/dev/null 2>&1; then exit "$FACTORY_ATTACH_STATUS"; fi`,
+    `FACTORY_LIVE_PANES=$(tmux -S ${shq(socket)} list-panes -t ${shq(session)} -F '#{pane_dead}' 2>/dev/null | grep -c '^0$' || true)`,
+    `if [ "$FACTORY_LIVE_PANES" = "0" ]; then agents tmux kill ${shq(session)} >/dev/null 2>&1 || true; exit "$FACTORY_ATTACH_STATUS"; fi`,
   ].join('; ');
-  parts.push(closeWhenOriginalPaneDead);
+  parts.push(closeWhenNoLivePanes);
 
   const tmuxInit = parts.join(' && ');
 
