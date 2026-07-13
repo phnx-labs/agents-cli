@@ -4,7 +4,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, secretsAgentServiceInstalled, retireLegacySecretsAgentService, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -258,6 +258,47 @@ describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket roun
       else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe.skipIf(process.platform !== 'darwin')('retireLegacySecretsAgentService (#416 step 2: retire the standalone service)', () => {
+  const SERVICE_PLIST = 'com.phnx-labs.agents-secrets-agent.plist';
+
+  function withRelocatedLaunchAgents<T>(fn: (dir: string) => T): T {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-launchagents-'));
+    const prev = process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR;
+    process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR = dir;
+    try {
+      return fn(dir);
+    } finally {
+      if (prev === undefined) delete process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR;
+      else process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR = prev;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('detects a legacy plist and removes it on retire', () => {
+    withRelocatedLaunchAgents((dir) => {
+      const plist = path.join(dir, SERVICE_PLIST);
+      fs.writeFileSync(plist, '<plist/>');
+      expect(secretsAgentServiceInstalled()).toBe(true);
+
+      retireLegacySecretsAgentService();
+
+      // The plist is gone, so the service reads as retired. (A relocated dir is
+      // not launchd-managed, so retire is a pure file removal here.)
+      expect(fs.existsSync(plist)).toBe(false);
+      expect(secretsAgentServiceInstalled()).toBe(false);
+    });
+  });
+
+  it('is an idempotent no-op when no legacy plist is present', () => {
+    withRelocatedLaunchAgents(() => {
+      expect(secretsAgentServiceInstalled()).toBe(false);
+      expect(() => retireLegacySecretsAgentService()).not.toThrow();
+      expect(() => retireLegacySecretsAgentService()).not.toThrow();
+      expect(secretsAgentServiceInstalled()).toBe(false);
+    });
   });
 });
 

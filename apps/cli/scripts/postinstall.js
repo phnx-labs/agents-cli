@@ -386,8 +386,26 @@ function retargetManagedLinksToNativeBin() {
 async function healLongRunningProcesses() {
   if (process.platform !== 'darwin') return;
   if (process.env.CI || process.env.AGENTS_NO_HEAL === '1') return;
+
+  // Retire the legacy standalone secrets-agent service FIRST (#416 step 2) so
+  // that when the daemon (re)starts below its coexistence guard sees no
+  // standalone broker and hosts the broker socket itself. No-op if no legacy
+  // plist is present; never blocks.
+  let retiredLegacyBroker = false;
+  try {
+    const a = await import('../dist/lib/secrets/agent.js');
+    if (a.secretsAgentServiceInstalled?.()) {
+      a.retireLegacySecretsAgentService?.();
+      retiredLegacyBroker = true;
+      console.log('  Retired the standalone secrets-agent service — the daemon now hosts the broker.');
+    }
+  } catch { /* best effort */ }
+
   // Routines daemon: restart so it reloads new code (e.g. picks up keychain
-  // read-memoization / broker fast-path that a stale daemon wouldn't have).
+  // read-memoization / broker fast-path that a stale daemon wouldn't have) and
+  // (re)hosts the broker socket now the legacy service is gone. If it wasn't
+  // running but we just retired a broker the user relied on, start it so the
+  // socket has a host.
   try {
     const d = await import('../dist/lib/daemon.js');
     if (d.isDaemonRunning?.()) {
@@ -397,15 +415,9 @@ async function healLongRunningProcesses() {
       // never records scripts/postinstall.js as the daemon command.
       d.startDaemon?.(AGENTS_BIN);
       console.log('  Restarted the routines daemon onto this version.');
-    }
-  } catch { /* best effort */ }
-  // Persistent secrets-agent broker: kickstart so launchd relaunches it on the
-  // new code. No-op if the service isn't installed; never blocks.
-  try {
-    const a = await import('../dist/lib/secrets/agent.js');
-    if (a.secretsAgentServiceInstalled?.()) {
-      a.kickstartSecretsAgentService?.();
-      console.log('  Reloaded the secrets-agent service onto this version.');
+    } else if (retiredLegacyBroker) {
+      d.startDaemon?.(AGENTS_BIN);
+      console.log('  Started the daemon to host the secrets broker.');
     }
   } catch { /* best effort */ }
 }
