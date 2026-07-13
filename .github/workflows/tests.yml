@@ -23,7 +23,7 @@ jobs:
   # dist/, so the build never needed to precede the suite -- pulling it onto its
   # own lane takes it off the test critical path while still gating types.
   typecheck:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 15
     defaults:
       run:
@@ -43,7 +43,7 @@ jobs:
   # files on its own runner; fail-fast is off so one failing shard doesn't cancel
   # the others (you see every failure in one run).
   test-shard:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -71,7 +71,7 @@ jobs:
   test:
     needs: [typecheck, test-shard]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 5
     steps:
       - name: Gate on typecheck + all test shards
