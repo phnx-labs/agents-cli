@@ -182,8 +182,6 @@ is that remote commands are faster and dead connections self-terminate.
 Follow-ups (non-blocking):
 
 - Remove the now-unused `sshReachable` export.
-- Pass `multiplex: false` on the interactive `secrets --reveal -tt` path so a
-  Touch-ID reveal doesn't leave a 60 s master.
 - Route the remaining specialized direct-`ssh` sites (browser CDP, cloud
   `ProxyCommand`, drive-sync) through the shared baseline.
 - Evaluate the persistent `tail -f` streaming follow.
