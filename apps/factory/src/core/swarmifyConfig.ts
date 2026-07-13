@@ -1,10 +1,13 @@
 // Pure functions for .agents config parsing/validation (no VS Code dependencies)
 
 import * as YAML from 'yaml';
+import { CLI_AGENT_IDS, CliAgentId, isCliAgentId } from './agents.cli';
 
 export const AGENTS_CONFIG_FILENAME = '.agents';
 
-export type AgentId = 'claude' | 'codex' | 'gemini' | 'cursor' | 'opencode';
+/** Valid `.agents` config agent ids — the CLI's own AgentId union (issue #741),
+ *  not a hardcoded subset that silently rejected newer agents (grok, droid, …). */
+export type AgentId = CliAgentId;
 
 // Context mapping: source file and its aliases
 export interface ContextMapping {
@@ -29,8 +32,6 @@ export interface AgentsConfigOverrides {
   tasks?: Partial<TasksConfig>;
 }
 
-const VALID_AGENT_IDS: AgentId[] = ['claude', 'codex', 'gemini', 'cursor', 'opencode'];
-
 export function getDefaultConfig(): AgentsConfig {
   return {
     context: [
@@ -48,8 +49,11 @@ export function getDefaultConfig(): AgentsConfig {
 }
 
 export function isValidAgentId(value: string): value is AgentId {
-  return VALID_AGENT_IDS.includes(value as AgentId);
+  return isCliAgentId(value);
 }
+
+/** Re-exported so config consumers can enumerate the valid set. */
+export const VALID_AGENT_IDS: readonly AgentId[] = CLI_AGENT_IDS;
 
 export type ContextMergeStrategy = 'replace' | 'union';
 

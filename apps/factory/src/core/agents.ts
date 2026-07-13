@@ -11,6 +11,7 @@ import {
   ANTIGRAVITY_TITLE,
   GROK_TITLE
 } from './utils';
+import { CLI_AGENT_META, CliAgentId } from './agents.cli';
 
 // Built-in agent definition (static data)
 export interface BuiltInAgentDef {
@@ -22,16 +23,42 @@ export interface BuiltInAgentDef {
   commandId: string;
 }
 
-export const BUILT_IN_AGENTS: BuiltInAgentDef[] = [
-  { key: 'claude', title: CLAUDE_TITLE, command: 'claude', icon: 'claude.png', prefix: 'cl', commandId: 'agents.newClaude' },
-  { key: 'codex', title: CODEX_TITLE, command: 'codex', icon: 'chatgpt.png', prefix: 'cx', commandId: 'agents.newCodex' },
-  { key: 'gemini', title: GEMINI_TITLE, command: 'gemini', icon: 'gemini.png', prefix: 'gm', commandId: 'agents.newGemini' },
-  { key: 'opencode', title: OPENCODE_TITLE, command: 'opencode', icon: 'opencode.png', prefix: 'oc', commandId: 'agents.newOpenCode' },
-  { key: 'cursor', title: CURSOR_TITLE, command: 'cursor-agent', icon: 'cursor.png', prefix: 'cr', commandId: 'agents.newCursor' },
-  { key: 'shell', title: SHELL_TITLE, command: '', icon: 'agents.png', prefix: 'sh', commandId: 'agents.newShell' },
-  { key: 'antigravity', title: ANTIGRAVITY_TITLE, command: 'antigravity', icon: 'antigravity.png', prefix: 'ag', commandId: 'agents.newAntigravity' },
-  { key: 'grok', title: GROK_TITLE, command: 'grok', icon: 'grok.png', prefix: 'gk', commandId: 'agents.newGrok' }
+/**
+ * The VS Code presentation overlay for each agent the extension offers a
+ * spawn command for: tab title, icon asset, terminal prefix, and the
+ * registered command id. What an agent IS — its id and launch binary — comes
+ * from the CLI registry snapshot (agents.cli.ts, issue #741); 'shell' is the
+ * one extension-only entry (a plain terminal, not a CLI agent).
+ */
+interface AgentPresentation {
+  key: CliAgentId | 'shell';
+  title: string;
+  icon: string;
+  prefix: string;
+  commandId: string;
+}
+
+const PRESENTED_AGENTS: AgentPresentation[] = [
+  { key: 'claude', title: CLAUDE_TITLE, icon: 'claude.png', prefix: 'cl', commandId: 'agents.newClaude' },
+  { key: 'codex', title: CODEX_TITLE, icon: 'chatgpt.png', prefix: 'cx', commandId: 'agents.newCodex' },
+  { key: 'gemini', title: GEMINI_TITLE, icon: 'gemini.png', prefix: 'gm', commandId: 'agents.newGemini' },
+  { key: 'opencode', title: OPENCODE_TITLE, icon: 'opencode.png', prefix: 'oc', commandId: 'agents.newOpenCode' },
+  { key: 'cursor', title: CURSOR_TITLE, icon: 'cursor.png', prefix: 'cr', commandId: 'agents.newCursor' },
+  { key: 'shell', title: SHELL_TITLE, icon: 'agents.png', prefix: 'sh', commandId: 'agents.newShell' },
+  { key: 'antigravity', title: ANTIGRAVITY_TITLE, icon: 'antigravity.png', prefix: 'ag', commandId: 'agents.newAntigravity' },
+  { key: 'grok', title: GROK_TITLE, icon: 'grok.png', prefix: 'gk', commandId: 'agents.newGrok' }
 ];
+
+export const BUILT_IN_AGENTS: BuiltInAgentDef[] = PRESENTED_AGENTS.map((p) => ({
+  key: p.key,
+  title: p.title,
+  // The launch binary is the CLI registry's cliCommand — e.g. antigravity's is
+  // `agy`, which the old hardcoded 'antigravity' entry got wrong.
+  command: p.key === 'shell' ? '' : CLI_AGENT_META[p.key].cliCommand,
+  icon: p.icon,
+  prefix: p.prefix,
+  commandId: p.commandId,
+}));
 
 // Lookup built-in agent by key (e.g., "claude", "codex")
 export function getBuiltInByKey(key: string): BuiltInAgentDef | undefined {
