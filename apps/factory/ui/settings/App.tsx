@@ -45,6 +45,7 @@ import { ForemanOrb, ForemanCursor } from './components/foreman'
 const vscode = getVsCodeApi()
 const icons = getIcons() as IconConfig
 const BUILT_IN_AGENTS = createBuiltInAgents(icons)
+const UNIFIED_TASKS_REFRESH_MS = 30_000
 
 function getAgentWithHighestRunningCount(runningCounts: RunningCounts): string | null {
   const candidates: Array<[string, number]> = [
@@ -115,6 +116,7 @@ export default function App() {
   const [unifiedTasks, setUnifiedTasks] = useState<UnifiedTask[]>([])
   const [unifiedTasksLoading, setUnifiedTasksLoading] = useState(false)
   const [unifiedTasksLoaded, setUnifiedTasksLoaded] = useState(false)
+  const unifiedTasksRefreshAtRef = useRef(0)
   const [cycleInfo, setCycleInfo] = useState<CycleInfo | null>(null)
   const [availableSources, setAvailableSources] = useState<{ linear: boolean; github: boolean }>({
     linear: false, github: false
@@ -393,6 +395,17 @@ export default function App() {
     }
   }, [activeTab, tasksLoaded, tasksLoading, unifiedTasksLoaded, unifiedTasksLoading, contextLoaded, contextLoading])
 
+  useEffect(() => {
+    if ((activeTab !== 'floor' && activeTab !== 'bench') || !unifiedTasksLoaded) return
+    const interval = setInterval(() => {
+      if (unifiedTasksLoading) return
+      const now = Date.now()
+      if (now - unifiedTasksRefreshAtRef.current < UNIFIED_TASKS_REFRESH_MS) return
+      fetchUnifiedTasks()
+    }, UNIFIED_TASKS_REFRESH_MS)
+    return () => clearInterval(interval)
+  }, [activeTab, unifiedTasksLoaded, unifiedTasksLoading])
+
   // Refetch agent inventories when Panel tab is active and any are missing.
   // The init fetch can fail when agents-cli isn't on PATH yet; this self-heals
   // once the user installs the CLI and revisits the Panel tab.
@@ -511,6 +524,7 @@ export default function App() {
 
   const fetchUnifiedTasks = () => {
     setUnifiedTasksLoading(true)
+    unifiedTasksRefreshAtRef.current = Date.now()
     vscode.postMessage({ type: 'fetchUnifiedTasks' })
   }
 
