@@ -1645,6 +1645,18 @@ export class AgentManager {
 
     const who = agent.name ?? agent.agentId.slice(0, 8);
 
+    // The message rides as `agents run`'s prompt positional. A leading '-' makes
+    // commander parse it as an (unknown) flag, exiting the child non-zero — the
+    // teammate would silently land FAILED. `--` can't rescue it: `agents run`
+    // treats post-`--` tokens as native passthrough and unsets the prompt. Fail
+    // loud and early instead. (Steer/mailbox delivery has no such limit.)
+    if (message.startsWith('-')) {
+      throw new Error(
+        `Resume message can't start with '-' — \`agents run\` would parse it as a flag. ` +
+        `Rephrase so it leads with a word (e.g. "Please ${message}").`,
+      );
+    }
+
     // Cloud-backed teammates run on remote provider infrastructure with no local
     // or host process to re-launch; continuing them goes through the provider.
     if (agent.cloudProvider) {
@@ -1710,10 +1722,17 @@ export class AgentManager {
 
     try {
       const stdoutPath = await agent.getStdoutPath();
-      // Resume APPENDS so the prior turn's stream survives in the log (teammate
-      // status re-reads the whole file each poll, so the fresh terminal event
-      // still wins); a fresh launch truncates.
-      const stdoutFile = await fs.open(stdoutPath, resume ? 'a' : 'w');
+      // Always TRUNCATE — including on resume. The status reader re-reads the
+      // whole log from byte 0 every poll (lastReadPos is in-memory, not
+      // persisted) and marks terminal status from the last `result` event it
+      // sees, with no liveness guard. If the resumed turn's stream were appended
+      // after the prior turn's `result:success`, that stale event would win for
+      // the entire duration of the new (still-running) turn — reporting the
+      // teammate COMPLETED while it works, and steering a second follow-up into
+      // a forked session. Truncating keeps exactly one turn in the log, so the
+      // re-read is always correct. The authoritative transcript lives in the
+      // agent's own session (resumed via --resume), not this stdout mirror.
+      const stdoutFile = await fs.open(stdoutPath, 'w');
       const stdoutFd = stdoutFile.fd;
 
       // Wrap the teammate command in a shell that records the underlying CLI's
@@ -1833,6 +1852,13 @@ export class AgentManager {
       agent.remoteLog = task.remoteLog ?? null;
       agent.remoteExit = task.remoteExit ?? null;
       agent.remoteLogOffset = 0;
+      // On resume the offset resets to 0 against a FRESH remote log, and
+      // syncRemoteMirror appends the delta onto the local mirror. Truncate that
+      // mirror first so the prior turn's terminal event can't linger and get
+      // re-read as the current status (same hazard the local path truncates for).
+      if (resume) {
+        await fs.writeFile(await agent.getStdoutPath(), '').catch(() => {});
+      }
       agent.status = AgentStatus.RUNNING;
       agent.startedAt = new Date();
       await agent.saveMeta();
