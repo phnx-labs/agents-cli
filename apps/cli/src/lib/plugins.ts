@@ -575,6 +575,15 @@ export function syncPluginToVersion(
     return result;
   }
 
+  // Goose loads Open Plugins from $HOME/.agents/plugins/<name>/ (same layout as
+  // agents-cli's source tree). Under the shim HOME is the version home.
+  if (agent === 'goose') {
+    const ok = installGoosePlugin(plugin, versionHome);
+    result.success = ok;
+    if (ok) result.skills.push(plugin.name);
+    return result;
+  }
+
   const userConfig = loadUserConfig(plugin.name);
 
   // Route every marketplace op through the plugin's own marketplace, so a plugin
@@ -980,6 +989,50 @@ export function removeOpenCodePlugin(pluginName: string, versionHome: string): b
   return removed;
 }
 
+
+// ─── Goose plugins (Open Plugins under .agents/plugins/) ─────────────────────
+
+/**
+ * Goose auto-discovers Open Plugins at `$HOME/.agents/plugins/<name>/`.
+ * Under agents-cli version isolation HOME is the version home, so we install to:
+ *   {versionHome}/.agents/plugins/<name>/
+ *
+ * Full plugin directory copy (not marketplace) — same layout goose and
+ * agents-cli share for source plugins.
+ */
+export function goosePluginsDir(versionHome: string): string {
+  return path.join(versionHome, '.agents', 'plugins');
+}
+
+export function installGoosePlugin(plugin: DiscoveredPlugin, versionHome: string): boolean {
+  const destRoot = path.join(goosePluginsDir(versionHome), plugin.name);
+  try {
+    if (fs.existsSync(destRoot)) {
+      fs.rmSync(destRoot, { recursive: true, force: true });
+    }
+    fs.cpSync(plugin.root, destRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(destRoot, '.agents-cli-managed'),
+      `plugin=${plugin.name}\n`,
+      'utf-8'
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isGoosePluginInstalled(pluginName: string, versionHome: string): boolean {
+  return fs.existsSync(path.join(goosePluginsDir(versionHome), pluginName));
+}
+
+export function removeGoosePlugin(pluginName: string, versionHome: string): boolean {
+  const destRoot = path.join(goosePluginsDir(versionHome), pluginName);
+  if (!fs.existsSync(destRoot)) return false;
+  fs.rmSync(destRoot, { recursive: true, force: true });
+  return true;
+}
+
 // ─── Sync status ──────────────────────────────────────────────────────────────
 
 /**
@@ -995,6 +1048,9 @@ export function isPluginSynced(
   if (!isCapable(agent, 'plugins')) return false;
   if (agent === 'opencode') {
     return isOpenCodePluginInstalled(plugin.name, versionHome);
+  }
+  if (agent === 'goose') {
+    return isGoosePluginInstalled(plugin.name, versionHome);
   }
   const spec = marketplaceSpecForName(plugin.marketplace);
   if (!isInstalledInMarketplace(plugin.name, spec, agent, versionHome)) return false;
@@ -1041,6 +1097,14 @@ export function removePluginFromVersion(
   // OpenCode: remove TS/JS modules from ~/.config/opencode/plugins/.
   if (agent === 'opencode') {
     if (removeOpenCodePlugin(pluginName, versionHome)) {
+      result.skills.push(pluginName);
+    }
+    return result;
+  }
+
+  // Goose: remove Open Plugin directory from versionHome/.agents/plugins/.
+  if (agent === 'goose') {
+    if (removeGoosePlugin(pluginName, versionHome)) {
       result.skills.push(pluginName);
     }
     return result;

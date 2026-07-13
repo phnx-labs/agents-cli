@@ -1488,3 +1488,74 @@ describe('syncPluginToVersion (cursor native marketplace install)', () => {
     expect(isPluginSynced(plugin, 'cursor', versionHome)).toBe(true);
   });
 });
+
+// ─── syncPluginToVersion: Goose (Open Plugins under .agents/plugins/) ────────
+
+describe('syncPluginToVersion (goose Open Plugins install)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function setupGoosePlugin(name = 'myplugin'): {
+    pluginRoot: string;
+    versionHome: string;
+    plugin: DiscoveredPlugin;
+  } {
+    const pluginRoot = path.join(tmpDir, name);
+    fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: 'test', author: { name: 'tester' } })
+    );
+    fs.mkdirSync(path.join(pluginRoot, 'hooks'), { recursive: true });
+    fs.writeFileSync(
+      path.join(pluginRoot, 'hooks', 'hooks.json'),
+      JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } })
+    );
+    const versionHome = path.join(tmpDir, `${name}-home`);
+    fs.mkdirSync(versionHome, { recursive: true });
+    const plugin: DiscoveredPlugin = {
+      name,
+      root: pluginRoot,
+      manifest: { name, version: '1.0.0', description: 'test' },
+      skills: [],
+      hooks: ['SessionStart'],
+      scripts: [],
+      commands: [],
+      agentDefs: [],
+      bin: [],
+      mcpServers: [],
+      lspServers: [],
+      monitors: [],
+      hasMcp: false,
+      hasSettings: false,
+    };
+    return { pluginRoot, versionHome, plugin };
+  }
+
+  it('copies the full plugin into versionHome/.agents/plugins/<name>/', async () => {
+    const { versionHome, plugin } = setupGoosePlugin();
+    const { syncPluginToVersion, isPluginSynced, goosePluginsDir } = await import('./plugins.js');
+    const r = syncPluginToVersion(plugin, 'goose', versionHome);
+    expect(r.success).toBe(true);
+    const dest = path.join(goosePluginsDir(versionHome), 'myplugin');
+    expect(fs.existsSync(path.join(dest, '.claude-plugin', 'plugin.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dest, 'hooks', 'hooks.json'))).toBe(true);
+    expect(fs.existsSync(path.join(dest, '.agents-cli-managed'))).toBe(true);
+    expect(isPluginSynced(plugin, 'goose', versionHome)).toBe(true);
+  });
+
+  it('removePluginFromVersion deletes the installed plugin dir', async () => {
+    const { pluginRoot, versionHome, plugin } = setupGoosePlugin();
+    const { syncPluginToVersion, removePluginFromVersion, isPluginSynced } = await import('./plugins.js');
+    syncPluginToVersion(plugin, 'goose', versionHome);
+    removePluginFromVersion(plugin.name, pluginRoot, 'goose', versionHome);
+    expect(isPluginSynced(plugin, 'goose', versionHome)).toBe(false);
+  });
+});

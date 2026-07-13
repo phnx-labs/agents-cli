@@ -90,7 +90,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | Copilot | `copilot` | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
 | Kiro | `kiro` | ≥0.10 | ✓ | — | ✓ | ✓ | — | — | — |
-| Goose | `goose` | ≥1.34 | ✓ | — | — | — | — | — | — |
+| Goose | `goose` | ≥1.34 | ✓ | — | — | — | ✓ | — | — |
 | Droid | `droid` | ✓ | ✓ | — | — | ✓ | ✓ | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
