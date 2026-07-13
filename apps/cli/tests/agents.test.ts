@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
+import { convertToOpenCodeFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
 import {
   transformSubagentForDroid,
@@ -268,6 +269,43 @@ describe('grok subagents (Claude-compatible agent defs)', () => {
       expect(fs.readFileSync(dest, 'utf-8')).toContain('Explore.');
       const listed = listSubagentsForAgent('grok', home);
       expect(listed.map(s => s.name)).toEqual(['explorer']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('opencode allowlist (permission in opencode.jsonc)', () => {
+  it('is capable of allowlist since 1.1.1', () => {
+    expect(capableAgents('allowlist')).toContain('opencode');
+    expect(supports('opencode', 'allowlist', '1.1.0').ok).toBe(false);
+    expect(supports('opencode', 'allowlist', '1.1.1').ok).toBe(true);
+  });
+
+  it('convertToOpenCodeFormat maps Bash patterns into permission.bash', () => {
+    const out = convertToOpenCodeFormat({ name: 't', allow: ['Bash(git *)', 'Bash(*)'], deny: ['Bash(rm *)'] });
+    expect(out.permission.bash['git *']).toBe('allow');
+    expect(out.permission.bash['*']).toBe('allow');
+    expect(out.permission.bash['rm *']).toBe('deny');
+  });
+
+  it('applyPermissionsToVersion writes permission.bash into opencode.jsonc', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-perm-'));
+    try {
+      const home = path.join(root, 'home');
+      const r = applyPermissionsToVersion(
+        'opencode',
+        { name: 't', allow: ['Bash(git *)'], deny: ['Bash(rm *)'] },
+        home,
+        false,
+      );
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.opencode', 'opencode.jsonc');
+      expect(fs.existsSync(dest)).toBe(true);
+      const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      expect(cfg.permission.bash['git *']).toBe('allow');
+      expect(cfg.permission.bash['rm *']).toBe('deny');
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
