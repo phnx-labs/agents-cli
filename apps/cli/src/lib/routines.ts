@@ -13,6 +13,7 @@ import * as yaml from 'yaml';
 import { Cron } from 'croner';
 import { getRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
 import { safeJoin } from './paths.js';
+import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
 import type { LoopConfig } from './loop.js';
@@ -269,7 +270,7 @@ export function writeJob(config: JobConfig): void {
   const devArr = output.devices as string[] | undefined;
   if (!devArr || devArr.length === 0) delete output.devices;
 
-  fs.writeFileSync(filePath, yaml.stringify(output), 'utf-8');
+  atomicWriteFileSync(filePath, yaml.stringify(output));
 }
 
 /** Delete a job config file by name. Returns true if the file existed. */

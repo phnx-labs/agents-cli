@@ -110,6 +110,39 @@ describe('default execution mode (RUSH-1595: plan -> auto)', () => {
   });
 });
 
+describe('writeJob atomic persistence', () => {
+  it('round-trips a job through an atomic write and leaves no temp files', () => {
+    ensureAgentsDir();
+    const name = '__test-atomic-write-routine__';
+    const routinesDir = getRoutinesDir();
+    const file = path.join(routinesDir, `${name}.yml`);
+    const config: JobConfig = {
+      name,
+      schedule: '0 3 * * *',
+      agent: 'claude',
+      prompt: 'round-trip check',
+      mode: 'plan',
+      effort: 'auto',
+      timeout: '10m',
+      enabled: true,
+    } as JobConfig;
+    try {
+      writeJob(config);
+      const read = readJob(name);
+      expect(read).not.toBeNull();
+      expect(read!.name).toBe(name);
+      expect(read!.agent).toBe('claude');
+      expect(read!.schedule).toBe('0 3 * * *');
+      expect(read!.prompt).toBe('round-trip check');
+
+      const leftovers = fs.readdirSync(routinesDir).filter((f) => f.startsWith(`${name}.yml.tmp-`));
+      expect(leftovers).toEqual([]);
+    } finally {
+      deleteJob(name);
+    }
+  });
+});
+
 describe('normalizeTriggerEvent', () => {
   it('maps canonical names and aliases', () => {
     expect(normalizeTriggerEvent('pull_request')).toBe('pull_request');

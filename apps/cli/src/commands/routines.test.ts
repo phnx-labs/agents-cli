@@ -6,7 +6,7 @@
  * imported writeJob/readJob. Modeled on `routines-webhook.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -65,6 +65,75 @@ function readRoutineYaml(home: string, name: string): Record<string, unknown> | 
   return yaml.parse(fs.readFileSync(p, 'utf-8'));
 }
 
+function daemonPidPath(home: string): string {
+  return path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+}
+
+function readDaemonPid(home: string): number | null {
+  const pidPath = daemonPidPath(home);
+  if (!fs.existsSync(pidPath)) return null;
+  const raw = fs.readFileSync(pidPath, 'utf-8').trim();
+  const pid = parseInt(raw, 10);
+  return isNaN(pid) ? null : pid;
+}
+
+/** Start the real `agents daemon _run` process against an isolated HOME. */
+function startIsolatedDaemon(home: string): { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> } {
+  const child = spawn('node', ['--import', 'tsx', 'src/index.ts', 'daemon', '_run'], {
+    cwd: REPO_ROOT,
+    env: {
+      ...process.env,
+      HOME: home,
+      USERPROFILE: home,
+      AGENTS_SKIP_MIGRATION: '1',
+    },
+    detached: true,
+    stdio: 'ignore',
+  });
+
+  const pidPromise = new Promise<number | null>((resolve) => {
+    const deadline = Date.now() + 15_000;
+    const interval = setInterval(() => {
+      const pid = readDaemonPid(home);
+      if (pid) {
+        clearInterval(interval);
+        resolve(pid);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        clearInterval(interval);
+        resolve(null);
+      }
+    }, 50);
+  });
+
+  return { child, pidPromise };
+}
+
+/** Terminate a daemon process started by startIsolatedDaemon and wait for it to exit. */
+async function stopIsolatedDaemon(child: ReturnType<typeof spawn>): Promise<void> {
+  if (!child.pid) return;
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch {
+    // already gone
+  }
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        // already gone
+      }
+      resolve();
+    }, 3_000);
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 const baseJob = {
   name: 'test-job',
   schedule: '0 3 * * *',
@@ -83,6 +152,23 @@ describe('routines devices --set persists', () => {
     const home = makeHome({ jobs: [baseJob], registry });
     try {
       const res = run(home, ['devices', 'test-job', '--set', 'yosemite-s0,mac-mini']);
+      expect(res.status).toBe(0);
+
+      const doc = readRoutineYaml(home, 'test-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.devices).toEqual(['yosemite-s0', 'mac-mini']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('routines devices --set normalizes mixed case and FQDN duplicates', () => {
+  it('persists one normalized entry per device', () => {
+    const job = { ...baseJob, devices: ['yosemite-s0'] };
+    const home = makeHome({ jobs: [job], registry });
+    try {
+      const res = run(home, ['devices', 'test-job', '--set', 'Yosemite-S0,yosemite-s0.tailnet.ts.net,MAC-MINI']);
       expect(res.status).toBe(0);
 
       const doc = readRoutineYaml(home, 'test-job');
@@ -210,6 +296,22 @@ describe('routines list table has Devices column with bounded ellipsis', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('renders unrestricted routines with Devices set to "all"', () => {
+    const home = makeHome({ jobs: [baseJob], registry });
+    try {
+      const res = run(home, ['list']);
+      expect(res.status).toBe(0);
+      const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, '');
+      const line = stripped.split('\n').find((l) => l.includes('test-job'));
+      expect(line).toBeDefined();
+      // Column layout: 2 spaces + Name(24) + Agent(10) + Repo(24) + Devices(22).
+      const deviceField = line!.slice(60, 82).trim();
+      expect(deviceField).toBe('all');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('routines devices no-flags nonTTY names --set/--clear', () => {
@@ -312,9 +414,14 @@ describe('routines add --devices empty/whitespace fails closed', () => {
     }
   });
 
-  it('successfully persists --devices with valid names', () => {
+  it('successfully persists --devices with valid names against a running daemon', async () => {
     const home = makeHome({ registry });
+    let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
     try {
+      daemon = startIsolatedDaemon(home);
+      const pid = await daemon.pidPromise;
+      expect(pid).not.toBeNull();
+
       const res = run(home, [
         'add', 'placed-job',
         '--schedule', '0 3 * * *',
@@ -327,6 +434,7 @@ describe('routines add --devices empty/whitespace fails closed', () => {
       expect(doc).not.toBeNull();
       expect(doc!.devices).toEqual(['yosemite-s0', 'mac-mini']);
     } finally {
+      if (daemon) await stopIsolatedDaemon(daemon.child);
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
@@ -395,6 +503,40 @@ describe('routines list --help documents --host and --device once each', () => {
       const deviceMatches = output.match(/^\s+--device /gm) ?? [];
       expect(hostMatches.length).toBe(1);
       expect(deviceMatches.length).toBe(1);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/** Parse direct subcommand names from `routines --help`. */
+function directSubcommandNames(home: string): string[] {
+  const res = run(home, ['--help']);
+  expect(res.status).toBe(0);
+  const output = res.stdout + res.stderr;
+  const commandsMatch = output.match(/Commands:\n([\s\S]*?)(?=\n(?:Options|Notes|Examples|Arguments):)/);
+  if (!commandsMatch) return [];
+  return commandsMatch[1]
+    .split('\n')
+    .map((line) => line.trim().match(/^([a-z][a-z0-9-]*)/)?.[1])
+    .filter((name): name is string => Boolean(name));
+}
+
+describe('routines subcommand --help documents --host and --device once each', () => {
+  it('derives every direct command from routines --help and checks local help', () => {
+    const home = makeHome();
+    try {
+      const names = directSubcommandNames(home);
+      expect(names.length).toBeGreaterThan(0);
+      for (const name of names) {
+        const res = run(home, [name, '--help']);
+        expect(res.status).toBe(0);
+        const output = res.stdout + res.stderr;
+        const hostMatches = output.match(/^\s+-H, --host /gm) ?? [];
+        const deviceMatches = output.match(/^\s+--device /gm) ?? [];
+        expect(hostMatches.length).toBe(1);
+        expect(deviceMatches.length).toBe(1);
+      }
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

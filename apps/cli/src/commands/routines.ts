@@ -93,16 +93,12 @@ function ensureSchedulerRunning(): void {
     console.log(chalk.gray('Scheduler reloaded'));
     return;
   }
-  try {
-    const result = startDaemon();
-    if (result.pid) {
-      console.log(chalk.green(`Scheduler started (PID: ${result.pid}). It will run in the background and fire routines on schedule.`));
-      console.log(chalk.gray(`Stop anytime with: agents routines stop`));
-    } else {
-      console.log(chalk.yellow('Could not start the scheduler. Start it manually with: agents routines start'));
-    }
-  } catch (err) {
-    console.log(chalk.yellow(`Could not start the scheduler: ${(err as Error).message}`));
+  const result = startDaemon();
+  if (result.pid) {
+    console.log(chalk.green(`Scheduler started (PID: ${result.pid}). It will run in the background and fire routines on schedule.`));
+    console.log(chalk.gray(`Stop anytime with: agents routines stop`));
+  } else {
+    console.log(chalk.yellow('Could not start the scheduler. Start it manually with: agents routines start'));
   }
 }
 
@@ -210,6 +206,15 @@ export function registerRoutinesCommands(program: Command): void {
       # List all routines and their next run times
       agents routines list
 
+      # List routines as seen from a specific host (local --host fallback)
+      agents routines list --host yosemite-s0
+
+      # Create a routine restricted to specific devices
+      agents routines add nightly --schedule "0 2 * * *" --agent claude --prompt "Summarize today's commits" --devices yosemite-s0,mac-mini
+
+      # Interactively manage which devices may run a routine
+      agents routines devices nightly
+
       # Run a routine right now in the foreground (ignores schedule)
       agents routines run daily-standup
 
@@ -240,12 +245,11 @@ export function registerRoutinesCommands(program: Command): void {
     `,
   });
 
-  addHostOption(
-    routinesCmd
-      .command('list')
-      .description('See all scheduled jobs, when they run next, and their last execution status')
-      .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)'),
-  ).action((options: { json?: boolean }) => {
+  routinesCmd
+    .command('list')
+    .description('See all scheduled jobs, when they run next, and their last execution status')
+    .option('--json', 'Emit machine-readable JSON instead of the table (used by the menu bar helper)')
+    .action((options: { json?: boolean }) => {
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const jobs = listAllJobs(process.cwd());
       if (jobs.length === 0) {
@@ -348,10 +352,13 @@ export function registerRoutinesCommands(program: Command): void {
         const enabledWord = job.enabled ? 'yes' : 'no';
         const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
 
-        const deviceFull = job.devices && job.devices.length > 0 ? job.devices.join(',') : '-';
-        const deviceWord = deviceFull.length > DEVICE_W ? deviceFull.slice(0, DEVICE_W - 1) + '…' : deviceFull;
+        const deviceWord = !job.devices || job.devices.length === 0
+          ? 'all'
+          : job.devices.join(',').length > DEVICE_W
+            ? job.devices.join(',').slice(0, DEVICE_W - 1) + '…'
+            : job.devices.join(',');
         const deviceCell = !job.devices || job.devices.length === 0
-          ? chalk.gray('-')
+          ? chalk.gray('all')
           : jobRunsOnThisDevice(job)
             ? deviceWord
             : chalk.gray(deviceWord);
@@ -1172,4 +1179,10 @@ export function registerRoutinesCommands(program: Command): void {
         console.log(chalk.gray('No scheduler logs'));
       }
     });
+
+  // Every direct routines subcommand accepts the shared --host family so remote
+  // fall-through works and each subcommand's --help documents the flags.
+  for (const sub of routinesCmd.commands) {
+    addHostOption(sub);
+  }
 }

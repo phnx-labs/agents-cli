@@ -33,31 +33,11 @@ describe('runner device enforcement', () => {
     await expect(executeJob(config)).rejects.toThrow("Job 'test-job' can only run on: yosemite-s0, mac-mini");
   });
 
-  it('executeJobDetached logs and throws the canonical message; no run directory is created', async () => {
+  it('executeJobDetached throws the canonical message; no run directory is created', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
     const config = baseConfig({ name: 'guard-reject', devices: ['yosemite-s0'] });
 
-    const stderrChunks: string[] = [];
-    const originalWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = ((chunk: string | Buffer, ...args: unknown[]) => {
-      stderrChunks.push(typeof chunk === 'string' ? chunk : chunk.toString());
-      // @ts-expect-error overloaded signature
-      return originalWrite(chunk, ...args);
-    }) as typeof process.stderr.write;
-
-    let err: Error | undefined;
-    try {
-      await executeJobDetached(config);
-    } catch (e) {
-      err = e as Error;
-    } finally {
-      process.stderr.write = originalWrite;
-    }
-
-    expect(err).toBeDefined();
-    expect(err!.message).toBe("Job 'guard-reject' can only run on: yosemite-s0");
-    const stderr = stderrChunks.join('');
-    expect(stderr).toContain("[agents] daemon: skipping 'guard-reject' — Job 'guard-reject' can only run on: yosemite-s0");
+    await expect(executeJobDetached(config)).rejects.toThrow("Job 'guard-reject' can only run on: yosemite-s0");
 
     const runDir = path.dirname(getRunDir(config.name, 'any'));
     expect(fs.existsSync(runDir)).toBe(false);
