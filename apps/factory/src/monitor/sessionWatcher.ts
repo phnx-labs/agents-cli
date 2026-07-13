@@ -23,7 +23,7 @@ import {
   isSessionFilename,
   parseSessionHead,
   sessionIdFromFile,
-  watcherRoots,
+  watcherRootsFromCli,
 } from './sessionParse';
 
 const DEFAULT_DEBOUNCE_MS = 300;
@@ -32,7 +32,8 @@ export interface SessionWatcherOptions {
   emit: (fact: SessionFactPayload) => void;
   /** Warmth signal: a tracked session file was written (kill/restart clock). */
   emitWarmth: (fact: SessionWarmthPayload) => void;
-  /** Override the watched roots (tests). Defaults to watcherRoots(). */
+  /** Override the watched roots (tests). Defaults to the CLI's discovery table
+   *  (`agents sessions --roots --json`, resolved async in start()). */
   roots?: WatcherRoot[];
   debounceMs?: number;
 }
@@ -46,7 +47,7 @@ interface MountedWatcher {
 export class SessionWatcher {
   private readonly emit: (fact: SessionFactPayload) => void;
   private readonly emitWarmth: (fact: SessionWarmthPayload) => void;
-  private readonly roots: WatcherRoot[];
+  private readonly rootsOverride?: WatcherRoot[];
   private readonly debounceMs: number;
   private readonly mounted: MountedWatcher[] = [];
   private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
@@ -55,7 +56,7 @@ export class SessionWatcher {
   constructor(options: SessionWatcherOptions) {
     this.emit = options.emit;
     this.emitWarmth = options.emitWarmth;
-    this.roots = options.roots ?? watcherRoots();
+    this.rootsOverride = options.roots;
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   }
 
@@ -68,7 +69,22 @@ export class SessionWatcher {
   start(): void {
     if (this.started) return;
     this.started = true;
-    for (const { root, agentType } of this.roots) {
+    // Injected roots (tests) mount synchronously so callers can write files
+    // right after start(). Otherwise the roots come from the CLI's discovery
+    // table (`agents sessions --roots --json`, issue #741) — a subprocess, so
+    // the watches mount when it resolves.
+    if (this.rootsOverride) {
+      this.mount(this.rootsOverride);
+      return;
+    }
+    void watcherRootsFromCli().then((roots) => {
+      if (!this.started) return; // stopped while the roots were resolving
+      this.mount(roots);
+    });
+  }
+
+  private mount(roots: WatcherRoot[]): void {
+    for (const { root, agentType } of roots) {
       if (!ensureDirExists(root)) continue;
       let watcher: fs.FSWatcher;
       try {

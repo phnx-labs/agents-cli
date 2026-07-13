@@ -3,8 +3,18 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
+import { convertToOpenCodeFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
-import { transformSubagentForDroid, transformSubagentForCodex, installSubagentToAgent } from '../src/lib/subagents.js';
+import {
+  transformSubagentForDroid,
+  transformSubagentForCodex,
+  transformSubagentForKimi,
+  buildKimiSubagentsParentYaml,
+  installSubagentToAgent,
+  listSubagentsForAgent,
+  transformSubagentForOpenCode,
+  KIMI_SUBAGENTS_PARENT_FILE,
+} from '../src/lib/subagents.js';
 
 describe('capableAgents("commands")', () => {
   it('excludes openclaw since it uses Gateway-based slash commands', () => {
@@ -98,6 +108,76 @@ describe('droid (Factory AI)', () => {
   });
 });
 
+describe('Hermes and ForgeCode install targets', () => {
+  it('registers Hermes with skills, MCP, and MEMORY.md rules', () => {
+    expect(ALL_AGENT_IDS).toContain('hermes');
+    expect(capableAgents('mcp')).toContain('hermes');
+    expect(capableAgents('skills')).toContain('hermes');
+    expect(capableAgents('commands')).not.toContain('hermes');
+    expect(capableAgents('hooks')).not.toContain('hermes');
+    expect(AGENTS.hermes.instructionsFile).toBe('MEMORY.md');
+    expect(AGENTS.hermes.capabilities.rules).toEqual({ file: 'MEMORY.md' });
+  });
+
+  it('resolves Hermes MCP config to ~/.hermes/config.yaml and parses mcp_servers YAML', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hermes-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('hermes', home);
+      expect(configPath).toBe(path.join(home, '.hermes', 'config.yaml'));
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        [
+          'model: openrouter/anthropic/claude-sonnet-4',
+          'mcp_servers:',
+          '  ctx:',
+          '    command: ctx-server',
+          '    args:',
+          '      - --stdio',
+          '',
+        ].join('\n')
+      );
+
+      const parsed = parseMcpConfig('hermes', configPath);
+      expect(parsed.ctx.command).toBe('ctx-server');
+      expect(parsed.ctx.args).toEqual(['--stdio']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('registers ForgeCode with skills, MCP, and AGENTS.md rules', () => {
+    expect(ALL_AGENT_IDS).toContain('forge');
+    expect(capableAgents('mcp')).toContain('forge');
+    expect(capableAgents('skills')).toContain('forge');
+    expect(capableAgents('commands')).not.toContain('forge');
+    expect(capableAgents('hooks')).not.toContain('forge');
+    expect(AGENTS.forge.instructionsFile).toBe('AGENTS.md');
+    expect(AGENTS.forge.capabilities.rules).toEqual({ file: 'AGENTS.md' });
+  });
+
+  it('resolves ForgeCode MCP config to ~/.forge/.mcp.json and parses mcpServers JSON', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-forge-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('forge', home);
+      expect(configPath).toBe(path.join(home, '.forge', '.mcp.json'));
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({ mcpServers: { ctx: { command: 'ctx-server', args: ['--stdio'] } } })
+      );
+
+      const parsed = parseMcpConfig('forge', configPath);
+      expect(parsed.ctx.command).toBe('ctx-server');
+      expect(parsed.ctx.args).toEqual(['--stdio']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('codex subagents (TOML custom agents)', () => {
   it('is capable of subagents since 0.117.0', () => {
     expect(capableAgents('subagents')).toContain('codex');
@@ -138,6 +218,211 @@ describe('codex subagents (TOML custom agents)', () => {
       const dest = path.join(home, '.codex', 'agents', 'explorer.toml');
       expect(fs.existsSync(dest)).toBe(true);
       expect(fs.readFileSync(dest, 'utf-8')).toContain('name = "explorer"');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('kimi subagents (YAML agent files)', () => {
+  it('is capable of subagents', () => {
+    expect(capableAgents('subagents')).toContain('kimi');
+    expect(supports('kimi', 'subagents').ok).toBe(true);
+  });
+
+  it('transformSubagentForKimi emits system_prompt_path (not inline system_prompt)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-sub-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'AGENT.md'),
+        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: kimi-k2\n---\n\nYou review code.\n`
+      );
+      const out = transformSubagentForKimi(dir, 'reviewer');
+      expect(out.yaml).toContain('version: 1');
+      expect(out.yaml).toContain('name: reviewer');
+      expect(out.yaml).toContain('description: Reviews diffs');
+      expect(out.yaml).toContain('model: kimi-k2');
+      expect(out.yaml).toContain('extend: default');
+      expect(out.yaml).toContain('system_prompt_path: ./reviewer.system.md');
+      expect(out.yaml).not.toContain('system_prompt:');
+      expect(out.systemPromptFileName).toBe('reviewer.system.md');
+      expect(out.systemPrompt).toContain('You review code.');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('buildKimiSubagentsParentYaml lists subagents for --agent-file', () => {
+    expect(KIMI_SUBAGENTS_PARENT_FILE).toBe('_agents-cli.yaml');
+    const out = buildKimiSubagentsParentYaml([
+      { name: 'reviewer', description: 'Reviews diffs', relativePath: './reviewer.yaml' },
+      { name: 'explorer', description: 'Explores', relativePath: './explorer.yaml' },
+    ]);
+    expect(out).toContain('name: agents-cli');
+    expect(out).toContain('subagents:');
+    expect(out).toContain('reviewer:');
+    expect(out).toContain('path: ./reviewer.yaml');
+    expect(out).toContain('explorer:');
+  });
+
+  it('installSubagentToAgent writes yaml + sibling system prompt md', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'kimi', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.kimi-code', 'agents', 'explorer.yaml');
+      const prompt = path.join(home, '.kimi-code', 'agents', 'explorer.system.md');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.existsSync(prompt)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('system_prompt_path: ./explorer.system.md');
+      expect(fs.readFileSync(prompt, 'utf-8')).toContain('Explore.');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('listSubagentsForAgent finds installed kimi yaml (excludes managed parent)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-list-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      expect(installSubagentToAgent(subDir, 'explorer', 'kimi', home).success).toBe(true);
+      // managed parent must not show as an installed subagent
+      fs.writeFileSync(
+        path.join(home, '.kimi-code', 'agents', KIMI_SUBAGENTS_PARENT_FILE),
+        'version: 1\nagent:\n  name: agents-cli\n'
+      );
+      const listed = listSubagentsForAgent('kimi', home);
+      expect(listed.map(s => s.name)).toEqual(['explorer']);
+      expect(listed[0].files).toContain('explorer.yaml');
+      expect(listed[0].files).toContain('explorer.system.md');
+      expect(listed[0].frontmatter.description).toBe('Explores code');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('grok subagents (Claude-compatible agent defs)', () => {
+  it('is capable of subagents', () => {
+    expect(capableAgents('subagents')).toContain('grok');
+    expect(supports('grok', 'subagents').ok).toBe(true);
+  });
+
+  it('installSubagentToAgent writes ~/.grok/agents/<name>.md', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-grok-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'grok', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.grok', 'agents', 'explorer.md');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('name: explorer');
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('Explore.');
+      const listed = listSubagentsForAgent('grok', home);
+      expect(listed.map(s => s.name)).toEqual(['explorer']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('opencode allowlist (permission in opencode.jsonc)', () => {
+  it('is capable of allowlist since 1.1.1', () => {
+    expect(capableAgents('allowlist')).toContain('opencode');
+    expect(supports('opencode', 'allowlist', '1.1.0').ok).toBe(false);
+    expect(supports('opencode', 'allowlist', '1.1.1').ok).toBe(true);
+  });
+
+  it('convertToOpenCodeFormat maps Bash patterns into permission.bash', () => {
+    const out = convertToOpenCodeFormat({ name: 't', allow: ['Bash(git *)', 'Bash(*)'], deny: ['Bash(rm *)'] });
+    expect(out.permission.bash['git *']).toBe('allow');
+    expect(out.permission.bash['*']).toBe('allow');
+    expect(out.permission.bash['rm *']).toBe('deny');
+  });
+
+  it('applyPermissionsToVersion writes permission.bash into opencode.jsonc', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-perm-'));
+    try {
+      const home = path.join(root, 'home');
+      const r = applyPermissionsToVersion(
+        'opencode',
+        { name: 't', allow: ['Bash(git *)'], deny: ['Bash(rm *)'] },
+        home,
+        false,
+      );
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.opencode', 'opencode.jsonc');
+      expect(fs.existsSync(dest)).toBe(true);
+      const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      expect(cfg.permission.bash['git *']).toBe('allow');
+      expect(cfg.permission.bash['rm *']).toBe('deny');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('opencode subagents (markdown mode: subagent)', () => {
+  it('is capable of subagents', () => {
+    expect(capableAgents('subagents')).toContain('opencode');
+    expect(supports('opencode', 'subagents').ok).toBe(true);
+  });
+
+  it('transformSubagentForOpenCode emits mode subagent frontmatter', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-sub-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'AGENT.md'),
+        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: anthropic/claude-sonnet-4\n---\n\nYou review code.\n`
+      );
+      const out = transformSubagentForOpenCode(dir);
+      expect(out).toContain('mode: subagent');
+      expect(out).toContain('description: Reviews diffs');
+      expect(out).toContain('model: anthropic/claude-sonnet-4');
+      expect(out).toContain('You review code.');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('installSubagentToAgent writes ~/.config/opencode/agents/<name>.md', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'opencode', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.config', 'opencode', 'agents', 'explorer.md');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('mode: subagent');
+      expect(listSubagentsForAgent('opencode', home).map(s => s.name)).toEqual(['explorer']);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

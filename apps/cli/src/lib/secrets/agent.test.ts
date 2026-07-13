@@ -4,7 +4,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { describe, it, expect } from 'vitest';
 import type { SecretsBundle } from './bundles.js';
-import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
+import { handleAgentRequest, shouldSelfHealForUpgrade, shouldTeardownVersionSkewedBroker, realBundleCount, shouldWipeOnWatchEvent, agentEvictSync, startHostedBroker, runSecretsAgent, agentPing, META_CACHE_PREFIX, type StoredBundle, type Request } from './agent.js';
 
 /**
  * These tests target the broker's store semantics — the part with real bug
@@ -254,6 +254,158 @@ describe.skipIf(process.platform !== 'darwin')('agentEvictSync (real socket roun
     try {
       expect(() => agentEvictSync('prod')).not.toThrow();
     } finally {
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe.skipIf(process.platform !== 'darwin')('startHostedBroker (#416: broker hosted in the daemon)', () => {
+  it('binds the socket, answers agentPing over the wire, and close() tears it down', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosted-broker-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    const sock = path.join(dir, 'agent.sock');
+    let broker: { close(): void } | null = null;
+    try {
+      broker = await startHostedBroker();
+      // Real socket bound on the isolated temp dir — same wire protocol as the
+      // standalone broker, so agentPing (a real socket round-trip) succeeds.
+      expect(broker).not.toBeNull();
+      expect(fs.existsSync(sock)).toBe(true);
+      expect((await agentPing()).reachable).toBe(true);
+
+      // Daemon-safe teardown: no process.exit — close() just releases the socket.
+      broker!.close();
+      broker = null;
+      expect(fs.existsSync(sock)).toBe(false);
+      expect((await agentPing()).reachable).toBe(false);
+    } finally {
+      broker?.close();
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('never clobbers a live broker — a second startHostedBroker returns null', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosted-broker2-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    let first: { close(): void } | null = null;
+    try {
+      first = await startHostedBroker();
+      expect(first).not.toBeNull();
+      expect((await agentPing()).reachable).toBe(true);
+      // A second host attempt while the first is live must back off (EADDRINUSE
+      // + the socket answers agentPing) rather than unlink + steal the socket.
+      const second = await startHostedBroker();
+      expect(second).toBeNull();
+      // The first broker is still serving — not orphaned.
+      expect((await agentPing()).reachable).toBe(true);
+    } finally {
+      first?.close();
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a persistent loser quiescent, then takes over after the hosted broker stops', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosted-then-standalone-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    const sock = path.join(dir, 'agent.sock');
+    const pid = path.join(dir, 'agent.pid');
+    let hosted: { close(): void } | null = null;
+    let standalone: { close(): void } | null = null;
+    try {
+      hosted = await startHostedBroker();
+      expect(hosted).not.toBeNull();
+      expect((await agentPing()).reachable).toBe(true);
+
+      // Reproduces postinstall ownership order: the daemon has already bound
+      // the broker and launchd then starts the installed standalone service.
+      const starting = runSecretsAgent({ service: true });
+      const state = await Promise.race([
+        starting.then(() => 'returned'),
+        new Promise<'waiting'>((resolve) => setTimeout(() => resolve('waiting'), 600)),
+      ]);
+
+      // Returning would make launchd KeepAlive restart the loser forever. It
+      // must stay alive as the single pid-file owner without touching the live
+      // daemon socket.
+      expect(state).toBe('waiting');
+      expect(fs.existsSync(sock)).toBe(true);
+      expect(fs.readFileSync(pid, 'utf-8')).toBe(String(process.pid));
+      expect((await agentPing()).reachable).toBe(true);
+
+      // If the daemon owner stops, the quiescent service becomes the broker
+      // instead of leaving the socket unavailable until launchd retries it.
+      hosted.close();
+      hosted = null;
+      standalone = await new Promise<{ close(): void } | null>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('standalone takeover timed out')), 3000);
+        starting.then((handle) => {
+          clearTimeout(timer);
+          resolve(handle);
+        }, reject);
+      });
+      expect(standalone).not.toBeNull();
+      expect((await agentPing()).reachable).toBe(true);
+    } finally {
+      standalone?.close();
+      hosted?.close();
+      if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
+      else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('releases the standby pid file when launchd terminates the waiting process', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-standby-sigterm-'));
+    const prevDir = process.env.AGENTS_SECRETS_AGENT_DIR;
+    process.env.AGENTS_SECRETS_AGENT_DIR = dir;
+    const pid = path.join(dir, 'agent.pid');
+    let hosted: { close(): void } | null = null;
+    let child: ReturnType<typeof spawn> | null = null;
+    let stderr = '';
+    try {
+      hosted = await startHostedBroker();
+      expect(hosted).not.toBeNull();
+
+      const agentModule = new URL('./agent.ts', import.meta.url).href;
+      const childProgram = `import { runSecretsAgent } from ${JSON.stringify(agentModule)}; await runSecretsAgent({ service: true });`;
+      child = spawn(process.execPath, [
+        '--import', 'tsx',
+        '--input-type=module',
+        '--eval', childProgram,
+      ], {
+        cwd: process.cwd(),
+        env: { ...process.env, AGENTS_SECRETS_AGENT_DIR: dir },
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      child.stderr?.setEncoding('utf-8');
+      child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        if (fs.existsSync(pid) && fs.readFileSync(pid, 'utf-8') === String(child.pid)) break;
+        if (child.exitCode !== null) throw new Error(`standby exited before readiness: ${stderr}`);
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(fs.readFileSync(pid, 'utf-8')).toBe(String(child.pid));
+
+      child.kill('SIGTERM');
+      const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+        child!.once('close', (code, signal) => resolve({ code, signal }));
+      });
+      expect(exit, stderr).toEqual({ code: 0, signal: null });
+      expect(fs.existsSync(pid)).toBe(false);
+    } finally {
+      if (child?.exitCode === null) child.kill('SIGKILL');
+      hosted?.close();
       if (prevDir === undefined) delete process.env.AGENTS_SECRETS_AGENT_DIR;
       else process.env.AGENTS_SECRETS_AGENT_DIR = prevDir;
       fs.rmSync(dir, { recursive: true, force: true });

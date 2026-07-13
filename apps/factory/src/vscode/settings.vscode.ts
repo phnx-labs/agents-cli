@@ -4,6 +4,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
 import { homedir, hostname } from 'os';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
@@ -39,7 +40,7 @@ import { repoSlugFromPath } from '../core/projectIndex';
 import { matchLinearProject } from '../core/linearProjects';
 import { fetchLinearProjects } from './linear.vscode';
 import { resolveForemanTarget, candidateName } from '../core/foreman.target';
-import { parseEvents } from '../core/watchdogLog';
+import { parseEvents, WATCHDOG_LOG_PATH } from '../core/watchdogLog';
 import {
   WATCHDOG_PLAYBOOK_PATH,
   ensureWatchdogPlaybookScaffold,
@@ -381,11 +382,15 @@ async function dispatchToDevice(input: {
       ? `if (-not (Test-Path (Join-Path $P '.git'))) { New-Item -ItemType Directory -Force -Path (Split-Path $P) | Out-Null; git clone '${cloneUrl.replace(/'/g, "''")}' $P }; `
       : '';
     // Background Start-Process so the ssh hop returns promptly (parity with nohup).
+    // PowerShell rejects redirecting stdout and stderr to the same path — use
+    // distinct .out/.err files (RUSH-1622).
     remote =
       `$tmp = ${logDir}; New-Item -ItemType Directory -Force -Path $tmp | Out-Null; ` +
       `${pAssign}; ${ensureClone}Set-Location -LiteralPath $P; ` +
-      `$log = Join-Path $tmp ("dispatch-" + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + ".log"); ` +
-      `Start-Process -FilePath agents -ArgumentList @(${runArgs}) -WorkingDirectory $P -RedirectStandardOutput $log -RedirectStandardError $log -WindowStyle Hidden`;
+      `$stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); ` +
+      `$logOut = Join-Path $tmp ("dispatch-" + $stamp + ".out.log"); ` +
+      `$logErr = Join-Path $tmp ("dispatch-" + $stamp + ".err.log"); ` +
+      `Start-Process -FilePath agents -ArgumentList @(${runArgs}) -WorkingDirectory $P -RedirectStandardOutput $logOut -RedirectStandardError $logErr -WindowStyle Hidden`;
   } else {
     const syncShell = buildDeviceSyncShell(syncPolicy);
     const runCmd = `agents run ${shq(agentType)} --mode ${mode} ${shq(prompt)}`;
@@ -845,11 +850,100 @@ async function writeFactoryConfigSafe(patch: Record<string, unknown>): Promise<R
 
 function resolveEditorPath(pathValue: string): string | null {
   if (!pathValue) return null;
+  if (pathValue.startsWith('~/')) return path.join(homedir(), pathValue.slice(2));
   if (path.isAbsolute(pathValue)) return pathValue;
   const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!workspacePath) return null;
   return path.join(workspacePath, pathValue);
 }
+
+function webviewLocalResourceRoots(context: vscode.ExtensionContext): vscode.Uri[] {
+  return [
+    vscode.Uri.joinPath(context.extensionUri, 'out', 'ui'),
+    vscode.Uri.joinPath(context.extensionUri, 'assets'),
+    vscode.Uri.file(path.join(homedir(), '.agents', '.history', 'attachments')),
+    vscode.Uri.file(path.join(homedir(), '.agents', '.cache')),
+  ];
+}
+
+function withAttachmentThumbnailUris(rows: terminals.TerminalDetail[]): terminals.TerminalDetail[] {
+  if (!settingsPanel) return rows;
+  return rows.map((row) => {
+    if (!row.attachments?.length) return row;
+    return {
+      ...row,
+      attachments: row.attachments.map((attachment) => {
+        if (!attachment.mediaType.startsWith('image/')) return attachment;
+        const resolvedPath = resolveEditorPath(attachment.path);
+        if (!resolvedPath || !fs.existsSync(resolvedPath)) return attachment;
+        return {
+          ...attachment,
+          thumbnailUri: settingsPanel!.webview.asWebviewUri(vscode.Uri.file(resolvedPath)).toString(),
+        };
+      }),
+    };
+  });
+}
+
+async function getFloorTerminalDetailsForWebview(workspacePath?: string): Promise<terminals.TerminalDetail[]> {
+  return withAttachmentThumbnailUris(await terminals.getFloorTerminalDetails(workspacePath));
+}
+
+async function openPlanPreview(pathValue: string, kind: string | undefined, host: string | undefined): Promise<void> {
+  const target = pathValue.trim();
+  if (!target) return;
+  if (/^https?:\/\//i.test(target)) {
+    await vscode.env.openExternal(vscode.Uri.parse(target));
+    return;
+  }
+  const remoteHost = host && host !== 'this-mac' ? host : '';
+  let resolvedPath = resolveEditorPath(target);
+  if (remoteHost) {
+    const safeHost = remoteHost.replace(/[^a-zA-Z0-9._-]+/g, '-');
+    // Isolate by full source path (hash) so two worktrees with the same
+    // plan basename cannot overwrite each other (RUSH-1631).
+    const pathKey = createHash('sha1').update(target).digest('hex').slice(0, 12);
+    const destDir = path.join(
+      homedir(),
+      '.agents',
+      '.cache',
+      'factory-plan-previews',
+      safeHost,
+      pathKey,
+    );
+    await fs.promises.mkdir(destDir, { recursive: true });
+    resolvedPath = path.join(destDir, path.basename(target));
+    await execFileAsync('scp', [`${remoteHost}:${target}`, resolvedPath], { timeout: 20_000 });
+  }
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) return;
+  const uri = vscode.Uri.file(resolvedPath);
+  if (kind === 'markdown' || resolvedPath.toLowerCase().endsWith('.md')) {
+    await vscode.commands.executeCommand('markdown.showPreview', uri);
+    return;
+  }
+  await vscode.env.openExternal(uri);
+}
+
+async function openAttachmentPreview(pathValue: string, host: string | undefined): Promise<void> {
+  const target = pathValue.trim();
+  if (!target) return;
+  if (/^https?:\/\//i.test(target)) {
+    await vscode.env.openExternal(vscode.Uri.parse(target));
+    return;
+  }
+  const remoteHost = host && host !== 'this-mac' ? host : '';
+  let resolvedPath = resolveEditorPath(target);
+  if (remoteHost) {
+    const safeHost = remoteHost.replace(/[^a-zA-Z0-9._-]+/g, '-');
+    const destDir = path.join(homedir(), '.agents', '.cache', 'factory-attachment-previews', safeHost);
+    await fs.promises.mkdir(destDir, { recursive: true });
+    resolvedPath = path.join(destDir, path.basename(target));
+    await execFileAsync('scp', [`${remoteHost}:${target}`, resolvedPath], { timeout: 20_000 });
+  }
+  if (!resolvedPath || !fs.existsSync(resolvedPath)) return;
+  await vscode.env.openExternal(vscode.Uri.file(resolvedPath));
+}
+
 
 async function openFileOrDiffInEditor(pathValue: string): Promise<void> {
   const resolvedPath = resolveEditorPath(pathValue);
@@ -908,11 +1002,6 @@ let settingsPanel: vscode.WebviewPanel | undefined;
 const sessionWatchers = new Map<string, fs.FSWatcher>();
 let sessionUpdateTimeout: NodeJS.Timeout | undefined;
 let currentlySubscribedAgentType: string | null = null;
-
-// Cache for getFloorThroughput, keyed by session file path. Skip the read+
-// parse when the file's mtime+size are unchanged since the previous poll —
-// the webview polls every 2.5s and most polls hit unchanged files.
-const throughputCache = new Map<string, { mtimeMs: number; size: number; tokensPerSec: number }>();
 
 // Notify settings panel when integration status changes
 export function notifyIntegrationStatus(provider: string, connected: boolean): void {
@@ -1060,7 +1149,7 @@ let lastFloorTasks: swarm.TaskSummary[] = [];
 async function pushFloorUpdate(workspacePath?: string): Promise<void> {
   if (!settingsPanel || !floorSubscribed) return;
   const [floorTerminals, floorTasks] = await Promise.all([
-    terminals.getFloorTerminalDetails(workspacePath),
+    getFloorTerminalDetailsForWebview(workspacePath),
     swarm.fetchTasks(undefined, workspacePath),
   ]);
   if (!settingsPanel || !floorSubscribed) return;
@@ -1409,10 +1498,7 @@ export function openPanel(context: vscode.ExtensionContext): void {
     {
       enableScripts: true,
       retainContextWhenHidden: true, // Prevent full reload when panel loses focus
-      localResourceRoots: [
-        vscode.Uri.joinPath(context.extensionUri, 'out', 'ui'),
-        vscode.Uri.joinPath(context.extensionUri, 'assets')
-      ]
+      localResourceRoots: webviewLocalResourceRoots(context)
     }
   );
   wirePanel(panel, context);
@@ -1427,10 +1513,7 @@ export function registerPanelSerializer(context: vscode.ExtensionContext): void 
       async deserializeWebviewPanel(webviewPanel: vscode.WebviewPanel) {
         webviewPanel.webview.options = {
           enableScripts: true,
-          localResourceRoots: [
-            vscode.Uri.joinPath(context.extensionUri, 'out', 'ui'),
-            vscode.Uri.joinPath(context.extensionUri, 'assets')
-          ]
+          localResourceRoots: webviewLocalResourceRoots(context)
         };
         wirePanel(webviewPanel, context);
       }
@@ -2196,41 +2279,24 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'getFloorThroughput': {
-        const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const all = terminals.getAllTerminals();
-        const { computeOutputTokensPerSec } = await import('../core/session.activity');
+        // Throughput now rides the CLI payload (ActiveSession.tokPerSec, issue
+        // #741): sum the rows belonging to this window's live terminals instead
+        // of re-reading and re-parsing each transcript here. fetchLocalSessions
+        // is short-TTL cached, so the 2.5s webview poll shares subprocesses with
+        // the feed poll.
         let total = 0;
-        await Promise.all(all.map(async (t) => {
-          if (t.terminal.exitStatus !== undefined) return;
-          const agentType = (t.agentType || '').toLowerCase() as 'claude' | 'codex' | 'gemini';
-          if (!t.sessionId || (agentType !== 'claude' && agentType !== 'codex' && agentType !== 'gemini')) return;
-          try {
-            const sessionPath = await getSessionPathBySessionId(t.sessionId, agentType, workspacePath);
-            if (!sessionPath) return;
-            const stat = await fs.promises.stat(sessionPath);
-            const size = stat.size;
-            // Cache by (mtime, size). The webview polls every 2.5s; without
-            // this cache an idle Gemini session forced a full multi-MB JSON
-            // re-read every poll for an unchanged result.
-            const cached = throughputCache.get(sessionPath);
-            if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === size) {
-              total += cached.tokensPerSec;
-              return;
-            }
-            const fh = await fs.promises.open(sessionPath, 'r');
-            try {
-              const readStart = agentType === 'gemini' ? 0 : Math.max(0, size - 256 * 1024);
-              const buf = Buffer.alloc(size - readStart);
-              await fh.read(buf, 0, buf.length, readStart);
-              const content = buf.toString('utf-8');
-              const tps = computeOutputTokensPerSec(content, agentType, 60);
-              total += tps;
-              throughputCache.set(sessionPath, { mtimeMs: stat.mtimeMs, size, tokensPerSec: tps });
-            } finally {
-              await fh.close();
-            }
-          } catch { }
-        }));
+        try {
+          const { fetchLocalSessions } = await import('./remoteSessions.vscode');
+          const windowSessionIds = new Set(
+            terminals.getAllTerminals()
+              .filter((t) => t.terminal.exitStatus === undefined && t.sessionId)
+              .map((t) => t.sessionId as string),
+          );
+          const { sessions } = await fetchLocalSessions();
+          for (const s of sessions) {
+            if (windowSessionIds.has(s.sessionId)) total += s.tokPerSec;
+          }
+        } catch { /* CLI unavailable — report 0, same as an unreadable session file before */ }
         settingsPanel?.webview.postMessage({ type: 'floorThroughputData', tokensPerSec: Math.round(total) });
         break;
       }
@@ -2833,6 +2899,16 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           await openFileOrDiffInEditor(message.path);
         }
         break;
+      case 'openPlanPreview':
+        if (typeof message.path === 'string') {
+          await openPlanPreview(message.path, typeof message.kind === 'string' ? message.kind : undefined, typeof message.host === 'string' ? message.host : undefined);
+        }
+        break;
+      case 'openAttachmentPreview':
+        if (typeof message.path === 'string') {
+          await openAttachmentPreview(message.path, typeof message.host === 'string' ? message.host : undefined);
+        }
+        break;
       case 'revealFolder':
         if (message.path) {
           try {
@@ -2849,7 +2925,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         const allWs = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         settingsPanel?.webview.postMessage({
           type: 'allTerminalsData',
-          terminals: await terminals.getFloorTerminalDetails(allWs),
+          terminals: await getFloorTerminalDetailsForWebview(allWs),
         });
         break;
       }
@@ -2917,9 +2993,8 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'getWatchdogLog': {
-        const logPath = path.join(homedir(), '.agents', 'watchdog.log');
         try {
-          const text = fs.readFileSync(logPath, 'utf8');
+          const text = fs.readFileSync(WATCHDOG_LOG_PATH, 'utf8');
           settingsPanel?.webview.postMessage({ type: 'watchdogLogData', events: parseEvents(text) });
         } catch {
           settingsPanel?.webview.postMessage({ type: 'watchdogLogData', events: [] });
@@ -3257,7 +3332,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         if (settingsPanel) {
           settingsPanel?.webview.postMessage({
             type: 'allTerminalsData',
-            terminals: await terminals.getFloorTerminalDetails(wsPath),
+            terminals: await getFloorTerminalDetailsForWebview(wsPath),
           });
 
           const updatedTasks = await swarm.fetchTasks(undefined, wsPath);
