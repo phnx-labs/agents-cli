@@ -7,10 +7,12 @@
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { ensureFeedPublishHook, listBlocks, type OpenBlock } from '../lib/feed.js';
+import { ensureFeedPublishHook, listBlocks, recordNotified, type OpenBlock } from '../lib/feed.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { relTime } from '../lib/format.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
+import { loadPolicy, applyPolicyToBlock, isPhoneUrgent } from '../lib/feed-policy.js';
+import { notifyUrgentBlock } from '../lib/notify.js';
 
 export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
@@ -59,7 +61,10 @@ function renderBlock(b: OpenBlock, localHost: string): void {
   const host = b.host !== localHost ? chalk.yellow(` [${b.host}]`) : '';
   const runtime = chalk.gray(b.runtime);
   const age = chalk.gray(relTime(b.ts));
-  console.log(`${chalk.cyan(b.mailboxId)}${host}  ${runtime}  ${age}`);
+  const cls = b.blockClass ? chalk.gray(`(${b.blockClass})`) : '';
+  const consequence = b.consequence && b.consequence !== 'normal' ? chalk.red(`[${b.consequence}]`) : '';
+  const cost = b.costOfDelay ? chalk.gray(`cost:${b.costOfDelay}`) : '';
+  console.log(`${chalk.cyan(b.mailboxId)}${host}  ${runtime}  ${age}  ${cls} ${consequence} ${cost}`.trimEnd());
   for (const question of b.questions) {
     const header = question.header ? chalk.gray(`[${question.header}] `) : '';
     console.log(`  ${header}${question.text}`);
@@ -77,8 +82,15 @@ function renderBlock(b: OpenBlock, localHost: string): void {
   }
 
   if (b.answer) {
+    const verified = b.answer.verified ? chalk.green('✓') : chalk.yellow('?');
     const who = b.answer.answeredFrom + (b.answer.answeredBy ? ` (${b.answer.answeredBy})` : '');
-    console.log(`  ${chalk.green('answered')} by ${who}`);
+    console.log(`  ${chalk.green('answered')} by ${who} ${verified}`);
+  }
+  if (b.parkedAt) {
+    console.log(`  ${chalk.red('hard-parked')} ${relTime(b.parkedAt)}`);
+  }
+  if (b.defaultedAt) {
+    console.log(`  ${chalk.yellow('defaulted')} ${relTime(b.defaultedAt)}`);
   }
   if (b.receipts && b.receipts.length > 0) {
     const latest = b.receipts[b.receipts.length - 1];
@@ -87,8 +99,11 @@ function renderBlock(b: OpenBlock, localHost: string): void {
   if (b.continuedAt) {
     console.log(`  ${chalk.green('continued')} ${relTime(b.continuedAt)}`);
   }
+  if (b.notifiedAt) {
+    console.log(`  ${chalk.dim('notified')} ${relTime(b.notifiedAt)}`);
+  }
 
-  if (!b.answer) {
+  if (!b.answer && !b.parkedAt) {
     console.log(`  ${chalk.dim('reply:')} agents message ${b.mailboxId} "<answer>"`);
   }
   console.log();
@@ -102,7 +117,8 @@ export function registerFeedCommand(program: Command): void {
     .option('--local', 'Only this machine -- skip the cross-machine SSH fan-out')
     .option('-H, --host <target...>', 'Scope to remote machine(s) over SSH; repeatable')
     .option('--device <target...>', 'Alias for --host; repeatable')
-    .action(async (opts: { json?: boolean; local?: boolean; host?: string[]; device?: string[] }) => {
+    .option('--dispatch', 'Run default-on-no-answer policy and urgent notifications')
+    .action(async (opts: { json?: boolean; local?: boolean; host?: string[]; device?: string[]; dispatch?: boolean }) => {
       if (opts.device?.length) opts.host = [...(opts.host ?? []), ...opts.device];
       const self = machineId();
       const includeLocal = shouldIncludeLocalFeed(opts.host, self);
@@ -139,6 +155,26 @@ export function registerFeedCommand(program: Command): void {
             parse: parseRemoteFeed,
           });
           blocks = mergeFeedBlocks(localBlocks, remote.items);
+        }
+      }
+
+      if (opts.dispatch) {
+        const policy = loadPolicy();
+        const now = new Date();
+        for (const b of blocks) {
+          const result = applyPolicyToBlock(b, policy, now);
+          if (result.action !== 'none') {
+            console.log(`${chalk.yellow('policy')} ${b.blockId}: ${result.action}`);
+          }
+          if (isPhoneUrgent(b, policy)) {
+            const notifyResult = await notifyUrgentBlock(b, { dryRun: opts.json });
+            if (notifyResult.ok && !notifyResult.skipped) {
+              recordNotified(b.blockId);
+              console.log(`${chalk.green('notified')} ${b.blockId}`);
+            } else if (notifyResult.error) {
+              console.error(chalk.yellow(`Notification failed for ${b.blockId}: ${notifyResult.error}`));
+            }
+          }
         }
       }
 
