@@ -303,6 +303,50 @@ export function transformSubagentForDroid(subagentDir: string): string {
 }
 
 /**
+ * Transform a subagent into a Codex custom-agent TOML file.
+ *
+ * Codex loads standalone TOML under ~/.codex/agents/*.toml. Required fields:
+ * name, description, developer_instructions. Optional model maps from our
+ * frontmatter when present.
+ * https://developers.openai.com/codex/subagents (custom agents section)
+ */
+export function transformSubagentForCodex(subagentDir: string): string {
+  const agentMd = path.join(subagentDir, 'AGENT.md');
+  const frontmatter = parseSubagentFrontmatter(agentMd);
+  const body = getSubagentBody(agentMd);
+
+  if (!frontmatter) {
+    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
+  }
+
+  // Append other .md files into the developer_instructions body.
+  let instructions = body.trim();
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    instructions += `\n\n## ${title}\n\n${content}`;
+  }
+
+  // Escape TOML multi-line string (""") content — only """ needs escaping.
+  const safeInstructions = instructions.replace(/"""/g, '\\"""');
+  const safeName = frontmatter.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const safeDesc = frontmatter.description.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+  let toml = `name = "${safeName}"\n`;
+  toml += `description = "${safeDesc}"\n`;
+  if (frontmatter.model) {
+    const safeModel = String(frontmatter.model).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    toml += `model = "${safeModel}"\n`;
+  }
+  toml += `developer_instructions = """\n${safeInstructions}\n"""\n`;
+  return toml;
+}
+
+/**
  * Sync a subagent to an OpenClaw workspace
  * Copies full directory, renames AGENT.md to AGENTS.md
  */
@@ -356,6 +400,19 @@ export function installSubagentToAgent(
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  } else if (agent === 'codex') {
+    // Codex: standalone TOML under ~/.codex/agents/<name>.toml
+    const agentsDir = path.join(agentHome, '.codex', 'agents');
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true });
+    }
+    try {
+      const toml = transformSubagentForCodex(subagentDir);
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.toml`), toml);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else if (agent === 'openclaw') {
     // OpenClaw: copy full directory
     const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
@@ -377,6 +434,12 @@ export function removeSubagentFromAgent(
   try {
     if (agent === 'claude') {
       const targetPath = safeJoin(path.join(agentHome, '.claude', 'agents'), `${subagentName}.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+      }
+      return { success: true };
+    } else if (agent === 'codex') {
+      const targetPath = safeJoin(path.join(agentHome, '.codex', 'agents'), `${subagentName}.toml`);
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
       }
