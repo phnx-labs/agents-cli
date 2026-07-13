@@ -82,6 +82,9 @@ export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, o
     if (!onSidebarWidthChange) return
     e.preventDefault()
     e.stopPropagation()
+    const target = e.currentTarget
+    const pointerId = e.pointerId
+    target.setPointerCapture(pointerId)
     const startX = e.clientX
     const startWidth = sidebarWidth
     const prevCursor = document.documentElement.style.cursor
@@ -90,15 +93,21 @@ export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, o
     document.documentElement.style.userSelect = 'none'
     setResizing(true)
     const onMove = (ev: PointerEvent) => setWidth(startWidth + ev.clientX - startX)
+    let cleaned = false
     const onUp = () => {
+      if (cleaned) return
+      cleaned = true
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
       document.documentElement.style.cursor = prevCursor
       document.documentElement.style.userSelect = prevUserSelect
       setResizing(false)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp, { once: true })
+    window.addEventListener('pointercancel', onUp, { once: true })
   }
 
   const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
