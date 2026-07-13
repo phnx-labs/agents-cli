@@ -1337,9 +1337,9 @@ export async function installVersion(
     // binary (postinstall failed, or a platform with no published native dep)
     // fails there with the correct message rather than throwing here.
     if (agentConfig.npmPackage) {
-      // Recompute from installedVersion, not the (possibly renamed) `versionDir`:
-      // the `latest` branch above may have renamed the dir to its concrete version.
-      const pkgRoot = path.join(getVersionDir(agent, installedVersion), 'node_modules', agentConfig.npmPackage);
+      // `installedVersion === version`, so this is exactly `versionDir` — the
+      // install landed in its final dir with no rename to chase.
+      const pkgRoot = path.join(versionDir, 'node_modules', agentConfig.npmPackage);
       try {
         const pkg = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf-8'));
         const postinstall = pkg?.scripts?.postinstall;
