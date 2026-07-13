@@ -202,20 +202,26 @@ enum AgentsCLI {
     }
 
     // The standing brief handed to the ticket agent. It embeds the user's note
-    // and the screenshot path; the agent does project detection + investigation
-    // itself (Swift pre-computes nothing). `linear create` takes a POSITIONAL
-    // title, no --json, and prints `Created RUSH-###: <title>` — parsed back in
-    // the termination handler for the completion notification.
+    // and every selected screenshot path as user-provided ticket material; the
+    // agent chooses the clearest placement on the issue, while the prompt's
+    // `linear update --proof` command gives it a reliable upload path. Project
+    // detection + investigation remain agent-owned (Swift pre-computes nothing).
+    // `linear create` takes a POSITIONAL title, no --json, and prints `Created
+    // RUSH-###: <title>` — parsed back in the termination handler.
     static func ticketAgentPrompt(note: String, screenshotPaths: [String]) -> String {
         let linear = "\(home)/.agents/skills/linear/scripts/linear"
         let shots: String
+        let attachmentStep: String
         if screenshotPaths.isEmpty {
             shots = "No screenshots were attached; work from the note alone."
+            attachmentStep = "5. No user-provided files were attached; skip attachment handling."
         } else if screenshotPaths.count == 1 {
-            shots = "A screenshot is attached at: \(screenshotPaths[0]) — read it first with your image tools."
+            shots = "The user attached this screenshot for the ticket: \(screenshotPaths[0]) — read it first with your image tools."
+            attachmentStep = ticketAttachmentStep(linear: linear, paths: screenshotPaths)
         } else {
             let list = screenshotPaths.map { "  - \($0)" }.joined(separator: "\n")
-            shots = "\(screenshotPaths.count) screenshots are attached — read each with your image tools:\n\(list)"
+            shots = "The user attached \(screenshotPaths.count) screenshots for the ticket — read each with your image tools:\n\(list)"
+            attachmentStep = ticketAttachmentStep(linear: linear, paths: screenshotPaths)
         }
         return """
         You are filing exactly ONE Linear ticket from a quick capture bar. Do not ask \
@@ -225,7 +231,8 @@ enum AgentsCLI {
         \(shots)
 
         Steps:
-        1. If screenshots are attached, inspect them to understand what the user is pointing at.
+        1. If files are attached, inspect every one to understand what the user is pointing at. \
+        They are user-provided ticket material, not analysis-only references.
         2. Run `agents sessions --all --limit 20` and skim the recent local sessions to \
         identify which repository / project this concerns (match the note + screenshot to a \
         repo you have been working in). Derive the repo name (e.g. `agents-cli`).
@@ -242,9 +249,27 @@ enum AgentsCLI {
                --description-file -
 
            Pick an HONEST priority. Keep the title short and specific.
-        5. Print the resulting `Created RUSH-###: <title>` line, then on the NEXT line print
+        \(attachmentStep)
+        6. Print the resulting `Created RUSH-###: <title>` line, then on the NEXT line print
         the ticket's Linear URL as `URL: https://linear.app/…` (the `linear create` output or
         `\(linear) tasks <id>` gives it). Nothing else — no commentary.
+        """
+    }
+
+    private static func ticketAttachmentStep(linear: String, paths: [String]) -> String {
+        let proofArgs = paths.map { "             --proof \(shellQuote($0))" }
+            .joined(separator: " \\\n")
+        return """
+        5. Make sure every user-provided file is uploaded to the resulting Linear issue — do \
+        not merely mention its local filesystem path. Use whatever placement best communicates \
+        the issue: description, comment, or another appropriate attachment surface. The reliable \
+        CLI default is:
+
+           \(linear) update <created-id> \\
+        \(proofArgs)
+
+           An equivalent upload mechanism is fine when you intentionally choose another placement. \
+        Do not finish until every attached path is represented on the issue.
         """
     }
 
