@@ -1779,7 +1779,14 @@ export class AgentManager {
       }
     } catch (err) {
       Object.assign(agent, priorRuntime);
-      await agent.saveMeta();
+      try {
+        await agent.saveMeta();
+      } catch (restoreErr) {
+        throw new Error(
+          `Failed to resume teammate: ${(err as Error).message}; restoring stopped state also failed: ${(restoreErr as Error).message}`,
+          { cause: err },
+        );
+      }
       throw err;
     }
     return agent;

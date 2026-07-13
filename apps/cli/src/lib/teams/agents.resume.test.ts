@@ -199,7 +199,19 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       // The real local launcher reaches spawn, then saveMeta follows the
       // read-only symlink and fails. The transactional catch must terminate the
       // detached process before resumeTeammate restores the original lifecycle.
-      await expect(mgr.resumeTeammate(id, marker)).rejects.toThrow();
+      // The restore's own saveMeta ALSO fails against the read-only symlink, so
+      // the wrapper must preserve the ORIGINAL launch error via `{ cause }` — a
+      // bare restore-write error would erase the informative failure.
+      const rejection = await mgr.resumeTeammate(id, marker).then(
+        () => { throw new Error('expected resumeTeammate to reject'); },
+        (e: unknown) => e as Error,
+      );
+      expect(rejection.message).toMatch(/restoring stopped state also failed/);
+      const originalErr = rejection.cause as Error | undefined;
+      expect(originalErr).toBeDefined();
+      // The original launch failure was the read-only-symlink saveMeta write,
+      // not the restore write — its message must survive on the cause chain.
+      expect(originalErr!.message).not.toMatch(/restoring stopped state also failed/);
 
       const retained = (mgr as any).agents.get(id) as AgentProcess | undefined;
       expect(retained).toBeDefined();
