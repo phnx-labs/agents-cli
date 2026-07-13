@@ -537,7 +537,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       skills: true,
       commands: false,
       plugins: true,
-      subagents: false,
+      subagents: true, // YAML agent files under ~/.kimi-code/agents/ (see transformSubagentForKimi)
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: false,
