@@ -26,4 +26,18 @@ describe('buildSpawnEnv', () => {
     const env = buildSpawnEnv('/tmp/overlay', { FOO: 'bar' });
     expect(env.FOO).toBe('bar');
   });
+
+  // RUSH-1016: sandboxed routine spawns must keep the daemon's headless Claude
+  // OAuth token; without it the agent looks "unconfigured" under overlay HOME.
+  it('forwards CLAUDE_CODE_OAUTH_TOKEN from the parent process', () => {
+    const prev = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-test-token';
+    try {
+      const env = buildSpawnEnv('/tmp/overlay');
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-test-token');
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+      else process.env.CLAUDE_CODE_OAUTH_TOKEN = prev;
+    }
+  });
 });

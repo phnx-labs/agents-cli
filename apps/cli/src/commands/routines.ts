@@ -189,6 +189,18 @@ export function registerRoutinesCommands(program: Command): void {
 
       The background scheduler auto-starts the first time you add a routine.
       Manage it with 'agents routines start|stop|status'.
+
+      Version / credit failover (same semantics as 'agents run'):
+        - Omit 'version:' to let the configured run strategy (default: balanced)
+          pick a healthy install and skip accounts that are out of credits or
+          rate-limited. Pin with 'version: 2.1.x' when you want one install only.
+        - Foreground 'agents routines run' re-dispatches to the next healthy
+          same-agent account when a mid-run rate/usage limit is detected.
+        - Detached/daemon fires use the pre-flight pick only (next tick re-selects).
+        - Diagnostic lines log which account was picked, which were skipped, and
+          each failover hop: look for "[agents] routine <name>:" in the run log.
+        - Headless Claude auth: store CLAUDE_CODE_OAUTH_TOKEN in the 'claude'
+          secrets bundle so the daemon can inject it into routine spawns.
     `,
   });
 

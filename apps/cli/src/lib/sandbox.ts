@@ -46,6 +46,12 @@ const ENV_ALLOWLIST = [
   'VISUAL',
   'NO_COLOR',
   'FORCE_COLOR',
+  // Headless Claude auth: the routines daemon injects CLAUDE_CODE_OAUTH_TOKEN
+  // from the `claude` secrets bundle (see daemon.ts). Without this allowlist
+  // entry, sandboxed routine spawns drop the token and look "unconfigured".
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
 ];
 
 /** Tools safe to grant as wildcards (no filesystem access). */
