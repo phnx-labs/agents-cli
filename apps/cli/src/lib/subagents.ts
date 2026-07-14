@@ -316,6 +316,18 @@ export function transformSubagentForDroid(subagentDir: string): string {
 export const transformSubagentForCopilot = transformSubagentForDroid;
 
 /**
+ * Transform a subagent into a Cursor CLI custom subagent `.md` file.
+ *
+ * Cursor loads subagents from `.cursor/agents/*.md` (project) or
+ * `~/.cursor/agents/*.md` (user) — Markdown with YAML frontmatter
+ * (name, description, model; also readonly/is_background, which our
+ * frontmatter schema doesn't carry). Cursor has no `color` field, so this is
+ * an alias of transformSubagentForDroid, same as Copilot.
+ * See https://cursor.com/docs/subagents.
+ */
+export const transformSubagentForCursor = transformSubagentForDroid;
+
+/**
  * Transform a subagent into Antigravity's custom-agent markdown shape.
  *
  * Antigravity exposes custom agents as Markdown files with YAML frontmatter,
@@ -688,6 +700,19 @@ export function installSubagentToAgent(
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  } else if (agent === 'cursor') {
+    // Cursor: flattened .md custom subagent under ~/.cursor/agents/
+    const agentsDir = path.join(agentHome, '.cursor', 'agents');
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true });
+    }
+    try {
+      const transformed = transformSubagentForCursor(subagentDir);
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.md`), transformed);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else {
     // Other agents don't support subagents yet
     return { success: false, error: `Agent '${agent}' does not support subagents` };
@@ -739,6 +764,12 @@ export function removeSubagentFromAgent(
       return { success: true };
     } else if (agent === 'kiro') {
       const targetPath = safeJoin(path.join(agentHome, '.kiro', 'agents'), `${subagentName}.json`);
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+      }
+      return { success: true };
+    } else if (agent === 'cursor') {
+      const targetPath = safeJoin(path.join(agentHome, '.cursor', 'agents'), `${subagentName}.md`);
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
       }
@@ -956,6 +987,18 @@ export function listSubagentsForAgent(
         frontmatter,
       });
     }
+  } else if (agentId === 'cursor') {
+    // Cursor: flat `<name>.md` files under ~/.cursor/agents/
+    const agentsDir = path.join(home, '.cursor', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.md')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+      const name = file.replace(/\.md$/, '');
+      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
+      subagents.push({ name, path: filePath, files: [file], frontmatter });
+    }
   }
 
   return subagents;
@@ -1050,6 +1093,15 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
         }
       }
     }
+  } else if (agent === 'cursor') {
+    const agentsDir = path.join(versionHome, '.cursor', 'agents');
+    if (fs.existsSync(agentsDir)) {
+      for (const file of fs.readdirSync(agentsDir)) {
+        if (!file.endsWith('.md')) continue;
+        const name = path.basename(file, '.md');
+        if (!discovered.has(name)) orphans.push(name);
+      }
+    }
   }
 
   return { agent, version, orphans: orphans.sort() };
@@ -1136,6 +1188,12 @@ export function removeSubagentFromVersion(
       if (fs.existsSync(targetPath)) {
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.json.${stamp}`));
+      }
+    } else if (agent === 'cursor') {
+      const targetPath = path.join(versionHome, '.cursor', 'agents', `${subagentName}.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
       }
     }
     return { success: true };

@@ -3,8 +3,9 @@
  * .md file under their native agents directory. Codex writes TOML under
  * `.codex/agents/`.
  * Droid (Factory AI) flattens each into a custom droid .md under
- * `<versionHome>/.factory/droids/`. OpenClaw copies the full subagent
- * directory (with AGENT.md renamed to AGENTS.md) into
+ * `<versionHome>/.factory/droids/`. Cursor flattens each into a custom
+ * subagent .md under `<versionHome>/.cursor/agents/`. OpenClaw copies the
+ * full subagent directory (with AGENT.md renamed to AGENTS.md) into
  * `<versionHome>/.openclaw/<name>/`.
  *
  * Source-side discovery is `listInstalledSubagents` from lib/subagents.ts —
@@ -27,6 +28,7 @@ import {
   transformSubagentForAntigravity,
   transformSubagentForDroid,
   transformSubagentForKiro,
+  transformSubagentForCursor,
   syncSubagentToOpenclaw,
   parseSubagentFrontmatter,
 } from '../../subagents.js';
@@ -89,6 +91,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             const agentsDir = path.join(versionHome, '.kiro', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.json`), transformSubagentForKiro(sub.path));
+            synced.push(sub.name);
+          } else if (agent === 'cursor') {
+            const agentsDir = path.join(versionHome, '.cursor', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForCursor(sub.path));
             synced.push(sub.name);
           }
         } catch { /* per-item sync failure: skip */ }

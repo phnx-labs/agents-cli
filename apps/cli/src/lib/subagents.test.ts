@@ -7,6 +7,7 @@ import {
   listSubagentsForAgent,
   transformSubagentForAntigravity,
   transformSubagentForCopilot,
+  transformSubagentForCursor,
   transformSubagentForKiro,
 } from './subagents.js';
 

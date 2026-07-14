@@ -313,7 +313,11 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
+    // Subagents: `.cursor/agents/<name>.md` (project) or `~/.cursor/agents/<name>.md`
+    // (user), Markdown with YAML frontmatter (name, description, model, readonly,
+    // is_background — no `color`). Shipped in cursor-agent CLI 2026.01 (Cursor 2.4).
+    // See transformSubagentForCursor / https://cursor.com/docs/subagents.
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',

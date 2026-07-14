@@ -2,6 +2,7 @@
  * Subagents detector. Claude/Gemini/Grok: flat .md files under `<agentDir>/agents/`.
  * Codex: flat .toml files under `<versionHome>/.codex/agents/`.
  * Droid: flat .md files under `<versionHome>/.factory/droids/`.
+ * Cursor: flat .md files under `<versionHome>/.cursor/agents/`.
  * OpenClaw: subdirectories containing AGENTS.md under `<versionHome>/.openclaw/`.
  * Mirrors versions.ts:521-539.
  */
@@ -76,6 +77,20 @@ function buildCopilotDetector(): ResourceDetector {
       return fs.readdirSync(agentsDir)
         .filter(f => f.endsWith('.agent.md'))
         .map(f => f.replace('.agent.md', ''));
+    },
+  };
+}
+
+function buildCursorDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'cursor',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.cursor', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.md'))
+        .map(f => f.replace(/\.md$/, ''));
     },
   };
 }
@@ -163,6 +178,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   droid: buildDroidDetector,
   openclaw: buildOpenclawDetector,
   kiro: buildKiroDetector,
+  cursor: buildCursorDetector,
 };
 
 export const subagentsDetectors = lazyAgentMap<ResourceDetector>(() => {
