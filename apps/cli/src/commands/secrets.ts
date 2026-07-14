@@ -416,11 +416,11 @@ async function browseRemote(targets: string[], args: string[], tty: boolean): Pr
   if (tty) {
     for (const t of targets) {
       const target = await resolveSshTarget(t);
-      render(t, remoteSecretsRaw(target, args, { tty: true }));
+      render(t, remoteSecretsRaw(target, args, { tty: true, osLookupName: t }));
     }
   } else {
-    const resolved = await Promise.all(targets.map((t) => resolveSshTarget(t)));
-    const results = resolved.map((target) => remoteSecretsRaw(target, args));
+    const resolved = await Promise.all(targets.map(async (t) => ({ name: t, target: await resolveSshTarget(t) })));
+    const results = resolved.map(({ name, target }) => remoteSecretsRaw(target, args, { osLookupName: name }));
     targets.forEach((t, i) => render(t, results[i]));
   }
   if (failures > 0) process.exit(1);
@@ -1565,7 +1565,7 @@ Examples:
               res = remoteSecretsRaw(
                 host,
                 ['import', resolvedBundleName, '--from', '-', ...(opts.force ? ['--force'] : [])],
-                { input: dotenv },
+                { input: dotenv, osLookupName: host },
               );
             }
             if (res.code === null) {
@@ -1675,7 +1675,7 @@ Examples:
             { keys: keysSubset, allowExpired: execOpts.allowExpired },
             { keysFlag: '--keys', allowExpiredFlag: '--allow-expired' },
           );
-          secretEnv = await remoteResolveEnv(await resolveSshTarget(execOpts.host), bundleName);
+          secretEnv = await remoteResolveEnv(await resolveSshTarget(execOpts.host), bundleName, { osLookupName: execOpts.host });
         } else {
           const { readAndResolveBundleEnv } = await import('../lib/secrets/bundles.js');
           secretEnv = readAndResolveBundleEnv(bundleName, {
@@ -1837,7 +1837,7 @@ Examples:
           // sees a real TTY, which requires our local terminal to pass straight
           // through. The remote's prompt + output stream to this terminal; we get
           // back only the exit code.
-          const code = remoteSecretsStream(target, unlockArgs);
+          const code = remoteSecretsStream(target, unlockArgs, { osLookupName: h });
           if (code === 0) {
             console.log(chalk.green(`${h}: unlocked`));
           } else {

@@ -25,11 +25,12 @@ import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 
 const REMOTE_TIMEOUT_MS = 30_000;
 
-/** Remote OS for a target string (bare alias matches a device entry; a raw
- * `user@host` falls back to POSIX). Threaded into the command builder so a
- * Windows host gets PowerShell instead of `bash -lc`. */
-function osForTarget(target: string): string | undefined {
-  return resolveRemoteOsSync(target.split('@').pop() ?? target);
+/** Remote OS for a host name or target string. Prefer the original host name
+ * because enrolled inline hosts resolve to `user@address`, while the OS
+ * registry is keyed by the host name. */
+function osForTarget(target: string, lookupName?: string): string | undefined {
+  const byName = lookupName ? resolveRemoteOsSync(lookupName) : undefined;
+  return byName ?? resolveRemoteOsSync(target.split('@').pop() ?? target);
 }
 
 /**
@@ -90,9 +91,9 @@ export function splitBundleRef(ref: string): { bundle: string; host?: string } {
 export function remoteSecretsRaw(
   target: string,
   args: string[],
-  opts: { tty?: boolean; input?: string } = {},
+  opts: { tty?: boolean; input?: string; osLookupName?: string } = {},
 ): SshExecResult {
-  const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target));
+  const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
   return sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
     input: opts.input,
@@ -114,8 +115,8 @@ export function remoteSecretsRaw(
  * bundle's passphrase at your own terminal. Output is NOT captured (it streams
  * to the terminal); only the exit code is returned.
  */
-export function remoteSecretsStream(target: string, args: string[]): number {
-  const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target));
+export function remoteSecretsStream(target: string, args: string[], opts: { osLookupName?: string } = {}): number {
+  const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
   return sshStream(target, remoteCmd, { tty: true });
 }
 
@@ -132,12 +133,16 @@ export function remoteSecretsStream(target: string, args: string[]): number {
  * SSH will block on Touch-ID — use `view`/`exec` with a remote `file` bundle,
  * an already-unlocked remote secrets-agent, or an interactive `-tt` session.)
  */
-export async function remoteResolveEnv(target: string, bundle: string): Promise<Record<string, string>> {
+export async function remoteResolveEnv(
+  target: string,
+  bundle: string,
+  opts: { osLookupName?: string } = {},
+): Promise<Record<string, string>> {
   assertValidSshTarget(target);
   const remoteCmd = buildRemoteAgentsInvocation(
     ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
     undefined,
-    osForTarget(target),
+    osForTarget(target, opts.osLookupName),
   );
   const res: SshExecResult = sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,

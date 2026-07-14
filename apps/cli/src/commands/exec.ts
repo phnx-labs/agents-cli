@@ -1419,7 +1419,7 @@ export function registerRunCommand(program: Command): void {
             // Remote bundle (`bundle@host`): resolve over SSH and inject
             // ephemerally — values never touch this machine's keychain or disk.
             const target = await resolveSshTarget(host);
-            const bundleEnv = await remoteResolveEnv(target, bundleName);
+            const bundleEnv = await remoteResolveEnv(target, bundleName, { osLookupName: host });
             console.log(chalk.gray(`[secrets] Resolved ${bundleName}@${host}: ${Object.keys(bundleEnv).length} keys (remote, ephemeral)`));
             secretsEnv = { ...secretsEnv, ...bundleEnv };
           } else {
