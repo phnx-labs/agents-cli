@@ -143,6 +143,20 @@ function buildForgeDetector(): ResourceDetector {
   return buildFlatMdAgentsDetector('forge', '.forge');
 }
 
+function buildGooseDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'goose',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.config', 'goose', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.yaml'))
+        .map(f => f.replace(/\.yaml$/, ''));
+    },
+  };
+}
+
 function buildOpenCodeDetector(): ResourceDetector {
   return {
     kind: 'subagents',
@@ -185,6 +199,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   kiro: buildKiroDetector,
   cursor: buildCursorDetector,
   forge: buildForgeDetector,
+  goose: buildGooseDetector,
 };
 
 export const subagentsDetectors = lazyAgentMap<ResourceDetector>(() => {

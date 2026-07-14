@@ -30,6 +30,7 @@ import {
   transformSubagentForForge,
   transformSubagentForKiro,
   transformSubagentForCursor,
+  transformSubagentForGoose,
   syncSubagentToOpenclaw,
   parseSubagentFrontmatter,
 } from '../../subagents.js';
@@ -102,6 +103,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             const agentsDir = path.join(versionHome, '.forge', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForForge(sub.path));
+            synced.push(sub.name);
+          } else if (agent === 'goose') {
+            const agentsDir = path.join(versionHome, '.config', 'goose', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.yaml`), transformSubagentForGoose(sub.path));
             synced.push(sub.name);
           }
         } catch { /* per-item sync failure: skip */ }

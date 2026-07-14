@@ -599,6 +599,51 @@ export function transformSubagentForKiro(subagentDir: string): string {
 }
 
 /**
+ * Transform a subagent into a Goose recipe YAML file.
+ *
+ * Goose has no dedicated subagent file format — a named subagent IS a recipe.
+ * Goose resolves named agents from `~/.config/goose/agents/<name>.yaml` (global)
+ * and delegates to them by name in autonomous mode. The recipe schema mirrors the
+ * one agents-cli already emits for Goose workflow recipes (`writeGooseSubrecipe`):
+ * `version`, `title`, `description`, `instructions`, `prompt`, plus an optional
+ * `settings.goose_model`. See goose-docs.ai context-engineering/subagents.
+ */
+export function transformSubagentForGoose(subagentDir: string): string {
+  const agentMd = path.join(subagentDir, 'AGENT.md');
+  const frontmatter = parseSubagentFrontmatter(agentMd);
+  const body = getSubagentBody(agentMd);
+
+  if (!frontmatter) {
+    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
+  }
+
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+
+  let prompt = body || frontmatter.description || frontmatter.name;
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    prompt += `\n\n## ${title}\n\n${content}`;
+  }
+
+  const recipe: Record<string, unknown> = {
+    version: '1.0.0',
+    title: frontmatter.name || path.basename(subagentDir),
+    description: frontmatter.description || frontmatter.name || path.basename(subagentDir),
+    instructions: prompt,
+    prompt,
+  };
+  if (frontmatter.model) {
+    recipe.settings = { goose_model: frontmatter.model };
+  }
+
+  return yaml.stringify(recipe);
+}
+
+/**
  * Sync a subagent to an OpenClaw workspace
  * Copies full directory, renames AGENT.md to AGENTS.md
  */
@@ -737,6 +782,19 @@ export function installSubagentToAgent(
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  } else if (agent === 'goose') {
+    // Goose: recipe YAML custom-agent file under ~/.config/goose/agents/
+    const agentsDir = path.join(agentHome, '.config', 'goose', 'agents');
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true });
+    }
+    try {
+      const transformed = transformSubagentForGoose(subagentDir);
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.yaml`), transformed);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else {
     // Other agents don't support subagents yet
     return { success: false, error: `Agent '${agent}' does not support subagents` };
@@ -800,6 +858,12 @@ export function removeSubagentFromAgent(
       return { success: true };
     } else if (agent === 'forge') {
       const targetPath = safeJoin(path.join(agentHome, '.forge', 'agents'), `${subagentName}.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+      }
+      return { success: true };
+    } else if (agent === 'goose') {
+      const targetPath = safeJoin(path.join(agentHome, '.config', 'goose', 'agents'), `${subagentName}.yaml`);
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
       }
@@ -1041,6 +1105,24 @@ export function listSubagentsForAgent(
       const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
       subagents.push({ name, path: filePath, files: [file], frontmatter });
     }
+  } else if (agentId === 'goose') {
+    // Goose: recipe YAML files under ~/.config/goose/agents/
+    const agentsDir = path.join(home, '.config', 'goose', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.yaml')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+      const name = file.replace(/\.yaml$/, '');
+      let frontmatter: SubagentFrontmatter;
+      try {
+        const recipe = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as { title?: string; description?: string } | null;
+        frontmatter = { name: recipe?.title || name, description: recipe?.description || '' };
+      } catch {
+        continue;
+      }
+      subagents.push({ name, path: filePath, files: [file], frontmatter });
+    }
   }
 
   return subagents;
@@ -1153,6 +1235,15 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
         if (!discovered.has(name)) orphans.push(name);
       }
     }
+  } else if (agent === 'goose') {
+    const agentsDir = path.join(versionHome, '.config', 'goose', 'agents');
+    if (fs.existsSync(agentsDir)) {
+      for (const file of fs.readdirSync(agentsDir)) {
+        if (!file.endsWith('.yaml')) continue;
+        const name = path.basename(file, '.yaml');
+        if (!discovered.has(name)) orphans.push(name);
+      }
+    }
   }
 
   return { agent, version, orphans: orphans.sort() };
@@ -1251,6 +1342,12 @@ export function removeSubagentFromVersion(
       if (fs.existsSync(targetPath)) {
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
+      }
+    } else if (agent === 'goose') {
+      const targetPath = path.join(versionHome, '.config', 'goose', 'agents', `${subagentName}.yaml`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.yaml.${stamp}`));
       }
     }
     return { success: true };

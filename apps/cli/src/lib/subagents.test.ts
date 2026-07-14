@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   installSubagentToAgent,
@@ -10,6 +11,7 @@ import {
   transformSubagentForCursor,
   transformSubagentForForge,
   transformSubagentForKiro,
+  transformSubagentForGoose,
 } from './subagents.js';
 
 const tempDirs: string[] = [];
@@ -150,6 +152,43 @@ describe('installSubagentToAgent for ForgeCode', () => {
     expect(content).toContain('You run tests.');
 
     const installed = listSubagentsForAgent('forge', agentHome);
+    expect(installed.map(s => s.name)).toEqual(['tester']);
+    expect(installed[0].frontmatter.description).toBe('Runs tests');
+  });
+});
+
+describe('transformSubagentForGoose', () => {
+  it('emits a Goose recipe YAML with version/title/description/instructions/prompt', () => {
+    const dir = makeSubagentDir(makeTempDir(), 'security-auditor');
+    const output = transformSubagentForGoose(dir);
+    const recipe = yaml.parse(output) as { version: string; title: string; description: string; instructions: string; prompt: string; settings?: { goose_model?: string } };
+
+    expect(recipe.version).toBe('1.0.0');
+    expect(recipe.title).toBe('security-auditor');
+    expect(recipe.description).toBe('Test security-auditor agent');
+    expect(recipe.instructions).toContain('You are the security-auditor agent.');
+    expect(recipe.prompt).toContain('You are the security-auditor agent.');
+    expect(recipe.settings?.goose_model).toBe('gpt-4o');
+  });
+});
+
+describe('installSubagentToAgent for Goose', () => {
+  it('writes a recipe YAML to ~/.config/goose/agents/ and round-trips', () => {
+    const sourceHome = makeTempHome();
+    const agentHome = makeTempHome();
+    const dir = path.join(sourceHome, 'subagent');
+    writeAgentMd(dir, '---\nname: tester\ndescription: Runs tests\n---\n\nYou run tests.');
+
+    const result = installSubagentToAgent(dir, 'tester', 'goose', agentHome);
+    expect(result.success).toBe(true);
+
+    const targetPath = path.join(agentHome, '.config', 'goose', 'agents', 'tester.yaml');
+    expect(fs.existsSync(targetPath)).toBe(true);
+    const recipe = yaml.parse(fs.readFileSync(targetPath, 'utf-8')) as { title: string; prompt: string };
+    expect(recipe.title).toBe('tester');
+    expect(recipe.prompt).toContain('You run tests.');
+
+    const installed = listSubagentsForAgent('goose', agentHome);
     expect(installed.map(s => s.name)).toEqual(['tester']);
     expect(installed[0].frontmatter.description).toBe('Runs tests');
   });

@@ -140,7 +140,7 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 | Copilot | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Kiro | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
-| Goose | >= 1.34.0 | yes | yes | >= 1.25.0 | no | yes | no | `AGENTS.md` | yes |
+| Goose | >= 1.34.0 | yes | yes | >= 1.25.0 | no | yes | yes | `AGENTS.md` | yes |
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | >= 1.0.16 | `AGENTS.md` | >= 1.0.6 |
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
