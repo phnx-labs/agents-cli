@@ -89,6 +89,13 @@ describe('gemini hooks since 0.26.0', () => {
     });
   });
 
+  describe('gemini allowlist', () => {
+    it('is capable of allowlist', () => {
+      expect(supports('gemini', 'allowlist')).toEqual({ ok: true });
+      expect(capableAgents('allowlist')).toContain('gemini');
+    });
+  });
+
   describe('unsupported agents skip regardless of version', () => {
     it('cursor hooks are supported', () => {
       expect(supports('cursor', 'hooks').ok).toBe(true);

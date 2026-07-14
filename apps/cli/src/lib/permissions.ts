@@ -545,30 +545,39 @@ const BLANKET_BASH_FORMS = new Set(['Bash', 'Bash(*)', 'Bash(**)']);
 
 /**
  * Convert canonical permission set to Gemini format.
- * Gemini reads tool allow-lists from settings.json under `tools.allowed`.
- * Bash permissions map to run_shell_command(prefix) — the prefix is extracted
- * from the canonical "Bash(cmd:*)" pattern by stripping the trailing ":*".
- * Blanket Bash grants map to bare "run_shell_command" (no prefix filter).
+ * Gemini reads tool allow/deny lists from settings.json under
+ * `tools.core` / `tools.exclude`. Bash permissions map to ShellTool(pattern).
+ * Blanket Bash grants map to bare "ShellTool" (no command filter).
  * Non-Bash tool patterns are skipped; Gemini uses different tool names.
  */
-export function convertToGeminiFormat(set: PermissionSet): { tools: { allowed: string[] } } {
-  const allowed = new Set<string>();
-  for (const perm of set.allow) {
-    if (BLANKET_BASH_FORMS.has(perm)) {
-      allowed.add('run_shell_command');
-      continue;
+export function convertToGeminiFormat(set: PermissionSet): { tools: { core: string[]; exclude?: string[] } } {
+  const serialize = (permissions: string[]): string[] => {
+    const tools = new Set<string>();
+    for (const perm of permissions) {
+      if (BLANKET_BASH_FORMS.has(perm)) {
+        tools.add('ShellTool');
+        continue;
+      }
+      const parsed = parseCanonicalPattern(perm);
+      if (!parsed || parsed.tool !== 'bash') continue;
+      const command = normalizeBashPattern(parsed.pattern);
+      if (command === '*') {
+        tools.add('ShellTool');
+      } else {
+        tools.add(`ShellTool(${command})`);
+      }
     }
-    const parsed = parseCanonicalPattern(perm);
-    if (!parsed || parsed.tool !== 'bash') continue;
-    const colonIdx = parsed.pattern.lastIndexOf(':');
-    const prefix = colonIdx > 0 ? parsed.pattern.slice(0, colonIdx) : parsed.pattern;
-    if (prefix === '*' || prefix === '**') {
-      allowed.add('run_shell_command');
-    } else {
-      allowed.add(`run_shell_command(${prefix})`);
-    }
-  }
-  return { tools: { allowed: Array.from(allowed) } };
+    return Array.from(tools);
+  };
+
+  const core = serialize(set.allow);
+  const exclude = serialize(set.deny ?? []);
+  return {
+    tools: {
+      core,
+      ...(exclude.length ? { exclude } : {}),
+    },
+  };
 }
 
 /**
@@ -1455,11 +1464,18 @@ export function applyPermissionsToVersion(
         const tools = (typeof settings.tools === 'object' && settings.tools !== null && !Array.isArray(settings.tools))
           ? settings.tools as Record<string, unknown>
           : {};
+        delete tools.allowed;
         if (merge) {
-          const existing = Array.isArray(tools.allowed) ? (tools.allowed as string[]) : [];
-          tools.allowed = Array.from(new Set([...existing, ...geminiPerms.tools.allowed]));
+          const existingCore = Array.isArray(tools.core) ? (tools.core as string[]) : [];
+          const existingExclude = Array.isArray(tools.exclude) ? (tools.exclude as string[]) : [];
+          tools.core = Array.from(new Set([...existingCore, ...geminiPerms.tools.core]));
+          const mergedExclude = Array.from(new Set([...existingExclude, ...(geminiPerms.tools.exclude ?? [])]));
+          if (mergedExclude.length) tools.exclude = mergedExclude;
+          else delete tools.exclude;
         } else {
-          tools.allowed = geminiPerms.tools.allowed;
+          tools.core = geminiPerms.tools.core;
+          if (geminiPerms.tools.exclude?.length) tools.exclude = geminiPerms.tools.exclude;
+          else delete tools.exclude;
         }
         settings.tools = tools;
       });

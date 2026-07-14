@@ -96,6 +96,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.antigravity).toBeDefined();
   });
 
+  it('gemini has a permissions writer + detector', () => {
+    expect(WRITERS.permissions.gemini).toBeDefined();
+    expect(DETECTORS.permissions.gemini).toBeDefined();
+  });
+
   it('kiro has a subagents writer + detector', () => {
     expect(WRITERS.subagents.kiro).toBeDefined();
     expect(DETECTORS.subagents.kiro).toBeDefined();
@@ -214,7 +219,4 @@ describe('staleness/registry', () => {
     }
   });
 
-  // Gemini's allowlist capability is `false` in the matrix today even though
-  // applyPermissionsToVersion has a Gemini branch. Flipping that capability
-  // is its own PR — when it lands, add the assertion here.
 });
