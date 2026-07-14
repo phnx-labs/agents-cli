@@ -11,7 +11,7 @@ import ReactDOM from 'react-dom/client'
 import '../index.css'
 
 import { Icon } from '../components/mission-control/icons'
-import { FloorSidebar } from '../components/mission-control/FloorSidebar'
+import { FloorSidebar, FLOOR_SIDEBAR_DEFAULT_WIDTH } from '../components/mission-control/FloorSidebar'
 import { FloorRail } from '../components/mission-control/FloorRail'
 import { FloorControls, floorControlsMode } from '../components/mission-control/FloorControls'
 import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from '../components/mission-control/FloorSubtabs'
@@ -439,6 +439,7 @@ function Subtabs() {
 // so the host status dots (`.hd`) can be screenshotted at their true size.
 function Sidebar() {
   const [pins, setPins] = useState<string[]>(['zion'])
+  const [sidebarWidth, setSidebarWidth] = useState(FLOOR_SIDEBAR_DEFAULT_WIDTH)
   const sidebarAgents: FloorAgent[] = [
     ...running,
     agent({ id: 's1', hostLabel: 'yosemite-s0', project: 'agents-cli' }),
@@ -472,21 +473,26 @@ function Sidebar() {
       onExpand={() => setCollapsed(false)}
     />
   ) : (
-    <FloorSidebar
-      agents={sidebarAgents}
-      tickets={tickets}
-      projFilter={null}
-      offlineHosts={['yosemite-s1']}
-      devices={devices}
-      hostPins={pins}
-      projects={managedProjects}
-      onManageProjects={noop}
-      onCollapse={() => setCollapsed(true)}
-      onToggleHostPin={(n) => setPins((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))}
-      onReorderHostPins={setPins}
-      onScope={noop}
-      localHost="zion"
-    />
+    <div className="page" style={{ height: '100%', '--floor-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}>
+      <FloorSidebar
+        agents={sidebarAgents}
+        tickets={tickets}
+        projFilter={null}
+        offlineHosts={['yosemite-s1']}
+        devices={devices}
+        hostPins={pins}
+        projects={managedProjects}
+        onManageProjects={noop}
+        sidebarWidth={sidebarWidth}
+        onSidebarWidthChange={setSidebarWidth}
+        onCollapse={() => setCollapsed(true)}
+        onToggleHostPin={(n) => setPins((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n]))}
+        onReorderHostPins={setPins}
+        onScope={noop}
+        localHost="zion"
+      />
+      <div className="feed-col" />
+    </div>
   )
 }
 
