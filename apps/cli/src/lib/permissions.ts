@@ -1459,7 +1459,8 @@ export function applyPermissionsToVersion(
       const geminiPerms = convertToGeminiFormat(set);
       const settingsPath = path.join(versionHome, '.gemini', 'settings.json');
       updateGeminiSettings(settingsPath, (settings) => {
-        // Remove stale permissions key written by earlier versions of this serializer.
+        // Remove stale keys written by earlier serializer versions:
+        // top-level `permissions`, and Gemini's pre-core/exclude `tools.allowed`.
         delete (settings as Record<string, unknown>).permissions;
         const tools = (typeof settings.tools === 'object' && settings.tools !== null && !Array.isArray(settings.tools))
           ? settings.tools as Record<string, unknown>

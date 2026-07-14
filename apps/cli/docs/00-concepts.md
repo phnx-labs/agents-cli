@@ -153,6 +153,8 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 
 Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode, Antigravity, Grok, Kimi, Kiro 2.8.0+, and Droid >= 0.57.5). **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
 
+Gemini permission sync maps canonical Bash rules to its native `ShellTool(...)` entries under `tools.core` / `tools.exclude`. Other canonical permission tools are not representable in Gemini's native allowlist grammar and are skipped.
+
 ### Per-command targeting
 
 Slash commands in `commands/*.md` can narrow sync with optional YAML frontmatter:
