@@ -29,6 +29,10 @@
   has no memory of. Requires `--agent claude` or `codex` (native resume, validated);
   the job runs **un-sandboxed** so `--resume` can find the session in the real agent
   home, and — like workflow jobs — its command is never binary-pinned.
+- **Cursor CLI receives synced subagents.** cursor-agent custom subagents are
+  installed as `.md` profiles under `~/.cursor/agents/` (matching cursor-agent's
+  native format), with matching list, remove, and stale-state behavior.
+  (RUSH-1388)
 
 - **`agents output` — productivity: token burn vs shipped output.** A new command
   that joins spend (`$` cost, from the offline price table) to what actually

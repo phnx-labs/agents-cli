@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Wire subagents support for Cursor CLI (RUSH-1388).** cursor-agent loads custom subagents as Markdown with YAML frontmatter under `~/.cursor/agents/*.md` (project-scoped `.cursor/agents/` also supported natively), same shape as Claude/Droid/Copilot minus the `color` field, gated at `>= 2026.1.22` (cursor-agent's CalVer build tag for Cursor 2.4). Flip Cursor's `subagents`, add `transformSubagentForCursor` (alias of `transformSubagentForDroid`), and wire the install/remove, list, orphan-detection, writer, and detector paths. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/subagents.ts`, `apps/cli/src/lib/staleness/{writers,detectors}/subagents.ts`.
+
 ## 1.20.61
 
 - **Detect OpenCode sign-in state so `agents view` stops mislabeling a logged-in install as "not signed in."** `getAccountInfo` had no `opencode` case, so it fell through to `signedIn: false` and every row printed "(not signed in — run opencode to log in)" even with a live login. It now reads OpenCode's `auth.json` (`$XDG_DATA_HOME/opencode/auth.json`, defaulting to `~/.local/share/opencode/auth.json` on every platform — `xdg-basedir` does not special-case macOS), validates each provider entry against its `oauth`/`api`/`wellknown` credential shape, and reports the account as signed in with the non-secret provider ids surfaced as the account label (e.g. `id:muse-spark`). Credential secrets (`access`/`refresh`/`key`/`token`) are only inspected for presence — never read into any display or JSON output. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/agents.test.ts`.
