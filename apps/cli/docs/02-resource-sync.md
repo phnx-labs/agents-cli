@@ -214,6 +214,13 @@ Per-agent conversion is lossy in both directions:
   `user.always_allow` / `user.never_allow` entries using the Goose Developer
   extension tool names. Existing non-managed permission categories and
   unrelated user tool entries are preserved.
+- OpenClaw gates at tool granularity only, so only **blanket** (whole-tool)
+  rules map into `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) /
+  `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`,
+  `webfetch → web_fetch`, `websearch → web_search`. Sub-command/path/domain
+  rules (`Bash(git:*)`, `Write(secrets/**)`, `WebFetch(domain:x)`) have no
+  tool-level equivalent and are skipped. The absolute `tools.allow` list is
+  never touched, and all other keys (`mcp`, `exec`, `agents`, …) are preserved.
 
 ## Plugins: Synthetic Marketplace + Exec-Surface Gate
 

@@ -360,7 +360,11 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
+    // allowlist: maps blanket (whole-tool) rules to ~/.openclaw/openclaw.json
+    // tools.alsoAllow (allow) / tools.deny (deny). OpenClaw gates at tool
+    // granularity only, so sub-command/path/domain patterns are skipped.
+    // OpenClaw is self-updating (no pinned since), so `true` is correct.
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
   },
   copilot: {
     id: 'copilot',

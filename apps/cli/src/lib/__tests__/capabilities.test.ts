@@ -123,6 +123,13 @@ describe('gemini allowlist', () => {
   });
 });
 
+describe('openclaw allowlist', () => {
+  it('is capable of allowlist', () => {
+    expect(supports('openclaw', 'allowlist')).toEqual({ ok: true });
+    expect(capableAgents('allowlist')).toContain('openclaw');
+  });
+});
+
 describe('unsupported agents skip regardless of version', () => {
   it('cursor hooks are supported', () => {
     expect(supports('cursor', 'hooks').ok).toBe(true);

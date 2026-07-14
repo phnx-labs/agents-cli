@@ -316,6 +316,36 @@ describe('PermissionsHandler', () => {
       expect(settings.tools.exclude).toEqual(['ShellTool(rm -rf *)']);
     });
 
+    it('merges all permissions and writes to OpenClaw openclaw.json tools.alsoAllow/deny', () => {
+      const home = makeTempHome();
+      const versionHome = makeTempHome();
+
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+
+      writePermissionYaml(home, path.join('.agents', '.system'), 'base', {
+        name: 'base',
+        allow: ['Bash(*)'],
+      });
+
+      writePermissionYaml(home, '.agents', 'extra', {
+        name: 'extra',
+        allow: ['Read(**)', 'Bash(mq:*)'],
+        deny: ['Write(**)'],
+      });
+
+      runPermissionsExpression(home, `PermissionsHandler.sync('openclaw', ${JSON.stringify(versionHome)})`);
+
+      const settingsPath = path.join(versionHome, '.openclaw', 'openclaw.json');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      // Bash(*) + Read(**) are blanket -> exec, read. Bash(mq:*) skipped.
+      expect(settings.tools.alsoAllow).toEqual(['exec', 'read']);
+      // Write(**) is blanket -> write.
+      expect(settings.tools.deny).toEqual(['write']);
+    });
+
     it('skips non-permission-capable agents', () => {
       const home = makeTempHome();
       const versionHome = makeTempHome();
@@ -365,6 +395,11 @@ describe('PermissionsHandler', () => {
     it('returns correct path for Kimi', () => {
       const result = PermissionsHandler.configPath!('kimi', '/test/home');
       expect(result).toBe(path.join('/test/home', '.kimi-code', 'config.toml'));
+    });
+
+    it('returns correct path for OpenClaw', () => {
+      const result = PermissionsHandler.configPath!('openclaw', '/test/home');
+      expect(result).toBe(path.join('/test/home', '.openclaw', 'openclaw.json'));
     });
 
     it('returns correct path for Droid', () => {

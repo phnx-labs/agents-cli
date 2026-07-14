@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- **Allowlist (permissions) support for OpenClaw (RUSH-1570).** Permission
+  groups now sync to OpenClaw. Because OpenClaw gates at TOOL granularity only,
+  just **blanket** (whole-tool) rules map into `~/.openclaw/openclaw.json`
+  `tools.alsoAllow` (allow) / `tools.deny` (deny) — `bash → exec`,
+  `read → read`, `write`/`edit → write`, `webfetch → web_fetch`,
+  `websearch → web_search`; sub-command/path/domain rules (`Bash(git:*)`,
+  `Write(secrets/**)`, `WebFetch(domain:x)`) are skipped. The absolute
+  `tools.allow` list and all other config keys are preserved. Source:
+  `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/permissions.ts`,
+  `apps/cli/src/lib/resources/permissions.ts`,
+  `apps/cli/src/lib/staleness/detectors/permissions.ts`.
+
 ### Fixed
 
 - **`agents add grok@latest` now places the Grok binary in the new version's

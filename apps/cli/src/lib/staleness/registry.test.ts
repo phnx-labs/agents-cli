@@ -101,6 +101,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.gemini).toBeDefined();
   });
 
+  it('openclaw has a permissions writer + detector', () => {
+    expect(WRITERS.permissions.openclaw).toBeDefined();
+    expect(DETECTORS.permissions.openclaw).toBeDefined();
+  });
+
   it('antigravity has subagents + workflows writers + detectors', () => {
     expect(WRITERS.subagents.antigravity).toBeDefined();
     expect(DETECTORS.subagents.antigravity).toBeDefined();

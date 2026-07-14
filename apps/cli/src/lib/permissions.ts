@@ -624,6 +624,59 @@ export function convertToDroidFormat(set: PermissionSet): {
 }
 
 /**
+ * Canonical tool -> OpenClaw tool id. OpenClaw gates at TOOL granularity only
+ * (no sub-command/path/domain patterns), so only these whole-tool ids exist.
+ * Any canonical tool not in this map is unsupported and skipped.
+ */
+const CANONICAL_TO_OPENCLAW_TOOL: Record<string, string> = {
+  bash: 'exec',
+  read: 'read',
+  write: 'write',
+  edit: 'write',
+  webfetch: 'web_fetch',
+  websearch: 'web_search',
+};
+
+/**
+ * Convert canonical permission set to OpenClaw's `tools.alsoAllow`/`tools.deny`.
+ *
+ * OpenClaw's allowlist is tool-level only, so ONLY blanket (whole-tool) rules
+ * map — a rule is blanket iff it's a bare tool with no parens (`Bash`), it's in
+ * BLANKET_BASH_FORMS, or its pattern is `*`/`**` (`Read(**)`, `Write(*)`).
+ * Sub-command/path/domain rules (`Bash(git:*)`, `Write(secrets/**)`,
+ * `WebFetch(domain:x)`) are SKIPPED — coarse-mapping a specific deny to a whole
+ * tool would wrongly gate every use of that tool. Output arrays are deduped and
+ * sorted for deterministic writes/tests.
+ */
+export function convertToOpenClawFormat(set: PermissionSet): { alsoAllow: string[]; deny: string[] } {
+  const map = (permissions: string[]): string[] => {
+    const tools = new Set<string>();
+    for (const perm of permissions) {
+      // Bare tool name with no parens (e.g. "Bash", "Read") is a blanket grant;
+      // parseCanonicalPattern requires parens, so handle it first.
+      const bare = perm.match(/^(\w+)$/);
+      if (bare) {
+        const id = CANONICAL_TO_OPENCLAW_TOOL[bare[1].toLowerCase()];
+        if (id) tools.add(id);
+        continue;
+      }
+      const parsed = parseCanonicalPattern(perm);
+      if (!parsed) continue;
+      const isBlanket = BLANKET_BASH_FORMS.has(perm) || parsed.pattern === '*' || parsed.pattern === '**';
+      if (!isBlanket) continue;
+      const id = CANONICAL_TO_OPENCLAW_TOOL[parsed.tool];
+      if (id) tools.add(id);
+    }
+    return Array.from(tools).sort();
+  };
+
+  return {
+    alsoAllow: map(set.allow),
+    deny: map(set.deny ?? []),
+  };
+}
+
+/**
  * Convert canonical permission set to Antigravity format.
  * Antigravity reads ~/.gemini/antigravity-cli/settings.json with
  *   { permissions: { allow: [...], deny: [...] } }
@@ -1745,6 +1798,49 @@ export function applyPermissionsToVersion(
 
       fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
       fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'openclaw') {
+      // OpenClaw's allowlist lives in ~/.openclaw/openclaw.json under `tools`.
+      // Only blanket tool-level rules map (see convertToOpenClawFormat). We
+      // read-modify-write to preserve all other keys (mcp, exec, agents, …) and
+      // never touch `tools.allow` (the absolute allowlist that replaces defaults).
+      const configPath = path.join(versionHome, '.openclaw', 'openclaw.json');
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      }
+      const converted = convertToOpenClawFormat(set);
+
+      const existingTools = (typeof config.tools === 'object' && config.tools !== null && !Array.isArray(config.tools))
+        ? config.tools as Record<string, unknown>
+        : {};
+      let alsoAllow: string[];
+      let deny: string[];
+      if (merge) {
+        const existingAllow = Array.isArray(existingTools.alsoAllow) ? existingTools.alsoAllow as string[] : [];
+        const existingDeny = Array.isArray(existingTools.deny) ? existingTools.deny as string[] : [];
+        alsoAllow = Array.from(new Set([...existingAllow, ...converted.alsoAllow]));
+        deny = Array.from(new Set([...existingDeny, ...converted.deny]));
+      } else {
+        alsoAllow = converted.alsoAllow;
+        deny = converted.deny;
+      }
+
+      // Set or delete each key: avoid writing empty arrays (churn). On a
+      // non-merge replace with nothing to write, delete the stale key.
+      const tools: Record<string, unknown> = { ...existingTools };
+      if (alsoAllow.length > 0) tools.alsoAllow = alsoAllow;
+      else delete tools.alsoAllow;
+      if (deny.length > 0) tools.deny = deny;
+      else delete tools.deny;
+
+      if (Object.keys(tools).length > 0) config.tools = tools;
+      else delete config.tools;
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
       return { success: true };
     }
 
