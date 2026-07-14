@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **Wire subagents support for Cursor CLI (RUSH-1388).** cursor-agent loads custom subagents as Markdown with YAML frontmatter under `~/.cursor/agents/*.md` (project-scoped `.cursor/agents/` also supported natively), same shape as Claude/Droid/Copilot minus the `color` field, gated at `>= 2026.1.22` (cursor-agent's CalVer build tag for Cursor 2.4). Flip Cursor's `subagents`, add `transformSubagentForCursor` (alias of `transformSubagentForDroid`), and wire the install/remove, list, orphan-detection, writer, and detector paths. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/subagents.ts`, `apps/cli/src/lib/staleness/{writers,detectors}/subagents.ts`.
+- **Wire hooks support for Hermes (RUSH-1687).** `agents` now registers central hooks into Hermes Agent's `~/.hermes/config.yaml` under a `hooks:` block (YAML, ≥ 0.11.0). The registrar read-modify-writes that shared config so sibling keys like `mcp_servers` survive, maps canonical events to Hermes' snake_case lifecycle names (`SessionStart→on_session_start`, `SessionEnd→on_session_end`, `PreToolUse→pre_tool_call`, `PostToolUse→post_tool_call`, `SubagentStop→subagent_stop`, `UserPromptSubmit→pre_llm_call`, `Stop→on_session_finalize`), and clamps each hook's timeout to 300s (default 60s). Managed entries are re-synced idempotently while user-authored hooks are preserved. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/hooks.ts`, `apps/cli/src/lib/staleness/writers/hooks.ts`.
 
 ## 1.20.61
 

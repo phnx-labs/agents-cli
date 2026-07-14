@@ -245,6 +245,11 @@ describe('capableAgents()', () => {
     expect(agents).toContain('cursor');
   });
 
+  it('includes hermes for hooks (Hermes Agent config.yaml hooks since 0.11.0)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('hermes');
+  });
+
   it('excludes opencode/amp for hooks', () => {
     const agents = capableAgents('hooks');
     expect(agents).not.toContain('opencode');
@@ -265,6 +270,22 @@ describe('goose hooks version gate', () => {
   it('passes 1.34.0 and above', () => {
     expect(supports('goose', 'hooks', '1.34.0')).toEqual({ ok: true });
     expect(supports('goose', 'hooks', '1.37.0')).toEqual({ ok: true });
+  });
+});
+
+describe('hermes hooks version gate', () => {
+  it('gates versions below 0.11.0 as too_old', () => {
+    const result = supports('hermes', 'hooks', '0.10.0');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 0.11.0');
+    }
+  });
+
+  it('passes 0.11.0 and above', () => {
+    expect(supports('hermes', 'hooks', '0.11.0')).toEqual({ ok: true });
+    expect(supports('hermes', 'hooks', '0.14.2')).toEqual({ ok: true });
   });
 });
 

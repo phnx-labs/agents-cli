@@ -20,6 +20,15 @@
 
 ### Added
 
+- **Hooks support for Hermes Agent (RUSH-1687).** Central hooks now register into
+  Hermes' `~/.hermes/config.yaml` under a `hooks:` block (YAML, gated to Hermes
+  ≥ 0.11.0). The registrar read-modify-writes the shared config so `mcp_servers`
+  and other keys survive, maps canonical events to Hermes' snake_case lifecycle
+  names (`pre_tool_call`, `post_tool_call`, `on_session_start`, `on_session_end`,
+  `pre_llm_call`, `on_session_finalize`, `subagent_stop`), and caps each timeout
+  at 300s. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/hooks.ts`,
+  `apps/cli/src/lib/staleness/writers/hooks.ts`.
+
 - **`agents routines add --resume <sessionId>` — wake an existing session instead
   of starting fresh.** At fire time the job runs `agents run <agent> --resume <id>`,
   so the *actual* prior session reopens with its full context and the routine's

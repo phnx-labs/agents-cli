@@ -40,7 +40,7 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
       // registerHooksForGrok — file copy alone only sees top-level available.hooks
       // names (RUSH-1353). Copilot/Kiro/Goose load managed *.json under their
       // hooks dirs the same way.
-      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'kiro' || agent === 'goose' || agent === 'cursor' || agent === 'grok') {
+      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'kiro' || agent === 'goose' || agent === 'cursor' || agent === 'grok' || agent === 'hermes') {
         registerHooksToSettings(agent, versionHome);
       }
       return { synced };

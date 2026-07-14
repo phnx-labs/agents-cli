@@ -641,9 +641,12 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     instructionsFile: 'MEMORY.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
+    supportsHooks: true,
     capabilities: {
-      hooks: false,
+      // Lifecycle hooks land in ~/.hermes/config.yaml under a `hooks:` block
+      // (YAML, shared with `mcp_servers`); gated to Hermes ≥ 0.11.0 which
+      // introduced the configurable hook runner.
+      hooks: { since: '0.11.0' },
       mcp: true,
       mcpHttp: true,
       mcpHeaders: false,
