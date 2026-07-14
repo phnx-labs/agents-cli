@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.20.60
+
 - **Fix Goose skill sync status for its native central-storage path.** `agents skills list goose@<version>` now reports skills under `~/.agents/skills/` as installed instead of falsely requiring a per-version `.config/goose/skills/` copy that Goose never reads. Source: `apps/cli/src/lib/skills.ts`.
 - **Correct the documented `auto` and ACP `skip` semantics.** The README and bundled `run` skill now distinguish Kimi's interactive `--auto` from its already-auto-approved headless `-p` path, document Droid's native `--auto high`, and explain that ACP `skip` prefers `allow_always` but falls back to the first permission option offered by the server. Documentation only; runtime behavior is unchanged. Source: `README.md`, `skills/run/SKILL.md`.
 - **Wire Antigravity subagents and Kimi workflow sync (RUSH-1548, RUSH-1581).** Antigravity now receives subagents as custom-agent Markdown under `~/.gemini/config/agents/<name>/agent.md` with the `>= 1.0.16` version gate enforced during sync. Kimi receives workflows as managed `type: flow` skills under `.kimi-code/skills/<name>/SKILL.md`, using the canonical slug as the flow name and an `agents_workflow` marker so native user-owned flows are not overwritten or removed. Antigravity workflows remain disabled for version-home sync until a global filesystem target is documented. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/subagents.ts`, `apps/cli/src/lib/workflows.ts`.
