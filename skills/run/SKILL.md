@@ -37,7 +37,7 @@ Permission mode controls what the agent can do.
 |------|----------------|
 | `plan` (default) | Read-only — research, audit, analysis. No writes, no shell side-effects. |
 | `edit` | Read + write files; prompts for shell / risky operations |
-| `auto` | Harness-native automatic approval: Claude/Copilot use the smart classifier (safe ops approved, risky ops blocked); Kimi uses `--auto`; Droid uses `--auto high`. |
+| `auto` | Harness-native automatic approval: Claude/Copilot use the smart classifier; Droid uses `--auto high`; Kimi uses `--auto` interactively, while headless `-p` already auto-approves and emits no mode flag. |
 | `skip` | Last-resort bypass of every permission prompt. Direct exec uses the native unsafe flag; ACP selects a protocol permission option. `full` remains an alias. |
 
 ```bash
@@ -47,8 +47,10 @@ agents run claude "/code:commit" --mode auto          # run a command unattended
 
 **Treat `skip` as a last resort.** In direct-exec runs (without `--acp`), agents-cli
 forwards the harness's native bypass flag; it does not add another safety layer. Prefer
-`auto` where supported (smart classifier on Claude/Copilot, native auto mode on
-Kimi/Droid), or `edit` everywhere else.
+`auto` where it adds a safer automatic policy (smart classifier on Claude/Copilot,
+native high-auto mode on Droid, or interactive Kimi), or `edit` everywhere else.
+For headless Kimi, `edit`, `auto`, and `skip` all use the same already-auto-approved
+`-p` behavior, so prefer `edit` rather than signaling a blanket bypass.
 
 | Harness | Direct-exec `--mode skip` becomes |
 |---|---|
