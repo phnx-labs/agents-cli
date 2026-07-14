@@ -72,6 +72,24 @@ export interface HostPromptRun {
   timeoutMs?: number;
   /** Local directory to record in the session index (defaults to process.cwd()). */
   cwd?: string;
+  /** Forwarded run options — see RUN_OPTION_FORWARDING in remote-cmd.ts. */
+  effort?: string;
+  env?: string[];
+  addDir?: string[];
+  timeout?: string;
+  strategy?: string;
+  balanced?: boolean;
+  fallback?: string;
+  loop?: boolean;
+  maxIterations?: string;
+  budget?: string;
+  until?: string;
+  interval?: string;
+  json?: boolean;
+  verbose?: boolean;
+  yes?: boolean;
+  autoSecrets?: boolean;
+  passthroughArgs?: string[];
 }
 
 /**
@@ -94,6 +112,23 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     resume: opts.resume,
     follow: opts.follow !== false,
     timeoutMs: opts.timeoutMs,
+    effort: opts.effort,
+    env: opts.env,
+    addDir: opts.addDir,
+    timeout: opts.timeout,
+    strategy: opts.strategy,
+    balanced: opts.balanced,
+    fallback: opts.fallback,
+    loop: opts.loop,
+    maxIterations: opts.maxIterations,
+    budget: opts.budget,
+    until: opts.until,
+    interval: opts.interval,
+    json: opts.json,
+    verbose: opts.verbose,
+    yes: opts.yes,
+    autoSecrets: opts.autoSecrets,
+    passthroughArgs: opts.passthroughArgs,
   });
   registerHostSession(result.task, { cwd: opts.cwd ?? process.cwd(), prompt: opts.prompt });
   return result;

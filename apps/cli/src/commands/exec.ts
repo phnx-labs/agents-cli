@@ -32,7 +32,8 @@ interface ExecCommandActionOptions {
   addDir: string[];
   env: string[];
   secrets: string[];
-  noAutoSecrets?: boolean;
+  /** Commander maps `--no-auto-secrets` to `autoSecrets` (default true, false when passed). */
+  autoSecrets?: boolean;
   json?: boolean;
   quiet?: boolean;
   headless?: boolean;
@@ -637,6 +638,22 @@ export function registerRunCommand(program: Command): void {
         const { resolveHostRunTarget, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
+        const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
+
+        // The forwarding contract (RUN_OPTION_FORWARDING): options that cannot
+        // cross the SSH boundary fail loud BEFORE dispatch — never a silent
+        // drop. Value-aware: only reject what was actually passed.
+        const hostRejects: string[] = [];
+        if (options.secrets.length > 0) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.secrets);
+        if (options.secretsKeys) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.secretsKeys);
+        if (options.allowExpired) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.allowExpired);
+        if (options.acp) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.acp);
+        if (options.resumeCheckpoint) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeCheckpoint);
+        if (options.resume === true) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeBare);
+        if (hostRejects.length > 0) {
+          for (const msg of hostRejects) console.error(chalk.red(msg));
+          process.exit(1);
+        }
         // Shared resolution (name → capability tag → error). A password-auth
         // device throws DeviceOffloadUnsupportedError inside the helper and
         // propagates untouched — it's printed cleanly by the top-level catch in
@@ -707,6 +724,13 @@ export function registerRunCommand(program: Command): void {
               passthroughArgs,
               raw: options.raw || options.tmux === false || options.disableTmux === true,
               forceInteractive: options.interactive,
+              effort: options.effort,
+              env: options.env,
+              addDir: options.addDir,
+              strategy: options.strategy,
+              balanced: options.balanced,
+              fallback: options.fallback,
+              verbose: options.verbose,
             });
             process.exit(exitCode);
           }
@@ -728,6 +752,23 @@ export function registerRunCommand(program: Command): void {
             name: options.name,
             resume: resumeId,
             follow: options.follow !== false,
+            effort: options.effort,
+            env: options.env,
+            addDir: options.addDir,
+            timeout: options.timeout,
+            strategy: options.strategy,
+            balanced: options.balanced,
+            fallback: options.fallback,
+            loop: options.loop,
+            maxIterations: options.maxIterations,
+            budget: options.budget,
+            until: options.until,
+            interval: options.interval,
+            json: options.json,
+            verbose: options.verbose,
+            yes: options.yes,
+            autoSecrets: options.autoSecrets,
+            passthroughArgs,
           });
           if (options.follow === false) {
             // The handle the caller uses to check on the run: the name if given,
@@ -1023,7 +1064,9 @@ export function registerRunCommand(program: Command): void {
 
         // Auto-inject secrets bundles declared in the workflow's frontmatter `secrets:` field.
         // Union with any --secrets flags the user passed; dedupe. Skip when --no-auto-secrets is set.
-        if (!options.noAutoSecrets) {
+        // (Commander stores the negated flag as `autoSecrets: false` — the old
+        // `noAutoSecrets` read was never populated, making the flag a no-op.)
+        if (options.autoSecrets !== false) {
           const declared = workflowFrontmatter?.secrets ?? [];
           if (declared.length > 0) {
             const existing = new Set(options.secrets);

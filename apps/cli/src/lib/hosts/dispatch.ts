@@ -227,6 +227,33 @@ export interface DispatchOptions {
   /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
+  /** Reasoning effort — forwarded unless 'auto' (the remote default). */
+  effort?: string;
+  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
+  env?: string[];
+  /** `--add-dir` grants, forwarded verbatim. */
+  addDir?: string[];
+  /** Agent wall-clock cap, forwarded as `--timeout <duration>` for the REMOTE to enforce. */
+  timeout?: string;
+  /** Version/account rotation — the remote picks among ITS signed-in accounts. */
+  strategy?: string;
+  balanced?: boolean;
+  fallback?: string;
+  /** Loop family — the loop driver runs on the host. */
+  loop?: boolean;
+  maxIterations?: string;
+  budget?: string;
+  until?: string;
+  interval?: string;
+  /** Remote emits ndjson into its log; the local follow streams it verbatim. */
+  json?: boolean;
+  verbose?: boolean;
+  /** Skip the budget-confirm prompt — a detached remote run can't answer one. */
+  yes?: boolean;
+  /** False forwards --no-auto-secrets (workflow secrets resolve on the REMOTE keychain). */
+  autoSecrets?: boolean;
+  /** Native-CLI passthrough (everything after `--`), appended last. */
+  passthroughArgs?: string[];
 }
 
 /**
@@ -234,6 +261,10 @@ export interface DispatchOptions {
  * session-id / resume flag wiring is unit-testable without an SSH round-trip.
  * `--session-id` and `--resume` are mutually exclusive (the CLI rejects both);
  * resume wins when — defensively — both are set.
+ *
+ * Every field here is classified 'forward' in RUN_OPTION_FORWARDING
+ * (remote-cmd.ts) — keep the two in lockstep; run-forwarding.test.ts asserts
+ * the table side.
  */
 export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   const args = ['run', opts.agent, opts.prompt, '--quiet'];
@@ -242,6 +273,24 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   if (opts.name) args.push('--name', opts.name);
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
+  // 'auto' is the remote default — forwarding it would only add noise.
+  if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
+  for (const kv of opts.env ?? []) args.push('--env', kv);
+  for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
+  if (opts.timeout) args.push('--timeout', opts.timeout);
+  if (opts.strategy) args.push('--strategy', opts.strategy);
+  if (opts.balanced) args.push('--balanced');
+  if (opts.fallback) args.push('--fallback', opts.fallback);
+  if (opts.loop) args.push('--loop');
+  if (opts.maxIterations) args.push('--max-iterations', opts.maxIterations);
+  if (opts.budget) args.push('--budget', opts.budget);
+  if (opts.until) args.push('--until', opts.until);
+  if (opts.interval) args.push('--interval', opts.interval);
+  if (opts.json) args.push('--json');
+  if (opts.verbose) args.push('--verbose');
+  if (opts.yes) args.push('--yes');
+  if (opts.autoSecrets === false) args.push('--no-auto-secrets');
+  if (opts.passthroughArgs && opts.passthroughArgs.length > 0) args.push('--', ...opts.passthroughArgs);
   return args;
 }
 
@@ -259,6 +308,13 @@ export interface InteractiveDispatchOptions {
   raw?: boolean;
   /** Forward `--interactive` to the remote so a prompt-bearing run still starts the TUI. */
   forceInteractive?: boolean;
+  effort?: string;
+  env?: string[];
+  addDir?: string[];
+  strategy?: string;
+  balanced?: boolean;
+  fallback?: string;
+  verbose?: boolean;
 }
 
 /**
@@ -277,6 +333,13 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
   if (opts.name) args.push('--name', opts.name);
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
+  if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
+  for (const kv of opts.env ?? []) args.push('--env', kv);
+  for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
+  if (opts.strategy) args.push('--strategy', opts.strategy);
+  if (opts.balanced) args.push('--balanced');
+  if (opts.fallback) args.push('--fallback', opts.fallback);
+  if (opts.verbose) args.push('--verbose');
   if (opts.raw) args.push('--raw');
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) {
     args.push('--', ...opts.passthroughArgs);
