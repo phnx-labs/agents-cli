@@ -1088,6 +1088,60 @@ async function antigravityKeychainSignedIn(): Promise<boolean> {
   return cachedAgyKeychainSignedIn;
 }
 
+/**
+ * OpenCode (sst/opencode) stores provider credentials in a single JSON file at
+ * `$XDG_DATA_HOME/opencode/auth.json`, defaulting to
+ * `~/.local/share/opencode/auth.json` on EVERY platform — its `xdg-basedir`
+ * dependency does not special-case macOS, so there is no
+ * `~/Library/Application Support` variant. The path is account-global (not
+ * per-version), matching how `session/discover.ts` already resolves
+ * `~/.local/share/opencode/opencode.db`.
+ *
+ * Resolution order, first existing wins:
+ *   1. `<base>/.local/share/opencode/auth.json` — the passed per-version home.
+ *      This is primarily a test hook (suites write a hermetic auth file under a
+ *      temp home) but also covers any relocated install.
+ *   2. `$XDG_DATA_HOME/opencode/auth.json` — an explicit XDG override, exactly
+ *      what OpenCode itself honours.
+ *   3. `<realHome>/.local/share/opencode/auth.json` — the active default, under
+ *      `AGENTS_REAL_HOME` or `os.homedir()`, so every installed version reflects
+ *      the one account-global login (same fallback shape as
+ *      resolveAccountCredentialPath).
+ * Returns the first existing path, or null. Never throws.
+ */
+function resolveOpenCodeAuthPath(base: string): string | null {
+  const candidates = [path.join(base, '.local', 'share', 'opencode', 'auth.json')];
+  const xdgData = process.env.XDG_DATA_HOME;
+  if (xdgData) candidates.push(path.join(xdgData, 'opencode', 'auth.json'));
+  const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
+  candidates.push(path.join(realHome, '.local', 'share', 'opencode', 'auth.json'));
+  for (const candidate of candidates) {
+    try { if (fs.existsSync(candidate)) return candidate; } catch { /* unreadable */ }
+  }
+  return null;
+}
+
+/**
+ * Validate one OpenCode auth.json entry against its discriminated union
+ * (`type: 'oauth' | 'api' | 'wellknown'`) and confirm the credential actually
+ * carries its required secret field(s) non-empty. This guards against a
+ * corrupt/half-written entry reading as signed-in — the same "must have a real
+ * credential" floor grok/antigravity apply. We only INSPECT the shape here; the
+ * secret values (`access`/`refresh`/`key`/`token`) are never read out or
+ * surfaced anywhere.
+ */
+function isValidOpenCodeCredential(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const cred = value as Record<string, unknown>;
+  const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+  switch (cred.type) {
+    case 'oauth': return nonEmpty(cred.access) || nonEmpty(cred.refresh);
+    case 'api': return nonEmpty(cred.key);
+    case 'wellknown': return nonEmpty(cred.key) && nonEmpty(cred.token);
+    default: return false;
+  }
+}
+
 export async function getAccountInfo(
   agentId: AgentId,
   home?: string
@@ -1319,6 +1373,31 @@ export async function getAccountInfo(
         const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
         if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
+      }
+      case 'opencode': {
+        // OpenCode's auth.json is a record keyed by provider id ->
+        // { type: 'oauth'|'api'|'wellknown', ...secret fields }. There is no
+        // email/identity claim to surface, so — like antigravity/kimi — we
+        // report signed-in state plus the NON-SECRET provider metadata (which
+        // provider ids hold a valid credential) and never read the tokens/keys
+        // themselves. The user's complaint was the row read "not signed in"
+        // despite a live login; a valid provider entry now shows e.g.
+        // "id:muse-spark" so they can see exactly which provider is configured.
+        const authPath = resolveOpenCodeAuthPath(base);
+        if (!authPath) return { ...empty, lastActive };
+        const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
+        if (!data || typeof data !== 'object') return { ...empty, lastActive };
+        const providers = Object.entries(data as Record<string, unknown>)
+          .filter(([, cred]) => isValidOpenCodeCredential(cred))
+          .map(([id]) => id)
+          .sort();
+        if (providers.length === 0) return { ...empty, lastActive };
+        // Provider ids are config keys (e.g. "anthropic", "muse-spark"), not
+        // secrets. Join them into a stable, human-readable account label +
+        // identity key for usage dedup.
+        const accountId = providers.join('+');
+        const accountKey = buildIdentityKey(agentId, [['providers', accountId]]);
+        return { ...empty, signedIn: true, accountId, accountKey, lastActive };
       }
       default:
         return { ...empty, lastActive };

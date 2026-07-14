@@ -512,6 +512,122 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
   });
 });
 
+describe('getAccountInfo — OpenCode provider credentials', () => {
+  // OpenCode stores its login at $XDG_DATA_HOME/opencode/auth.json (defaulting
+  // to ~/.local/share/opencode/auth.json on every platform). getAccountInfo
+  // checks the passed per-version home first, then $XDG_DATA_HOME, then the
+  // active real home. Pin XDG_DATA_HOME and AGENTS_REAL_HOME at fresh empty dirs
+  // so assertions can't leak into (or false-positive from) the developer's real
+  // OpenCode login, and so "signed out" is hermetic.
+  let prevXdg: string | undefined;
+  let prevRealHome: string | undefined;
+  beforeEach(() => {
+    prevXdg = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = makeTempDir();
+    prevRealHome = process.env.AGENTS_REAL_HOME;
+    process.env.AGENTS_REAL_HOME = makeTempDir();
+  });
+  afterEach(() => {
+    if (prevXdg === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prevXdg;
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+  });
+
+  function writeOpenCodeAuth(home: string, auth: Record<string, unknown>): void {
+    const dir = path.join(home, '.local', 'share', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify(auth), 'utf-8');
+  }
+
+  it('marks OpenCode signed in and surfaces the provider id for an api credential', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { 'muse-spark': { type: 'api', key: 'sk-secret-value' } });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    // Non-secret provider id is surfaced; the secret key never is.
+    expect(info.accountId).toBe('muse-spark');
+    expect(info.accountKey).toBe('opencode:providers=muse-spark');
+    expect(info.email).toBeNull();
+    expect(JSON.stringify(info)).not.toContain('sk-secret-value');
+  });
+
+  it('detects oauth credentials and joins multiple providers into a stable sorted key', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {
+      openai: { type: 'oauth', access: 'at', refresh: 'rt', expires: 0 },
+      anthropic: { type: 'api', key: 'sk-ant' },
+    });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    // Providers are sorted so the key is stable regardless of file order.
+    expect(info.accountId).toBe('anthropic+openai');
+    expect(info.accountKey).toBe('opencode:providers=anthropic+openai');
+  });
+
+  it('detects a wellknown credential requiring both key and token', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { github: { type: 'wellknown', key: 'k', token: 't' } });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.accountId).toBe('github');
+  });
+
+  it('resolves auth.json under $XDG_DATA_HOME when the per-version home has none', async () => {
+    // No auth under the passed home; the login lives at $XDG_DATA_HOME/opencode.
+    const xdg = process.env.XDG_DATA_HOME!;
+    fs.mkdirSync(path.join(xdg, 'opencode'), { recursive: true });
+    fs.writeFileSync(
+      path.join(xdg, 'opencode', 'auth.json'),
+      JSON.stringify({ anthropic: { type: 'api', key: 'sk-xdg' } }),
+      'utf-8'
+    );
+
+    const info = await getAccountInfo('opencode', makeTempDir());
+    expect(info.signedIn).toBe(true);
+    expect(info.accountId).toBe('anthropic');
+  });
+
+  it('treats OpenCode as signed out when auth.json is missing', async () => {
+    const info = await getAccountInfo('opencode', makeTempDir());
+    expect(info.signedIn).toBe(false);
+    expect(info.accountId).toBeNull();
+  });
+
+  it('treats OpenCode as signed out when auth.json holds an empty object', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {});
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(false);
+  });
+
+  it('ignores corrupt/incomplete entries that carry no real credential', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {
+      // Missing key -> not signed in via this entry.
+      broken: { type: 'api' },
+      // Empty-string secret -> not a real credential.
+      blank: { type: 'oauth', access: '', refresh: '' },
+      // Unknown type -> ignored.
+      weird: { type: 'mystery', key: 'x' },
+    });
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(false);
+  });
+
+  it('does not throw and reads signed out when auth.json is malformed JSON', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.local', 'share', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), '{ not valid json', 'utf-8');
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(false);
+  });
+});
+
 describe('agent deprecation warnings', () => {
   it('marks gemini deprecated by Google with a dated notice and antigravity successor', () => {
     const dep = AGENTS.gemini.deprecated;
