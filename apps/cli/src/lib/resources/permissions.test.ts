@@ -294,7 +294,7 @@ describe('PermissionsHandler', () => {
 
     it('returns correct path for OpenCode', () => {
       const result = PermissionsHandler.configPath!('opencode', '/test/home');
-      expect(result).toBe(path.join('/test/home', '.opencode', 'opencode.jsonc'));
+      expect(result).toBe(path.join('/test/home', '.config', 'opencode', 'opencode.jsonc'));
     });
 
     it('returns correct path for Kimi', () => {

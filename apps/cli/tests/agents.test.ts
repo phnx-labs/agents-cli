@@ -372,7 +372,7 @@ describe('opencode allowlist (permission in opencode.jsonc)', () => {
         false,
       );
       expect(r.success).toBe(true);
-      const dest = path.join(home, '.opencode', 'opencode.jsonc');
+      const dest = path.join(home, '.config', 'opencode', 'opencode.jsonc');
       expect(fs.existsSync(dest)).toBe(true);
       const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
       expect(cfg.permission.bash['git *']).toBe('allow');

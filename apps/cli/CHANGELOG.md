@@ -1,9 +1,8 @@
 # Changelog
 
 ## Unreleased
-
-
-- **Wire subagents support for OpenCode.** OpenCode loads agent markdown from `~/.config/opencode/agents/` with frontmatter `mode: subagent`. Flip `subagents: true`, add `transformSubagentForOpenCode`, wire writer/detector/list/diff/remove. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/subagents.ts`. (RUSH-1386)
+- **Wire Droid skills support (RUSH-1397).** Droid loads skills from `.factory/skills/` (since 0.26.0). Flip `skills: { since: '0.26.0' }`, register generic skills writer/detector. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/__tests__/capabilities.test.ts`.
+- **OpenCode permissions write to the loaded config path (RUSH-1623).** Global config is `~/.config/opencode/opencode.jsonc` (not `~/.opencode/`); project config is `opencode.jsonc` at the project root. Source: `apps/cli/src/lib/permissions.ts`, `apps/cli/src/lib/agents.ts`.
 ## 1.20.58
 
 - **Self-updating agent CLIs are represented as one live installation.** `agents view` no longer invents version-home rows for single-binary installers such as Droid, Grok, Cursor, Kiro, Goose, and Hermes; it reports the version returned by the installed binary and folds away stale per-version directories. `agents add <agent>@<version>` now installs or keeps that agent's current release instead of rejecting an unsupported pinned install. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/versions.ts`, `apps/cli/src/commands/{versions,view}.ts`. (RUSH-1321)
