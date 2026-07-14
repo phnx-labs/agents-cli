@@ -90,7 +90,13 @@ describe('inferProjectRoot', () => {
   let repo: string;
 
   beforeAll(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'proot-'));
+    // Canonicalize the temp dir so it matches the long real path git — and thus
+    // inferProjectRoot — resolves to. realpathSync.native resolves BOTH the macOS
+    // /var → /private/var symlink AND Windows 8.3 short names (CI runners hand back
+    // os.tmpdir() as C:\Users\RUNNER~1\..., which would never fold under the
+    // long-form home dir). Without this the home-relative comparison mismatches on
+    // Windows (short vs long) even though inferProjectRoot is correct.
+    tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'proot-')));
     repo = path.join(tmp, 'my-repo');
     fs.mkdirSync(path.join(repo, 'sub', 'deep'), { recursive: true });
     const git = (args: string[]) =>
