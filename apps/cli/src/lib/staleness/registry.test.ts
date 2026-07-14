@@ -101,11 +101,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.gemini).toBeDefined();
   });
 
-  it('antigravity has subagents writers + detectors', () => {
+  it('antigravity has subagents + workflows writers + detectors', () => {
     expect(WRITERS.subagents.antigravity).toBeDefined();
     expect(DETECTORS.subagents.antigravity).toBeDefined();
-    expect(WRITERS.workflows.antigravity).toBeUndefined();
-    expect(DETECTORS.workflows.antigravity).toBeUndefined();
+    expect(WRITERS.workflows.antigravity).toBeDefined();
+    expect(DETECTORS.workflows.antigravity).toBeDefined();
   });
 
   it('kimi has a workflows writer + detector', () => {

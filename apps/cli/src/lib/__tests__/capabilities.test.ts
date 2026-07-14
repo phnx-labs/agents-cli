@@ -359,12 +359,18 @@ describe('antigravity subagents version gate', () => {
 });
 
 describe('workflow capability gates', () => {
-  it('includes Claude, Goose, and Kimi for version-home workflow sync', () => {
+  it('includes Antigravity, Claude, Goose, and Kimi for workflow sync', () => {
     expect(supports('claude', 'workflows')).toEqual({ ok: true });
-    expect(supports('antigravity', 'workflows')).toEqual({ ok: false, reason: 'unsupported' });
+    expect(supports('antigravity', 'workflows')).toEqual({ ok: true });
     expect(supports('goose', 'workflows')).toEqual({ ok: true });
     expect(supports('kimi', 'workflows')).toEqual({ ok: true });
-    expect(capableAgents('workflows').sort()).toEqual(['claude', 'goose', 'kimi']);
+    expect(capableAgents('workflows').sort()).toEqual(['antigravity', 'claude', 'goose', 'kimi']);
+  });
+
+  it('gates Antigravity workflows at >= 1.0.6', () => {
+    expect(supports('antigravity', 'workflows', '1.0.5')).toEqual({ ok: false, reason: 'too_old', need: '>= 1.0.6' });
+    expect(supports('antigravity', 'workflows', '1.0.6')).toEqual({ ok: true });
+    expect(supports('antigravity', 'workflows', '1.1.0')).toEqual({ ok: true });
   });
 });
 
