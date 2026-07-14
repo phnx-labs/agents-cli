@@ -32,7 +32,7 @@ import { latestSessionFileForCwd } from './db.js';
 import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { computeTokPerSec } from './throughput.js';
-import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
 import type { SessionAttachment } from './types.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { mapBounded } from '../concurrency.js';
@@ -86,6 +86,13 @@ export interface ActiveSession {
    * says whether it is still pending.
    */
   plan?: string;
+  /**
+   * Live plan progress from the most recent `TodoWrite` (RUSH-1380): the checklist
+   * items + a done/total tally + the current step. The Factory Floor renders this
+   * as an N/M pill + checklist for every session — including remote and
+   * device-dispatched agents that have no local tool-call stream to parse.
+   */
+  todos?: TodoProgress;
   /** Last few assistant turns (most-recent last), for at-a-glance context in the UI. */
   tail?: string[];
   /** PR opened during the session. */
@@ -407,6 +414,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     awaitingReason: state.awaitingReason,
     question: state.question,
     plan: state.plan,
+    todos: state.todos,
     tail: state.tail,
     // Prefer the live preview (latest turn); keep the first-prompt topic as a fallback.
     preview: state.preview ?? base.preview,

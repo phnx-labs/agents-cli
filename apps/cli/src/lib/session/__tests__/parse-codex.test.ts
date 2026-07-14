@@ -102,6 +102,28 @@ describe('summarizeToolUse Codex additions', () => {
   test('WebSearch summarizes with its query', () => {
     expect(summarizeToolUse('WebSearch', { query: 'codex sessions' })).toBe('WebSearch: codex sessions');
   });
+
+  test('TodoWrite summarizes as progress + the current step (RUSH-1380)', () => {
+    expect(
+      summarizeToolUse('TodoWrite', {
+        todos: [
+          { content: 'Read the code', status: 'completed', activeForm: 'Reading the code' },
+          { content: 'Ship it', status: 'in_progress', activeForm: 'Shipping it' },
+          { content: 'Verify', status: 'pending' },
+        ],
+      }),
+    ).toBe('Plan 1/3: Shipping it');
+    // No in-progress item ⇒ bare progress fraction.
+    expect(
+      summarizeToolUse('TodoWrite', {
+        todos: [
+          { content: 'a', status: 'completed' },
+          { content: 'b', status: 'completed' },
+        ],
+      }),
+    ).toBe('Plan: 2/2 done');
+    expect(summarizeToolUse('TodoWrite', { todos: [] })).toBe('Plan: 0 steps');
+  });
 });
 
 describe('parseCodexContent update_plan (function_call)', () => {

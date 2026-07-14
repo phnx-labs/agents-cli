@@ -12,6 +12,7 @@ import {
   isTicketCreateTool,
   extractCreatedTicket,
   structuredQuestionFromAsk,
+  extractTodoProgress,
 } from './state.js';
 
 const now = Date.now();
@@ -360,5 +361,88 @@ describe('inferSessionState — composed', () => {
     expect(s.attachments).toEqual([
       { path: '/home/u/.agents/.history/attachments/shot.png', name: 'shot.png', mediaType: 'image/png', sizeBytes: 4096 },
     ]);
+  });
+});
+
+describe('extractTodoProgress (RUSH-1380)', () => {
+  it('tallies done/total and surfaces the in-progress activeForm', () => {
+    const p = extractTodoProgress({
+      todos: [
+        { content: 'Read the code', status: 'completed', activeForm: 'Reading the code' },
+        { content: 'Ship it', status: 'in_progress', activeForm: 'Shipping it' },
+        { content: 'Verify', status: 'pending', activeForm: 'Verifying' },
+      ],
+    });
+    expect(p?.done).toBe(1);
+    expect(p?.total).toBe(3);
+    expect(p?.activeForm).toBe('Shipping it');
+    expect(p?.items).toHaveLength(3);
+  });
+
+  it('falls back to content when the in-progress item has no activeForm', () => {
+    const p = extractTodoProgress({
+      todos: [
+        { content: 'Done thing', status: 'completed' },
+        { content: 'Current thing', status: 'in_progress' },
+      ],
+    });
+    expect(p?.activeForm).toBe('Current thing');
+  });
+
+  it('uses activeForm as content when content is missing, defaults unknown status to pending', () => {
+    const p = extractTodoProgress({
+      todos: [{ activeForm: 'Migrating store', status: 'weird' }],
+    });
+    expect(p?.items[0]).toEqual({ content: 'Migrating store', status: 'pending', activeForm: 'Migrating store' });
+    expect(p?.done).toBe(0);
+    expect(p?.total).toBe(1);
+    expect(p?.activeForm).toBeUndefined(); // nothing in_progress
+  });
+
+  it('returns undefined for empty, missing, or contentless lists', () => {
+    expect(extractTodoProgress(undefined)).toBeUndefined();
+    expect(extractTodoProgress({})).toBeUndefined();
+    expect(extractTodoProgress({ todos: [] })).toBeUndefined();
+    expect(extractTodoProgress({ todos: [{ status: 'pending' }] })).toBeUndefined();
+  });
+
+  it('inferActivity attaches todos from the latest TodoWrite, even mid-work', () => {
+    const s = inferActivity(
+      [
+        msg('user', 'do the thing'),
+        tool('TodoWrite', {
+          todos: [
+            { content: 'Step one', status: 'completed', activeForm: 'Doing step one' },
+            { content: 'Step two', status: 'in_progress', activeForm: 'Doing step two' },
+          ],
+        }),
+        tool('Bash', { command: 'bun test' }),
+      ],
+      { pidAlive: true, mtimeMs: fresh },
+    );
+    expect(s.activity).toBe('working');            // latest event is Bash, still working
+    expect(s.todos?.done).toBe(1);                 // todos come from the earlier TodoWrite
+    expect(s.todos?.total).toBe(2);
+    expect(s.todos?.activeForm).toBe('Doing step two');
+  });
+
+  it('uses the LATEST TodoWrite when several were written', () => {
+    const s = inferActivity(
+      [
+        tool('TodoWrite', { todos: [{ content: 'a', status: 'pending' }] }),
+        tool('TodoWrite', { todos: [
+          { content: 'a', status: 'completed' },
+          { content: 'b', status: 'completed' },
+        ] }),
+      ],
+      { pidAlive: true, mtimeMs: fresh },
+    );
+    expect(s.todos?.done).toBe(2);
+    expect(s.todos?.total).toBe(2);
+  });
+
+  it('no TodoWrite ⇒ no todos field', () => {
+    const s = inferActivity([msg('user', 'hi'), tool('Bash', { command: 'ls' })], { pidAlive: true, mtimeMs: fresh });
+    expect(s.todos).toBeUndefined();
   });
 });
