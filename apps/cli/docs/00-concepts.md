@@ -135,7 +135,7 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 | Codex | >= 0.116.0 | yes | >= 0.138.0 | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | >= 0.117.0 | `AGENTS.md` | no |
 | Gemini † | >= 0.26.0 | yes | yes | yes | yes (.toml) | >= 0.8.0 | >= 0.36.0 | `GEMINI.md` | no |
 | Cursor | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
-| OpenCode | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| OpenCode | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Copilot | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
