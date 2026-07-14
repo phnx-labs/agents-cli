@@ -9,6 +9,7 @@ import {
   discoverPermissionsFromRepo,
   convertToClaudeFormat,
   convertToOpenCodeFormat,
+  convertToCursorFormat,
   convertToCodexFormat,
   convertToAntigravityFormat,
   convertToGrokFormat,
@@ -799,9 +800,43 @@ describe('applyPermissionsToVersion', () => {
       allow: ['Bash(git *)'],
     };
 
-    const result = applyPermissionsToVersion('cursor' as any, set, versionHome, true);
+    // amp has no allowlist writer path
+    const result = applyPermissionsToVersion('amp' as any, set, versionHome, true);
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not support permissions');
+  });
+
+  it('writes Cursor permissions to .cursor/cli-config.json (Bash→Shell)', () => {
+    const versionHome = join(testDir, 'cursor-write');
+    mkdirSync(versionHome, { recursive: true });
+
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Bash(git *)', 'Read(src/**)'],
+      deny: ['Bash(rm *)'],
+    };
+
+    const result = applyPermissionsToVersion('cursor' as any, set, versionHome, false);
+    expect(result.success).toBe(true);
+    const configPath = join(versionHome, '.cursor', 'cli-config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+    expect(config.permissions.allow).toContain('Shell(git *)');
+    expect(config.permissions.allow).toContain('Read(src/**)');
+    expect(config.permissions.deny).toContain('Shell(rm *)');
+  });
+
+  it('convertToCursorFormat maps Edit(...) to Write(...) for both allow and deny (Cursor has no Edit prefix)', () => {
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Edit(src/**)'],
+      deny: ['Edit(secrets/**)'],
+    };
+
+    const out = convertToCursorFormat(set);
+    expect(out.permissions.allow).toContain('Write(src/**)');
+    expect(out.permissions.allow).not.toContain('Edit(src/**)');
+    expect(out.permissions.deny).toContain('Write(secrets/**)');
+    expect(out.permissions.deny).not.toContain('Edit(secrets/**)');
   });
 
   it('writes Antigravity permissions to .gemini/antigravity-cli/settings.json', () => {

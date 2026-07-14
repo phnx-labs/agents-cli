@@ -34,6 +34,8 @@ import {
   bundleExists,
   bundleItemStore,
   bundlePolicy,
+  isLoaderOrInterpreterEnv,
+  isReservedEnvName,
   keychainRef,
   readBundle,
   writeBundle,
@@ -116,6 +118,12 @@ export interface ImportSyncedResult {
   skipped: number;
   /** Keys whose iCloud value could not be read (left in place, never purged). */
   missing: string[];
+  /**
+   * Keys the modern store refuses by policy (reserved env names like USER,
+   * loader/interpreter vars like DYLD_*) — the pre-cutover store accepted
+   * them. Left in iCloud, never purged: the iCloud item is the only copy.
+   */
+  unimportable: string[];
   purged: number;
 }
 
@@ -125,9 +133,12 @@ export interface ImportSyncedResult {
  * Values come from the synced secret items; the synced metadata item, when
  * present, contributes the description, literal vars, and non-keychain refs
  * (env:/file:/exec: refs carry no stored secret, so copying the ref preserves
- * them exactly). Existing local keys are skipped unless `force`. With `purge`,
- * only services whose value was successfully read are deleted from iCloud —
- * an unreadable item is never destroyed.
+ * them exactly). Existing local keys are skipped unless `force`. Keys the
+ * modern store refuses by policy (reserved / loader env names the pre-cutover
+ * store accepted) are reported as `unimportable` instead of aborting the whole
+ * bundle. With `purge`, only services whose value provably lives locally
+ * (imported now, or skipped-because-present) are deleted from iCloud — an
+ * unreadable or unimportable item is never destroyed.
  */
 export function importSyncedBundle(
   candidate: SyncedBundleCandidate,
@@ -169,9 +180,22 @@ export function importSyncedBundle(
   let added = 0;
   let skipped = 0;
   const missing: string[] = [];
+  const unimportable: string[] = [];
+  // Services whose value now provably lives in the local store — imported this
+  // run, or skipped because the local bundle already carries the key. Only
+  // these may be purged; a missing or unimportable key's iCloud item is its
+  // only copy and must survive.
+  const purgeable = new Set<string>();
+  const rejectedByPolicy = (key: string) => isLoaderOrInterpreterEnv(key) || isReservedEnvName(key);
 
   // Keys with a synced secret item: re-store the value device-locally.
   for (const key of candidate.keys) {
+    // The pre-cutover store accepted keys the modern one refuses (writeBundle
+    // throws) — skip them instead of aborting the whole bundle.
+    if (rejectedByPolicy(key)) {
+      unimportable.push(key);
+      continue;
+    }
     const value = values.get(secretsKeychainItem(candidate.name, key));
     if (value === undefined) {
       missing.push(key);
@@ -179,6 +203,7 @@ export function importSyncedBundle(
     }
     if (!opts.force && key in bundle.vars) {
       skipped++;
+      purgeable.add(secretsKeychainItem(candidate.name, key));
       continue;
     }
     if (opts.allPlaintext) {
@@ -187,6 +212,7 @@ export function importSyncedBundle(
       store.set(secretsKeychainItem(candidate.name, key), value);
       bundle.vars[key] = keychainRef(key);
     }
+    purgeable.add(secretsKeychainItem(candidate.name, key));
     added++;
   }
 
@@ -196,6 +222,10 @@ export function importSyncedBundle(
   for (const [key, raw] of Object.entries(metaVars)) {
     if (!ENV_KEY_PATTERN.test(key)) continue;
     if (candidate.keys.includes(key)) continue; // the secret item already covered it
+    if (rejectedByPolicy(key)) {
+      if (!unimportable.includes(key)) unimportable.push(key);
+      continue;
+    }
     let parsed: { literal: string } | { ref: SecretRef };
     try {
       parsed = parseBundleValue(raw);
@@ -215,14 +245,21 @@ export function importSyncedBundle(
   }
 
   writeBundle(bundle);
+  // The metadata item is only a projection of what was just written locally —
+  // safe to purge once writeBundle has succeeded, UNLESS it still names keys
+  // that never made it over (missing/unimportable): then it stays as the only
+  // record of them.
+  if (metaJson !== undefined && missing.length === 0 && unimportable.length === 0) {
+    purgeable.add(metaService);
+  }
 
   let purged = 0;
   if (opts.purge) {
     for (const svc of candidate.services) {
-      if (!values.has(svc)) continue; // never destroy an item we couldn't read
+      if (!purgeable.has(svc)) continue;
       if (deleteSyncedKeychainItem(svc)) purged++;
     }
   }
 
-  return { name: candidate.name, added, skipped, missing, purged };
+  return { name: candidate.name, added, skipped, missing, unimportable, purged };
 }

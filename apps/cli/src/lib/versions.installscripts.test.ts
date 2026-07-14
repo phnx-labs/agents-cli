@@ -29,34 +29,50 @@ const npmInstallCapture = vi.hoisted(() => ({ argv: undefined as string[] | unde
 const execCalls = vi.hoisted(() => ({ list: [] as Array<{ file: string; args: string[]; cwd?: string; shell?: boolean }> }));
 // Lets a test force the mocked postinstall to fail, exercising the best-effort path.
 const behavior = vi.hoisted(() => ({ failPostinstall: false }));
+// The version `npm view <pkg> version` returns — lets a test resolve `latest`.
+const npmView = vi.hoisted(() => ({ version: '2.1.187' }));
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
-  return {
-    ...actual,
-    execFile: vi.fn((file, args, options, callback) => {
-      const cb = typeof options === 'function' ? options : callback;
-      const opts = (typeof options === 'function' ? {} : options) ?? {};
-      const argv: string[] = Array.isArray(args) ? args : [];
-      if (file === 'npm' && argv[0] === 'install') {
-        npmInstallCapture.argv = argv;
-        if (cb) cb(null, 'mock npm install success', '');
-      } else if (file === 'npm' && argv[0] === '--version') {
-        if (cb) cb(null, '10.0.0', '');
-      } else {
-        // Postinstall command string (args=[], shell:true) or a binary --version
-        // probe. Record both; a postinstall is distinguished by shell === true.
-        execCalls.list.push({ file, args: argv, cwd: (opts as any).cwd, shell: (opts as any).shell });
-        const isPostinstall = (opts as any).shell === true && argv.length === 0;
-        if (isPostinstall && behavior.failPostinstall) {
-          if (cb) cb(new Error('mock postinstall failed'), '', 'boom');
-        } else if (cb) {
-          cb(null, '', '');
-        }
+  const { promisify } = await import('util');
+  const execFileMock = vi.fn((file, args, options, callback) => {
+    const cb = typeof options === 'function' ? options : callback;
+    const opts = (typeof options === 'function' ? {} : options) ?? {};
+    const argv: string[] = Array.isArray(args) ? args : [];
+    if (file === 'npm' && argv[0] === 'install') {
+      npmInstallCapture.argv = argv;
+      if (cb) cb(null, 'mock npm install success', '');
+    } else if (file === 'npm' && argv[0] === '--version') {
+      if (cb) cb(null, '10.0.0', '');
+    } else if (file === 'npm' && argv[0] === 'view') {
+      // `npm view <pkg> version` — getLatestNpmVersion resolves `latest` to a
+      // concrete version up front so the install never uses a shared `latest/`
+      // scratch dir.
+      if (cb) cb(null, `${npmView.version}\n`, '');
+    } else {
+      // Postinstall command string (args=[], shell:true) or a binary --version
+      // probe. Record both; a postinstall is distinguished by shell === true.
+      execCalls.list.push({ file, args: argv, cwd: (opts as any).cwd, shell: (opts as any).shell });
+      const isPostinstall = (opts as any).shell === true && argv.length === 0;
+      if (isPostinstall && behavior.failPostinstall) {
+        if (cb) cb(new Error('mock postinstall failed'), '', 'boom');
+      } else if (cb) {
+        cb(null, '', '');
       }
-      return undefined;
-    }),
-  };
+    }
+    return undefined;
+  });
+  // Real child_process.execFile carries a `util.promisify.custom` that resolves
+  // to `{ stdout, stderr }`. A bare vi.fn loses it, so `promisify(execFile)`
+  // would resolve to a single string and `const { stdout } = ...` would be
+  // undefined — breaking getLatestNpmVersion. Restore the faithful shape.
+  (execFileMock as any)[promisify.custom] = (file: string, args: string[], options: unknown) =>
+    new Promise((resolve, reject) => {
+      execFileMock(file, args, options as never, (err: Error | null, stdout: string, stderr: string) =>
+        err ? reject(err) : resolve({ stdout, stderr }),
+      );
+    });
+  return { ...actual, execFile: execFileMock };
 });
 
 beforeEach(() => {
@@ -111,6 +127,60 @@ describe('installVersion npm install argv', () => {
       expect(npmInstallCapture.argv).toContain('install');
       expect(npmInstallCapture.argv).toContain('--ignore-scripts');
     } finally {
+      process.env.HOME = originalHome;
+    }
+  });
+});
+
+describe('installVersion latest-alias resolution', () => {
+  it('resolves `latest` to a concrete version up front and installs a pinned spec (no shared `latest/` dir)', async () => {
+    const home = makeTempHome();
+    const originalHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      vi.resetModules();
+      npmView.version = '2.1.187';
+      const { installVersion } = await import('./versions.js');
+      // Stage the on-disk shape npm would leave — but under the CONCRETE version
+      // dir, since the fix installs straight into it (no post-install rename).
+      stageInstall(home, 'claude', '@anthropic-ai/claude-code', '2.1.187');
+
+      const result = await installVersion('claude', 'latest');
+
+      expect(result.success).toBe(true);
+      // The alias resolved to the concrete version, not the literal 'latest'.
+      expect(result.installedVersion).toBe('2.1.187');
+      // npm install ran with a PINNED spec, never the bare package name that the
+      // old (racy) code passed for `latest`.
+      expect(npmInstallCapture.argv).toContain('@anthropic-ai/claude-code@2.1.187');
+      expect(npmInstallCapture.argv).not.toContain('@anthropic-ai/claude-code');
+      // The install landed in the concrete dir; no literal `latest/` dir exists
+      // for a concurrent reconcile/install to race on.
+      const versionsRoot = path.join(home, '.agents', '.history', 'versions', 'claude');
+      expect(fs.existsSync(path.join(versionsRoot, '2.1.187'))).toBe(true);
+      expect(fs.existsSync(path.join(versionsRoot, 'latest'))).toBe(false);
+    } finally {
+      process.env.HOME = originalHome;
+    }
+  });
+
+  it('fails cleanly when npm cannot resolve `latest`', async () => {
+    const home = makeTempHome();
+    const originalHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      vi.resetModules();
+      npmView.version = '';
+      const { installVersion } = await import('./versions.js');
+      const result = await installVersion('claude', 'latest');
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/Could not resolve the latest/);
+      // Nothing was installed and no `latest/` dir was left behind.
+      expect(npmInstallCapture.argv).toBeUndefined();
+      const versionsRoot = path.join(home, '.agents', '.history', 'versions', 'claude');
+      expect(fs.existsSync(path.join(versionsRoot, 'latest'))).toBe(false);
+    } finally {
+      npmView.version = '2.1.187';
       process.env.HOME = originalHome;
     }
   });

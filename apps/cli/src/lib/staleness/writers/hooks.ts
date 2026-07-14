@@ -34,11 +34,13 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
         synced.push(hook);
       }
 
-      // Native hook registration in settings.json/hooks.json. Grok auto-
-      // discovers from ~/.grok/hooks/ so the file copy is sufficient. Copilot
-      // loads every *.json under ~/.copilot/hooks/ — registerHooksForCopilot
-      // writes the managed agents-cli-hooks.json there.
-      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'kiro' || agent === 'goose' || agent === 'cursor') {
+      // Native hook registration in settings.json/hooks.json. Grok is included
+      // so subrule-bundled guards (absolute paths outside the central hooks/
+      // copy set) get registered into ~/.grok/hooks/hooks.json via
+      // registerHooksForGrok — file copy alone only sees top-level available.hooks
+      // names (RUSH-1353). Copilot/Kiro/Goose load managed *.json under their
+      // hooks dirs the same way.
+      if (agent === 'claude' || agent === 'codex' || agent === 'gemini' || agent === 'antigravity' || agent === 'kimi' || agent === 'droid' || agent === 'copilot' || agent === 'kiro' || agent === 'goose' || agent === 'cursor' || agent === 'grok') {
         registerHooksToSettings(agent, versionHome);
       }
       return { synced };

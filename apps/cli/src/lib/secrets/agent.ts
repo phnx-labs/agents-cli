@@ -157,112 +157,65 @@ function brokerSpawn(): { cmd: string; args: string[] } {
   return cliSpawn(['secrets', '_agent-run']);
 }
 
-// ─── Persistent launchd service ──────────────────────────────────────────────
-// On a heavily-loaded machine a freshly-spawned broker (a full CLI cold start)
-// can't get scheduled enough CPU to finish booting and bind its socket — so the
-// on-demand model fails exactly when there are many agents (the case we care
-// about). The fix is to run the broker as a launchd user service: started once
-// with RunAtLoad + KeepAlive, it stays up, and every read just connects. The
-// cold start happens once (and launchd retries until it wins), never per-read.
+// ─── Legacy standalone launchd service (retired, #416 step 2) ────────────────
+// Earlier versions ran the broker as its own launchd user service
+// (com.phnx-labs.agents-secrets-agent, shipped in 1.20.20) so a heavily-loaded
+// machine couldn't starve an on-demand cold start. That role now belongs to the
+// always-on daemon, which hosts the broker socket-first (#416 step 1) — one
+// supervised backbone instead of a second service. The functions below no
+// longer INSTALL the standalone service; they only DETECT and RETIRE a plist
+// left by an older version so the daemon can take over the socket. The upgrade
+// migration (postinstall) and `ensureAgentRunning` both drive the retire path.
 
 const SERVICE_LABEL = 'com.phnx-labs.agents-secrets-agent';
 
-function servicePlistPath(): string {
-  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
+// LaunchAgents dir is relocatable for tests via AGENTS_SECRETS_LAUNCHAGENTS_DIR.
+// A relocated dir is NOT launchd-managed (launchd only bootstraps plists from
+// the real ~/Library/LaunchAgents), so retirement there is a pure file removal.
+function launchAgentsDir(): string {
+  return process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR || path.join(os.homedir(), 'Library', 'LaunchAgents');
 }
 
-/** True if the launchd plist for the persistent broker is installed. */
+function servicePlistPath(): string {
+  return path.join(launchAgentsDir(), `${SERVICE_LABEL}.plist`);
+}
+
+/** True if a legacy standalone-broker launchd plist is still installed. */
 export function secretsAgentServiceInstalled(): boolean {
   return onDarwin() && fs.existsSync(servicePlistPath());
 }
 
-function generateServicePlist(): string {
-  const { cmd, args } = cliSpawn(['secrets', '_agent-run', '--service']);
-  const progArgs = [cmd, ...args]
-    .map((a) => `    <string>${a.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</string>`)
-    .join('\n');
-  const logPath = path.join(agentDir(), 'service.log');
-  const home = os.homedir();
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${SERVICE_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-${progArgs}
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-  <key>ProcessType</key>
-  <string>Interactive</string>
-  <key>StandardOutPath</key>
-  <string>${logPath}</string>
-  <key>StandardErrorPath</key>
-  <string>${logPath}</string>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:${home}/.bun/bin</string>
-  </dict>
-</dict>
-</plist>`;
-}
-
 /**
- * Install + start the persistent broker as a launchd user service (idempotent).
- * Writes the plist, bootstraps it into the GUI domain, and waits for the socket.
- * `ProcessType: Interactive` asks launchd to schedule it at foreground priority
- * so it can boot even when the machine is loaded. Returns true once reachable.
+ * Retire the legacy standalone secrets-agent launchd service: bootout the job
+ * (falling back to the legacy `unload`) and remove its plist so the always-on
+ * daemon owns the broker socket. Idempotent and best-effort — a no-op when no
+ * legacy plist is present. Does NOT wipe held bundles: the booted-out process's
+ * memory is gone anyway, and the daemon-hosted broker starts fresh.
  */
-export async function installSecretsAgentService(timeoutMs = 30000): Promise<boolean> {
-  if (!onDarwin()) return false;
-  const plist = servicePlistPath();
-  fs.mkdirSync(path.dirname(plist), { recursive: true });
-  fs.writeFileSync(plist, generateServicePlist());
-  const uid = process.getuid?.() ?? 0;
-  // bootstrap is the modern API; fall back to legacy load. Both idempotent-ish.
-  try {
-    execFileSync('launchctl', ['bootstrap', `gui/${uid}`, plist], { stdio: ['ignore', 'ignore', 'ignore'] });
-  } catch {
-    try { execFileSync('launchctl', ['load', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* may already be loaded */ }
-  }
-  // kickstart to force an immediate start even if already bootstrapped.
-  try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* best effort */ }
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if ((await agentPing()).reachable) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return false;
-}
-
-/**
- * Kickstart the already-installed persistent broker so launchd relaunches it
- * onto the current on-disk code. Used by postinstall heal-on-upgrade. No-op if
- * the service isn't installed; never rewrites the plist or waits, so it's safe
- * and fast to call from an installer.
- */
-export function kickstartSecretsAgentService(): void {
+export function retireLegacySecretsAgentService(): void {
   if (!onDarwin() || !secretsAgentServiceInstalled()) return;
-  const uid = process.getuid?.() ?? 0;
-  try {
-    execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] });
-  } catch { /* best effort */ }
+  const plist = servicePlistPath();
+  // Only the real LaunchAgents dir is launchd-managed; a relocated (test) dir
+  // has no bootstrapped job, so skip launchctl and just remove the plist.
+  if (!process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR) {
+    const uid = process.getuid?.() ?? 0;
+    try { execFileSync('launchctl', ['bootout', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
+    catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
+  }
+  try { fs.unlinkSync(plist); } catch { /* already gone */ }
 }
 
-/** Stop + remove the persistent broker service, and wipe whatever it held. */
+/**
+ * Stop the persistent broker for `agents secrets stop`: wipe whatever the broker
+ * holds (forces Touch ID again on the next read), then retire any legacy
+ * standalone service. The daemon-hosted broker itself is left running — it is
+ * the always-on backbone, and stopping it would take down unrelated background
+ * work (routines, browser IPC, session-sync).
+ */
 export async function uninstallSecretsAgentService(): Promise<void> {
   if (!onDarwin()) return;
-  await agentLock(); // wipe the in-memory store before tearing down
-  const plist = servicePlistPath();
-  const uid = process.getuid?.() ?? 0;
-  try { execFileSync('launchctl', ['bootout', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
-  catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
-  try { fs.unlinkSync(plist); } catch { /* already gone */ }
+  await agentLock(); // wipe the in-memory store before retiring the legacy service
+  retireLegacySecretsAgentService();
 }
 
 // ─── Wire protocol ───────────────────────────────────────────────────────────
@@ -361,13 +314,52 @@ export function shouldWipeOnWatchEvent(chunk: string): boolean {
   return /\bSLEEP\b/.test(chunk);
 }
 
+type BrokerConnectionHandler = (conn: net.Socket) => void;
+
+/**
+ * Bind the shared broker socket without stealing it from another live owner.
+ * Both the standalone service and daemon-hosted broker use this single path so
+ * either startup order is safe: a reachable owner wins, while an unreachable
+ * stale socket is reclaimed once.
+ */
+async function bindBrokerSocket(
+  sock: string,
+  onConnection: BrokerConnectionHandler,
+): Promise<net.Server | null> {
+  const listenOnce = (): Promise<net.Server | 'inuse'> =>
+    new Promise((resolve, reject) => {
+      const server = net.createServer(onConnection);
+      const onError = (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') resolve('inuse');
+        else reject(err);
+      };
+      server.once('error', onError);
+      server.listen(sock, () => {
+        try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
+        resolve(server);
+      });
+    });
+
+  let bound = await listenOnce();
+  if (bound !== 'inuse') return bound;
+  if ((await agentPing()).reachable) return null;
+
+  try { fs.unlinkSync(sock); } catch { /* disappeared between probe and reclaim */ }
+  bound = await listenOnce();
+  if (bound !== 'inuse') return bound;
+  if ((await agentPing()).reachable) return null;
+  throw new Error(`Secrets broker socket is in use but unreachable: ${sock}`);
+}
+
 /**
  * Run the broker in the foreground. Spawned detached by ensureAgentRunning via
  * `agents secrets _agent-run`. Holds the store in memory, serves the socket,
  * sweeps expired entries, wipes on sleep, and self-exits when idle.
  */
-export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise<void> {
-  if (!onDarwin()) return; // nothing to broker without biometry prompts
+export async function runSecretsAgent(
+  opts: { service?: boolean } = {},
+): Promise<{ close(): void } | null> {
+  if (!onDarwin()) return null; // nothing to broker without biometry prompts
   // When launchd keeps us alive as a persistent service, never idle-exit:
   // exiting would just make launchd cold-start us again, reintroducing the
   // startup-under-load fragility the service exists to avoid.
@@ -383,7 +375,7 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   } catch (err: any) {
     if (err?.code === 'EEXIST') {
       const holder = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-      if (!isNaN(holder) && isAlive(holder)) return; // another broker is live
+      if (!isNaN(holder) && isAlive(holder)) return null; // another broker is live
       // Stale pid — reclaim it.
       try { fs.unlinkSync(pidFile); } catch { /* race; fall through */ }
       fs.writeFileSync(pidFile, String(process.pid));
@@ -397,7 +389,40 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   // the process once it's been empty for IDLE_EXIT_MS so no idle broker lingers.
   let emptySince = Date.now();
   const sock = socketPath();
-  try { fs.unlinkSync(sock); } catch { /* no stale socket */ }
+
+  const releasePid = () => {
+    try {
+      if (parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) === process.pid) {
+        fs.unlinkSync(pidFile);
+      }
+    } catch { /* gone or no longer ours */ }
+  };
+
+  // Register lifecycle handlers before socket arbitration. A persistent
+  // launchd service may spend its whole lifetime as the standby loser, and a
+  // kickstart/bootout during that wait must still release its pid-file lease.
+  let standbyTimer: NodeJS.Timeout | null = null;
+  let cleanupActive: (() => void) | null = null;
+  let shuttingDown = false;
+  const onSigterm = () => shutdown(0);
+  const onSigint = () => shutdown(0);
+  const detachSignals = () => {
+    process.off('SIGTERM', onSigterm);
+    process.off('SIGINT', onSigint);
+  };
+  const shutdown = (code: number) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (standbyTimer) {
+      clearTimeout(standbyTimer);
+      standbyTimer = null;
+    }
+    if (cleanupActive) cleanupActive();
+    else releasePid();
+    process.exit(code);
+  };
+  process.on('SIGTERM', onSigterm);
+  process.on('SIGINT', onSigint);
 
   // Capture the version of the code we're running so the sweep can detect when
   // an in-place upgrade has landed and self-heal onto it. getCliVersion caches
@@ -436,7 +461,7 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
     return resp;
   };
 
-  const server = net.createServer((conn) => {
+  const onConnection = (conn: net.Socket) => {
     conn.setEncoding('utf-8');
     let buf = '';
     conn.on('data', (chunk) => {
@@ -456,33 +481,48 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
       }
     });
     conn.on('error', () => { /* client vanished mid-request; ignore */ });
-  });
+  };
+
+  let server: net.Server | null = null;
+  do {
+    try {
+      server = await bindBrokerSocket(sock, onConnection);
+    } catch (err) {
+      detachSignals();
+      releasePid();
+      throw err;
+    }
+    if (!server && persistent) {
+      // launchd KeepAlive would immediately relaunch a persistent loser if it
+      // returned here. Stay quiescent instead, then claim the socket if the
+      // daemon-hosted owner goes away. The pid file keeps launchd/manual starts
+      // from creating additional waiters while this process is standing by.
+      do {
+        await new Promise<void>((resolve) => {
+          standbyTimer = setTimeout(() => {
+            standbyTimer = null;
+            resolve();
+          }, 1000);
+        });
+      } while ((await agentPing()).reachable);
+    }
+  } while (!server && persistent);
+  if (!server) {
+    detachSignals();
+    releasePid();
+    return null;
+  }
 
   let watcher: ChildProcess | null = null;
   let sweepTimer: NodeJS.Timeout | null = null;
-  let shuttingDown = false;
-  const shutdown = (code: number) => {
-    if (shuttingDown) return;
-    shuttingDown = true;
+  cleanupActive = () => {
     store.clear();
     if (sweepTimer) clearInterval(sweepTimer);
     try { watcher?.kill(); } catch { /* already gone */ }
     try { server.close(); } catch { /* not listening */ }
     try { fs.unlinkSync(sock); } catch { /* gone */ }
-    try { if (parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10) === process.pid) fs.unlinkSync(pidFile); } catch { /* gone */ }
-    process.exit(code);
+    releasePid();
   };
-
-  process.on('SIGTERM', () => shutdown(0));
-  process.on('SIGINT', () => shutdown(0));
-
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(sock, () => {
-      try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
-      resolve();
-    });
-  });
 
   sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
 
@@ -507,6 +547,99 @@ export async function runSecretsAgent(opts: { service?: boolean } = {}): Promise
   } catch {
     watcher = null;
   }
+
+  return {
+    close() {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      detachSignals();
+      cleanupActive?.();
+    },
+  };
+}
+
+/**
+ * Host the secrets broker inside the always-on daemon (#416).
+ *
+ * Serves the SAME socket and wire protocol as the standalone `runSecretsAgent`
+ * — so every existing client (`agentGetSync`, `agentPing`, `agentAutoLoadSync`)
+ * keeps working unchanged, no PROTOCOL_VERSION bump — but it is daemon-safe:
+ *
+ *   - no pid-file single-instance guard (the daemon owns the instance);
+ *   - no `process.exit`, no SIGTERM/SIGINT handlers, no self-heal/idle-exit
+ *     (those would kill the daemon — the daemon is the always-on backbone and
+ *     manages its own version/lifecycle). The sweep only TTL-evicts.
+ *
+ * The caller (`runDaemon`) normally invokes this only when no broker answers
+ * its initial ping. Binding still arbitrates ownership through the same shared
+ * path as the standalone service: a live owner wins, while only an unreachable
+ * stale socket is reclaimed. Returns a handle the daemon closes on shutdown,
+ * or null off-darwin (nothing to broker without biometry).
+ */
+export async function startHostedBroker(): Promise<{ close(): void } | null> {
+  if (!onDarwin()) return null;
+
+  const store = new Map<string, StoredBundle>();
+  const sock = socketPath(); // agentDir() creates the 0700 dir as a side effect
+
+  const handle = (req: Request): Response => handleAgentRequest(store, req);
+  const onConn = (conn: net.Socket) => {
+    conn.setEncoding('utf-8');
+    let buf = '';
+    conn.on('data', (chunk) => {
+      buf += chunk;
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        let resp: Response;
+        try {
+          resp = handle(JSON.parse(line) as Request);
+        } catch (err) {
+          resp = { ok: false, error: (err as Error).message };
+        }
+        conn.write(JSON.stringify(resp) + '\n');
+      }
+    });
+    conn.on('error', () => { /* client vanished mid-request; ignore */ });
+  };
+
+  const server = await bindBrokerSocket(sock, onConn);
+  if (!server) return null;
+
+  // TTL eviction ONLY. Unlike the standalone broker's sweep, there is no
+  // self-heal-exit or idle-exit here — the daemon is always-on and owns the
+  // upgrade/lifecycle path; a broker that called process.exit() would take the
+  // whole daemon down with it.
+  const sweepTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [name, e] of store) if (now >= e.expiresAt) store.delete(name);
+  }, SWEEP_INTERVAL_MS);
+
+  // Auto-lock on sleep, same as the standalone broker: the signed helper emits
+  // LOCK/SLEEP lines; wipe the in-memory store on a wipe-worthy event.
+  let watcher: ChildProcess | null = null;
+  try {
+    watcher = spawn(getKeychainHelperPath(), ['watch-lock'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    watcher.stdout?.setEncoding('utf-8');
+    watcher.stdout?.on('data', (chunk: string) => {
+      if (shouldWipeOnWatchEvent(chunk)) store.clear();
+    });
+    watcher.on('error', () => { watcher = null; });
+  } catch {
+    watcher = null;
+  }
+
+  return {
+    close() {
+      store.clear();
+      clearInterval(sweepTimer);
+      try { watcher?.kill(); } catch { /* already gone */ }
+      try { server.close(); } catch { /* not listening */ }
+      try { fs.unlinkSync(sock); } catch { /* gone */ }
+    },
+  };
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
@@ -773,7 +906,7 @@ export async function agentStatus(): Promise<AgentStatusEntry[]> {
 
 /** Ping result: whether a broker is reachable + speaking our protocol, and the
  * version of the code it's running (for staleness detection). */
-async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
+export async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
   if (!agentSocketExists()) return { reachable: false };
   const r = await request({ cmd: 'ping' });
   if (r?.ok === true && r.cmd === 'ping' && r.version === PROTOCOL_VERSION) {
@@ -786,11 +919,12 @@ async function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }>
  * Ensure a broker is running and reachable. Returns true once the socket answers
  * a ping. macOS only.
  *
- * Prefers the persistent launchd service: if it isn't installed we install it
- * (which makes the broker survive for the whole login session, so subsequent
- * reads never cold-start); if it's installed but unreachable we kickstart it.
- * Only when the service path can't be used do we fall back to a one-off detached
- * broker — that's the model that gets starved under heavy load, so it's last.
+ * Prefers the always-on daemon, which hosts the broker socket (#416): retire any
+ * legacy standalone launchd service so the daemon owns the socket, then bring the
+ * daemon up (Path 0) — one supervised backbone that survives the whole login
+ * session, so subsequent reads never cold-start. Only when the daemon can't be
+ * used do we fall back to a one-off detached broker (Path 1) — the model that
+ * gets starved under heavy load, so it's last.
  */
 export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   if (!onDarwin()) return false;
@@ -808,20 +942,29 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
     await teardownStaleBroker();
   }
 
-  // Path 1: the persistent service. installSecretsAgentService is idempotent and
-  // waits for the socket; for an already-installed service we kickstart and wait.
-  try {
-    if (!secretsAgentServiceInstalled()) {
-      if (await installSecretsAgentService(Math.max(timeoutMs, 20000))) return true;
-    } else {
-      const uid = process.getuid?.() ?? 0;
-      try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* may already be running */ }
-      const d = Date.now() + timeoutMs;
-      while (Date.now() < d) { if ((await agentPing()).reachable) return true; await new Promise((r) => setTimeout(r, 150)); }
-    }
-  } catch { /* fall through to the one-off spawn */ }
+  // A legacy standalone secrets-agent service may still be installed from an
+  // older version. Retire it (#416 step 2) so the always-on daemon owns the
+  // broker socket rather than racing a launchd job for it. No-op when no legacy
+  // plist is present. We only reach here when nothing is already reachable, so
+  // retiring never disrupts a warm broker.
+  retireLegacySecretsAgentService();
 
-  // Path 2 (fallback): one-off detached broker. Clear a stale socket/pid first.
+  // Path 0 (#416): the always-on daemon hosts the broker socket — one supervised
+  // backbone rather than a separate launchd service. If bringing the daemon up
+  // makes the broker answer, we're done.
+  try {
+    const { ensureDaemonStarted } = await import('../daemon.js');
+    if (ensureDaemonStarted()) {
+      const d0 = Date.now() + timeoutMs;
+      while (Date.now() < d0) {
+        if ((await agentPing()).reachable) return true;
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    }
+  } catch { /* daemon path unavailable — fall through to the one-off spawn */ }
+
+  // Path 1 (fallback): one-off detached broker when the daemon can't host it.
+  // Clear a stale socket/pid first.
   const stalePid = (() => {
     try { return parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10); }
     catch { return NaN; }
@@ -845,15 +988,12 @@ export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
 
 /**
  * Tear down a stale broker (running pre-upgrade code) so a fresh one can take
- * over. If the persistent service is installed, bootout makes launchd relaunch
- * it on the new code; otherwise kill the process and clear its socket/pid.
+ * over. Retire any legacy standalone service first (#416 step 2) so the daemon —
+ * not the old launchd job — hosts the fresh broker, then kill the process and
+ * clear its socket/pid. The caller then brings the daemon-hosted broker up.
  */
 async function teardownStaleBroker(): Promise<void> {
-  if (secretsAgentServiceInstalled()) {
-    const uid = process.getuid?.() ?? 0;
-    try { execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* best effort */ }
-    return; // kickstart -k restarts the service onto current code; socket/pid managed by it
-  }
+  retireLegacySecretsAgentService();
   const pid = (() => { try { return parseInt(fs.readFileSync(pidPath(), 'utf-8').trim(), 10); } catch { return NaN; } })();
   if (!isNaN(pid) && isAlive(pid)) { try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ } }
   try { fs.unlinkSync(socketPath()); } catch { /* gone */ }

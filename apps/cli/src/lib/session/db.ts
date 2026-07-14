@@ -912,21 +912,39 @@ function resolveLastActivity(meta: SessionMeta, scan?: ScanStamp): string {
   return meta.timestamp;
 }
 
+export function isSessionActivityFresh(
+  row: { last_activity: string | null; timestamp: string; file_mtime_ms: number | null },
+  maxAgeMs: number,
+  nowMs: number,
+): boolean {
+  const parsedActivityMs = Date.parse(row.last_activity ?? row.timestamp);
+  const activityMs = Number.isFinite(parsedActivityMs) ? parsedActivityMs : row.file_mtime_ms ?? undefined;
+  return activityMs != null && nowMs - activityMs <= maxAgeMs;
+}
+
 /**
  * Newest indexed session file for an agent working in `cwd`. Lets the live
  * `--active` scanner locate a Codex transcript (whose files are date-partitioned,
  * not cwd-keyed like Claude's) by reusing the index. Returns undefined if the
  * session hasn't been scanned yet — the caller degrades to no live state.
  */
-export function latestSessionFileForCwd(agent: SessionAgentId, cwd: string): string | undefined {
+export function latestSessionFileForCwd(agent: SessionAgentId, cwd: string, options?: { maxAgeMs?: number; nowMs?: number }): string | undefined {
   if (!cwd) return undefined;
   let normalized = cwd;
   try { normalized = fs.realpathSync(cwd); } catch { /* use as-is */ }
   const db = getDB();
   const row = db
-    .prepare(`SELECT file_path FROM sessions WHERE agent = ? AND cwd = ? ORDER BY timestamp DESC LIMIT 1`)
-    .get(agent, normalized) as { file_path: string } | undefined;
-  return row?.file_path;
+    .prepare(`SELECT file_path, last_activity, timestamp, file_mtime_ms
+              FROM sessions
+              WHERE agent = ? AND cwd = ?
+              ORDER BY COALESCE(last_activity, timestamp) DESC
+              LIMIT 1`)
+    .get(agent, normalized) as { file_path: string; last_activity: string | null; timestamp: string; file_mtime_ms: number | null } | undefined;
+  if (!row) return undefined;
+  if (options?.maxAgeMs != null) {
+    if (!isSessionActivityFresh(row, options.maxAgeMs, options.nowMs ?? Date.now())) return undefined;
+  }
+  return row.file_path;
 }
 
 /** Build a parameterized WHERE clause from query options. */

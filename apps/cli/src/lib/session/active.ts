@@ -22,6 +22,7 @@ import * as os from 'os';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { listActiveTasks } from '../cloud/store.js';
+import type { CloudTaskStatus } from '../cloud/types.js';
 import { AgentManager } from '../teams/agents.js';
 import { getTerminalsDir } from '../state.js';
 import { readPidSessionEntry, prunePidSessionRegistry, type PidSessionEntry } from './pid-registry.js';
@@ -32,6 +33,7 @@ import { extractSessionTopic } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type DetectedPr, type DetectedWorktree, type DetectedTicket } from './state.js';
+import type { SessionAttachment } from './types.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { mapBounded } from '../concurrency.js';
 
@@ -92,10 +94,14 @@ export interface ActiveSession {
   worktree?: DetectedWorktree;
   /** Tracker ticket the session is tied to. */
   ticket?: DetectedTicket;
+  /** Per-session rate/usage limit detected in the transcript (RUSH-1523). */
+  rateLimited?: boolean;
   /** Tracker refs the session CREATED (Linear create_issue / gh issue create). */
   createdTickets?: string[];
   /** Team name the session SPAWNED via `agents teams create/add`. */
   spawnedTeam?: string;
+  /** Files/screenshots attached to the session prompt. */
+  attachments?: SessionAttachment[];
   sessionFile?: string;
   startedAtMs?: number;
   status: ActiveStatus;
@@ -156,6 +162,19 @@ export interface ActiveSession {
   viewingIn?: { app: string; tab?: number };
 }
 
+export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'idle':
+      return 'idle';
+    case 'input_required':
+      return 'input_required';
+    default:
+      return 'queued';
+  }
+}
+
 export interface ActiveQueryOptions {
   /** Skip the `ps` scan for ad-hoc headless agents. */
   skipHeadless?: boolean;
@@ -170,6 +189,15 @@ const LIVE_TERMINALS_FILE = path.join(getTerminalsDir(), 'live-terminals.json');
  * healthy session writes several times a minute.
  */
 const ACTIVE_MTIME_WINDOW_MS = 2 * 60_000;
+
+/**
+ * A live process can only borrow an indexed session file if that transcript
+ * has been touched recently enough to plausibly belong to the process. This is
+ * deliberately wider than ACTIVE_MTIME_WINDOW_MS: an inactive-but-live CLI can
+ * be idle for longer than 2 minutes, but it must not attach to a weeks-old
+ * transcript just because a GUI app service with the same basename is alive.
+ */
+export const ACTIVE_SESSION_STALE_MS = 24 * 60 * 60_000;
 
 /** Executables we recognize as agent CLIs when scanning the process table. */
 const AGENT_CLI_NAMES: Record<string, string> = {
@@ -322,7 +350,7 @@ function classifyActivity(sessionFile: string | undefined): 'running' | 'idle' {
 export function findSessionFileForKind(kind: string, cwd?: string, sessionId?: string): string | undefined {
   if (!cwd) return undefined;
   if (kind === 'claude') return findClaudeSessionFile(cwd, sessionId);
-  if (kind === 'codex') return latestSessionFileForCwd('codex', cwd);
+  if (kind === 'codex') return latestSessionFileForCwd('codex', cwd, { maxAgeMs: ACTIVE_SESSION_STALE_MS });
   return undefined;
 }
 
@@ -387,6 +415,8 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     ticket: state.ticket,
     createdTickets: state.createdTickets,
     spawnedTeam: state.spawnedTeam,
+    attachments: state.attachments,
+    rateLimited: state.rateLimited,
   };
 }
 
@@ -556,11 +586,7 @@ export function listCloudActive(): ActiveSession[] {
     kind: t.agent || 'cloud',
     label: t.prompt.length > 60 ? t.prompt.slice(0, 57) + '...' : t.prompt,
     startedAtMs: Date.parse(t.createdAt) || undefined,
-    status: t.status === 'running'
-      ? 'running'
-      : t.status === 'input_required'
-        ? 'input_required'
-        : 'queued',
+    status: activeStatusFromCloudStatus(t.status),
     cloudProvider: t.provider,
     cloudTaskId: t.id,
     cloudStatus: t.status,

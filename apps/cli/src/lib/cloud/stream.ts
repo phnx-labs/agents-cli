@@ -188,6 +188,8 @@ function statusLabel(status: string): string {
       return chalk.blue(`[${status}]`);
     case 'running':
       return chalk.yellow(`[${status}]`);
+    case 'idle':
+      return chalk.dim('[idle]');
     case 'completed':
       return chalk.green('[completed]');
     case 'needs_review':

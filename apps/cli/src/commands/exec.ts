@@ -27,6 +27,8 @@ interface ExecCommandActionOptions {
   effort: ExecEffort;
   model?: string;
   cwd?: string;
+  /** --project <slug>[@worktree]: resolve cwd from the projects root shorthand. */
+  project?: string;
   addDir: string[];
   env: string[];
   secrets: string[];
@@ -311,7 +313,11 @@ export function registerRunCommand(program: Command): void {
       'Inject only this comma-separated subset of keys from --secrets bundles (e.g. KEY1,KEY2). Missing keys are an error. Applies to all --secrets bundles on this run.',
     )
     .option('--allow-expired', 'Inject secrets even if their expiry date has passed (overrides the pre-run expiry abort).')
-    .option('--cwd <dir>', 'Working directory for the agent (defaults to current directory)')
+    .option('--cwd <dir>', 'Working directory for the agent (defaults to current directory). With --host, the directory ON the host.')
+    .option(
+      '-P, --project <ref>',
+      'Project shorthand <slug>[@worktree], resolved against your projects root (auto-inferred, cached). Sets the cwd locally or on --host.',
+    )
     .option(
       '--add-dir <dir>',
       'Grant access to an additional directory outside the project (Claude and Codex, repeatable)',
@@ -383,7 +389,7 @@ export function registerRunCommand(program: Command): void {
       '--device <name>',
       'Alias of --host: offload this run onto a registered device (from `agents devices`).',
     )
-    .option('--remote-cwd <dir>', 'Working directory on the host for --host runs.')
+    .option('--remote-cwd <dir>', 'Explicit host working directory for --host runs (overrides --cwd; usually --cwd suffices).')
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
     .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.')
     .option(
@@ -603,6 +609,25 @@ export function registerRunCommand(program: Command): void {
       // --host/--on/--computer: offload this run onto a registered agent host
       // over SSH instead of running locally. The three flags are aliases.
       const hostGiven = [options.host, options.device, options.on, options.computer].filter((v): v is string => !!v);
+
+      // --project <slug>[@worktree]: resolve the projects-root shorthand into a
+      // cwd. On a host run it resolves home-relative (`~/…`, so the host expands
+      // it); locally it becomes an absolute path. It owns the working directory,
+      // so it is mutually exclusive with both --cwd and --remote-cwd.
+      if (options.project) {
+        if (options.cwd || options.remoteCwd) {
+          console.error(chalk.red('Pass --project alone — not with --cwd or --remote-cwd.'));
+          process.exit(1);
+        }
+        const { resolveProjectRef } = await import('../lib/project-root.js');
+        try {
+          options.cwd = await resolveProjectRef(options.project, { forRemote: hostGiven.length > 0 });
+        } catch (err) {
+          console.error(chalk.red((err as Error).message));
+          process.exit(1);
+        }
+      }
+
       if (hostGiven.length > 0) {
         if (new Set(hostGiven).size > 1) {
           console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
@@ -636,6 +661,11 @@ export function registerRunCommand(program: Command): void {
         }
         try {
           const runAgent = agentSpec.split('@')[0];
+          // Working directory on the host: an explicit --remote-cwd is used
+          // verbatim; --cwd/--project are made portable (a local-home absolute
+          // becomes `~/…` so the remote shell re-roots it at ITS home).
+          const { toRemotePortable } = await import('../lib/project-root.js');
+          const hostCwd = options.remoteCwd ?? (options.cwd ? toRemotePortable(options.cwd) : undefined);
           // `--resume [id]`: commander yields the string id, or `true` when the
           // flag is passed bare. A bare resume needs the interactive picker,
           // which can't run over a detached remote dispatch — only forward a
@@ -678,7 +708,7 @@ export function registerRunCommand(program: Command): void {
               prompt,
               mode: options.mode,
               model: options.model,
-              remoteCwd: options.remoteCwd,
+              remoteCwd: hostCwd,
               sessionId: hostSessionId,
               name: options.name,
               resume: resumeId,
@@ -701,7 +731,7 @@ export function registerRunCommand(program: Command): void {
             prompt,
             mode: options.mode,
             model: options.model,
-            remoteCwd: options.remoteCwd,
+            remoteCwd: hostCwd,
             sessionId: hostSessionId,
             name: options.name,
             resume: resumeId,

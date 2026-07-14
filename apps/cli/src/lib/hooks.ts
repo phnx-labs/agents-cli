@@ -1750,12 +1750,15 @@ function registerHooksForAntigravity(
       if (!hooks[agyEvent]) {
         hooks[agyEvent] = [];
       }
-      const list = hooks[agyEvent] as Array<{ command: string }>;
+      // Antigravity settings entries: command + optional matcher (tool scope).
+      // Without matcher every PreToolUse guard fires on ALL tools (RUSH-1353).
+      const list = hooks[agyEvent] as Array<{ command: string; matcher?: string }>;
 
       const existingIdx = list.findIndex(
         (e) => e && typeof e === 'object' && e.command === commandPath
       );
-      const entry = { command: commandPath };
+      const entry: { command: string; matcher?: string } = { command: commandPath };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
       if (existingIdx >= 0) {
         list[existingIdx] = entry;
       } else {
@@ -2310,8 +2313,7 @@ const GOOSE_EVENT_MAP: Record<string, string> = {
   AfterFileEdit: 'AfterFileEdit',
   BeforeShellExecution: 'BeforeShellExecution',
   AfterShellExecution: 'AfterShellExecution',
-  SubagentStart: 'SubagentStart',
-  SubagentStop: 'SubagentStop',
+  // SubagentStart/SubagentStop are not emitted by Goose — do not advertise them.
 };
 
 /** Managed Open Plugins directory name under ~/.agents/plugins/. */
@@ -2472,21 +2474,28 @@ function registerHooksForCursor(
     }
   }
 
-  const currentManifestPaths = new Set<string>();
+  // Desired managed entries keyed by event|command|matcher so a matcher or
+  // event change drops the stale entry instead of retaining it by command path alone.
+  const desiredManaged = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
     const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
-    if (resolved) currentManifestPaths.add(resolved);
+    if (!resolved) continue;
+    for (const event of hookDef.events) {
+      const cursorEvent = CURSOR_EVENT_MAP[event];
+      if (!cursorEvent) continue;
+      desiredManaged.add(`${cursorEvent}|${resolved}|${hookDef.matcher ?? ''}`);
+    }
   }
 
-  // GC managed entries that are no longer in the manifest
+  // GC managed entries that are no longer in the manifest (by event+command+matcher)
   const hooks: Record<string, CursorEntry[]> = {};
   for (const [event, entries] of Object.entries(existing.hooks || {})) {
     if (!Array.isArray(entries)) continue;
     hooks[event] = entries.filter((e) => {
       if (typeof e?.command !== 'string') return true;
       if (!isManagedHookCommand(e.command, managedPrefixes)) return true;
-      return currentManifestPaths.has(e.command);
+      return desiredManaged.has(`${event}|${e.command}|${e.matcher ?? ''}`);
     });
     if (hooks[event].length === 0) delete hooks[event];
   }

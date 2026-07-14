@@ -18,21 +18,10 @@ import type {
   DispatchOptions,
   ProviderCapabilities,
 } from './types.js';
-import { resolveDispatchRepos, MissingTargetError } from './types.js';
+import { resolveDispatchRepos, normalizeProviderStatus, MissingTargetError } from './types.js';
 import { getShimsDir } from '../state.js';
 
 const SHIMS_DIR = getShimsDir();
-
-/** Map a Codex Cloud status string to the canonical CloudTaskStatus enum. */
-function mapStatus(s: string): CloudTaskStatus {
-  const lower = s.toLowerCase();
-  if (lower.includes('queued') || lower.includes('pending')) return 'queued';
-  if (lower.includes('running') || lower.includes('in_progress')) return 'running';
-  if (lower.includes('completed') || lower.includes('succeeded') || lower.includes('success')) return 'completed';
-  if (lower.includes('failed') || lower.includes('error')) return 'failed';
-  if (lower.includes('cancelled') || lower.includes('canceled')) return 'cancelled';
-  return 'running';
-}
 
 /** Locate the codex binary, checking agents-cli shims first then PATH. */
 function findCodexBinary(): string | null {
@@ -86,7 +75,7 @@ function parseTaskFromText(text: string): Partial<CloudTask> {
     }
     return {
       id: result.id || result.task_id,
-      status: result.status ? mapStatus(result.status) : undefined,
+      status: result.status ? normalizeProviderStatus('codex', result.status) : undefined,
       summary: result.summary || result.output,
     };
   }
@@ -215,7 +204,7 @@ export class CodexCloudProvider implements CloudProvider {
       const tasks: CloudTask[] = (data.tasks ?? data ?? []).map((t: Record<string, unknown>) => ({
         id: (t.id || t.task_id) as string,
         provider: 'codex' as const,
-        status: mapStatus((t.status as string) ?? ''),
+        status: normalizeProviderStatus('codex', (t.status as string) ?? ''),
         agent: 'codex',
         prompt: (t.prompt || t.query || '') as string,
         branch: (t.branch as string) || undefined,

@@ -28,8 +28,10 @@ import {
   type ReplyTarget,
   type CiStatus,
   type TodoItem,
+  type FloorAttachment,
 } from './floorModel'
-import type { UnifiedTask, RecentToolCall, ProjectRule } from '../../types'
+import type { UnifiedTask, RecentToolCall, ProjectRule, SessionAttachment } from '../../types'
+import { detectPlanFiles, extractPlanCandidates, type PlanFile, type PlanFileCandidate } from '../../utils/planDetector'
 
 // Last non-empty todo set per session, so the checklist survives the recent-tool
 // window cap (see floorModel.todosWithFallback). Keyed by the FloorAgent id, which is
@@ -38,6 +40,7 @@ import type { UnifiedTask, RecentToolCall, ProjectRule } from '../../types'
 // threading a store through every adapter call. Empty parses fall back to the remembered
 // set; a fresh non-empty parse overwrites it.
 const lastTodosById = new Map<string, TodoItem[]>()
+const GIT_COMMIT_OUTPUT_RE = /^\[[^\]\n]*\s([0-9a-f]{7,40})\]\s+(.+)$/gm
 
 /** Parse fresh todos, remembering the last non-empty set so the checklist doesn't vanish. */
 function stickyTodos(id: string, toolCalls: RecentToolCall[] | undefined): TodoItem[] {
@@ -94,6 +97,8 @@ export interface UnifiedAgentLike {
     currentActivity?: string
     narrative?: string
     recentToolCalls?: RecentToolCall[]
+    recentFiles?: string[]
+    attachments?: SessionAttachment[]
   } | null
   agent?: {
     cwd?: string | null
@@ -103,6 +108,11 @@ export interface UnifiedAgentLike {
     /** Original dispatch prompt for a headless/background agent. */
     prompt?: string
     last_messages?: string[]
+    files_created?: string[]
+    files_modified?: string[]
+    attachments?: Array<Partial<SessionAttachment> & { name?: string; ref?: string } | string>
+    /** Per-session rate/usage limit from the CLI transcript (RUSH-1523). */
+    rateLimited?: boolean
   } | null
 }
 
@@ -124,6 +134,8 @@ export interface RemoteSessionLike {
   question?: { text: string; reason: 'question' | 'plan_review' | 'permission'; options: Array<{ label: string; description?: string; key?: string }> } | null
   /** Last few assistant turns (most-recent last) — panel context. */
   tail?: string[]
+  output?: string
+  attachments?: Array<Partial<SessionAttachment> & { name?: string; ref?: string } | string>
   prUrl: string | null
   ci?: CiStatus | null
   ticket: string | null
@@ -137,6 +149,7 @@ export interface RemoteSessionLike {
   worktreeSlug?: string
   /** Absolute worktree path, for the Reveal-worktree action. */
   worktreePath?: string
+  plans?: PlanFile[]
   sinceMs: number
   startedAtMs: number
   /** Epoch ms of the most recent observed activity (session-file last write).
@@ -151,6 +164,8 @@ export interface RemoteSessionLike {
   teamName: string
   pid: number
   transport: string
+  /** Per-session rate/usage limit from the CLI (RUSH-1523). */
+  rateLimited?: boolean
   replyRail: string
   replyMuxTarget: string
   replyMuxSocket: string
@@ -176,6 +191,8 @@ const ABBR_BY_TYPE: Record<string, AgentAbbr> = {
   kimi: 'GK',
 }
 
+type AttachmentLike = Partial<SessionAttachment> & { name?: string; ref?: string } | string
+
 /** agentType string -> terminal-tab prefix. Unknown types fall back to Shell. */
 export function abbrFor(agentType: string): AgentAbbr {
   return ABBR_BY_TYPE[(agentType || '').toLowerCase()] ?? 'SH'
@@ -187,6 +204,119 @@ function firstNonEmptyStr(...values: Array<string | null | undefined>): string |
     if (typeof v === 'string' && v.trim()) return v.trim()
   }
   return undefined
+}
+
+function stringifyUnknown(v: unknown): string {
+  if (typeof v === 'string') return v
+  if (v == null) return ''
+  try {
+    return JSON.stringify(v)
+  } catch {
+    return String(v)
+  }
+}
+
+function collectToolCallPlanCandidates(toolCalls: RecentToolCall[] | undefined): PlanFileCandidate[] {
+  const out: PlanFileCandidate[] = []
+  for (const call of toolCalls ?? []) {
+    out.push(...extractPlanCandidates(stringifyUnknown(call.input), 'output'))
+    out.push(...extractPlanCandidates(call.output, 'output'))
+  }
+  return out
+}
+
+function collectAttachmentPlanCandidates(attachments: AttachmentLike[] | undefined): PlanFileCandidate[] {
+  if (!Array.isArray(attachments)) return []
+  const out: PlanFileCandidate[] = []
+  for (const a of attachments) {
+    if (typeof a === 'string') {
+      out.push(...extractPlanCandidates(a, 'attachment'))
+      continue
+    }
+    if (a && typeof a === 'object') {
+      out.push(...extractPlanCandidates(a.path, 'attachment'))
+      out.push(...extractPlanCandidates(a.label, 'attachment'))
+      out.push(...extractPlanCandidates(a.name, 'attachment'))
+      out.push(...extractPlanCandidates(a.ref, 'attachment'))
+    }
+  }
+  return out
+}
+
+function basename(filePath: string): string {
+  const parts = filePath.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] || filePath
+}
+
+function normalizeAttachment(a: AttachmentLike): FloorAttachment | null {
+  if (typeof a === 'string') {
+    const label = a.trim()
+    return label ? { path: label, label: basename(label), mediaType: 'application/octet-stream' } : null
+  }
+  if (!a || typeof a !== 'object') return null
+  const path = firstNonEmptyStr(a.path, a.ref)
+  if (!path) return null
+  return {
+    path,
+    label: firstNonEmptyStr(a.label, a.name, basename(path)) ?? basename(path),
+    mediaType: firstNonEmptyStr(a.mediaType) ?? 'application/octet-stream',
+    sizeBytes: typeof a.sizeBytes === 'number' ? a.sizeBytes : undefined,
+    thumbnailUri: firstNonEmptyStr(a.thumbnailUri),
+  }
+}
+
+function collectAttachments(...sources: Array<AttachmentLike[] | undefined>): FloorAttachment[] {
+  const out: FloorAttachment[] = []
+  const seen = new Set<string>()
+  for (const list of sources) {
+    for (const item of list ?? []) {
+      const attachment = normalizeAttachment(item)
+      if (!attachment || seen.has(attachment.path)) continue
+      seen.add(attachment.path)
+      out.push(attachment)
+    }
+  }
+  return out
+}
+
+export function detectCreatedCommits(toolCalls: RecentToolCall[] | undefined): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const call of toolCalls ?? []) {
+    if (call.isError || typeof call.output !== 'string') continue
+    GIT_COMMIT_OUTPUT_RE.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = GIT_COMMIT_OUTPUT_RE.exec(call.output)) !== null) {
+      const sha = match[1].slice(0, 12)
+      if (seen.has(sha)) continue
+      seen.add(sha)
+      out.push(sha)
+    }
+  }
+  return out
+}
+
+function detectUnifiedPlans(u: UnifiedAgentLike, worktreePath: string): PlanFile[] {
+  const candidates: PlanFileCandidate[] = []
+  candidates.push(...extractPlanCandidates(u.terminal?.narrative, 'output'))
+  for (const msg of u.agent?.last_messages ?? []) candidates.push(...extractPlanCandidates(msg, 'output'))
+  for (const file of u.files ?? []) candidates.push(...extractPlanCandidates(file, 'worktree'))
+  for (const file of u.terminal?.recentFiles ?? []) candidates.push(...extractPlanCandidates(file, 'worktree'))
+  for (const file of u.agent?.files_created ?? []) candidates.push(...extractPlanCandidates(file, 'worktree'))
+  for (const file of u.agent?.files_modified ?? []) candidates.push(...extractPlanCandidates(file, 'worktree'))
+  candidates.push(...collectToolCallPlanCandidates(u.terminal?.recentToolCalls))
+  candidates.push(...collectAttachmentPlanCandidates(u.agent?.attachments))
+  return detectPlanFiles(candidates, worktreePath || u.terminal?.cwd || u.agent?.cwd || null)
+}
+
+function detectRemotePlans(r: RemoteSessionLike, worktreePath: string): PlanFile[] {
+  if (r.plans?.length) return r.plans
+  const candidates: PlanFileCandidate[] = []
+  candidates.push(...extractPlanCandidates(r.lastResponse, 'output'))
+  candidates.push(...extractPlanCandidates(r.output, 'output'))
+  for (const msg of r.tail ?? []) candidates.push(...extractPlanCandidates(msg, 'output'))
+  candidates.push(...collectAttachmentPlanCandidates(r.attachments))
+  return detectPlanFiles(candidates, worktreePath || r.cwd || null)
 }
 
 /**
@@ -339,6 +469,10 @@ export function toFloorAgentFromUnified(
   const prompt = firstNonEmptyStr(u.terminal?.firstUserMessage, u.agent?.prompt)
   const { verb, target } = splitActivity(u.activity)
   const project = deriveProject(u.terminal?.cwd ?? u.agent?.cwd, u.agent?.repo_name, opts.workspaceRepo || '—', opts.projectRules ?? [])
+  const worktreePath = worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd) ? (u.terminal?.cwd ?? u.agent?.cwd ?? '') : ''
+  const plans = detectUnifiedPlans(u, worktreePath)
+  const attachments = collectAttachments(u.terminal?.attachments, u.agent?.attachments)
+  const createdCommits = detectCreatedCommits(u.terminal?.recentToolCalls)
   // Local unified agents ARE this window's terminal tabs, so sendText into the live
   // terminal is the exact reply channel; fall back to 'none' for a tab-less headless row.
   const reply: ReplyTarget = u.terminal?.id
@@ -373,10 +507,13 @@ export function toFloorAgentFromUnified(
     ci,
     ticket: u.linearIssue ?? null,
     createdTickets: u.createdTickets ?? [],
+    createdCommits,
     spawnedTeam: u.spawnedTeam || undefined,
+    attachments,
     branch: u.terminal?.branch ?? u.agent?.branch ?? '',
     worktreeSlug: cleanWorktreeSlug(u.terminal?.cwd ?? u.agent?.cwd),
-    worktreePath: worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd) ? (u.terminal?.cwd ?? u.agent?.cwd ?? '') : '',
+    worktreePath,
+    plans,
     resp,
     prompt,
     messages,
@@ -391,7 +528,28 @@ export function toFloorAgentFromUnified(
     // (currentActivity) when it hasn't spoken between tool calls yet.
     summary: u.terminal?.narrative || u.terminal?.currentActivity || '',
     recent: u.terminal?.recentToolCalls ?? [],
+    // Per-session rate limit (RUSH-1523): CLI flag or detect from last messages.
+    rateLimited: detectSessionRateLimited(u.agent?.rateLimited, messages, resp),
   }
+}
+
+/** True when the CLI flagged the session, or last messages match rate-limit shapes. */
+export function detectSessionRateLimited(
+  flagged: boolean | undefined,
+  messages: string[],
+  resp: string,
+): boolean | undefined {
+  if (flagged) return true
+  const blob = [...messages, resp].join('\n').toLowerCase()
+  if (!blob) return undefined
+  const hit =
+    /\brate[- ]?limit(ed|s)?\b/.test(blob) ||
+    /\btoo many requests\b/.test(blob) ||
+    /\b429\b/.test(blob) ||
+    /\busage[- ]?limit(ed)?\b/.test(blob) ||
+    /\bout of (credits|quota)\b/.test(blob) ||
+    /\bquota exceeded\b/.test(blob)
+  return hit || undefined
 }
 
 /**
@@ -414,6 +572,9 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
   // attributes them to the querier ('zion') for reply routing, but they should NOT
   // fold under that local host in the feed. Give them their own "Cloud" category.
   const isCloud = (r.context || '').toLowerCase() === 'cloud' || !!r.cloudTaskId
+  const worktreePath = r.worktreePath ?? (worktreeSlugOf(r.cwd) ? r.cwd : '')
+  const plans = detectRemotePlans(r, worktreePath)
+  const attachments = collectAttachments(r.attachments)
 
   return {
     id,
@@ -448,11 +609,14 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     ci,
     ticket: r.ticket,
     createdTickets: r.createdTickets ?? [],
+    createdCommits: [],
     spawnedTeam: r.spawnedTeam || undefined,
+    attachments,
     branch: r.branch,
     // Prefer the CLI-provided slug; strip any WT= / path leak from either source.
     worktreeSlug: r.worktreeSlug ? cleanWorktreeSlug(r.worktreeSlug) : cleanWorktreeSlug(r.cwd),
-    worktreePath: r.worktreePath ?? (worktreeSlugOf(r.cwd) ? r.cwd : ''),
+    worktreePath,
+    plans,
     resp,
     // Remote (Tier-1) has no first-user-message enrichment yet — the session's task line
     // (topic) is the closest durable anchor for the original task.
@@ -473,6 +637,11 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // tmux %pane handle + where it's being viewed, surfaced on the card.
     pane: r.tmuxPane || undefined,
     viewingIn: r.viewingIn || undefined,
+    rateLimited: detectSessionRateLimited(
+      r.rateLimited,
+      r.tail && r.tail.length ? r.tail : r.lastResponse ? [r.lastResponse] : [],
+      resp,
+    ),
   }
 }
 
