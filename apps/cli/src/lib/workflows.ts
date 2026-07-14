@@ -552,18 +552,6 @@ export function transformWorkflowForKimi(workflowPath: string, name: string): st
   return `---\n${frontmatter}\n---\n\n\`\`\`d2\nBEGIN -> step -> END\nstep: |md\n${indentD2BlockString(instructions)}\n|\n\`\`\`\n`;
 }
 
-/** Convert a canonical agents-cli workflow bundle into Antigravity workflow markdown. */
-export function transformWorkflowForAntigravity(workflowPath: string, name: string): string {
-  const fm = parseWorkflowFrontmatter(workflowPath);
-  if (!fm) throw new Error(`Invalid WORKFLOW.md in ${workflowPath}`);
-  const body = getWorkflowBody(workflowPath) || fm.description;
-  const frontmatter = yaml.stringify({
-    description: fm.description,
-    ...(fm.name ? { name: fm.name } : { name }),
-  }).trim();
-  return `---\n${frontmatter}\n---\n\n${body.trim()}\n`;
-}
-
 function expandWorkflowPath(ref: string): string {
   if (ref === '~') return process.env.HOME ?? ref;
   if (ref.startsWith('~/')) {

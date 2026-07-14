@@ -9,7 +9,6 @@ import {
   resolveAllowedSubagents,
   pruneStaleWorkflowSubagents,
   syncWorkflowToVersion,
-  transformWorkflowForAntigravity,
   transformWorkflowForKimi,
 } from './workflows.js';
 
@@ -199,17 +198,6 @@ describe('workflow native projections', () => {
     expect(skill).toContain('type: flow');
     expect(skill).toContain('```mermaid');
     expect(skill).toContain('BEGIN --> END');
-  });
-
-  it('converts a workflow into Antigravity workflow markdown without version-home sync', () => {
-    const dir = writeWorkflow('---\nname: Ship Flow\ndescription: Ship safely\n---\n\n1. Test\n2. Release');
-
-    const workflow = transformWorkflowForAntigravity(dir, 'ship-flow');
-
-    expect(workflow).toContain('description: Ship safely');
-    expect(workflow).toContain('name: Ship Flow');
-    expect(workflow).toContain('1. Test');
-    expect(workflow).toContain('2. Release');
   });
 
   it('syncs and lists only agents-cli managed Kimi workflow destinations', () => {
