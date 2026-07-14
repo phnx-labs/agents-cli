@@ -18,6 +18,7 @@ import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, Disp
 import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
 import type { JobConfig, JobTrigger } from '../lib/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/routines.js';
+import { machineId } from '../lib/machine-id.js';
 import { emit } from '../lib/events.js';
 
 /** Map a supported image file extension to its wire mimeType. Rejects anything else. */
@@ -340,6 +341,14 @@ Examples:
           prompt,
         };
         if (repoValues[0]) routine.repo = repoValues[0];
+        // --host with --on: the webhook-fired run places on that machine (the
+        // routine carries the placement, and firing pins to THIS device so a
+        // fleet of receivers can't each dispatch a duplicate).
+        if (options.host) {
+          routine.host = options.host as string;
+          if (options.remoteCwd) routine.remoteCwd = options.remoteCwd as string;
+          routine.devices = [machineId()];
+        }
         writeJob(routine);
 
         if (json) {

@@ -50,7 +50,7 @@ import { detectOverdueJobs } from '../lib/overdue.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { loadDevices } from '../lib/devices/registry.js';
-import { normalizeHost } from '../lib/machine-id.js';
+import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { addHostOption } from '../lib/hosts/option.js';
 
 /**
@@ -290,6 +290,7 @@ export function registerRoutinesCommands(program: Command): void {
             trigger: job.trigger ?? null,
             timezone: job.timezone ?? null,
             devices: job.devices ?? [],
+            host: job.host ?? null,
             runsHere: jobRunsOnThisDevice(job),
             enabled: job.enabled,
             overdue: overdueSet.has(job.name),
@@ -352,7 +353,10 @@ export function registerRoutinesCommands(program: Command): void {
         const enabledWord = job.enabled ? 'yes' : 'no';
         const enabledPad = Math.max(0, ENABLED_W - enabledWord.length);
 
-        const deviceFull = job.devices?.join(',') ?? '';
+        // Placement (`→host`) rides in the Devices cell: eligibility →execution.
+        const deviceFull = [job.devices?.join(',') ?? '', job.host ? `→${job.host}` : '']
+          .filter(Boolean)
+          .join(' ');
         const deviceWord = deviceFull.length === 0
           ? 'all'
           : deviceFull.length > DEVICE_W
@@ -402,6 +406,8 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
     .option('--devices <names>', 'Fleet allowlist (comma-separated): only listed devices schedule and fire this routine. Omit for unrestricted.')
+    .option('--run-on <name>', 'Execute the job body on this machine over SSH (a registered host, device, capability tag, or user@host). Placement, not eligibility — see --devices. Auto-pins devices to THIS machine unless --devices is given.')
+    .option('--run-cwd <dir>', 'Working directory on the --run-on host (--remote-cwd is taken by the remote-management passthrough)')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
@@ -459,6 +465,14 @@ export function registerRoutinesCommands(program: Command): void {
           devices = await parseAndValidateDevices(options.devices);
         }
 
+        // --run-on without a --devices pin would fire on EVERY daemon in the
+        // fleet, each dispatching to the same host — duplicate runs. Pin to
+        // this machine unless the user chose an explicit eligibility set.
+        if (options.runOn && !devices) {
+          devices = [machineId()];
+          console.log(chalk.gray(`--run-on set with no --devices: pinned firing to this machine (${devices[0]}).`));
+        }
+
         const config: JobConfig = {
           name: nameOrPath,
           schedule,
@@ -471,6 +485,8 @@ export function registerRoutinesCommands(program: Command): void {
           prompt: options.prompt,
           timezone: options.timezone,
           ...(devices ? { devices } : {}),
+          ...(options.runOn ? { host: options.runOn } : {}),
+          ...(options.runCwd ? { remoteCwd: options.runCwd } : {}),
           ...(runOnce ? { runOnce: true } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
         };
@@ -534,6 +550,13 @@ export function registerRoutinesCommands(program: Command): void {
           enabled: true,
           ...parsed,
         } as JobConfig;
+
+        // Same duplicate-fire guard as the --run-on flag: a host-placed routine
+        // with no eligibility pin would fire from every daemon in the fleet.
+        if (config.host && (!config.devices || config.devices.length === 0)) {
+          config.devices = [machineId()];
+          console.log(chalk.gray(`host: set with no devices pin: pinned firing to this machine (${config.devices[0]}).`));
+        }
 
         writeJob(config);
         console.log(chalk.green(`Job '${name}' added`));

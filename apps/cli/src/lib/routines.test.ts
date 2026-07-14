@@ -332,3 +332,27 @@ describe('writeJob extension handling', () => {
     }
   });
 });
+
+describe('validateJob — host placement', () => {
+  it('accepts a plain host-placed agent job', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', host: 'gpu-box' }))).toEqual([]);
+  });
+
+  it('rejects an empty host', () => {
+    expect(validateJob(baseJob({ host: '  ' }))).toContainEqual(expect.stringContaining('host must be a non-empty machine name'));
+  });
+
+  it('rejects host + workflow (bundle lives on the firing machine)', () => {
+    const errors = validateJob(baseJob({ host: 'gpu-box', workflow: 'autodev', agent: undefined }));
+    expect(errors).toContainEqual(expect.stringContaining("host: can't be combined with workflow:"));
+  });
+
+  it('rejects host + loop (driver + signal files live on the firing machine)', () => {
+    const errors = validateJob(baseJob({ host: 'gpu-box', loop: { maxIterations: 2 } as JobConfig['loop'] }));
+    expect(errors).toContainEqual(expect.stringContaining("host: can't be combined with loop:"));
+  });
+
+  it('rejects remoteCwd without host', () => {
+    expect(validateJob(baseJob({ remoteCwd: '~/proj' }))).toContainEqual(expect.stringContaining('remoteCwd only applies'));
+  });
+});
