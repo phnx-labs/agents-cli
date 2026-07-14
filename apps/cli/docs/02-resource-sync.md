@@ -179,12 +179,12 @@ a format rewrite.
 │ allow: [Read, Grep] │ ─Groups()──────────▶  │   "Grep",        │              deny:  [...]
 │ deny:  [Write]      │ concat per group      │   "Bash(git *)"  │            }}
 │                     │                       │ ],               │
-│ git-safe.yaml       │                       │ deny: [          │          OpenCode (TOML):
-│ ───────             │                       │   "Write"        │          [permission]
-│ allow: [Bash(git *)]│                       │ ],               │          [permission.bash]
-│                     │                       │ additional-      │          "git *" = "allow"
-│ 99-deny.yaml ──────▶│ rules go to deny      │   Directories:   │          "rm *" = "deny"
-│ allow: [Bash(rm *)] │ (naming convention)   │   [...]          │
+│ git-safe.yaml       │                       │ deny: [          │          OpenCode (JSONC/JSON):
+│ ───────             │                       │   "Write"        │          { "permission": {
+│ allow: [Bash(git *)]│                       │ ],               │              "bash": {
+│                     │                       │ additional-      │                "git *": "allow",
+│ 99-deny.yaml ──────▶│ rules go to deny      │   Directories:   │                "rm *": "deny"
+│ allow: [Bash(rm *)] │ (naming convention)   │   [...]          │              }}}
 └─────────────────────┘                       └──────────────────┘          Codex (Starlark file):
                                                                             agents-deny.rules
                                                                             (generated text)
@@ -199,8 +199,10 @@ Per-agent conversion is lossy in both directions:
 
 - Claude's native format is closest to canonical — near 1:1 passthrough
   (`permissions.ts:362-369`).
-- OpenCode maps `Bash(pattern)` rules into a pattern → `allow`/`deny` map
-  (`permissions.ts:385-405`). Non-bash rules are dropped.
+- OpenCode 1.1.1+ maps `Bash(pattern)` rules into the `permission.bash`
+  `allow`/`deny` map in `~/.config/opencode/opencode.jsonc` (or `.json`) for
+  user scope, or project-root `opencode.jsonc` (or `.json`). Non-bash rules are
+  dropped.
 - Codex (>= 0.138.0) writes `approval_policy` and `sandbox_mode` to
   `.codex/config.toml`, plus `sandbox_workspace_write.network_access=true` when
   web tools are allowed. Deny rules are emitted as Starlark to a generated

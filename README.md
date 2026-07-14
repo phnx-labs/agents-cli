@@ -855,7 +855,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Grok Build | yes | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Cursor | yes | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
-| OpenCode | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| OpenCode | yes | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Kiro | yes | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
