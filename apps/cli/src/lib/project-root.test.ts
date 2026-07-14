@@ -109,8 +109,9 @@ describe('inferProjectRoot', () => {
 
   it('returns the directory ABOVE the git root, resolved from a nested cwd', async () => {
     const root = await inferProjectRoot(path.join(repo, 'sub', 'deep'));
-    // tmp is outside $HOME, so it stays absolute — realpath to dodge /var → /private/var on macOS.
-    expect(root).toBe(fs.realpathSync(tmp));
+    // Windows places os.tmpdir() under HOME; compare through the same portable
+    // storage contract. realpath also dodges /var → /private/var on macOS.
+    expect(root).toBe(toHomeRelative(fs.realpathSync(tmp)));
   });
 
   it('resolves the MAIN repo root from inside a linked worktree (not the worktree dir)', async () => {
@@ -118,7 +119,7 @@ describe('inferProjectRoot', () => {
     fs.mkdirSync(path.dirname(wt), { recursive: true });
     execFileSync('git', ['worktree', 'add', '-q', wt], { cwd: repo });
     // Regression: naive --show-toplevel would yield <repo>/.agents/worktrees here.
-    expect(await inferProjectRoot(wt)).toBe(fs.realpathSync(tmp));
+    expect(await inferProjectRoot(wt)).toBe(toHomeRelative(fs.realpathSync(tmp)));
   });
 
   it('returns undefined when cwd is not inside a git repo', async () => {

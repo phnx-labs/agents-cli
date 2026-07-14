@@ -123,7 +123,7 @@ describe('remoteCdPrefix', () => {
 
   it('does NOT re-root a raw local-home absolute — only ~/$HOME anchor here (exec.ts makes --cwd portable)', () => {
     const p = `${LOCAL_HOME}/src/x`;
-    expect(remoteCdPrefix(p)).toBe(`cd ${p} && `);
+    expect(remoteCdPrefix(p)).toBe(`cd ${shellQuote(p)} && `);
   });
 
   it('maps bare ~ / $HOME to "$HOME"', () => {
