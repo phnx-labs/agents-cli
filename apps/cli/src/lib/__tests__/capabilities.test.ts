@@ -358,6 +358,25 @@ describe('antigravity subagents version gate', () => {
   });
 });
 
+describe('cursor subagents version gate', () => {
+  it('gates pre-2.4 cursor-agent (CalVer) builds as too_old', () => {
+    // cursor-agent reports CalVer build tags, e.g. 2025.11.25-<hash>; compareVersions
+    // parses each dot-segment as an int so 2025.11.25 < 2026.1.22 (Cursor 2.4).
+    const result = supports('cursor', 'subagents', '2025.11.25');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 2026.1.22');
+    }
+    expect(supports('cursor', 'subagents', '2026.1.21').ok).toBe(false);
+  });
+
+  it('passes 2026.1.22 (Cursor 2.4) and above', () => {
+    expect(supports('cursor', 'subagents', '2026.1.22')).toEqual({ ok: true });
+    expect(supports('cursor', 'subagents', '2026.2.1')).toEqual({ ok: true });
+  });
+});
+
 describe('workflow capability gates', () => {
   it('includes Antigravity, Claude, Goose, and Kimi for workflow sync', () => {
     expect(supports('claude', 'workflows')).toEqual({ ok: true });

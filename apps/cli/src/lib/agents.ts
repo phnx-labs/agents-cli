@@ -317,7 +317,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // (user), Markdown with YAML frontmatter (name, description, model, readonly,
     // is_background — no `color`). Shipped in cursor-agent CLI 2026.01 (Cursor 2.4,
     // 2026-01-22); cursor-agent uses CalVer build tags (e.g. 2025.11.25-<hash>), so
-    // gate at `>= 2026.1.22` so pre-2.4 installs are skipped, not silently written.
+    // gate at `>= 2026.1.22`. The `agents sync` path enforces this (versions.ts skips
+    // + warns for pre-2.4 installs); the direct `subagents add --agents cursor` path
+    // writes unconditionally, same as the other since-gated agents.
     // See transformSubagentForCursor / https://cursor.com/docs/subagents.
     capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
   },
