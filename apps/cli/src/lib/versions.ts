@@ -1232,6 +1232,73 @@ export function setGlobalDefault(agent: AgentId, version: string | undefined): v
 }
 
 /**
+ * Grok's official installer writes into ~/.grok/downloads, which (because we
+ * symlink ~/.grok to the active version home) resolves to the PREVIOUS default
+ * home during `agents add grok@<new>`. Move the freshly-downloaded binary and
+ * its generic platform copy into the target version's isolated home so
+ * `listInstalledVersions` and the shim resolve the right binary.
+ */
+function relocateGrokBinaryToVersionHome(installedVersion: string): void {
+  const hostGrokLink = path.join(getHomeDir(), agentConfigDirName('grok'));
+  let sourceDownloads: string;
+  try {
+    sourceDownloads = path.join(fs.readlinkSync(hostGrokLink), 'downloads');
+  } catch {
+    sourceDownloads = path.join(hostGrokLink, 'downloads');
+  }
+  const targetDownloads = path.join(
+    getVersionHomePath('grok', installedVersion),
+    agentConfigDirName('grok'),
+    'downloads'
+  );
+
+  if (!fs.existsSync(sourceDownloads)) return;
+  if (path.resolve(sourceDownloads) === path.resolve(targetDownloads)) return;
+
+  const entries = fs.readdirSync(sourceDownloads).filter((e) => e.startsWith('grok-'));
+  if (entries.length === 0) return;
+
+  fs.mkdirSync(targetDownloads, { recursive: true });
+
+  const escapedVersion = installedVersion.replace(/\./g, '\\.');
+  const versionedPattern = new RegExp(`^grok-${escapedVersion}-`);
+  const movedPaths: string[] = [];
+
+  // Move the versioned binary first.
+  for (const entry of entries) {
+    if (!versionedPattern.test(entry)) continue;
+    const src = path.join(sourceDownloads, entry);
+    const dst = path.join(targetDownloads, entry);
+    if (fs.existsSync(dst)) continue;
+    try {
+      fs.renameSync(src, dst);
+      movedPaths.push(dst);
+    } catch {
+      /* ignore per-file failures */
+    }
+  }
+
+  if (movedPaths.length === 0) return;
+
+  // The installer also creates a generic platform binary (e.g. grok-macos-aarch64)
+  // that is a copy of the versioned binary. Move it too if its size matches.
+  const movedSize = fs.statSync(movedPaths[0]).size;
+  for (const entry of entries) {
+    if (versionedPattern.test(entry)) continue; // already handled
+    const src = path.join(sourceDownloads, entry);
+    const dst = path.join(targetDownloads, entry);
+    if (fs.existsSync(dst)) continue;
+    try {
+      if (fs.statSync(src).size === movedSize) {
+        fs.renameSync(src, dst);
+      }
+    } catch {
+      /* ignore per-file failures */
+    }
+  }
+}
+
+/**
  * Install a specific version of an agent.
  */
 export async function installVersion(
@@ -1297,6 +1364,13 @@ export async function installVersion(
     const versionDir = getVersionDir(agent, installedVersion);
     fs.mkdirSync(versionDir, { recursive: true });
     fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
+
+    // Grok's installer drops the binary into ~/.grok/downloads, which currently
+    // resolves to the PREVIOUS default home. Move it into the target version home
+    // so version isolation is correct.
+    if (agent === 'grok') {
+      relocateGrokBinaryToVersionHome(installedVersion);
+    }
 
     // Symlink the installed binary into the version's node_modules/.bin so
     // listInstalledVersions (which checks getBinaryPath) sees this version as
