@@ -32,7 +32,7 @@ Central storage (project > user > system):
     .kiro/
       agents/<name>.json             Kiro custom-agent JSON format
     .cursor/
-      agents/<name>.md                Cursor native format (flattened, no color)
+      agents/<name>.md               Cursor native format (flattened, no color)
 
                       Parent agent session (Claude example)
                                   │

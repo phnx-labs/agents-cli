@@ -315,9 +315,11 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Subagents: `.cursor/agents/<name>.md` (project) or `~/.cursor/agents/<name>.md`
     // (user), Markdown with YAML frontmatter (name, description, model, readonly,
-    // is_background — no `color`). Shipped in cursor-agent CLI 2026.01 (Cursor 2.4).
+    // is_background — no `color`). Shipped in cursor-agent CLI 2026.01 (Cursor 2.4,
+    // 2026-01-22); cursor-agent uses CalVer build tags (e.g. 2025.11.25-<hash>), so
+    // gate at `>= 2026.1.22` so pre-2.4 installs are skipped, not silently written.
     // See transformSubagentForCursor / https://cursor.com/docs/subagents.
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: true, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',

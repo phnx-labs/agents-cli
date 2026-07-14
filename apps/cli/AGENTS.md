@@ -102,7 +102,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — |
 | ★ OpenCode | `opencode` | — | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | — | — |
 | Gemini † | `gemini` | ≥0.26 | ✓ | ✓ | ✓ | ✓ | ≥0.8 | ≥0.36 | — |
-| Cursor | `cursor` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| Cursor | `cursor` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥2026.1.22 | — |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — |
 | Copilot | `copilot` | ✓ | ✓ | — | ✓ | ✓ | ✓ | ≥0.0.353 | — |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
@@ -114,7 +114,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
 snapshot in sync. `workflows` is `claude`/`kimi`/`goose`/`antigravity` (≥1.0.6, written to the
 shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home); `mcp` is universal; `allowlist` is
-`claude`/`gemini`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`; `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`gemini`.
+`claude`/`gemini`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`; `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`gemini`/`cursor` (≥2026.1.22).
 **† Gemini is deprecated by Google** (retired June 18 2026); Antigravity is the
 successor — the CLI warns on `agents add gemini` (`warnAgentDeprecated`).
 
