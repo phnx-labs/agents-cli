@@ -63,7 +63,8 @@ Agent cards surface outputs such as PRs, spawned teams, created tickets, and pla
 artifacts. `.html` and `ref-*.md` plans detected in session output, worktree
 files, or attachments appear as one-click preview chips. Screenshots and other
 session attachments appear as thumbnail artifacts that click through to the host
-preview.
+preview. The expanded project and host sidebar can be resized by dragging its
+right edge.
 
 ### Foreman Voice Orb
 

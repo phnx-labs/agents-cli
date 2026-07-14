@@ -337,7 +337,13 @@
 
 /* page with optional project sidebar */
 .swarmify-root .page { display: flex; height: 100%; min-height: 0; }
-.swarmify-root .sidebar { width: 210px; flex: 0 0 210px; border-right: 1px solid var(--ds-border); overflow: auto; padding: 8px 0; background: var(--ds-bg); }
+.swarmify-root .sidebar { position: relative; width: var(--floor-sidebar-width, 210px); flex: 0 0 var(--floor-sidebar-width, 210px); border-right: 1px solid var(--ds-border); overflow: auto; padding: 8px 0; background: var(--ds-bg); }
+.swarmify-root .sidebar-resize { position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 3; touch-action: none; }
+.swarmify-root .sidebar-resize::after { content: ""; position: absolute; top: 8px; bottom: 8px; right: 0; width: 1px; background: transparent; transition: background .12s; }
+.swarmify-root .sidebar-resize:hover::after,
+.swarmify-root .sidebar-resize:focus-visible::after,
+.swarmify-root .sidebar.resizing .sidebar-resize::after { background: var(--brand); }
+.swarmify-root .sidebar-resize:focus-visible { outline: 1px solid var(--brand); outline-offset: -2px; }
 /* Icon rail — collapsed left nav (mockup default): a column of 46px rounded icon
    buttons with count/needs badges, active button lime-outlined. */
 .swarmify-root .floor-rail { flex: 0 0 68px; width: 68px; border-right: 1px solid var(--ds-border); background: var(--ds-bg); padding: 16px 0; overflow: visible; }

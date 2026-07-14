@@ -7,6 +7,10 @@ import { computeHostRows, orderManagedProjects, type FloorAgent, type FloorTicke
 // Projects (with wait-counts), Hosts (with health). Counts are derived from the
 // agents + tickets passed in — no data fetching here.
 
+export const FLOOR_SIDEBAR_DEFAULT_WIDTH = 210
+export const FLOOR_SIDEBAR_MIN_WIDTH = 176
+export const FLOOR_SIDEBAR_MAX_WIDTH = 360
+
 interface FloorSidebarProps {
   agents: FloorAgent[]
   tickets: FloorTicket[]
@@ -44,11 +48,15 @@ interface FloorSidebarProps {
   projects?: ManagedProject[]
   /** Open the Projects management pane (gear + "+N more" row). */
   onManageProjects?: () => void
+  /** Current sidebar width, persisted by the parent shell. */
+  sidebarWidth?: number
+  /** Persist a resized sidebar width. */
+  onSidebarWidthChange?: (width: number) => void
   /** Collapse back to the icon rail. */
   onCollapse?: () => void
 }
 
-export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, offlineHosts = [], devices = [], hostPins = [], onToggleHostPin, onReorderHostPins, onScope, localHost, projects = [], onManageProjects, onCollapse }: FloorSidebarProps) {
+export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, offlineHosts = [], devices = [], hostPins = [], onToggleHostPin, onReorderHostPins, onScope, localHost, projects = [], onManageProjects, sidebarWidth = FLOOR_SIDEBAR_DEFAULT_WIDTH, onSidebarWidthChange, onCollapse }: FloorSidebarProps) {
   const byProj: Record<string, number> = {}
   const projWait: Record<string, number> = {}
   for (const a of agents) {
@@ -64,6 +72,60 @@ export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, o
 
   const [dragName, setDragName] = useState<string | null>(null)
   const [overName, setOverName] = useState<string | null>(null)
+  const [resizing, setResizing] = useState(false)
+
+  const setWidth = (width: number) => {
+    onSidebarWidthChange?.(Math.max(FLOOR_SIDEBAR_MIN_WIDTH, Math.min(FLOOR_SIDEBAR_MAX_WIDTH, Math.round(width))))
+  }
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!onSidebarWidthChange) return
+    e.preventDefault()
+    e.stopPropagation()
+    const target = e.currentTarget
+    const pointerId = e.pointerId
+    target.setPointerCapture(pointerId)
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+    const prevCursor = document.documentElement.style.cursor
+    const prevUserSelect = document.documentElement.style.userSelect
+    document.documentElement.style.cursor = 'col-resize'
+    document.documentElement.style.userSelect = 'none'
+    setResizing(true)
+    const onMove = (ev: PointerEvent) => setWidth(startWidth + ev.clientX - startX)
+    let cleaned = false
+    const onUp = () => {
+      if (cleaned) return
+      cleaned = true
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
+      document.documentElement.style.cursor = prevCursor
+      document.documentElement.style.userSelect = prevUserSelect
+      setResizing(false)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp, { once: true })
+    window.addEventListener('pointercancel', onUp, { once: true })
+  }
+
+  const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!onSidebarWidthChange) return
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setWidth(sidebarWidth - (e.shiftKey ? 32 : 16))
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setWidth(sidebarWidth + (e.shiftKey ? 32 : 16))
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setWidth(FLOOR_SIDEBAR_MIN_WIDTH)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setWidth(FLOOR_SIDEBAR_MAX_WIDTH)
+    }
+  }
 
   // Drop `dragName` immediately before `target` in the persisted pin order.
   const dropBefore = (target: string) => {
@@ -107,7 +169,7 @@ export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, o
   )
 
   return (
-    <div className="sidebar">
+    <div className={`sidebar${resizing ? ' resizing' : ''}`}>
       <div className="sb-sec" style={{ display: 'flex', alignItems: 'center' }}>
         <span>SMART</span>
         {onCollapse && (
@@ -165,6 +227,19 @@ export function FloorSidebar({ agents, tickets, projFilter, hostFilter = null, o
       {pinnedRows.map(renderHost)}
       {pinnedRows.length > 0 && restRows.length > 0 && <div className="sb-host-div" />}
       {restRows.map(renderHost)}
+      <div
+        className="sidebar-resize"
+        role="separator"
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={FLOOR_SIDEBAR_MIN_WIDTH}
+        aria-valuemax={FLOOR_SIDEBAR_MAX_WIDTH}
+        aria-valuenow={Math.round(sidebarWidth)}
+        tabIndex={0}
+        title="Resize sidebar"
+        onPointerDown={startResize}
+        onKeyDown={onResizeKey}
+      />
     </div>
   )
 }

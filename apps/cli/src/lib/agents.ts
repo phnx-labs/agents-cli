@@ -428,7 +428,10 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     configDir: path.join(HOME, '.config', 'goose'),
     commandsDir: path.join(HOME, '.config', 'goose', 'commands'),
     commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.config', 'goose', 'skills'),
+    // Goose reads skills directly from central ~/.agents/skills/ via the Summon
+    // extension (block-goose-cli ≥ 1.25.0). No per-version copy is written.
+    skillsDir: path.join(HOME, '.agents', 'skills'),
+    nativeAgentsSkillsDir: true,
     // Hooks: Open Plugins format — auto-discovered from
     // ~/.agents/plugins/<name>/hooks/hooks.json (shipped block-goose-cli
     // ≥ 1.34.0). See registerHooksForGoose.
@@ -439,7 +442,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: false, commands: false, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: { since: '1.25.0' }, commands: false, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
