@@ -291,7 +291,52 @@ export function writeJob(config: JobConfig): void {
   const devArr = output.devices as string[] | undefined;
   if (!devArr || devArr.length === 0) delete output.devices;
 
-  atomicWriteFileSync(filePath, yaml.stringify(output));
+  let existingText: string | null = null;
+  if (ymlExists || yamlExists) {
+    try {
+      existingText = fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      existingText = null;
+    }
+  }
+  atomicWriteFileSync(filePath, serializeJob(output, existingText));
+}
+
+/**
+ * Serialize a job config, preserving the on-disk formatting of an existing file.
+ *
+ * A full `yaml.stringify(config)` re-emits the whole document — restyling every
+ * scalar (unquoting `schedule`, re-wrapping the folded `prompt` block, reordering
+ * keys). When a routine is only being toggled (pause/resume) or re-pinned
+ * (`devices --set`), that rewrites the entire file, leaving the git-backed
+ * `~/.agents` tree perpetually dirty so `agents repo pull` refuses to sync across
+ * the fleet. To keep the diff to the field that actually changed, we edit the
+ * existing document in place and only re-render touched nodes; untouched nodes
+ * (notably the large `prompt` block) keep their byte-for-byte formatting.
+ *
+ * `existingText` is the current file contents, or null for a new file. New,
+ * unparseable, and non-mapping documents fall back to canonical `yaml.stringify`.
+ */
+export function serializeJob(output: Record<string, unknown>, existingText: string | null): string {
+  if (existingText == null) return yaml.stringify(output);
+
+  const doc = yaml.parseDocument(existingText);
+  if (doc.errors.length > 0 || !yaml.isMap(doc.contents)) return yaml.stringify(output);
+
+  const existing = (doc.toJS() ?? {}) as Record<string, unknown>;
+
+  // Update or add only the keys that actually changed; leave the rest untouched
+  // so their original formatting is preserved.
+  for (const [key, value] of Object.entries(output)) {
+    if (JSON.stringify(existing[key]) !== JSON.stringify(value)) doc.set(key, value);
+  }
+  // Drop keys that no longer belong (e.g. an omitted default, or `devices`
+  // cleared back to fleet-wide).
+  for (const key of Object.keys(existing)) {
+    if (!(key in output)) doc.delete(key);
+  }
+
+  return doc.toString();
 }
 
 /** Delete a job config file by name. Returns true if the file existed. */
