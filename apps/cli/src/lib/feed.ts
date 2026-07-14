@@ -75,6 +75,10 @@ export interface OpenBlock {
   notificationType?: string;
   ticket?: string;
   pr?: string;
+  /** Worktree slug under `.agents/worktrees/` — soft outcome when no ticket/PR. */
+  worktreeSlug?: string;
+  /** Epic / initiative label when no ticket/PR/worktree is known. */
+  epic?: string;
   /** Block class: approval has a safe default; decision requires human choice. */
   blockClass?: 'approval' | 'decision';
   /** Consequence tag for authz. 'high' gates merge/deploy/admin-style answers. */
@@ -169,7 +173,8 @@ export function recordAnswer(
   const operatorId = answer.operatorId;
 
   if (block?.consequence && block.consequence !== 'normal') {
-    if (!operatorId || answer.verified !== true || !isHighConsequenceAllowed(block.consequence, operatorId, dir)) {
+    // Operators live in ~/.agents/operators.yaml — never the feed store root.
+    if (!operatorId || answer.verified !== true || !isHighConsequenceAllowed(block.consequence, operatorId)) {
       return {
         ok: false,
         unauthorized: true,
@@ -224,9 +229,18 @@ export function isBlockAnswered(blockId: string, root?: string): boolean {
   return fs.existsSync(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
 }
 
+/** Receipt lifecycle rank — higher means further along; never regress. */
+const RECEIPT_STATUS_RANK: Record<MessageReceipt['status'], number> = {
+  queued: 0,
+  consumed: 1,
+  continued: 2,
+};
+
 /**
  * Record a delivery-receipt transition for a message tied to a block.
- * Updates the receipts list in the block file (last receipt per msgId wins).
+ * Updates the receipts list in the block file. Status is monotonic
+ * (queued → consumed → continued): a late `queued` write cannot overwrite
+ * an already-recorded `consumed`/`continued` (race with mailbox drain).
  */
 export function recordMessageReceipt(
   blockId: string,
@@ -238,8 +252,15 @@ export function recordMessageReceipt(
   if (!block) return;
   const receipts = block.receipts ?? [];
   const idx = receipts.findIndex((r) => r.msgId === receipt.msgId);
-  if (idx >= 0) receipts[idx] = receipt;
-  else receipts.push(receipt);
+  if (idx >= 0) {
+    const prev = receipts[idx];
+    if (RECEIPT_STATUS_RANK[receipt.status] < RECEIPT_STATUS_RANK[prev.status]) {
+      return; // do not regress
+    }
+    receipts[idx] = receipt;
+  } else {
+    receipts.push(receipt);
+  }
   block.receipts = receipts;
   publishBlock(block, dir);
 }

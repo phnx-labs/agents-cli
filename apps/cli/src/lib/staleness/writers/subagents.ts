@@ -18,9 +18,11 @@ import {
   listInstalledSubagents,
   transformSubagentForClaude,
   transformSubagentForCodex,
+  transformSubagentForCopilot,
   writeKimiSubagentFiles,
   buildKimiSubagentsParentYaml,
   KIMI_SUBAGENTS_PARENT_FILE,
+  transformSubagentForOpenCode,
   transformSubagentForDroid,
   transformSubagentForKiro,
   syncSubagentToOpenclaw,
@@ -56,20 +58,30 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
           } else if (agent === 'kimi') {
             writeKimiSubagentFiles(path.join(versionHome, '.kimi-code', 'agents'), sub.path, sub.name);
             synced.push(sub.name);
+          } else if (agent === 'opencode') {
+            const agentsDir = path.join(versionHome, '.config', 'opencode', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForOpenCode(sub.path));
+            synced.push(sub.name);
           } else if (agent === 'droid') {
             const droidsDir = path.join(versionHome, '.factory', 'droids');
             fs.mkdirSync(droidsDir, { recursive: true });
             fs.writeFileSync(safeJoin(droidsDir, `${sub.name}.md`), transformSubagentForDroid(sub.path));
             synced.push(sub.name);
-          } else if (agent === 'kiro') {
-            const agentsDir = path.join(versionHome, '.kiro', 'agents');
+          } else if (agent === 'copilot') {
+            const agentsDir = path.join(versionHome, '.copilot', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
-            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.json`), transformSubagentForKiro(sub.path));
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.agent.md`), transformSubagentForCopilot(sub.path));
             synced.push(sub.name);
           } else if (agent === 'openclaw') {
             const target = safeJoin(path.join(versionHome, '.openclaw'), sub.name);
             const r = syncSubagentToOpenclaw(sub.path, target);
             if (r.success) synced.push(sub.name);
+          } else if (agent === 'kiro') {
+            const agentsDir = path.join(versionHome, '.kiro', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.json`), transformSubagentForKiro(sub.path));
+            synced.push(sub.name);
           }
         } catch { /* per-item sync failure: skip */ }
       }

@@ -13,7 +13,7 @@ import { terminalWidth, truncateToWidth, stringWidth } from '../lib/session/widt
 import * as fs from 'fs';
 import { SSH_TARGET_RE, assertValidSshTarget, sshExec, type SshExecResult } from '../lib/ssh-exec.js';
 import { quoteWin32ExecArg, composeWin32CommandLine } from '../lib/platform/index.js';
-import { ensureDaemonStarted } from '../lib/daemon.js';
+import { ensureDaemonStarted, isDaemonRunning } from '../lib/daemon.js';
 import {
   parseHostsOption,
   remoteResolveEnv,
@@ -71,12 +71,11 @@ import {
   DEFAULT_TTL_MS,
   agentLoad,
   agentLock,
+  agentPing,
   agentStatus,
   ensureAgentRunning,
-  installSecretsAgentService,
   runAgentLoadFromStdin,
   runSecretsAgent,
-  secretsAgentServiceInstalled,
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
 import { parseDuration } from '../lib/hooks/cache.js';
@@ -289,9 +288,11 @@ async function importFromICloud(
     const parts = [`imported ${result.added} key(s)`];
     if (result.skipped) parts.push(`skipped ${result.skipped} (already set, pass --force)`);
     if (result.missing.length) parts.push(`unreadable (left in iCloud): ${result.missing.join(', ')}`);
+    if (result.unimportable.length) parts.push(`reserved, not importable (left in iCloud): ${result.unimportable.join(', ')}`);
     if (opts.purge) parts.push(`purged ${result.purged} iCloud item(s)`);
     const line = `${candidate.name}: ${parts.join(', ')}`;
-    console.log(result.missing.length ? chalk.yellow(line) : chalk.green(line));
+    const warn = result.missing.length > 0 || result.unimportable.length > 0;
+    console.log(warn ? chalk.yellow(line) : chalk.green(line));
   }
 }
 
@@ -465,15 +466,16 @@ function compactRemaining(expiresAt: number): string {
   return `${Math.round(hours / 24)}d`;
 }
 
-/** The POLICY column for `secrets list`: the prompt policy, plus a "Nh left"
- * hint when a `daily` bundle is currently held by the secrets-agent. `held`
+/** The POLICY column for `secrets list`: the prompt policy, plus a concise
+ * state hint. `daily` shows `held Nh` when the secrets-agent is currently
+ * caching the bundle; `always` and `never` show whether they prompt. `held`
  * maps bundle name → expiry epoch-ms (from agentStatus()). */
 export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): string {
   // `never` is loud on purpose — it's the only tier with no user-presence gate.
-  if (bundlePolicy(b) === 'never') return chalk.red.bold('never · NO ACL');
-  if (bundlePolicy(b) === 'always') return chalk.yellow('always ask');
+  if (bundlePolicy(b) === 'never') return chalk.red.bold('never · no prompt');
+  if (bundlePolicy(b) === 'always') return chalk.yellow('always · prompt');
   const exp = held?.get(b.name);
-  return exp ? chalk.green(`daily · ${compactRemaining(exp)} left`) : chalk.gray('daily');
+  return exp ? chalk.green(`daily · held ${compactRemaining(exp)}`) : chalk.gray('daily');
 }
 
 /** Below this width the fixed date columns no longer fit; `list` uses cards. */
@@ -737,7 +739,7 @@ export function registerSecretsCommands(program: Command): void {
         return;
       }
       // Cross-reference the secrets-agent so `daily` bundles that are currently
-      // held can show "· Nh left". Soft-fails to no hint if the broker is down.
+      // held can show "· held Nh". Soft-fails to no hint if the broker is down.
       const held = new Map<string, number>();
       if (process.platform === 'darwin') {
         try {
@@ -1865,13 +1867,13 @@ Examples:
         ttlMs = secs * 1000;
       }
       if (!(await ensureAgentRunning())) {
-        console.error(chalk.red('Could not start the secrets-agent.'));
+        console.error(chalk.red('Could not start the secrets broker.'));
         process.exit(1);
       }
       // #415: the daemon should be always-on for any background need, not only
-      // after `routines add`. A user who only ever unlocks secrets still gets
-      // the daemon installed + running here. `ensureAgentRunning` above only
-      // brings up the standalone secrets broker, not the daemon. Idempotent
+      // after `routines add`. `ensureAgentRunning` prefers the daemon (it hosts
+      // the broker, #416), but can fall back to a one-off broker spawn when the
+      // daemon can't come up — so ensure the daemon is up regardless. Idempotent
       // (single-instance start lock, #414) and best-effort — never blocks unlock.
       ensureDaemonStarted();
       let loaded = 0;
@@ -1921,15 +1923,16 @@ Examples:
         console.log(chalk.gray('secrets-agent is macOS-only.'));
         return;
       }
+      const brokerUp = (await agentPing()).reachable;
       console.log(
-        chalk.gray('service: ') +
-        (secretsAgentServiceInstalled()
-          ? chalk.green('installed (persistent)')
-          : chalk.yellow('not installed — run `agents secrets start` for a persistent broker')),
+        chalk.gray('broker: ') +
+        (brokerUp
+          ? chalk.green('running') + chalk.gray(isDaemonRunning() ? ' (hosted by the daemon)' : ' (standalone)')
+          : chalk.yellow('not running — starts on demand, or run `agents secrets start` to bring the daemon up now')),
       );
       const entries = await agentStatus();
       if (entries.length === 0) {
-        console.log(chalk.gray('No bundles unlocked. The secrets-agent is idle or not running.'));
+        console.log(chalk.gray('No bundles unlocked. The secrets broker is idle or not running.'));
         console.log(chalk.gray('Try: agents secrets unlock <bundle>'));
         return;
       }
@@ -1979,28 +1982,36 @@ Examples:
 
   cmd
     .command('start')
-    .description('Install + start the secrets-agent as a persistent background service (macOS). Survives heavy load; reads connect instantly.')
+    .description('Bring up the always-on daemon that hosts the secrets broker (macOS). Survives heavy load; reads connect instantly.')
     .action(async () => {
       if (process.platform !== 'darwin') {
-        console.error(chalk.red('secrets-agent service is macOS-only.'));
+        console.error(chalk.red('The secrets broker is macOS-only.'));
         process.exit(1);
       }
-      process.stdout.write(chalk.gray('Installing launchd service…\n'));
-      if (await installSecretsAgentService()) {
-        console.log(chalk.green('secrets-agent service running.') + chalk.gray(' It stays up across your macOS login session; unlock/auto-cache now connect instantly.'));
+      process.stdout.write(chalk.gray('Starting the daemon…\n'));
+      ensureDaemonStarted();
+      // The daemon hosts the broker socket-first; wait briefly for it to answer.
+      const deadline = Date.now() + 10000;
+      let reachable = (await agentPing()).reachable;
+      while (!reachable && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 200));
+        reachable = (await agentPing()).reachable;
+      }
+      if (reachable) {
+        console.log(chalk.green('secrets broker running.') + chalk.gray(' Hosted by the always-on daemon; unlock/auto-cache now connect instantly.'));
       } else {
-        console.error(chalk.red('Service installed but did not become reachable in time (machine may be heavily loaded — launchd will keep retrying).'));
+        console.error(chalk.red('Daemon started but the broker did not become reachable in time (machine may be heavily loaded — it will keep retrying).'));
         process.exit(1);
       }
     });
 
   cmd
     .command('stop')
-    .description('Stop + remove the persistent secrets-agent service and wipe what it held.')
+    .description('Lock all bundles and retire any legacy standalone service. The always-on daemon (which hosts the broker) is left running.')
     .action(async () => {
       if (process.platform !== 'darwin') return;
       await uninstallSecretsAgentService();
-      console.log(chalk.green('secrets-agent service stopped and removed.'));
+      console.log(chalk.green('Locked all bundles.') + chalk.gray(' The broker stays hosted by the always-on daemon; a legacy standalone service, if any, was retired.'));
     });
 
   cmd

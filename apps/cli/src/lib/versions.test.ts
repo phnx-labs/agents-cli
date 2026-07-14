@@ -175,6 +175,119 @@ describe('reconcileStaleLatestForAgent (proactive)', () => {
   });
 });
 
+// RUSH-1321: a self-updating agent (droid) is ONE global binary. Its per-version
+// dirs all map to the same executable, so agents-cli must model it as a single
+// install — not a set of fictional version-homes. grok is self-updating too but
+// stores a real per-version binary copy under each version-home, so it must NOT
+// be collapsed.
+function droidBin(home: string): string {
+  return path.join(home, '.local', 'bin', 'droid');
+}
+
+function makeDroidBinary(home: string): void {
+  const binDir = path.dirname(droidBin(home));
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(droidBin(home), '#!/bin/sh\necho "droid 0.21.0"\n');
+  fs.chmodSync(droidBin(home), 0o755);
+}
+
+function grokBinaryDir(home: string, version: string): string {
+  return path.join(home, '.agents', '.history', 'versions', 'grok', version, 'home', '.grok', 'downloads');
+}
+
+// Predicate check runs in a tsx subprocess (versions.ts pulls in the SQLite
+// layer with a top-level await the CJS test process can't statically transform).
+function runPredicates(expression: string): unknown {
+  const versionsUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
+  const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    import { isGlobalBinaryAgent } from ${JSON.stringify(versionsUrl)};
+    import { isSelfUpdatingAgent } from ${JSON.stringify(agentsUrl)};
+    console.log(JSON.stringify(${expression}));
+  `], { env: { ...process.env }, encoding: 'utf-8' });
+  expect(child.status, child.stderr).toBe(0);
+  return JSON.parse(child.stdout.trim());
+}
+
+describe('self-updating single-binary agents (RUSH-1321)', () => {
+  it('classifies self-updating vs npm-packaged vs per-version-binary agents', () => {
+    const r = runPredicates(`{
+      droidSelf: isSelfUpdatingAgent('droid'),
+      grokSelf: isSelfUpdatingAgent('grok'),
+      antigravitySelf: isSelfUpdatingAgent('antigravity'),
+      claudeSelf: isSelfUpdatingAgent('claude'),
+      kimiSelf: isSelfUpdatingAgent('kimi'),
+      droidGlobal: isGlobalBinaryAgent('droid'),
+      grokGlobal: isGlobalBinaryAgent('grok'),
+      claudeGlobal: isGlobalBinaryAgent('claude'),
+    }`) as Record<string, boolean>;
+    expect(r).toEqual({
+      droidSelf: true,
+      grokSelf: true,
+      antigravitySelf: true,
+      claudeSelf: false, // npm-packaged — pinnable, genuinely multi-version
+      kimiSelf: false,   // npm-packaged
+      droidGlobal: true, // one binary at ~/.local/bin/droid regardless of version
+      grokGlobal: false, // per-version binary copy under each version-home
+      claudeGlobal: false,
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')('collapses multiple droid version dirs to a single canonical entry', () => {
+    const home = makeTempHome();
+    makeDroidBinary(home);
+    // Two real semver dirs that both resolve to the ONE global binary.
+    fs.mkdirSync(path.join(droidVersionDir(home, '0.19.3'), 'home'), { recursive: true });
+    fs.mkdirSync(path.join(droidVersionDir(home, '0.21.0'), 'home'), { recursive: true });
+
+    const versions = runVersionSync(home, "listInstalledVersions('droid')") as string[];
+
+    // One entry, not two phantom rows. Newest wins with no symlink/default/live cache.
+    expect(versions).toEqual(['0.21.0']);
+  });
+
+  it.skipIf(process.platform === 'win32')('does NOT collapse grok — per-version-home binaries stay distinct', () => {
+    const home = makeTempHome();
+    for (const v of ['0.2.33', '0.2.40']) {
+      const dir = grokBinaryDir(home, v);
+      fs.mkdirSync(dir, { recursive: true });
+      const bin = path.join(dir, `grok-${v}-test`);
+      fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n');
+      fs.chmodSync(bin, 0o755);
+    }
+
+    const versions = runVersionSync(home, "listInstalledVersions('grok')") as string[];
+
+    expect(versions).toEqual(['0.2.33', '0.2.40']);
+  });
+
+  it.skipIf(process.platform === 'win32')('reconcile folds every stale droid dir into the live version, preserving home/', () => {
+    const home = makeTempHome();
+    // Two coexisting real-semver droid dirs; the old one carries a login file.
+    const oldFactory = path.join(droidVersionDir(home, '0.19.3'), 'home', '.factory');
+    fs.mkdirSync(oldFactory, { recursive: true });
+    fs.writeFileSync(path.join(oldFactory, 'auth.v2.file'), 'LOGIN');
+    fs.mkdirSync(path.join(droidVersionDir(home, '0.21.0'), 'home'), { recursive: true });
+
+    // Fake `droid --version` -> 0.21.0 so the live version is the survivor.
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const droidStub = path.join(binDir, 'droid');
+    fs.writeFileSync(droidStub, '#!/bin/sh\necho "droid 0.21.0"\n');
+    fs.chmodSync(droidStub, 0o755);
+
+    runReconcileForAgent(home, 'droid', binDir);
+
+    // The stale 0.19.3 dir is folded away; only the live 0.21.0 survives on disk.
+    expect(fs.existsSync(droidVersionDir(home, '0.19.3'))).toBe(false);
+    expect(fs.existsSync(droidVersionDir(home, '0.21.0'))).toBe(true);
+    // Soft-deleted (recoverable), not hard-deleted — its home/ (incl. login) is in trash.
+    const trashDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'droid', '0.19.3');
+    expect(fs.existsSync(trashDir)).toBe(true);
+  });
+});
+
 describe('version resource sync path handling', () => {
   it('intersects explicit resource selections with discovered resources before syncing', async () => {
     const home = makeTempHome();
@@ -383,7 +496,7 @@ describe('version resource sync path handling', () => {
 // tainted version because VERSION_RE rejects it at the source (versions.ts).
 // These tests assert the rejection happens before any npm exec, so a malicious
 // version can never escape into a shell.
-function runInstallVersion(home: string, agent: string, version: string): { ok: boolean; error?: string } {
+function runInstallVersion(home: string, agent: string, version: string, extraPathDir?: string): { ok: boolean; error?: string; result?: { success: boolean; installedVersion?: string; error?: string } } {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
   // Run tsx via `node node_modules/tsx/dist/cli.mjs` (not the .bin/tsx shim): on
   // Windows the shim is tsx.cmd, which spawnSync cannot exec without a shell, and
@@ -401,7 +514,11 @@ function runInstallVersion(home: string, agent: string, version: string): { ok: 
       }
     })();
   `], {
-    env: { ...process.env, HOME: home },
+    env: {
+      ...process.env,
+      HOME: home,
+      ...(extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
+    },
     encoding: 'utf-8',
   });
   expect(child.status, child.stderr).toBe(0);
@@ -430,17 +547,26 @@ describe('installVersion version validation', () => {
     });
   }
 
-  it('accepts a well-formed semver version through the validation guard', () => {
+  it.skipIf(process.platform === 'win32')('gracefully redirects a pinned self-updating install to the current release (RUSH-1321)', () => {
     const home = makeTempHome();
-    // A valid version passes VERSION_RE. `kiro` has no npmPackage and a
-    // non-VERSION installScript, so installVersion returns a benign,
-    // network-free error AFTER the guard — proving valid input is not rejected.
-    const outcome = runInstallVersion(home, 'kiro', '0.0.0-rc.1');
+    // A valid version passes VERSION_RE. `kiro` is self-updating (brew, no
+    // VERSION token). A `kiro-cli` on PATH makes the single binary read as
+    // already-installed, so the pin is a network-free no-op — NOT the old
+    // `does not support version-pinned installs` hard error, and NOT a real
+    // `brew install`.
+    const binDir = path.join(home, 'fakebin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'kiro-cli');
+    fs.writeFileSync(stub, '#!/bin/sh\necho "kiro-cli 2.12.1"\n');
+    fs.chmodSync(stub, 0o755);
+
+    const outcome = runInstallVersion(home, 'kiro', '0.0.0-rc.1', binDir);
     expect(outcome.ok).toBe(true);
-    const result = (outcome as { result?: { success: boolean; error?: string } }).result;
-    expect(result?.success).toBe(false);
+    const result = outcome.result;
+    expect(result?.success).toBe(true);
+    expect(result?.installedVersion).toBe('2.12.1'); // the live version, not the ignored pin
     expect(result?.error ?? '').not.toContain('Invalid version');
-    expect(result?.error ?? '').toContain('does not support version-pinned installs');
+    expect(result?.error ?? '').not.toContain('does not support version-pinned installs');
   });
 });
 
@@ -482,6 +608,20 @@ function installDroidVersions(home: string, versions: string[]): void {
   fs.chmodSync(bin, 0o755);
 }
 
+// Numeric-vs-lexical ordering must be exercised on a genuinely MULTI-version
+// agent. droid is now single-binary (its dirs collapse to one — RUSH-1321), so
+// use antigravity (cliCommand `agy`): self-updating but per-version binary at
+// `node_modules/.bin/agy`, so its version dirs are NOT collapsed.
+function installAntigravityVersions(home: string, versions: string[]): void {
+  for (const v of versions) {
+    const binDir = path.join(home, '.agents', '.history', 'versions', 'antigravity', v, 'node_modules', '.bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const bin = path.join(binDir, 'agy');
+    fs.writeFileSync(bin, '#!/bin/sh\nexit 0\n', 'utf-8');
+    fs.chmodSync(bin, 0o755);
+  }
+}
+
 describe('resolveVersionAlias @selectors', () => {
   // Versions chosen so numeric ordering disagrees with lexical ordering:
   // numeric oldest=0.9.0, newest=0.158.0; lexical would put "0.10.0" first.
@@ -489,14 +629,14 @@ describe('resolveVersionAlias @selectors', () => {
 
   it("resolves 'latest' to the highest installed version (numeric, not lexical)", () => {
     const home = makeTempHome();
-    installDroidVersions(home, VERSIONS);
-    expect(runResolveAlias(home, 'droid', 'latest')).toBe('0.158.0');
+    installAntigravityVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'antigravity', 'latest')).toBe('0.158.0');
   });
 
   it("resolves 'oldest' to the lowest installed version (numeric, not lexical)", () => {
     const home = makeTempHome();
-    installDroidVersions(home, VERSIONS);
-    expect(runResolveAlias(home, 'droid', 'oldest')).toBe('0.9.0');
+    installAntigravityVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'antigravity', 'oldest')).toBe('0.9.0');
   });
 
   it("treats 'pinned' as a synonym for 'default' — both defer to the caller (undefined)", () => {
@@ -508,8 +648,8 @@ describe('resolveVersionAlias @selectors', () => {
 
   it('passes an explicit installed version through unchanged', () => {
     const home = makeTempHome();
-    installDroidVersions(home, VERSIONS);
-    expect(runResolveAlias(home, 'droid', '0.10.0')).toBe('0.10.0');
+    installAntigravityVersions(home, VERSIONS);
+    expect(runResolveAlias(home, 'antigravity', '0.10.0')).toBe('0.10.0');
   });
 
   it("defers an absent/empty token to the caller (undefined)", () => {

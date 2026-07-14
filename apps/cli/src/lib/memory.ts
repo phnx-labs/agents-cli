@@ -244,14 +244,26 @@ export function syncMemoryToVersionHome(
   const targetDir = path.join(versionHome, targetRel);
   fs.mkdirSync(targetDir, { recursive: true });
 
-  // Clear previous managed fact files (keep non-.md).
+  // Managed manifest tracks which fact files *we* wrote. On sync we only
+  // remove previously-managed names that are no longer in the canonical set —
+  // never wipe every .md (user-authored native memory must survive).
+  const managedManifestPath = path.join(targetDir, '.agents-cli-memory.json');
+  let previouslyManaged: string[] = [];
   try {
-    for (const entry of fs.readdirSync(targetDir)) {
-      if (entry.endsWith('.md')) {
-        try { fs.unlinkSync(path.join(targetDir, entry)); } catch { /* ignore */ }
-      }
+    const raw = JSON.parse(fs.readFileSync(managedManifestPath, 'utf-8')) as { facts?: unknown };
+    if (Array.isArray(raw.facts)) {
+      previouslyManaged = raw.facts.filter((f): f is string => typeof f === 'string');
     }
-  } catch { /* target missing */ }
+  } catch { /* missing or corrupt → treat as first managed sync */ }
+
+  const desiredNames = new Set(facts.map((f) => f.name));
+  const managedThisSync = new Set<string>(desiredNames);
+
+  for (const name of previouslyManaged) {
+    if (desiredNames.has(name)) continue;
+    if (name === 'MEMORY') continue; // index rewritten below
+    try { fs.unlinkSync(path.join(targetDir, `${name}.md`)); } catch { /* ignore */ }
+  }
 
   const written: string[] = [];
   for (const fact of facts) {
@@ -273,10 +285,20 @@ export function syncMemoryToVersionHome(
   if (indexSrc) {
     try {
       fs.copyFileSync(indexSrc, path.join(targetDir, 'MEMORY.md'));
+      managedThisSync.add('MEMORY');
     } catch { /* ignore */ }
   } else {
     rebuildMemoryIndex(targetDir);
+    managedThisSync.add('MEMORY');
   }
+
+  try {
+    fs.writeFileSync(
+      managedManifestPath,
+      JSON.stringify({ facts: [...managedThisSync].sort() }, null, 2) + '\n',
+      'utf-8',
+    );
+  } catch { /* best-effort */ }
 
   return written;
 }

@@ -5,6 +5,7 @@ import * as path from 'path';
 import { homedir } from 'os';
 import type { Dirent, Stats } from 'fs';
 import { AgentSession } from '../core/sessions';
+import { runAgents } from '../core/agentsBin';
 import type { SqlJsStatic } from 'sql.js';
 
 // Cached SQL.js instance (lazy-loaded)
@@ -258,209 +259,67 @@ function extractPreviewLines(head: string): ExtractedPreview {
   return { text: normalizePreview(firstAny) };
 }
 
-async function getPreview(filePath: string): Promise<string | undefined> {
-  try {
-    const lines = await readHeadLines(filePath, 60);
-    return extractPreviewLines(lines.join('\n')).text;
-  } catch {
-    return undefined;
-  }
+/** The subset of the CLI's flat `agents sessions --json` row (SessionMeta) read here. */
+interface CliRecentSessionRow {
+  id?: string;
+  agent?: string;
+  timestamp?: string;
+  lastActivity?: string;
+  filePath?: string;
+  topic?: string;
+  label?: string;
 }
 
-async function collectSessionFiles(dir: string, depth: number): Promise<string[]> {
-  if (depth < 0) return [];
-  const entries = await safeReaddir(dir);
-  const files: string[] = [];
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...await collectSessionFiles(fullPath, depth - 1));
-      continue;
-    }
-    const ext = path.extname(entry.name).toLowerCase();
-    if (SESSION_EXTENSIONS.has(ext)) {
-      files.push(fullPath);
-    }
-  }
-
-  return files;
-}
-
-function parseCodexTimestamp(sessionId: string): Date | null {
-  const match = sessionId.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
-  if (!match) return null;
-  const [, year, month, day, hour, minute, second] = match;
-  return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
-}
-
-// Per-file cache for built sessions, keyed by mtime+size. The discovery walk
-// runs on every fetchSessions webview message and otherwise re-reads each
-// session file's head (getPreview) every time; this skips the read for files
-// that haven't changed since the last scan.
-interface SessionBuildCacheEntry {
-  mtimeMs: number;
-  size: number;
-  session: AgentSession;
-}
-const SESSION_BUILD_CACHE = new Map<string, SessionBuildCacheEntry>();
-const SESSION_BUILD_CACHE_MAX = 1000;
-
-async function buildSession(
-  agentType: AgentSession['agentType'],
-  filePath: string,
-  timestampOverride?: Date | null
-): Promise<AgentSession | null> {
-  const stats = await safeStat(filePath);
-  if (!stats) return null;
-
-  const cached = SESSION_BUILD_CACHE.get(filePath);
-  if (cached && cached.mtimeMs === stats.mtimeMs && cached.size === stats.size) {
-    return cached.session;
-  }
-
-  const sessionId = path.basename(filePath, path.extname(filePath));
-  const hasOverride = timestampOverride && !Number.isNaN(timestampOverride.getTime());
-  const timestamp = hasOverride ? timestampOverride : (stats.mtime ?? stats.birthtime);
-  const preview = await getPreview(filePath);
-
-  const session: AgentSession = {
-    agentType,
-    sessionId,
-    timestamp,
-    path: filePath,
-    preview
-  };
-
-  SESSION_BUILD_CACHE.set(filePath, { mtimeMs: stats.mtimeMs, size: stats.size, session });
-  evictLRU(SESSION_BUILD_CACHE, SESSION_BUILD_CACHE_MAX);
-
-  return session;
-}
-
-// Convert workspace path to Claude's project folder name format
-// Claude replaces both slashes AND periods with dashes
-// e.g., /Users/muqsit/src/github.com/project -> -Users-muqsit-src-github-com-project
-function workspaceToClaudeFolder(workspacePath: string): string {
-  return workspacePath.replace(/[\/\.]/g, '-');
-}
-
-async function discoverClaudeProjectSessions(projectPath: string): Promise<AgentSession[]> {
-  const sessions: AgentSession[] = [];
-
-  const projectFiles = await safeReaddir(projectPath);
-  for (const entry of projectFiles) {
-    if (entry.isFile()) {
-      const ext = path.extname(entry.name).toLowerCase();
-      if (SESSION_EXTENSIONS.has(ext)) {
-        const session = await buildSession('claude', path.join(projectPath, entry.name));
-        if (session) sessions.push(session);
-      }
-    } else if (entry.isDirectory() && entry.name !== 'sessions') {
-      const nestedFiles = await collectSessionFiles(path.join(projectPath, entry.name), 1);
-      for (const nestedFile of nestedFiles) {
-        const session = await buildSession('claude', nestedFile);
-        if (session) sessions.push(session);
-      }
-    }
-  }
-
-  const sessionsDir = path.join(projectPath, 'sessions');
-  const sessionFiles = await collectSessionFiles(sessionsDir, 2);
-  for (const sessionFile of sessionFiles) {
-    const session = await buildSession('claude', sessionFile);
-    if (session) sessions.push(session);
-  }
-
-  return sessions;
-}
-
-// Short-TTL cache for the discovery walk. fetchSessions fires this on every
-// webview message; without a cache the no-workspace branch readdir-walks every
-// project under ~/.claude/projects each time. Per-file head reads are already
-// cached by mtime in buildSession (SESSION_BUILD_CACHE); this caps how often
-// the directory walk itself runs. New sessions surface within DISCOVER_TTL_MS.
-interface DiscoverCacheEntry {
-  at: number;
-  sessions: AgentSession[];
-}
-const CLAUDE_DISCOVER_CACHE = new Map<string, DiscoverCacheEntry>();
-const DISCOVER_TTL_MS = 3000;
-
-async function discoverClaudeSessions(workspacePath?: string): Promise<AgentSession[]> {
-  const cacheKey = workspacePath ?? '<all>';
-  const cachedDiscovery = CLAUDE_DISCOVER_CACHE.get(cacheKey);
-  if (cachedDiscovery && Date.now() - cachedDiscovery.at < DISCOVER_TTL_MS) {
-    return cachedDiscovery.sessions;
-  }
-
-  const root = path.join(homedir(), '.claude', 'projects');
-
-  // If workspace provided, only scan that project folder
-  if (workspacePath) {
-    const projectFolder = workspaceToClaudeFolder(workspacePath);
-    const projectPath = path.join(root, projectFolder);
-    const scoped = await discoverClaudeProjectSessions(projectPath);
-    CLAUDE_DISCOVER_CACHE.set(cacheKey, { at: Date.now(), sessions: scoped });
-    return scoped;
-  }
-
-  // No filter - scan all projects
-  const projects = await safeReaddir(root);
-  const sessions: AgentSession[] = [];
-
-  for (const project of projects) {
-    if (!project.isDirectory()) continue;
-    const projectPath = path.join(root, project.name);
-    const projectSessions = await discoverClaudeProjectSessions(projectPath);
-    sessions.push(...projectSessions);
-  }
-
-  CLAUDE_DISCOVER_CACHE.set(cacheKey, { at: Date.now(), sessions });
-  return sessions;
-}
-
-async function discoverCodexSessions(): Promise<AgentSession[]> {
-  const root = path.join(homedir(), '.codex', 'sessions');
-  const files = await collectSessionFiles(root, 4);
-  const sessions: AgentSession[] = [];
-
-  for (const filePath of files) {
-    const sessionId = path.basename(filePath, path.extname(filePath));
-    const timestamp = parseCodexTimestamp(sessionId);
-    const session = await buildSession('codex', filePath, timestamp);
-    if (session) sessions.push(session);
-  }
-
-  return sessions;
-}
-
-async function discoverGeminiSessions(): Promise<AgentSession[]> {
-  const root = path.join(homedir(), '.gemini', 'sessions');
-  const files = await collectSessionFiles(root, 3);
-  const sessions: AgentSession[] = [];
-
-  for (const filePath of files) {
-    const session = await buildSession('gemini', filePath);
-    if (session) sessions.push(session);
-  }
-
-  return sessions;
-}
-
+/**
+ * Recent sessions across agents, from the CLI's own discovery (`agents sessions
+ * --json --local`, issue #741). The CLI scans the real transcript roots — every
+ * version home plus the current per-agent layouts (e.g. gemini's ~/.gemini/tmp,
+ * which the old hand-rolled walk missed by scanning ~/.gemini/sessions) — so the
+ * extension no longer re-implements per-agent directory formats. With a
+ * workspace, the subprocess runs in that directory and the CLI's own workspace
+ * scoping applies; without one, --all lists every workspace.
+ */
 export async function discoverRecentSessions(
   limit: number = 50,
   workspacePath?: string
 ): Promise<AgentSession[]> {
-  const [claudeSessions, codexSessions, geminiSessions] = await Promise.all([
-    discoverClaudeSessions(workspacePath),
-    discoverCodexSessions(),
-    discoverGeminiSessions()
-  ]);
+  let stdout: string;
+  try {
+    const args = `sessions --json --local --limit ${limit}${workspacePath ? '' : ' --all'}`;
+    ({ stdout } = await runAgents(args, { cwd: workspacePath, timeout: 15_000 }));
+  } catch {
+    // CLI unavailable — no recent list, same as an unreadable session root before.
+    return [];
+  }
 
-  const all = [...claudeSessions, ...codexSessions, ...geminiSessions];
-  all.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
-  return all.slice(0, limit);
+  let rows: unknown[];
+  try {
+    const parsed = JSON.parse(stdout);
+    rows = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+
+  const sessions: AgentSession[] = [];
+  for (const row of rows as CliRecentSessionRow[]) {
+    if (!row || typeof row !== 'object') continue;
+    const agentType = row.agent;
+    // AgentSession is the session-picker shape; it only knows the transcript
+    // formats the extension can open.
+    if (agentType !== 'claude' && agentType !== 'codex' && agentType !== 'gemini') continue;
+    if (!row.id || !row.filePath) continue;
+    const ts = Date.parse(row.lastActivity || row.timestamp || '');
+    sessions.push({
+      agentType,
+      sessionId: row.id,
+      timestamp: Number.isNaN(ts) ? new Date(0) : new Date(ts),
+      path: row.filePath,
+      preview: row.topic || row.label || undefined,
+    });
+  }
+
+  sessions.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  return sessions.slice(0, limit);
 }
 
 export async function getSessionContent(session: AgentSession): Promise<string> {

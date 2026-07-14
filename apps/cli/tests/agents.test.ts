@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
-import { convertToOpenCodeFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
+import { convertToOpenCodeFormat, convertToCursorFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
 import {
   transformSubagentForDroid,
@@ -12,6 +12,7 @@ import {
   buildKimiSubagentsParentYaml,
   installSubagentToAgent,
   listSubagentsForAgent,
+  transformSubagentForOpenCode,
   KIMI_SUBAGENTS_PARENT_FILE,
 } from '../src/lib/subagents.js';
 
@@ -103,6 +104,76 @@ describe('droid (Factory AI)', () => {
       expect(out).toContain('You review code.');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Hermes and ForgeCode install targets', () => {
+  it('registers Hermes with skills, MCP, and MEMORY.md rules', () => {
+    expect(ALL_AGENT_IDS).toContain('hermes');
+    expect(capableAgents('mcp')).toContain('hermes');
+    expect(capableAgents('skills')).toContain('hermes');
+    expect(capableAgents('commands')).not.toContain('hermes');
+    expect(capableAgents('hooks')).not.toContain('hermes');
+    expect(AGENTS.hermes.instructionsFile).toBe('MEMORY.md');
+    expect(AGENTS.hermes.capabilities.rules).toEqual({ file: 'MEMORY.md' });
+  });
+
+  it('resolves Hermes MCP config to ~/.hermes/config.yaml and parses mcp_servers YAML', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hermes-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('hermes', home);
+      expect(configPath).toBe(path.join(home, '.hermes', 'config.yaml'));
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        [
+          'model: openrouter/anthropic/claude-sonnet-4',
+          'mcp_servers:',
+          '  ctx:',
+          '    command: ctx-server',
+          '    args:',
+          '      - --stdio',
+          '',
+        ].join('\n')
+      );
+
+      const parsed = parseMcpConfig('hermes', configPath);
+      expect(parsed.ctx.command).toBe('ctx-server');
+      expect(parsed.ctx.args).toEqual(['--stdio']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('registers ForgeCode with skills, MCP, and AGENTS.md rules', () => {
+    expect(ALL_AGENT_IDS).toContain('forge');
+    expect(capableAgents('mcp')).toContain('forge');
+    expect(capableAgents('skills')).toContain('forge');
+    expect(capableAgents('commands')).not.toContain('forge');
+    expect(capableAgents('hooks')).not.toContain('forge');
+    expect(AGENTS.forge.instructionsFile).toBe('AGENTS.md');
+    expect(AGENTS.forge.capabilities.rules).toEqual({ file: 'AGENTS.md' });
+  });
+
+  it('resolves ForgeCode MCP config to ~/.forge/.mcp.json and parses mcpServers JSON', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-forge-mcp-'));
+    try {
+      const configPath = getMcpConfigPathForHome('forge', home);
+      expect(configPath).toBe(path.join(home, '.forge', '.mcp.json'));
+
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({ mcpServers: { ctx: { command: 'ctx-server', args: ['--stdio'] } } })
+      );
+
+      const parsed = parseMcpConfig('forge', configPath);
+      expect(parsed.ctx.command).toBe('ctx-server');
+      expect(parsed.ctx.args).toEqual(['--stdio']);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 });
@@ -306,6 +377,87 @@ describe('opencode allowlist (permission in opencode.jsonc)', () => {
       const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
       expect(cfg.permission.bash['git *']).toBe('allow');
       expect(cfg.permission.bash['rm *']).toBe('deny');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+
+describe('cursor allowlist (cli-config.json)', () => {
+  it('is capable of allowlist', () => {
+    expect(capableAgents('allowlist')).toContain('cursor');
+    expect(supports('cursor', 'allowlist').ok).toBe(true);
+  });
+
+  it('convertToCursorFormat maps Bash to Shell', () => {
+    const out = convertToCursorFormat({ name: 't', allow: ['Bash(git *)', 'Read(src/**)'], deny: ['Bash(rm *)'] });
+    expect(out.permissions.allow).toContain('Shell(git *)');
+    expect(out.permissions.allow).toContain('Read(src/**)');
+    expect(out.permissions.deny).toContain('Shell(rm *)');
+  });
+
+  it('applyPermissionsToVersion writes ~/.cursor/cli-config.json', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cur-perm-'));
+    try {
+      const home = path.join(root, 'home');
+      const r = applyPermissionsToVersion(
+        'cursor',
+        { name: 't', allow: ['Bash(ls)'], deny: ['Bash(rm)'] },
+        home,
+        false,
+      );
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.cursor', 'cli-config.json');
+      expect(fs.existsSync(dest)).toBe(true);
+      const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      expect(cfg.permissions.allow).toContain('Shell(ls)');
+      expect(cfg.permissions.deny).toContain('Shell(rm)');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('opencode subagents (markdown mode: subagent)', () => {
+  it('is capable of subagents', () => {
+    expect(capableAgents('subagents')).toContain('opencode');
+    expect(supports('opencode', 'subagents').ok).toBe(true);
+  });
+
+  it('transformSubagentForOpenCode emits mode subagent frontmatter', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-sub-'));
+    try {
+      fs.writeFileSync(
+        path.join(dir, 'AGENT.md'),
+        `---\nname: reviewer\ndescription: Reviews diffs\nmodel: anthropic/claude-sonnet-4\n---\n\nYou review code.\n`
+      );
+      const out = transformSubagentForOpenCode(dir);
+      expect(out).toContain('mode: subagent');
+      expect(out).toContain('description: Reviews diffs');
+      expect(out).toContain('model: anthropic/claude-sonnet-4');
+      expect(out).toContain('You review code.');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('installSubagentToAgent writes ~/.config/opencode/agents/<name>.md', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-oc-inst-'));
+    try {
+      const subDir = path.join(root, 'sub');
+      fs.mkdirSync(subDir);
+      fs.writeFileSync(
+        path.join(subDir, 'AGENT.md'),
+        `---\nname: explorer\ndescription: Explores code\n---\n\nExplore.\n`
+      );
+      const home = path.join(root, 'home');
+      const r = installSubagentToAgent(subDir, 'explorer', 'opencode', home);
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.config', 'opencode', 'agents', 'explorer.md');
+      expect(fs.existsSync(dest)).toBe(true);
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('mode: subagent');
+      expect(listSubagentsForAgent('opencode', home).map(s => s.name)).toEqual(['explorer']);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

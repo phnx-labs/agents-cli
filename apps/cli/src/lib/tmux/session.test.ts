@@ -28,6 +28,7 @@ import {
   slugifyName,
   splitPane,
   AGENT_HOOK_SCHEMA,
+  agentPaneDiedHook,
   TmuxSessionError,
 } from './session.js';
 
@@ -259,6 +260,12 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(screen).toContain('BRIEF');
   });
 
+  it('setSessionHook reports whether tmux accepted the hook', async () => {
+    await createSession({ name: 'hook-result', cmd: 'sleep 30', socket });
+    expect(await setSessionHook('hook-result', 'pane-died', 'display-message accepted', socket)).toBe(true);
+    expect(await setSessionHook('missing-session', 'pane-died', 'display-message rejected', socket)).toBe(false);
+  });
+
   it('pane-guarded pane-died hook: exiting a user split closes only that split, agent pane survives', async () => {
     // Replicates runInTmux()'s hook wiring: a pane-died hook scoped to the AGENT
     // pane via #{hook_pane}. Exiting a user-created split must close that split in
@@ -272,7 +279,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     await setSessionHook(
       'guardsplit',
       'pane-died',
-      `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =guardsplit' 'kill-pane'`,
+      agentPaneDiedHook('guardsplit', agentPane),
       socket,
     );
     // User opens a split (a plain shell), then exits it.
@@ -299,7 +306,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     await setSessionHook(
       'guardagent',
       'pane-died',
-      `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =guardagent' 'kill-pane'`,
+      agentPaneDiedHook('guardagent', agentPane),
       socket,
     );
     await wait(400);
