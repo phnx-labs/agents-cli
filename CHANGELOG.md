@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`agents add grok@latest` now places the Grok binary in the new version's
+  isolated home.** The x.ai installer writes to `~/.grok/downloads`, which
+  resolved to the previous default home during install, leaving `agents view`
+  and `agents run` pointing at the old version. The installer-dropped binary is
+  now relocated into the target version home automatically.
+
 ### Added
 
 - **`agents output` — productivity: token burn vs shipped output.** A new command
