@@ -33,7 +33,7 @@ import { getSessionPathBySessionId, getSessionPreviewInfo, SessionPreviewInfo, r
 import { extractLinearTicketId } from '../core/utils';
 import { readPrompts } from './settings.vscode';
 import { BUILT_IN_AGENTS } from '../core/agents';
-import { parseLineForActivity, formatActivity } from '../core/session.activity';
+import { parseLineForActivity, formatActivity, extractTodoProgress, type TodoProgress } from '../core/session.activity';
 import { getSessionToolStatsViaAgentsCli } from '../core/handoff';
 import {
   extractPrUrls as extractPrUrlsHelper,
@@ -122,6 +122,9 @@ interface PanelSnapshot {
   // Conversation
   conversation?: ConversationSummary;
   recentActivity?: ActivityItem[];
+  // Fine-grained task checklist + done/total, from the agent's latest plan write.
+  // Rides the transcript tail already read for recentActivity (no extra I/O).
+  todoProgress?: TodoProgress;
   // Linked artifacts — multi-PR (the agent may have opened several in one session)
   linearIssue?: string;
   pullRequests?: PullRequestRef[];
@@ -478,6 +481,8 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
 
           const tailLines = await readTailLines(filePath, 80);
           snapshot.recentActivity = collectRecentActivity(tailLines, entry.agentType, 5);
+          // Fine-grained progress rides the SAME tail — no extra read, no floor poll.
+          snapshot.todoProgress = extractTodoProgress(tailLines.join('\n'), entry.agentType as 'claude' | 'codex' | 'gemini') ?? undefined;
           // Scan the full transcript-by-tail PLUS first/last user messages so a
           // PR mentioned in a wrap-up message isn't dropped. extractPrUrls
           // returns every match deduped, not just the first.
@@ -786,6 +791,43 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
     color: var(--vscode-foreground);
     word-break: break-word;
   }
+  h2 .todo-frac {
+    color: var(--vscode-descriptionForeground);
+    font-weight: 600;
+    font-size: 11px;
+  }
+  .todo-track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--vscode-editorWidget-border, rgba(128,128,128,0.3));
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .todo-track > i {
+    display: block;
+    height: 100%;
+    background: var(--vscode-progressBar-background, var(--vscode-textLink-foreground));
+  }
+  .todo {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 1px 0;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .todo-mk {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    align-self: center;
+    background: var(--vscode-descriptionForeground);
+  }
+  .todo.status-in_progress .todo-mk { background: var(--vscode-charts-yellow, #d7a000); }
+  .todo.status-completed .todo-mk { background: var(--vscode-charts-green, #4caf50); }
+  .todo.status-completed .todo-txt { text-decoration: line-through; color: var(--vscode-descriptionForeground); }
+  .todo-txt { color: var(--vscode-foreground); word-break: break-word; }
   .actions-row {
     display: flex;
     gap: 6px;
@@ -1260,6 +1302,25 @@ function renderActivityCard(s) {
   );
 }
 
+function renderChecklistCard(s) {
+  const p = s.todoProgress;
+  if (!p || !p.total) return '';
+  const pct = Math.round((p.done / p.total) * 100);
+  const rows = p.todos.map((t) => (
+    '<div class="todo status-' + esc(t.status) + '">' +
+      '<span class="todo-mk"></span>' +
+      '<span class="todo-txt">' + esc(truncate(t.content, 100)) + '</span>' +
+    '</div>'
+  )).join('');
+  return (
+    '<h2>Checklist <span class="todo-frac">' + p.done + '/' + p.total + '</span></h2>' +
+    '<div class="card">' +
+      '<div class="todo-track"><i style="width:' + pct + '%"></i></div>' +
+      rows +
+    '</div>'
+  );
+}
+
 function renderPromptsCard(s) {
   const prompts = s.quickPrompts || [];
   if (!prompts.length) return '';
@@ -1480,6 +1541,7 @@ function render(snap) {
     renderActionsCard(snap) +
     renderLinksCard(snap) +
     renderConversationCard(snap) +
+    renderChecklistCard(snap) +
     renderActivityCard(snap) +
     renderRecentFilesCard(snap) +
     renderWorktreesCard(snap) +
