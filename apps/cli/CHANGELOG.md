@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Release retries rebuild the exact merged, CI-tested release tree even after `main` advances.** A registry/auth failure after the release PR merged previously stranded that version because the catch-up guard required the release merge to remain current `main`. The local release script now validates the original PR head and full green matrix, stages its signed helpers in a detached temporary worktree, rebuilds that historical tree, and tags/publishes that exact merge without including later commits. Source: `apps/cli/scripts/release.sh`.
 - **Fix: `agents run <agent>@<version> --host <host>` now forwards the version pin and most run flags to the remote host.** Previously the `--host` branch stripped `@version` and ignored `--strategy`, `--effort`, `--add-dir`, `--json`, `--verbose`, `--timeout`, `--yes`, and `--acp`, so the remote host applied its own defaults. The local CLI now parses `agent@version` verbatim, normalizes `--strategy`/`--balanced`, makes `--add-dir` paths remote-portable, and forwards all of these flags to the remote `agents run` invocation. `--add-dir` portability uses the same `~`/`$HOME` re-rooting that `--cwd` already uses, so a Linux remote resolves home paths against its own `/home/<user>`. Source: `apps/cli/src/lib/hosts/dispatch.ts`, `apps/cli/src/commands/exec.ts`, `apps/cli/src/lib/hosts/dispatch.test.ts`.
 
 ## 1.20.59

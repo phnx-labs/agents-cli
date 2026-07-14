@@ -209,6 +209,10 @@ scripts/release.sh <version> --apply  # commits chore(release), tags v<version>,
 `release.sh` reads the npm token from the `npmjs.com` secrets bundle (`agents
 secrets`) — no 2FA prompt, no token on disk. The script's git-scope reads use
 `<ref>:apps/cli/package.json` (not root) since the package moved under `apps/cli`.
+If npm rejects a publish after the release PR merges, rerun the same command.
+The script revalidates that PR's full CI matrix and rebuilds from its exact merged
+tree in a temporary worktree, so later commits on `main` cannot leak into the
+already-versioned package or strand the retry.
 
 **Linux-driven release (`SIGN_HOST`).** The signed macOS artifacts (below) are
 the only reason publishing was macOS-pinned. `release.sh` now offloads producing
