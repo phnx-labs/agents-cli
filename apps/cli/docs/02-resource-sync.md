@@ -201,9 +201,10 @@ Per-agent conversion is lossy in both directions:
   (`permissions.ts:362-369`).
 - OpenCode maps `Bash(pattern)` rules into a pattern → `allow`/`deny` map
   (`permissions.ts:385-405`). Non-bash rules are dropped.
-- Codex emits Starlark deny rules to a generated `agents-deny.rules` file
-  (`permissions.ts:38-56`). Allow rules aren't expressed; Codex defaults to
-  deny-unless-allowed elsewhere.
+- Codex (>= 0.138.0) writes `approval_policy` and `sandbox_mode` to
+  `.codex/config.toml`, plus `sandbox_workspace_write.network_access=true` when
+  web tools are allowed. Deny rules are emitted as Starlark to a generated
+  `agents-deny.rules` file (`permissions.ts:38-56`).
 - Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
   capability rules under `.kiro/settings/permissions.yaml`. Existing user
   rules are preserved when managed rules are merged.
