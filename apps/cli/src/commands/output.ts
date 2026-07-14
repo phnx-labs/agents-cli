@@ -64,6 +64,8 @@ interface BurnTotals {
 
 interface GitOut {
   commits: number;
+  /** Deduped commit SHAs — unioned across machines under --all-hosts. */
+  commitShas: string[];
   prsOpened: number;
   prsMerged: number;
   reposScanned: number;
@@ -172,6 +174,7 @@ async function computeLocalPayload(options: OutputOptions, includePrs: boolean):
     burn,
     output: {
       commits: git.commits,
+      commitShas: git.commitShas,
       prsOpened: git.prsOpened,
       prsMerged: git.prsMerged,
       reposScanned: git.reposScanned,
@@ -204,7 +207,7 @@ async function fetchRemotePayload(device: string, options: OutputOptions): Promi
       pricingVersion: PRICING_VERSION,
       since: options.since ?? '7d',
       burn: emptyBurn(),
-      output: { commits: 0, prsOpened: 0, prsMerged: 0, reposScanned: 0, ghAvailable: false, authors: [], logins: [] },
+      output: { commits: 0, commitShas: [], prsOpened: 0, prsMerged: 0, reposScanned: 0, ghAvailable: false, authors: [], logins: [] },
       breakdown: { by: resolveGroup(options.by), rows: [] },
       uncostedAgents: [],
       error: (err?.stderr || err?.message || 'unreachable').toString().split('\n')[0].slice(0, 120),
@@ -250,7 +253,10 @@ async function outputAction(options: OutputOptions): Promise<void> {
 function mergeMachines(machines: OutputPayload[], options: OutputOptions): OutputPayload {
   const burn = emptyBurn();
   const byKey = new Map<string, RollupRow>();
-  let commits = 0;
+  // Union commit SHAs across machines: shared repos (cloned on several boxes)
+  // expose the same commits to `git log` on each, so summing counts would
+  // multi-count. A commit's SHA is its global identity — union, don't add.
+  const allShas = new Set<string>();
   const uncosted = new Set<string>();
   for (const m of machines) {
     burn.costUsd += m.burn.costUsd;
@@ -258,7 +264,7 @@ function mergeMachines(machines: OutputPayload[], options: OutputOptions): Outpu
     burn.tokenCount += m.burn.tokenCount;
     burn.sessionCount += m.burn.sessionCount;
     burn.durationMs += m.burn.durationMs;
-    commits += m.output.commits;
+    for (const s of m.output.commitShas) allShas.add(s);
     for (const a of m.uncostedAgents) uncosted.add(a);
     for (const r of m.breakdown.rows) {
       const cur = byKey.get(r.key) ?? { key: r.key, costUsd: 0, durationMs: 0, sessionCount: 0, tokenCount: 0, outputTokens: 0 };
@@ -278,7 +284,7 @@ function mergeMachines(machines: OutputPayload[], options: OutputOptions): Outpu
     pricingVersion: PRICING_VERSION,
     since: options.since ?? '7d',
     burn,
-    output: { ...localGit, commits },
+    output: { ...localGit, commits: allShas.size, commitShas: [...allShas] },
     breakdown: { by: resolveGroup(options.by), rows },
     uncostedAgents: [...uncosted],
   };

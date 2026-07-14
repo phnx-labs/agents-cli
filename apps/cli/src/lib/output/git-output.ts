@@ -28,6 +28,12 @@ export interface GitOutputSummary {
   byAuthor: AuthorCommits[];
   prsOpened: number;
   prsMerged: number;
+  /**
+   * Deduped commit SHAs authored by us in the window. Carried so `--all-hosts`
+   * can UNION across machines — a repo cloned on several boxes exposes the same
+   * commits to `git log` on each, so summing counts would multi-count.
+   */
+  commitShas: string[];
   /** false when `gh` is missing/unauthed — PR counts are then 0 and not trustworthy. */
   ghAvailable: boolean;
   /** Author emails counted as "ours". */
@@ -83,15 +89,27 @@ export function findGitRepos(root: string, maxDepth = 4): string[] {
   return repos;
 }
 
-/** git output for one repo, tolerant of empty/broken repos. */
-async function repoLog(repoDir: string, sinceIso: string): Promise<string[]> {
+/** One commit's identity: its SHA and author email. */
+interface CommitRef {
+  sha: string;
+  email: string;
+}
+
+/** git log for one repo (SHA + author email per commit), tolerant of empty/broken repos. */
+async function repoLog(repoDir: string, sinceIso: string): Promise<CommitRef[]> {
   try {
     const { stdout } = await execFileAsync(
       'git',
-      ['-C', repoDir, 'log', '--all', '--no-merges', `--since=${sinceIso}`, '--pretty=format:%ae'],
+      ['-C', repoDir, 'log', '--all', '--no-merges', `--since=${sinceIso}`, '--pretty=format:%H%x09%ae'],
       { maxBuffer: 64 * 1024 * 1024 },
     );
-    return stdout.split('\n').map(s => s.trim()).filter(Boolean);
+    const refs: CommitRef[] = [];
+    for (const line of stdout.split('\n')) {
+      const tab = line.indexOf('\t');
+      if (tab < 0) continue;
+      refs.push({ sha: line.slice(0, tab).trim(), email: line.slice(tab + 1).trim() });
+    }
+    return refs;
   } catch {
     return []; // no commits yet / not a real repo / detached weirdness
   }
@@ -124,27 +142,33 @@ async function discoverAuthorEmails(repos: string[]): Promise<string[]> {
   return [...emails];
 }
 
-/** Count commits by our authors across all repos, tallied per email. */
+/**
+ * Count commits by our authors across all repos, deduped by SHA (so the same
+ * commit reachable via multiple repo clones/worktrees on this machine — or, at
+ * the fleet layer, across machines — is counted once), tallied per email.
+ */
 export async function collectCommits(
   repos: string[],
   sinceIso: string,
   authors: string[],
-): Promise<{ total: number; byAuthor: AuthorCommits[] }> {
+): Promise<{ total: number; byAuthor: AuthorCommits[]; shas: string[] }> {
   const ours = new Set(authors.map(a => a.toLowerCase()));
   const tally = new Map<string, number>();
+  const seen = new Set<string>();
   const logs = await Promise.all(repos.map(r => repoLog(r, sinceIso)));
-  for (const lines of logs) {
-    for (const email of lines) {
+  for (const refs of logs) {
+    for (const { sha, email } of refs) {
       const key = email.toLowerCase();
       if (ours.size > 0 && !ours.has(key)) continue;
+      if (seen.has(sha)) continue; // same commit seen via another clone/ref
+      seen.add(sha);
       tally.set(key, (tally.get(key) ?? 0) + 1);
     }
   }
   const byAuthor = [...tally.entries()]
     .map(([author, commits]) => ({ author, commits }))
     .sort((a, b) => b.commits - a.commits);
-  const total = byAuthor.reduce((s, r) => s + r.commits, 0);
-  return { total, byAuthor };
+  return { total: seen.size, byAuthor, shas: [...seen] };
 }
 
 /** Resolve the current gh login, or null if gh is unavailable/unauthed. */
@@ -223,7 +247,7 @@ export async function collectGitOutput(options: GitOutputOptions): Promise<GitOu
     ? options.authors.map(a => a.toLowerCase())
     : await discoverAuthorEmails(repos);
 
-  const { total: commits, byAuthor } = await collectCommits(repos, sinceIso, authors);
+  const { total: commits, byAuthor, shas: commitShas } = await collectCommits(repos, sinceIso, authors);
 
   let prsOpened = 0;
   let prsMerged = 0;
@@ -241,6 +265,7 @@ export async function collectGitOutput(options: GitOutputOptions): Promise<GitOu
     reposScanned: repos.length,
     commits,
     byAuthor,
+    commitShas,
     prsOpened,
     prsMerged,
     ghAvailable,

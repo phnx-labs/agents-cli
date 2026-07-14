@@ -96,6 +96,18 @@ describe('collectCommits', () => {
     const { total } = await collectCommits([path.join(root, 'does-not-exist')], daysAgoIso(7), ['alice@example.com']);
     expect(total).toBe(0);
   });
+
+  it('dedupes the same commit seen via multiple clones (the --all-hosts fix)', async () => {
+    // A second clone of the repo exposes the identical SHAs to git log. Counting
+    // both clones must NOT double the commits — SHA identity collapses them.
+    const clone = path.join(root, 'clone');
+    execFileSync('git', ['clone', '-q', repo, clone], { stdio: 'pipe' });
+    const since = daysAgoIso(7);
+    const one = await collectCommits([repo], since, ['alice@example.com', 'bob@example.com']);
+    const both = await collectCommits([repo, clone], since, ['alice@example.com', 'bob@example.com']);
+    expect(both.total).toBe(one.total); // deduped, not 2x
+    expect(both.shas.sort()).toEqual(one.shas.sort());
+  });
 });
 
 describe('toSearchDate', () => {
