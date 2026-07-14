@@ -29,6 +29,8 @@ export const CLI_AGENT_IDS = [
   'grok',
   'kimi',
   'droid',
+  'hermes',
+  'forge',
 ] as const;
 
 /** Mirror of the CLI's AgentId union. */
@@ -57,6 +59,8 @@ export const CLI_AGENT_META: Record<CliAgentId, CliAgentMeta> = {
   grok: { name: 'Grok', cliCommand: 'grok' },
   kimi: { name: 'Kimi', cliCommand: 'kimi' },
   droid: { name: 'Droid', cliCommand: 'droid' },
+  hermes: { name: 'Hermes', cliCommand: 'hermes' },
+  forge: { name: 'ForgeCode', cliCommand: 'forge' },
 };
 
 /** Type guard against the CLI agent id set. */

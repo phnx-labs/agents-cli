@@ -1,8 +1,3 @@
-## Unreleased
-
-- **Remote plan previews are isolated by source path (RUSH-1631).** Cache key is `host/sha1(path)/basename` so two worktrees sharing a plan basename no longer clobber each other. Source: `apps/factory/src/vscode/settings.vscode.ts`.
-- **Windows remote dispatch uses distinct PowerShell stdout/stderr log paths (RUSH-1622).** `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot share a file; use `.out.log` / `.err.log`. Source: `apps/factory/src/vscode/settings.vscode.ts`.
-
 # Changelog
 
 All notable changes to the Factory extension are documented here. Format follows
@@ -10,6 +5,15 @@ All notable changes to the Factory extension are documented here. Format follows
 `## [<version>]` section for the version being published.
 
 ## [Unreleased]
+
+## [0.9.292] - 2026-07-13
+
+- **Factory recognizes every current agents-cli harness.** The checked-in CLI
+  registry snapshot now includes Hermes and ForgeCode, keeping Factory's agent
+  metadata aligned with the canonical `AgentId` union. Source:
+  `src/core/agents.cli.ts`.
+- **Remote plan previews are isolated by source path (RUSH-1631).** Cache key is `host/sha1(path)/basename` so two worktrees sharing a plan basename no longer clobber each other. Source: `src/vscode/settings.vscode.ts`.
+- **Windows remote dispatch uses distinct PowerShell stdout/stderr log paths (RUSH-1622).** `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot share a file; use `.out.log` / `.err.log`. Source: `src/vscode/settings.vscode.ts`.
 
 - **Factory Floor group controls now support Subgroup (RUSH-1544).**
   The live feed and Backlog controls can render a second grouping axis, excluding
