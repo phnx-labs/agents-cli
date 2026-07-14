@@ -919,11 +919,12 @@ export async function agentPing(): Promise<{ reachable: boolean; cliVersion?: st
  * Ensure a broker is running and reachable. Returns true once the socket answers
  * a ping. macOS only.
  *
- * Prefers the persistent launchd service: if it isn't installed we install it
- * (which makes the broker survive for the whole login session, so subsequent
- * reads never cold-start); if it's installed but unreachable we kickstart it.
- * Only when the service path can't be used do we fall back to a one-off detached
- * broker — that's the model that gets starved under heavy load, so it's last.
+ * Prefers the always-on daemon, which hosts the broker socket (#416): retire any
+ * legacy standalone launchd service so the daemon owns the socket, then bring the
+ * daemon up (Path 0) — one supervised backbone that survives the whole login
+ * session, so subsequent reads never cold-start. Only when the daemon can't be
+ * used do we fall back to a one-off detached broker (Path 1) — the model that
+ * gets starved under heavy load, so it's last.
  */
 export async function ensureAgentRunning(timeoutMs = 5000): Promise<boolean> {
   if (!onDarwin()) return false;
