@@ -27,6 +27,7 @@ import {
   transformSubagentForOpenCode,
   transformSubagentForAntigravity,
   transformSubagentForDroid,
+  transformSubagentForForge,
   transformSubagentForKiro,
   transformSubagentForCursor,
   syncSubagentToOpenclaw,
@@ -96,6 +97,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             const agentsDir = path.join(versionHome, '.cursor', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForCursor(sub.path));
+            synced.push(sub.name);
+          } else if (agent === 'forge') {
+            const agentsDir = path.join(versionHome, '.forge', 'agents');
+            fs.mkdirSync(agentsDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForForge(sub.path));
             synced.push(sub.name);
           }
         } catch { /* per-item sync failure: skip */ }

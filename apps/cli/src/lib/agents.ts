@@ -682,14 +682,20 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     npmPackage: '',
     installScript: 'curl -fsSL https://forgecode.dev/cli | sh',
     configDir: path.join(HOME, '.forge'),
-    commandsDir: '',
-    commandsSubdir: '',
+    commandsDir: path.join(HOME, '.forge', 'commands'),
+    commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.forge', 'skills'),
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
+    // Commands: ForgeCode reads Markdown slash commands from `~/.forge/commands/<name>.md`
+    // (also the shared `~/.agents/commands/`); the filename is the command name.
+    // Subagents: named `.md` agent definitions with YAML frontmatter under
+    // `~/.forge/agents/<name>.md` — same Markdown+frontmatter shape as Droid/Copilot
+    // (no `color` field), so transformSubagentForForge aliases transformSubagentForDroid.
+    // See https://forgecode.dev/docs/commands/ and /docs/agent-definition-guide/.
     capabilities: {
       hooks: false,
       mcp: true,
@@ -697,9 +703,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcpHeaders: false,
       allowlist: false,
       skills: true,
-      commands: false,
+      commands: true,
       plugins: false,
-      subagents: false,
+      subagents: true,
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: false,

@@ -3,6 +3,7 @@
  * Codex: flat .toml files under `<versionHome>/.codex/agents/`.
  * Droid: flat .md files under `<versionHome>/.factory/droids/`.
  * Cursor: flat .md files under `<versionHome>/.cursor/agents/`.
+ * ForgeCode: flat .md files under `<versionHome>/.forge/agents/`.
  * OpenClaw: subdirectories containing AGENTS.md under `<versionHome>/.openclaw/`.
  * Mirrors versions.ts:521-539.
  */
@@ -138,6 +139,10 @@ function buildKiroDetector(): ResourceDetector {
   };
 }
 
+function buildForgeDetector(): ResourceDetector {
+  return buildFlatMdAgentsDetector('forge', '.forge');
+}
+
 function buildOpenCodeDetector(): ResourceDetector {
   return {
     kind: 'subagents',
@@ -179,6 +184,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   openclaw: buildOpenclawDetector,
   kiro: buildKiroDetector,
   cursor: buildCursorDetector,
+  forge: buildForgeDetector,
 };
 
 export const subagentsDetectors = lazyAgentMap<ResourceDetector>(() => {

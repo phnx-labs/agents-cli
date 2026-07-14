@@ -197,6 +197,28 @@ describe('version command management', () => {
   });
 });
 
+describe('ForgeCode native command install', () => {
+  it('installs a native .md command to ~/.forge/commands/ (not command-as-skill)', () => {
+    const home = makeTempHome();
+    // forge: format=markdown, commands: true, commandsSubdir='commands' => native .md,
+    // NOT the command-as-skill path (which fires only when commands is unsupported).
+    writeSystemCommand(home, 'my-cmd', '---\ndescription: Test command\n---\nDo something.');
+    scaffoldInstalledVersion(home, 'forge', '1.0.0');
+
+    const installed = runCommandsExpression(home, "installCommandToVersion('forge', '1.0.0', 'my-cmd', 'copy')") as { success: boolean };
+    expect(installed.success).toBe(true);
+
+    // Native command file lands under the forge version home's .forge/commands/.
+    const commandsDir = path.join(versionHomePath(home, 'forge', '1.0.0'), '.forge', 'commands');
+    expect(fs.existsSync(path.join(commandsDir, 'my-cmd.md'))).toBe(true);
+    // It must be a plain command file, not a SKILL.md wrapper.
+    expect(fs.existsSync(path.join(versionHomePath(home, 'forge', '1.0.0'), '.forge', 'skills', 'my-cmd', 'SKILL.md'))).toBe(false);
+
+    const listed = runCommandsExpression(home, "listCommandsInVersionHome('forge', '1.0.0')") as string[];
+    expect(listed).toEqual(['my-cmd']);
+  });
+});
+
 describe('removeCommandFromVersion soft-delete', () => {
   it('moves a .md command to trash for claude instead of deleting it', () => {
     const home = makeTempHome();

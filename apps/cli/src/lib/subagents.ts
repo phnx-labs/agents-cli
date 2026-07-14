@@ -328,6 +328,17 @@ export const transformSubagentForCopilot = transformSubagentForDroid;
 export const transformSubagentForCursor = transformSubagentForDroid;
 
 /**
+ * Transform a subagent into a ForgeCode custom subagent `.md` file.
+ *
+ * ForgeCode loads named agents from `.forge/agents/*.md` (project) or
+ * `~/.forge/agents/*.md` (user) — Markdown with YAML frontmatter (id, title,
+ * description, tools, model, temperature) + a system-prompt body. ForgeCode has
+ * no `color` field, so this is an alias of transformSubagentForDroid, same as
+ * Copilot/Cursor. See https://forgecode.dev/docs/agent-definition-guide/.
+ */
+export const transformSubagentForForge = transformSubagentForDroid;
+
+/**
  * Transform a subagent into Antigravity's custom-agent markdown shape.
  *
  * Antigravity exposes custom agents as Markdown files with YAML frontmatter,
@@ -713,6 +724,19 @@ export function installSubagentToAgent(
     } catch (err) {
       return { success: false, error: String(err) };
     }
+  } else if (agent === 'forge') {
+    // ForgeCode: flattened .md custom subagent under ~/.forge/agents/
+    const agentsDir = path.join(agentHome, '.forge', 'agents');
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true });
+    }
+    try {
+      const transformed = transformSubagentForForge(subagentDir);
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.md`), transformed);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else {
     // Other agents don't support subagents yet
     return { success: false, error: `Agent '${agent}' does not support subagents` };
@@ -770,6 +794,12 @@ export function removeSubagentFromAgent(
       return { success: true };
     } else if (agent === 'cursor') {
       const targetPath = safeJoin(path.join(agentHome, '.cursor', 'agents'), `${subagentName}.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
+      }
+      return { success: true };
+    } else if (agent === 'forge') {
+      const targetPath = safeJoin(path.join(agentHome, '.forge', 'agents'), `${subagentName}.md`);
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
       }
@@ -999,6 +1029,18 @@ export function listSubagentsForAgent(
       const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
       subagents.push({ name, path: filePath, files: [file], frontmatter });
     }
+  } else if (agentId === 'forge') {
+    // ForgeCode: flat `<name>.md` files under ~/.forge/agents/
+    const agentsDir = path.join(home, '.forge', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.md')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+      const name = file.replace(/\.md$/, '');
+      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
+      subagents.push({ name, path: filePath, files: [file], frontmatter });
+    }
   }
 
   return subagents;
@@ -1102,6 +1144,15 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
         if (!discovered.has(name)) orphans.push(name);
       }
     }
+  } else if (agent === 'forge') {
+    const agentsDir = path.join(versionHome, '.forge', 'agents');
+    if (fs.existsSync(agentsDir)) {
+      for (const file of fs.readdirSync(agentsDir)) {
+        if (!file.endsWith('.md')) continue;
+        const name = path.basename(file, '.md');
+        if (!discovered.has(name)) orphans.push(name);
+      }
+    }
   }
 
   return { agent, version, orphans: orphans.sort() };
@@ -1191,6 +1242,12 @@ export function removeSubagentFromVersion(
       }
     } else if (agent === 'cursor') {
       const targetPath = path.join(versionHome, '.cursor', 'agents', `${subagentName}.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
+      }
+    } else if (agent === 'forge') {
+      const targetPath = path.join(versionHome, '.forge', 'agents', `${subagentName}.md`);
       if (fs.existsSync(targetPath)) {
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
