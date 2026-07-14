@@ -24,7 +24,7 @@ import {
   type PendingDispatch,
 } from './dispatch'
 import { FloorControls, floorControlsMode, type StatusChip } from './FloorControls'
-import { FloorSidebar } from './FloorSidebar'
+import { FloorSidebar, FLOOR_SIDEBAR_DEFAULT_WIDTH, FLOOR_SIDEBAR_MAX_WIDTH, FLOOR_SIDEBAR_MIN_WIDTH } from './FloorSidebar'
 import { FloorRail } from './FloorRail'
 import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from './FloorSubtabs'
 import { BacklogCenter } from './BacklogCenter'
@@ -105,17 +105,25 @@ interface FloorPrefs {
   // Ordered pinned host names for the HOSTS sidebar. null = never customized
   // (the local machine is pinned by default); [] = user explicitly unpinned all.
   hostPins: string[] | null
+  sidebarWidth: number
 }
 
 function defaultFloorPrefs(): FloorPrefs {
-  return { plain: false, sidebar: true, rail: true, right: true, pinned: [], hostPins: null }
+  return { plain: false, sidebar: true, rail: true, right: true, pinned: [], hostPins: null, sidebarWidth: FLOOR_SIDEBAR_DEFAULT_WIDTH }
+}
+
+function clampSidebarWidth(width: unknown): number {
+  const n = typeof width === 'number' ? width : Number(width)
+  if (!Number.isFinite(n)) return FLOOR_SIDEBAR_DEFAULT_WIDTH
+  return Math.max(FLOOR_SIDEBAR_MIN_WIDTH, Math.min(FLOOR_SIDEBAR_MAX_WIDTH, Math.round(n)))
 }
 
 function loadFloorPrefs(): FloorPrefs {
   try {
     const raw = localStorage.getItem(FLOOR_PREFS_KEY)
     if (!raw) return defaultFloorPrefs()
-    return { ...defaultFloorPrefs(), ...JSON.parse(raw) }
+    const parsed = { ...defaultFloorPrefs(), ...JSON.parse(raw) }
+    return { ...parsed, sidebarWidth: clampSidebarWidth(parsed.sidebarWidth) }
   } catch {
     return defaultFloorPrefs()
   }
@@ -651,6 +659,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [railCollapsed, setRailCollapsed] = useState(floorPrefs0.rail)
   const [rightOpen, setRightOpen] = useState(floorPrefs0.right)
   const [pinned, setPinned] = useState<Set<string>>(() => new Set(floorPrefs0.pinned))
+  const [sidebarWidth, setSidebarWidth] = useState(floorPrefs0.sidebarWidth)
   // Ordered pinned HOSTS names (null = default: pin the local machine).
   const [hostPins, setHostPins] = useState<string[] | null>(floorPrefs0.hostPins)
   const [statusChips, setStatusChips] = useState<StatusChip[]>([])
@@ -721,8 +730,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
 
   // Persist the durable Floor prefs (pinned set, plain/sidebar/right toggles, group-by, host pins).
   useEffect(() => {
-    saveFloorPrefs({ plain, sidebar: sidebarOpen, rail: railCollapsed, right: rightOpen, pinned: [...pinned], hostPins })
-  }, [plain, sidebarOpen, railCollapsed, rightOpen, pinned, hostPins])
+    saveFloorPrefs({ plain, sidebar: sidebarOpen, rail: railCollapsed, right: rightOpen, pinned: [...pinned], hostPins, sidebarWidth })
+  }, [plain, sidebarOpen, railCollapsed, rightOpen, pinned, hostPins, sidebarWidth])
 
   // Effective HOSTS pins: default to pinning just the local machine until the user
   // customizes. Pin/unpin and drag-reorder always write an explicit list.
@@ -2326,7 +2335,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         />
       )}
 
-      <div className="page" style={{ flex: 1, minHeight: 0, height: 'auto' }}>
+      <div className="page" style={{ flex: 1, minHeight: 0, height: 'auto', '--floor-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}>
         {sidebarOpen && (railCollapsed ? (
           <FloorRail
             agents={floorAgents}
@@ -2372,6 +2381,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             localHost={localHostName || undefined}
             projects={managedProjects}
             onManageProjects={() => { setCenter('projects'); setRightOpen(true) }}
+            sidebarWidth={sidebarWidth}
+            onSidebarWidthChange={(width) => setSidebarWidth(clampSidebarWidth(width))}
           />
         ))}
         <div className="feed-col">{centerContent}</div>
