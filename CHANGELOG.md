@@ -12,6 +12,14 @@
 
 ### Added
 
+- **`agents routines add --resume <sessionId>` — wake an existing session instead
+  of starting fresh.** At fire time the job runs `agents run <agent> --resume <id>`,
+  so the *actual* prior session reopens with its full context and the routine's
+  `--prompt` becomes its next turn. Powers self-scheduled wake-ups (an agent that
+  hibernates on a long external wait and resumes itself later). Without it, a routine
+  spawns a context-less fresh agent, which correctly refuses an opaque instruction it
+  has no memory of. claude/codex (native resume) only.
+
 - **`agents output` — productivity: token burn vs shipped output.** A new command
   that joins spend (`$` cost, from the offline price table) to what actually
   shipped: real generated **output tokens** plus **commits across every git

@@ -112,6 +112,13 @@ export interface JobConfig {
   runOnce?: boolean;
   // RFC3339 timestamp; routine auto-disables at the next fire on/after this time.
   endAt?: string;
+  /**
+   * When set, the job resumes this existing agent session id at fire time
+   * (`agents run <agent> --resume <id>`) instead of starting a fresh conversation,
+   * so the actual session reopens with full context and `prompt` becomes its next
+   * turn. Powers self-scheduled wake-ups (e.g. /hibernate). claude/codex only.
+   */
+  resume?: string;
   /** When set, executeJob runs this job through the loop driver instead of once. */
   loop?: LoopConfig;
 }

@@ -61,6 +61,17 @@ describe('buildJobCommand', () => {
     expect(argv).not.toContain('--non-interactive');
   });
 
+  it('resume emits `agents run <agent> --resume <id>` and reopens the session (not a fresh template)', () => {
+    const argv = buildJobCommand(
+      baseJob({ agent: 'claude', mode: 'skip', resume: 'sess-abc123' }),
+      '<wake prompt>',
+    );
+    expect(argv).toEqual(['agents', 'run', 'claude', '--resume', 'sess-abc123', '<wake prompt>', '--mode', 'skip']);
+    // Resume takes precedence over the fresh-agent template — none of its flags leak in.
+    expect(argv).not.toContain('--permission-mode');
+    expect(argv).not.toContain('--dangerously-skip-permissions');
+  });
+
   // Regression: kimi daemon jobs run headless via `--prompt`, which cannot be
   // combined with --plan/--auto/--yolo (kimi aborts "Cannot combine --prompt
   // with --X"). Write-modes must omit the flag; plan must fail closed.

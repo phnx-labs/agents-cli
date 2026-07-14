@@ -77,6 +77,15 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
     return cmd;
   }
 
+  // Resume branch: reopen an EXISTING session via `agents run <agent> --resume <id>`
+  // instead of starting fresh. The real session resumes with its full prior context
+  // (index-based lookup, cwd-independent) and `resolvedPrompt` becomes its next turn —
+  // so a self-scheduled wake (e.g. /hibernate) is handled by the session that scheduled
+  // it, not a fresh, context-less agent that would refuse an "opaque" instruction.
+  if (config.resume) {
+    return ['agents', 'run', config.agent, '--resume', config.resume, resolvedPrompt, '--mode', config.mode];
+  }
+
   const template = AGENT_COMMANDS[config.agent];
   if (!template) {
     throw new Error(`Unsupported agent for daemon jobs: ${config.agent}`);

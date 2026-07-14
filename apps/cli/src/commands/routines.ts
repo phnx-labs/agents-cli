@@ -405,6 +405,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
+    .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Use with --agent claude|codex.')
     .action(async (nameOrPath: string | undefined, options) => {
       // Check if inline mode (has flags) or file mode
       const hasInlineFlags = options.schedule || options.agent || options.workflow || options.prompt || options.at;
@@ -473,6 +474,7 @@ export function registerRoutinesCommands(program: Command): void {
           ...(devices ? { devices } : {}),
           ...(runOnce ? { runOnce: true } : {}),
           ...(options.endAt ? { endAt: options.endAt } : {}),
+          ...(options.resume ? { resume: options.resume } : {}),
         };
 
         const errors = validateJob(config);
