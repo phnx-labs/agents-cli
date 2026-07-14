@@ -4,7 +4,7 @@
  * Permissions are stored as YAML files in permissions/ directories at each layer.
  * Resolution: project > user > system (higher layer wins on name conflict).
  * Unlike other resources, permissions merge into agent-specific config files
- * (Claude: settings.json, Codex: config.toml, OpenCode: opencode.jsonc).
+ * (Claude/Gemini: settings.json, Codex: config.toml, OpenCode: opencode.jsonc).
  */
 
 import * as fs from 'fs';
@@ -83,6 +83,8 @@ function getAgentConfigPath(agent: AgentId, versionHome: string): string | null 
       return path.join(versionHome, '.claude', 'settings.json');
     case 'codex':
       return path.join(versionHome, '.codex', 'config.toml');
+    case 'gemini':
+      return path.join(versionHome, '.gemini', 'settings.json');
     case 'opencode':
       return path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
     case 'kimi':

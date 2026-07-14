@@ -112,8 +112,11 @@ function buildGeminiDetector(): ResourceDetector {
       if (!fs.existsSync(settingsPath)) return [];
       try {
         const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-        const allowed: unknown = settings?.tools?.allowed;
-        if (Array.isArray(allowed) && allowed.length > 0) {
+        const core: unknown = settings?.tools?.core;
+        const exclude: unknown = settings?.tools?.exclude;
+        const hasCore = Array.isArray(core) && core.length > 0;
+        const hasExclude = Array.isArray(exclude) && exclude.length > 0;
+        if (hasCore || hasExclude) {
           return discoverPermissionGroups().map(g => g.name);
         }
       } catch { /* parse fail */ }

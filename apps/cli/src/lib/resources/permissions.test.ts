@@ -288,6 +288,34 @@ describe('PermissionsHandler', () => {
       expect(rules).toContain('"-rf"');
     });
 
+    it('merges all permissions and writes to Gemini settings.json tools.core/exclude', () => {
+      const home = makeTempHome();
+      const versionHome = makeTempHome();
+
+      fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
+      fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+
+      writePermissionYaml(home, path.join('.agents', '.system'), 'base', {
+        name: 'base',
+        allow: ['Bash(git *)'],
+      });
+
+      writePermissionYaml(home, '.agents', 'extra', {
+        name: 'extra',
+        allow: ['Bash(mq:*)'],
+        deny: ['Bash(rm -rf *)'],
+      });
+
+      runPermissionsExpression(home, `PermissionsHandler.sync('gemini', ${JSON.stringify(versionHome)})`);
+
+      const settingsPath = path.join(versionHome, '.gemini', 'settings.json');
+      expect(fs.existsSync(settingsPath)).toBe(true);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      expect(settings.tools.core).toEqual(['ShellTool(git *)', 'ShellTool(mq *)']);
+      expect(settings.tools.exclude).toEqual(['ShellTool(rm -rf *)']);
+    });
+
     it('skips non-permission-capable agents', () => {
       const home = makeTempHome();
       const versionHome = makeTempHome();
@@ -300,15 +328,12 @@ describe('PermissionsHandler', () => {
         allow: ['Bash(*)'],
       });
 
-      // Cursor doesn't support permissions (`allowlist: false` in the capability matrix).
-      // Gemini was capable as of 236b4105 — pick an agent that's still on the
-      // excluded list, otherwise this test silently flips when capability is
-      // added.
-      runPermissionsExpression(home, `PermissionsHandler.sync('cursor', ${JSON.stringify(versionHome)})`);
+      // Amp still has `allowlist: false` in the capability matrix.
+      runPermissionsExpression(home, `PermissionsHandler.sync('amp', ${JSON.stringify(versionHome)})`);
 
       // No config should be written for a non-capable agent. Probe both the
       // canonical settings file paths a capable agent would have used.
-      expect(fs.existsSync(path.join(versionHome, '.cursor', 'settings.json'))).toBe(false);
+      expect(fs.existsSync(path.join(versionHome, '.gemini', 'settings.json'))).toBe(false);
       expect(fs.existsSync(path.join(versionHome, '.claude', 'settings.json'))).toBe(false);
     });
   });
@@ -327,6 +352,11 @@ describe('PermissionsHandler', () => {
       expect(result).toBe(path.join('/test/home', '.codex', 'config.toml'));
     });
 
+    it('returns correct path for Gemini', () => {
+      const result = PermissionsHandler.configPath!('gemini', '/test/home');
+      expect(result).toBe(path.join('/test/home', '.gemini', 'settings.json'));
+    });
+
     it('returns correct path for OpenCode', () => {
       const result = PermissionsHandler.configPath!('opencode', '/test/home');
       expect(result).toBe(path.join('/test/home', '.config', 'opencode', 'opencode.jsonc'));
@@ -343,7 +373,7 @@ describe('PermissionsHandler', () => {
     });
 
     it('returns null for unsupported agents', () => {
-      const result = PermissionsHandler.configPath!('gemini', '/test/home');
+      const result = PermissionsHandler.configPath!('amp', '/test/home');
       expect(result).toBeNull();
     });
   });
