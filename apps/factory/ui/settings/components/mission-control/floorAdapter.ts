@@ -134,6 +134,9 @@ export interface RemoteSessionLike {
   question?: { text: string; reason: 'question' | 'plan_review' | 'permission'; options: Array<{ label: string; description?: string; key?: string }> } | null
   /** Last few assistant turns (most-recent last) — panel context. */
   tail?: string[]
+  /** Live plan checklist from the CLI's latest `TodoWrite` (RUSH-1380). Populates the
+   *  N/M pill + checklist for remote / device-dispatched agents. Absent when none. */
+  todos?: Array<TodoItem & { activeForm?: string }>
   output?: string
   attachments?: Array<Partial<SessionAttachment> & { name?: string; ref?: string } | string>
   prUrl: string | null
@@ -562,7 +565,18 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
   const prOpenUnreviewed = !!r.prUrl
   const ci = r.ci ?? null
   const needs = deriveNeeds(phase, prOpenUnreviewed, ci)
-  const { verb, target } = splitActivity(r.activity)
+  let { verb, target } = splitActivity(r.activity)
+  // Live plan progress from the CLI (RUSH-1380): map to the checklist the UI renders,
+  // and — when there's no live tool action (idle/waiting/no preview) but a plan is in
+  // flight — surface the current step as the now-line so the row still says what it's on.
+  const remoteTodos: TodoItem[] = (r.todos ?? []).map((t) => ({ content: t.content, status: t.status }))
+  if (!verb && !target) {
+    const active = (r.todos ?? []).find((t) => t.status === 'in_progress')
+    if (active) {
+      verb = 'Plan'
+      target = active.activeForm || active.content
+    }
+  }
   const id = `remote-${r.host}-${r.sessionId}`
   const name = humanRemoteSessionName(r)
   // Remote (Tier-1) sessions have no enriched last-response yet — fall back to the
@@ -628,8 +642,9 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // the source); fall back to parsing the last response for a plain prose question.
     question: structuredQuestionFromRemote(r.question) ?? parseStructuredQuestion(resp, phase),
     reply: deriveReplyTargetFromRemote(r),
-    // Remote (Tier-1) sessions are status-only; no tool calls to parse todos from yet.
-    todos: [],
+    // Live plan checklist from the CLI's TodoWrite (RUSH-1380). Empty when the session
+    // wrote no todo list; the CLI now carries this for remote/device-dispatched agents.
+    todos: remoteTodos,
     // Remote = summary only: the sweep carries the session's task line (topic) / last
     // response but no tool calls yet, so recent stays empty until Tier-2 enrichment.
     summary: r.topic || r.lastResponse || '',
