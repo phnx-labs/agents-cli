@@ -634,30 +634,22 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const hostName = hostGiven[0];
-        const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
-        const { dispatchToHost, runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
-        const { registerHostSession, registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
-        // A password-auth device throws DeviceOffloadUnsupportedError here; it's
-        // printed cleanly by the top-level catch in index.ts (covers every
-        // resolveHost caller), so it never falls through to capability routing.
-        let host = await resolveHost(hostName);
-        if (!host) {
-          // Not a host name — try capability routing (e.g. --host gpu). A
-          // "Multiple hosts tagged…" error is actionable and must surface;
-          // only "no host tagged" falls through to the generic unknown-host msg.
-          try {
-            host = await resolveHostByCap(hostName, options.any);
-          } catch (e) {
-            const msg = (e as Error).message ?? '';
-            if (msg.startsWith('Multiple hosts')) {
-              console.error(chalk.red(msg));
-              process.exit(1);
-            }
+        const { resolveHostRunTarget, dispatchPromptToHost, HostResolutionError } = await import('../lib/hosts/run-target.js');
+        const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
+        const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
+        // Shared resolution (name → capability tag → error). A password-auth
+        // device throws DeviceOffloadUnsupportedError inside the helper and
+        // propagates untouched — it's printed cleanly by the top-level catch in
+        // index.ts (covers every resolveHost caller).
+        let host;
+        try {
+          host = await resolveHostRunTarget(hostName, { any: options.any });
+        } catch (e) {
+          if (e instanceof HostResolutionError) {
+            console.error(chalk.red(e.message));
+            process.exit(1);
           }
-        }
-        if (!host) {
-          console.error(chalk.red(`Unknown host "${hostName}". List hosts: agents hosts list`));
-          process.exit(1);
+          throw e;
         }
         try {
           const runAgent = agentSpec.split('@')[0];
@@ -725,22 +717,18 @@ export function registerRunCommand(program: Command): void {
             console.error(chalk.red('A prompt is required for headless host runs: agents run <agent> "<task>" --host <name>'));
             process.exit(1);
           }
-          const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
-          const { task, exitCode } = await dispatchToHost(host, {
+          // Session-id mint, detached dispatch, and local session-index
+          // registration all live in the shared helper (lib/hosts/run-target.ts).
+          const { task, exitCode } = await dispatchPromptToHost(host, {
             agent: runAgent,
             prompt,
             mode: options.mode,
             model: options.model,
             remoteCwd: hostCwd,
-            sessionId: hostSessionId,
             name: options.name,
             resume: resumeId,
             follow: options.follow !== false,
           });
-          // Register the dispatched run in the LOCAL session index so it shows
-          // up in `agents sessions` and resolves by id/name, even though its
-          // transcript lives on the host. No-op when no session id was captured.
-          registerHostSession(task, { cwd: process.cwd(), prompt });
           if (options.follow === false) {
             // The handle the caller uses to check on the run: the name if given,
             // else the real host-task id (never the old literal `<id>`). Steer
