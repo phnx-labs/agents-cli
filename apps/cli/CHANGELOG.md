@@ -2,6 +2,7 @@
 
 ## Unreleased
 - **Wire subagents support for Kiro CLI (RUSH-1393).** Kiro loads custom agents as JSON under `~/.kiro/agents/*.json` (since 1.23.0). Canonical subagent instructions now transform into Kiro's `name` / `description` / `prompt` schema with inherited tool access, and install, sync, drift detection, listing, diff, and removal all use the centralized writer path. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/subagents.ts`, `apps/cli/src/lib/staleness/writers/subagents.ts`, `apps/cli/src/lib/staleness/detectors/subagents.ts`.
+- **Wire Codex permissions/allowlist support (RUSH-1566).** Codex stores allow/deny in `.codex/config.toml` (`approval_policy`, `sandbox_mode`). Flip `allowlist: true` since 0.128.0, add `convertToCodexFormat`, wire writer/detector. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/permissions.ts`.
 - **OpenCode permissions write to the loaded config path (RUSH-1623).** Global config is `~/.config/opencode/opencode.jsonc` (not `~/.opencode/`); project config is `opencode.jsonc` at the project root. Source: `apps/cli/src/lib/permissions.ts`, `apps/cli/src/lib/agents.ts`.
 ## 1.20.58
 
