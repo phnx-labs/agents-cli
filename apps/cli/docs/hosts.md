@@ -348,6 +348,24 @@ secret-injection path works remotely for free** — provided agents-cli + that a
 are installed and authed on the box, which `ensureHostReady` / `agents hosts check`
 guarantee (see Context, below).
 
+**Working directory on the host.** The remote command is prefixed with a
+`cd <dir> &&` computed from the run's flags (see `remoteCdPrefix`,
+`src/lib/hosts/dispatch.ts`):
+
+- `--cwd <dir>` sets the host working directory. A home-anchored path (`~/…`,
+  `$HOME/…`, or a local-home absolute the local shell already expanded) is
+  re-rooted at the **remote** `$HOME`, so it resolves across machines with
+  different homes (`/Users/me` → `/home/me`). Resolution happens locally: the
+  forwarded argv is still a plain `agents run <agent> …`.
+- `-P, --project <slug>[@worktree]` resolves `<slug>` against your projects root
+  (auto-inferred from the launch repo and cached in `agents.yaml`; set via
+  `agents defaults project-root <path>`) and lands on the host home-relative
+  (`~/…`), so the host expands it to its own home. `@worktree` targets
+  `<repo>/.agents/worktrees/<worktree>`.
+- `--remote-cwd <dir>` is the explicit escape hatch — a literal remote path used
+  verbatim (never re-rooted). Precedence: `--remote-cwd` > `--project`/`--cwd`;
+  `--project` is mutually exclusive with `--cwd`/`--remote-cwd`.
+
 Workspace (where the run executes) is a deliberate scoping choice — see Open
 Questions. Phase 1 default: a caller-specified `--remote-cwd` (or the repo's
 existing checkout on the box). The rush per-task git-worktree workspace

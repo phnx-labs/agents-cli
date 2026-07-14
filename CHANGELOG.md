@@ -2,22 +2,22 @@
 
 ## Unreleased
 
-### Fixed
-
-- **Self-updating agents (droid et al.) are modeled as a single binary, not
-  fictional version-homes.** droid installs one global self-updating binary, so
-  `agents view` no longer shows phantom duplicate droid versions (e.g. `0.19.3`
-  AND `0.21.0` for the same binary) — it collapses to a single row showing the
-  live `droid --version`, and stale per-version dirs are folded away on sight.
-  `agents add droid@<version>` no longer errors with "does not support
-  version-pinned installs" — it gracefully installs the current release (a no-op
-  when already installed). Applies to every VERSION-less curl/brew installer
-  (droid, grok, antigravity, cursor, hermes, forge, kiro, goose). npm-packaged
-  agents (claude, codex, kimi) are unaffected. (RUSH-1321)
-
 ## 1.20.58
 
 ### Added
+
+- **Cursor CLI allowlists sync into its native permission store.** Shell, file,
+  web, and MCP grants now write to `~/.cursor/cli-config.json` without changing
+  Cursor's existing deny rules. (RUSH-1387)
+
+- **GitHub Copilot CLI and Kiro CLI receive synced subagents.** Copilot custom
+  agents are installed as `.agent.md` profiles, while Kiro custom agents are
+  installed as native JSON definitions with matching list, remove, and stale-
+  state behavior. (RUSH-1390, RUSH-1393)
+
+- **Active-session JSON includes attachment metadata for Factory previews.**
+  Prompt images and documents now surface their path, name, media type, and size
+  so consumers can render thumbnails and open the originals. (RUSH-1524)
 
 - **Kiro CLI allowlists sync as v3 capability rules.** Shell, filesystem, and
   web permissions now merge into Kiro 2.8.0+ while preserving user-authored
@@ -29,6 +29,30 @@
   over `--host`.
 
 ### Fixed
+
+- **Self-updating agents are modeled as one live binary, not fictional version
+  homes.** `agents view` reports the installed binary's version and folds away
+  stale per-version directories; `agents add <agent>@<version>` gracefully keeps
+  or installs the current release for Droid, Grok, Cursor, Kiro, Goose, Hermes,
+  and other single-binary agents. (RUSH-1321)
+
+- **Stopped teammate resumes are transactional.** Failed local and remote resume
+  launches preserve the existing teammate record and runtime state, terminate
+  the replacement process group and descendants, restore the prior log cursor,
+  and preserve the original launch error even if the restore write also fails.
+  Successful resumes restart log parsing at byte zero after truncation. (#1104,
+  #1108)
+
+- **Menu-bar Quick Dispatch keeps drafts when focus is stolen and carries every
+  selected screenshot into filed tickets.** Reopening the panel restores its
+  text and selections, while ticket-agent briefs now require the attached files
+  to be uploaded to the resulting Linear issue. (RUSH-1592, RUSH-1668)
+
+- **The always-on daemon is the sole persistent secrets-broker host.** Upgrades
+  retire the legacy `com.phnx-labs.agents-secrets-agent` launchd service before
+  restarting the daemon, and the `secrets start`, `stop`, and `status` commands
+  now report and control broker reachability without reinstalling that service.
+  (#416, step 2)
 
 - **Interactive remote secret reveals do not leave an SSH control master
   behind.** The one-shot TTY reveal path now disables multiplexing, so it exits
