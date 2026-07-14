@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- **Wire skills support for Goose CLI (RUSH-1394).** Goose reads skills directly from `~/.agents/skills/` via the Summon extension (block-goose-cli >= 1.25.0). Flip `skills: { since: '1.25.0' }`, register generic skills writer/detector. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/staleness/writers/commands.ts`.
 - **Wire Droid allowlist support (RUSH-1396).** Droid stores allow/deny in `.factory/settings.json` (`commandAllowlist`/`commandDenylist`). Flip `allowlist: true` since 0.57.5, add `convertToDroidFormat`, wire writer/detector. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/permissions.ts`.
 - **Wire Codex permissions/allowlist support (RUSH-1566).** Codex stores allow/deny in `.codex/config.toml` (`approval_policy`, `sandbox_mode`). Flip `allowlist: true` since 0.128.0, add `convertToCodexFormat`, wire writer/detector. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/permissions.ts`.
 - **OpenCode permissions write to the loaded config path (RUSH-1623).** Global config is `~/.config/opencode/opencode.jsonc` (not `~/.opencode/`); project config is `opencode.jsonc` at the project root. Source: `apps/cli/src/lib/permissions.ts`, `apps/cli/src/lib/agents.ts`.

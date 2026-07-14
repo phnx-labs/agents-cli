@@ -40,10 +40,10 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
       const commandsAsSkills = shouldInstallCommandAsSkill(agent, version);
       const supportsCommands = supports(agent, 'commands', version).ok;
 
-      // Writers fire only after supports() OR commands-as-skills says yes —
-      // both paths produce a usable result here.
+      // Version-gated agents (e.g. goose skills >= 1.25.0) are registered but
+      // may be called at a version too old for both paths — skip gracefully.
       if (!commandsAsSkills && !supportsCommands) {
-        throw new Error(`commands writer reached for ${agent}@${version} with no path (cmd=false, asSkill=false)`);
+        return { synced: [] };
       }
 
       const skillRoots = trustedSkillRoots();
