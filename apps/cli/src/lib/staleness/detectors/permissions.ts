@@ -88,7 +88,7 @@ function buildOpenCodeDetector(): ResourceDetector {
     kind: 'permissions',
     agent: 'opencode',
     list({ versionHome }: DetectArgs): string[] {
-      const opencodeConfigPath = path.join(versionHome, '.opencode', 'opencode.jsonc');
+      const opencodeConfigPath = path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
       if (!fs.existsSync(opencodeConfigPath)) return [];
       try {
         const content = fs.readFileSync(opencodeConfigPath, 'utf-8');

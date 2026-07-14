@@ -1042,9 +1042,7 @@ function readOpenCodePermissions(
   options?: { home?: string }
 ): OpenCodePermissions | null {
   const home = options?.home || HOME;
-  const configPath = scope === 'user'
-    ? path.join(home, '.opencode', 'opencode.jsonc')
-    : path.join(cwd || process.cwd(), '.opencode', 'opencode.jsonc');
+  const configPath = openCodeConfigPath(scope, cwd, home);
 
   if (!fs.existsSync(configPath)) {
     return null;
@@ -1182,6 +1180,29 @@ export function applyClaudePermissions(
 }
 
 /**
+ * Path OpenCode actually loads for global config:
+ *   ~/.config/opencode/opencode.jsonc  (or .json)
+ * Project: <cwd>/opencode.jsonc (or .json) at project root — not .opencode/.
+ * See https://opencode.ai/docs/config/
+ */
+export function openCodeConfigPath(scope: 'user' | 'project', cwd?: string, home: string = HOME): string {
+  if (scope === 'project') {
+    const root = cwd || process.cwd();
+    for (const name of ['opencode.jsonc', 'opencode.json']) {
+      const candidate = path.join(root, name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
+    return path.join(root, 'opencode.jsonc');
+  }
+  const globalDir = path.join(home, '.config', 'opencode');
+  for (const name of ['opencode.jsonc', 'opencode.json']) {
+    const candidate = path.join(globalDir, name);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(globalDir, 'opencode.jsonc');
+}
+
+/**
  * Apply a permission set to OpenCode's opencode.jsonc.
  */
 function applyOpenCodePermissions(
@@ -1190,10 +1211,8 @@ function applyOpenCodePermissions(
   cwd?: string,
   merge: boolean = true
 ): { success: boolean; error?: string } {
-  const configDir = scope === 'user'
-    ? path.join(HOME, '.opencode')
-    : path.join(cwd || process.cwd(), '.opencode');
-  const configPath = path.join(configDir, 'opencode.jsonc');
+  const configPath = openCodeConfigPath(scope, cwd);
+  const configDir = path.dirname(configPath);
 
   try {
     // Ensure directory exists
@@ -1360,7 +1379,10 @@ export function applyPermissionsToVersion(
     }
 
     if (agentId === 'opencode') {
-      const configPath = path.join(configDir, 'opencode.jsonc');
+      // OpenCode loads ~/.config/opencode/opencode.jsonc under the version home
+      // (HOME isolation), not ~/.opencode/opencode.jsonc.
+      const configPath = openCodeConfigPath('user', undefined, versionHome);
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
       let config: Record<string, unknown> = {};
       if (fs.existsSync(configPath)) {
         const content = stripJsonComments(fs.readFileSync(configPath, 'utf-8'));
@@ -1723,7 +1745,7 @@ export function exportPermissionsFromPath(filePath: string): PermissionSet | nul
 
   if (fileName === 'settings.json' && parentDir === '.claude') {
     agentId = 'claude';
-  } else if (fileName === 'opencode.jsonc' || parentDir === '.opencode') {
+  } else if (fileName === 'opencode.jsonc' || fileName === 'opencode.json' || parentDir === 'opencode' || parentDir === '.opencode') {
     agentId = 'opencode';
   } else if (fileName === 'config.toml' && parentDir === '.codex') {
     agentId = 'codex';

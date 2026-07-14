@@ -1,9 +1,8 @@
 # Changelog
 
 ## Unreleased
-
-
-- **`agents feed` groups by outcome (ticket/PR/worktree), not by agent (RUSH-1479).** The default human view collapses open blocks under the deliverable they serve — Linear ticket first, then PR, then worktree/epic, then a shared Unassigned bucket — so a 1,100-agent fleet reads as dozens of initiatives (`RUSH-1125 · 4 agents · 1 needs you`). Each block is attributed to exactly one outcome; live session meta fills missing ticket/PR/worktree at list time; `--flat` restores the per-agent list; `--json` stamps each block with its `outcome` ref. Factory Floor's Group control gains an Outcome axis (the new default). Source: `apps/cli/src/lib/feed-outcome.ts`, `apps/cli/src/commands/feed.ts`, `apps/factory/ui/settings/components/mission-control/floorModel.ts`.
+- **Wire Droid allowlist support (RUSH-1396).** Droid stores allow/deny in `.factory/settings.json` (`commandAllowlist`/`commandDenylist`). Flip `allowlist: true` since 0.57.5, add `convertToDroidFormat`, wire writer/detector. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/permissions.ts`.
+- **OpenCode permissions write to the loaded config path (RUSH-1623).** Global config is `~/.config/opencode/opencode.jsonc` (not `~/.opencode/`); project config is `opencode.jsonc` at the project root. Source: `apps/cli/src/lib/permissions.ts`, `apps/cli/src/lib/agents.ts`.
 ## 1.20.58
 
 - **Self-updating agent CLIs are represented as one live installation.** `agents view` no longer invents version-home rows for single-binary installers such as Droid, Grok, Cursor, Kiro, Goose, and Hermes; it reports the version returned by the installed binary and folds away stale per-version directories. `agents add <agent>@<version>` now installs or keeps that agent's current release instead of rejecting an unsupported pinned install. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/versions.ts`, `apps/cli/src/commands/{versions,view}.ts`. (RUSH-1321)
