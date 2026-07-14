@@ -24,10 +24,82 @@ import { followHostTask } from './progress.js';
 // injection-safe to interpolate unquoted into remote commands.
 const REMOTE_DIR = '$HOME/.agents/.cache/hosts';
 
+/**
+ * If `p` is anchored at the home dir — a leading `~` or `$HOME` — return the
+ * remainder (no leading slash), else null. Callers that want a local-home
+ * absolute (`/Users/<me>/x`, from a shell-expanded `--cwd ~/x`) re-rooted at the
+ * remote home normalize it to `~/x` first (`toRemotePortable`); explicit
+ * `--remote-cwd` is left literal and so is never re-rooted here.
+ */
+function homeRemainder(p: string): string | null {
+  if (p === '~' || p === '$HOME') return '';
+  if (p.startsWith('~/')) return p.slice(2);
+  if (p.startsWith('$HOME/')) return p.slice(6);
+  return null;
+}
+
+/**
+ * Build a `cd <dir> && ` prefix that resolves on the REMOTE host.
+ *
+ * A `~`/`$HOME`-anchored path must resolve against the REMOTE user's home, not
+ * the local one (`/home/<me>` vs `/Users/<me>`). We emit an unquoted `"$HOME"`
+ * for that segment — the remote login shell expands it — and shell-quote the
+ * remainder. Any other path (absolute or relative) is quoted verbatim.
+ */
+export function remoteCdPrefix(remoteCwd?: string): string {
+  if (!remoteCwd) return '';
+  const rest = homeRemainder(remoteCwd);
+  if (rest === '') return 'cd "$HOME" && ';
+  if (rest !== null) return `cd "$HOME"/${shellQuote(rest)} && `;
+  return `cd ${shellQuote(remoteCwd)} && `;
+}
+
+/**
+ * Launch a detached login-shell command in its own Unix session/process group.
+ *
+ * Node is already a hard requirement for a host that can run `agents`. Its
+ * `detached: true` contract calls setsid(2) on Unix, unlike `nohup ... &` under
+ * a non-interactive shell where the background wrapper can remain in the SSH
+ * shell's process group. Returning the group leader PID makes `kill(-pid)` a
+ * reliable whole-tree operation for both normal stops and rollback cleanup.
+ */
+export function buildDetachedLaunchCommand(inner: string): string {
+  const nodeScript = [
+    "const { spawn } = require('node:child_process');",
+    `const child = spawn('/bin/bash', ['-lc', ${JSON.stringify(inner)}], { detached: true, stdio: 'ignore' });`,
+    "child.once('error', error => { console.error(error.message); process.exitCode = 1; });",
+    "child.once('spawn', () => { console.log(child.pid); child.unref(); });",
+  ].join(' ');
+  return `bash -lc ${shellQuote(`node -e ${shellQuote(nodeScript)}`)}`;
+}
+
 export interface DispatchResult {
   task: HostTask;
   /** Exit code when followed; undefined when detached (--no-follow). */
   exitCode?: number;
+}
+
+function terminateRemoteLaunch(task: HostTask): void {
+  if (!task.pid) throw new Error(`Cannot terminate remote task ${task.id}: launch returned no PID.`);
+  const pid = task.pid;
+  const command =
+    `if kill -TERM -- -${pid} 2>/dev/null; then ` +
+      `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
+    `elif kill -0 -- -${pid} 2>/dev/null; then exit 1; fi; ` +
+    `rm -f ${task.remoteLog} ${task.remoteExit}`;
+  const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true });
+  if (result.code !== 0) {
+    throw new Error(
+      `Failed to terminate remote task ${task.id} on ${task.host}: ` +
+      `${(result.stderr || result.stdout).trim() || 'ssh error'}`,
+    );
+  }
+}
+
+/** Terminate a detached dispatch that its caller could not persist locally. */
+export function terminateDispatchedTask(task: HostTask): void {
+  terminateRemoteLaunch(task);
+  updateTask(task.id, terminalPatch(143));
 }
 
 /** Options shared by every detached dispatch. */
@@ -75,11 +147,12 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 
   // Inner command run under a login shell so PATH resolves `agents`.
   const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
-  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const cwd = remoteCdPrefix(opts.remoteCwd);
   const inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
 
-  // Outer: ensure dir, launch detached under bash -lc, print the PID.
-  const launch = `mkdir -p ${REMOTE_DIR}; nohup bash -lc ${shellQuote(inner)} >/dev/null 2>&1 & echo $!`;
+  // Outer: ensure dir, launch the login-shell wrapper as a new process-group
+  // leader, and print that leader PID.
+  const launch = `mkdir -p ${REMOTE_DIR}; ${buildDetachedLaunchCommand(inner)}`;
   const res = sshExec(target, launch, { timeoutMs: 30000, multiplex: true });
   if (res.code !== 0) {
     throw new Error(`Failed to launch on "${host.name}": ${(res.stderr || res.stdout).trim() || 'ssh error'}`);
@@ -100,7 +173,19 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     status: 'running',
     createdAt: new Date().toISOString(),
   };
-  saveTask(task);
+  try {
+    saveTask(task);
+  } catch (err) {
+    try {
+      terminateRemoteLaunch(task);
+    } catch (cleanupErr) {
+      throw new Error(
+        `Failed to persist remote task ${task.id}; cleanup also failed: ${(cleanupErr as Error).message}`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
 
   if (opts.follow === false) {
     return { task };
@@ -210,7 +295,7 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
   const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
-  const cwd = opts.remoteCwd ? `cd ${shellQuote(opts.remoteCwd)} && ` : '';
+  const cwd = remoteCdPrefix(opts.remoteCwd);
   const remoteCmd = `${cwd}${invocation}`;
   return sshStream(target, remoteCmd, { tty: process.stdin.isTTY, multiplex: true });
 }

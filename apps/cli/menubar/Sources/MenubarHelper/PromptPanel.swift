@@ -1,11 +1,11 @@
 import AppKit
 
-// Spotlight-style quick-issue bar (Cmd-Shift-O). A thin capture surface: type a
-// one-line note, optionally attach one or more recent screenshots from clip
-// history, hit Return, and it dispatches a headless agent that recalls the
-// project from recent sessions, investigates, and files the Linear ticket itself
-// (AgentsCLI.dispatchTicketAgent). The panel then gets out of the way — the agent
-// does the work, a notification reports the created ticket.
+// Spotlight-style quick-dispatch bar (Cmd-Shift-O). A thin capture surface: type
+// a one-line note, optionally attach one or more recent screenshots from clip
+// history, pick the agents, and hit Return. "File Ticket" dispatches the ticket
+// agent; "Fix" fans out autonomous `agents run --mode auto --name quick-*`
+// sessions. The panel then gets out of the way — agents do the work, and
+// notifications report results.
 //
 // Focus is the crux. This is a no-Dock .accessory app, so a borderless panel
 // can't take keyboard input by default. Three things, all required on summon:
@@ -107,6 +107,37 @@ final class ClipThumbView: NSView {
     }
 }
 
+enum QuickDispatchAction: Int {
+    case fileTicket = 0
+    case fix = 1
+}
+
+struct PromptDraft {
+    let note: String
+    let selectedPaths: [String]
+    let selectedAgents: Set<String>
+    let action: QuickDispatchAction
+
+    // Pure decision for what to preserve when the panel dismisses without
+    // submitting: a note that is empty (or only whitespace) means "nothing to keep"
+    // and yields nil so the next summon starts clean; otherwise the note and its
+    // current selections round-trip verbatim. Kept as a free function so the
+    // save/clear state machine is testable without a live NSPanel (see
+    // IssueSelfTest.testDraftPreservation).
+    static func forDismissal(note: String,
+                             selectedPaths: [String],
+                             selectedAgents: Set<String>,
+                             action: QuickDispatchAction) -> PromptDraft? {
+        if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return nil
+        }
+        return PromptDraft(note: note,
+                           selectedPaths: selectedPaths,
+                           selectedAgents: selectedAgents,
+                           action: action)
+    }
+}
+
 final class PromptPanelController: NSObject, NSTextFieldDelegate {
     // A screenshot older than this isn't pre-selected — but it still shows in the
     // strip for manual attach, since the user can see exactly what they're picking.
@@ -115,10 +146,20 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     private var panel: PromptPanel?
     private let field = NSTextField()
+    private let modeControl = NSSegmentedControl(labels: ["File Ticket", "Fix"],
+                                                 trackingMode: .selectOne,
+                                                 target: nil,
+                                                 action: nil)
+    private let agentStrip = NSStackView()
     private let hint = NSTextField(labelWithString: "")
     private let thumbStrip = NSStackView()
     private var selected: [String] = []   // newest-first order preserved
+    private var selectedAgents = Set<String>()
+    private var roster: [MenuAgent] = []
+    private var agentButtons: [NSButton] = []
+    private var action: QuickDispatchAction = .fileTicket
     private var inFlight = false
+    private var draft: PromptDraft?
     // Click-outside dismissal is armed only AFTER the summon settles — otherwise
     // the key/order race while activating an .accessory app fires resignKey once
     // and the panel dismisses itself the instant it appears.
@@ -134,20 +175,26 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let panel = self.panel ?? buildPanel()
         self.panel = panel
 
-        // Reset for a fresh capture.
+        // Restore an interrupted capture if another app stole focus last time.
+        let restoredDraft = draft
         inFlight = false
-        field.stringValue = ""
-        rebuildThumbs()
+        field.stringValue = restoredDraft?.note ?? ""
+        action = restoredDraft?.action ?? .fileTicket
+        modeControl.setSelected(true, forSegment: action.rawValue)
+        rebuildAgents(restoring: restoredDraft?.selectedAgents)
+        rebuildThumbs(restoring: restoredDraft?.selectedPaths)
 
         let hasThumbs = !thumbStrip.arrangedSubviews.isEmpty
         thumbStrip.isHidden = !hasThumbs
-        panel.setContentSize(NSSize(width: Self.panelWidth, height: hasThumbs ? 188 : 96))
+        panel.setContentSize(NSSize(width: Self.panelWidth, height: hasThumbs ? 248 : 156))
 
         dismissArmed = false
         position(panel)
         NSApp.activate(ignoringOtherApps: true)
+        panel.orderFrontRegardless()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(field)
+        waitUntilReadyForTyping(panel)
         if ProcessInfo.processInfo.environment["MENUBAR_PROMPT_DEBUG"] == "1" {
             FileHandle.standardError.write(Data(
                 "summon: frame=\(panel.frame) visible=\(panel.isVisible) thumbs=\(thumbStrip.arrangedSubviews.count)\n".utf8))
@@ -158,10 +205,35 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    private func dismiss() {
+    private func dismiss(preservingDraft: Bool = true) {
         dismissArmed = false
+        if preservingDraft {
+            saveDraftForDismissal()
+        } else {
+            clearDraft()
+        }
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
+    }
+
+    private func saveDraftForDismissal() {
+        guard !inFlight else { return }
+        draft = PromptDraft.forDismissal(note: field.stringValue,
+                                         selectedPaths: selected,
+                                         selectedAgents: selectedAgents,
+                                         action: action)
+    }
+
+    private func clearDraft() {
+        draft = nil
+    }
+
+    private func waitUntilReadyForTyping(_ panel: PromptPanel) {
+        let deadline = Date().addingTimeInterval(0.25)
+        while Date() < deadline {
+            if panel.isKeyWindow, field.currentEditor() != nil { return }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
     }
 
     // MARK: Submit
@@ -170,32 +242,125 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let note = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !note.isEmpty, !inFlight else { return }
         inFlight = true
-        AgentsCLI.dispatchTicketAgent(note: note, screenshotPaths: selected)
-        dismiss()
+        let agents = selectedAgentList()
+        switch action {
+        case .fileTicket:
+            AgentsCLI.dispatchTicketAgent(note: note, screenshotPaths: selected, agent: agents.first)
+        case .fix:
+            AgentsCLI.dispatchQuickFix(note: note, screenshotPaths: selected, agents: agents)
+        }
+        dismiss(preservingDraft: false)
     }
 
-    // Return submits, Escape cancels. A single-line NSTextField sends these as
+    // Return submits, Escape clears. A single-line NSTextField sends these as
     // command selectors through the field editor — intercept them here.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
         if sel == #selector(NSResponder.insertNewline(_:)) { submit(); return true }
-        if sel == #selector(NSResponder.cancelOperation(_:)) { dismiss(); return true }
+        if sel == #selector(NSResponder.cancelOperation(_:)) { dismiss(preservingDraft: false); return true }
         return false
+    }
+
+    // MARK: Dispatch mode / agents
+
+    @objc private func onModeChanged(_ sender: NSSegmentedControl) {
+        action = QuickDispatchAction(rawValue: sender.selectedSegment) ?? .fileTicket
+        normalizeSelectionForAction()
+        updateAgentButtons()
+        updateHint()
+    }
+
+    @objc private func onAgentToggle(_ sender: NSButton) {
+        guard sender.tag >= 0, sender.tag < roster.count else { return }
+        let id = roster[sender.tag].id
+        switch action {
+        case .fileTicket:
+            selectedAgents = [id]
+        case .fix:
+            if sender.state == .on {
+                selectedAgents.insert(id)
+            } else {
+                selectedAgents.remove(id)
+            }
+            if selectedAgents.isEmpty {
+                selectedAgents.insert(id)
+            }
+        }
+        updateAgentButtons()
+        updateHint()
+    }
+
+    private func rebuildAgents(restoring restoredAgents: Set<String>? = nil) {
+        for v in agentStrip.arrangedSubviews {
+            agentStrip.removeArrangedSubview(v)
+            v.removeFromSuperview()
+        }
+        roster = LocalState.quickDispatchRoster()
+        agentButtons = roster.enumerated().map { index, agent in
+            let button = NSButton(checkboxWithTitle: agent.label, target: self,
+                                  action: #selector(onAgentToggle(_:)))
+            button.tag = index
+            button.font = .systemFont(ofSize: 12.5, weight: .medium)
+            button.contentTintColor = .labelColor
+            return button
+        }
+        for button in agentButtons { agentStrip.addArrangedSubview(button) }
+        selectedAgents = restoredAgents ?? defaultAgentSelection()
+        normalizeSelectionForAction()
+        updateAgentButtons()
+    }
+
+    private func defaultAgentSelection() -> Set<String> {
+        let configured = ProcessInfo.processInfo.environment["AGENTS_QUICK_DISPATCH_AGENTS"]?
+            .split(separator: ",")
+            .map { LocalState.normalizeAgent(String($0).trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .filter { id in roster.contains { $0.id == id } } ?? []
+        if !configured.isEmpty { return Set(configured) }
+        return [roster.first?.id ?? "claude"]
+    }
+
+    private func selectedAgentList() -> [String] {
+        let ordered = roster.map(\.id).filter { selectedAgents.contains($0) }
+        return ordered.isEmpty ? [roster.first?.id ?? "claude"] : ordered
+    }
+
+    private func normalizeSelectionForAction() {
+        let visible = Set(roster.map(\.id))
+        selectedAgents = selectedAgents.intersection(visible)
+        if selectedAgents.isEmpty {
+            selectedAgents = [roster.first?.id ?? "claude"]
+        }
+        if action == .fileTicket, let first = selectedAgentList().first {
+            selectedAgents = [first]
+        }
+    }
+
+    private func updateAgentButtons() {
+        for (index, button) in agentButtons.enumerated() {
+            let id = roster[index].id
+            button.state = selectedAgents.contains(id) ? .on : .off
+        }
     }
 
     // MARK: Thumbnails
 
-    private func rebuildThumbs() {
+    private func rebuildThumbs(restoring restoredSelection: [String]? = nil) {
         for v in thumbStrip.arrangedSubviews {
             thumbStrip.removeArrangedSubview(v)
             v.removeFromSuperview()
         }
         selected = []
         let paths = AgentsCLI.recentImageAttachments()
+        let restoredSet = Set(restoredSelection ?? [])
         for path in paths {
             let thumb = ClipThumbView(path: path)
-            // Pre-select the newest clip only when it's recent enough to relate
-            // to what the user just captured.
-            if path == paths.first, isRecent(path) {
+            if restoredSelection != nil {
+                if restoredSet.contains(path) {
+                    thumb.isSelected = true
+                    selected.append(path)
+                }
+            } else if path == paths.first, isRecent(path) {
+                // Pre-select the newest clip only when it's recent enough to relate
+                // to what the user just captured.
                 thumb.isSelected = true
                 selected.append(path)
             }
@@ -239,7 +404,9 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let attach = count == 0 ? "no image attached"
             : count == 1 ? "1 image attached" : "\(count) images attached"
         let pickable = thumbStrip.arrangedSubviews.isEmpty ? "" : " · click attaches · dbl-click previews"
-        hint.stringValue = "\(attach)\(pickable)    ↩ file · esc cancel"
+        let agents = selectedAgentList().map(LocalState.agentLabel).joined(separator: ", ")
+        let actionText = action == .fileTicket ? "file ticket with \(agents)" : "fix with \(agents)"
+        hint.stringValue = "\(attach)\(pickable)    ↩ \(actionText) · esc clear"
     }
 
     // MARK: Build / layout
@@ -247,7 +414,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private func buildPanel() -> PromptPanel {
         let panel = PromptPanel(
             contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: 188),
-            styleMask: [.nonactivatingPanel, .borderless],
+            styleMask: [.borderless],
             backing: .buffered, defer: false)
         panel.level = .floating
         panel.isFloatingPanel = true
@@ -274,7 +441,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         bg.layer?.borderColor = kAccent.withAlphaComponent(0.35).cgColor
         panel.contentView = bg
 
-        field.placeholderString = "Describe the issue…"
+        field.placeholderString = "Describe the issue or fix…"
         field.font = .systemFont(ofSize: 21, weight: .regular)
         field.textColor = .labelColor
         field.isBezeled = false
@@ -289,13 +456,24 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         thumbStrip.alignment = .centerY
         thumbStrip.spacing = 8
 
+        modeControl.target = self
+        modeControl.action = #selector(onModeChanged(_:))
+        modeControl.selectedSegment = QuickDispatchAction.fileTicket.rawValue
+        modeControl.segmentStyle = .rounded
+        modeControl.translatesAutoresizingMaskIntoConstraints = false
+
+        agentStrip.orientation = .horizontal
+        agentStrip.alignment = .centerY
+        agentStrip.spacing = 10
+        rebuildAgents()
+
         hint.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
         hint.textColor = .secondaryLabelColor
 
-        let stack = NSStackView(views: [field, thumbStrip, hint])
+        let stack = NSStackView(views: [field, modeControl, agentStrip, thumbStrip, hint])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         bg.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -303,6 +481,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             stack.trailingAnchor.constraint(equalTo: bg.trailingAnchor, constant: -22),
             stack.centerYAnchor.constraint(equalTo: bg.centerYAnchor),
             field.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            modeControl.widthAnchor.constraint(equalToConstant: 180),
         ])
         return panel
     }

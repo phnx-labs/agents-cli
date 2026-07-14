@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import {
+  hashedServiceName,
   setKeychainBackendForTest,
+  setKeychainServiceHashingForTest,
   secretsKeychainItem,
   type KeychainBackend,
 } from './index.js';
@@ -218,5 +221,61 @@ describe('pullBundle restore atomicity', () => {
     // Metadata written and readable, with all three vars.
     const persisted = readBundle(NAME);
     expect(Object.keys(persisted.vars).sort()).toEqual(['AKEY', 'BKEY', 'CKEY']);
+  });
+});
+
+// ─── Pull/restore under hashed service names (GitHub #316) ──────────────────
+//
+// Sync payloads carry bundle names + shortIds, never service names — the
+// restore re-materializes items locally through secretsKeychainItem, so a
+// pulled bundle must land under this machine's hashed names and the rollback
+// must revert exactly those hashed items.
+
+describe('restoreSnapshot under hashed service names (#316)', () => {
+  const hashKey = randomBytes(32);
+
+  beforeEach(() => {
+    setKeychainServiceHashingForTest(hashKey);
+  });
+  afterEach(() => {
+    setKeychainServiceHashingForTest(null);
+  });
+
+  it('materializes pulled secrets under hashed names and round-trips a read', async () => {
+    prevBackend = setSyncBackend(fixedBackend(envelopeFor(makeSnapshot())));
+    const bundle = await pullBundle(NAME, { passphrase: PASSPHRASE, force: true });
+    expect(bundle.name).toBe(NAME);
+
+    // Storage names are all opaque — the cross-machine payload carried only
+    // bundle name + shortIds, and this machine's key hashed them locally.
+    for (const stored of kc.store.keys()) {
+      expect(stored).toMatch(/^agents-cli\.h\./);
+      expect(stored).not.toContain(NAME);
+    }
+    expect(kc.store.get(hashedServiceName(secretsKeychainItem(NAME, 'AKEY'), hashKey))).toBe('new-a');
+
+    // And the normal read path resolves the pulled bundle end-to-end.
+    const persisted = readBundle(NAME);
+    expect(Object.keys(persisted.vars).sort()).toEqual(['AKEY', 'BKEY', 'CKEY']);
+  });
+
+  it('rolls a failed restore back to the exact pre-pull hashed state', async () => {
+    const aHashed = hashedServiceName(secretsKeychainItem(NAME, 'AKEY'), hashKey);
+    const bHashed = hashedServiceName(secretsKeychainItem(NAME, 'BKEY'), hashKey);
+    const cHashed = hashedServiceName(secretsKeychainItem(NAME, 'CKEY'), hashKey);
+
+    kc.store.set(aHashed, 'old-a'); // pre-existing, must be restored
+    kc.failOnSet = bHashed;         // forward write of BKEY fails
+    kc.failOnSetValue = 'new-b';
+    prevBackend = setSyncBackend(fixedBackend(envelopeFor(makeSnapshot())));
+
+    await expect(pullBundle(NAME, { passphrase: PASSPHRASE, force: true }))
+      .rejects.toThrow(/rolled back to the pre-restore state/);
+
+    expect(kc.store.get(aHashed)).toBe('old-a');
+    expect(kc.store.has(bHashed)).toBe(false);
+    expect(kc.store.has(cHashed)).toBe(false);
+    // Metadata was never committed.
+    expect([...kc.store.keys()]).toEqual([aHashed]);
   });
 });

@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as TOML from 'smol-toml';
+import * as yaml from 'yaml';
 import chalk from 'chalk';
 import type { AgentConfig, AgentId } from './types.js';
 import { needsWindowsShell } from './platform/index.js';
@@ -311,7 +312,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',
@@ -331,7 +332,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
   },
   openclaw: {
     id: 'openclaw',
@@ -375,7 +376,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: { since: '0.0.353' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'] },
   },
   amp: {
     id: 'amp',
@@ -407,13 +408,15 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     skillsDir: path.join(HOME, '.kiro', 'skills'),
     // Hooks: v3 standalone files under ~/.kiro/hooks/*.json
     // (`{ "version": "v1", "hooks": [...] }`). Fixed PreToolUse/PostToolUse
-    // firing in kiro-cli 0.10; fully stable by 2.6.1. See registerHooksForKiro.
+    // firing in kiro-cli 0.10; fully stable by 2.6.1. Launch always passes
+    // --v3 (see AGENT_COMMANDS.kiro) so the standalone files actually load.
+    // See registerHooksForKiro.
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '2.8.0' }, skills: true, commands: true, plugins: false, subagents: { since: '1.23.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
   },
   goose: {
     id: 'goose',
@@ -498,7 +501,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       skills: true,
       commands: false, // covered by skills
       plugins: true,
-      subagents: false,
+      subagents: true, // ~/.grok/agents/*.md (Claude-compatible agent defs)
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: true,
@@ -537,7 +540,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       skills: true,
       commands: false,
       plugins: true,
-      subagents: false,
+      subagents: true, // YAML agent files under ~/.kimi-code/agents/ (see transformSubagentForKimi)
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: false,
@@ -607,10 +610,106 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       rulesImports: false,
     },
   },
+  // Nous Hermes Agent. Config lives under ~/.hermes/config.yaml; MCP servers
+  // are YAML `mcp_servers`, skills are local SKILL.md directories, and durable
+  // memory is file-backed.
+  hermes: {
+    id: 'hermes',
+    name: 'Hermes',
+    color: 'cyanBright',
+    cliCommand: 'hermes',
+    npmPackage: '',
+    installScript: 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash',
+    configDir: path.join(HOME, '.hermes'),
+    commandsDir: '',
+    commandsSubdir: '',
+    skillsDir: path.join(HOME, '.hermes', 'skills'),
+    hooksDir: 'hooks',
+    instructionsFile: 'MEMORY.md',
+    format: 'markdown',
+    variableSyntax: '$ARGUMENTS',
+    supportsHooks: false,
+    capabilities: {
+      hooks: false,
+      mcp: true,
+      mcpHttp: true,
+      mcpHeaders: false,
+      allowlist: false,
+      skills: true,
+      commands: false,
+      plugins: false,
+      subagents: false,
+      rules: { file: 'MEMORY.md' },
+      workflows: false,
+      memory: true,
+      modes: ['edit'],
+      rulesImports: false,
+    },
+  },
+  // ForgeCode (`forge`) from Tailcall. It reads AGENTS.md project rules,
+  // SKILL.md directories, and MCP servers from `.mcp.json` files.
+  forge: {
+    id: 'forge',
+    name: 'ForgeCode',
+    color: 'greenBright',
+    cliCommand: 'forge',
+    npmPackage: '',
+    installScript: 'curl -fsSL https://forgecode.dev/cli | sh',
+    configDir: path.join(HOME, '.forge'),
+    commandsDir: '',
+    commandsSubdir: '',
+    skillsDir: path.join(HOME, '.forge', 'skills'),
+    hooksDir: 'hooks',
+    instructionsFile: 'AGENTS.md',
+    format: 'markdown',
+    variableSyntax: '$ARGUMENTS',
+    supportsHooks: false,
+    capabilities: {
+      hooks: false,
+      mcp: true,
+      mcpHttp: true,
+      mcpHeaders: false,
+      allowlist: false,
+      skills: true,
+      commands: false,
+      plugins: false,
+      subagents: false,
+      rules: { file: 'AGENTS.md' },
+      workflows: false,
+      memory: false,
+      modes: ['edit'],
+      rulesImports: false,
+    },
+  },
 };
 
 /** All registered agent IDs derived from the AGENTS registry. */
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
+
+/**
+ * A self-updating agent is a single global binary installed by an official
+ * `curl … | sh` / `brew install` script that carries NO version token — the
+ * installer can only ever fetch the *current* release, and the binary then keeps
+ * itself up to date in place (droid, grok, antigravity, cursor, hermes, forge,
+ * kiro, goose). There is no semver to pin, so agents-cli must not model these as
+ * having multiple installable version-homes the way it does for npm-packaged
+ * agents (claude, codex, kimi, …).
+ *
+ * The predicate is `!npmPackage && installScript && !installScript.includes('VERSION')`:
+ *   - `npmPackage` empty       → not installed from npm, so `agents add x@1.2.3`
+ *                                can't resolve a registry version.
+ *   - `installScript` present  → it IS installed by a script (not unmanaged).
+ *   - no `VERSION` placeholder → the script has no slot for a pinned version
+ *                                (contrast: an installer templated with `VERSION`
+ *                                could pin, and is NOT self-updating).
+ *
+ * Route every "is this a pinnable, multi-version agent?" decision through here —
+ * never a scattered `agent === 'droid'`.
+ */
+export function isSelfUpdatingAgent(agent: AgentId): boolean {
+  const cfg = AGENTS[agent];
+  return !cfg.npmPackage && !!cfg.installScript && !cfg.installScript.includes('VERSION');
+}
 
 // Capability-filtered agent lists used to live here as `*_CAPABLE_AGENTS`
 // constants. They were a frequent source of silent-skip bugs (e.g. grok
@@ -1439,6 +1538,14 @@ export async function registerMcp(
   if (transport === 'http' && options?.headers && Object.keys(options.headers).length > 0 && !supports(agentId, 'mcpHeaders').ok) {
     return { success: false, error: 'skipped: HTTP MCP headers are only supported for Claude registration' };
   }
+  if (agentId === 'hermes' || agentId === 'forge') {
+    try {
+      writeMcpToConfig(agentId, name, command, scope, transport, options?.home);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  }
   if (!options?.binary && !(await isCliInstalled(agentId))) {
     return { success: false, error: 'CLI not installed' };
   }
@@ -1482,6 +1589,14 @@ export async function unregisterMcp(
   const agent = AGENTS[agentId];
   if (!agent.capabilities.mcp) {
     return { success: false, error: 'Agent does not support MCP' };
+  }
+  if (agentId === 'hermes' || agentId === 'forge') {
+    try {
+      removeMcpFromConfig(agentId, name, options?.home);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
   }
   if (!options?.binary && !(await isCliInstalled(agentId))) {
     return { success: false, error: 'CLI not installed' };
@@ -1583,6 +1698,99 @@ interface McpConfigEntry {
   env?: Record<string, string>;
   type?: string;
   url?: string;
+}
+
+function userMcpConfigPath(agentId: AgentId, home?: string): string {
+  if (home) return getMcpConfigPathForHome(agentId, home);
+  return getUserMcpConfigPath(agentId);
+}
+
+function scopedMcpConfigPath(agentId: AgentId, scope: 'user' | 'project', home?: string): string {
+  if (scope === 'project') return getProjectMcpConfigPath(agentId);
+  return userMcpConfigPath(agentId, home);
+}
+
+function mcpEntryFromCommand(command: string, transport: string): McpConfigEntry {
+  if (transport === 'http') {
+    return { url: command };
+  }
+  const commandArgs = splitCommandLine(command);
+  return {
+    command: commandArgs[0],
+    args: commandArgs.slice(1),
+  };
+}
+
+function readYamlConfig(configPath: string): Record<string, unknown> {
+  if (!fs.existsSync(configPath)) return {};
+  const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
+}
+
+function readJsonConfig(configPath: string): Record<string, unknown> {
+  if (!fs.existsSync(configPath)) return {};
+  const content = configPath.endsWith('.jsonc')
+    ? stripJsonComments(fs.readFileSync(configPath, 'utf-8'))
+    : fs.readFileSync(configPath, 'utf-8');
+  const parsed = JSON.parse(content);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {};
+}
+
+function writeMcpToConfig(
+  agentId: AgentId,
+  name: string,
+  command: string,
+  scope: 'user' | 'project',
+  transport: string,
+  home?: string
+): void {
+  const configPath = scopedMcpConfigPath(agentId, scope, home);
+  const entry = mcpEntryFromCommand(command, transport);
+
+  if (agentId === 'hermes') {
+    const config = readYamlConfig(configPath);
+    if (!config.mcp_servers || typeof config.mcp_servers !== 'object' || Array.isArray(config.mcp_servers)) {
+      config.mcp_servers = {};
+    }
+    (config.mcp_servers as Record<string, unknown>)[name] = entry;
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+    return;
+  }
+
+  const config = readJsonConfig(configPath);
+  if (!config.mcpServers || typeof config.mcpServers !== 'object' || Array.isArray(config.mcpServers)) {
+    config.mcpServers = {};
+  }
+  (config.mcpServers as Record<string, unknown>)[name] = entry;
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+function removeMcpFromConfig(agentId: AgentId, name: string, home?: string): void {
+  const configPath = userMcpConfigPath(agentId, home);
+  if (!fs.existsSync(configPath)) return;
+
+  if (agentId === 'hermes') {
+    const config = readYamlConfig(configPath);
+    const servers = config.mcp_servers;
+    if (servers && typeof servers === 'object' && !Array.isArray(servers)) {
+      delete (servers as Record<string, unknown>)[name];
+      fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+    }
+    return;
+  }
+
+  const config = readJsonConfig(configPath);
+  const servers = config.mcpServers;
+  if (servers && typeof servers === 'object' && !Array.isArray(servers)) {
+    delete (servers as Record<string, unknown>)[name];
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  }
 }
 
 /**
@@ -1715,6 +1923,21 @@ function parseMcpFromTomlConfig(configPath: string): Record<string, McpConfigEnt
   }
 }
 
+function parseMcpFromYamlConfig(configPath: string): Record<string, McpConfigEntry> {
+  if (!fs.existsSync(configPath)) {
+    return {};
+  }
+
+  try {
+    const config = readYamlConfig(configPath);
+    const mcpServers = config.mcp_servers as Record<string, McpConfigEntry> | undefined;
+    return mcpServers || {};
+  } catch {
+    /* YAML config corrupt or unreadable */
+    return {};
+  }
+}
+
 /**
  * Parse MCP servers from OpenCode's JSONC config.
  * OpenCode stores MCPs in the "mcp" object with different structure.
@@ -1793,6 +2016,10 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
     case 'droid':
       // Factory AI Droid stores MCPs in ~/.factory/mcp.json
       return path.join(agent.configDir, 'mcp.json');
+    case 'hermes':
+      return path.join(agent.configDir, 'config.yaml');
+    case 'forge':
+      return path.join(agent.configDir, '.mcp.json');
     default:
       // Gemini and others use settings.json
       return path.join(agent.configDir, 'settings.json');
@@ -1828,6 +2055,10 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
       return path.join(home, '.grok', 'config.toml');
     case 'droid':
       return path.join(home, '.factory', 'mcp.json');
+    case 'hermes':
+      return path.join(home, '.hermes', 'config.yaml');
+    case 'forge':
+      return path.join(home, '.forge', '.mcp.json');
     default:
       return path.join(home, agentConfigDirName(agentId), 'settings.json');
   }
@@ -1865,6 +2096,10 @@ function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()):
       return path.join(cwd, '.grok', 'config.toml');
     case 'droid':
       return path.join(cwd, '.factory', 'mcp.json');
+    case 'hermes':
+      return path.join(cwd, '.hermes', 'config.yaml');
+    case 'forge':
+      return path.join(cwd, '.mcp.json');
     default:
       return path.join(cwd, `.${agentId}`, 'settings.json');
   }
@@ -1927,6 +2162,8 @@ export function parseMcpConfig(agentId: AgentId, configPath: string): Record<str
       return parseMcpFromOpenCodeConfig(configPath);
     case 'openclaw':
       return parseMcpFromOpenClawConfig(configPath);
+    case 'hermes':
+      return parseMcpFromYamlConfig(configPath);
     default:
       return parseMcpFromJsonConfig(configPath);
   }
@@ -2022,6 +2259,12 @@ export const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   'kimi-code': 'kimi',
   factory: 'droid',
   'factory-ai': 'droid',
+  droid: 'droid',
+  hermes: 'hermes',
+  'hermes-agent': 'hermes',
+  forge: 'forge',
+  forgecode: 'forge',
+  'forge-code': 'forge',
 };
 
 /**

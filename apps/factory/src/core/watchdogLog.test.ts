@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'bun:test';
-import { formatEvent, parseEvents, trimToLast, WatchdogEvent } from './watchdogLog';
+import * as path from 'path';
+import { formatEvent, parseEvents, trimToLast, WatchdogEvent, WATCHDOG_LOG_PATH } from './watchdogLog';
+
+describe('WATCHDOG_LOG_PATH', () => {
+  it('uses the cache logs location shared by watchdog readers and writers', () => {
+    expect(WATCHDOG_LOG_PATH.endsWith(path.join('.agents', '.cache', 'logs', 'watchdog.log'))).toBe(true);
+  });
+});
 
 describe('formatEvent', () => {
   it('serializes event to JSON', () => {

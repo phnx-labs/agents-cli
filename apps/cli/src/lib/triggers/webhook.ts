@@ -14,7 +14,7 @@
 
 import * as http from 'http';
 import type { JobConfig, RunMeta } from '../routines.js';
-import { listJobs } from '../routines.js';
+import { listJobs, jobRunsOnThisDevice } from '../routines.js';
 import { executeJobDetached } from '../runner.js';
 
 /**
@@ -103,7 +103,9 @@ export function jobMatchesWebhook(job: JobConfig, webhook: GithubWebhook): boole
  * time-based jobs are unaffected by webhook delivery.
  */
 export function matchJobsToWebhook(jobs: JobConfig[], webhook: GithubWebhook): JobConfig[] {
-  return jobs.filter((job) => job.enabled !== false && jobMatchesWebhook(job, webhook));
+  return jobs.filter(
+    (job) => job.enabled !== false && jobRunsOnThisDevice(job) && jobMatchesWebhook(job, webhook)
+  );
 }
 
 /** Options for firing webhook-matched jobs (dispatch is injectable for tests). */

@@ -48,6 +48,7 @@ import {
   ticketWorkers,
   projectRollups,
   type FloorAgent,
+  type FloorAttachment,
   type FloorTicket,
   type CenterMode,
   type HostInventory,
@@ -60,10 +61,13 @@ import {
   type CiStatus,
   type ManagedProject,
   type LinearProjectLite,
+  linearIssueLabel,
+  linearIssueUrl,
 } from './floorModel'
 import { SavedViews } from './SavedViewsBar'
 import { loadSavedViews, persistSavedViews, upsertView, removeView, viewMatches, type SavedView } from './savedViews'
 import { adaptUnified, adaptRemote, adaptTickets, sinceFromMs, type RemoteSessionLike } from './floorAdapter'
+import type { PlanFile } from '../../utils/planDetector'
 import {
   DispatchPanel,
   type DispatchDevice,
@@ -634,12 +638,13 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // sweep is expensive (SSH fan-out), so it runs lazily when the Recap center opens.
   const [recapSessions, setRecapSessions] = useState<RemoteSessionLike[] | null>(null)
   const [floorSort, setFloorSort] = useState<FloorSort>('needs')
-  // Group the live feed by an axis (project/host/status/agent). Defaults to 'project'
-  // so sessions cluster under the repo/Linear project they're working on (NEEDS YOU
-  // stays pinned above the groups); 'none' falls back to flat phase sections
-  // (NEEDS YOU -> RUNNING -> DONE). Reuses the same groupAgents() the Backlog's group
-  // control uses, so the two bars behave alike.
-  const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('project')
+  // Group the live feed by an axis. Defaults to 'outcome' (ticket/PR/worktree) so a
+  // fleet-scale floor shows deliverables, not ~1,100 agents (RUSH-1479). NEEDS YOU
+  // stays pinned above the groups; 'none' falls back to flat phase sections
+  // (NEEDS YOU -> RUNNING -> DONE). Reuses groupAgents() so the control bar and
+  // the feed share one grouping implementation.
+  const [floorGroup, setFloorGroup] = useState<FloorGroupBy | 'none'>('outcome')
+  const [floorSubgroup, setFloorSubgroup] = useState<FloorGroupBy | 'none'>('none')
   const [plain, setPlain] = useState(floorPrefs0.plain)
   const [sidebarOpen, setSidebarOpen] = useState(floorPrefs0.sidebar)
   // Collapsed = the icon rail (mockup default); expanded = the full text sidebar.
@@ -680,8 +685,20 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     })
   }, [])
   const [ticketGroup, setTicketGroup] = useState<TicketGroupBy>('project')
+  const [ticketSubgroup, setTicketSubgroup] = useState<TicketGroupBy | 'none'>('none')
   const [ticketSort, setTicketSort] = useState<TicketSort>('priority')
   const [ticketSrc, setTicketSrc] = useState<Record<TicketSource, boolean>>({ LN: true, GH: true })
+
+  const handleFloorGroup = useCallback((next: FloorGroupBy | 'none') => {
+    setFloorGroup(next)
+    setFloorSubgroup((cur) => (next === 'none' || cur === next ? 'none' : cur))
+  }, [])
+
+  const handleTicketGroup = useCallback((next: TicketGroupBy) => {
+    setTicketGroup(next)
+    setTicketSubgroup((cur) => (cur === next ? 'none' : cur))
+  }, [])
+
   const [remoteSessions, setRemoteSessions] = useState<RemoteSessionLike[]>([])
   const [offlineHosts, setOfflineHosts] = useState<string[]>([])
   // Per-agent reply failures (host 'replyResult' with ok=false, or a 'none' channel),
@@ -1617,6 +1634,36 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // no-op (no fake success) rather than pretending it worked. TODO: wire capture path.
   const onAttachScreenshot = useCallback((_a: FloorAgent) => { /* TODO: screenshot transport pending */ }, [])
 
+  /**
+   * Open/resume the session in a real terminal (RUSH-1520). Prefers an already-
+   * open local tab, then a remote tmux rail, then `agents sessions focus <id>`.
+   */
+  const openTerminalForAgent = useCallback((a: FloorAgent) => {
+    if (a.reply.kind === 'terminal' && a.reply.terminalId) {
+      postMessage({ type: 'focusTerminal', terminalId: a.reply.terminalId })
+      return
+    }
+    if (a.reply.kind === 'tmux' && a.reply.muxTarget) {
+      postMessage({
+        type: 'focusRemoteSession',
+        host: a.reply.host,
+        muxSocket: a.reply.muxSocket,
+        muxTarget: a.reply.muxTarget,
+        sessionId: a.reply.sessionId ?? a.sessionId,
+        label: a.name,
+      })
+      return
+    }
+    if (a.sessionId) {
+      postMessage({ type: 'focusSession', sessionId: a.sessionId, host: a.host })
+      return
+    }
+    const u = unifiedById.get(a.id)
+    if (u?.terminal) {
+      postMessage({ type: 'focusTerminal', terminalId: u.terminal.id })
+    }
+  }, [unifiedById])
+
   const onBatchReply = useCallback((cluster: FloorAgent[], option: string) => {
     for (const a of cluster) replyToAgent(a, option)
   }, [replyToAgent])
@@ -1629,6 +1676,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Nudge a stalled (wedged) agent to wake it back up.
   const nudgeFloorAgent = useCallback((a: FloorAgent) => {
     postMessage({ type: 'nudgeAgent', sessionId: a.id, host: a.host })
+  }, [])
+
+  const openPlanPreview = useCallback((a: FloorAgent, plan: PlanFile) => {
+    postMessage({ type: 'openPlanPreview', path: plan.path, kind: plan.kind, host: a.host })
+  }, [])
+
+  const openAttachmentPreview = useCallback((a: FloorAgent, attachment: FloorAttachment) => {
+    postMessage({ type: 'openAttachmentPreview', path: attachment.path, mediaType: attachment.mediaType, host: a.host })
   }, [])
 
   // Plan-review actions (Floor after-dispatch): approve as-is/edited, or send back a note.
@@ -1770,8 +1825,30 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               <div className="sub">host <b>{a.hostLabel ?? a.host}</b>{(a.worktreeSlug || a.branch) ? ` · ${a.worktreeSlug || a.branch}` : ''} · {a.phase}{a.tok ? ` · ${a.tok} tok/s` : ''}{a.ticket ? ` · ${a.ticket}` : ''}</div>
               {/* Artifacts row: the agent's outputs at a glance — the PR (click-through),
                   CI, the team it spawned, and tickets it created. Mirrors the card chips. */}
-              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0) && (
+              {(a.prUrl || a.ci || a.spawnedTeam || (a.createdTickets?.length ?? 0) > 0 || (a.createdCommits?.length ?? 0) > 0 || (a.plans?.length ?? 0) > 0 || (a.attachments?.length ?? 0) > 0) && (
                 <div className="arts">
+                  {(a.attachments ?? []).map((attachment) => (
+                    <button
+                      key={attachment.path}
+                      type="button"
+                      className="art attachment"
+                      title={`Preview ${attachment.path}`}
+                      onClick={() => openAttachmentPreview(a, attachment)}
+                    >
+                      <Icon name="paperclip" size={10} /> {attachment.label}
+                    </button>
+                  ))}
+                  {(a.plans ?? []).map((plan) => (
+                    <button
+                      key={plan.path}
+                      type="button"
+                      className="art plan"
+                      title={`Preview ${plan.path}`}
+                      onClick={() => openPlanPreview(a, plan)}
+                    >
+                      <Icon name="external" size={10} /> {plan.label}
+                    </button>
+                  ))}
                   {a.prUrl && (
                     <ExtLink href={a.prUrl} className="art pr" style={{ textDecoration: 'none' }}>
                       <Icon name="chevR" size={10} /> PR {a.pr ?? ''}
@@ -1779,8 +1856,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                   )}
                   {a.ci && <span className={`art ci ${a.ci}`}>CI {a.ci}</span>}
                   {a.spawnedTeam && <span className="art team"><Icon name="grip" size={10} /> team · {a.spawnedTeam}</span>}
-                  {(a.createdTickets ?? []).map((t) => (
-                    <span key={t} className="art tk"><Icon name="plus" size={10} /> {t}</span>
+                  {(a.createdTickets ?? []).map((t) => {
+                    const href = linearIssueUrl(t)
+                    const label = linearIssueLabel(t)
+                    return href
+                      ? <ExtLink key={t} href={href} className="art tk" style={{ textDecoration: 'none' }}><Icon name="plus" size={10} /> {label}</ExtLink>
+                      : <span key={t} className="art tk"><Icon name="plus" size={10} /> {label}</span>
+                  })}
+                  {(a.createdCommits ?? []).map((sha) => (
+                    <span key={sha} className="art commit"><Icon name="gitBranch" size={10} /> commit {sha}</span>
                   ))}
                 </div>
               )}
@@ -1923,6 +2007,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     <BacklogCenter
       tickets={floorTickets}
       group={ticketGroup}
+      subgroup={ticketSubgroup}
       sort={ticketSort}
       srcFilter={ticketSrc}
       projFilter={projFilter}
@@ -1961,6 +2046,21 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         onApply={applyView}
         onSave={saveView}
         onDelete={deleteView}
+        feedFilters={{
+          group: floorGroup,
+          onGroup: handleFloorGroup,
+          subgroup: floorSubgroup,
+          onSubgroup: setFloorSubgroup,
+          status: statusChips,
+          onToggleStatus: (s) => setStatusChips((cur) => (
+            cur.includes(s) ? cur.filter((c) => c !== s) : [...cur, s]
+          )),
+          abbrs: abbrChips,
+          availableAbbrs: Array.from(new Set(floorAgents.map((a) => a.abbr))).sort(),
+          onToggleAbbr: (a) => setAbbrChips((cur) => (
+            cur.includes(a) ? cur.filter((c) => c !== a) : [...cur, a]
+          )),
+        }}
       />
       {(needsAgents.length > 0 || pendingPlans.length > 0) && (
         <>
@@ -1991,6 +2091,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
           {failedAgents.map((a) => (
@@ -2012,12 +2115,15 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
         </>
       )}
 
-      <div className="feed-sec">{floorGroup === 'none' ? `RUNNING · ${runningFeed.length}` : `GROUPED BY ${floorGroup.toUpperCase()} · ${runningFeed.length + doneFeed.length}`}<span className="ln" />
+      <div className="feed-sec">{floorGroup === 'none' ? `RUNNING · ${runningFeed.length}` : `GROUPED BY ${floorGroup.toUpperCase()}${floorSubgroup !== 'none' && floorSubgroup !== floorGroup ? ` / ${floorSubgroup.toUpperCase()}` : ''} · ${runningFeed.length + doneFeed.length}`}<span className="ln" />
         <span
           className={`fresh${syncingHosts ? ' syncing' : ''}${!syncingHosts && lastRemoteSync > 0 && nowMs - lastRemoteSync > 2 * REMOTE_POLL_MS ? ' stale' : ''}`}
           title="Last cross-host sync. Click to refresh now."
@@ -2042,17 +2148,38 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))
         : [...groupAgents([...runningFeed, ...doneFeed], floorGroup).entries()].map(([k, arr]) => {
             // When grouped by project, enrich the header: "N agents" + a Linear project
             // link pill (mockup: "agents-cli · 8 agents · RUSH · Agents CLI").
-            const linkedProject = floorGroup === 'project'
-              ? managedProjects.find((p) => p.name === k)?.linearProjectName
-              : undefined
+            const projectPill = (axis: FloorGroupBy | 'none', key: string) => (
+              axis === 'project' ? managedProjects.find((p) => p.name === key)?.linearProjectName : undefined
+            )
+            const linkedProject = projectPill(floorGroup, k)
             const countLabel = floorGroup === 'project'
               ? `${arr.length} agent${arr.length === 1 ? '' : 's'}`
               : `${arr.length}`
+            const subgroupActive = floorSubgroup !== 'none' && floorSubgroup !== floorGroup
+            const subgroups = subgroupActive ? [...groupAgents(arr, floorSubgroup).entries()] : []
+            const renderRows = (rows: FloorAgent[]) => rows.map((a) => (
+              <FeedRow onOpenTask={openTaskFromAgent}
+                key={a.id}
+                agent={a}
+                selected={selectedFloorAgent?.id === a.id}
+                plain={plain}
+                onSelect={selectFloorAgent}
+                onOption={onAgentOption}
+                onFreeText={replyToAgent}
+                onAttach={onAttachScreenshot}
+                onOpenPlan={openPlanPreview}
+                onOpenAttachment={openAttachmentPreview}
+                onOpenTerminal={openTerminalForAgent}
+              />
+            ))
             return (
             <React.Fragment key={k}>
               <div className="feed-sec">
@@ -2060,18 +2187,21 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                 {linkedProject && <span className="proj-lk">{linkedProject}</span>}
                 <span className="ln" />
               </div>
-              {arr.map((a) => (
-                <FeedRow onOpenTask={openTaskFromAgent}
-                  key={a.id}
-                  agent={a}
-                  selected={selectedFloorAgent?.id === a.id}
-                  plain={plain}
-                  onSelect={selectFloorAgent}
-                  onOption={onAgentOption}
-                  onFreeText={replyToAgent}
-                  onAttach={onAttachScreenshot}
-                />
-              ))}
+              {subgroupActive
+                ? subgroups.map(([subKey, subArr]) => {
+                    const linkedSubProject = projectPill(floorSubgroup, subKey)
+                    return (
+                      <React.Fragment key={`${k}:${subKey}`}>
+                        <div className="feed-sec feed-subsec">
+                          {subKey} · {subArr.length}
+                          {linkedSubProject && <span className="proj-lk">{linkedSubProject}</span>}
+                          <span className="ln" />
+                        </div>
+                        {renderRows(subArr)}
+                      </React.Fragment>
+                    )
+                  })
+                : renderRows(arr)}
             </React.Fragment>
           )})}
 
@@ -2088,6 +2218,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
         </>
@@ -2108,6 +2241,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}
+              onOpenPlan={openPlanPreview}
+              onOpenAttachment={openAttachmentPreview}
+              onOpenTerminal={openTerminalForAgent}
             />
           ))}
         </>
@@ -2176,9 +2312,13 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           sort={floorSort}
           onSort={setFloorSort}
           group={floorGroup}
-          onGroup={setFloorGroup}
+          onGroup={handleFloorGroup}
+          subgroup={floorSubgroup}
+          onSubgroup={setFloorSubgroup}
           ticketGroup={ticketGroup}
-          onTicketGroup={setTicketGroup}
+          onTicketGroup={handleTicketGroup}
+          ticketSubgroup={ticketSubgroup}
+          onTicketSubgroup={setTicketSubgroup}
           ticketSort={ticketSort}
           onTicketSort={setTicketSort}
           srcFilter={ticketSrc}

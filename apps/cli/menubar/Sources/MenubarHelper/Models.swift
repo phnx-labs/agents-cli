@@ -90,3 +90,16 @@ struct DoctorOrphan: Decodable {
     let skills: Int?
     let hooks: Int?
 }
+
+// One row of `agents sessions --active --local --json` — the session engine's
+// authoritative live view (terminals, tmux, IDE, headless). Richer coverage than
+// the cheap live-terminals.json file, which only carries extension-registered
+// terminals; used to feed the ACTIVE section from a warm cache.
+struct ActiveSession: Decodable {
+    let kind: String
+    let sessionId: String?
+    let cwd: String?
+    let status: String       // running | idle | queued | …
+    let context: String?
+    let machine: String?
+}
