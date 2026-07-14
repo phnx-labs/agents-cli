@@ -17,6 +17,10 @@ All notable changes to the Factory extension are documented here. Format follows
   combinations like Project -> Host and Project -> Source visible without
   switching views. Source: `ui/settings/components/mission-control/FloorControls.tsx`,
   `UnifiedAgentsPane.tsx`, `BacklogCenter.tsx`.
+- **Factory Floor backlog refreshes while the view stays open (RUSH-1578).**
+  The Floor and Bench tabs now re-fetch unified Linear/GitHub tasks on a
+  30-second active-view cadence, so external ticket status changes no longer
+  require closing and reopening Factory. Source: `ui/settings/App.tsx`.
 - **Factory Floor surfaces agent-created tickets as clickable Linear artifacts (RUSH-1547).**
   Session cards and detail panes now render linked Linear badges for carried/created
   ticket refs and include commit chips in the produced-artifacts row, so PRs,
