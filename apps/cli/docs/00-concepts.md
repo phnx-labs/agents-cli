@@ -142,7 +142,7 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 | Kiro | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
 | Goose | >= 1.34.0 | yes | yes | >= 1.25.0 | no | yes | no | `AGENTS.md` | yes |
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Antigravity | yes | yes | yes | yes | yes | yes | >= 1.0.16 | `AGENTS.md` | no |
+| Antigravity | yes | yes | yes | yes | yes | yes | >= 1.0.16 | `AGENTS.md` | >= 1.0.6 |
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
@@ -151,7 +151,7 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 
 **† Gemini is deprecated.** Google retired the Gemini CLI for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI (`antigravity`) is the successor. agents-cli still manages existing Gemini installs but warns on `agents add gemini` / `agents teams add … gemini`.
 
-Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, and Droid >= 0.57.5). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, and Goose recipe YAML. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
+Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, and Droid >= 0.57.5). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, Goose recipe YAML, and Antigravity workflow markdown (since 1.0.6). Antigravity workflows are the one non-version-isolated target: `agy` scans a single shared `~/.gemini/config/global_workflows/` at startup (a real HOME directory, never symlinked per version), so agents-cli writes there once for all installed antigravity versions and reads it back the same way — the `agents_workflow` marker guards user-authored files from being overwritten or removed. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
 
 Gemini permission sync maps canonical Bash rules to its native `ShellTool(...)` entries under `tools.core` / `tools.exclude`. Other canonical permission tools are not representable in Gemini's native allowlist grammar and are skipped.
 
