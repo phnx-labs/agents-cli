@@ -858,6 +858,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Kiro | yes | no | yes | >= 2.8.0 | yes | yes | no | no | `AGENTS.md` | no |
 | Goose | yes | no | yes | no | no | no | no | no | `AGENTS.md` | no |
 | Roo Code | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| Droid | yes | yes | yes | >= 0.57.5 | no | yes | yes | yes | `AGENTS.md` | no |
 
 **Legend:** `yes` / `no` = synced or skipped at install time. `skills ($name)` = no file-based slash-command dir; behavior ships as a generated skill invoked with `$command`. `gateway` = OpenClaw resolves slash commands at runtime, not from synced files. Version suffixes are enforced at sync time — out-of-range versions are skipped with a clear message.
 
@@ -882,6 +883,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Capability | Agent | Gate |
 |------------|-------|------|
 | Hooks | Codex | >= 0.116.0 |
+| Permissions | Droid | >= 0.57.5 |
 | Hooks | Gemini | >= 0.26.0 |
 | Permissions | Kiro | >= 2.8.0 |
 | File-based commands | Codex | < 0.117.0 (0.117+ uses command-as-skill) |

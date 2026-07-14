@@ -249,6 +249,19 @@ describe('kiro hooks version gate', () => {
   });
 });
 
+describe('droid allowlist version gate', () => {
+  it('gates versions below 0.57.5 as too_old', () => {
+    const result = supports('droid', 'allowlist', '0.57.4');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.need).toBe('>= 0.57.5');
+  });
+
+  it('passes 0.57.5 and above', () => {
+    expect(supports('droid', 'allowlist', '0.57.5')).toEqual({ ok: true });
+    expect(supports('droid', 'allowlist', '0.159.0')).toEqual({ ok: true });
+  });
+});
+
 describe('kiro allowlist version gate', () => {
   it('gates versions below 2.8.0 as too_old', () => {
     const result = supports('kiro', 'allowlist', '2.7.9');

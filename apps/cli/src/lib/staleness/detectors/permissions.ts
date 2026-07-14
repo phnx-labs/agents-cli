@@ -201,6 +201,24 @@ function buildCursorDetector(): ResourceDetector {
   };
 }
 
+function buildDroidDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'droid',
+    list({ versionHome }: DetectArgs): string[] {
+      const settingsPath = path.join(versionHome, '.factory', 'settings.json');
+      if (!fs.existsSync(settingsPath)) return [];
+      try {
+        const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+        const hasAllow = Array.isArray(settings.commandAllowlist) && settings.commandAllowlist.length > 0;
+        const hasDeny = Array.isArray(settings.commandDenylist) && settings.commandDenylist.length > 0;
+        if (hasAllow || hasDeny) return discoverPermissionGroups().map(g => g.name);
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
 function buildKiroDetector(): ResourceDetector {
   return {
     kind: 'permissions',
@@ -228,6 +246,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   grok: buildGrokDetector,
   kimi: buildKimiDetector,
   cursor: buildCursorDetector,
+  droid: buildDroidDetector,
   kiro: buildKiroDetector,
 };
 
