@@ -1391,6 +1391,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         s.time_updated AS time_updated,
         COALESCE(stats.message_count, 0) AS message_count,
         stats.token_count AS token_count,
+        stats.output_tokens AS output_tokens,
         COALESCE(stats.has_token_data, 0) AS has_token_data
       FROM session s
       LEFT JOIN (
