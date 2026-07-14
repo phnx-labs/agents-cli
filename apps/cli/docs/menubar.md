@@ -23,7 +23,9 @@ optionally attach recent screenshots from the thumbnail strip, then pick one
 agent for **File Ticket** or one or more agents for **Fix**.
 
 - **File Ticket** sends the note and selected screenshots to the selected ticket
-  agent, which investigates and files one Linear ticket.
+  agent, which investigates and files one Linear ticket. Selected screenshot
+  paths are identified as user-provided ticket material, and the agent uploads
+  every selected file using whichever issue placement communicates it best.
 - **Fix** fans out to every selected agent with `agents run <agent> --mode auto
   --name quick-<agent>-<timestamp>`, so the resulting sessions appear in normal
   `agents sessions` and menu-bar surfaces instead of as opaque background work.
@@ -33,6 +35,11 @@ filter which agents appear in the picker, and
 `AGENTS_QUICK_DISPATCH_AGENTS=claude,codex` to change which visible agents are
 preselected. Without a roster override, the picker uses the same roster as the
 menu bar's New Session submenu.
+
+If another app steals focus while you are typing, the panel hides but keeps the
+draft note plus the selected screenshots, action, and agents for the next
+`Cmd-Shift-O` summon. Return submits and clears the draft; Escape clears it
+without dispatching.
 
 ## The dropdown
 
@@ -108,7 +115,8 @@ The helper assembles the menu by reading these directly — no CLI, no re-index:
 
 | Source | Path | Gives |
 |---|---|---|
-| Terminals | `~/.agents/.cache/terminals/live-terminals.json` | terminal / IDE sessions (agent, cwd, pid) |
+| Terminals | `~/.agents/.cache/terminals/live-terminals.json` | extension-registered terminals (agent, cwd, pid, label) — cold start + 10s badge poll |
+| Active sessions | `agents sessions --active --local --json` (warm cache, 30s TTL) | every local session (tmux / IDE / headless) with running-vs-idle — feeds triage + ACTIVE once loaded |
 | Teams | `~/.agents/.history/teams/agents/<id>/meta.json` | running teammate agents |
 | Cloud | `~/.agents/.cache/cloud/tasks.db` (SQLite) | cloud tasks, incl. `input_required` or `needs_review` → "awaiting input" |
 | Attention sentinels | `~/.agents/.cache/state/attention/<sessionId>` | terminal sessions awaiting input — mtime = wait start, content = the awaiting message (written by the Notification hook; empty content renders "awaiting input") |

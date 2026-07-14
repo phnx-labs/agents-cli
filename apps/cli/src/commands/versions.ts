@@ -21,6 +21,7 @@ import {
   getAccountInfo,
   agentLabel,
   warnAgentDeprecated,
+  isSelfUpdatingAgent,
 } from '../lib/agents.js';
 import type { AccountInfo } from '../lib/agents.js';
 import type { UsageSnapshot } from '../lib/usage.js';
@@ -123,7 +124,7 @@ async function setDefaultVersion(
   createVersionedAlias(agent, installedVersion);
   const symlinkResult = await switchConfigSymlink(agent, installedVersion);
   if (symlinkResult.success) {
-    console.log(chalk.green('  Set as default'));
+    console.log(chalk.green(isSelfUpdatingAgent(agent) ? '  Set as active config profile' : '  Set as default'));
     if (symlinkResult.backupPath) {
       console.log(chalk.gray(`  Backed up existing config to: ${symlinkResult.backupPath}`));
     }
@@ -862,7 +863,14 @@ export function registerVersionsCommands(program: Command): void {
 
           const useEmail = await getAccountEmail(agentId, getVersionHomePath(agentId, finalVersion));
           const useEmailStr = useEmail ? chalk.cyan(` (${useEmail})`) : '';
-          console.log(chalk.green(`Set ${agentLabel(agentConfig.id)}@${finalVersion} as global default`) + useEmailStr);
+          // Self-updating agents are one binary; `use` only swaps the config
+          // symlink (the profile), it does not change which binary runs — so say
+          // "profile", not "version", to match what actually happened.
+          if (isSelfUpdatingAgent(agentId)) {
+            console.log(chalk.green(`Switched ${agentLabel(agentConfig.id)} to config profile ${finalVersion}`) + useEmailStr);
+          } else {
+            console.log(chalk.green(`Set ${agentLabel(agentConfig.id)}@${finalVersion} as global default`) + useEmailStr);
+          }
         }
       } catch (err) {
         if (isPromptCancelled(err)) return;

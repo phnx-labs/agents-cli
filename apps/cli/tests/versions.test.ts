@@ -617,8 +617,10 @@ describe('hasNewResources', () => {
     const diff = { ...emptyResources(), permissions: ['01-core'] };
     // claude supports permissions
     expect(hasNewResources(diff, 'claude')).toBe(true);
-    // cursor does NOT support permissions
-    expect(hasNewResources(diff, 'cursor')).toBe(false);
+    // cursor supports permissions (cli-config.json allowlist)
+    expect(hasNewResources(diff, 'cursor')).toBe(true);
+    // amp does NOT support permissions
+    expect(hasNewResources(diff, 'amp')).toBe(false);
   });
 
   it('filters plugins by agent capability', () => {
@@ -1218,12 +1220,24 @@ describe('installVersion', () => {
     }
   });
 
-  it('rejects version-pinned external installs when the installer has no version placeholder', async () => {
-    const result = await installVersion('antigravity', '1.2.3');
+  it('gracefully redirects a version-pinned external install to the current release (RUSH-1321)', async () => {
+    // A self-updating agent (no VERSION token in the installer) can't pin. A
+    // network-free `true` installer stands in for the real curl/brew script.
+    const original = AGENTS.antigravity.installScript;
+    AGENTS.antigravity.installScript = 'true';
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('does not support version-pinned installs');
-    expect(fs.existsSync(path.join(AGENTS_DIR, 'versions', 'antigravity'))).toBe(false);
+    try {
+      const result = await installVersion('antigravity', '1.2.3');
+
+      // No longer a hard `does not support version-pinned installs` error — the
+      // pin is redirected to installing the current release.
+      expect(result.success).toBe(true);
+      expect(result.error ?? '').not.toContain('does not support version-pinned installs');
+      // The ignored `1.2.3` pin did NOT create a fictional `1.2.3` version dir.
+      expect(fs.existsSync(path.join(AGENTS_DIR, 'versions', 'antigravity', '1.2.3'))).toBe(false);
+    } finally {
+      AGENTS.antigravity.installScript = original;
+    }
   });
 });
 

@@ -30,6 +30,7 @@ import { getCacheDir } from '../state.js';
 import { SSH_OPTS, controlOpts, assertValidSshTarget } from '../ssh-exec.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
+import { NO_FANOUT_ENV } from './remote-active.js';
 import { formatRelativeTime } from './relative-time.js';
 import { terminalWidth } from './width.js';
 
@@ -81,6 +82,22 @@ export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set(
 }
 
 /**
+ * Force a forwarded `agents sessions` listing to span the peer's WHOLE index.
+ *
+ * A remote listing runs in the peer's SSH-login cwd — its home dir — and the
+ * default listing is silently cwd-scoped, so `sessions --host box` reads as
+ * empty even when the box's index is full (`No sessions found for /home/<user>`).
+ * Across SSH a peer's cwd is meaningless, so `--host` defaults to `--all`
+ * (whole-index) scope. This only drops the *cwd* narrowing — an explicit path
+ * query, `--project`, `--since`, or `--agent` filter still narrows on top, and
+ * a query that looks like a path takes precedence over `--all` on the remote.
+ * Idempotent: never adds a second `--all`.
+ */
+export function ensureWholeIndex(forwardedArgs: string[]): string[] {
+  return forwardedArgs.includes('--all') ? forwardedArgs : [...forwardedArgs, '--all'];
+}
+
+/**
  * Build the single remote command string for `ssh <host> <cmd>`. Forwarded args
  * are quoted for the inner login shell, then the whole `agents …` invocation is
  * quoted again so it survives `bash -lc <...>`.
@@ -92,16 +109,22 @@ export function buildForwardedArgs(argv: string[], hosts: Set<string> = new Set(
  * remote renders its table to the local screen.
  */
 export function buildRemoteCommand(forwardedArgs: string[], columns?: number, os?: string): string {
+  // `--host <box>` means "that box's own sessions" — so the peer must answer for
+  // ITSELF and not re-sweep its fleet. Without this the remote `agents sessions`
+  // fans back out to every device IT knows (including us), printing a spurious
+  // `<this-machine>: unreachable`. AGENTS_SESSIONS_LOCAL=1 pins the peer local,
+  // matching the JSON fan-out path (`remote-list.ts`).
   if (remoteShellFor(os) === 'powershell') {
-    const env = columns && columns > 0 ? { COLUMNS: String(columns) } : undefined;
+    const env: Record<string, string> = { [NO_FANOUT_ENV]: '1' };
+    if (columns && columns > 0) env.COLUMNS = String(columns);
     return buildWindowsAgentsCommand({ args: forwardedArgs, env });
   }
   const inner = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
   // Forward the caller's terminal width so the remote renders the table to the
   // local screen (over SSH the remote's own COLUMNS is unset/wrong). `VAR=val
   // cmd` scopes the env to that process — the remote's terminalWidth() reads it.
-  const withCols = columns && columns > 0 ? `COLUMNS=${columns} ${inner}` : inner;
-  return `bash -lc ${shellQuote(withCols)}`;
+  const envPrefix = `${NO_FANOUT_ENV}=1` + (columns && columns > 0 ? ` COLUMNS=${columns}` : '');
+  return `bash -lc ${shellQuote(`${envPrefix} ${inner}`)}`;
 }
 
 
@@ -189,7 +212,7 @@ function replayRemoteCache(host: string, forwardedArgs: string[]): boolean {
 export function runRemoteSessions(hosts: string[], argv: string[] = process.argv): void {
   for (const host of hosts) assertValidSshTarget(host); // fail fast on any bad target
 
-  const forwarded = buildForwardedArgs(argv, new Set(hosts));
+  const forwarded = ensureWholeIndex(buildForwardedArgs(argv, new Set(hosts)));
   const cols = terminalWidth();
   const multi = hosts.length > 1;
   let failures = 0;

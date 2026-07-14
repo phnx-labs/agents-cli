@@ -1374,18 +1374,23 @@ describe('syncPluginToVersion (opencode TS modules)', () => {
     expect(isPluginSynced(plugin, 'opencode', versionHome)).toBe(true);
   });
 
-  it('copies multiple modules into a named plugin directory', async () => {
+  it('flattens multiple modules into loader-visible direct .ts files (RUSH-1617)', async () => {
     const { pluginRoot, versionHome, plugin } = setupOpenCodePlugin();
     fs.mkdirSync(path.join(pluginRoot, 'plugins'), { recursive: true });
     fs.writeFileSync(path.join(pluginRoot, 'plugins', 'a.ts'), 'export const A = 1;\n');
     fs.writeFileSync(path.join(pluginRoot, 'plugins', 'b.ts'), 'export const B = 2;\n');
+    // .mjs is not loader-visible for local plugins — must be ignored.
+    fs.writeFileSync(path.join(pluginRoot, 'plugins', 'skip.mjs'), 'export const S = 0;\n');
 
     const { syncPluginToVersion, openCodePluginsDir } = await import('./plugins.js');
     syncPluginToVersion(plugin, 'opencode', versionHome);
 
-    const destDir = path.join(openCodePluginsDir(versionHome), 'myplugin');
-    expect(fs.existsSync(path.join(destDir, 'a.ts'))).toBe(true);
-    expect(fs.existsSync(path.join(destDir, 'b.ts'))).toBe(true);
+    const destDir = openCodePluginsDir(versionHome);
+    expect(fs.existsSync(path.join(destDir, 'myplugin-a.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'myplugin-b.ts'))).toBe(true);
+    expect(fs.existsSync(path.join(destDir, 'myplugin-skip.mjs'))).toBe(false);
+    // Modules must not live only inside a nested dir the loader never scans.
+    expect(fs.existsSync(path.join(destDir, 'myplugin', 'a.ts'))).toBe(false);
   });
 
   it('installs a managed marker when no TS/JS modules exist', async () => {

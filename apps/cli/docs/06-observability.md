@@ -147,6 +147,12 @@ Each source answers a different question:
 | `agents cloud list --json` | What am I running on remote VMs right now? | Rush Cloud, Codex Cloud, Factory | Local sessions |
 | `agents teams list --json` | What multi-agent DAGs are active? | All team-coordinated runs | Standalone agents |
 
+`agents sessions --active --json` includes `attachments` for prompt-side
+screenshots and files when the source transcript carries a local path. Each entry
+contains `path`, `name`, `mediaType`, and `sizeBytes` so consumers such as Factory
+can render thumbnails and open the original attachment without re-reading the raw
+agent transcript.
+
 Some sessions appear in multiple sources:
 
 - **Local CLI**: `sessions` only

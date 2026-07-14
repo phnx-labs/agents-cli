@@ -10,6 +10,7 @@ import {
   toFloorAgentFromRemote,
   adaptTickets,
   cleanWorktreeSlug,
+  detectCreatedCommits,
   type UnifiedAgentLike,
   type RemoteSessionLike,
 } from './floorAdapter'
@@ -94,6 +95,22 @@ describe('floorPrLabel', () => {
   })
 })
 
+describe('detectCreatedCommits', () => {
+  test('extracts short commit shas from successful command output', () => {
+    expect(detectCreatedCommits([
+      { name: 'Bash', output: '[rush-1547-linear-artifacts 095e588093ca] RUSH-1547: surface ticket artifacts' },
+      { name: 'Bash', output: '[rush-1547-linear-artifacts 095e588093ca] duplicate line' },
+      { name: 'Bash', output: '[rush-1547-linear-artifacts 1111111] another change' },
+    ])).toEqual(['095e588093ca', '1111111'])
+  })
+
+  test('ignores failed command output', () => {
+    expect(detectCreatedCommits([
+      { name: 'Bash', output: '[rush-1547-linear-artifacts deadbee] failed change', isError: true },
+    ])).toEqual([])
+  })
+})
+
 function baseUnified(over: Partial<UnifiedAgentLike>): UnifiedAgentLike {
   return {
     id: 'term-1',
@@ -128,6 +145,22 @@ describe('toFloorAgentFromUnified', () => {
     expect(a.needs).toBe(true)
     expect(a.host).toBe('this-mac')
     expect(a.abbr).toBe('CC')
+  })
+
+  test('surfaces commit artifacts from recent terminal output', () => {
+    const a = toFloorAgentFromUnified(
+      baseUnified({
+        terminal: {
+          id: 't1',
+          recentToolCalls: [
+            { name: 'Bash', output: '[rush-1547-linear-artifacts abc1234] RUSH-1547: wire ticket links' },
+          ],
+        },
+        agent: null,
+      }),
+      { pinned: new Set(), workspaceRepo: 'agents-cli', nowMs: NOW },
+    )
+    expect(a.createdCommits).toEqual(['abc1234'])
   })
 
   test('a completed agent with a stale waiting flag lands in done, not needs-you (RUSH-1522)', () => {
@@ -430,6 +463,52 @@ describe('toFloorAgentFromRemote', () => {
       '/home/u/src/agents-cli/.agents/worktrees/rush-1525/ref-cycle.md',
       '/tmp/ref-screenshot.html',
     ])
+  })
+
+  test('carries structured remote attachments onto the Floor card', () => {
+    const r: RemoteSessionLike = {
+      host: 'yosemite-s0',
+      sessionId: 'shot123',
+      agentType: 'codex',
+      cwd: '/home/u/src/agents-cli',
+      project: 'agents-cli',
+      phase: 'running',
+      activity: 'Reading screenshot',
+      tokPerSec: 0,
+      waitingForInput: false,
+      lastResponse: '',
+      output: '',
+      attachments: [{
+        path: '/home/u/.agents/.history/attachments/factory-floor.png',
+        label: 'factory-floor.png',
+        mediaType: 'image/png',
+        sizeBytes: 12345,
+        thumbnailUri: 'vscode-resource://factory-floor.png',
+      }],
+      prUrl: null,
+      ticket: 'RUSH-1524',
+      branch: 'rush-1524',
+      sinceMs: 1000,
+      startedAtMs: NOW - 1000,
+      topic: 'Preview session attachments',
+      context: 'terminal',
+      cloudTaskId: '',
+      cloudProvider: '',
+      teamName: '',
+      pid: 4321,
+      transport: 'ssh',
+      replyRail: '',
+      replyMuxTarget: '',
+      replyMuxSocket: '',
+    }
+    const a = toFloorAgentFromRemote(r, new Set())
+    expect(a.attachments).toEqual([{
+      path: '/home/u/.agents/.history/attachments/factory-floor.png',
+      label: 'factory-floor.png',
+      mediaType: 'image/png',
+      sizeBytes: 12345,
+      thumbnailUri: 'vscode-resource://factory-floor.png',
+    }])
   })
 
   test('ignores remote plan-like paths that are only labels or task topics', () => {

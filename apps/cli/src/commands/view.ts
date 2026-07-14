@@ -54,6 +54,8 @@ import {
   removeVersion,
   printTrashFooter,
   reconcileStaleLatestForAgent,
+  isGlobalBinaryAgent,
+  getLiveVersion,
 } from '../lib/versions.js';
 import {
   getShimsDir,
@@ -445,6 +447,22 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
     }
   }
 
+  // For self-updating global-binary agents (droid) the on-disk version-dir name
+  // is a stale label — the real version is whatever `<cli> --version` reports.
+  // Resolve it once so every row/width pass shows the live version, while the
+  // per-version home + account lookups keep using the real dir name.
+  const liveVersionByAgent = new Map<AgentId, string>();
+  await Promise.all(
+    versionManaged
+      .filter((agentId) => isGlobalBinaryAgent(agentId))
+      .map(async (agentId) => {
+        const live = await getLiveVersion(agentId);
+        if (live) liveVersionByAgent.set(agentId, live);
+      })
+  );
+  const displayVersion = (agentId: AgentId, dirVersion: string): string =>
+    liveVersionByAgent.get(agentId) ?? dirVersion;
+
   // Show version-managed agents
   if (versionManaged.length > 0) {
     // Calculate column widths across all agents for alignment
@@ -457,7 +475,8 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
       const versions = listInstalledVersions(agentId);
       const globalDefault = getGlobalDefault(agentId);
       for (const v of versions) {
-        const label = v === globalDefault ? `${v} (default)` : v;
+        const shown = displayVersion(agentId, v);
+        const label = v === globalDefault ? `${shown} (default)` : shown;
         maxVerLabel = Math.max(maxVerLabel, label.length);
         const rawInfo = infoMap.get(`${agentId}:${v}`);
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
@@ -510,9 +529,10 @@ async function showInstalledVersions(filterAgentId?: AgentId): Promise<void> {
 
       for (const version of sortedVersions) {
         const isDefault = version === globalDefault;
-        const base = isDefault ? `${version} (default)` : version;
+        const shown = displayVersion(agentId, version);
+        const base = isDefault ? `${shown} (default)` : shown;
         const padded = base.padEnd(maxVerLabel);
-        const label = isDefault ? `${version}${chalk.green(' (default)')}${' '.repeat(maxVerLabel - base.length)}` : padded;
+        const label = isDefault ? `${shown}${chalk.green(' (default)')}${' '.repeat(maxVerLabel - base.length)}` : padded;
         const rawInfo = infoMap.get(`${agentId}:${version}`);
         const vInfo = rawInfo ? mergeCanonical(rawInfo) : undefined;
         const usageKey = getUsageLookupKey(vInfo);
