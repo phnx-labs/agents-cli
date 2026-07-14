@@ -37,8 +37,8 @@ Permission mode controls what the agent can do.
 |------|----------------|
 | `plan` (default) | Read-only — research, audit, analysis. No writes, no shell side-effects. |
 | `edit` | Read + write files; prompts for shell / risky operations |
-| `auto` | Smart classifier auto-approves safe ops (incl. commit + push to the current branch) and blocks risky ones (force-push, push to `main`, `git reset --hard`). Claude/copilot only. |
-| `skip` | Last-resort bypass of every permission prompt. Direct exec uses the native unsafe flag; ACP uses `allow_always`. `full` remains an alias. |
+| `auto` | Harness-native automatic approval: Claude/Copilot use the smart classifier (safe ops approved, risky ops blocked); Kimi uses `--auto`; Droid uses `--auto high`. |
+| `skip` | Last-resort bypass of every permission prompt. Direct exec uses the native unsafe flag; ACP selects a protocol permission option. `full` remains an alias. |
 
 ```bash
 agents run claude "fix lint errors in src/" --mode edit
@@ -47,8 +47,8 @@ agents run claude "/code:commit" --mode auto          # run a command unattended
 
 **Treat `skip` as a last resort.** In direct-exec runs (without `--acp`), agents-cli
 forwards the harness's native bypass flag; it does not add another safety layer. Prefer
-`auto` where the harness has a smart classifier (Claude Code and GitHub Copilot), or
-`edit` everywhere else.
+`auto` where supported (smart classifier on Claude/Copilot, native auto mode on
+Kimi/Droid), or `edit` everywhere else.
 
 | Harness | Direct-exec `--mode skip` becomes |
 |---|---|
@@ -64,8 +64,9 @@ forwards the harness's native bypass flag; it does not add another safety layer.
 | Droid | `--skip-permissions-unsafe` |
 
 With `--acp`, these native flags are not used. agents-cli instead grants `skip`
-permission requests at the ACP protocol layer with `allow_always`; the same
-last-resort warning applies.
+permission requests at the ACP protocol layer: it selects `allow_always` when offered,
+otherwise the first permission option offered by the server. The same last-resort
+warning applies.
 
 Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
 to sandboxed `edit` and can still prompt. `agents run codex --mode skip` instead
