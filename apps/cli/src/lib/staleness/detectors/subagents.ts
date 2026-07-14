@@ -133,6 +133,20 @@ function buildOpenCodeDetector(): ResourceDetector {
   };
 }
 
+function buildAntigravityDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'antigravity',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.gemini', 'config', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && fs.existsSync(path.join(agentsDir, d.name, 'agent.md')))
+        .map(d => d.name);
+    },
+  };
+}
+
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   copilot: buildCopilotDetector,
@@ -140,6 +154,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   codex: buildCodexDetector,
   kimi: buildKimiDetector,
   opencode: buildOpenCodeDetector,
+  antigravity: buildAntigravityDetector,
   droid: buildDroidDetector,
   openclaw: buildOpenclawDetector,
   kiro: buildKiroDetector,

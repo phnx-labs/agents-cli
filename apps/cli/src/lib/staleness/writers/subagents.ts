@@ -23,6 +23,7 @@ import {
   buildKimiSubagentsParentYaml,
   KIMI_SUBAGENTS_PARENT_FILE,
   transformSubagentForOpenCode,
+  transformSubagentForAntigravity,
   transformSubagentForDroid,
   transformSubagentForKiro,
   syncSubagentToOpenclaw,
@@ -62,6 +63,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             const agentsDir = path.join(versionHome, '.config', 'opencode', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForOpenCode(sub.path));
+            synced.push(sub.name);
+          } else if (agent === 'antigravity') {
+            const agentDir = safeJoin(path.join(versionHome, '.gemini', 'config', 'agents'), sub.name);
+            fs.mkdirSync(agentDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentDir, 'agent.md'), transformSubagentForAntigravity(sub.path));
             synced.push(sub.name);
           } else if (agent === 'droid') {
             const droidsDir = path.join(versionHome, '.factory', 'droids');

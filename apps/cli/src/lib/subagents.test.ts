@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   installSubagentToAgent,
   listSubagentsForAgent,
+  transformSubagentForAntigravity,
   transformSubagentForCopilot,
   transformSubagentForKiro,
 } from './subagents.js';
@@ -105,6 +106,27 @@ describe('transformSubagentForKiro', () => {
   });
 });
 
+describe('transformSubagentForAntigravity', () => {
+  it('emits a markdown custom-agent profile with local kind', () => {
+    const home = makeTempHome();
+    const dir = path.join(home, 'subagent');
+    writeAgentMd(
+      dir,
+      '---\nname: planner\ndescription: Plans changes\nmodel: gemini-3-pro\n---\n\nYou plan implementation work.',
+      { notes: 'Use file evidence.' }
+    );
+
+    const output = transformSubagentForAntigravity(dir);
+    expect(output).toContain('name: planner');
+    expect(output).toContain('description: Plans changes');
+    expect(output).toContain('kind: local');
+    expect(output).toContain('model: gemini-3-pro');
+    expect(output).toContain('You plan implementation work.');
+    expect(output).toContain('## Notes');
+    expect(output).toContain('Use file evidence.');
+  });
+});
+
 describe('installSubagentToAgent for Kiro', () => {
   it('writes a JSON custom-agent file to ~/.kiro/agents/', () => {
     const sourceHome = makeTempHome();
@@ -136,5 +158,25 @@ describe('installSubagentToAgent for Kiro', () => {
     const installed = listSubagentsForAgent('kiro', agentHome);
     expect(installed.map(s => s.name)).toContain('docbot');
     expect(installed.find(s => s.name === 'docbot')?.frontmatter.description).toBe('Docs bot');
+  });
+});
+
+describe('installSubagentToAgent for Antigravity', () => {
+  it('writes markdown custom-agent files under ~/.gemini/config/agents/<name>/agent.md', () => {
+    const sourceHome = makeTempHome();
+    const agentHome = makeTempHome();
+    const dir = path.join(sourceHome, 'subagent');
+    writeAgentMd(dir, '---\nname: verifier\ndescription: Verifies work\n---\n\nYou verify work.');
+
+    const result = installSubagentToAgent(dir, 'verifier', 'antigravity', agentHome);
+    expect(result.success).toBe(true);
+
+    const targetPath = path.join(agentHome, '.gemini', 'config', 'agents', 'verifier', 'agent.md');
+    expect(fs.existsSync(targetPath)).toBe(true);
+    expect(fs.readFileSync(targetPath, 'utf-8')).toContain('kind: local');
+
+    const installed = listSubagentsForAgent('antigravity', agentHome);
+    expect(installed.map(s => s.name)).toEqual(['verifier']);
+    expect(installed[0].frontmatter.description).toBe('Verifies work');
   });
 });

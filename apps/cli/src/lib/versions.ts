@@ -2635,9 +2635,15 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // reads only user + system layers (project excluded for the same defense
   // as commands/skills/hooks).
   const subagentsWriter = getWriter('subagents', agent);
-  const subagentsToSync = selection
+  const subagentsGate = supports(agent, 'subagents', version);
+  const subagentsRequested = selection
     ? resolveSelection(selection.subagents, available.subagents)
     : (subagentsWriter ? available.subagents : []);
+  const subagentsToSync = subagentsGate.ok ? subagentsRequested : [];
+
+  if (subagentsRequested.length > 0 && !subagentsGate.ok) {
+    console.warn(explainSkip(agent, 'subagents', subagentsGate, version) + ' -- skipped');
+  }
 
   if (subagentsToSync.length > 0 && subagentsWriter) {
     const r = subagentsWriter.write({ version, versionHome, selection: subagentsToSync, cwd });
@@ -2675,9 +2681,15 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
 
   // Sync workflows — dispatch through WRITERS.workflows.
   const workflowsWriter = getWriter('workflows', agent);
-  const workflowsToSync = selection
+  const workflowsGate = supports(agent, 'workflows', version);
+  const workflowsRequested = selection
     ? resolveSelection(selection.workflows, available.workflows)
     : (workflowsWriter ? available.workflows : []);
+  const workflowsToSync = workflowsGate.ok ? workflowsRequested : [];
+
+  if (workflowsRequested.length > 0 && !workflowsGate.ok) {
+    console.warn(explainSkip(agent, 'workflows', workflowsGate, version) + ' -- skipped');
+  }
 
   if (workflowsToSync.length > 0 && workflowsWriter) {
     const r = workflowsWriter.write({ version, versionHome, selection: workflowsToSync, cwd });

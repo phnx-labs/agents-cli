@@ -101,6 +101,18 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.gemini).toBeDefined();
   });
 
+  it('antigravity has subagents writers + detectors', () => {
+    expect(WRITERS.subagents.antigravity).toBeDefined();
+    expect(DETECTORS.subagents.antigravity).toBeDefined();
+    expect(WRITERS.workflows.antigravity).toBeUndefined();
+    expect(DETECTORS.workflows.antigravity).toBeUndefined();
+  });
+
+  it('kimi has a workflows writer + detector', () => {
+    expect(WRITERS.workflows.kimi).toBeDefined();
+    expect(DETECTORS.workflows.kimi).toBeDefined();
+  });
+
   it('kiro has a subagents writer + detector', () => {
     expect(WRITERS.subagents.kiro).toBeDefined();
     expect(DETECTORS.subagents.kiro).toBeDefined();

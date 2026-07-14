@@ -314,6 +314,31 @@ describe('kiro allowlist version gate', () => {
   });
 });
 
+describe('antigravity subagents version gate', () => {
+  it('gates versions below 1.0.16 as too_old', () => {
+    const result = supports('antigravity', 'subagents', '1.0.15');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 1.0.16');
+    }
+  });
+
+  it('passes 1.0.16 and above', () => {
+    expect(supports('antigravity', 'subagents', '1.0.16')).toEqual({ ok: true });
+    expect(supports('antigravity', 'subagents', '1.1.1')).toEqual({ ok: true });
+  });
+});
+
+describe('workflow capability gates', () => {
+  it('includes Claude and Kimi for version-home workflow sync', () => {
+    expect(supports('claude', 'workflows')).toEqual({ ok: true });
+    expect(supports('antigravity', 'workflows')).toEqual({ ok: false, reason: 'unsupported' });
+    expect(supports('kimi', 'workflows')).toEqual({ ok: true });
+    expect(capableAgents('workflows').sort()).toEqual(['claude', 'kimi']);
+  });
+});
+
 describe('explainSkip()', () => {
   it('formats unsupported message', () => {
     const r = supports('amp', 'hooks');

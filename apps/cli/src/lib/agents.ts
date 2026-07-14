@@ -471,7 +471,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     cloudProvider: 'antigravity',
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit', 'skip'], rulesImports: false },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit', 'skip'], rulesImports: false },
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
   // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
@@ -545,7 +545,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       plugins: true,
       subagents: true, // YAML agent files under ~/.kimi-code/agents/ (see transformSubagentForKimi)
       rules: { file: 'AGENTS.md' },
-      workflows: false,
+      workflows: true,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,

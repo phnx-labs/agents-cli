@@ -5,8 +5,12 @@ import * as path from 'path';
 import {
   parseLoopBlock,
   parseWorkflowFrontmatter,
+  listWorkflowsForAgent,
   resolveAllowedSubagents,
   pruneStaleWorkflowSubagents,
+  syncWorkflowToVersion,
+  transformWorkflowForAntigravity,
+  transformWorkflowForKimi,
 } from './workflows.js';
 
 describe('parseLoopBlock — defensive coercion (issue #332)', () => {
@@ -163,5 +167,68 @@ describe('parseWorkflowFrontmatter — loop block', () => {
     ].join('\n'));
     const fm = parseWorkflowFrontmatter(dir)!;
     expect(fm.loop).toBeUndefined();
+  });
+});
+
+describe('workflow native projections', () => {
+  function writeWorkflow(body: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wf-projection-'));
+    fs.writeFileSync(path.join(dir, 'WORKFLOW.md'), body, 'utf-8');
+    return dir;
+  }
+
+  it('converts a workflow into a Kimi flow skill', () => {
+    const dir = writeWorkflow('---\nname: Review Flow\ndescription: Review code\n---\n\nCheck the diff and report findings.');
+
+    const skill = transformWorkflowForKimi(dir, 'review-flow');
+
+    expect(skill).toContain('name: review-flow');
+    expect(skill).toContain('type: flow');
+    expect(skill).toContain('agents_workflow: review-flow');
+    expect(skill).toContain('description: Review code');
+    expect(skill).toContain('```d2');
+    expect(skill).toContain('BEGIN -> step -> END');
+    expect(skill).toContain('Check the diff and report findings.');
+  });
+
+  it('preserves an existing Mermaid diagram for Kimi flow skills', () => {
+    const dir = writeWorkflow('---\nname: Mermaid Flow\ndescription: Has diagram\n---\n\n```mermaid\nflowchart TD\nBEGIN --> END\n```');
+
+    const skill = transformWorkflowForKimi(dir, 'mermaid-flow');
+
+    expect(skill).toContain('type: flow');
+    expect(skill).toContain('```mermaid');
+    expect(skill).toContain('BEGIN --> END');
+  });
+
+  it('converts a workflow into Antigravity workflow markdown without version-home sync', () => {
+    const dir = writeWorkflow('---\nname: Ship Flow\ndescription: Ship safely\n---\n\n1. Test\n2. Release');
+
+    const workflow = transformWorkflowForAntigravity(dir, 'ship-flow');
+
+    expect(workflow).toContain('description: Ship safely');
+    expect(workflow).toContain('name: Ship Flow');
+    expect(workflow).toContain('1. Test');
+    expect(workflow).toContain('2. Release');
+  });
+
+  it('syncs and lists only agents-cli managed Kimi workflow destinations', () => {
+    const dir = writeWorkflow('---\nname: Native Flow\ndescription: Native projection\n---\n\nDo the work.');
+    const kimiHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-wf-home-'));
+
+    try {
+      const nativeSkillDir = path.join(kimiHome, '.kimi-code', 'skills', 'native-flow');
+      fs.mkdirSync(nativeSkillDir, { recursive: true });
+      fs.writeFileSync(path.join(nativeSkillDir, 'SKILL.md'), '---\nname: Native Flow\ndescription: User-owned\ntype: flow\n---\n\n```d2\nBEGIN -> END\n```\n');
+      expect(syncWorkflowToVersion(dir, 'native-flow', 'kimi', kimiHome).success).toBe(false);
+      expect(listWorkflowsForAgent('kimi', kimiHome)).toEqual([]);
+
+      fs.rmSync(nativeSkillDir, { recursive: true, force: true });
+      expect(syncWorkflowToVersion(dir, 'native-flow', 'kimi', kimiHome).success).toBe(true);
+      expect(fs.existsSync(path.join(kimiHome, '.kimi-code', 'skills', 'native-flow', 'SKILL.md'))).toBe(true);
+      expect(listWorkflowsForAgent('kimi', kimiHome)).toEqual(['native-flow']);
+    } finally {
+      fs.rmSync(kimiHome, { recursive: true, force: true });
+    }
   });
 });
