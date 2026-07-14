@@ -51,6 +51,7 @@ export class SessionWatcher {
   private readonly debounceMs: number;
   private readonly mounted: MountedWatcher[] = [];
   private readonly debounceTimers = new Map<string, NodeJS.Timeout>();
+  private readonly parsedFiles = new Set<string>();
   private started = false;
 
   constructor(options: SessionWatcherOptions) {
@@ -88,9 +89,9 @@ export class SessionWatcher {
       if (!ensureDirExists(root)) continue;
       let watcher: fs.FSWatcher;
       try {
-        watcher = fs.watch(root, { recursive: true }, (event, filename) => {
+        watcher = fs.watch(root, { recursive: true }, (_event, filename) => {
           if (!filename) return;
-          this.onEvent(root, agentType, event, filename.toString());
+          this.onEvent(root, agentType, filename.toString());
         });
       } catch {
         continue; // some platforms reject recursive watch — skip the root
@@ -111,21 +112,22 @@ export class SessionWatcher {
     this.mounted.length = 0;
     for (const t of this.debounceTimers.values()) clearTimeout(t);
     this.debounceTimers.clear();
+    this.parsedFiles.clear();
   }
 
   private onEvent(
     root: string,
     agentType: SessionFactPayload['agentType'],
-    event: string,
     relative: string,
   ): void {
     const base = path.basename(relative);
     if (!isSessionFilename(base, agentType)) return;
     const full = path.join(root, relative);
 
-    // Warmth is recorded immediately on every write so a follower's dormancy
-    // clock for its tracked file stays accurate (mirrors recordWrite).
-    if (event === 'change') {
+    // macOS can report an append as `rename`. After a session file has been
+    // parsed, any later event while the path still exists is activity for that
+    // tracked session. Deletion events do not extend its dormancy clock.
+    if (this.parsedFiles.has(full) && fs.existsSync(full)) {
       this.emitWarmth({ filePath: full, ts: Date.now() });
     }
 
@@ -150,6 +152,7 @@ export class SessionWatcher {
       return; // file vanished between event and parse
     }
     const parsed = await parseSessionHead(filePath, agentType);
+    this.parsedFiles.add(filePath);
     this.emit({
       agentType,
       filePath,
