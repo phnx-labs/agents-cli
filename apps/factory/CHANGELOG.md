@@ -6,6 +6,13 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Cloud agent activity feed no longer freezes on the first streamed event (RUSH-1558).**
+  `parseCloudSummaryIncremental` was returning its internal mutable cache array by
+  reference; React's `useMemo` in `CloudActivityFeed` keyed off that reference and
+  never saw it change as new events were pushed in place, so the detail pane's
+  live feed rendered only the first commit and stopped advancing. It now always
+  returns a fresh array. Source: `ui/settings/components/mission-control/cloudActivity.ts`.
+
 ## [0.9.292] - 2026-07-13
 
 - **Factory recognizes every current agents-cli harness.** The checked-in CLI
