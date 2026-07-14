@@ -133,14 +133,14 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 |------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
 | Claude | yes | yes | yes | yes | yes | yes | yes | `CLAUDE.md` | yes |
 | Codex | >= 0.116.0 | yes | >= 0.138.0 | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | >= 0.117.0 | `AGENTS.md` | no |
-| Gemini † | >= 0.26.0 | yes | yes | yes | yes (.toml) | no | no | `GEMINI.md` | no |
+| Gemini † | >= 0.26.0 | yes | yes | yes | yes (.toml) | >= 0.8.0 | >= 0.36.0 | `GEMINI.md` | no |
 | Cursor | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
 | OpenCode | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Copilot | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Kiro | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
-| Goose | no | yes | no | no | no | no | no | `AGENTS.md` | no |
+| Goose | >= 1.34.0 | yes | yes | >= 1.25.0 | no | yes | no | `AGENTS.md` | yes |
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | >= 1.0.16 | `AGENTS.md` | no |
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
@@ -151,7 +151,7 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 
 **† Gemini is deprecated.** Google retired the Gemini CLI for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI (`antigravity`) is the successor. agents-cli still manages existing Gemini installs but warns on `agents add gemini` / `agents teams add … gemini`.
 
-Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode, Antigravity, Grok, Kimi, Kiro 2.8.0+, and Droid >= 0.57.5). Workflow sync writes Claude workflow bundles and Kimi `type: flow` skills with an `agents_workflow` ownership marker. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
+Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, and Droid >= 0.57.5). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, and Goose recipe YAML. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
 
 Gemini permission sync maps canonical Bash rules to its native `ShellTool(...)` entries under `tools.core` / `tools.exclude`. Other canonical permission tools are not representable in Gemini's native allowlist grammar and are skipped.
 

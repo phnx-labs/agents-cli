@@ -86,30 +86,58 @@ describe('gemini hooks since 0.26.0', () => {
 
     it('passes 1.0.0', () => {
       expect(supports('gemini', 'hooks', '1.0.0')).toEqual({ ok: true });
-    });
+  });
+});
+
+describe('gemini extensions and subagents version gates', () => {
+  it('gates plugins below 0.8.0 and passes 0.8.0+', () => {
+    const result = supports('gemini', 'plugins', '0.7.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.need).toBe('>= 0.8.0');
+    expect(supports('gemini', 'plugins', '0.8.0')).toEqual({ ok: true });
+    expect(supports('gemini', 'plugins', '0.50.0')).toEqual({ ok: true });
   });
 
-  describe('gemini allowlist', () => {
-    it('is capable of allowlist', () => {
-      expect(supports('gemini', 'allowlist')).toEqual({ ok: true });
-      expect(capableAgents('allowlist')).toContain('gemini');
-    });
+  it('gates subagents below 0.36.0 and passes 0.36.0+', () => {
+    const result = supports('gemini', 'subagents', '0.35.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.need).toBe('>= 0.36.0');
+    expect(supports('gemini', 'subagents', '0.36.0')).toEqual({ ok: true });
+    expect(supports('gemini', 'subagents', '0.50.0')).toEqual({ ok: true });
+  });
+});
+
+describe('goose workflows and allowlist support', () => {
+  it('passes workflow and allowlist capability checks', () => {
+    expect(supports('goose', 'workflows')).toEqual({ ok: true });
+    expect(supports('goose', 'allowlist')).toEqual({ ok: true });
+    expect(supports('goose', 'workflows', '1.41.0')).toEqual({ ok: true });
+    expect(supports('goose', 'allowlist', '1.41.0')).toEqual({ ok: true });
+  });
+});
+
+describe('gemini allowlist', () => {
+  it('is capable of allowlist', () => {
+    expect(supports('gemini', 'allowlist')).toEqual({ ok: true });
+    expect(capableAgents('allowlist')).toContain('gemini');
+  });
+});
+
+describe('unsupported agents skip regardless of version', () => {
+  it('cursor hooks are supported', () => {
+    expect(supports('cursor', 'hooks').ok).toBe(true);
+    expect(supports('cursor', 'hooks', '999.0.0').ok).toBe(true);
   });
 
-  describe('unsupported agents skip regardless of version', () => {
-    it('cursor hooks are supported', () => {
-      expect(supports('cursor', 'hooks').ok).toBe(true);
-      expect(supports('cursor', 'hooks', '999.0.0').ok).toBe(true);
-    });
-
-    it('opencode plugins are supported (TS module install path)', () => {
-      expect(supports('opencode', 'plugins').ok).toBe(true);
-    });
-
-    it('amp plugins always unsupported (writer not implemented)', () => {
-      expect(supports('amp', 'plugins', '999.0.0').ok).toBe(false);
-    });
+  it('opencode plugins are supported (TS module install path)', () => {
+    expect(supports('opencode', 'plugins').ok).toBe(true);
   });
+
+  it('amp plugins always unsupported (writer not implemented)', () => {
+    expect(supports('amp', 'plugins', '999.0.0').ok).toBe(false);
+  });
+});
+
 });
 
 describe('mcpHttp / mcpHeaders capability gates', () => {
@@ -331,11 +359,12 @@ describe('antigravity subagents version gate', () => {
 });
 
 describe('workflow capability gates', () => {
-  it('includes Claude and Kimi for version-home workflow sync', () => {
+  it('includes Claude, Goose, and Kimi for version-home workflow sync', () => {
     expect(supports('claude', 'workflows')).toEqual({ ok: true });
     expect(supports('antigravity', 'workflows')).toEqual({ ok: false, reason: 'unsupported' });
+    expect(supports('goose', 'workflows')).toEqual({ ok: true });
     expect(supports('kimi', 'workflows')).toEqual({ ok: true });
-    expect(capableAgents('workflows').sort()).toEqual(['claude', 'kimi']);
+    expect(capableAgents('workflows').sort()).toEqual(['claude', 'goose', 'kimi']);
   });
 });
 

@@ -180,3 +180,25 @@ describe('installSubagentToAgent for Antigravity', () => {
     expect(installed[0].frontmatter.description).toBe('Verifies work');
   });
 });
+
+describe('installSubagentToAgent for Gemini', () => {
+  it('writes a markdown subagent file to ~/.gemini/agents/', () => {
+    const sourceHome = makeTempHome();
+    const agentHome = makeTempHome();
+    const dir = path.join(sourceHome, 'subagent');
+    writeAgentMd(dir, '---\nname: reviewer\ndescription: Reviews changes\n---\n\nReview the diff.');
+
+    const result = installSubagentToAgent(dir, 'reviewer', 'gemini', agentHome);
+    expect(result.success).toBe(true);
+
+    const targetPath = path.join(agentHome, '.gemini', 'agents', 'reviewer.md');
+    expect(fs.existsSync(targetPath)).toBe(true);
+    const content = fs.readFileSync(targetPath, 'utf-8');
+    expect(content).toContain('name: reviewer');
+    expect(content).toContain('Review the diff.');
+
+    const installed = listSubagentsForAgent('gemini', agentHome);
+    expect(installed.map(s => s.name)).toContain('reviewer');
+    expect(installed.find(s => s.name === 'reviewer')?.frontmatter.description).toBe('Reviews changes');
+  });
+});

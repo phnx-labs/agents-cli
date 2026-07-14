@@ -352,14 +352,22 @@ export function buildPermissionsFromGroups(groupNames: string[]): PermissionSet 
       // Matches lines like: - "Bash(git *)" or   - "WebFetch(domain:example.com)"
       // Handles nested quotes that break YAML parsers
       const lines = content.split('\n');
+      let section: 'allow' | 'deny' | null = null;
       for (const line of lines) {
+        const sectionMatch = line.match(/^\s*(allow|deny)\s*:\s*(?:#.*)?$/);
+        if (sectionMatch) {
+          section = sectionMatch[1] as 'allow' | 'deny';
+          continue;
+        }
+
         // Match: optional whitespace, dash, whitespace, quote, content, quote
         // Use greedy match to capture everything between first and last quote
         const match = line.match(/^\s*-\s*"(.+)"$/);
         if (match) {
           const rule = match[1];
-          // 99-deny group rules go to deny, others to allow
-          if (groupName === '99-deny' || groupName.includes('-deny')) {
+          // 99-deny group rules go to deny, others follow their YAML section.
+          // Legacy group files used bare lists with no section; keep those as allow.
+          if (section === 'deny' || groupName === '99-deny' || groupName.includes('-deny')) {
             allDeny.push(rule);
           } else {
             allAllow.push(rule);
@@ -665,6 +673,56 @@ const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
   write: 'write_file',
   webfetch: 'read_url',
 };
+
+export interface GoosePermissionConfig {
+  user: {
+    always_allow: string[];
+    ask_before: string[];
+    never_allow: string[];
+  };
+}
+
+const GOOSE_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
+  bash: 'developer__shell',
+  read: 'developer__text_editor',
+  write: 'developer__text_editor',
+  edit: 'developer__text_editor',
+  grep: 'developer__analyze',
+  glob: 'developer__analyze',
+  webfetch: 'developer__fetch',
+  mcp: undefined,
+};
+
+function canonicalToGooseTool(permission: string): string | null {
+  if (BLANKET_BASH_FORMS.has(permission)) return 'developer__shell';
+  const parsed = parseCanonicalPattern(permission);
+  if (!parsed) return null;
+  return GOOSE_TOOL_BY_CANONICAL[parsed.tool] ?? null;
+}
+
+/** Convert canonical permissions to Goose's per-tool permission.yaml shape. */
+export function convertToGooseFormat(set: PermissionSet): GoosePermissionConfig {
+  const alwaysAllow = new Set<string>();
+  const neverAllow = new Set<string>();
+  for (const permission of set.allow) {
+    const tool = canonicalToGooseTool(permission);
+    if (tool) alwaysAllow.add(tool);
+  }
+  for (const permission of set.deny ?? []) {
+    const tool = canonicalToGooseTool(permission);
+    if (tool) neverAllow.add(tool);
+  }
+  for (const tool of neverAllow) {
+    alwaysAllow.delete(tool);
+  }
+  return {
+    user: {
+      always_allow: Array.from(alwaysAllow).sort(),
+      ask_before: [],
+      never_allow: Array.from(neverAllow).sort(),
+    },
+  };
+}
 
 /**
  * Convert canonical permission set to Grok format.
@@ -1534,6 +1592,49 @@ export function applyPermissionsToVersion(
       config.permission = existingPermission;
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, TOML.stringify(config as any), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'goose') {
+      const permissionsPath = path.join(versionHome, '.config', 'goose', 'permission.yaml');
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(permissionsPath)) {
+        const parsed = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          config = parsed as Record<string, unknown>;
+        }
+      }
+
+      const converted = convertToGooseFormat(set).user;
+      const user = (typeof config.user === 'object' && config.user !== null && !Array.isArray(config.user))
+        ? config.user as Record<string, unknown>
+        : {};
+
+      const currentAlways = Array.isArray(user.always_allow) ? user.always_allow.filter((v): v is string => typeof v === 'string') : [];
+      const currentAsk = Array.isArray(user.ask_before) ? user.ask_before.filter((v): v is string => typeof v === 'string') : [];
+      const currentNever = Array.isArray(user.never_allow) ? user.never_allow.filter((v): v is string => typeof v === 'string') : [];
+
+      if (merge) {
+        const incomingAlways = new Set(converted.always_allow);
+        const incomingNever = new Set(converted.never_allow);
+        const touched = new Set([...incomingAlways, ...incomingNever]);
+        const always = new Set(currentAlways.filter(tool => !touched.has(tool)));
+        const ask = new Set(currentAsk.filter(tool => !touched.has(tool)));
+        const never = new Set(currentNever.filter(tool => !touched.has(tool)));
+        for (const tool of incomingAlways) always.add(tool);
+        for (const tool of incomingNever) never.add(tool);
+        user.always_allow = Array.from(always).sort();
+        user.ask_before = Array.from(ask).sort();
+        user.never_allow = Array.from(never).sort();
+      } else {
+        user.always_allow = converted.always_allow;
+        user.ask_before = converted.ask_before;
+        user.never_allow = converted.never_allow;
+      }
+
+      config.user = user;
+      fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
+      fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
       return { success: true };
     }
 

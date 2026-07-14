@@ -1,5 +1,5 @@
 /**
- * Subagents detector. Claude: flat .md files under `<agentDir>/agents/`.
+ * Subagents detector. Claude/Gemini/Grok: flat .md files under `<agentDir>/agents/`.
  * Codex: flat .toml files under `<versionHome>/.codex/agents/`.
  * Droid: flat .md files under `<versionHome>/.factory/droids/`.
  * OpenClaw: subdirectories containing AGENTS.md under `<versionHome>/.openclaw/`.
@@ -32,6 +32,10 @@ function buildClaudeDetector(): ResourceDetector {
 
 function buildGrokDetector(): ResourceDetector {
   return buildFlatMdAgentsDetector('grok', '.grok');
+}
+
+function buildGeminiDetector(): ResourceDetector {
+  return buildFlatMdAgentsDetector('gemini', '.gemini');
 }
 
 function buildCodexDetector(): ResourceDetector {
@@ -150,6 +154,7 @@ function buildAntigravityDetector(): ResourceDetector {
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   copilot: buildCopilotDetector,
+  gemini: buildGeminiDetector,
   grok: buildGrokDetector,
   codex: buildCodexDetector,
   kimi: buildKimiDetector,

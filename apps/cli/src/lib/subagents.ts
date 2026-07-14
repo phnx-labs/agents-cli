@@ -615,10 +615,10 @@ export function installSubagentToAgent(
   agent: AgentId,
   agentHome: string
 ): { success: boolean; error?: string } {
-  if (agent === 'claude' || agent === 'grok') {
-    // Claude / Grok: flatten to single .md under ~/.claude/agents or ~/.grok/agents
-    // Grok discovers user agent defs from ~/.grok/agents/*.md (same shape as Claude).
-    const agentsDir = path.join(agentHome, agent === 'grok' ? '.grok' : '.claude', 'agents');
+  if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
+    // Claude / Gemini / Grok: flatten to single .md under the native agents dir.
+    const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
+    const agentsDir = path.join(agentHome, agentsRoot, 'agents');
     if (!fs.existsSync(agentsDir)) {
       fs.mkdirSync(agentsDir, { recursive: true });
     }
@@ -703,8 +703,8 @@ export function removeSubagentFromAgent(
   agentHome: string
 ): { success: boolean; error?: string } {
   try {
-    if (agent === 'claude' || agent === 'grok') {
-      const agentsRoot = agent === 'grok' ? '.grok' : '.claude';
+    if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
+      const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
       const targetPath = safeJoin(path.join(agentHome, agentsRoot, 'agents'), `${subagentName}.md`);
       if (fs.existsSync(targetPath)) {
         fs.unlinkSync(targetPath);
@@ -788,7 +788,7 @@ export function subagentContentMatches(installedDir: string, sourceDir: string):
 
 /**
  * List subagents installed to a specific agent's home
- * Claude: scans ~/.claude/agents/{name}.md
+ * Claude/Gemini/Grok: scans ~/.{agent}/agents/{name}.md
  * Kimi: scans ~/.kimi-code/agents/{name}.yaml (+ sibling .system.md)
  * Kiro: scans ~/.kiro/agents/{name}.json
  * OpenClaw: scans ~/.openclaw/{name}/AGENTS.md
@@ -799,9 +799,10 @@ export function listSubagentsForAgent(
 ): InstalledSubagent[] {
   const subagents: InstalledSubagent[] = [];
 
-  if (agentId === 'claude' || agentId === 'grok') {
-    // Claude / Grok: flat .md files in agents/
-    const agentsDir = path.join(home, agentId === 'grok' ? '.grok' : '.claude', 'agents');
+  if (agentId === 'claude' || agentId === 'gemini' || agentId === 'grok') {
+    // Claude / Gemini / Grok: flat .md files in agents/
+    const agentsRoot = agentId === 'grok' ? '.grok' : agentId === 'gemini' ? '.gemini' : '.claude';
+    const agentsDir = path.join(home, agentsRoot, 'agents');
     if (!fs.existsSync(agentsDir)) return subagents;
 
     for (const file of fs.readdirSync(agentsDir)) {
@@ -987,8 +988,9 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
   }
 
   // Check what's installed
-  if (agent === 'claude' || agent === 'grok') {
-    const agentsDir = path.join(versionHome, agent === 'grok' ? '.grok' : '.claude', 'agents');
+  if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
+    const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
+    const agentsDir = path.join(versionHome, agentsRoot, 'agents');
     if (fs.existsSync(agentsDir)) {
       for (const file of fs.readdirSync(agentsDir)) {
         if (!file.endsWith('.md')) continue;
@@ -1084,8 +1086,8 @@ export function removeSubagentFromVersion(
   const trashDir = path.join(getTrashSubagentsDir(), agent, version, subagentName);
 
   try {
-    if (agent === 'claude' || agent === 'grok') {
-      const agentsRoot = agent === 'grok' ? '.grok' : '.claude';
+    if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
+      const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
       const targetPath = path.join(versionHome, agentsRoot, 'agents', `${subagentName}.md`);
       if (fs.existsSync(targetPath)) {
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });

@@ -4,7 +4,7 @@ Named multi-agent pipeline bundles that agents-cli resolves and dispatches via `
 
 ## Overview
 
-A workflow is a directory containing a `WORKFLOW.md` file with YAML frontmatter and an orchestrator system prompt. Optionally, the directory includes `subagents/`, `skills/`, and `plugins/` subdirectories composed at runtime. Workflows are stored in `~/.agents/workflows/` (user) or `.agents/workflows/` (project) and synced to agent version homes. Currently only Claude is workflow-capable (`capableAgents('workflows')` in `src/lib/agents.ts` — today that list is just `claude`).
+A workflow is a directory containing a `WORKFLOW.md` file with YAML frontmatter and an orchestrator system prompt. Optionally, the directory includes `subagents/`, `skills/`, and `plugins/` subdirectories composed at runtime. Workflows are stored in `~/.agents/workflows/` (user) or `.agents/workflows/` (project) and synced to agent version homes. Claude and Goose are workflow-capable (`capableAgents('workflows')` in `src/lib/agents.ts`).
 
 Run a workflow with `agents run <workflow-name> [prompt]`. The workflow name replaces the agent argument in the normal `agents run` invocation. The frontmatter controls which model is used, which tools are available, which MCP servers are connected, and which secrets are injected. If the workflow writes files or posts comments, pass `--mode edit` or `--mode full` — the default `--mode plan` will deadlock at `ExitPlanMode`.
 
@@ -39,6 +39,11 @@ Source locations (project > user > system):
                                              ▼
   Claude reads WORKFLOW.md system prompt, spawns subagents as needed,
   uses declared tools, connects declared MCP servers, injects secrets.
+
+  <version-home>/.config/goose/recipes/<name>.yaml
+    Goose recipe generated from WORKFLOW.md
+  <version-home>/.config/goose/recipes/<name>.subrecipes/*.yaml
+    Goose subrecipes generated from allowed workflow subagents
 ```
 
 ## Command Reference
@@ -105,7 +110,7 @@ review of pending changes...
 
 `tools`, `mcpServers`, and `allowedAgents` are not just documentation — they scope the actual run on Claude. `tools: [Read, Grep]` produces `--tools Read Grep`, which restricts the *available* built-in tool set — `Write`, `Bash`, and `Edit` are not present in the session — so a review workflow declared read-only really is read-only. (`--allowedTools` is also emitted for the same set so the permitted tools don't prompt in headless runs.) `mcpServers` translates to an ephemeral `--mcp-config` JSON built from the MCP registry, emitted together with `--strict-mcp-config`, so *only* the named servers are connected. These boundaries are **fail-closed**: declaring `mcpServers` whose names resolve to *zero* installed servers still writes a locked-down empty config (`{ "mcpServers": {} }`) and emits `--strict-mcp-config`, so the run gets **no MCP servers** — never the user's full ambient set. `allowedAgents` is enforced by copying only the listed subagent definition files into the run directory: a subagent whose `.md` definition isn't present cannot be dispatched. An explicit `allowedAgents: []` copies **no** subagents (allow none); omitting the field entirely copies all of them. (Note: subagents copied by a prior run of a different, unrestricted workflow can remain in the shared agents dir; for a hard guarantee, scope per version home.)
 
-On an agent that lacks the tool-allowlist capability (`allowlist` in `src/lib/agents.ts`), a workflow that declares any of these fields runs *unscoped* and emits a `declared but unenforceable on <agent>` warning rather than silently dropping the boundary.
+On an agent that lacks the tool-allowlist capability (`allowlist` in `src/lib/agents.ts`), a workflow that declares any of these fields runs *unscoped* and emits a `declared but unenforceable on <agent>` warning rather than silently dropping the boundary. Goose recipes receive the workflow body as both `instructions` and `prompt`; workflow subagents selected by `allowedAgents` become Goose subrecipes referenced from the generated recipe YAML.
 
 ## Recipes
 

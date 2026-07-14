@@ -34,6 +34,14 @@ function buildWorkflowsDetector(agent: AgentId): ResourceDetector {
           .map(d => d.name);
       }
 
+      if (agent === 'goose') {
+        const recipesDir = path.join(versionHome, '.config', 'goose', 'recipes');
+        if (!fs.existsSync(recipesDir)) return [];
+        return fs.readdirSync(recipesDir, { withFileTypes: true })
+          .filter(d => d.isFile() && d.name.endsWith('.yaml') && !d.name.startsWith('.'))
+          .map(d => d.name.slice(0, -'.yaml'.length));
+      }
+
       const workflowsDir = path.join(versionHome, 'workflows');
       if (!fs.existsSync(workflowsDir)) return [];
       return fs.readdirSync(workflowsDir, { withFileTypes: true })

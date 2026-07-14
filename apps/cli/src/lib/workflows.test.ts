@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import {
   parseLoopBlock,
   parseWorkflowFrontmatter,
@@ -217,6 +218,74 @@ describe('workflow native projections', () => {
       expect(listWorkflowsForAgent('kimi', kimiHome)).toEqual(['native-flow']);
     } finally {
       fs.rmSync(kimiHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Goose workflow recipe sync', () => {
+  it('writes a recipe YAML and subrecipe YAML files', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-goose-workflow-'));
+    try {
+      const workflowDir = path.join(root, 'wf');
+      const subagentsDir = path.join(workflowDir, 'subagents');
+      const versionHome = path.join(root, 'home');
+      fs.mkdirSync(subagentsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workflowDir, 'WORKFLOW.md'),
+        [
+          '---',
+          'name: Review workflow',
+          'description: Review code',
+          'model: claude-sonnet-4',
+          'allowedAgents:',
+          '  - reviewer',
+          '---',
+          'Coordinate the review.',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(subagentsDir, 'reviewer.md'),
+        '---\nname: reviewer\ndescription: Reviews code\n---\n\nInspect code changes.',
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(subagentsDir, 'ignored.md'),
+        '---\nname: ignored\ndescription: Ignored\n---\n\nDo not include.',
+        'utf-8'
+      );
+
+      const result = syncWorkflowToVersion(workflowDir, 'review-wf', 'goose', versionHome);
+      expect(result).toEqual({ success: true });
+
+      const recipePath = path.join(versionHome, '.config', 'goose', 'recipes', 'review-wf.yaml');
+      const recipe = yaml.parse(fs.readFileSync(recipePath, 'utf-8'));
+      expect(recipe).toMatchObject({
+        version: '1.0.0',
+        title: 'Review workflow',
+        description: 'Review code',
+        instructions: 'Coordinate the review.',
+        prompt: 'Coordinate the review.',
+        settings: { goose_model: 'claude-sonnet-4' },
+      });
+      expect(recipe.sub_recipes).toEqual([{
+        name: 'reviewer',
+        path: './review-wf.subrecipes/reviewer.yaml',
+        description: 'Workflow subrecipe reviewer',
+      }]);
+
+      const subrecipe = yaml.parse(fs.readFileSync(path.join(versionHome, '.config', 'goose', 'recipes', 'review-wf.subrecipes', 'reviewer.yaml'), 'utf-8'));
+      expect(subrecipe).toMatchObject({
+        version: '1.0.0',
+        title: 'reviewer',
+        description: 'Reviews code',
+        instructions: 'Inspect code changes.',
+      });
+      expect(fs.existsSync(path.join(versionHome, '.config', 'goose', 'recipes', 'review-wf.subrecipes', 'ignored.yaml'))).toBe(false);
+      expect(listWorkflowsForAgent('goose', versionHome)).toEqual(['review-wf']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 });

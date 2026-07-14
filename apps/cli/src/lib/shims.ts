@@ -2129,17 +2129,28 @@ export function releaseAdoptedLauncher(
   const launcher = lines[1] || getPathShadowingExecutable(agent) || original;
 
   const shimReal = canonical(path.join(shimsDir, AGENTS[agent].cliCommand));
+  const shimPath = path.resolve(path.join(shimsDir, AGENTS[agent].cliCommand));
   try {
     // Only rewrite the launcher if it currently points at our shim (i.e. we own
     // it). If the user has since replaced it themselves, leave it alone.
     let pointsAtShim = false;
     try {
-      pointsAtShim = fs.lstatSync(launcher).isSymbolicLink()
-        && canonical(launcher) === shimReal;
+      const stat = fs.lstatSync(launcher);
+      if (stat.isSymbolicLink()) {
+        const target = fs.readlinkSync(launcher);
+        const absoluteTarget = path.resolve(path.dirname(launcher), target);
+        pointsAtShim = canonicalOrNull(launcher) === shimReal || absoluteTarget === shimPath;
+      }
     } catch { /* launcher gone — recreate below */ }
 
     if (pointsAtShim || !fs.existsSync(launcher)) {
-      try { fs.rmSync(launcher); } catch { /* may not exist */ }
+      try {
+        if (fs.lstatSync(launcher).isSymbolicLink()) {
+          fs.unlinkSync(launcher);
+        } else {
+          fs.rmSync(launcher, { force: true });
+        }
+      } catch { /* may not exist */ }
       fs.symlinkSync(original, launcher);
     }
     fs.rmSync(recordPath);

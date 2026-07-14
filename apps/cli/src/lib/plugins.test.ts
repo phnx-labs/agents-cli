@@ -25,6 +25,9 @@ import {
   inspectPluginCapabilities,
   pluginCapabilityLabels,
   pluginResourceGroups,
+  installGeminiPlugin,
+  isGeminiPluginInstalled,
+  removeGeminiPlugin,
 } from './plugins.js';
 import type { DiscoveredPlugin, PluginManifest } from './types.js';
 
@@ -115,6 +118,80 @@ describe('loadPluginManifest', () => {
     expect(manifest?.userConfig).toHaveLength(1);
     expect(manifest?.userConfig?.[0].key).toBe('api_key');
     expect(manifest?.dependencies).toEqual(['other-plugin']);
+  });
+});
+
+describe('Gemini extension plugin install', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('copies a plugin bundle to .gemini/extensions with gemini-extension.json', () => {
+    const root = makePluginRoot(tmpDir, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
+    fs.mkdirSync(path.join(root, 'commands'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'commands', 'ship.md'), '# Ship\n');
+    fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({
+      mcpServers: {
+        demo: {
+          command: 'node',
+          args: ['${CLAUDE_PLUGIN_ROOT}/server.js'],
+        },
+      },
+    }));
+
+    const plugin = makeDiscoveredPlugin(root, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
+    plugin.commands = ['ship'];
+    plugin.hasMcp = true;
+    const versionHome = path.join(tmpDir, 'home');
+
+    expect(installGeminiPlugin(plugin, versionHome)).toBe(true);
+    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(true);
+
+    const dest = path.join(versionHome, '.gemini', 'extensions', 'gem-ext');
+    expect(fs.existsSync(path.join(dest, 'commands', 'ship.md'))).toBe(true);
+    const manifest = JSON.parse(fs.readFileSync(path.join(dest, 'gemini-extension.json'), 'utf-8'));
+    expect(manifest).toEqual({
+      name: 'gem-ext',
+      version: '1.2.3',
+      description: 'Gemini extension',
+      mcpServers: {
+        demo: {
+          command: 'node',
+          args: ['${extensionPath}/server.js'],
+        },
+      },
+    });
+
+    expect(removeGeminiPlugin('gem-ext', versionHome)).toBe(true);
+    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(false);
+  });
+
+  it('does not sync live Gemini extensions with executable surfaces unless explicitly allowed', async () => {
+    const root = makePluginRoot(tmpDir, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
+    fs.writeFileSync(path.join(root, '.mcp.json'), JSON.stringify({
+      mcpServers: {
+        demo: { command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server.js'] },
+      },
+    }));
+
+    const plugin = makeDiscoveredPlugin(root, { name: 'gem-ext', version: '1.2.3', description: 'Gemini extension' });
+    plugin.hasMcp = true;
+    const versionHome = path.join(tmpDir, 'home');
+
+    const { syncPluginToVersion } = await import('./plugins.js');
+    const untrusted = syncPluginToVersion(plugin, 'gemini', versionHome);
+    expect(untrusted.success).toBe(false);
+    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(false);
+
+    const trusted = syncPluginToVersion(plugin, 'gemini', versionHome, { allowExecSurfaces: true });
+    expect(trusted.success).toBe(true);
+    expect(isGeminiPluginInstalled('gem-ext', versionHome)).toBe(true);
   });
 });
 
