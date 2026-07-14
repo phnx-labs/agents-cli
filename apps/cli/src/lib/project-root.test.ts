@@ -89,6 +89,9 @@ describe('inferProjectRoot', () => {
   let tmp: string;
   let repo: string;
 
+  const expectedRoot = () =>
+    toHomeRelative(process.platform === 'win32' ? tmp : fs.realpathSync(tmp));
+
   beforeAll(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'proot-'));
     repo = path.join(tmp, 'my-repo');
@@ -109,9 +112,9 @@ describe('inferProjectRoot', () => {
 
   it('returns the directory ABOVE the git root, resolved from a nested cwd', async () => {
     const root = await inferProjectRoot(path.join(repo, 'sub', 'deep'));
-    // Windows places os.tmpdir() under HOME; compare through the same portable
-    // storage contract. realpath also dodges /var → /private/var on macOS.
-    expect(root).toBe(toHomeRelative(fs.realpathSync(tmp)));
+    // Windows realpath emits an 8.3 home alias (RUNNER~1) that cannot compare
+    // against HOME; macOS still needs realpath for /var → /private/var.
+    expect(root).toBe(expectedRoot());
   });
 
   it('resolves the MAIN repo root from inside a linked worktree (not the worktree dir)', async () => {
@@ -119,7 +122,7 @@ describe('inferProjectRoot', () => {
     fs.mkdirSync(path.dirname(wt), { recursive: true });
     execFileSync('git', ['worktree', 'add', '-q', wt], { cwd: repo });
     // Regression: naive --show-toplevel would yield <repo>/.agents/worktrees here.
-    expect(await inferProjectRoot(wt)).toBe(toHomeRelative(fs.realpathSync(tmp)));
+    expect(await inferProjectRoot(wt)).toBe(expectedRoot());
   });
 
   it('returns undefined when cwd is not inside a git repo', async () => {
