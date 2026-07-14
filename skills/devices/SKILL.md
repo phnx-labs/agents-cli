@@ -104,6 +104,15 @@ agents logs <id> -f          # re-attach to a running one and follow
 local session by id, filters with `--host`/`--agent`/`--version`, and `-f`
 follows a live one. `agents hosts logs <id>` is the host-only equivalent.
 
+Registered devices are part of the host pool automatically: they appear in
+`agents hosts list` (SOURCE `devices`), resolve as `--host` targets by name,
+and join capability routing once tagged (`agents hosts add <device> --cap gpu`
+enrolls straight from the device profile — no target needed). Password-auth
+devices are listed but can't carry a dispatch (BatchMode ssh); switch them with
+`agents devices set <name> --auth key`. Devices also work as cloud task targets
+(`agents cloud run "…" --host <device>`) and routines placement
+(`agents routines add … --run-on <device>`).
+
 ## Tips
 
 - Reachability in `list` is a snapshot from the last `sync`; rerun `sync` to

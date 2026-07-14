@@ -2,7 +2,15 @@
 
 > **Status:** Implemented. `agents hosts` and the `-H, --host` flag ship today —
 > on the read-only/config commands (`view`, `inspect`, `usage`, `cost`, `doctor`,
-> `list`, `sync`), on `agents run`, and across the `agents teams` lifecycle. This
+> `list`, `sync`), on `agents run`, and across the `agents teams` lifecycle.
+> Hosts are also a first-class **task backend**: `agents cloud run --host <name>`
+> dispatches through the `host` cloud provider (tasks visible in both
+> `agents cloud ps` and `agents hosts ps`), routines place their job body on a
+> machine with `--run-on`, and devices (`agents devices`) enumerate in the host
+> pool via the `devices` HostProvider. Every `agents run` option is classified
+> by the forwarding contract (`RUN_OPTION_FORWARDING`,
+> `src/lib/hosts/remote-cmd.ts`) — forwarded, rejected loud, or local-only;
+> nothing silently drops at the SSH boundary. This
 > document is the design rationale; see
 > [00-concepts.md](00-concepts.md#devices--hosts) for the concept overview and how
 > hosts relate to the Tailscale-backed `agents devices` registry, and
