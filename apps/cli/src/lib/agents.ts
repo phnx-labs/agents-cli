@@ -1996,8 +1996,8 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
       // Codex uses TOML config
       return path.join(agent.configDir, 'config.toml');
     case 'opencode':
-      // OpenCode uses JSONC config
-      return path.join(agent.configDir, 'opencode.jsonc');
+      // OpenCode loads ~/.config/opencode/opencode.jsonc (not ~/.opencode/)
+      return path.join(HOME, '.config', 'opencode', 'opencode.jsonc');
     case 'cursor':
       // Cursor uses mcp.json
       return path.join(agent.configDir, 'mcp.json');
@@ -2036,7 +2036,7 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
     case 'codex':
       return path.join(home, '.codex', 'config.toml');
     case 'opencode':
-      return path.join(home, '.opencode', 'opencode.jsonc');
+      return path.join(home, '.config', 'opencode', 'opencode.jsonc');
     case 'cursor':
       return path.join(home, '.cursor', 'mcp.json');
     case 'openclaw':
@@ -2075,7 +2075,8 @@ function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()):
     case 'codex':
       return path.join(cwd, `.${agentId}`, 'config.toml');
     case 'opencode':
-      return path.join(cwd, `.${agentId}`, 'opencode.jsonc');
+      // Project config is opencode.jsonc at project root (not .opencode/)
+      return path.join(cwd, 'opencode.jsonc');
     case 'cursor':
       return path.join(cwd, `.${agentId}`, 'mcp.json');
     case 'openclaw':

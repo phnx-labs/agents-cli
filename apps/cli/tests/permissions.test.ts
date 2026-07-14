@@ -761,7 +761,7 @@ describe('applyPermissionsToVersion', () => {
     const result = applyPermissionsToVersion('opencode', set, versionHome, true);
     expect(result.success).toBe(true);
 
-    const configPath = join(versionHome, '.opencode', 'opencode.jsonc');
+    const configPath = join(versionHome, '.config', 'opencode', 'opencode.jsonc');
     expect(existsSync(configPath)).toBe(true);
 
     const config = JSON.parse(readFileSync(configPath, 'utf-8'));
@@ -992,7 +992,7 @@ describe('applyPermissionsToVersion', () => {
 
   it('merge=false drops OpenCode rules removed from the central set', () => {
     const versionHome = join(testDir, 'opencode-replace-drops');
-    const opencodeDir = join(versionHome, '.opencode');
+    const opencodeDir = join(versionHome, '.config', 'opencode');
     mkdirSync(opencodeDir, { recursive: true });
 
     writeFileSync(join(opencodeDir, 'opencode.jsonc'), JSON.stringify({
