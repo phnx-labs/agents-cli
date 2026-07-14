@@ -3,6 +3,7 @@
  * containing WORKFLOW.md. Mirrors versions.ts:551-558.
  */
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import type { AgentId } from '../../types.js';
@@ -32,6 +33,29 @@ function buildWorkflowsDetector(agent: AgentId): ResourceDetector {
             } catch { return false; }
           })
           .map(d => d.name);
+      }
+
+      if (agent === 'antigravity') {
+        // Antigravity user workflows are HOME-global and shared across versions,
+        // not version-isolated — see workflows.ts:antigravityWorkflowsDir(). agy
+        // scans the real ~/.gemini/config/global_workflows/, so the detector reads
+        // the same shared dir the writer targets (versionHome is intentionally unused).
+        const dir = path.join(process.env.HOME ?? os.homedir(), '.gemini', 'config', 'global_workflows');
+        if (!fs.existsSync(dir)) return [];
+        return fs.readdirSync(dir, { withFileTypes: true })
+          .filter(d => d.isFile() && d.name.endsWith('.md') && !d.name.startsWith('.'))
+          .filter(d => {
+            try {
+              const content = fs.readFileSync(path.join(dir, d.name), 'utf-8');
+              const lines = content.split('\n');
+              if (lines[0] !== '---') return false;
+              const endIndex = lines.slice(1).findIndex(l => l === '---');
+              if (endIndex < 0) return false;
+              const parsed = yaml.parse(lines.slice(1, endIndex + 1).join('\n')) as { agents_workflow?: unknown } | null;
+              return parsed?.agents_workflow === d.name.slice(0, -'.md'.length);
+            } catch { return false; }
+          })
+          .map(d => d.name.slice(0, -'.md'.length));
       }
 
       if (agent === 'goose') {

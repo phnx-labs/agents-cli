@@ -7,6 +7,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import type { AgentId } from './types.js';
@@ -563,6 +564,26 @@ export function transformWorkflowForKimi(workflowPath: string, name: string): st
   return `---\n${frontmatter}\n---\n\n\`\`\`d2\nBEGIN -> step -> END\nstep: |md\n${indentD2BlockString(instructions)}\n|\n\`\`\`\n`;
 }
 
+/**
+ * Convert a canonical agents-cli workflow bundle into an Antigravity workflow
+ * markdown file. Antigravity discovers workflows as flat `<name>.md` files under
+ * `~/.gemini/config/global_workflows/` (scanned by `agy` at startup) and exposes
+ * each as a `/<name>` slash command. Frontmatter carries the required `description`
+ * plus the shared `agents_workflow` ownership marker so agents-cli never clobbers a
+ * user-authored workflow of the same name.
+ */
+export function transformWorkflowForAntigravity(workflowPath: string, name: string): string {
+  const fm = parseWorkflowFrontmatter(workflowPath);
+  if (!fm) throw new Error(`Invalid WORKFLOW.md in ${workflowPath}`);
+  const body = getWorkflowBody(workflowPath) || fm.description;
+  const frontmatter = yaml.stringify({
+    description: fm.description,
+    name: fm.name || name,
+    [KIMI_WORKFLOW_MARKER]: name,
+  }).trim();
+  return `---\n${frontmatter}\n---\n\n${body.trim()}\n`;
+}
+
 function expandWorkflowPath(ref: string): string {
   if (ref === '~') return process.env.HOME ?? ref;
   if (ref.startsWith('~/')) {
@@ -730,8 +751,23 @@ export function removeWorkflow(name: string): { success: boolean; error?: string
   }
 }
 
+/**
+ * Antigravity user workflows are NOT version-isolated. `agy` scans a single,
+ * shared, HOME-global directory at startup — `~/.gemini/config/global_workflows/`
+ * — and that dir is a real directory in the user's home, never symlinked into a
+ * per-version home (only `~/.gemini/antigravity-cli` is version-scoped). Writing
+ * into a version home therefore lands somewhere agy never reads. So every
+ * antigravity version resolves to the same real shared dir; `versionHome` is
+ * intentionally ignored. (Verified via strace of `agy`: it opens
+ * `$HOME/.gemini/config/global_workflows/<name>.md` and never the version home.)
+ */
+function antigravityWorkflowsDir(): string {
+  return path.join(process.env.HOME ?? os.homedir(), '.gemini', 'config', 'global_workflows');
+}
+
 function workflowTargetRoot(agent: AgentId, versionHome: string): string {
   if (agent === 'kimi') return path.join(versionHome, '.kimi-code', 'skills');
+  if (agent === 'antigravity') return antigravityWorkflowsDir();
   return path.join(versionHome, 'workflows');
 }
 
@@ -744,6 +780,19 @@ export function listWorkflowsForAgent(agent: AgentId, versionHome: string): stri
       .filter(d => d.isDirectory() && fs.existsSync(path.join(skillsDir, d.name, 'SKILL.md')))
       .filter(d => kimiWorkflowMarker(path.join(skillsDir, d.name, 'SKILL.md')) === d.name)
       .map(d => d.name);
+  }
+
+  if (agent === 'antigravity') {
+    const dir = workflowTargetRoot(agent, versionHome);
+    if (!fs.existsSync(dir)) return [];
+    try {
+      return fs.readdirSync(dir, { withFileTypes: true })
+        .filter(d => d.isFile() && d.name.endsWith('.md') && !d.name.startsWith('.'))
+        .map(d => d.name.slice(0, -'.md'.length))
+        .filter(base => antigravityWorkflowMarker(path.join(dir, `${base}.md`)) === base);
+    } catch {
+      return [];
+    }
   }
 
   if (agent === 'goose') {
@@ -888,7 +937,17 @@ export function syncWorkflowToVersion(
     }
 
     if (agent === 'antigravity') {
-      return { success: false, error: 'Antigravity workflow sync is not supported for version homes' };
+      const targetDir = workflowTargetRoot(agent, versionHome);
+      const targetFile = path.join(targetDir, `${name}.md`);
+      if (fs.existsSync(targetFile)) {
+        const marker = antigravityWorkflowMarker(targetFile);
+        if (marker !== name) {
+          return { success: false, error: `Antigravity workflow '${name}' already exists and is not managed by agents-cli` };
+        }
+      }
+      fs.mkdirSync(targetDir, { recursive: true });
+      fs.writeFileSync(targetFile, transformWorkflowForAntigravity(workflowPath, name), 'utf-8');
+      return { success: true };
     }
 
     const targetDir = path.join(workflowTargetRoot(agent, versionHome), name);
@@ -911,7 +970,19 @@ export function removeWorkflowFromVersion(
 ): { success: boolean; error?: string } {
   const versionHome = getVersionHomePath(agent, version);
   if (agent === 'antigravity') {
-    return { success: false, error: 'Antigravity workflow sync is not supported for version homes' };
+    const targetFile = path.join(workflowTargetRoot(agent, versionHome), `${name}.md`);
+    if (!fs.existsSync(targetFile)) {
+      return { success: false, error: `Workflow '${name}' not synced to ${agent}@${version}` };
+    }
+    if (antigravityWorkflowMarker(targetFile) !== name) {
+      return { success: false, error: `Antigravity workflow '${name}' is not managed by agents-cli` };
+    }
+    try {
+      fs.rmSync(targetFile, { force: true });
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
   }
 
   if (agent === 'goose') {
@@ -962,6 +1033,15 @@ function kimiWorkflowMarker(filePath: string): string | null {
   try {
     const fm = parseSkillFrontmatter(filePath) as { type?: unknown; agents_workflow?: unknown } | null;
     return fm?.type === 'flow' && typeof fm.agents_workflow === 'string' ? fm.agents_workflow : null;
+  } catch {
+    return null;
+  }
+}
+
+function antigravityWorkflowMarker(filePath: string): string | null {
+  try {
+    const fm = parseSkillFrontmatter(filePath) as { agents_workflow?: unknown } | null;
+    return typeof fm?.agents_workflow === 'string' ? fm.agents_workflow : null;
   } catch {
     return null;
   }

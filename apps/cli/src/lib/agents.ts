@@ -473,7 +473,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     cloudProvider: 'antigravity',
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit', 'skip'], rulesImports: false },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false }, // workflows: markdown files in the shared, HOME-global ~/.gemini/config/global_workflows/ (agy scans it at startup; not version-isolated — see workflows.ts), invoked as /<name> slash commands
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
   // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
