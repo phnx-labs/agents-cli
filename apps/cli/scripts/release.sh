@@ -581,13 +581,14 @@ git fetch --quiet origin "$DEFAULT_BRANCH"
 MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
 MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
 [[ "$MERGED_VER" == "$TARGET" ]] || die "merged $DEFAULT_BRANCH is at $MERGED_VER, not $TARGET -- refusing to tag/publish"
-if [[ -n "${BRANCH_TREE:-}" ]]; then
-  # A single-commit squash onto an unchanged base yields a tree identical to what
-  # we built + published from. A mismatch means a concurrent merge or a stray
-  # push landed on the branch -- the local tarball would not match merged main.
-  [[ "$(git rev-parse "$MERGED_SHA^{tree}")" == "$BRANCH_TREE" ]] \
-    || die "merged tree != built tree -- refusing to publish (concurrent merge or stray push on $RELEASE_BRANCH)"
-fi
+# A normal release compares against the release-commit tree. A catch-up release
+# skips that commit because main already carries TARGET, so compare against the
+# exact base tree that passed preflight and was built locally. Either way, a
+# concurrent merge must abort before the tag or registry can point at artifacts
+# produced from a different source tree.
+EXPECTED_TREE="${BRANCH_TREE:-$(git rev-parse "$BASE_SHA^{tree}")}"
+[[ "$(git rev-parse "$MERGED_SHA^{tree}")" == "$EXPECTED_TREE" ]] \
+  || die "merged tree != built tree -- refusing to publish (concurrent merge or stray push on $RELEASE_BRANCH)"
 
 # Bring the working-tree package.json/CHANGELOG to exactly the merged code so the
 # published tarball matches merged main. dist/ was already built from the same
