@@ -10,6 +10,14 @@
   and `agents run` pointing at the old version. The installer-dropped binary is
   now relocated into the target version home automatically.
 
+- **`agents run` user splits close automatically instead of leaving dead husks.**
+  `createSession` now applies `remain-on-exit` only to the agent pane and reverts
+  the global default, so splits opened with `agents tmux split` (or tmux
+  keybindings) close when their shell exits. The guarded `pane-died` hook still
+  detaches the client on agent pane death, and its `kill-pane` fallback remains
+  for legacy sessions that still carry the old global setting. This removes the
+  async cleanup race that made the guarded-hook test flake in CI.
+
 ### Added
 
 - **`agents routines add --resume <sessionId>` — wake an existing session instead
