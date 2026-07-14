@@ -18,7 +18,9 @@
   `--prompt` becomes its next turn. Powers self-scheduled wake-ups (an agent that
   hibernates on a long external wait and resumes itself later). Without it, a routine
   spawns a context-less fresh agent, which correctly refuses an opaque instruction it
-  has no memory of. claude/codex (native resume) only.
+  has no memory of. Requires `--agent claude` or `codex` (native resume, validated);
+  the job runs **un-sandboxed** so `--resume` can find the session in the real agent
+  home, and — like workflow jobs — its command is never binary-pinned.
 
 - **`agents output` — productivity: token burn vs shipped output.** A new command
   that joins spend (`$` cost, from the offline price table) to what actually

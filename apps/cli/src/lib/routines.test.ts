@@ -50,6 +50,33 @@ describe('validateJob — schedule OR trigger', () => {
   });
 });
 
+describe('validateJob — resume', () => {
+  it('accepts resume with a native-resume agent', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: 'sess-1' }))).toEqual([]);
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'codex', resume: 'sess-1' }))).toEqual([]);
+  });
+
+  it('rejects resume on an agent without native --resume', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'gemini', resume: 'sess-1' }));
+    expect(errors.some((e) => /resume is only supported for agents with native --resume/.test(e))).toBe(true);
+  });
+
+  it('rejects resume combined with a workflow', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: undefined, workflow: 'autodev', resume: 'sess-1' }));
+    expect(errors.some((e) => /resume cannot be combined with workflow/.test(e))).toBe(true);
+  });
+
+  it('rejects resume combined with a loop', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: 'sess-1', loop: { maxIterations: 3 } as never }));
+    expect(errors.some((e) => /resume cannot be combined with loop/.test(e))).toBe(true);
+  });
+
+  it('rejects an empty resume session id', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: '  ' }));
+    expect(errors.some((e) => /resume must be a non-empty session id/.test(e))).toBe(true);
+  });
+});
+
 describe('validateTrigger', () => {
   it('accepts a well-formed github_event trigger', () => {
     expect(validateTrigger({ type: 'github_event', event: 'pull_request', repo: 'x/y', branch: 'main' })).toEqual([]);

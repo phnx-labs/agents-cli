@@ -409,6 +409,24 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push('workflow must be a lowercase alphanumeric name (hyphens and underscores allowed, e.g. autodev)');
     }
   }
+  if (config.resume !== undefined) {
+    // Only claude/codex support native `--resume`; other agents would emit a resume
+    // flag they don't understand. Resume reopens an agent session, so it is
+    // incompatible with workflow and loop jobs (which have no single session to reopen).
+    const RESUMABLE_AGENTS = ['claude', 'codex'];
+    if (typeof config.resume !== 'string' || config.resume.trim() === '') {
+      errors.push('resume must be a non-empty session id string');
+    }
+    if (hasWorkflow) {
+      errors.push('resume cannot be combined with workflow (resume reopens an existing agent session)');
+    }
+    if (config.loop) {
+      errors.push('resume cannot be combined with loop');
+    }
+    if (hasAgent && config.agent && !RESUMABLE_AGENTS.includes(config.agent)) {
+      errors.push(`resume is only supported for agents with native --resume (${RESUMABLE_AGENTS.join(', ')}); got '${config.agent}'`);
+    }
+  }
   if (config.mode && !['plan', 'edit', 'auto', 'skip', 'full'].includes(config.mode)) {
     errors.push("mode must be plan, edit, auto, or skip ('full' accepted as alias for skip)");
   }

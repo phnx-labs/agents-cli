@@ -342,6 +342,16 @@ export function pinJobBinary(cmd: string[], agent: AgentId, version: string | un
 }
 
 /**
+ * Whether a job's command is dispatched through `agents run` (so `cmd[0] === 'agents'`)
+ * rather than the agent binary directly. True for workflow jobs and for resume jobs.
+ * Such commands must NOT be binary-pinned (pinning rewrites cmd[0] to the agent binary,
+ * producing a broken `<binary> run …`) and must not receive a version-pinned spawn env.
+ */
+export function dispatchesViaAgentsRun(config: Pick<JobConfig, 'workflow' | 'resume'>): boolean {
+  return Boolean(config.workflow || config.resume);
+}
+
+/**
  * Merge sandbox/base env with the canonical per-version exec env
  * (CLAUDE_CONFIG_DIR / CODEX_HOME / …) so routines share account isolation
  * with `agents run`.
@@ -492,7 +502,11 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
 
   const resolvedPrompt = resolveJobPrompt(config);
 
-  const useSandbox = config.sandbox !== false;
+  // Resume must run against the REAL home: `--resume <id>` resolves the session from
+  // the agent's config dir, and the sandbox overlay home has only a freshly-generated
+  // config with no session store. So a resume job is never sandboxed, regardless of
+  // `config.sandbox` (see the resume branch in buildJobCommand).
+  const useSandbox = config.sandbox !== false && !config.resume;
   const overlayHome = useSandbox ? prepareJobHome(config) : undefined;
 
   const runId = generateRunId();
@@ -580,10 +594,11 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
       process.stderr.write(`[agents] routine ${config.name}: running ${label}\n`);
     }
 
-    const cmd = config.workflow
+    const viaAgentsRun = dispatchesViaAgentsRun(config);
+    const cmd = viaAgentsRun
       ? baseCmd
       : pinJobBinary(baseCmd, attemptAgent, attemptVersion);
-    const spawnEnv = config.workflow
+    const spawnEnv = viaAgentsRun
       ? (() => {
           const e = { ...baseEnv };
           if (config.timezone) e.TZ = config.timezone;
@@ -679,11 +694,17 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
 
   const resolvedPrompt = resolveJobPrompt(config);
   let cmd = buildJobCommand(config, resolvedPrompt);
-  if (!config.workflow && version) {
+  // workflow AND resume dispatch through `agents run` — never binary-pin them (pinning
+  // rewrites cmd[0] to the agent binary → broken `<binary> run …`).
+  if (!dispatchesViaAgentsRun(config) && version) {
     cmd = pinJobBinary(cmd, config.agent, version);
   }
 
-  const useSandbox = config.sandbox !== false;
+  // Resume must run against the REAL home: `--resume <id>` resolves the session from
+  // the agent's config dir, and the sandbox overlay home has only a freshly-generated
+  // config with no session store. So a resume job is never sandboxed, regardless of
+  // `config.sandbox` (see the resume branch in buildJobCommand).
+  const useSandbox = config.sandbox !== false && !config.resume;
   const overlayHome = useSandbox ? prepareJobHome(config) : undefined;
 
   const runId = generateRunId();
@@ -696,7 +717,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
   const baseEnv = useSandbox
     ? buildSpawnEnv(overlayHome!)
     : { ...process.env } as Record<string, string>;
-  const spawnEnv = config.workflow
+  const spawnEnv = dispatchesViaAgentsRun(config)
     ? (() => {
         const e = { ...baseEnv };
         if (config.timezone) e.TZ = config.timezone;

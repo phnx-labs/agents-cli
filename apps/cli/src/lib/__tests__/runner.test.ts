@@ -4,6 +4,7 @@ import * as path from 'path';
 import {
   buildJobCommand,
   buildRoutineSpawnEnv,
+  dispatchesViaAgentsRun,
   executeJobDetached,
   pinJobBinary,
   resolveRoutineLaunch,
@@ -88,6 +89,26 @@ describe('buildJobCommand', () => {
 
   it('kimi plan mode throws (no headless read-only mode)', () => {
     expect(() => buildJobCommand(baseJob({ agent: 'kimi', mode: 'plan' }), 'Do the task.')).toThrow(/read-only/);
+  });
+});
+
+describe('dispatchesViaAgentsRun — pin exclusion for `agents run` commands', () => {
+  // Regression: resume commands start with 'agents' (the dispatcher), so binary-pinning
+  // them rewrites cmd[0] -> the agent binary and yields a broken `<binary> run …`.
+  // executeJob/executeJobDetached must skip pinning for these, exactly like workflow jobs.
+  it('is true for resume and workflow jobs, false for a plain agent job', () => {
+    expect(dispatchesViaAgentsRun(baseJob({ agent: 'claude', resume: 'sess-1' }))).toBe(true);
+    expect(dispatchesViaAgentsRun(baseJob({ workflow: 'autodev', agent: undefined as unknown as 'claude' }))).toBe(true);
+    expect(dispatchesViaAgentsRun(baseJob({ agent: 'claude' }))).toBe(false);
+  });
+
+  it('pinJobBinary would corrupt a resume command — proving why it must be excluded', () => {
+    // A resume command: cmd[0] is the 'agents' dispatcher, not the agent binary.
+    const resumeCmd = buildJobCommand(baseJob({ agent: 'claude', mode: 'skip', resume: 'sess-1' }), '<p>');
+    expect(resumeCmd[0]).toBe('agents');
+    // If pinJobBinary DID run on it and the version were installed, it would clobber
+    // cmd[0] to the binary → `<binary> run claude …`. The guard is what prevents this.
+    expect(dispatchesViaAgentsRun({ resume: 'sess-1' })).toBe(true);
   });
 });
 
