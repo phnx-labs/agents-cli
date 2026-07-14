@@ -337,6 +337,11 @@ describe('PermissionsHandler', () => {
       expect(result).toBe(path.join('/test/home', '.kimi-code', 'config.toml'));
     });
 
+    it('returns correct path for Droid', () => {
+      const result = PermissionsHandler.configPath!('droid', '/test/home');
+      expect(result).toBe(path.join('/test/home', '.factory', 'settings.json'));
+    });
+
     it('returns null for unsupported agents', () => {
       const result = PermissionsHandler.configPath!('gemini', '/test/home');
       expect(result).toBeNull();

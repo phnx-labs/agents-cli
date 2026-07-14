@@ -582,6 +582,30 @@ function normalizeBashPattern(pattern: string): string {
   return pattern;
 }
 
+/** Convert canonical Bash rules into Droid's command arrays. */
+export function convertToDroidFormat(set: PermissionSet): {
+  commandAllowlist: string[];
+  commandDenylist: string[];
+} {
+  const commands = (permissions: string[]): string[] => {
+    const result = new Set<string>();
+    for (const permission of permissions) {
+      if (BLANKET_BASH_FORMS.has(permission)) {
+        result.add('*');
+        continue;
+      }
+      const parsed = parseCanonicalPattern(permission);
+      if (parsed?.tool === 'bash') result.add(normalizeBashPattern(parsed.pattern));
+    }
+    return Array.from(result);
+  };
+
+  return {
+    commandAllowlist: commands(set.allow),
+    commandDenylist: commands(set.deny ?? []),
+  };
+}
+
 /**
  * Convert canonical permission set to Antigravity format.
  * Antigravity reads ~/.gemini/antigravity-cli/settings.json with
@@ -1548,6 +1572,27 @@ export function applyPermissionsToVersion(
         config.permissions = { allow: [...allow], deny: [...deny] };
       } else {
         config.permissions = converted.permissions;
+      }
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'droid') {
+      const configPath = path.join(versionHome, '.factory', 'settings.json');
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+      }
+      const converted = convertToDroidFormat(set);
+      if (merge) {
+        const existingAllow = Array.isArray(config.commandAllowlist) ? config.commandAllowlist as string[] : [];
+        const existingDeny = Array.isArray(config.commandDenylist) ? config.commandDenylist as string[] : [];
+        config.commandAllowlist = Array.from(new Set([...existingAllow, ...converted.commandAllowlist]));
+        config.commandDenylist = Array.from(new Set([...existingDeny, ...converted.commandDenylist]));
+      } else {
+        config.commandAllowlist = converted.commandAllowlist;
+        config.commandDenylist = converted.commandDenylist;
       }
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');

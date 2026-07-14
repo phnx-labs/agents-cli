@@ -11,6 +11,7 @@ import {
   containsBroadGrants,
   convertDenyToCodexRules,
   convertToKimiFormat,
+  convertToDroidFormat,
   convertToKiroFormat,
   formatComputerPermissionGrantHint,
 } from './permissions.js';
@@ -27,6 +28,42 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('Droid permissions', () => {
+  it('maps canonical Bash rules into command allow and deny arrays', () => {
+    expect(convertToDroidFormat({
+      name: 'droid',
+      allow: ['Bash(git:*)', 'Bash(pwd)', 'Read(**)'],
+      deny: ['Bash(rm -rf:*)', 'Write(**)'],
+    })).toEqual({
+      commandAllowlist: ['git *', 'pwd'],
+      commandDenylist: ['rm -rf *'],
+    });
+  });
+
+  it('writes and merges Droid settings without replacing unrelated keys', () => {
+    const home = makeTempHome();
+    const configDir = path.join(home, '.factory');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({
+      model: 'custom-model',
+      commandAllowlist: ['ls'],
+      commandDenylist: ['shutdown'],
+    }));
+
+    expect(applyPermissionsToVersion('droid', {
+      name: 'set',
+      allow: ['Bash(git:*)'],
+      deny: ['Bash(rm -rf:*)'],
+    }, home, true)).toEqual({ success: true });
+
+    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf-8'))).toEqual({
+      model: 'custom-model',
+      commandAllowlist: ['ls', 'git *'],
+      commandDenylist: ['shutdown', 'rm -rf *'],
+    });
+  });
 });
 
 describe('permission path handling', () => {

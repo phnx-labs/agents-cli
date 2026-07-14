@@ -101,6 +101,11 @@ describe('staleness/registry', () => {
     expect(DETECTORS.skills.droid).toBeDefined();
   });
 
+  it('droid has a permissions writer + detector', () => {
+    expect(WRITERS.permissions.droid).toBeDefined();
+    expect(DETECTORS.permissions.droid).toBeDefined();
+  });
+
   it('kiro has a permissions writer + detector', () => {
     expect(WRITERS.permissions.kiro).toBeDefined();
     expect(DETECTORS.permissions.kiro).toBeDefined();
