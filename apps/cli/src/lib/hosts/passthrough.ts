@@ -41,6 +41,7 @@ const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   view: {},
   usage: {},
   cost: {},
+  output: {},
   doctor: {},
   inspect: {},
   list: {},

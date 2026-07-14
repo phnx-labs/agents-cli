@@ -113,6 +113,7 @@ import {
   loadFactory,
   loadUsage,
   loadCost,
+  loadOutput,
   loadBudget,
   loadAlias,
   loadPty,
@@ -814,6 +815,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadFactory);
   await reg(loadUsage);
   await reg(loadCost);
+  await reg(loadOutput);
   await reg(loadBudget);
   await reg(loadAlias);
   await reg(loadPty);
