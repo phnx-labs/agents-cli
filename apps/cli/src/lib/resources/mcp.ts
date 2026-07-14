@@ -146,7 +146,7 @@ export function getMcpConfigPath(agent: AgentId, versionHome: string): string | 
     case 'codex':
       return path.join(versionHome, '.codex', 'config.toml');
     case 'opencode':
-      return path.join(versionHome, '.opencode', 'opencode.jsonc');
+      return path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
     case 'cursor':
       return path.join(versionHome, '.cursor', 'mcp.json');
     case 'gemini':
