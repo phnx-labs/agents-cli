@@ -59,6 +59,8 @@ export async function resolveHostRunTarget(name: string, opts: { any?: boolean }
 export interface HostPromptRun {
   agent: string;
   prompt: string;
+  /** Explicit agent version pin, forwarded as `agent@version`. */
+  version?: string;
   mode?: string;
   model?: string;
   /** Durable `--name <slug>` handle recorded on the task. */
@@ -88,6 +90,7 @@ export interface HostPromptRun {
   json?: boolean;
   verbose?: boolean;
   yes?: boolean;
+  acp?: boolean;
   autoSecrets?: boolean;
   passthroughArgs?: string[];
 }
@@ -104,6 +107,7 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
   const result = await dispatchToHost(host, {
     agent: opts.agent,
     prompt: opts.prompt,
+    version: opts.version,
     mode: opts.mode,
     model: opts.model,
     remoteCwd: opts.remoteCwd,
@@ -127,6 +131,7 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     json: opts.json,
     verbose: opts.verbose,
     yes: opts.yes,
+    acp: opts.acp,
     autoSecrets: opts.autoSecrets,
     passthroughArgs: opts.passthroughArgs,
   });

@@ -639,6 +639,7 @@ export function registerRunCommand(program: Command): void {
         const { runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
         const { RUN_OPTION_REJECT_MESSAGES } = await import('../lib/hosts/remote-cmd.js');
+        const { normalizeRunStrategy, RUN_STRATEGIES } = await import('../lib/rotate.js');
 
         // The forwarding contract (RUN_OPTION_FORWARDING): options that cannot
         // cross the SSH boundary fail loud BEFORE dispatch — never a silent
@@ -647,7 +648,6 @@ export function registerRunCommand(program: Command): void {
         if (options.secrets.length > 0) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.secrets);
         if (options.secretsKeys) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.secretsKeys);
         if (options.allowExpired) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.allowExpired);
-        if (options.acp) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.acp);
         if (options.resumeCheckpoint) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeCheckpoint);
         if (options.resume === true) hostRejects.push(RUN_OPTION_REJECT_MESSAGES.resumeBare);
         if (hostRejects.length > 0) {
@@ -669,12 +669,32 @@ export function registerRunCommand(program: Command): void {
           throw e;
         }
         try {
-          const runAgent = agentSpec.split('@')[0];
+          const [runAgent, rawRunVersion] = agentSpec.split('@');
+          // Forward the explicit @version pin verbatim. Resolving aliases like
+          // @latest locally would check local installs, but the remote host may
+          // have versions the laptop does not. The remote agents CLI resolves
+          // aliases against its own installed versions.
+          const runVersion = rawRunVersion || undefined;
+
+          // Normalize the effective strategy exactly like the local path so we
+          // fail fast on invalid input and can forward --balanced/--strategy.
+          const explicitStrategy = options.strategy ? normalizeRunStrategy(options.strategy) : null;
+          if (options.strategy && !explicitStrategy) {
+            console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
+            process.exit(1);
+          }
+          if (options.balanced && explicitStrategy && explicitStrategy !== 'balanced') {
+            console.error(chalk.red('--balanced conflicts with --strategy. Use one strategy override.'));
+            process.exit(1);
+          }
+          const runStrategy = options.balanced ? 'balanced' : explicitStrategy ?? undefined;
+
           // Working directory on the host: an explicit --remote-cwd is used
           // verbatim; --cwd/--project are made portable (a local-home absolute
           // becomes `~/…` so the remote shell re-roots it at ITS home).
           const { toRemotePortable } = await import('../lib/project-root.js');
           const hostCwd = options.remoteCwd ?? (options.cwd ? toRemotePortable(options.cwd) : undefined);
+          const hostAddDirs = options.addDir.length > 0 ? options.addDir.map(toRemotePortable) : undefined;
           // `--resume [id]`: commander yields the string id, or `true` when the
           // flag is passed bare. A bare resume needs the interactive picker,
           // which can't run over a detached remote dispatch — only forward a
@@ -714,9 +734,20 @@ export function registerRunCommand(program: Command): void {
             }
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
+              version: resumeId ? undefined : runVersion,
+              strategy: resumeId ? undefined : runStrategy,
+              fallback: options.fallback,
               prompt,
               mode: options.mode,
               model: options.model,
+              effort: options.effort,
+              env: options.env,
+              addDir: hostAddDirs,
+              json: options.json,
+              verbose: options.verbose,
+              timeout: options.timeout,
+              yes: options.yes,
+              acp: options.acp,
               remoteCwd: hostCwd,
               sessionId: hostSessionId,
               name: options.name,
@@ -724,13 +755,6 @@ export function registerRunCommand(program: Command): void {
               passthroughArgs,
               raw: options.raw || options.tmux === false || options.disableTmux === true,
               forceInteractive: options.interactive,
-              effort: options.effort,
-              env: options.env,
-              addDir: options.addDir,
-              strategy: options.strategy,
-              balanced: options.balanced,
-              fallback: options.fallback,
-              verbose: options.verbose,
             });
             process.exit(exitCode);
           }
@@ -745,20 +769,16 @@ export function registerRunCommand(program: Command): void {
           // registration all live in the shared helper (lib/hosts/run-target.ts).
           const { task, exitCode } = await dispatchPromptToHost(host, {
             agent: runAgent,
+            version: resumeId ? undefined : runVersion,
+            strategy: resumeId ? undefined : runStrategy,
+            fallback: options.fallback,
             prompt,
             mode: options.mode,
             model: options.model,
-            remoteCwd: hostCwd,
-            name: options.name,
-            resume: resumeId,
-            follow: options.follow !== false,
             effort: options.effort,
             env: options.env,
-            addDir: options.addDir,
+            addDir: hostAddDirs,
             timeout: options.timeout,
-            strategy: options.strategy,
-            balanced: options.balanced,
-            fallback: options.fallback,
             loop: options.loop,
             maxIterations: options.maxIterations,
             budget: options.budget,
@@ -767,7 +787,12 @@ export function registerRunCommand(program: Command): void {
             json: options.json,
             verbose: options.verbose,
             yes: options.yes,
+            acp: options.acp,
             autoSecrets: options.autoSecrets,
+            remoteCwd: hostCwd,
+            name: options.name,
+            resume: resumeId,
+            follow: options.follow !== false,
             passthroughArgs,
           });
           if (options.follow === false) {

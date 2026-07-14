@@ -105,13 +105,13 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   json: 'forward', // remote emits ndjson into its log; the local follow streams it verbatim
   verbose: 'forward',
   yes: 'forward', // a detached remote run can't answer the budget-confirm prompt
+  acp: 'forward', // the remote CLI routes through ACP on ITS side of the wire
   autoSecrets: 'forward', // workflow frontmatter secrets resolve on the REMOTE keychain
 
   // rejected — cannot cross the SSH boundary; fail loud, never degrade
   secrets: 'reject',
   secretsKeys: 'reject',
   allowExpired: 'reject',
-  acp: 'reject',
   resumeCheckpoint: 'reject',
 
   // local-only — routing, dispatch-path choice, and follow rendering
@@ -142,7 +142,6 @@ export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
     'workflow frontmatter secrets resolve from the HOST\'s own keychain.',
   secretsKeys: '--secrets-keys applies to --secrets bundles, which cannot cross the SSH boundary (see --secrets).',
   allowExpired: '--allow-expired applies to --secrets bundles, which cannot cross the SSH boundary (see --secrets).',
-  acp: '--acp is a local transport (Agent Client Protocol over stdio) and cannot drive a run dispatched over SSH. Drop --acp, or run locally.',
   resumeCheckpoint: '--resume-checkpoint reads a local checkpoint.json — it cannot resume a run on another machine. Run it locally, or start a fresh --loop run on the host.',
   resumeBare: '--resume with no id opens the interactive picker, which cannot run across a detached host dispatch. Pass a concrete session id: agents run <agent> --resume <id> --host <name>.',
 };

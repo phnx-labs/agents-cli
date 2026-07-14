@@ -208,8 +208,39 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 export interface DispatchOptions {
   agent: string;
   prompt: string;
+  /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
+  version?: string;
+  /** Run strategy (e.g. "balanced") — the remote picks among ITS signed-in accounts. */
+  strategy?: string;
+  balanced?: boolean;
+  fallback?: string;
   mode?: string;
   model?: string;
+  /** Reasoning effort — forwarded unless 'auto' (the remote default). */
+  effort?: string;
+  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
+  env?: string[];
+  /** `--add-dir` grants, already made remote-portable. */
+  addDir?: string[];
+  /** Agent wall-clock cap, forwarded as `--timeout <duration>` for the REMOTE to enforce. */
+  timeout?: string;
+  /** Loop family — the loop driver runs on the host. */
+  loop?: boolean;
+  maxIterations?: string;
+  budget?: string;
+  until?: string;
+  interval?: string;
+  /** Remote emits ndjson into its log; the local follow streams it verbatim. */
+  json?: boolean;
+  verbose?: boolean;
+  /** Skip the budget-confirm prompt — a detached remote run can't answer one. */
+  yes?: boolean;
+  /** Route through the Agent Client Protocol. */
+  acp?: boolean;
+  /** False forwards --no-auto-secrets (workflow secrets resolve on the REMOTE keychain). */
+  autoSecrets?: boolean;
+  /** Native-CLI passthrough (everything after `--`), appended last. */
+  passthroughArgs?: string[];
   remoteCwd?: string;
   /**
    * Force the remote run's NEW session to use this exact id (Claude only, via
@@ -227,33 +258,6 @@ export interface DispatchOptions {
   /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
-  /** Reasoning effort — forwarded unless 'auto' (the remote default). */
-  effort?: string;
-  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
-  env?: string[];
-  /** `--add-dir` grants, forwarded verbatim. */
-  addDir?: string[];
-  /** Agent wall-clock cap, forwarded as `--timeout <duration>` for the REMOTE to enforce. */
-  timeout?: string;
-  /** Version/account rotation — the remote picks among ITS signed-in accounts. */
-  strategy?: string;
-  balanced?: boolean;
-  fallback?: string;
-  /** Loop family — the loop driver runs on the host. */
-  loop?: boolean;
-  maxIterations?: string;
-  budget?: string;
-  until?: string;
-  interval?: string;
-  /** Remote emits ndjson into its log; the local follow streams it verbatim. */
-  json?: boolean;
-  verbose?: boolean;
-  /** Skip the budget-confirm prompt — a detached remote run can't answer one. */
-  yes?: boolean;
-  /** False forwards --no-auto-secrets (workflow secrets resolve on the REMOTE keychain). */
-  autoSecrets?: boolean;
-  /** Native-CLI passthrough (everything after `--`), appended last. */
-  passthroughArgs?: string[];
 }
 
 /**
@@ -267,12 +271,10 @@ export interface DispatchOptions {
  * the table side.
  */
 export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
-  const args = ['run', opts.agent, opts.prompt, '--quiet'];
+  const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
+  const args = ['run', agentArg, opts.prompt, '--quiet'];
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
-  if (opts.name) args.push('--name', opts.name);
-  if (opts.resume) args.push('--resume', opts.resume);
-  else if (opts.sessionId) args.push('--session-id', opts.sessionId);
   // 'auto' is the remote default — forwarding it would only add noise.
   if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
   for (const kv of opts.env ?? []) args.push('--env', kv);
@@ -289,17 +291,39 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   if (opts.json) args.push('--json');
   if (opts.verbose) args.push('--verbose');
   if (opts.yes) args.push('--yes');
+  if (opts.acp) args.push('--acp');
   if (opts.autoSecrets === false) args.push('--no-auto-secrets');
+  if (opts.name) args.push('--name', opts.name);
+  if (opts.resume) args.push('--resume', opts.resume);
+  else if (opts.sessionId) args.push('--session-id', opts.sessionId);
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) args.push('--', ...opts.passthroughArgs);
   return args;
 }
 
 export interface InteractiveDispatchOptions {
   agent: string;
+  /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
+  version?: string;
+  /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
+  strategy?: string;
   /** Optional prompt — forwarded only when the caller explicitly forced interactive mode. */
   prompt?: string;
   mode?: string;
   model?: string;
+  /** Reasoning effort to forward as `--effort <effort>`. */
+  effort?: string;
+  /** Additional directories to grant, already made remote-portable. */
+  addDir?: string[];
+  /** Stream events as JSON lines. */
+  json?: boolean;
+  /** Show detailed execution logs. */
+  verbose?: boolean;
+  /** Kill the agent after this duration, forwarded as `--timeout <duration>`. */
+  timeout?: string;
+  /** Skip the interactive budget-confirm prompt. */
+  yes?: boolean;
+  /** Route through the Agent Client Protocol. */
+  acp?: boolean;
   remoteCwd?: string;
   sessionId?: string;
   name?: string;
@@ -308,13 +332,10 @@ export interface InteractiveDispatchOptions {
   raw?: boolean;
   /** Forward `--interactive` to the remote so a prompt-bearing run still starts the TUI. */
   forceInteractive?: boolean;
-  effort?: string;
+  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
   env?: string[];
-  addDir?: string[];
-  strategy?: string;
   balanced?: boolean;
   fallback?: string;
-  verbose?: boolean;
 }
 
 /**
@@ -325,21 +346,27 @@ export interface InteractiveDispatchOptions {
  * infer headless from the prompt).
  */
 export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOptions): string[] {
-  const args = ['run', opts.agent];
+  const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
+  const args = ['run', agentArg];
   if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
   if (opts.forceInteractive) args.push('--interactive');
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
-  if (opts.name) args.push('--name', opts.name);
-  if (opts.resume) args.push('--resume', opts.resume);
-  else if (opts.sessionId) args.push('--session-id', opts.sessionId);
+  // 'auto' is the remote default — forwarding it would only add noise.
   if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
   for (const kv of opts.env ?? []) args.push('--env', kv);
   for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
+  if (opts.timeout) args.push('--timeout', opts.timeout);
   if (opts.strategy) args.push('--strategy', opts.strategy);
   if (opts.balanced) args.push('--balanced');
   if (opts.fallback) args.push('--fallback', opts.fallback);
+  if (opts.json) args.push('--json');
   if (opts.verbose) args.push('--verbose');
+  if (opts.yes) args.push('--yes');
+  if (opts.acp) args.push('--acp');
+  if (opts.name) args.push('--name', opts.name);
+  if (opts.resume) args.push('--resume', opts.resume);
+  else if (opts.sessionId) args.push('--session-id', opts.sessionId);
   if (opts.raw) args.push('--raw');
   if (opts.passthroughArgs && opts.passthroughArgs.length > 0) {
     args.push('--', ...opts.passthroughArgs);
