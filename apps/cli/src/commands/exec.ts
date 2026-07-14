@@ -637,6 +637,7 @@ export function registerRunCommand(program: Command): void {
         const { resolveHost, resolveHostByCap } = await import('../lib/hosts/registry.js');
         const { dispatchToHost, runInteractiveOnHost } = await import('../lib/hosts/dispatch.js');
         const { registerHostSession, registerInteractiveHostSession } = await import('../lib/hosts/session-index.js');
+        const { normalizeRunStrategy, RUN_STRATEGIES } = await import('../lib/rotate.js');
         // A password-auth device throws DeviceOffloadUnsupportedError here; it's
         // printed cleanly by the top-level catch in index.ts (covers every
         // resolveHost caller), so it never falls through to capability routing.
@@ -660,12 +661,32 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         try {
-          const runAgent = agentSpec.split('@')[0];
+          const [runAgent, rawRunVersion] = agentSpec.split('@');
+          // Forward the explicit @version pin verbatim. Resolving aliases like
+          // @latest locally would check local installs, but the remote host may
+          // have versions the laptop does not. The remote agents CLI resolves
+          // aliases against its own installed versions.
+          const runVersion = rawRunVersion || undefined;
+
+          // Normalize the effective strategy exactly like the local path so we
+          // fail fast on invalid input and can forward --balanced/--strategy.
+          const explicitStrategy = options.strategy ? normalizeRunStrategy(options.strategy) : null;
+          if (options.strategy && !explicitStrategy) {
+            console.error(chalk.red(`Invalid strategy: ${options.strategy}. Use ${RUN_STRATEGIES.join(', ')}.`));
+            process.exit(1);
+          }
+          if (options.balanced && explicitStrategy && explicitStrategy !== 'balanced') {
+            console.error(chalk.red('--balanced conflicts with --strategy. Use one strategy override.'));
+            process.exit(1);
+          }
+          const runStrategy = options.balanced ? 'balanced' : explicitStrategy ?? undefined;
+
           // Working directory on the host: an explicit --remote-cwd is used
           // verbatim; --cwd/--project are made portable (a local-home absolute
           // becomes `~/…` so the remote shell re-roots it at ITS home).
           const { toRemotePortable } = await import('../lib/project-root.js');
           const hostCwd = options.remoteCwd ?? (options.cwd ? toRemotePortable(options.cwd) : undefined);
+          const hostAddDirs = options.addDir.length > 0 ? options.addDir.map(toRemotePortable) : undefined;
           // `--resume [id]`: commander yields the string id, or `true` when the
           // flag is passed bare. A bare resume needs the interactive picker,
           // which can't run over a detached remote dispatch — only forward a
@@ -705,9 +726,18 @@ export function registerRunCommand(program: Command): void {
             }
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
+              version: resumeId ? undefined : runVersion,
+              strategy: resumeId ? undefined : runStrategy,
               prompt,
               mode: options.mode,
               model: options.model,
+              effort: options.effort,
+              addDir: hostAddDirs,
+              json: options.json,
+              verbose: options.verbose,
+              timeout: options.timeout,
+              yes: options.yes,
+              acp: options.acp,
               remoteCwd: hostCwd,
               sessionId: hostSessionId,
               name: options.name,
@@ -728,9 +758,18 @@ export function registerRunCommand(program: Command): void {
           const hostSessionId = runAgent === 'claude' && !resumeId ? randomUUID() : undefined;
           const { task, exitCode } = await dispatchToHost(host, {
             agent: runAgent,
+            version: resumeId ? undefined : runVersion,
+            strategy: resumeId ? undefined : runStrategy,
             prompt,
             mode: options.mode,
             model: options.model,
+            effort: options.effort,
+            addDir: hostAddDirs,
+            json: options.json,
+            verbose: options.verbose,
+            timeout: options.timeout,
+            yes: options.yes,
+            acp: options.acp,
             remoteCwd: hostCwd,
             sessionId: hostSessionId,
             name: options.name,
