@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fix: `agents run <agent>@<version> --host <host>` now forwards the version pin and most run flags to the remote host.** Previously the `--host` branch stripped `@version` and ignored `--strategy`, `--effort`, `--add-dir`, `--json`, `--verbose`, `--timeout`, `--yes`, and `--acp`, so the remote host applied its own defaults. The local CLI now parses `agent@version` verbatim, normalizes `--strategy`/`--balanced`, makes `--add-dir` paths remote-portable, and forwards all of these flags to the remote `agents run` invocation. `--add-dir` portability uses the same `~`/`$HOME` re-rooting that `--cwd` already uses, so a Linux remote resolves home paths against its own `/home/<user>`. Source: `apps/cli/src/lib/hosts/dispatch.ts`, `apps/cli/src/commands/exec.ts`, `apps/cli/src/lib/hosts/dispatch.test.ts`.
+
 ## 1.20.59
 
 - **Fix: remote secrets now choose the Windows PowerShell wrapper from the original `--host` name, not the resolved `user@ip` SSH target.** Inline enrolled Windows hosts resolve to address-based SSH targets, but the OS registry is keyed by the host name; `agents secrets view/list/exec --host <windows>`, `agents run --secrets bundle@<windows>`, and remote secrets unlock/export paths now pass that original name into command construction so Windows hosts no longer fall back to `bash -lc`. Source: `apps/cli/src/lib/secrets/remote.ts`, `apps/cli/src/commands/secrets.ts`, `apps/cli/src/commands/exec.ts`. (RUSH-1431)
