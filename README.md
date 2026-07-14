@@ -161,9 +161,11 @@ Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON outpu
 
 Treat `skip` as a last-resort escape hatch. In direct-exec runs (without `--acp`),
 agents-cli forwards the harness's native no-prompt flag; it does not add another
-safety layer. Prefer `auto` where the harness has a smart classifier (Claude Code and
-GitHub Copilot), or `edit` everywhere else. Harnesses without a native bypass flag
-reject direct-exec `skip`.
+safety layer. Prefer `auto` where it adds a safer automatic policy (smart classifier
+on Claude/Copilot, native high-auto mode on Droid, or interactive Kimi), or `edit`
+everywhere else. For headless Kimi, `edit`, `auto`, and `skip` all use the same
+already-auto-approved `-p` behavior, so prefer `edit` rather than signaling a blanket
+bypass. Harnesses without a native bypass flag reject direct-exec `skip`.
 
 | Harness | Direct-exec `--mode skip` becomes |
 |---|---|
@@ -179,8 +181,9 @@ reject direct-exec `skip`.
 | Droid | `--skip-permissions-unsafe` |
 
 With `--acp`, these native flags are not used. agents-cli instead grants `skip`
-permission requests at the ACP protocol layer with `allow_always`; the same
-last-resort warning applies.
+permission requests at the ACP protocol layer: it selects `allow_always` when offered,
+otherwise the first permission option offered by the server. The same last-resort
+warning applies.
 
 Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
 to sandboxed `edit` and can still prompt. `agents run codex --mode skip` is different:

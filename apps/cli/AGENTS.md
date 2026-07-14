@@ -97,23 +97,23 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 |---|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | ★ Claude Code | `claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | ★ Codex CLI | `codex` | ≥0.116 | ✓ | — | ✓ | <0.117 | ≥0.128 | ≥0.117 | — |
-| ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — |
-| ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
+| ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥1.0.16 | — |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — |
 | ★ OpenCode | `opencode` | — | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | — | — |
-| Gemini † | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — |
+| Gemini † | `gemini` | ≥0.26 | ✓ | ✓ | ✓ | ✓ | ≥0.8 | ≥0.36 | — |
 | Cursor | `cursor` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — |
 | Copilot | `copilot` | ✓ | ✓ | — | ✓ | ✓ | ✓ | ≥0.0.353 | — |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
 | Kiro | `kiro` | ≥0.10 | ✓ | ≥2.8 | ✓ | ✓ | — | ≥1.23 | — |
-| Goose | `goose` | ≥1.34 | ✓ | — | — | — | ✓ | — | — |
+| Goose | `goose` | ≥1.34 | ✓ | ✓ | ≥1.25 | — | ✓ | — | ✓ |
 | Droid | `droid` | ✓ | ✓ | ≥0.57.5 | ≥0.26 | ✓ | ✓ | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
-snapshot in sync. `workflows` is Claude-only; `mcp` is universal; `allowlist` is
-`claude`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`; `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`.
+snapshot in sync. `workflows` is `claude`/`kimi`/`goose`; `mcp` is universal; `allowlist` is
+`claude`/`gemini`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`kiro`/`droid`/`goose`; `subagents` is `claude`/`codex`/`kiro`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`gemini`.
 **† Gemini is deprecated by Google** (retired June 18 2026); Antigravity is the
 successor — the CLI warns on `agents add gemini` (`warnAgentDeprecated`).
 
@@ -209,6 +209,12 @@ scripts/release.sh <version> --apply  # commits chore(release), tags v<version>,
 `release.sh` reads the npm token from the `npmjs.com` secrets bundle (`agents
 secrets`) — no 2FA prompt, no token on disk. The script's git-scope reads use
 `<ref>:apps/cli/package.json` (not root) since the package moved under `apps/cli`.
+If npm rejects a publish after the release PR merges, rerun the same command.
+The script revalidates that PR's full CI matrix and rebuilds from its exact merged
+tree in a temporary worktree. It verifies the staged keychain helper against the
+historical SHA pin, rebuilds the unpinned menu-bar helper from historical source,
+and requires any remote tag to name the verified release commit, so later commits
+on `main` cannot leak into the already-versioned package or strand the retry.
 
 **Linux-driven release (`SIGN_HOST`).** The signed macOS artifacts (below) are
 the only reason publishing was macOS-pinned. `release.sh` now offloads producing

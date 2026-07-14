@@ -1,6 +1,7 @@
 /**
- * Subagents writer. Claude flattens each subagent into a single .md file
- * under `<agentDir>/agents/`. Codex writes TOML under `.codex/agents/`.
+ * Subagents writer. Claude/Gemini/Grok flatten each subagent into a single
+ * .md file under their native agents directory. Codex writes TOML under
+ * `.codex/agents/`.
  * Droid (Factory AI) flattens each into a custom droid .md under
  * `<versionHome>/.factory/droids/`. OpenClaw copies the full subagent
  * directory (with AGENT.md renamed to AGENTS.md) into
@@ -23,6 +24,7 @@ import {
   buildKimiSubagentsParentYaml,
   KIMI_SUBAGENTS_PARENT_FILE,
   transformSubagentForOpenCode,
+  transformSubagentForAntigravity,
   transformSubagentForDroid,
   transformSubagentForKiro,
   syncSubagentToOpenclaw,
@@ -45,8 +47,9 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
         const sub = map.get(name);
         if (!sub) continue;
         try {
-          if (agent === 'claude' || agent === 'grok') {
-            const agentsDir = path.join(versionHome, agent === 'grok' ? '.grok' : '.claude', 'agents');
+          if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
+            const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
+            const agentsDir = path.join(versionHome, agentsRoot, 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForClaude(sub.path));
             synced.push(sub.name);
@@ -62,6 +65,11 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
             const agentsDir = path.join(versionHome, '.config', 'opencode', 'agents');
             fs.mkdirSync(agentsDir, { recursive: true });
             fs.writeFileSync(safeJoin(agentsDir, `${sub.name}.md`), transformSubagentForOpenCode(sub.path));
+            synced.push(sub.name);
+          } else if (agent === 'antigravity') {
+            const agentDir = safeJoin(path.join(versionHome, '.gemini', 'config', 'agents'), sub.name);
+            fs.mkdirSync(agentDir, { recursive: true });
+            fs.writeFileSync(safeJoin(agentDir, 'agent.md'), transformSubagentForAntigravity(sub.path));
             synced.push(sub.name);
           } else if (agent === 'droid') {
             const droidsDir = path.join(versionHome, '.factory', 'droids');

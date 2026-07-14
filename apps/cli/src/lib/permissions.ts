@@ -352,14 +352,22 @@ export function buildPermissionsFromGroups(groupNames: string[]): PermissionSet 
       // Matches lines like: - "Bash(git *)" or   - "WebFetch(domain:example.com)"
       // Handles nested quotes that break YAML parsers
       const lines = content.split('\n');
+      let section: 'allow' | 'deny' | null = null;
       for (const line of lines) {
+        const sectionMatch = line.match(/^\s*(allow|deny)\s*:\s*(?:#.*)?$/);
+        if (sectionMatch) {
+          section = sectionMatch[1] as 'allow' | 'deny';
+          continue;
+        }
+
         // Match: optional whitespace, dash, whitespace, quote, content, quote
         // Use greedy match to capture everything between first and last quote
         const match = line.match(/^\s*-\s*"(.+)"$/);
         if (match) {
           const rule = match[1];
-          // 99-deny group rules go to deny, others to allow
-          if (groupName === '99-deny' || groupName.includes('-deny')) {
+          // 99-deny group rules go to deny, others follow their YAML section.
+          // Legacy group files used bare lists with no section; keep those as allow.
+          if (section === 'deny' || groupName === '99-deny' || groupName.includes('-deny')) {
             allDeny.push(rule);
           } else {
             allAllow.push(rule);
@@ -545,30 +553,39 @@ const BLANKET_BASH_FORMS = new Set(['Bash', 'Bash(*)', 'Bash(**)']);
 
 /**
  * Convert canonical permission set to Gemini format.
- * Gemini reads tool allow-lists from settings.json under `tools.allowed`.
- * Bash permissions map to run_shell_command(prefix) — the prefix is extracted
- * from the canonical "Bash(cmd:*)" pattern by stripping the trailing ":*".
- * Blanket Bash grants map to bare "run_shell_command" (no prefix filter).
+ * Gemini reads tool allow/deny lists from settings.json under
+ * `tools.core` / `tools.exclude`. Bash permissions map to ShellTool(pattern).
+ * Blanket Bash grants map to bare "ShellTool" (no command filter).
  * Non-Bash tool patterns are skipped; Gemini uses different tool names.
  */
-export function convertToGeminiFormat(set: PermissionSet): { tools: { allowed: string[] } } {
-  const allowed = new Set<string>();
-  for (const perm of set.allow) {
-    if (BLANKET_BASH_FORMS.has(perm)) {
-      allowed.add('run_shell_command');
-      continue;
+export function convertToGeminiFormat(set: PermissionSet): { tools: { core: string[]; exclude?: string[] } } {
+  const serialize = (permissions: string[]): string[] => {
+    const tools = new Set<string>();
+    for (const perm of permissions) {
+      if (BLANKET_BASH_FORMS.has(perm)) {
+        tools.add('ShellTool');
+        continue;
+      }
+      const parsed = parseCanonicalPattern(perm);
+      if (!parsed || parsed.tool !== 'bash') continue;
+      const command = normalizeBashPattern(parsed.pattern);
+      if (command === '*') {
+        tools.add('ShellTool');
+      } else {
+        tools.add(`ShellTool(${command})`);
+      }
     }
-    const parsed = parseCanonicalPattern(perm);
-    if (!parsed || parsed.tool !== 'bash') continue;
-    const colonIdx = parsed.pattern.lastIndexOf(':');
-    const prefix = colonIdx > 0 ? parsed.pattern.slice(0, colonIdx) : parsed.pattern;
-    if (prefix === '*' || prefix === '**') {
-      allowed.add('run_shell_command');
-    } else {
-      allowed.add(`run_shell_command(${prefix})`);
-    }
-  }
-  return { tools: { allowed: Array.from(allowed) } };
+    return Array.from(tools);
+  };
+
+  const core = serialize(set.allow);
+  const exclude = serialize(set.deny ?? []);
+  return {
+    tools: {
+      core,
+      ...(exclude.length ? { exclude } : {}),
+    },
+  };
 }
 
 /**
@@ -656,6 +673,56 @@ const ANTIGRAVITY_ACTION_BY_TOOL: Record<string, string | undefined> = {
   write: 'write_file',
   webfetch: 'read_url',
 };
+
+export interface GoosePermissionConfig {
+  user: {
+    always_allow: string[];
+    ask_before: string[];
+    never_allow: string[];
+  };
+}
+
+const GOOSE_TOOL_BY_CANONICAL: Record<string, string | undefined> = {
+  bash: 'developer__shell',
+  read: 'developer__text_editor',
+  write: 'developer__text_editor',
+  edit: 'developer__text_editor',
+  grep: 'developer__analyze',
+  glob: 'developer__analyze',
+  webfetch: 'developer__fetch',
+  mcp: undefined,
+};
+
+function canonicalToGooseTool(permission: string): string | null {
+  if (BLANKET_BASH_FORMS.has(permission)) return 'developer__shell';
+  const parsed = parseCanonicalPattern(permission);
+  if (!parsed) return null;
+  return GOOSE_TOOL_BY_CANONICAL[parsed.tool] ?? null;
+}
+
+/** Convert canonical permissions to Goose's per-tool permission.yaml shape. */
+export function convertToGooseFormat(set: PermissionSet): GoosePermissionConfig {
+  const alwaysAllow = new Set<string>();
+  const neverAllow = new Set<string>();
+  for (const permission of set.allow) {
+    const tool = canonicalToGooseTool(permission);
+    if (tool) alwaysAllow.add(tool);
+  }
+  for (const permission of set.deny ?? []) {
+    const tool = canonicalToGooseTool(permission);
+    if (tool) neverAllow.add(tool);
+  }
+  for (const tool of neverAllow) {
+    alwaysAllow.delete(tool);
+  }
+  return {
+    user: {
+      always_allow: Array.from(alwaysAllow).sort(),
+      ask_before: [],
+      never_allow: Array.from(neverAllow).sort(),
+    },
+  };
+}
 
 /**
  * Convert canonical permission set to Grok format.
@@ -1450,16 +1517,24 @@ export function applyPermissionsToVersion(
       const geminiPerms = convertToGeminiFormat(set);
       const settingsPath = path.join(versionHome, '.gemini', 'settings.json');
       updateGeminiSettings(settingsPath, (settings) => {
-        // Remove stale permissions key written by earlier versions of this serializer.
+        // Remove stale keys written by earlier serializer versions:
+        // top-level `permissions`, and Gemini's pre-core/exclude `tools.allowed`.
         delete (settings as Record<string, unknown>).permissions;
         const tools = (typeof settings.tools === 'object' && settings.tools !== null && !Array.isArray(settings.tools))
           ? settings.tools as Record<string, unknown>
           : {};
+        delete tools.allowed;
         if (merge) {
-          const existing = Array.isArray(tools.allowed) ? (tools.allowed as string[]) : [];
-          tools.allowed = Array.from(new Set([...existing, ...geminiPerms.tools.allowed]));
+          const existingCore = Array.isArray(tools.core) ? (tools.core as string[]) : [];
+          const existingExclude = Array.isArray(tools.exclude) ? (tools.exclude as string[]) : [];
+          tools.core = Array.from(new Set([...existingCore, ...geminiPerms.tools.core]));
+          const mergedExclude = Array.from(new Set([...existingExclude, ...(geminiPerms.tools.exclude ?? [])]));
+          if (mergedExclude.length) tools.exclude = mergedExclude;
+          else delete tools.exclude;
         } else {
-          tools.allowed = geminiPerms.tools.allowed;
+          tools.core = geminiPerms.tools.core;
+          if (geminiPerms.tools.exclude?.length) tools.exclude = geminiPerms.tools.exclude;
+          else delete tools.exclude;
         }
         settings.tools = tools;
       });
@@ -1517,6 +1592,49 @@ export function applyPermissionsToVersion(
       config.permission = existingPermission;
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       fs.writeFileSync(configPath, TOML.stringify(config as any), 'utf-8');
+      return { success: true };
+    }
+
+    if (agentId === 'goose') {
+      const permissionsPath = path.join(versionHome, '.config', 'goose', 'permission.yaml');
+      let config: Record<string, unknown> = {};
+      if (fs.existsSync(permissionsPath)) {
+        const parsed = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8'));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          config = parsed as Record<string, unknown>;
+        }
+      }
+
+      const converted = convertToGooseFormat(set).user;
+      const user = (typeof config.user === 'object' && config.user !== null && !Array.isArray(config.user))
+        ? config.user as Record<string, unknown>
+        : {};
+
+      const currentAlways = Array.isArray(user.always_allow) ? user.always_allow.filter((v): v is string => typeof v === 'string') : [];
+      const currentAsk = Array.isArray(user.ask_before) ? user.ask_before.filter((v): v is string => typeof v === 'string') : [];
+      const currentNever = Array.isArray(user.never_allow) ? user.never_allow.filter((v): v is string => typeof v === 'string') : [];
+
+      if (merge) {
+        const incomingAlways = new Set(converted.always_allow);
+        const incomingNever = new Set(converted.never_allow);
+        const touched = new Set([...incomingAlways, ...incomingNever]);
+        const always = new Set(currentAlways.filter(tool => !touched.has(tool)));
+        const ask = new Set(currentAsk.filter(tool => !touched.has(tool)));
+        const never = new Set(currentNever.filter(tool => !touched.has(tool)));
+        for (const tool of incomingAlways) always.add(tool);
+        for (const tool of incomingNever) never.add(tool);
+        user.always_allow = Array.from(always).sort();
+        user.ask_before = Array.from(ask).sort();
+        user.never_allow = Array.from(never).sort();
+      } else {
+        user.always_allow = converted.always_allow;
+        user.ask_before = converted.ask_before;
+        user.never_allow = converted.never_allow;
+      }
+
+      config.user = user;
+      fs.mkdirSync(path.dirname(permissionsPath), { recursive: true });
+      fs.writeFileSync(permissionsPath, yaml.stringify(config), 'utf-8');
       return { success: true };
     }
 

@@ -96,9 +96,40 @@ describe('staleness/registry', () => {
     expect(DETECTORS.permissions.antigravity).toBeDefined();
   });
 
+  it('gemini has a permissions writer + detector', () => {
+    expect(WRITERS.permissions.gemini).toBeDefined();
+    expect(DETECTORS.permissions.gemini).toBeDefined();
+  });
+
+  it('antigravity has subagents writers + detectors', () => {
+    expect(WRITERS.subagents.antigravity).toBeDefined();
+    expect(DETECTORS.subagents.antigravity).toBeDefined();
+    expect(WRITERS.workflows.antigravity).toBeUndefined();
+    expect(DETECTORS.workflows.antigravity).toBeUndefined();
+  });
+
+  it('kimi has a workflows writer + detector', () => {
+    expect(WRITERS.workflows.kimi).toBeDefined();
+    expect(DETECTORS.workflows.kimi).toBeDefined();
+  });
+
   it('kiro has a subagents writer + detector', () => {
     expect(WRITERS.subagents.kiro).toBeDefined();
     expect(DETECTORS.subagents.kiro).toBeDefined();
+  });
+
+  it('gemini has plugins and subagents writers + detectors', () => {
+    expect(WRITERS.plugins.gemini).toBeDefined();
+    expect(DETECTORS.plugins.gemini).toBeDefined();
+    expect(WRITERS.subagents.gemini).toBeDefined();
+    expect(DETECTORS.subagents.gemini).toBeDefined();
+  });
+
+  it('goose has workflows and permissions writers + detectors', () => {
+    expect(WRITERS.workflows.goose).toBeDefined();
+    expect(DETECTORS.workflows.goose).toBeDefined();
+    expect(WRITERS.permissions.goose).toBeDefined();
+    expect(DETECTORS.permissions.goose).toBeDefined();
   });
 
   it('droid has a generic skills writer + detector', () => {
@@ -214,7 +245,4 @@ describe('staleness/registry', () => {
     }
   });
 
-  // Gemini's allowlist capability is `false` in the matrix today even though
-  // applyPermissionsToVersion has a Gemini branch. Flipping that capability
-  // is its own PR — when it lands, add the assertion here.
 });

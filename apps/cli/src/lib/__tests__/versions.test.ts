@@ -209,6 +209,54 @@ describe('syncResourcesToVersion preserves command-skills through the skills orp
   });
 });
 
+
+describe('syncResourcesToVersion respects version-gated subagent capabilities', () => {
+  it('[antigravity] skips subagents before 1.0.16 and syncs them at 1.0.16+', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'subagent-version-gate-'));
+    try {
+      const script = String.raw`
+        import * as fs from 'fs';
+        import * as path from 'path';
+        import { getVersionHomePath, syncResourcesToVersion } from './src/lib/versions.ts';
+
+        const home = process.env.HOME;
+        if (!home) throw new Error('HOME missing');
+        const userDir = path.join(home, '.agents');
+        const projectRoot = path.join(home, 'project');
+        fs.mkdirSync(projectRoot, { recursive: true });
+        const subagentDir = path.join(userDir, 'subagents', 'verifier');
+        fs.mkdirSync(subagentDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(subagentDir, 'AGENT.md'),
+          ['---','name: verifier','description: Verifies work','---','','Check the installed artifact.'].join('\n')
+        );
+
+        for (const version of ['1.0.15', '1.0.16']) {
+          const fakeBin = path.join(userDir, '.history', 'versions', 'antigravity', version, 'node_modules', '.bin', 'agy');
+          fs.mkdirSync(path.dirname(fakeBin), { recursive: true });
+          fs.writeFileSync(fakeBin, '#!/usr/bin/env sh\nexit 0\n');
+          fs.chmodSync(fakeBin, 0o755);
+          syncResourcesToVersion('antigravity', version, { subagents: ['verifier'] }, { cwd: projectRoot, force: true });
+        }
+
+        const beforePath = path.join(getVersionHomePath('antigravity', '1.0.15'), '.gemini', 'config', 'agents', 'verifier', 'agent.md');
+        const afterPath = path.join(getVersionHomePath('antigravity', '1.0.16'), '.gemini', 'config', 'agents', 'verifier', 'agent.md');
+        console.log(JSON.stringify({ beforeExists: fs.existsSync(beforePath), afterExists: fs.existsSync(afterPath) }));
+      `;
+      const out = execFileSync('bun', ['--eval', script], {
+        cwd: repoRoot,
+        env: { ...process.env, HOME: home },
+        encoding: 'utf-8',
+      });
+      const result = JSON.parse(out.trim().split('\n').at(-1) ?? '{}') as { beforeExists: boolean; afterExists: boolean };
+      expect(result.beforeExists).toBe(false);
+      expect(result.afterExists).toBe(true);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 // When a version is removed, the command handler calls removeVersion then
 // updateSessionFilePaths so session reads still work from the new trash location.
 // This test verifies both pieces independently and together.

@@ -6,7 +6,7 @@ Distributable bundles that package skills, commands, hooks, MCP servers, and per
 
 A plugin is a directory in `~/.agents/plugins/` containing a `.claude-plugin/plugin.json` manifest. When you install or sync a plugin, agents-cli copies its contents into a synthetic per-user marketplace inside the agent version home and enables it via `enabledPlugins` in `settings.json`. Plugins are a superset of individual resources: a single plugin can ship skills, slash commands, subagent definitions, hooks, MCP servers, LSP servers, monitors, bin scripts, and permission sets — installed atomically as a unit.
 
-Only agents with `plugins: true` (or a version-gated `since`) in the capability matrix participate — today Claude, OpenClaw, Antigravity, Grok, and Codex >= 0.128.0 (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins can narrow further by declaring `agents: [...]` in their manifest. Plugins that ship executable surfaces (hooks, `.mcp.json`, `bin/`, `scripts/`, `settings.json`, `permissions/`) require explicit consent via `--allow-exec-surfaces` to be enabled after installation.
+Only agents with `plugins: true` (or a version-gated `since`) in the capability matrix participate — today Claude, OpenClaw, Antigravity, Grok, Kimi, Cursor, Goose, Droid, Gemini >= 0.8.0, and Codex >= 0.128.0 (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins can narrow further by declaring `agents: [...]` in their manifest. Plugins that ship executable surfaces (hooks, `.mcp.json`, `bin/`, `scripts/`, `settings.json`, `permissions/`) require explicit consent via `--allow-exec-surfaces` to be enabled after installation.
 
 For the layered resource model that governs plugin resolution, see [02-resource-sync.md](02-resource-sync.md).
 
@@ -40,6 +40,11 @@ For the layered resource model that governs plugin resolution, see [02-resource-
     settings.json
       enabledPlugins["<name>@agents-cli"] = true   (only when exec gate passes)
 ```
+
+Gemini >= 0.8.0 installs the same bundle as a Gemini extension at
+`<version-home>/.gemini/extensions/<name>/` with a generated
+`gemini-extension.json` manifest. Claude plugin path placeholders are rewritten
+to Gemini's `${extensionPath}` runtime variable.
 
 ## Command Reference
 

@@ -112,8 +112,11 @@ function buildGeminiDetector(): ResourceDetector {
       if (!fs.existsSync(settingsPath)) return [];
       try {
         const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-        const allowed: unknown = settings?.tools?.allowed;
-        if (Array.isArray(allowed) && allowed.length > 0) {
+        const core: unknown = settings?.tools?.core;
+        const exclude: unknown = settings?.tools?.exclude;
+        const hasCore = Array.isArray(core) && core.length > 0;
+        const hasExclude = Array.isArray(exclude) && exclude.length > 0;
+        if (hasCore || hasExclude) {
           return discoverPermissionGroups().map(g => g.name);
         }
       } catch { /* parse fail */ }
@@ -156,6 +159,29 @@ function buildGrokDetector(): ResourceDetector {
         if (perm && Array.isArray(perm.rules) && perm.rules.length > 0) {
           return discoverPermissionGroups().map(g => g.name);
         }
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
+function buildGooseDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'goose',
+    list({ versionHome }: DetectArgs): string[] {
+      const permissionsPath = path.join(versionHome, '.config', 'goose', 'permission.yaml');
+      if (!fs.existsSync(permissionsPath)) return [];
+      try {
+        const config = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8')) as {
+          user?: { always_allow?: unknown[]; ask_before?: unknown[]; never_allow?: unknown[] };
+        } | null;
+        const user = config?.user;
+        const count =
+          (Array.isArray(user?.always_allow) ? user.always_allow.length : 0) +
+          (Array.isArray(user?.ask_before) ? user.ask_before.length : 0) +
+          (Array.isArray(user?.never_allow) ? user.never_allow.length : 0);
+        if (count > 0) return discoverPermissionGroups().map(g => g.name);
       } catch { /* parse fail */ }
       return [];
     },
@@ -244,6 +270,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   gemini: buildGeminiDetector,
   antigravity: buildAntigravityDetector,
   grok: buildGrokDetector,
+  goose: buildGooseDetector,
   kimi: buildKimiDetector,
   cursor: buildCursorDetector,
   droid: buildDroidDetector,

@@ -511,6 +511,21 @@ export interface VersionSkillDiff {
  */
 export function diffVersionSkills(agent: AgentId, version: string): VersionSkillDiff {
   const available = new Set(listAllSkills());
+
+  // Goose and other native ~/.agents/skills consumers read central storage
+  // directly. They intentionally have no per-version copy to diff, so every
+  // available central skill is already current for every supported version.
+  if (AGENTS[agent].nativeAgentsSkillsDir) {
+    return {
+      agent,
+      version,
+      toAdd: [],
+      toUpdate: [],
+      matched: Array.from(available).sort(),
+      orphans: [],
+    };
+  }
+
   const installed = new Set(listSkillsInVersionHome(agent, version));
 
   const toAdd: string[] = [];
