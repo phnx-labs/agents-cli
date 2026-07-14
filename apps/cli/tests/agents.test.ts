@@ -148,11 +148,12 @@ describe('Hermes and ForgeCode install targets', () => {
     }
   });
 
-  it('registers ForgeCode with skills, MCP, and AGENTS.md rules', () => {
+  it('registers ForgeCode with skills, MCP, commands, subagents, and AGENTS.md rules', () => {
     expect(ALL_AGENT_IDS).toContain('forge');
     expect(capableAgents('mcp')).toContain('forge');
     expect(capableAgents('skills')).toContain('forge');
-    expect(capableAgents('commands')).not.toContain('forge');
+    expect(capableAgents('commands')).toContain('forge');
+    expect(capableAgents('subagents')).toContain('forge');
     expect(capableAgents('hooks')).not.toContain('forge');
     expect(AGENTS.forge.instructionsFile).toBe('AGENTS.md');
     expect(AGENTS.forge.capabilities.rules).toEqual({ file: 'AGENTS.md' });
