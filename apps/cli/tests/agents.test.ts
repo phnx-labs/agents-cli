@@ -58,9 +58,9 @@ describe('droid (Factory AI)', () => {
     // (RUSH-1340). Both route through supports() like every other capability.
     expect(capableAgents('hooks')).toContain('droid');
     expect(capableAgents('plugins')).toContain('droid');
-    // No Droid equivalent for these — must stay false so the registry
-    // assertion doesn't demand writers we can't provide.
-    expect(capableAgents('skills')).not.toContain('droid');
+    expect(capableAgents('skills')).toContain('droid');
+    // No Droid equivalent for workflows — keep it false so the registry
+    // assertion doesn't demand a writer we can't provide.
     expect(capableAgents('workflows')).not.toContain('droid');
   });
 

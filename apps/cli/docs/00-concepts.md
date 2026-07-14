@@ -145,7 +145,7 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 | Antigravity | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | no |
-| Droid | yes | yes | >= 0.57.5 | no | yes | yes | yes | `AGENTS.md` | no |
+| Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | no | yes | no | no | no | `MEMORY.md` | no |
 | ForgeCode | no | yes | no | yes | no | no | no | `AGENTS.md` | no |
 

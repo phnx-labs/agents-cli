@@ -108,7 +108,7 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
 | Kiro | `kiro` | ≥0.10 | ✓ | ≥2.8 | ✓ | ✓ | — | ≥1.23 | — |
 | Goose | `goose` | ≥1.34 | ✓ | — | — | — | ✓ | — | — |
-| Droid | `droid` | ✓ | ✓ | ≥0.57.5 | — | ✓ | ✓ | ✓ | — |
+| Droid | `droid` | ✓ | ✓ | ≥0.57.5 | ≥0.26 | ✓ | ✓ | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
