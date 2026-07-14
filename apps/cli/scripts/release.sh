@@ -138,6 +138,14 @@ NPM_USER="$(npm whoami 2>/dev/null || true)"
 [[ -n "$NPM_USER" ]] || die "npm whoami failed with the resolved NPM_TOKEN -- token may be expired or lack publish scope"
 green "npm authenticated as $NPM_USER (via npmjs.com bundle)"
 
+remote_tag_commit() {
+  local tag="$1" refs peeled direct
+  refs="$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+  peeled="$(awk '$2 ~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  direct="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  printf '%s' "${peeled:-$direct}"
+}
+
 # ----- Validate version bump -----
 # Compare against current published latest of the canonical package.
 PHNX_LATEST="$(npm view "$PHNX_PKG" version 2>/dev/null || true)"
@@ -267,23 +275,33 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
   [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
     || die "merged release PR #$MERGED_RELEASE_PR is not version $TARGET"
 
-  for helper in "Agents CLI.app" "MenubarHelper.app"; do
-    [[ -d "$INVOKING_ROOT/bin/$helper" ]] \
-      || die "historical publish retry needs the staged signed helper: $INVOKING_ROOT/bin/$helper"
-  done
+  if [[ "$(uname)" == "Darwin" ]]; then
+    [[ -d "$INVOKING_ROOT/bin/Agents CLI.app" ]] \
+      || die "historical publish retry needs the staged SHA-pinned helper: $INVOKING_ROOT/bin/Agents CLI.app"
+  fi
 
   HISTORICAL_CATCHUP=true
   HISTORICAL_WT="$REPO_ROOT/.agents/worktrees/retry-release-v$TARGET-$$"
   git worktree add --quiet --detach "$HISTORICAL_WT" "$MERGED_RELEASE_SHA" \
     || die "could not create historical release worktree at $HISTORICAL_WT"
-  mkdir -p "$HISTORICAL_WT/apps/cli/bin"
-  cp -R "$INVOKING_ROOT/bin/Agents CLI.app" "$HISTORICAL_WT/apps/cli/bin/"
-  cp -R "$INVOKING_ROOT/bin/MenubarHelper.app" "$HISTORICAL_WT/apps/cli/bin/"
   cd "$HISTORICAL_WT/apps/cli"
   ROOT="$(pwd)"
   bold "Retrying from merged release PR #$MERGED_RELEASE_PR at ${MERGED_RELEASE_SHA:0:9} (current main: ${BASE_SHA:0:9})..."
   bun install --frozen-lockfile >/dev/null \
     || die "dependency install failed in historical release worktree"
+  if [[ "$(uname)" == "Darwin" ]]; then
+    mkdir -p bin
+    cp -R "$INVOKING_ROOT/bin/Agents CLI.app" bin/
+    scripts/verify-keychain-helper.sh \
+      || die "staged keychain helper does not match the historical release pin"
+    bold "Building the menu-bar helper from the historical release tree..."
+    menubar/scripts/build.sh release \
+      || die "historical menu-bar helper build failed"
+    rm -rf bin/MenubarHelper.app
+    cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
+    codesign --verify --deep --strict bin/MenubarHelper.app \
+      || die "historical menu-bar helper signature verification failed"
+  fi
 fi
 
 # ----- Sync package.json with target -----
@@ -508,14 +526,18 @@ PKG_BUMPED=false
 # just make sure the tag exists on the merged commit and is pushed.
 if $PHNX_TARGET_PUBLISHED; then
   green "$PHNX_PKG@$TARGET is already on the registry."
-  if ! git ls-remote --exit-code --tags origin "v$TARGET" >/dev/null 2>&1; then
-    TAG_TARGET="${MERGED_RELEASE_SHA:-origin/$DEFAULT_BRANCH}"
-    [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
-      || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
-    git tag -f "v$TARGET" "$TAG_TARGET" >/dev/null
+  TAG_TARGET="${MERGED_RELEASE_SHA:-origin/$DEFAULT_BRANCH}"
+  [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+    || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
+  VERIFIED_TAG_SHA="$(git rev-parse "$TAG_TARGET^{commit}")"
+  REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
+  if [[ -z "$REMOTE_TAG_SHA" ]]; then
+    git tag -f "v$TARGET" "$VERIFIED_TAG_SHA" >/dev/null
     git push origin "v$TARGET" && green "Pushed missing tag v$TARGET"
   else
-    gray "Tag v$TARGET already on origin, nothing to do."
+    [[ "$REMOTE_TAG_SHA" == "$VERIFIED_TAG_SHA" ]] \
+      || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, not verified release commit $VERIFIED_TAG_SHA"
+    gray "Tag v$TARGET already points at the verified release commit."
   fi
   exit 0
 fi
@@ -689,6 +711,9 @@ fi
 git checkout -q "$MERGED_SHA" -- package.json CHANGELOG.md
 
 # ----- Tag at the merged commit (idempotent) -----
+REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
+[[ -z "$REMOTE_TAG_SHA" || "$REMOTE_TAG_SHA" == "$MERGED_SHA" ]] \
+  || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, not verified release commit $MERGED_SHA"
 if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
   [[ "$(git rev-parse "refs/tags/v$TARGET^{commit}")" == "$MERGED_SHA" ]] \
     || die "local tag v$TARGET does not point at the verified release commit $MERGED_SHA"
