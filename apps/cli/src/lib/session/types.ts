@@ -74,6 +74,8 @@ export interface SessionMeta {
   gitBranch?: string;
   messageCount?: number;
   tokenCount?: number;
+  /** Real generated (output) tokens — excludes cache-read/-write context (issue: `agents output`). */
+  outputTokens?: number;
   /** Total USD cost, computed at scan time from per-model token usage (issue #323). */
   costUsd?: number;
   /** Wall-clock duration in ms (lastTs − firstTs), persisted at scan time. */
