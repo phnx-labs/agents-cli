@@ -303,6 +303,19 @@ export function transformSubagentForDroid(subagentDir: string): string {
 }
 
 /**
+ * Transform a subagent into a GitHub Copilot CLI custom agent `.agent.md` file.
+ *
+ * Copilot custom agents are Markdown profiles with YAML frontmatter stored in
+ * `~/.copilot/agents/` (user) or `.github/agents/` (project). The file name
+ * ends in `.agent.md` and the frontmatter carries `name`, `description`, and
+ * optionally `model` and `tools`. The emitted body is identical to Factory
+ * Droid's custom-droid format (flatten frontmatter + body + appended .md
+ * sections, `color` dropped), so this is an alias of transformSubagentForDroid.
+ * See GitHub docs for custom agents.
+ */
+export const transformSubagentForCopilot = transformSubagentForDroid;
+
+/**
  * Transform a subagent into an OpenCode agent markdown file.
  *
  * OpenCode loads agents from ~/.config/opencode/agents/*.md (global) with
@@ -790,6 +803,18 @@ export function listSubagentsForAgent(
       const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
       subagents.push({ name, path: filePath, files: [file], frontmatter });
     }
+  } else if (agentId === 'copilot') {
+    // Copilot: flat `<name>.agent.md` files under ~/.copilot/agents/
+    const agentsDir = path.join(home, '.copilot', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.agent.md')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+      const name = file.replace(/\.agent\.md$/, '');
+      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
+      subagents.push({ name, path: filePath, files: [file], frontmatter });
+    }
   } else if (agentId === 'openclaw') {
     // OpenClaw: directories with AGENTS.md
     const openclawDir = path.join(home, '.openclaw');
@@ -1007,6 +1032,12 @@ export function removeSubagentFromVersion(
       if (fs.existsSync(targetPath)) {
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
+      }
+    } else if (agent === 'copilot') {
+      const targetPath = path.join(versionHome, '.copilot', 'agents', `${subagentName}.agent.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.agent.md.${stamp}`));
       }
     } else if (agent === 'openclaw') {
       const targetDir = path.join(versionHome, '.openclaw', subagentName);

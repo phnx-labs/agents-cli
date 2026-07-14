@@ -62,6 +62,20 @@ function buildDroidDetector(): ResourceDetector {
   };
 }
 
+function buildCopilotDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'copilot',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.copilot', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.agent.md'))
+        .map(f => f.replace('.agent.md', ''));
+    },
+  };
+}
+
 function buildOpenclawDetector(): ResourceDetector {
   return {
     kind: 'subagents',
@@ -121,6 +135,7 @@ function buildOpenCodeDetector(): ResourceDetector {
 
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
+  copilot: buildCopilotDetector,
   grok: buildGrokDetector,
   codex: buildCodexDetector,
   kimi: buildKimiDetector,
