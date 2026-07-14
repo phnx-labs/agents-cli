@@ -185,7 +185,7 @@ echo "VSCE PAT verified."
 if [ $SKIP_TESTS -eq 0 ]; then
     echo "${DRY}Running tests..."
     if [ $CONFIRM -eq 1 ]; then
-        bun test
+        bun run test
     fi
 else
     echo "Skipping tests (--skip-tests)."
