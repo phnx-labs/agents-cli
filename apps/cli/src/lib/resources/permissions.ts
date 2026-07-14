@@ -84,9 +84,11 @@ function getAgentConfigPath(agent: AgentId, versionHome: string): string | null 
     case 'codex':
       return path.join(versionHome, '.codex', 'config.toml');
     case 'opencode':
-      return path.join(versionHome, '.opencode', 'opencode.jsonc');
+      return path.join(versionHome, '.config', 'opencode', 'opencode.jsonc');
     case 'kimi':
       return path.join(versionHome, '.kimi-code', 'config.toml');
+    case 'droid':
+      return path.join(versionHome, '.factory', 'settings.json');
     case 'kiro':
       return path.join(versionHome, '.kiro', 'settings', 'permissions.yaml');
     default:

@@ -90,20 +90,6 @@ function buildOpenclawDetector(): ResourceDetector {
   };
 }
 
-function buildKiroDetector(): ResourceDetector {
-  return {
-    kind: 'subagents',
-    agent: 'kiro',
-    list({ versionHome }: DetectArgs): string[] {
-      const agentsDir = path.join(versionHome, '.kiro', 'agents');
-      if (!fs.existsSync(agentsDir)) return [];
-      return fs.readdirSync(agentsDir)
-        .filter(f => f.endsWith('.json'))
-        .map(f => f.replace('.json', ''));
-    },
-  };
-}
-
 function buildKimiDetector(): ResourceDetector {
   return {
     kind: 'subagents',
@@ -115,6 +101,20 @@ function buildKimiDetector(): ResourceDetector {
       return fs.readdirSync(agentsDir)
         .filter(f => f.endsWith('.yaml') && !f.startsWith('_'))
         .map(f => f.replace(/\.yaml$/, ''));
+    },
+  };
+}
+
+function buildKiroDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'kiro',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.kiro', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace(/\.json$/, ''));
     },
   };
 }

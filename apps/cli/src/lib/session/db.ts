@@ -17,7 +17,7 @@ const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
 /** Current schema version; bumped when migrations are added. */
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   label TEXT,
   message_count INTEGER,
   token_count INTEGER,
+  output_tokens INTEGER,
   cost_usd REAL,
   duration_ms INTEGER,
   file_path TEXT NOT NULL,
@@ -120,6 +121,7 @@ export interface SessionRow {
   label: string | null;
   message_count: number | null;
   token_count: number | null;
+  output_tokens: number | null;
   cost_usd: number | null;
   duration_ms: number | null;
   file_path: string;
@@ -287,6 +289,16 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // column; rescan to backfill.
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'plan')) db.exec(`ALTER TABLE sessions ADD COLUMN plan TEXT`);
+    db.exec(`DELETE FROM scan_ledger;`);
+  }
+
+  if (fromVersion < 12) {
+    // v11 → v12: `output_tokens` — the real generated-token count, kept separate
+    // from `token_count` (which sums cache-read/-write and so is dominated by
+    // cheap re-counted context). This is the honest "output" metric powering
+    // `agents output`. Additive column; rescan to backfill from transcripts.
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'output_tokens')) db.exec(`ALTER TABLE sessions ADD COLUMN output_tokens INTEGER`);
     db.exec(`DELETE FROM scan_ledger;`);
   }
 }
@@ -515,13 +527,13 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
     id, short_id, agent, version, account, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
-    cost_usd, duration_ms,
+    output_tokens, cost_usd, duration_ms,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
     pr_url, pr_number, worktree_slug, ticket_id, plan
   ) VALUES (
     @id, @short_id, @agent, @version, @account, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
-    @cost_usd, @duration_ms,
+    @output_tokens, @cost_usd, @duration_ms,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
     @pr_url, @pr_number, @worktree_slug, @ticket_id, @plan
   )
@@ -539,6 +551,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     label = excluded.label,
     message_count = excluded.message_count,
     token_count = excluded.token_count,
+    output_tokens = excluded.output_tokens,
     cost_usd = excluded.cost_usd,
     duration_ms = excluded.duration_ms,
     file_path = excluded.file_path,
@@ -597,6 +610,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     label: meta.label ?? null,
     message_count: meta.messageCount ?? null,
     token_count: meta.tokenCount ?? null,
+    output_tokens: meta.outputTokens ?? null,
     cost_usd: meta.costUsd ?? null,
     duration_ms: meta.durationMs ?? null,
     file_path: meta.filePath,
@@ -699,6 +713,7 @@ export function upsertSessionsBatch(
         label: meta.label ?? null,
         message_count: meta.messageCount ?? null,
         token_count: meta.tokenCount ?? null,
+        output_tokens: meta.outputTokens ?? null,
         cost_usd: meta.costUsd ?? null,
         duration_ms: meta.durationMs ?? null,
         file_path: meta.filePath,
@@ -883,6 +898,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     gitBranch: row.git_branch ?? undefined,
     messageCount: row.message_count ?? undefined,
     tokenCount: row.token_count ?? undefined,
+    outputTokens: row.output_tokens ?? undefined,
     costUsd: row.cost_usd ?? undefined,
     durationMs: row.duration_ms ?? undefined,
     version: row.version ?? undefined,
@@ -1066,6 +1082,8 @@ export interface UsageRollupRow {
   durationMs: number;
   sessionCount: number;
   tokenCount: number;
+  /** Real generated (output) tokens — excludes cache-read/-write context. */
+  outputTokens: number;
 }
 
 /** What to group a usage rollup by. */
@@ -1097,7 +1115,8 @@ export function queryUsageRollup(
       IFNULL(SUM(cost_usd), 0) AS costUsd,
       IFNULL(SUM(duration_ms), 0) AS durationMs,
       COUNT(*) AS sessionCount,
-      IFNULL(SUM(token_count), 0) AS tokenCount
+      IFNULL(SUM(token_count), 0) AS tokenCount,
+      IFNULL(SUM(output_tokens), 0) AS outputTokens
     FROM sessions
     ${clause}
     GROUP BY key

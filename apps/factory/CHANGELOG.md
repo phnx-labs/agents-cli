@@ -1,9 +1,3 @@
-## Unreleased
-
-- **Remote plan previews are isolated by source path (RUSH-1631).** Cache key is `host/sha1(path)/basename` so two worktrees sharing a plan basename no longer clobber each other. Source: `apps/factory/src/vscode/settings.vscode.ts`.
-- **Windows remote dispatch uses distinct PowerShell stdout/stderr log paths (RUSH-1622).** `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot share a file; use `.out.log` / `.err.log`. Source: `apps/factory/src/vscode/settings.vscode.ts`.
-- **Factory Floor shows live plan progress for remote / device-dispatched agents (RUSH-1380).** The CLI now carries each session's latest `TodoWrite` on `ActiveSession.todos`; the remote adapter maps it onto the feed's checklist (previously hardcoded empty for status-only remote sessions), so a headless agent on another machine now renders an N/M pill in its header, the `CardChecklist` in its feed card, and a `TodoChecklist` in its detail pane. When there's no live tool action, the now-line falls back to the in-progress step. Source: `apps/factory/src/core/remoteSessions.ts` (`RemoteSession.todos`, `normalizeTodos`), `ui/settings/components/mission-control/floorAdapter.ts` (`toFloorAgentFromRemote`), `FeedItem.tsx`, `UnifiedAgentsPane.tsx`, `floor.css`.
-
 # Changelog
 
 All notable changes to the Factory extension are documented here. Format follows
@@ -12,12 +6,27 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Factory Floor shows live plan progress for remote / device-dispatched agents (RUSH-1380).** The CLI now carries each session's latest `TodoWrite` on `ActiveSession.todos`; the remote adapter maps it onto the feed's checklist (previously hardcoded empty for status-only remote sessions), so a headless agent on another machine now renders an N/M pill in its header, the `CardChecklist` in its feed card, and a `TodoChecklist` in its detail pane. When there's no live tool action, the now-line falls back to the in-progress step. Source: `apps/factory/src/core/remoteSessions.ts` (`RemoteSession.todos`, `normalizeTodos`), `ui/settings/components/mission-control/floorAdapter.ts` (`toFloorAgentFromRemote`), `FeedItem.tsx`, `UnifiedAgentsPane.tsx`, `floor.css`.
+
+## [0.9.292] - 2026-07-13
+
+- **Factory recognizes every current agents-cli harness.** The checked-in CLI
+  registry snapshot now includes Hermes and ForgeCode, keeping Factory's agent
+  metadata aligned with the canonical `AgentId` union. Source:
+  `src/core/agents.cli.ts`.
+- **Remote plan previews are isolated by source path (RUSH-1631).** Cache key is `host/sha1(path)/basename` so two worktrees sharing a plan basename no longer clobber each other. Source: `src/vscode/settings.vscode.ts`.
+- **Windows remote dispatch uses distinct PowerShell stdout/stderr log paths (RUSH-1622).** `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` cannot share a file; use `.out.log` / `.err.log`. Source: `src/vscode/settings.vscode.ts`.
+
 - **Factory Floor group controls now support Subgroup (RUSH-1544).**
   The live feed and Backlog controls can render a second grouping axis, excluding
   the primary axis to avoid duplicate grouping. Nested section headers make
   combinations like Project -> Host and Project -> Source visible without
   switching views. Source: `ui/settings/components/mission-control/FloorControls.tsx`,
   `UnifiedAgentsPane.tsx`, `BacklogCenter.tsx`.
+- **Factory Floor backlog refreshes while the view stays open (RUSH-1578).**
+  The Floor and Bench tabs now re-fetch unified Linear/GitHub tasks on a
+  30-second active-view cadence, so external ticket status changes no longer
+  require closing and reopening Factory. Source: `ui/settings/App.tsx`.
 - **Factory Floor surfaces agent-created tickets as clickable Linear artifacts (RUSH-1547).**
   Session cards and detail panes now render linked Linear badges for carried/created
   ticket refs and include commit chips in the produced-artifacts row, so PRs,
@@ -30,6 +39,11 @@ All notable changes to the Factory extension are documented here. Format follows
   Factory detaches, kills the tmux session, and lets the VS Code
   terminal close instead of lingering on a "Pane is dead" banner. Source:
   `src/vscode/tmux.ts`.
+- **Factory Floor's full sidebar is now resizable (RUSH-1539).** Drag the right
+  edge to widen or narrow the project/host sidebar; the chosen width persists
+  with the existing Floor preferences. Source:
+  `ui/settings/components/mission-control/FloorSidebar.tsx`,
+  `UnifiedAgentsPane.tsx`, `floor.css`.
 - **Per-session rate-limit badge on feed cards (RUSH-1523).** Sessions whose transcript shows a rate/usage limit render a distinct **rate limited** pill so they no longer look like healthy running agents. Source: `floorModel.ts` (`rateLimited`), `floorAdapter.ts` (`detectSessionRateLimited`), `FeedItem.tsx`.
 - **Feed cards get an Open/Resume-in-terminal action (RUSH-1520).** Each card shows a Terminal button that focuses an open tab, attaches a tmux rail, or runs `agents sessions focus <id>` — so the operator jumps into the session instead of only opening the side panel. Source: `ui/settings/components/mission-control/FeedItem.tsx`, `UnifiedAgentsPane.tsx` (`openTerminalForAgent`).
 - **Filter + group-by controls live in the feed header bar next to Save view (RUSH-1526).** The feed's own header (`SavedViews` / `feed-header-bar`) now carries Group + status chips (Needs you / Running / Idle / Failed) + agent-abbr chips, so operators filter and group where they are looking — not only from the top FloorControls bar. Source: `ui/settings/components/mission-control/SavedViewsBar.tsx`, `UnifiedAgentsPane.tsx`, `floor.css`.

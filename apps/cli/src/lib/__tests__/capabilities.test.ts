@@ -249,6 +249,48 @@ describe('kiro hooks version gate', () => {
   });
 });
 
+describe('kiro subagents version gate', () => {
+  it('gates versions below 1.23.0 as too_old', () => {
+    const result = supports('kiro', 'subagents', '1.22.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 1.23.0');
+    }
+  });
+
+  it('passes 1.23.0 and above', () => {
+    expect(supports('kiro', 'subagents', '1.23.0')).toEqual({ ok: true });
+    expect(supports('kiro', 'subagents', '2.12.1')).toEqual({ ok: true });
+  });
+});
+
+describe('droid skills version gate', () => {
+  it('gates versions below 0.26.0 as too_old', () => {
+    const result = supports('droid', 'skills', '0.25.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.need).toBe('>= 0.26.0');
+  });
+
+  it('passes 0.26.0 and above', () => {
+    expect(supports('droid', 'skills', '0.26.0')).toEqual({ ok: true });
+    expect(supports('droid', 'skills', '0.161.0')).toEqual({ ok: true });
+  });
+});
+
+describe('droid allowlist version gate', () => {
+  it('gates versions below 0.57.5 as too_old', () => {
+    const result = supports('droid', 'allowlist', '0.57.4');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.need).toBe('>= 0.57.5');
+  });
+
+  it('passes 0.57.5 and above', () => {
+    expect(supports('droid', 'allowlist', '0.57.5')).toEqual({ ok: true });
+    expect(supports('droid', 'allowlist', '0.159.0')).toEqual({ ok: true });
+  });
+});
+
 describe('kiro allowlist version gate', () => {
   it('gates versions below 2.8.0 as too_old', () => {
     const result = supports('kiro', 'allowlist', '2.7.9');

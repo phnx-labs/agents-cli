@@ -89,8 +89,17 @@ describe('inferProjectRoot', () => {
   let tmp: string;
   let repo: string;
 
+  const expectedRoot = () =>
+    toHomeRelative(process.platform === 'win32' ? tmp : fs.realpathSync(tmp));
+
   beforeAll(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'proot-'));
+    // Canonicalize the temp dir so it matches the long real path git — and thus
+    // inferProjectRoot — resolves to. realpathSync.native resolves BOTH the macOS
+    // /var → /private/var symlink AND Windows 8.3 short names (CI runners hand back
+    // os.tmpdir() as C:\Users\RUNNER~1\..., which would never fold under the
+    // long-form home dir). Without this the home-relative comparison mismatches on
+    // Windows (short vs long) even though inferProjectRoot is correct.
+    tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'proot-')));
     repo = path.join(tmp, 'my-repo');
     fs.mkdirSync(path.join(repo, 'sub', 'deep'), { recursive: true });
     const git = (args: string[]) =>
@@ -109,8 +118,9 @@ describe('inferProjectRoot', () => {
 
   it('returns the directory ABOVE the git root, resolved from a nested cwd', async () => {
     const root = await inferProjectRoot(path.join(repo, 'sub', 'deep'));
-    // tmp is outside $HOME, so it stays absolute — realpath to dodge /var → /private/var on macOS.
-    expect(root).toBe(fs.realpathSync(tmp));
+    // Windows realpath emits an 8.3 home alias (RUNNER~1) that cannot compare
+    // against HOME; macOS still needs realpath for /var → /private/var.
+    expect(root).toBe(expectedRoot());
   });
 
   it('resolves the MAIN repo root from inside a linked worktree (not the worktree dir)', async () => {
@@ -118,7 +128,7 @@ describe('inferProjectRoot', () => {
     fs.mkdirSync(path.dirname(wt), { recursive: true });
     execFileSync('git', ['worktree', 'add', '-q', wt], { cwd: repo });
     // Regression: naive --show-toplevel would yield <repo>/.agents/worktrees here.
-    expect(await inferProjectRoot(wt)).toBe(fs.realpathSync(tmp));
+    expect(await inferProjectRoot(wt)).toBe(expectedRoot());
   });
 
   it('returns undefined when cwd is not inside a git repo', async () => {

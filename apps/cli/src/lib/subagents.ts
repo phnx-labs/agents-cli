@@ -456,23 +456,12 @@ export function writeKimiSubagentFiles(agentsDir: string, subagentDir: string, n
 export function transformSubagentForCodex(subagentDir: string): string {
   const agentMd = path.join(subagentDir, 'AGENT.md');
   const frontmatter = parseSubagentFrontmatter(agentMd);
-  const body = getSubagentBody(agentMd);
 
   if (!frontmatter) {
     throw new Error(`Invalid AGENT.md in ${subagentDir}`);
   }
 
-  // Append other .md files into the developer_instructions body.
-  let instructions = body.trim();
-  const files = fs.readdirSync(subagentDir)
-    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
-    .sort();
-  for (const file of files) {
-    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
-    const sectionName = file.replace('.md', '');
-    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
-    instructions += `\n\n## ${title}\n\n${content}`;
-  }
+  const instructions = flattenSubagentInstructions(subagentDir);
 
   // Escape TOML multi-line string (""") content — only """ needs escaping.
   const safeInstructions = instructions.replace(/"""/g, '\\"""');
@@ -487,6 +476,21 @@ export function transformSubagentForCodex(subagentDir: string): string {
   }
   toml += `developer_instructions = """\n${safeInstructions}\n"""\n`;
   return toml;
+}
+
+function flattenSubagentInstructions(subagentDir: string): string {
+  let instructions = getSubagentBody(path.join(subagentDir, 'AGENT.md')).trim();
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    instructions += `\n\n## ${title}\n\n${content}`;
+  }
+
+  return instructions;
 }
 
 /**
@@ -733,6 +737,7 @@ export function subagentContentMatches(installedDir: string, sourceDir: string):
  * List subagents installed to a specific agent's home
  * Claude: scans ~/.claude/agents/{name}.md
  * Kimi: scans ~/.kimi-code/agents/{name}.yaml (+ sibling .system.md)
+ * Kiro: scans ~/.kiro/agents/{name}.json
  * OpenClaw: scans ~/.openclaw/{name}/AGENTS.md
  */
 export function listSubagentsForAgent(

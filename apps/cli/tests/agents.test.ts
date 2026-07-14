@@ -58,9 +58,9 @@ describe('droid (Factory AI)', () => {
     // (RUSH-1340). Both route through supports() like every other capability.
     expect(capableAgents('hooks')).toContain('droid');
     expect(capableAgents('plugins')).toContain('droid');
-    // No Droid equivalent for these — must stay false so the registry
-    // assertion doesn't demand writers we can't provide.
-    expect(capableAgents('skills')).not.toContain('droid');
+    expect(capableAgents('skills')).toContain('droid');
+    // No Droid equivalent for workflows — keep it false so the registry
+    // assertion doesn't demand a writer we can't provide.
     expect(capableAgents('workflows')).not.toContain('droid');
   });
 
@@ -372,7 +372,7 @@ describe('opencode allowlist (permission in opencode.jsonc)', () => {
         false,
       );
       expect(r.success).toBe(true);
-      const dest = path.join(home, '.opencode', 'opencode.jsonc');
+      const dest = path.join(home, '.config', 'opencode', 'opencode.jsonc');
       expect(fs.existsSync(dest)).toBe(true);
       const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
       expect(cfg.permission.bash['git *']).toBe('allow');

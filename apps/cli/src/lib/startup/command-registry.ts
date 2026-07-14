@@ -71,6 +71,7 @@ export const loadDrive: ModuleLoader = async () => (await import('../../commands
 export const loadFactory: ModuleLoader = async () => (await import('../../commands/factory.js')).registerFactoryCommands;
 export const loadUsage: ModuleLoader = async () => (await import('../../commands/usage.js')).registerUsageCommand;
 export const loadCost: ModuleLoader = async () => (await import('../../commands/cost.js')).registerCostCommand;
+export const loadOutput: ModuleLoader = async () => (await import('../../commands/output.js')).registerOutputCommand;
 export const loadBudget: ModuleLoader = async () => (await import('../../commands/budget.js')).registerBudgetCommand;
 export const loadAlias: ModuleLoader = async () => (await import('../../commands/alias.js')).registerAliasCommand;
 export const loadPty: ModuleLoader = async () => (await import('../../commands/pty.js')).registerPtyCommands;
@@ -167,6 +168,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   factory: [loadFactory],
   usage: [loadUsage],
   cost: [loadCost],
+  output: [loadOutput],
   budget: [loadBudget],
   alias: [loadAlias],
   pty: [loadPty],

@@ -408,6 +408,10 @@ if [[ "$(git show "origin/$DEFAULT_BRANCH:apps/cli/package.json" 2>/dev/null | j
   MAIN_AT_TARGET=true   # a prior run already merged the chore(release) PR
 fi
 EXISTING_PR="$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+MERGED_RELEASE_JSON="$(gh pr list --head "$RELEASE_BRANCH" --base "$DEFAULT_BRANCH" --state merged --limit 1 --json number,mergeCommit,headRefOid 2>/dev/null || echo '[]')"
+MERGED_RELEASE_PR="$(jq -r '.[0].number // empty' <<<"$MERGED_RELEASE_JSON")"
+MERGED_RELEASE_SHA="$(jq -r '.[0].mergeCommit.oid // empty' <<<"$MERGED_RELEASE_JSON")"
+MERGED_RELEASE_HEAD="$(jq -r '.[0].headRefOid // empty' <<<"$MERGED_RELEASE_JSON")"
 
 # ----- Bail out here in DRY-RUN mode -----
 if ! $APPLY; then
@@ -418,6 +422,7 @@ if ! $APPLY; then
   gray "  $PHNX_PKG@$TARGET on npm     $($PHNX_TARGET_PUBLISHED && echo yes || echo no)"
   gray "  origin/$DEFAULT_BRANCH at $TARGET   $($MAIN_AT_TARGET && echo yes || echo no)"
   gray "  open release PR           ${EXISTING_PR:-none} ($RELEASE_BRANCH)"
+  gray "  merged release PR         ${MERGED_RELEASE_PR:-none} ($RELEASE_BRANCH)"
   echo
   yellow "Will run on --apply (NPM_TOKEN from npmjs.com bundle, no 2FA prompts):"
   yellow "  1. roll CHANGELOG '## Unreleased' -> '## $TARGET'"
@@ -493,6 +498,27 @@ wait_for_ci_green() {
   (( problem == 0 )) || die "CI not all-green on PR #$pr -- PR left OPEN. Fix on a normal PR to $DEFAULT_BRANCH, then re-run this script."
   green "CI all-green on PR #$pr."
 }
+
+# A prior normal release run can merge its PR and then fail before publishing.
+# Re-running must reuse the exact CI-tested release tree — never treat a manual
+# package.json bump or a squash merge containing concurrent main changes as
+# release validation. This is the catch-up hole that let 1.20.58 publish before
+# its Windows tag matrix failed.
+if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED; then
+  [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_SHA" && -n "$MERGED_RELEASE_HEAD" ]] \
+    || die "main is already at $TARGET but no complete merged $RELEASE_BRANCH PR exists -- refusing an unverified catch-up publish; cut the next patch through the normal release PR flow"
+  [[ "$MERGED_RELEASE_SHA" == "$BASE_SHA" ]] \
+    || die "merged release PR #$MERGED_RELEASE_PR ended at ${MERGED_RELEASE_SHA:0:9}, but main is now ${BASE_SHA:0:9} -- refusing to publish a later tree under $TARGET"
+  git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
+    || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
+  CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
+  [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
+    || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
+  [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" == "$(git rev-parse "$BASE_SHA^{tree}")" ]] \
+    || die "current main tree differs from CI-tested release PR #$MERGED_RELEASE_PR head -- refusing catch-up publish"
+  bold "Re-validating CI from merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
+  wait_for_ci_green "$MERGED_RELEASE_PR"
+fi
 
 # ----- Open (or reuse) the release PR + merge, unless already merged -----
 if ! $MAIN_AT_TARGET; then
@@ -581,13 +607,14 @@ git fetch --quiet origin "$DEFAULT_BRANCH"
 MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
 MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
 [[ "$MERGED_VER" == "$TARGET" ]] || die "merged $DEFAULT_BRANCH is at $MERGED_VER, not $TARGET -- refusing to tag/publish"
-if [[ -n "${BRANCH_TREE:-}" ]]; then
-  # A single-commit squash onto an unchanged base yields a tree identical to what
-  # we built + published from. A mismatch means a concurrent merge or a stray
-  # push landed on the branch -- the local tarball would not match merged main.
-  [[ "$(git rev-parse "$MERGED_SHA^{tree}")" == "$BRANCH_TREE" ]] \
-    || die "merged tree != built tree -- refusing to publish (concurrent merge or stray push on $RELEASE_BRANCH)"
-fi
+# A normal release compares against the release-commit tree. A catch-up release
+# skips that commit because main already carries TARGET, so compare against the
+# exact base tree that passed preflight and was built locally. Either way, a
+# concurrent merge must abort before the tag or registry can point at artifacts
+# produced from a different source tree.
+EXPECTED_TREE="${BRANCH_TREE:-$(git rev-parse "$BASE_SHA^{tree}")}"
+[[ "$(git rev-parse "$MERGED_SHA^{tree}")" == "$EXPECTED_TREE" ]] \
+  || die "merged tree != built tree -- refusing to publish (concurrent merge or stray push on $RELEASE_BRANCH)"
 
 # Bring the working-tree package.json/CHANGELOG to exactly the merged code so the
 # published tarball matches merged main. dist/ was already built from the same

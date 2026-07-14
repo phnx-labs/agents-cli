@@ -132,26 +132,26 @@ bridges them one way (device → ssh_config → enrollable as a host). See
 | Agent | Hooks | MCP | Permissions | Skills | Commands | Plugins | Subagents | Rules | Workflows |
 |------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
 | Claude | yes | yes | yes | yes | yes | yes | yes | `CLAUDE.md` | yes |
-| Codex | >= 0.116.0 | yes | no | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | no | `AGENTS.md` | no |
+| Codex | >= 0.116.0 | yes | >= 0.138.0 | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | no | `AGENTS.md` | no |
 | Gemini † | >= 0.26.0 | yes | no | yes | yes (.toml) | no | no | `GEMINI.md` | no |
 | Cursor | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
 | OpenCode | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Copilot | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Kiro | no | yes | >= 2.8.0 | yes | yes | no | no | `AGENTS.md` | no |
+| Kiro | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
 | Goose | no | yes | no | no | no | no | no | `AGENTS.md` | no |
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Antigravity | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | no |
-| Droid | yes | yes | no | no | yes | yes | yes | `AGENTS.md` | no |
+| Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 | Hermes | no | yes | no | yes | no | no | no | `MEMORY.md` | no |
 | ForgeCode | no | yes | no | yes | no | no | no | `AGENTS.md` | no |
 
 **† Gemini is deprecated.** Google retired the Gemini CLI for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI (`antigravity`) is the successor. agents-cli still manages existing Gemini installs but warns on `agents add gemini` / `agents teams add … gemini`.
 
-Permissions sync is gated on the `allowlist` capability (Claude, Antigravity, Grok, Kimi, and Kiro 2.8.0+). **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
+Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Antigravity, Grok, Kimi, Kiro 2.8.0+, OpenCode, and Droid >= 0.57.5). **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
 
 ### Per-command targeting
 

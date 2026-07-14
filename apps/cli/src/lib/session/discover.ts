@@ -106,6 +106,8 @@ interface ClaudeSessionScan {
   topic?: string;
   messageCount: number;
   tokenCount?: number;
+  /** Real generated (output) tokens, excluding cache-read/-write context. */
+  outputTokens?: number;
   /** Total USD cost accumulated from per-(model, direction) token usage. */
   costUsd?: number;
   /** Wall-clock duration in ms between the first and last timestamped event. */
@@ -142,6 +144,8 @@ interface CodexSessionScan {
   topic?: string;
   messageCount: number;
   tokenCount?: number;
+  /** Real generated (output) tokens, excluding cache-read/-write context. */
+  outputTokens?: number;
   costUsd?: number;
   durationMs?: number;
   lastActivity?: string;
@@ -682,6 +686,7 @@ async function readClaudeMeta(
       label,
       messageCount: scan.messageCount,
       tokenCount: scan.tokenCount,
+      outputTokens: scan.outputTokens,
       costUsd: scan.costUsd,
       durationMs: scan.durationMs,
       isTeamOrigin,
@@ -706,6 +711,7 @@ async function readClaudeMeta(
       label,
       messageCount: scan.messageCount,
       tokenCount: scan.tokenCount,
+      outputTokens: scan.outputTokens,
       costUsd: scan.costUsd,
       durationMs: scan.durationMs,
       topic: scan.topic,
@@ -934,6 +940,7 @@ export async function readCodexMeta(
     topic: scan.topic,
     messageCount: scan.messageCount,
     tokenCount: scan.tokenCount,
+    outputTokens: scan.outputTokens,
     costUsd: scan.costUsd,
     durationMs: scan.durationMs,
     account: resolveAccount?.(),
@@ -1071,6 +1078,7 @@ function readGeminiMeta(
   let topic: string | undefined;
   let messageCount = 0;
   let tokenCount = 0;
+  let outputTokens = 0;
   let sawTokenCount = false;
   let costUsd = 0;
   let sawCost = false;
@@ -1106,6 +1114,16 @@ function readGeminiMeta(
     if (total !== null) {
       tokenCount += total;
       sawTokenCount = true;
+    }
+    // Output tokens: sum directional generation fields per message (output +
+    // thoughts + tool), mirroring the cost path — never `tokens.total`, which
+    // may be cumulative and would double-count when summed.
+    const gtk = message.tokens;
+    if (gtk && typeof gtk === 'object') {
+      outputTokens +=
+        (typeof gtk.output === 'number' ? gtk.output : 0) +
+        (typeof gtk.thoughts === 'number' ? gtk.thoughts : 0) +
+        (typeof gtk.tool === 'number' ? gtk.tool : 0);
     }
 
     // Per-message cost: directional tokens × this message's model price.
@@ -1146,6 +1164,7 @@ function readGeminiMeta(
     topic,
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
+    outputTokens: sawTokenCount ? outputTokens : undefined,
     costUsd: sawCost ? costUsd : undefined,
     durationMs,
   };
@@ -1372,6 +1391,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         s.time_updated AS time_updated,
         COALESCE(stats.message_count, 0) AS message_count,
         stats.token_count AS token_count,
+        stats.output_tokens AS output_tokens,
         COALESCE(stats.has_token_data, 0) AS has_token_data
       FROM session s
       LEFT JOIN (
@@ -1385,6 +1405,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
             COALESCE(json_extract(data, '$.tokens.cache.read'), 0) +
             COALESCE(json_extract(data, '$.tokens.cache.write'), 0)
           ) AS token_count,
+          SUM(COALESCE(json_extract(data, '$.tokens.output'), 0)) AS output_tokens,
           MAX(CASE WHEN json_type(data, '$.tokens') IS NOT NULL THEN 1 ELSE 0 END) AS has_token_data
         FROM message
         GROUP BY session_id
@@ -1404,6 +1425,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
       time_updated: unknown;
       message_count: unknown;
       token_count: unknown;
+      output_tokens: unknown;
       has_token_data: unknown;
     }>;
 
@@ -1421,6 +1443,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
       const timeUpdated = asInt(row.time_updated);
       const messageCount = asInt(row.message_count);
       const tokenCount = asInt(row.token_count);
+      const outputTokens = asInt(row.output_tokens);
       const hasTokenData = asInt(row.has_token_data) === 1;
       const timestamp = isNaN(timeCreated) ? new Date().toISOString() : new Date(timeCreated).toISOString();
       // OpenCode is one shared DB, not one file per session — its row carries a
@@ -1443,6 +1466,7 @@ async function scanOpenCodeIncremental(): Promise<void> {
         topic,
         messageCount: Number.isNaN(messageCount) ? undefined : messageCount,
         tokenCount: hasTokenData && !Number.isNaN(tokenCount) ? tokenCount : undefined,
+        outputTokens: hasTokenData && !Number.isNaN(outputTokens) ? outputTokens : undefined,
       };
 
       entries.push({ meta, content: topic || '', scan: currentScan });
@@ -1937,6 +1961,7 @@ async function readDroidMeta(
     topic: scan.topic,
     messageCount: scan.messageCount,
     tokenCount,
+    outputTokens: settings.usage?.outputTokens,
     costUsd: costUsd > 0 ? costUsd : undefined,
     durationMs: scan.durationMs,
   };
@@ -2091,6 +2116,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
   let entrypoint: string | undefined;
   let messageCount = 0;
   let tokenCount = 0;
+  let outputTokens = 0;
   let sawTokenCount = false;
   let costUsd = 0;
   let sawCost = false;
@@ -2246,6 +2272,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
         tokenCount += usage;
         sawTokenCount = true;
       }
+      if (typeof usageObj?.output_tokens === 'number') outputTokens += usageObj.output_tokens;
       // Per-assistant-message cost: each event carries its own model, so we
       // multiply that event's raw token directions by that model's price.
       const model = parsed.message?.model;
@@ -2288,6 +2315,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
     entrypoint,
     messageCount,
     tokenCount: sawTokenCount ? tokenCount : undefined,
+    outputTokens: sawTokenCount ? outputTokens : undefined,
     costUsd: sawCost ? costUsd : undefined,
     durationMs,
     lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
@@ -2451,6 +2479,9 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
     topic,
     messageCount,
     tokenCount,
+    outputTokens: lastTotalTokenUsage
+      ? (lastTotalTokenUsage.output_tokens ?? 0) + (lastTotalTokenUsage.reasoning_output_tokens ?? 0)
+      : undefined,
     costUsd,
     durationMs,
     lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
@@ -2806,7 +2837,7 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
   }
 
   // Parse wire.jsonl to extract message count and token usage
-  const { messageCount, tokenCount } = parseKimiWireMetrics(sessionDir);
+  const { messageCount, tokenCount, outputTokens } = parseKimiWireMetrics(sessionDir);
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -2818,6 +2849,7 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
     topic,
     messageCount,
     tokenCount: tokenCount > 0 ? tokenCount : undefined,
+    outputTokens: outputTokens > 0 ? outputTokens : undefined,
   };
 
   return { meta, content: lastPrompt || '' };
@@ -2827,13 +2859,14 @@ export function readKimiMeta(filePath: string): { meta: SessionMeta; content: st
  * TODO: optimize to stream (like scanClaudeSession) to avoid loading large files into memory.
  * For now, synchronous readFileSync matches the pattern of reading state.json and is acceptable
  * since session dirs are usually fresh in FS cache during incremental scans. */
-function parseKimiWireMetrics(sessionDir: string): { messageCount: number; tokenCount: number } {
+function parseKimiWireMetrics(sessionDir: string): { messageCount: number; tokenCount: number; outputTokens: number } {
   const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
   let messageCount = 0;
   let tokenCount = 0;
+  let outputTokens = 0;
 
   if (!fs.existsSync(wirePath)) {
-    return { messageCount: 0, tokenCount: 0 };
+    return { messageCount: 0, tokenCount: 0, outputTokens: 0 };
   }
 
   try {
@@ -2848,6 +2881,7 @@ function parseKimiWireMetrics(sessionDir: string): { messageCount: number; token
           // Kimi usage structure: inputOther + output + inputCacheRead + inputCacheCreation
           const u = event.usage;
           tokenCount += (u.inputOther || 0) + (u.output || 0) + (u.inputCacheRead || 0) + (u.inputCacheCreation || 0);
+          outputTokens += (u.output || 0);
         }
       } catch {
         // Malformed line, skip
@@ -2857,12 +2891,14 @@ function parseKimiWireMetrics(sessionDir: string): { messageCount: number; token
     // If wire.jsonl can't be read, return 0s (graceful degradation)
   }
 
-  return { messageCount, tokenCount };
+  return { messageCount, tokenCount, outputTokens };
 }
 
 /** Parse a time filter string (relative like '7d' or ISO timestamp) into epoch milliseconds. */
 export function parseTimeFilter(input: string): number {
-  const relativeMatch = input.match(/^(\d+)([mhdw])$/i);
+  // Units: m=minute, h=hour, d=day, w=week, mo=month(30d), y=year(365d). `mo`
+  // must precede the single-letter alternatives so "1mo" isn't read as "1m"+"o".
+  const relativeMatch = input.match(/^(\d+)(mo|[mhdwy])$/i);
   if (relativeMatch) {
     const value = parseInt(relativeMatch[1], 10);
     const unit = relativeMatch[2].toLowerCase();
@@ -2870,6 +2906,8 @@ export function parseTimeFilter(input: string): number {
     if (unit === 'h') return Date.now() - value * 3_600_000;
     if (unit === 'd') return Date.now() - value * 86_400_000;
     if (unit === 'w') return Date.now() - value * 7 * 86_400_000;
+    if (unit === 'mo') return Date.now() - value * 30 * 86_400_000;
+    if (unit === 'y') return Date.now() - value * 365 * 86_400_000;
   }
   const ts = new Date(input).getTime();
   return Number.isNaN(ts) ? 0 : ts;

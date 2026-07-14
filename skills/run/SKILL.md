@@ -213,6 +213,32 @@ agents logs <id> -f          # re-attach to a running one and follow
 `agents logs [id]` is the unified viewer over both host-dispatch runs and local
 session transcripts; `agents hosts logs <id>` is the host-only equivalent.
 
+### Working directory on the host
+
+`--cwd` sets the directory the agent runs in **on the host** too — a home-anchored
+path (`~/…`, `$HOME/…`, or a local-home absolute your shell already expanded like
+`/Users/me/…`) is re-rooted at the *remote* `$HOME`, so it resolves across machines
+with different home paths (`/Users/me` → `/home/me`):
+
+```bash
+agents run claude "..." --host gpu-box --cwd ~/src/github.com/me/app
+#   → runs on gpu-box in $HOME/src/github.com/me/app
+```
+
+`-P, --project <slug>[@worktree]` is a shorthand: it resolves `<slug>` against your
+projects root (auto-inferred from the repo you launch inside and cached in
+`agents.yaml`, e.g. `~/src/github.com/<user>`), and `@worktree` targets a git
+worktree under `.agents/worktrees/`:
+
+```bash
+agents run claude "..." --host gpu-box --project app          # → $HOME/…/app
+agents run claude "..." --host gpu-box --project app@fix-bug  # → app/.agents/worktrees/fix-bug
+agents defaults project-root ~/src/github.com/<user>          # set/show the root
+```
+
+`--remote-cwd <dir>` is the explicit escape hatch — a literal remote path, used
+verbatim (not re-rooted). Precedence: `--remote-cwd` > `--project`/`--cwd`.
+
 ## Bounded runs
 
 Kill the agent after a duration. Useful in CI and scheduled jobs.
@@ -292,7 +318,13 @@ agents run claude "refactor shared utils" --add-dir ../shared --add-dir ../other
 
 ```bash
 agents run claude "..." --cwd /path/to/repo
+agents run claude "..." --project app          # shorthand: <root>/app
 ```
+
+`--cwd` sets the working directory locally, and **on the host** for `--host` runs
+(see [Working directory on the host](#working-directory-on-the-host)). `-P, --project
+<slug>[@worktree]` resolves a project name against your cached projects root; set it
+with `agents defaults project-root <path>`.
 
 ## ACP routing
 
@@ -314,7 +346,9 @@ Emits a unified event stream; ndjson when combined with `--json`.
 | `--model <id>` | Override model |
 | `--secrets <bundle>` | Inject keychain bundle (repeatable) |
 | `--env KEY=val` | Pass env var (repeatable) |
-| `--cwd <dir>` | Working directory |
+| `--cwd <dir>` | Working directory (local, or on the host for `--host` runs) |
+| `-P, --project <slug>[@wt]` | Project shorthand → cwd from your projects root |
+| `--remote-cwd <dir>` | Explicit host working directory (`--host`; verbatim) |
 | `--add-dir <dir>` | Extra dir access (Claude, repeatable) |
 | `--json` | ndjson event stream |
 | `--quiet` | Drop preamble |

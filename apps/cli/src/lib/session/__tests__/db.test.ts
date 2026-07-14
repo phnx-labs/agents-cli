@@ -141,7 +141,7 @@ describe('migration v5 -> v6 adds cost/duration columns', () => {
   it('schema_version is recorded as the current version', () => {
     const db = getDB();
     const row = db.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
-    expect(row.value).toBe('11');
+    expect(row.value).toBe('12');
   });
 
   it('v10 unifies name into label — the separate `name` column is dropped', () => {

@@ -208,8 +208,26 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 export interface DispatchOptions {
   agent: string;
   prompt: string;
+  /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
+  version?: string;
+  /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
+  strategy?: string;
   mode?: string;
   model?: string;
+  /** Reasoning effort to forward as `--effort <effort>`. */
+  effort?: string;
+  /** Additional directories to grant, already made remote-portable. */
+  addDir?: string[];
+  /** Stream events as JSON lines. */
+  json?: boolean;
+  /** Show detailed execution logs. */
+  verbose?: boolean;
+  /** Kill the agent after this duration, forwarded as `--timeout <duration>`. */
+  timeout?: string;
+  /** Skip the interactive budget-confirm prompt. */
+  yes?: boolean;
+  /** Route through the Agent Client Protocol. */
+  acp?: boolean;
   remoteCwd?: string;
   /**
    * Force the remote run's NEW session to use this exact id (Claude only, via
@@ -236,9 +254,20 @@ export interface DispatchOptions {
  * resume wins when — defensively — both are set.
  */
 export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
-  const args = ['run', opts.agent, opts.prompt, '--quiet'];
+  const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
+  const args = ['run', agentArg, opts.prompt, '--quiet'];
+  if (opts.strategy) args.push('--strategy', opts.strategy);
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
+  if (opts.effort) args.push('--effort', opts.effort);
+  if (opts.addDir) {
+    for (const dir of opts.addDir) args.push('--add-dir', dir);
+  }
+  if (opts.json) args.push('--json');
+  if (opts.verbose) args.push('--verbose');
+  if (opts.timeout) args.push('--timeout', opts.timeout);
+  if (opts.yes) args.push('--yes');
+  if (opts.acp) args.push('--acp');
   if (opts.name) args.push('--name', opts.name);
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);
@@ -247,10 +276,28 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
 
 export interface InteractiveDispatchOptions {
   agent: string;
+  /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
+  version?: string;
+  /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
+  strategy?: string;
   /** Optional prompt — forwarded only when the caller explicitly forced interactive mode. */
   prompt?: string;
   mode?: string;
   model?: string;
+  /** Reasoning effort to forward as `--effort <effort>`. */
+  effort?: string;
+  /** Additional directories to grant, already made remote-portable. */
+  addDir?: string[];
+  /** Stream events as JSON lines. */
+  json?: boolean;
+  /** Show detailed execution logs. */
+  verbose?: boolean;
+  /** Kill the agent after this duration, forwarded as `--timeout <duration>`. */
+  timeout?: string;
+  /** Skip the interactive budget-confirm prompt. */
+  yes?: boolean;
+  /** Route through the Agent Client Protocol. */
+  acp?: boolean;
   remoteCwd?: string;
   sessionId?: string;
   name?: string;
@@ -269,11 +316,22 @@ export interface InteractiveDispatchOptions {
  * infer headless from the prompt).
  */
 export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOptions): string[] {
-  const args = ['run', opts.agent];
+  const agentArg = opts.version ? `${opts.agent}@${opts.version}` : opts.agent;
+  const args = ['run', agentArg];
   if (opts.prompt && opts.forceInteractive) args.push(opts.prompt);
   if (opts.forceInteractive) args.push('--interactive');
+  if (opts.strategy) args.push('--strategy', opts.strategy);
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
+  if (opts.effort) args.push('--effort', opts.effort);
+  if (opts.addDir) {
+    for (const dir of opts.addDir) args.push('--add-dir', dir);
+  }
+  if (opts.json) args.push('--json');
+  if (opts.verbose) args.push('--verbose');
+  if (opts.timeout) args.push('--timeout', opts.timeout);
+  if (opts.yes) args.push('--yes');
+  if (opts.acp) args.push('--acp');
   if (opts.name) args.push('--name', opts.name);
   if (opts.resume) args.push('--resume', opts.resume);
   else if (opts.sessionId) args.push('--session-id', opts.sessionId);

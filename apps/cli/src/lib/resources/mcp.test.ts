@@ -44,7 +44,7 @@ describe('getMcpConfigPath', () => {
 
   it('returns correct config path for OpenCode', () => {
     const configPath = getMcpConfigPath('opencode', '/home/user');
-    expect(configPath).toBe(path.join('/home/user', '.opencode', 'opencode.jsonc'));
+    expect(configPath).toBe(path.join('/home/user', '.config', 'opencode', 'opencode.jsonc'));
   });
 
   it('returns correct config path for Cursor', () => {
@@ -269,7 +269,7 @@ describe('Claude MCP config format', () => {
 describe('OpenCode MCP config format', () => {
   it('writes local MCP to OpenCode opencode.jsonc format', () => {
     const tempDir = makeTempDir();
-    const configPath = path.join(tempDir, '.opencode', 'opencode.jsonc');
+    const configPath = path.join(tempDir, '.config', 'opencode', 'opencode.jsonc');
 
     const items: McpItem[] = [
       {
@@ -306,7 +306,7 @@ describe('OpenCode MCP config format', () => {
 
   it('writes remote MCP to OpenCode opencode.jsonc format', () => {
     const tempDir = makeTempDir();
-    const configPath = path.join(tempDir, '.opencode', 'opencode.jsonc');
+    const configPath = path.join(tempDir, '.config', 'opencode', 'opencode.jsonc');
 
     const items: McpItem[] = [
       {

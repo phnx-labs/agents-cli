@@ -33,6 +33,9 @@ import {
   removeDaemonPid,
 } from './daemon.js';
 import { ipcEndpoint } from './platform/index.js';
+
+const systemdQuote = (value: string): string =>
+  `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 import {
   secretsKeychainItem,
   setKeychainToken,
@@ -213,11 +216,8 @@ describe('generateSystemdUnit', () => {
     fs.writeFileSync(indexJs, '');
     process.argv[1] = indexJs;
     try {
-      // Mirror systemdExecArg's quoting (backslashes escape for systemd) so
-      // the expectation holds on Windows paths too, not just POSIX ones.
-      const quote = (v: string) => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       expect(generateSystemdUnit()).toContain(
-        `ExecStart=${[process.execPath, indexJs, 'daemon', '_run'].map(quote).join(' ')}`,
+        `ExecStart=${[process.execPath, indexJs, 'daemon', '_run'].map(systemdQuote).join(' ')}`,
       );
     } finally {
       process.argv[1] = savedArgv1;
@@ -242,9 +242,9 @@ describe('service manifest CLI entry injection', () => {
       const plist = generateLaunchdPlist(null, installedEntry);
       const unit = generateSystemdUnit(null, installedEntry);
       expect(plist).toContain(`<string>${installedEntry}</string>`);
-      expect(unit).toContain(installedEntry);
+      expect(unit).toContain(systemdQuote(installedEntry));
       expect(plist).not.toContain(postinstallEntry);
-      expect(unit).not.toContain(postinstallEntry);
+      expect(unit).not.toContain(systemdQuote(postinstallEntry));
     } finally {
       process.argv[1] = savedArgv1;
       fs.rmSync(tmpDir, { recursive: true, force: true });

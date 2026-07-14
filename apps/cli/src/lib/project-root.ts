@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { readMeta, updateMeta } from './state.js';
 import { getMainRepoRoot } from './git.js';
+import { toPosix } from './platform/index.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 
@@ -24,7 +25,7 @@ const HOME = process.env.HOME ?? os.homedir();
 export function toHomeRelative(abs: string): string {
   const rel = path.relative(HOME, abs);
   if (rel === '') return '~';
-  if (!rel.startsWith('..') && !path.isAbsolute(rel)) return `~/${rel}`;
+  if (!rel.startsWith('..') && !path.isAbsolute(rel)) return `~/${toPosix(rel)}`;
   return abs;
 }
 

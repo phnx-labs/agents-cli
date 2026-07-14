@@ -258,7 +258,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     cloudProvider: 'codex',
     // Subagents: multi-agent plumbing since 0.117.0; custom agents as
     // ~/.codex/agents/*.toml (name, description, developer_instructions).
-    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
+    capabilities: { hooks: { since: '0.116.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: { since: '0.138.0' }, skills: true, commands: { until: '0.117.0' }, plugins: { since: '0.128.0' }, subagents: { since: '0.117.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
   },
   gemini: {
     id: 'gemini',
@@ -428,7 +428,10 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     configDir: path.join(HOME, '.config', 'goose'),
     commandsDir: path.join(HOME, '.config', 'goose', 'commands'),
     commandsSubdir: 'commands',
-    skillsDir: path.join(HOME, '.config', 'goose', 'skills'),
+    // Goose reads skills directly from central ~/.agents/skills/ via the Summon
+    // extension (block-goose-cli ≥ 1.25.0). No per-version copy is written.
+    skillsDir: path.join(HOME, '.agents', 'skills'),
+    nativeAgentsSkillsDir: true,
     // Hooks: Open Plugins format — auto-discovered from
     // ~/.agents/plugins/<name>/hooks/hooks.json (shipped block-goose-cli
     // ≥ 1.34.0). See registerHooksForGoose.
@@ -439,7 +442,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: false, commands: false, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: { since: '1.25.0' }, commands: false, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -583,7 +586,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     authFiles: ['auth.v2.file', 'auth.v2.key'],
     commandsDir: path.join(HOME, '.factory', 'commands'),
     commandsSubdir: 'commands',
-    skillsDir: '', // no skills concept
+    skillsDir: path.join(HOME, '.factory', 'skills'),
     hooksDir: 'hooks',
     pluginManifestDir: '.factory-plugin',
     instructionsFile: 'AGENTS.md',
@@ -598,8 +601,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcp: true,
       mcpHttp: false,
       mcpHeaders: false,
-      allowlist: false,
-      skills: false,
+      allowlist: { since: '0.57.5' },
+      skills: { since: '0.26.0' },
       commands: true,
       plugins: true,
       subagents: true,
@@ -1996,8 +1999,8 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
       // Codex uses TOML config
       return path.join(agent.configDir, 'config.toml');
     case 'opencode':
-      // OpenCode uses JSONC config
-      return path.join(agent.configDir, 'opencode.jsonc');
+      // OpenCode loads ~/.config/opencode/opencode.jsonc (not ~/.opencode/)
+      return path.join(HOME, '.config', 'opencode', 'opencode.jsonc');
     case 'cursor':
       // Cursor uses mcp.json
       return path.join(agent.configDir, 'mcp.json');
@@ -2036,7 +2039,7 @@ export function getMcpConfigPathForHome(agentId: AgentId, home: string): string 
     case 'codex':
       return path.join(home, '.codex', 'config.toml');
     case 'opencode':
-      return path.join(home, '.opencode', 'opencode.jsonc');
+      return path.join(home, '.config', 'opencode', 'opencode.jsonc');
     case 'cursor':
       return path.join(home, '.cursor', 'mcp.json');
     case 'openclaw':
@@ -2075,7 +2078,8 @@ function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()):
     case 'codex':
       return path.join(cwd, `.${agentId}`, 'config.toml');
     case 'opencode':
-      return path.join(cwd, `.${agentId}`, 'opencode.jsonc');
+      // Project config is opencode.jsonc at project root (not .opencode/)
+      return path.join(cwd, 'opencode.jsonc');
     case 'cursor':
       return path.join(cwd, `.${agentId}`, 'mcp.json');
     case 'openclaw':

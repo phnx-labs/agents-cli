@@ -47,6 +47,55 @@ describe('buildRunForwardedArgs', () => {
     });
     expect(args).toEqual(['run', 'claude', 'p', '--quiet', '--mode', 'plan', '--model', 'opus', '--session-id', 'id-1']);
   });
+
+  it('forwards an explicit version pin as agent@version', () => {
+    const args = buildRunForwardedArgs({ agent: 'claude', prompt: 'p', version: '2.1.207' });
+    expect(args).toEqual(['run', 'claude@2.1.207', 'p', '--quiet']);
+  });
+
+  it('forwards an explicit strategy', () => {
+    const args = buildRunForwardedArgs({ agent: 'claude', prompt: 'p', strategy: 'balanced' });
+    expect(args).toEqual(['run', 'claude', 'p', '--quiet', '--strategy', 'balanced']);
+  });
+
+  it('forwards version and strategy together before session flags', () => {
+    const args = buildRunForwardedArgs({
+      agent: 'claude',
+      prompt: 'p',
+      version: '2.1.207',
+      strategy: 'balanced',
+      sessionId: 'id-1',
+    });
+    expect(args).toEqual([
+      'run', 'claude@2.1.207', 'p', '--quiet',
+      '--strategy', 'balanced', '--session-id', 'id-1',
+    ]);
+  });
+
+  it('forwards common behavioral flags', () => {
+    const args = buildRunForwardedArgs({
+      agent: 'claude',
+      prompt: 'p',
+      effort: 'high',
+      addDir: ['~/notes', '/shared'],
+      json: true,
+      verbose: true,
+      timeout: '30m',
+      yes: true,
+      acp: true,
+    });
+    expect(args).toEqual([
+      'run', 'claude', 'p', '--quiet',
+      '--effort', 'high',
+      '--add-dir', '~/notes',
+      '--add-dir', '/shared',
+      '--json',
+      '--verbose',
+      '--timeout', '30m',
+      '--yes',
+      '--acp',
+    ]);
+  });
 });
 
 describe('buildInteractiveRunForwardedArgs', () => {
@@ -102,6 +151,38 @@ describe('buildInteractiveRunForwardedArgs', () => {
     const args = buildInteractiveRunForwardedArgs({ agent: 'claude', prompt: 'do a thing' });
     expect(args).toEqual(['run', 'claude']);
   });
+
+  it('forwards version and strategy interactively', () => {
+    const args = buildInteractiveRunForwardedArgs({
+      agent: 'claude',
+      version: '2.1.207',
+      strategy: 'balanced',
+    });
+    expect(args).toEqual(['run', 'claude@2.1.207', '--strategy', 'balanced']);
+  });
+
+  it('forwards common behavioral flags interactively', () => {
+    const args = buildInteractiveRunForwardedArgs({
+      agent: 'claude',
+      effort: 'max',
+      addDir: ['~/notes'],
+      json: true,
+      verbose: true,
+      timeout: '1h',
+      yes: true,
+      acp: true,
+    });
+    expect(args).toEqual([
+      'run', 'claude',
+      '--effort', 'max',
+      '--add-dir', '~/notes',
+      '--json',
+      '--verbose',
+      '--timeout', '1h',
+      '--yes',
+      '--acp',
+    ]);
+  });
 });
 
 describe('remoteCdPrefix', () => {
@@ -123,7 +204,7 @@ describe('remoteCdPrefix', () => {
 
   it('does NOT re-root a raw local-home absolute — only ~/$HOME anchor here (exec.ts makes --cwd portable)', () => {
     const p = `${LOCAL_HOME}/src/x`;
-    expect(remoteCdPrefix(p)).toBe(`cd ${p} && `);
+    expect(remoteCdPrefix(p)).toBe(`cd ${shellQuote(p)} && `);
   });
 
   it('maps bare ~ / $HOME to "$HOME"', () => {

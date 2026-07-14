@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SshExecResult } from '../ssh-exec.js';
 
-const { sshExecMock, resolveHostMock, emitMock } = vi.hoisted(() => ({
+const { sshExecMock, resolveHostMock, resolveRemoteOsMock, emitMock } = vi.hoisted(() => ({
   sshExecMock: vi.fn(),
   resolveHostMock: vi.fn(),
+  resolveRemoteOsMock: vi.fn(),
   emitMock: vi.fn(),
 }));
 
@@ -16,6 +17,10 @@ vi.mock('../ssh-exec.js', async () => {
 
 vi.mock('../hosts/registry.js', () => ({
   resolveHost: resolveHostMock,
+}));
+
+vi.mock('../hosts/remote-os.js', () => ({
+  resolveRemoteOsSync: resolveRemoteOsMock,
 }));
 
 // Spy on the audit emit so we can assert remote resolves are audited on the
@@ -35,6 +40,8 @@ const ok = (stdout: string): SshExecResult => ({ code: 0, stdout, stderr: '', ti
 beforeEach(() => {
   sshExecMock.mockReset();
   resolveHostMock.mockReset();
+  resolveRemoteOsMock.mockReset();
+  resolveRemoteOsMock.mockReturnValue(undefined);
   emitMock.mockReset();
   delete process.env.AGENTS_SECRETS_PASSPHRASE;
 });
@@ -136,6 +143,18 @@ describe('remoteSecretsRaw', () => {
     expect(remoteCmd).not.toContain('|| true');
     expect(opts.input).toBe('A="1"\n');
   });
+
+  it('uses the original host name to build PowerShell for inline Windows targets', () => {
+    resolveRemoteOsMock.mockImplementation((name: string) => name === 'win-mini' ? 'windows' : undefined);
+    sshExecMock.mockReturnValue(ok('listed'));
+
+    remoteSecretsRaw('muqsit@100.68.123.39', ['list'], { osLookupName: 'win-mini' });
+
+    const [target, remoteCmd] = sshExecMock.mock.calls[0];
+    expect(target).toBe('muqsit@100.68.123.39');
+    expect(remoteCmd).toContain('powershell -NoProfile -EncodedCommand ');
+    expect(remoteCmd).not.toContain('bash -lc');
+  });
 });
 
 describe('remoteResolveEnv', () => {
@@ -146,6 +165,19 @@ describe('remoteResolveEnv', () => {
     const [, remoteCmd, opts] = sshExecMock.mock.calls[0];
     expect(remoteCmd).toBe(`bash -lc 'agents secrets export r2.backups --plaintext --format json'`);
     expect(opts.input).toBeUndefined();
+  });
+
+  it('uses the original host name when resolving an inline Windows target', async () => {
+    resolveRemoteOsMock.mockImplementation((name: string) => name === 'win-mini' ? 'windows' : undefined);
+    sshExecMock.mockReturnValue(ok('{"FOO":"bar"}'));
+
+    await expect(remoteResolveEnv('muqsit@100.68.123.39', 'r2.backups', { osLookupName: 'win-mini' }))
+      .resolves.toEqual({ FOO: 'bar' });
+
+    const [target, remoteCmd] = sshExecMock.mock.calls[0];
+    expect(target).toBe('muqsit@100.68.123.39');
+    expect(remoteCmd).toContain('powershell -NoProfile -EncodedCommand ');
+    expect(remoteCmd).not.toContain('bash -lc');
   });
 
   it('audits the resolve on the initiating host (secrets.get, source=remote, no value)', async () => {
