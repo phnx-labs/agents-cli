@@ -114,7 +114,7 @@ describe('Hermes and ForgeCode install targets', () => {
     expect(capableAgents('mcp')).toContain('hermes');
     expect(capableAgents('skills')).toContain('hermes');
     expect(capableAgents('commands')).not.toContain('hermes');
-    expect(capableAgents('hooks')).not.toContain('hermes');
+    expect(capableAgents('hooks')).toContain('hermes');
     expect(AGENTS.hermes.instructionsFile).toBe('MEMORY.md');
     expect(AGENTS.hermes.capabilities.rules).toEqual({ file: 'MEMORY.md' });
   });
