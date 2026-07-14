@@ -15,7 +15,7 @@
 import { Cron } from 'croner';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { listJobs, getLatestRun } from './routines.js';
+import { listJobs, getLatestRun, jobRunsOnThisDevice } from './routines.js';
 
 export interface OverdueJob {
   name: string;
@@ -57,6 +57,10 @@ export function detectOverdueJobs(now: Date = new Date()): OverdueJob[] {
     if (!job.enabled || job.runOnce) continue;
     // Trigger-only jobs (no cron schedule) never have an expected fire time.
     if (!job.schedule) continue;
+    // A job pinned to another device is that device's to run, notify, and
+    // catch up — flagging it here would make every machine in the fleet nag
+    // (and `catchup` fire) for a job that must not run locally.
+    if (!jobRunsOnThisDevice(job)) continue;
 
     let expected: Date | null = null;
     try {

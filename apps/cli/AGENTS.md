@@ -68,6 +68,23 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams
 (`migrateLegacySwarmToTeams()` in `src/lib/migrate.ts`). Don't reach for Swarm — gone.
 
+### 7. Self-updating agents are ONE binary, not fictional version-homes
+
+Some harnesses (droid, grok, antigravity, cursor, hermes, forge, kiro, goose) install
+via an official `curl … | sh` / `brew install` script that carries no version token —
+the installer only ever fetches the *current* release and the binary self-updates in
+place. `isSelfUpdatingAgent()` ([`src/lib/agents.ts`](src/lib/agents.ts)) is the single
+predicate for "no pinnable semver"; route every such decision through it, never a
+scattered `=== 'droid'`. Its narrower cousin `isGlobalBinaryAgent()`
+([`src/lib/versions.ts`](src/lib/versions.ts)) — computed by probing whether
+`getBinaryPath` ignores the version arg — is true only when the agent resolves to ONE
+global binary (droid). For those, `listInstalledVersions` collapses the phantom
+per-version dirs to a single canonical entry, `reconcileStaleLatestForAgent` folds the
+stale dirs into the survivor, `agents view` shows the live `--version`, and
+`agents add droid@1.2.3` gracefully installs the current release instead of erroring.
+grok is self-updating but stores a real per-version binary under each version-home, so
+it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
+
 ## Supported harnesses
 
 14 harnesses ship support today. The full id list is `AgentId`
@@ -83,20 +100,20 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — |
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ | — |
-| ★ OpenCode | `opencode` | — | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | ✓ | — |
+| ★ OpenCode | `opencode` | — | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | — | — |
 | Gemini † | `gemini` | ≥0.26 | ✓ | — | ✓ | ✓ | — | — | — |
-| Cursor | `cursor` | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — |
+| Cursor | `cursor` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — | — |
 | OpenClaw | `openclaw` | ✓ | ✓ | — | ✓ | — | ✓ | ✓ | — |
-| Copilot | `copilot` | ✓ | ✓ | — | ✓ | ✓ | ✓ | — | — |
+| Copilot | `copilot` | ✓ | ✓ | — | ✓ | ✓ | ✓ | ≥0.0.353 | — |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
-| Kiro | `kiro` | ≥0.10 | ✓ | — | ✓ | ✓ | — | — | — |
+| Kiro | `kiro` | ≥0.10 | ✓ | ≥2.8 | ✓ | ✓ | — | — | — |
 | Goose | `goose` | ≥1.34 | ✓ | — | — | — | ✓ | — | — |
 | Droid | `droid` | ✓ | ✓ | — | — | ✓ | ✓ | ✓ | — |
 
 ✓ = supported · — = not · version cell = only within that range (out-of-range =
 skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — keep this
 snapshot in sync. `workflows` is Claude-only; `mcp` is universal; `allowlist` is
-`claude`/`antigravity`/`grok`/`kimi`; `subagents` is `claude`/`codex`/`kimi`/`grok`/`openclaw`/`droid`.
+`claude`/`antigravity`/`grok`/`kimi`/`kiro`; `subagents` is `claude`/`codex`/`kimi`/`grok`/`openclaw`/`droid`/`copilot`.
 **† Gemini is deprecated by Google** (retired June 18 2026); Antigravity is the
 successor — the CLI warns on `agents add gemini` (`warnAgentDeprecated`).
 

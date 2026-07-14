@@ -7,6 +7,8 @@
  */
 
 import * as fs from 'fs';
+import * as path from 'path';
+import { createHash } from 'crypto';
 import type {
   RegistryType,
   RegistryConfig,
@@ -18,6 +20,7 @@ import type {
 } from './types.js';
 import { DEFAULT_REGISTRIES } from './types.js';
 import { readMeta, writeMeta } from './state.js';
+import { discoverSkillsFromRepo } from './skills.js';
 
 const UNSAFE_PACKAGE_SPEC_CHARS = /[;&|`$\s\x00-\x1f\x7f]/;
 const NPM_SPEC_PATTERN = /^(@[a-z0-9][a-z0-9-_.]*\/)?[a-z0-9][a-z0-9-_.]*(@[A-Za-z0-9._+-]+)?$/;
@@ -252,23 +255,28 @@ export async function getMcpServerInfo(
   return null;
 }
 
+/** One row of a skill index document. */
+export interface SkillIndexEntry {
+  name: string;
+  description?: string;
+  source?: string;
+  identifier?: string;
+  trust_level?: string;
+  repo?: string;
+  path?: string;
+  tags?: string[];
+  author?: string;
+  installs?: number;
+  /** Lowercase hex sha256 of the skill's SKILL.md — written by `agents publish`. */
+  sha256?: string;
+}
+
 /** Raw shape of the skill index document served by Hermes and compatible registries. */
-interface SkillIndexDocument {
+export interface SkillIndexDocument {
   version?: number;
   generated_at?: string;
   skill_count?: number;
-  skills: Array<{
-    name: string;
-    description?: string;
-    source?: string;
-    identifier?: string;
-    trust_level?: string;
-    repo?: string;
-    path?: string;
-    tags?: string[];
-    author?: string;
-    installs?: number;
-  }>;
+  skills: SkillIndexEntry[];
 }
 
 const skillIndexCache = new Map<string, { fetchedAt: number; doc: SkillIndexDocument }>();
@@ -298,7 +306,7 @@ async function fetchSkillIndex(url: string, apiKey?: string): Promise<SkillIndex
 }
 
 /** Map a raw skill-index row into the canonical SkillEntry shape. */
-function normalizeSkillEntry(raw: SkillIndexDocument['skills'][number]): SkillEntry {
+export function normalizeSkillEntry(raw: SkillIndexEntry): SkillEntry {
   return {
     name: raw.name,
     description: raw.description,
@@ -310,6 +318,7 @@ function normalizeSkillEntry(raw: SkillIndexDocument['skills'][number]): SkillEn
     installs: raw.installs,
     tags: raw.tags,
     trustLevel: raw.trust_level,
+    sha256: raw.sha256,
   };
 }
 
@@ -538,4 +547,96 @@ export async function resolvePackage(identifier: string): Promise<ResolvedPackag
   }
 
   return null;
+}
+
+// ============================================================================
+// PUBLISH — generate a self-hosted skill index + verify integrity on install
+// ============================================================================
+
+/** Lowercase hex sha256 of a file's bytes. Small files only (SKILL.md). */
+export function sha256OfFile(file: string): string {
+  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+/**
+ * Parse an 'owner/repo' slug from a git remote URL (https or scp-style ssh).
+ * Returns null if the URL is not a recognizable GitHub-style remote.
+ */
+export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
+  const s = remoteUrl.trim().replace(/\.git$/, '');
+  // https://github.com/owner/repo  or  git@github.com:owner/repo
+  const m = s.match(/github\.com[/:]([^/]+\/[^/]+)$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Walk a repo's skills/ and build a flat {@link SkillIndexDocument}. Each entry
+ * carries the sha256 of its SKILL.md so install can verify integrity after
+ * cloning — this is the artifact `agents publish` commits + pushes.
+ *
+ * `repoSlug` is the 'owner/repo' the skills are published under, written into
+ * each entry's `repo` field so {@link skillEntryToGitSource} resolves it to
+ * `gh:owner/repo`. `identifier` is set to the skill's directory name so
+ * `agents install skill:<name>` resolves against this index.
+ */
+export function buildSkillIndex(
+  repoPath: string,
+  repoSlug: string,
+  opts?: { generatedAt?: string }
+): SkillIndexDocument {
+  const discovered = discoverSkillsFromRepo(repoPath);
+  const skills: SkillIndexEntry[] = discovered.map((s) => ({
+    name: s.name,
+    description: s.metadata.description || undefined,
+    identifier: s.name,
+    source: repoSlug,
+    repo: repoSlug,
+    path: path.relative(repoPath, s.path),
+    author: s.metadata.author,
+    sha256: sha256OfFile(path.join(s.path, 'SKILL.md')),
+  }));
+  return {
+    version: 1,
+    generated_at: opts?.generatedAt,
+    skill_count: skills.length,
+    skills,
+  };
+}
+
+/**
+ * Verify a cloned skill's SKILL.md against the sha256 recorded in its registry
+ * entry. Returns ok when the entry carries no sha256 — indexes published before
+ * integrity hashes (or by third parties) simply skip the check. Returns an
+ * error when the file is missing or its hash differs, so install can abort
+ * rather than silently trusting a tampered artifact.
+ */
+export function verifySkillIntegrity(
+  repoPath: string,
+  entry: Pick<SkillEntry, 'name' | 'path' | 'sha256'>
+): { ok: boolean; error?: string } {
+  if (!entry.sha256) return { ok: true };
+
+  const rel = entry.path || path.join('skills', entry.name);
+  const skillMd = rel.endsWith('SKILL.md')
+    ? path.join(repoPath, rel)
+    : path.join(repoPath, rel, 'SKILL.md');
+
+  if (!fs.existsSync(skillMd)) {
+    return {
+      ok: false,
+      error: `Integrity check failed for skill '${entry.name}': SKILL.md not found at ${rel}.`,
+    };
+  }
+
+  const actual = sha256OfFile(skillMd);
+  const expected = entry.sha256.toLowerCase();
+  if (actual !== expected) {
+    return {
+      ok: false,
+      error:
+        `Integrity check failed for skill '${entry.name}': expected sha256 ${expected}, got ${actual}. ` +
+        `The published SKILL.md does not match the registry index — refusing to install.`,
+    };
+  }
+  return { ok: true };
 }

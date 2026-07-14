@@ -62,6 +62,20 @@ function buildDroidDetector(): ResourceDetector {
   };
 }
 
+function buildCopilotDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'copilot',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.copilot', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.agent.md'))
+        .map(f => f.replace('.agent.md', ''));
+    },
+  };
+}
+
 function buildOpenclawDetector(): ResourceDetector {
   return {
     kind: 'subagents',
@@ -72,6 +86,20 @@ function buildOpenclawDetector(): ResourceDetector {
       return fs.readdirSync(openclawDir, { withFileTypes: true })
         .filter(d => d.isDirectory() && fs.existsSync(path.join(openclawDir, d.name, 'AGENTS.md')))
         .map(d => d.name);
+    },
+  };
+}
+
+function buildKiroDetector(): ResourceDetector {
+  return {
+    kind: 'subagents',
+    agent: 'kiro',
+    list({ versionHome }: DetectArgs): string[] {
+      const agentsDir = path.join(versionHome, '.kiro', 'agents');
+      if (!fs.existsSync(agentsDir)) return [];
+      return fs.readdirSync(agentsDir)
+        .filter(f => f.endsWith('.json'))
+        .map(f => f.replace('.json', ''));
     },
   };
 }
@@ -107,12 +135,14 @@ function buildOpenCodeDetector(): ResourceDetector {
 
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
+  copilot: buildCopilotDetector,
   grok: buildGrokDetector,
   codex: buildCodexDetector,
   kimi: buildKimiDetector,
   opencode: buildOpenCodeDetector,
   droid: buildDroidDetector,
   openclaw: buildOpenclawDetector,
+  kiro: buildKiroDetector,
 };
 
 export const subagentsDetectors = lazyAgentMap<ResourceDetector>(() => {

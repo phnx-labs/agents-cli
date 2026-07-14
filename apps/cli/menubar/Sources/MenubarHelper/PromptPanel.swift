@@ -107,9 +107,35 @@ final class ClipThumbView: NSView {
     }
 }
 
-private enum QuickDispatchAction: Int {
+enum QuickDispatchAction: Int {
     case fileTicket = 0
     case fix = 1
+}
+
+struct PromptDraft {
+    let note: String
+    let selectedPaths: [String]
+    let selectedAgents: Set<String>
+    let action: QuickDispatchAction
+
+    // Pure decision for what to preserve when the panel dismisses without
+    // submitting: a note that is empty (or only whitespace) means "nothing to keep"
+    // and yields nil so the next summon starts clean; otherwise the note and its
+    // current selections round-trip verbatim. Kept as a free function so the
+    // save/clear state machine is testable without a live NSPanel (see
+    // IssueSelfTest.testDraftPreservation).
+    static func forDismissal(note: String,
+                             selectedPaths: [String],
+                             selectedAgents: Set<String>,
+                             action: QuickDispatchAction) -> PromptDraft? {
+        if note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return nil
+        }
+        return PromptDraft(note: note,
+                           selectedPaths: selectedPaths,
+                           selectedAgents: selectedAgents,
+                           action: action)
+    }
 }
 
 final class PromptPanelController: NSObject, NSTextFieldDelegate {
@@ -133,6 +159,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
     private var agentButtons: [NSButton] = []
     private var action: QuickDispatchAction = .fileTicket
     private var inFlight = false
+    private var draft: PromptDraft?
     // Click-outside dismissal is armed only AFTER the summon settles — otherwise
     // the key/order race while activating an .accessory app fires resignKey once
     // and the panel dismisses itself the instant it appears.
@@ -148,13 +175,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let panel = self.panel ?? buildPanel()
         self.panel = panel
 
-        // Reset for a fresh capture.
+        // Restore an interrupted capture if another app stole focus last time.
+        let restoredDraft = draft
         inFlight = false
-        field.stringValue = ""
-        action = .fileTicket
+        field.stringValue = restoredDraft?.note ?? ""
+        action = restoredDraft?.action ?? .fileTicket
         modeControl.setSelected(true, forSegment: action.rawValue)
-        rebuildAgents()
-        rebuildThumbs()
+        rebuildAgents(restoring: restoredDraft?.selectedAgents)
+        rebuildThumbs(restoring: restoredDraft?.selectedPaths)
 
         let hasThumbs = !thumbStrip.arrangedSubviews.isEmpty
         thumbStrip.isHidden = !hasThumbs
@@ -177,10 +205,27 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         }
     }
 
-    private func dismiss() {
+    private func dismiss(preservingDraft: Bool = true) {
         dismissArmed = false
+        if preservingDraft {
+            saveDraftForDismissal()
+        } else {
+            clearDraft()
+        }
         guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
+    }
+
+    private func saveDraftForDismissal() {
+        guard !inFlight else { return }
+        draft = PromptDraft.forDismissal(note: field.stringValue,
+                                         selectedPaths: selected,
+                                         selectedAgents: selectedAgents,
+                                         action: action)
+    }
+
+    private func clearDraft() {
+        draft = nil
     }
 
     private func waitUntilReadyForTyping(_ panel: PromptPanel) {
@@ -204,14 +249,14 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         case .fix:
             AgentsCLI.dispatchQuickFix(note: note, screenshotPaths: selected, agents: agents)
         }
-        dismiss()
+        dismiss(preservingDraft: false)
     }
 
-    // Return submits, Escape cancels. A single-line NSTextField sends these as
+    // Return submits, Escape clears. A single-line NSTextField sends these as
     // command selectors through the field editor — intercept them here.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
         if sel == #selector(NSResponder.insertNewline(_:)) { submit(); return true }
-        if sel == #selector(NSResponder.cancelOperation(_:)) { dismiss(); return true }
+        if sel == #selector(NSResponder.cancelOperation(_:)) { dismiss(preservingDraft: false); return true }
         return false
     }
 
@@ -244,7 +289,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         updateHint()
     }
 
-    private func rebuildAgents() {
+    private func rebuildAgents(restoring restoredAgents: Set<String>? = nil) {
         for v in agentStrip.arrangedSubviews {
             agentStrip.removeArrangedSubview(v)
             v.removeFromSuperview()
@@ -259,7 +304,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
             return button
         }
         for button in agentButtons { agentStrip.addArrangedSubview(button) }
-        selectedAgents = defaultAgentSelection()
+        selectedAgents = restoredAgents ?? defaultAgentSelection()
         normalizeSelectionForAction()
         updateAgentButtons()
     }
@@ -298,18 +343,24 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
 
     // MARK: Thumbnails
 
-    private func rebuildThumbs() {
+    private func rebuildThumbs(restoring restoredSelection: [String]? = nil) {
         for v in thumbStrip.arrangedSubviews {
             thumbStrip.removeArrangedSubview(v)
             v.removeFromSuperview()
         }
         selected = []
         let paths = AgentsCLI.recentImageAttachments()
+        let restoredSet = Set(restoredSelection ?? [])
         for path in paths {
             let thumb = ClipThumbView(path: path)
-            // Pre-select the newest clip only when it's recent enough to relate
-            // to what the user just captured.
-            if path == paths.first, isRecent(path) {
+            if restoredSelection != nil {
+                if restoredSet.contains(path) {
+                    thumb.isSelected = true
+                    selected.append(path)
+                }
+            } else if path == paths.first, isRecent(path) {
+                // Pre-select the newest clip only when it's recent enough to relate
+                // to what the user just captured.
                 thumb.isSelected = true
                 selected.append(path)
             }
@@ -355,7 +406,7 @@ final class PromptPanelController: NSObject, NSTextFieldDelegate {
         let pickable = thumbStrip.arrangedSubviews.isEmpty ? "" : " · click attaches · dbl-click previews"
         let agents = selectedAgentList().map(LocalState.agentLabel).joined(separator: ", ")
         let actionText = action == .fileTicket ? "file ticket with \(agents)" : "fix with \(agents)"
-        hint.stringValue = "\(attach)\(pickable)    ↩ \(actionText) · esc cancel"
+        hint.stringValue = "\(attach)\(pickable)    ↩ \(actionText) · esc clear"
     }
 
     // MARK: Build / layout

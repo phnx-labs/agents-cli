@@ -61,7 +61,9 @@ PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0─�
 | `agents teams status [team]` | `s`, `st`, `check` | Check team progress |
 | `agents teams active` | — | All teammates running right now, across all teams |
 | `agents teams start [team]` | — | Launch pending teammates whose deps are satisfied |
-| `agents teams stop [team] [teammate]` | — | Stop a running teammate |
+| `agents teams message <team> <teammate> <message>` | — | Send a follow-up: steers a running teammate via its mailbox, resumes a stopped one |
+| `agents teams resume <team> <teammate> [message]` | — | Resume a stopped teammate (re-enter its own session with the message) |
+| `agents teams stop [team] [teammate]` | — | Stop a running teammate (resume it later with `teams resume`) |
 | `agents teams remove [team] [teammate]` | `rm` | Remove a stopped teammate's logs |
 | `agents teams disband [team]` | `d` | Stop all teammates and delete the team |
 | `agents teams logs [teammate]` | `log` | Read a teammate's raw stdout |
@@ -133,6 +135,39 @@ PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0─�
 |---|---|
 | `-n, --tail <n>` | Last N lines only |
 | `--team <team>` | Disambiguate when the same name appears in multiple teams |
+
+## Resuming a teammate
+
+A teammate often ends its turn with more to do — a PR opened and waiting on review,
+a headless run that hit a turn cap, a task you want to redirect after the fact.
+`agents teams resume` re-enters that teammate's **own** session with your message as
+the next user turn, so it picks up with full context instead of you finishing the
+work by hand or spawning a fresh, context-less teammate.
+
+```bash
+# A teammate finished with its PR open, waiting on review. Nudge it home:
+agents teams resume my-team backend "prix-cloud approved — rebase-merge the PR, then cut the release"
+```
+
+`teams message` is the same command with automatic routing by the teammate's current
+state:
+
+| Teammate state | What happens |
+|---|---|
+| running | The message is **steered** into its mailbox and delivered at its next tool call (no re-launch). |
+| completed / failed / stopped | The teammate is **resumed** — its session is re-entered with the message. |
+| pending (unmet `--after`) | Rejected — run `teams start` to launch it first. |
+
+The teammate re-launches through the same backend it first used (local process or
+remote host) in its original working directory / worktree, and flips back to
+`running` so `teams status` tracks it live again.
+
+**Every harness.** The resume delegates to `agents run --resume`, so it inherits that
+command's coverage: native resume for Claude (`--resume`) and Codex (`resume`), and a
+universal `/continue` replay for the rest (OpenCode, Grok, Kimi, …). The session id it
+resumes is the teammate's underlying agent session — captured from the agent's own
+output — so a non-Claude teammate that died before emitting its first event (no
+captured id) is refused with a clear message rather than resumed into a fresh run.
 
 ## Boundary Contracts
 

@@ -303,6 +303,19 @@ export function transformSubagentForDroid(subagentDir: string): string {
 }
 
 /**
+ * Transform a subagent into a GitHub Copilot CLI custom agent `.agent.md` file.
+ *
+ * Copilot custom agents are Markdown profiles with YAML frontmatter stored in
+ * `~/.copilot/agents/` (user) or `.github/agents/` (project). The file name
+ * ends in `.agent.md` and the frontmatter carries `name`, `description`, and
+ * optionally `model` and `tools`. The emitted body is identical to Factory
+ * Droid's custom-droid format (flatten frontmatter + body + appended .md
+ * sections, `color` dropped), so this is an alias of transformSubagentForDroid.
+ * See GitHub docs for custom agents.
+ */
+export const transformSubagentForCopilot = transformSubagentForDroid;
+
+/**
  * Transform a subagent into an OpenCode agent markdown file.
  *
  * OpenCode loads agents from ~/.config/opencode/agents/*.md (global) with
@@ -477,6 +490,49 @@ export function transformSubagentForCodex(subagentDir: string): string {
 }
 
 /**
+ * Transform a subagent into a Kiro CLI custom-agent JSON file.
+ *
+ * Kiro custom agents live in `~/.kiro/agents/<name>.json` (or `.kiro/agents/`
+ * workspace-local) and declare name, description, prompt, tools, and optional
+ * model. We flatten the AGENT.md frontmatter + body plus any sibling .md files
+ * as sections into a single `prompt`, and expose the standard built-in tool
+ * set so the subagent can actually run.
+ */
+export function transformSubagentForKiro(subagentDir: string): string {
+  const agentMd = path.join(subagentDir, 'AGENT.md');
+  const frontmatter = parseSubagentFrontmatter(agentMd);
+  const body = getSubagentBody(agentMd);
+
+  if (!frontmatter) {
+    throw new Error(`Invalid AGENT.md in ${subagentDir}`);
+  }
+
+  const files = fs.readdirSync(subagentDir)
+    .filter(f => f.endsWith('.md') && f !== 'AGENT.md')
+    .sort();
+
+  let prompt = body;
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(subagentDir, file), 'utf-8').trim();
+    const sectionName = file.replace('.md', '');
+    const title = sectionName.charAt(0).toUpperCase() + sectionName.slice(1).toLowerCase();
+    prompt += `\n\n## ${title}\n\n${content}`;
+  }
+
+  const config: Record<string, unknown> = {
+    name: frontmatter.name,
+    description: frontmatter.description,
+    prompt,
+    tools: ['read', 'write', 'shell', 'web_search', 'web_fetch'],
+  };
+  if (frontmatter.model) {
+    config.model = frontmatter.model;
+  }
+
+  return JSON.stringify(config, null, 2);
+}
+
+/**
  * Sync a subagent to an OpenClaw workspace
  * Copies full directory, renames AGENT.md to AGENTS.md
  */
@@ -566,6 +622,19 @@ export function installSubagentToAgent(
     // OpenClaw: copy full directory
     const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
     return syncSubagentToOpenclaw(subagentDir, targetDir);
+  } else if (agent === 'kiro') {
+    // Kiro: JSON custom-agent file under ~/.kiro/agents/
+    const agentsDir = path.join(agentHome, '.kiro', 'agents');
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true });
+    }
+    try {
+      const transformed = transformSubagentForKiro(subagentDir);
+      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.json`), transformed);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   } else {
     // Other agents don't support subagents yet
     return { success: false, error: `Agent '${agent}' does not support subagents` };
@@ -609,6 +678,12 @@ export function removeSubagentFromAgent(
       const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
       if (fs.existsSync(targetDir)) {
         fs.rmSync(targetDir, { recursive: true });
+      }
+      return { success: true };
+    } else if (agent === 'kiro') {
+      const targetPath = safeJoin(path.join(agentHome, '.kiro', 'agents'), `${subagentName}.json`);
+      if (fs.existsSync(targetPath)) {
+        fs.unlinkSync(targetPath);
       }
       return { success: true };
     } else {
@@ -728,6 +803,18 @@ export function listSubagentsForAgent(
       const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
       subagents.push({ name, path: filePath, files: [file], frontmatter });
     }
+  } else if (agentId === 'copilot') {
+    // Copilot: flat `<name>.agent.md` files under ~/.copilot/agents/
+    const agentsDir = path.join(home, '.copilot', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.agent.md')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+      const name = file.replace(/\.agent\.md$/, '');
+      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
+      subagents.push({ name, path: filePath, files: [file], frontmatter });
+    }
   } else if (agentId === 'openclaw') {
     // OpenClaw: directories with AGENTS.md
     const openclawDir = path.join(home, '.openclaw');
@@ -767,6 +854,36 @@ export function listSubagentsForAgent(
         name: dir,
         path: dirPath,
         files,
+        frontmatter,
+      });
+    }
+  } else if (agentId === 'kiro') {
+    // Kiro: JSON files under ~/.kiro/agents/
+    const agentsDir = path.join(home, '.kiro', 'agents');
+    if (!fs.existsSync(agentsDir)) return subagents;
+
+    for (const file of fs.readdirSync(agentsDir)) {
+      if (!file.endsWith('.json')) continue;
+      const filePath = path.join(agentsDir, file);
+      if (!fs.statSync(filePath).isFile()) continue;
+
+      let frontmatter: SubagentFrontmatter;
+      try {
+        const config = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as { name?: string; description?: string; model?: string };
+        frontmatter = {
+          name: config.name || file.replace('.json', ''),
+          description: config.description || '',
+          model: config.model,
+        };
+      } catch {
+        continue;
+      }
+
+      const name = file.replace('.json', '');
+      subagents.push({
+        name,
+        path: filePath,
+        files: [file],
         frontmatter,
       });
     }
@@ -843,6 +960,17 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
         }
       }
     }
+  } else if (agent === 'kiro') {
+    const agentsDir = path.join(versionHome, '.kiro', 'agents');
+    if (fs.existsSync(agentsDir)) {
+      for (const file of fs.readdirSync(agentsDir)) {
+        if (!file.endsWith('.json')) continue;
+        const name = path.basename(file, '.json');
+        if (!discovered.has(name)) {
+          orphans.push(name);
+        }
+      }
+    }
   }
 
   return { agent, version, orphans: orphans.sort() };
@@ -905,12 +1033,24 @@ export function removeSubagentFromVersion(
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
       }
+    } else if (agent === 'copilot') {
+      const targetPath = path.join(versionHome, '.copilot', 'agents', `${subagentName}.agent.md`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.agent.md.${stamp}`));
+      }
     } else if (agent === 'openclaw') {
       const targetDir = path.join(versionHome, '.openclaw', subagentName);
       if (fs.existsSync(targetDir)) {
         const trashDest = path.join(trashDir, stamp);
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(targetDir, trashDest);
+      }
+    } else if (agent === 'kiro') {
+      const targetPath = path.join(versionHome, '.kiro', 'agents', `${subagentName}.json`);
+      if (fs.existsSync(targetPath)) {
+        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
+        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.json.${stamp}`));
       }
     }
     return { success: true };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm } from './active.js';
+import { resolveCwds, LSOF_CONCURRENCY, agentKindFromComm, activeStatusFromCloudStatus } from './active.js';
 
 describe('agentKindFromComm', () => {
   it('matches a real agent CLI by basename (absolute path or bare name)', () => {
@@ -16,6 +16,19 @@ describe('agentKindFromComm', () => {
 
   it('does NOT match the Claude desktop app (named Claude, not the CLI claude)', () => {
     expect(agentKindFromComm('/Applications/Claude.app/Contents/MacOS/Claude')).toBeUndefined();
+  });
+});
+
+describe('activeStatusFromCloudStatus', () => {
+  it('preserves resumable idle cloud tasks as idle sessions', () => {
+    expect(activeStatusFromCloudStatus('idle')).toBe('idle');
+  });
+
+  it('maps cloud statuses into the active-session status vocabulary', () => {
+    expect(activeStatusFromCloudStatus('running')).toBe('running');
+    expect(activeStatusFromCloudStatus('input_required')).toBe('input_required');
+    expect(activeStatusFromCloudStatus('queued')).toBe('queued');
+    expect(activeStatusFromCloudStatus('allocating')).toBe('queued');
   });
 });
 

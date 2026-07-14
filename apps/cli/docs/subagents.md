@@ -4,7 +4,7 @@ Lightweight named agent definitions that parent agents can spawn for focused sub
 
 ## Overview
 
-A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents with `subagents: true` in the capability matrix (today Claude and OpenClaw — see `capableAgents('subagents')` in `src/lib/agents.ts`) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
+A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents with `subagents: true` in the capability matrix (today Claude, OpenClaw, Droid, Codex, and Kiro — see `capableAgents('subagents')` in `src/lib/agents.ts`) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
 
 Subagents are one of three patterns for specialization. Plugins can bundle subagent definitions alongside skills and hooks. Workflows declare `allowedAgents` in their frontmatter to constrain which subagents the orchestrator can reach. In all cases the on-disk format is the same `AGENT.md` file.
 
@@ -29,6 +29,8 @@ Central storage (project > user > system):
       agents/<name>.md               Claude native format (copied + converted)
     .openclaw/
       agents/<name>.yaml             OpenClaw YAML format
+    .kiro/
+      agents/<name>.json             Kiro custom-agent JSON format
 
                       Parent agent session (Claude example)
                                   │
@@ -51,7 +53,7 @@ Central storage (project > user > system):
 
 | Command | Flag | Effect |
 |---------|------|--------|
-| `add` | `-a, --agents <agents...>` | Target specific agents: `claude`, `openclaw` (defaults to all capable) |
+| `add` | `-a, --agents <agents...>` | Target specific agents: `claude`, `openclaw`, `kiro` (defaults to all capable) |
 | `add` | `-y, --yes` | Skip all prompts and confirmation |
 | `remove` | `-y, --yes` | Skip confirmation prompt |
 
@@ -103,7 +105,7 @@ agents subagents view code-reviewer
 **3. Install from GitHub**
 
 ```bash
-agents subagents add gh:team/subagents --agents claude,openclaw
+agents subagents add gh:team/subagents --agents claude,openclaw,kiro
 ```
 
 **4. Install from a local directory**

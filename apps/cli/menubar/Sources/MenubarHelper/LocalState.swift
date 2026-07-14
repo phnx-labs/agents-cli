@@ -123,7 +123,7 @@ enum LocalState {
     // name = sessionId, mtime = when flagged, content = the notification message
     // (newer hooks write it; empty for the touch-only contract). One stat + one
     // tiny read per blocked session — stays cheap on the badge poll path.
-    private static func attentionMarks() -> [String: AttentionMark] {
+    static func attentionMarks() -> [String: AttentionMark] {
         let dir = "\(home)/.agents/.cache/state/attention"
         let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
         var out: [String: AttentionMark] = [:]
@@ -150,6 +150,52 @@ enum LocalState {
             let platform = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             return PendingDevice(name: name, platform: platform.isEmpty ? "unknown" : platform)
         }
+    }
+
+    // MARK: Sessions from the engine's active list (warm cache)
+    // Convert `agents sessions --active --local --json` rows into menu Sessions.
+    // The engine list is authoritative for coverage + running/idle; the cheap
+    // local files still contribute what the engine payload lacks: the terminal
+    // label (title) and the attention sentinel (question + wait-start).
+    static func sessions(fromActive active: [ActiveSession]) -> [Session] {
+        let attention = attentionMarks()
+        let titles = terminalTitles()
+        var out: [Session] = []
+        for a in active {
+            let sid = a.sessionId ?? ""
+            let mark = sid.isEmpty ? nil : attention[sid]
+            let repo = a.cwd.map { ($0 as NSString).lastPathComponent } ?? ""
+            let status: SessionStatus = mark != nil ? .attention
+                : a.status == "running" ? .running
+                : a.status == "input_required" ? .attention
+                : a.status == "queued" ? .queued : .idle
+            out.append(Session(agent: a.kind, repo: repo, cwd: a.cwd, status: status,
+                               context: a.context ?? "terminal",
+                               title: sid.isEmpty ? "" : (titles[sid] ?? ""),
+                               question: mark?.text ?? "",
+                               attentionSinceMs: status == .attention ? mark?.sinceMs : nil))
+        }
+        return out
+    }
+
+    // sessionId -> label from live-terminals.json (the engine's active payload
+    // carries no label; the extension-registered terminals do).
+    private static func terminalTitles() -> [String: String] {
+        let path = "\(home)/.agents/.cache/terminals/live-terminals.json"
+        guard let data = fm.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (_, window) in root {
+            guard let w = window as? [String: Any],
+                  let entries = w["entries"] as? [[String: Any]] else { continue }
+            for e in entries {
+                if let sid = e["sessionId"] as? String, !sid.isEmpty,
+                   let label = e["label"] as? String, !label.isEmpty {
+                    out[sid] = label
+                }
+            }
+        }
+        return out
     }
 
     // MARK: All active sessions

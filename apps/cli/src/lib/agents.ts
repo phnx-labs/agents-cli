@@ -312,7 +312,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',
@@ -332,7 +332,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
-    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] }, // subagents: ~/.config/opencode/agents/*.md
+    capabilities: { hooks: false, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '1.1.1' }, skills: true, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit'] },
   },
   openclaw: {
     id: 'openclaw',
@@ -376,7 +376,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'] },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: true, subagents: { since: '0.0.353' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'auto', 'skip'] },
   },
   amp: {
     id: 'amp',
@@ -416,7 +416,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '0.10.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: { since: '2.8.0' }, skills: true, commands: true, plugins: false, subagents: { since: '1.23.0' }, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
   },
   goose: {
     id: 'goose',
@@ -685,6 +685,31 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
 
 /** All registered agent IDs derived from the AGENTS registry. */
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
+
+/**
+ * A self-updating agent is a single global binary installed by an official
+ * `curl … | sh` / `brew install` script that carries NO version token — the
+ * installer can only ever fetch the *current* release, and the binary then keeps
+ * itself up to date in place (droid, grok, antigravity, cursor, hermes, forge,
+ * kiro, goose). There is no semver to pin, so agents-cli must not model these as
+ * having multiple installable version-homes the way it does for npm-packaged
+ * agents (claude, codex, kimi, …).
+ *
+ * The predicate is `!npmPackage && installScript && !installScript.includes('VERSION')`:
+ *   - `npmPackage` empty       → not installed from npm, so `agents add x@1.2.3`
+ *                                can't resolve a registry version.
+ *   - `installScript` present  → it IS installed by a script (not unmanaged).
+ *   - no `VERSION` placeholder → the script has no slot for a pinned version
+ *                                (contrast: an installer templated with `VERSION`
+ *                                could pin, and is NOT self-updating).
+ *
+ * Route every "is this a pinnable, multi-version agent?" decision through here —
+ * never a scattered `agent === 'droid'`.
+ */
+export function isSelfUpdatingAgent(agent: AgentId): boolean {
+  const cfg = AGENTS[agent];
+  return !cfg.npmPackage && !!cfg.installScript && !cfg.installScript.includes('VERSION');
+}
 
 // Capability-filtered agent lists used to live here as `*_CAPABLE_AGENTS`
 // constants. They were a frequent source of silent-skip bugs (e.g. grok

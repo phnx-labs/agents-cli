@@ -492,6 +492,12 @@ export interface SkillEntry {
   tags?: string[];
   /** Registry-specific trust signal (e.g. 'builtin', 'trusted', 'community'). */
   trustLevel?: string;
+  /**
+   * Lowercase hex sha256 of the skill's SKILL.md, as recorded by
+   * `agents publish`. When present, install verifies the cloned SKILL.md
+   * against it and aborts on mismatch.
+   */
+  sha256?: string;
 }
 
 /** Paginated response from a skill registry search endpoint. */
@@ -701,6 +707,12 @@ export interface Meta {
   // Git remote source URL (when ~/.agents/.system/ is a git repo)
   source?: string;
   /**
+   * Projects root for the `agents run --project <slug>` shorthand, e.g.
+   * `~/src/github.com/<user>`. Auto-inferred from the repo you launch inside and
+   * cached here; stored home-relative (`~/…`) so it resolves on remote hosts too.
+   */
+  projectRoot?: string;
+  /**
    * Extra DotAgent repos merged after ~/.agents/. Managed clones live as peer
    * dirs at ~/.agents-<alias>/; user-owned repos can point at arbitrary paths
    * via the `path` field.
@@ -825,6 +837,14 @@ export interface ClaudePermissions {
     allow: string[];
     deny: string[];
     additionalDirectories?: string[];
+  };
+}
+
+/** Cursor CLI native format in ~/.cursor/cli-config.json (Shell/Read/Write/WebFetch/Mcp). */
+export interface CursorPermissions {
+  permissions: {
+    allow: string[];
+    deny: string[];
   };
 }
 

@@ -51,7 +51,26 @@ describe('supports() capability gate', () => {
     });
   });
 
-  describe('gemini hooks since 0.26.0', () => {
+  describe('copilot subagents since 0.0.353', () => {
+  it('gates 0.0.352 as too_old', () => {
+    const result = supports('copilot', 'subagents', '0.0.352');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 0.0.353');
+    }
+  });
+
+  it('passes 0.0.353 exactly', () => {
+    expect(supports('copilot', 'subagents', '0.0.353')).toEqual({ ok: true });
+  });
+
+  it('passes 1.0.0 and above', () => {
+    expect(supports('copilot', 'subagents', '1.0.0')).toEqual({ ok: true });
+  });
+});
+
+describe('gemini hooks since 0.26.0', () => {
     it('gates 0.25.1 as too_old (the silent-no-op case)', () => {
       const result = supports('gemini', 'hooks', '0.25.1');
       expect(result.ok).toBe(false);
@@ -227,6 +246,22 @@ describe('kiro hooks version gate', () => {
   it('passes 0.10.0 and above', () => {
     expect(supports('kiro', 'hooks', '0.10.0')).toEqual({ ok: true });
     expect(supports('kiro', 'hooks', '2.6.1')).toEqual({ ok: true });
+  });
+});
+
+describe('kiro allowlist version gate', () => {
+  it('gates versions below 2.8.0 as too_old', () => {
+    const result = supports('kiro', 'allowlist', '2.7.9');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 2.8.0');
+    }
+  });
+
+  it('passes 2.8.0 and above', () => {
+    expect(supports('kiro', 'allowlist', '2.8.0')).toEqual({ ok: true });
+    expect(supports('kiro', 'allowlist', '2.10.0')).toEqual({ ok: true });
   });
 });
 

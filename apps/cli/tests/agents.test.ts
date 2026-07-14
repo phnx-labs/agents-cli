@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { AGENTS, ALL_AGENT_IDS, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig } from '../src/lib/agents.js';
-import { convertToOpenCodeFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
+import { convertToOpenCodeFormat, convertToCursorFormat, applyPermissionsToVersion } from '../src/lib/permissions.js';
 import { capableAgents, supports } from '../src/lib/capabilities.js';
 import {
   transformSubagentForDroid,
@@ -383,6 +383,41 @@ describe('opencode allowlist (permission in opencode.jsonc)', () => {
   });
 });
 
+
+describe('cursor allowlist (cli-config.json)', () => {
+  it('is capable of allowlist', () => {
+    expect(capableAgents('allowlist')).toContain('cursor');
+    expect(supports('cursor', 'allowlist').ok).toBe(true);
+  });
+
+  it('convertToCursorFormat maps Bash to Shell', () => {
+    const out = convertToCursorFormat({ name: 't', allow: ['Bash(git *)', 'Read(src/**)'], deny: ['Bash(rm *)'] });
+    expect(out.permissions.allow).toContain('Shell(git *)');
+    expect(out.permissions.allow).toContain('Read(src/**)');
+    expect(out.permissions.deny).toContain('Shell(rm *)');
+  });
+
+  it('applyPermissionsToVersion writes ~/.cursor/cli-config.json', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cur-perm-'));
+    try {
+      const home = path.join(root, 'home');
+      const r = applyPermissionsToVersion(
+        'cursor',
+        { name: 't', allow: ['Bash(ls)'], deny: ['Bash(rm)'] },
+        home,
+        false,
+      );
+      expect(r.success).toBe(true);
+      const dest = path.join(home, '.cursor', 'cli-config.json');
+      expect(fs.existsSync(dest)).toBe(true);
+      const cfg = JSON.parse(fs.readFileSync(dest, 'utf-8'));
+      expect(cfg.permissions.allow).toContain('Shell(ls)');
+      expect(cfg.permissions.deny).toContain('Shell(rm)');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('opencode subagents (markdown mode: subagent)', () => {
   it('is capable of subagents', () => {
