@@ -1,8 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { loadOperators, getOperator, isKnownOperator, isAdmin, canPerform, isHighConsequenceAllowed } from './operator.js';
+import { loadOperators, getOperator, isKnownOperator, isAdmin, canPerform, isHighConsequenceAllowed, verifyOperatorIdentity } from './operator.js';
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-operator-test-'));
@@ -60,5 +60,28 @@ describe('operator registry', () => {
 `);
     expect(isHighConsequenceAllowed('deploy', 'boss', dir)).toBe(true);
     expect(isHighConsequenceAllowed('merge', 'boss', dir)).toBe(true);
+  });
+});
+
+describe('verifyOperatorIdentity (RUSH-1619)', () => {
+  const prev = process.env.AGENTS_OPERATOR_ID;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTS_OPERATOR_ID;
+    else process.env.AGENTS_OPERATOR_ID = prev;
+  });
+
+  it('rejects a known --as id without AGENTS_OPERATOR_ID', () => {
+    const dir = tmpDir();
+    writeOps(dir, `operators:\n  muqsit:\n    admin: true\n`);
+    delete process.env.AGENTS_OPERATOR_ID;
+    expect(verifyOperatorIdentity('muqsit', dir)).toBe(false);
+  });
+
+  it('accepts when env id matches a known operator', () => {
+    const dir = tmpDir();
+    writeOps(dir, `operators:\n  muqsit:\n    admin: true\n`);
+    process.env.AGENTS_OPERATOR_ID = 'muqsit';
+    expect(verifyOperatorIdentity('muqsit', dir)).toBe(true);
+    expect(verifyOperatorIdentity('stranger', dir)).toBe(false);
   });
 });

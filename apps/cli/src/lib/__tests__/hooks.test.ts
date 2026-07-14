@@ -949,6 +949,27 @@ describe('registerHooksToSettings - Goose', () => {
     const marker = path.join(versionHome, '.agents', 'plugins', 'agents-cli-hooks', '.agents-cli-managed');
     expect(fs.existsSync(marker)).toBe(true);
   });
+
+  it('skips SubagentStart/SubagentStop (Goose never emits them) (RUSH-1613)', () => {
+    makeGooseScript('on-subagent.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const result = registerHooksToSettings(
+      'goose',
+      versionHome,
+      {
+        'on-subagent': {
+          script: 'on-subagent.sh',
+          events: ['SubagentStart', 'SubagentStop', 'SessionStart'],
+        },
+      },
+      agentsDir,
+    );
+    expect(result.registered).toEqual(['on-subagent -> SessionStart']);
+    const parsed = JSON.parse(fs.readFileSync(gooseHooksPath(versionHome), 'utf-8'));
+    expect(parsed.hooks.SubagentStart).toBeUndefined();
+    expect(parsed.hooks.SubagentStop).toBeUndefined();
+    expect(parsed.hooks.SessionStart).toHaveLength(1);
+  });
 });
 
 describe('registerHooksToSettings - Cursor', () => {
@@ -1046,6 +1067,44 @@ describe('registerHooksToSettings - Cursor', () => {
     registerHooksToSettings('cursor', versionHome, manifest, agentsDir);
     const parsed = JSON.parse(fs.readFileSync(path.join(versionHome, '.cursor', 'hooks.json'), 'utf-8'));
     expect(parsed.hooks.preToolUse).toHaveLength(1);
+  });
+
+  it('drops managed entries when matcher or event changes (RUSH-1615)', () => {
+    makeCursorScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const outPath = path.join(versionHome, '.cursor', 'hooks.json');
+
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Shell' } },
+      agentsDir,
+    );
+    let parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Shell');
+
+    // Matcher change — old Shell entry must not linger.
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse'], matcher: 'Write' } },
+      agentsDir,
+    );
+    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toHaveLength(1);
+    expect(parsed.hooks.preToolUse[0].matcher).toBe('Write');
+
+    // Event change — PreToolUse managed entry must go when only PostToolUse remains.
+    registerHooksToSettings(
+      'cursor',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PostToolUse'], matcher: 'Write' } },
+      agentsDir,
+    );
+    parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
+    expect(parsed.hooks.preToolUse).toBeUndefined();
+    expect(parsed.hooks.postToolUse).toHaveLength(1);
   });
 });
 

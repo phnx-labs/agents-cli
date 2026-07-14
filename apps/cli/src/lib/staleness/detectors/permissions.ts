@@ -13,6 +13,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as TOML from 'smol-toml';
+import * as yaml from 'yaml';
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import {
@@ -180,6 +181,26 @@ function buildKimiDetector(): ResourceDetector {
   };
 }
 
+function buildCursorDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'cursor',
+    list({ versionHome }: DetectArgs): string[] {
+      const configPath = path.join(versionHome, '.cursor', 'cli-config.json');
+      if (!fs.existsSync(configPath)) return [];
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
+          permissions?: { allow?: string[]; deny?: string[] };
+        };
+        const allow = config.permissions?.allow?.length ?? 0;
+        const deny = config.permissions?.deny?.length ?? 0;
+        if (allow + deny > 0) return discoverPermissionGroups().map(g => g.name);
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
 function buildDroidDetector(): ResourceDetector {
   return {
     kind: 'permissions',
@@ -198,6 +219,24 @@ function buildDroidDetector(): ResourceDetector {
   };
 }
 
+function buildKiroDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'kiro',
+    list({ versionHome }: DetectArgs): string[] {
+      const permissionsPath = path.join(versionHome, '.kiro', 'settings', 'permissions.yaml');
+      if (!fs.existsSync(permissionsPath)) return [];
+      try {
+        const config = yaml.parse(fs.readFileSync(permissionsPath, 'utf-8')) as { rules?: unknown[] } | null;
+        if (config && Array.isArray(config.rules) && config.rules.length > 0) {
+          return discoverPermissionGroups().map(g => g.name);
+        }
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   codex: buildCodexDetector,
@@ -206,7 +245,9 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   antigravity: buildAntigravityDetector,
   grok: buildGrokDetector,
   kimi: buildKimiDetector,
+  cursor: buildCursorDetector,
   droid: buildDroidDetector,
+  kiro: buildKiroDetector,
 };
 
 export const permissionsDetectors = lazyAgentMap<ResourceDetector>(() => {

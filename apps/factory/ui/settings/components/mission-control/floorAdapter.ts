@@ -28,8 +28,9 @@ import {
   type ReplyTarget,
   type CiStatus,
   type TodoItem,
+  type FloorAttachment,
 } from './floorModel'
-import type { UnifiedTask, RecentToolCall, ProjectRule } from '../../types'
+import type { UnifiedTask, RecentToolCall, ProjectRule, SessionAttachment } from '../../types'
 import { detectPlanFiles, extractPlanCandidates, type PlanFile, type PlanFileCandidate } from '../../utils/planDetector'
 
 // Last non-empty todo set per session, so the checklist survives the recent-tool
@@ -39,6 +40,7 @@ import { detectPlanFiles, extractPlanCandidates, type PlanFile, type PlanFileCan
 // threading a store through every adapter call. Empty parses fall back to the remembered
 // set; a fresh non-empty parse overwrites it.
 const lastTodosById = new Map<string, TodoItem[]>()
+const GIT_COMMIT_OUTPUT_RE = /^\[[^\]\n]*\s([0-9a-f]{7,40})\]\s+(.+)$/gm
 
 /** Parse fresh todos, remembering the last non-empty set so the checklist doesn't vanish. */
 function stickyTodos(id: string, toolCalls: RecentToolCall[] | undefined): TodoItem[] {
@@ -96,6 +98,7 @@ export interface UnifiedAgentLike {
     narrative?: string
     recentToolCalls?: RecentToolCall[]
     recentFiles?: string[]
+    attachments?: SessionAttachment[]
   } | null
   agent?: {
     cwd?: string | null
@@ -107,7 +110,9 @@ export interface UnifiedAgentLike {
     last_messages?: string[]
     files_created?: string[]
     files_modified?: string[]
-    attachments?: Array<{ name?: string; ref?: string } | string>
+    attachments?: Array<Partial<SessionAttachment> & { name?: string; ref?: string } | string>
+    /** Per-session rate/usage limit from the CLI transcript (RUSH-1523). */
+    rateLimited?: boolean
   } | null
 }
 
@@ -130,7 +135,7 @@ export interface RemoteSessionLike {
   /** Last few assistant turns (most-recent last) — panel context. */
   tail?: string[]
   output?: string
-  attachments?: string[]
+  attachments?: Array<Partial<SessionAttachment> & { name?: string; ref?: string } | string>
   prUrl: string | null
   ci?: CiStatus | null
   ticket: string | null
@@ -159,6 +164,8 @@ export interface RemoteSessionLike {
   teamName: string
   pid: number
   transport: string
+  /** Per-session rate/usage limit from the CLI (RUSH-1523). */
+  rateLimited?: boolean
   replyRail: string
   replyMuxTarget: string
   replyMuxSocket: string
@@ -184,7 +191,7 @@ const ABBR_BY_TYPE: Record<string, AgentAbbr> = {
   kimi: 'GK',
 }
 
-type AttachmentLike = { name?: string; ref?: string } | string
+type AttachmentLike = Partial<SessionAttachment> & { name?: string; ref?: string } | string
 
 /** agentType string -> terminal-tab prefix. Unknown types fall back to Shell. */
 export function abbrFor(agentType: string): AgentAbbr {
@@ -227,8 +234,63 @@ function collectAttachmentPlanCandidates(attachments: AttachmentLike[] | undefin
       continue
     }
     if (a && typeof a === 'object') {
+      out.push(...extractPlanCandidates(a.path, 'attachment'))
+      out.push(...extractPlanCandidates(a.label, 'attachment'))
       out.push(...extractPlanCandidates(a.name, 'attachment'))
       out.push(...extractPlanCandidates(a.ref, 'attachment'))
+    }
+  }
+  return out
+}
+
+function basename(filePath: string): string {
+  const parts = filePath.split(/[\\/]/).filter(Boolean)
+  return parts[parts.length - 1] || filePath
+}
+
+function normalizeAttachment(a: AttachmentLike): FloorAttachment | null {
+  if (typeof a === 'string') {
+    const label = a.trim()
+    return label ? { path: label, label: basename(label), mediaType: 'application/octet-stream' } : null
+  }
+  if (!a || typeof a !== 'object') return null
+  const path = firstNonEmptyStr(a.path, a.ref)
+  if (!path) return null
+  return {
+    path,
+    label: firstNonEmptyStr(a.label, a.name, basename(path)) ?? basename(path),
+    mediaType: firstNonEmptyStr(a.mediaType) ?? 'application/octet-stream',
+    sizeBytes: typeof a.sizeBytes === 'number' ? a.sizeBytes : undefined,
+    thumbnailUri: firstNonEmptyStr(a.thumbnailUri),
+  }
+}
+
+function collectAttachments(...sources: Array<AttachmentLike[] | undefined>): FloorAttachment[] {
+  const out: FloorAttachment[] = []
+  const seen = new Set<string>()
+  for (const list of sources) {
+    for (const item of list ?? []) {
+      const attachment = normalizeAttachment(item)
+      if (!attachment || seen.has(attachment.path)) continue
+      seen.add(attachment.path)
+      out.push(attachment)
+    }
+  }
+  return out
+}
+
+export function detectCreatedCommits(toolCalls: RecentToolCall[] | undefined): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const call of toolCalls ?? []) {
+    if (call.isError || typeof call.output !== 'string') continue
+    GIT_COMMIT_OUTPUT_RE.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = GIT_COMMIT_OUTPUT_RE.exec(call.output)) !== null) {
+      const sha = match[1].slice(0, 12)
+      if (seen.has(sha)) continue
+      seen.add(sha)
+      out.push(sha)
     }
   }
   return out
@@ -253,7 +315,7 @@ function detectRemotePlans(r: RemoteSessionLike, worktreePath: string): PlanFile
   candidates.push(...extractPlanCandidates(r.lastResponse, 'output'))
   candidates.push(...extractPlanCandidates(r.output, 'output'))
   for (const msg of r.tail ?? []) candidates.push(...extractPlanCandidates(msg, 'output'))
-  for (const attachment of r.attachments ?? []) candidates.push(...extractPlanCandidates(attachment, 'attachment'))
+  candidates.push(...collectAttachmentPlanCandidates(r.attachments))
   return detectPlanFiles(candidates, worktreePath || r.cwd || null)
 }
 
@@ -409,6 +471,8 @@ export function toFloorAgentFromUnified(
   const project = deriveProject(u.terminal?.cwd ?? u.agent?.cwd, u.agent?.repo_name, opts.workspaceRepo || '—', opts.projectRules ?? [])
   const worktreePath = worktreeSlugOf(u.terminal?.cwd ?? u.agent?.cwd) ? (u.terminal?.cwd ?? u.agent?.cwd ?? '') : ''
   const plans = detectUnifiedPlans(u, worktreePath)
+  const attachments = collectAttachments(u.terminal?.attachments, u.agent?.attachments)
+  const createdCommits = detectCreatedCommits(u.terminal?.recentToolCalls)
   // Local unified agents ARE this window's terminal tabs, so sendText into the live
   // terminal is the exact reply channel; fall back to 'none' for a tab-less headless row.
   const reply: ReplyTarget = u.terminal?.id
@@ -443,7 +507,9 @@ export function toFloorAgentFromUnified(
     ci,
     ticket: u.linearIssue ?? null,
     createdTickets: u.createdTickets ?? [],
+    createdCommits,
     spawnedTeam: u.spawnedTeam || undefined,
+    attachments,
     branch: u.terminal?.branch ?? u.agent?.branch ?? '',
     worktreeSlug: cleanWorktreeSlug(u.terminal?.cwd ?? u.agent?.cwd),
     worktreePath,
@@ -462,7 +528,28 @@ export function toFloorAgentFromUnified(
     // (currentActivity) when it hasn't spoken between tool calls yet.
     summary: u.terminal?.narrative || u.terminal?.currentActivity || '',
     recent: u.terminal?.recentToolCalls ?? [],
+    // Per-session rate limit (RUSH-1523): CLI flag or detect from last messages.
+    rateLimited: detectSessionRateLimited(u.agent?.rateLimited, messages, resp),
   }
+}
+
+/** True when the CLI flagged the session, or last messages match rate-limit shapes. */
+export function detectSessionRateLimited(
+  flagged: boolean | undefined,
+  messages: string[],
+  resp: string,
+): boolean | undefined {
+  if (flagged) return true
+  const blob = [...messages, resp].join('\n').toLowerCase()
+  if (!blob) return undefined
+  const hit =
+    /\brate[- ]?limit(ed|s)?\b/.test(blob) ||
+    /\btoo many requests\b/.test(blob) ||
+    /\b429\b/.test(blob) ||
+    /\busage[- ]?limit(ed)?\b/.test(blob) ||
+    /\bout of (credits|quota)\b/.test(blob) ||
+    /\bquota exceeded\b/.test(blob)
+  return hit || undefined
 }
 
 /**
@@ -487,6 +574,7 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
   const isCloud = (r.context || '').toLowerCase() === 'cloud' || !!r.cloudTaskId
   const worktreePath = r.worktreePath ?? (worktreeSlugOf(r.cwd) ? r.cwd : '')
   const plans = detectRemotePlans(r, worktreePath)
+  const attachments = collectAttachments(r.attachments)
 
   return {
     id,
@@ -521,7 +609,9 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     ci,
     ticket: r.ticket,
     createdTickets: r.createdTickets ?? [],
+    createdCommits: [],
     spawnedTeam: r.spawnedTeam || undefined,
+    attachments,
     branch: r.branch,
     // Prefer the CLI-provided slug; strip any WT= / path leak from either source.
     worktreeSlug: r.worktreeSlug ? cleanWorktreeSlug(r.worktreeSlug) : cleanWorktreeSlug(r.cwd),
@@ -547,6 +637,11 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // tmux %pane handle + where it's being viewed, surfaced on the card.
     pane: r.tmuxPane || undefined,
     viewingIn: r.viewingIn || undefined,
+    rateLimited: detectSessionRateLimited(
+      r.rateLimited,
+      r.tail && r.tail.length ? r.tail : r.lastResponse ? [r.lastResponse] : [],
+      resp,
+    ),
   }
 }
 

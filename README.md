@@ -155,7 +155,37 @@ agents run claude "Review PRs merged this week, summarize risks" \
   | agents run codex "Write regression tests for the top 3 risks"
 ```
 
-Supports plan (read-only) and edit modes, effort levels, JSON output for scripting, and timeout limits.
+Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON output for scripting, and timeout limits.
+
+### What does `--mode skip` actually do?
+
+Treat `skip` as a last-resort escape hatch. In direct-exec runs (without `--acp`),
+agents-cli forwards the harness's native no-prompt flag; it does not add another
+safety layer. Prefer `auto` where the harness has a smart classifier (Claude Code and
+GitHub Copilot), or `edit` everywhere else. Harnesses without a native bypass flag
+reject direct-exec `skip`.
+
+| Harness | Direct-exec `--mode skip` becomes |
+|---|---|
+| Claude Code | `--dangerously-skip-permissions` |
+| Codex | `--dangerously-bypass-approvals-and-sandbox` (equivalent to `--yolo`) |
+| Gemini | `--yolo` |
+| Cursor | `-f` |
+| OpenClaw | `--mode full` |
+| GitHub Copilot | `--allow-all` (alias: `--yolo`) |
+| Antigravity | `--dangerously-skip-permissions` |
+| Grok | `--always-approve` |
+| Kimi | `--yolo` interactively; no extra flag in headless `-p` runs, which already auto-approve |
+| Droid | `--skip-permissions-unsafe` |
+
+With `--acp`, these native flags are not used. agents-cli instead grants `skip`
+permission requests at the ACP protocol layer with `allow_always`; the same
+last-resort warning applies.
+
+Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
+to sandboxed `edit` and can still prompt. `agents run codex --mode skip` is different:
+it bypasses approvals **and** removes the sandbox. `full` remains an alias for `skip`,
+but new scripts should use the explicit `skip` name.
 
 ### One protocol, every harness
 
@@ -432,7 +462,7 @@ tools:
 ---
 ```
 
-Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit` or `--mode full`. `agents run` defaults to `--mode plan` (read-only), which deadlocks at `ExitPlanMode` in headless runs.
+Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit`, or `--mode auto` on Claude Code and GitHub Copilot. Reserve `--mode skip` (legacy alias: `full`) for last-resort bypasses. `agents run` defaults to `--mode plan` (read-only), which deadlocks at `ExitPlanMode` in headless runs.
 
 Resolution is project > user > system: a `<repo>/.agents/workflows/<name>/` overrides a same-named workflow in `~/.agents/workflows/`. Commit project workflows with your repo so teammates get the same pipeline.
 
@@ -642,6 +672,13 @@ agents routines add daily-digest \
 agents routines list                   # All jobs + next run times
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
+
+# Routines sync to every device; restrict to an allowlist with --devices
+agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
+  --devices yosemite-s0,mac-mini --prompt "Drain the local work queue"
+
+agents routines devices nightly-drain --set yosemite-s0,mac-mini  # update allowlist
+agents routines list --host yosemite-s0                            # query another device
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
@@ -818,7 +855,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | OpenCode | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Kiro | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| Kiro | yes | no | yes | >= 2.8.0 | yes | yes | no | no | `AGENTS.md` | no |
 | Goose | yes | no | yes | no | no | no | no | no | `AGENTS.md` | no |
 | Roo Code | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Droid | yes | yes | yes | >= 0.57.5 | no | yes | yes | yes | `AGENTS.md` | no |
@@ -848,6 +885,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Hooks | Codex | >= 0.116.0 |
 | Permissions | Droid | >= 0.57.5 |
 | Hooks | Gemini | >= 0.26.0 |
+| Permissions | Kiro | >= 2.8.0 |
 | File-based commands | Codex | < 0.117.0 (0.117+ uses command-as-skill) |
 | Plugins | Codex | >= 0.128.0 |
 
@@ -896,6 +934,8 @@ For full transparency: `agents-cli` keeps a local event log at `~/.agents/.cache
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
 **macOS-only features:** Keychain-based secrets (`agents secrets`, `agents profiles login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+
+Interactive tmux-backed runs require tmux 3.2 or newer.
 
 ### Do I need Node.js?
 

@@ -46,10 +46,11 @@ export type StatusNormalizingProvider = 'rush' | 'codex' | 'antigravity';
  * Normalize a provider's raw wire status into the canonical `CloudTaskStatus`.
  *
  * Each cloud backend speaks its own status vocabulary and had its own copy of
- * this mapping, which had drifted. This dispatches per provider, preserving
- * each one's exact vocabulary AND default byte-for-byte:
+ * this mapping, which had drifted. This dispatches per provider while keeping
+ * provider-specific defaults explicit:
  *   - `rush`        — switch over the Factory Floor's known strings; includes
- *                     `allocating`, has no `queued`, default `running`.
+ *                     `allocating` and stopped/resumable `idle` states, has no
+ *                     `queued`, default `running`.
  *   - `codex`       — substring match on the lowercased CLI status; default
  *                     `running`.
  *   - `antigravity` — substring match on the (possibly `undefined`) Interactions
@@ -78,7 +79,10 @@ function normalizeRushStatus(s: string): CloudTaskStatus {
   switch (s) {
     case 'allocating': return 'allocating';
     case 'running': return 'running';
-    case 'needs_review': return 'input_required';
+    case 'idle':
+    case 'paused':
+    case 'needs_review': return 'idle';
+    case 'input_required': return 'input_required';
     case 'completed': return 'completed';
     case 'failed': return 'failed';
     case 'cancelled': return 'cancelled';
@@ -91,6 +95,7 @@ function normalizeCodexStatus(s: string): CloudTaskStatus {
   const lower = s.toLowerCase();
   if (lower.includes('queued') || lower.includes('pending')) return 'queued';
   if (lower.includes('running') || lower.includes('in_progress')) return 'running';
+  if (lower.includes('idle') || lower.includes('paused') || lower.includes('needs_review')) return 'idle';
   if (lower.includes('completed') || lower.includes('succeeded') || lower.includes('success')) return 'completed';
   if (lower.includes('failed') || lower.includes('error')) return 'failed';
   if (lower.includes('cancelled') || lower.includes('canceled')) return 'cancelled';
@@ -106,6 +111,7 @@ function normalizeAntigravityStatus(s: string | undefined): CloudTaskStatus {
   const lower = (s ?? '').toLowerCase();
   if (lower.includes('queue') || lower.includes('pending')) return 'queued';
   if (lower.includes('run') || lower.includes('progress')) return 'running';
+  if (lower.includes('idle') || lower.includes('paused') || lower.includes('needs_review')) return 'idle';
   if (lower.includes('complete') || lower.includes('success')) return 'completed';
   if (lower.includes('fail') || lower.includes('error')) return 'failed';
   if (lower.includes('cancel')) return 'cancelled';

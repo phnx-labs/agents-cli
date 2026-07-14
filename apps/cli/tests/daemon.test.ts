@@ -119,7 +119,7 @@ describe('generateSystemdUnit', () => {
     expect(unit).toContain('[Unit]');
     expect(unit).toContain('[Service]');
     expect(unit).toContain('[Install]');
-    expect(unit).toContain('daemon _run');
+    expect(unit).toContain('"daemon" "_run"');
     expect(unit).toContain('Restart=always');
   });
 });

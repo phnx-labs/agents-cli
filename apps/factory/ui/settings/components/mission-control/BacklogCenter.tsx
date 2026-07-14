@@ -18,6 +18,7 @@ import {
 interface BacklogCenterProps {
   tickets: FloorTicket[]
   group: TicketGroupBy
+  subgroup: TicketGroupBy | 'none'
   sort: TicketSort
   /** Which ticket sources are visible (Linear / GitHub); set from the shared bar. */
   srcFilter: Record<TicketSource, boolean>
@@ -78,7 +79,7 @@ function TicketRow({ ticket: t, selected, workers = [], onSelect, onOpen }: {
 }
 
 export function BacklogCenter({
-  tickets, group, sort, srcFilter, projFilter, search, selectedTicketId, workers = {},
+  tickets, group, subgroup, sort, srcFilter, projFilter, search, selectedTicketId, workers = {},
   onSelectTicket, onOpenTask,
 }: BacklogCenterProps) {
   // Backlog = work you can still dispatch onto, so completed tickets are excluded.
@@ -95,6 +96,7 @@ export function BacklogCenter({
   )
   const sorted = sortTickets(list, sort)
   const groups = groupTickets(sorted, group)
+  const subgroupActive = subgroup !== 'none' && subgroup !== group
 
   return (
     <div className="feed">
@@ -104,16 +106,35 @@ export function BacklogCenter({
             {k} <span style={{ color: 'var(--tx-dim)', fontWeight: 600 }}>· {arr.length}</span>
             <span className="ln" />
           </div>
-          {arr.map((t) => (
-            <TicketRow
-              key={t.id}
-              ticket={t}
-              selected={selectedTicketId === t.id}
-              workers={workers[t.id]}
-              onSelect={onSelectTicket}
-              onOpen={onOpenTask}
-            />
-          ))}
+          {subgroupActive
+            ? [...groupTickets(arr, subgroup).entries()].map(([subKey, subArr]) => (
+                <React.Fragment key={`${k}:${subKey}`}>
+                  <div className="feed-sec feed-subsec">
+                    {subKey} <span style={{ color: 'var(--tx-dim)', fontWeight: 600 }}>· {subArr.length}</span>
+                    <span className="ln" />
+                  </div>
+                  {subArr.map((t) => (
+                    <TicketRow
+                      key={t.id}
+                      ticket={t}
+                      selected={selectedTicketId === t.id}
+                      workers={workers[t.id]}
+                      onSelect={onSelectTicket}
+                      onOpen={onOpenTask}
+                    />
+                  ))}
+                </React.Fragment>
+              ))
+            : arr.map((t) => (
+                <TicketRow
+                  key={t.id}
+                  ticket={t}
+                  selected={selectedTicketId === t.id}
+                  workers={workers[t.id]}
+                  onSelect={onSelectTicket}
+                  onOpen={onOpenTask}
+                />
+              ))}
         </React.Fragment>
       ))}
     </div>

@@ -430,6 +430,8 @@ describe('feed store', () => {
 
   it('recordAnswer refuses unverified answers to high-consequence blocks', () => {
     const dir = tmpFeedDir();
+    // operators.yaml under the feed root must NOT authorize (RUSH-1618) —
+    // the registry lives at ~/.agents/operators.yaml only.
     fs.writeFileSync(path.join(dir, 'operators.yaml'), 'operators:\n  muqsit:\n    admin: true\n', 'utf-8');
     publishBlock(makeBlock('sess-authz', 'Deploy to prod?', {
       consequence: 'merge',
@@ -443,8 +445,35 @@ describe('feed store', () => {
       expect('unauthorized' in unverified).toBe(true);
     }
 
-    const verified = recordAnswer(blockId, { answeredFrom: 'feed', answeredBy: 'Muqsit', operatorId: 'muqsit', verified: true }, dir);
-    expect(verified.ok).toBe(true);
+    // verified:false still refused even with a known-looking operatorId.
+    const claimed = recordAnswer(blockId, {
+      answeredFrom: 'feed',
+      answeredBy: 'Muqsit',
+      operatorId: 'muqsit',
+      verified: false,
+    }, dir);
+    expect(claimed.ok).toBe(false);
+  });
+
+  it('recordAnswer ignores operators.yaml colocated with the feed store (RUSH-1618)', () => {
+    const dir = tmpFeedDir();
+    // Only the feed root has operators.yaml — the canonical registry is separate.
+    // Claiming verified:true for an id that exists ONLY here must still fail
+    // when that id is not in the real ~/.agents registry. Use a unique id.
+    fs.writeFileSync(
+      path.join(dir, 'operators.yaml'),
+      'operators:\n  feed-only-operator-xyz:\n    admin: true\n',
+      'utf-8',
+    );
+    publishBlock(makeBlock('sess-authz-feed', 'Deploy?', { consequence: 'merge' }), dir);
+    const blockId = blockIdForSession('sess-authz-feed');
+    const result = recordAnswer(blockId, {
+      answeredFrom: 'feed',
+      operatorId: 'feed-only-operator-xyz',
+      verified: true,
+    }, dir);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect('unauthorized' in result).toBe(true);
   });
 
   it('recordAnswer permits any answer to normal-consequence blocks', () => {
@@ -468,6 +497,20 @@ describe('feed store', () => {
     expect(block.receipts).toHaveLength(1);
     expect(block.receipts![0]).toMatchObject({ msgId: 'msg-1', status: 'continued' });
     expect(block.continuedAt).toBeTruthy();
+  });
+
+  it('recordMessageReceipt is monotonic — queued cannot overwrite consumed (RUSH-1614)', () => {
+    const dir = tmpFeedDir();
+    publishBlock(makeBlock('sess-mono', 'Confirm?'), dir);
+    const blockId = blockIdForSession('sess-mono');
+
+    recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'consumed', at: '2026-01-01T00:00:01.000Z' }, dir);
+    // Late enqueue writer races after drain already recorded consumed.
+    recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'queued', at: '2026-01-01T00:00:02.000Z' }, dir);
+
+    const block = readBlock(blockId, dir)!;
+    expect(block.receipts).toHaveLength(1);
+    expect(block.receipts![0].status).toBe('consumed');
   });
 
   it('removeBlock clears answered markers and receipts', () => {

@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { accountTokensFingerprint, buildDispatchBody, hasRushUploadConsent, RushCloudProvider } from './rush.js';
-import { MAX_IMAGES_PER_DISPATCH } from './types.js';
+import { MAX_IMAGES_PER_DISPATCH, normalizeProviderStatus } from './types.js';
 import type { ImageAttachment, SkillRef } from './types.js';
 
 const ORIGINAL_UPLOAD_ENV = process.env.AGENTS_RUSH_UPLOAD_TOKENS;
@@ -21,6 +21,14 @@ afterEach(() => {
     process.env.AGENTS_RUSH_UPLOAD_TOKENS = ORIGINAL_UPLOAD_ENV;
   }
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+describe('Rush status normalization', () => {
+  it('maps stopped-but-resumable Factory Floor states to idle', () => {
+    expect(normalizeProviderStatus('rush', 'idle')).toBe('idle');
+    expect(normalizeProviderStatus('rush', 'paused')).toBe('idle');
+    expect(normalizeProviderStatus('rush', 'needs_review')).toBe('idle');
+  });
 });
 
 describe('buildDispatchBody', () => {
