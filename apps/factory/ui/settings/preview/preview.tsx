@@ -181,6 +181,23 @@ const running: FloorAgent[] = [
     verb: 'Reading', target: 'the remote-session adapter',
     summary: 'Tracing where remote sessions lose their last-activity timestamp — found it in the adapter, drafting the fix.',
   }),
+  // RUSH-1380: a device-dispatched (headless) remote agent — no local tool stream, so it
+  // used to show zero progress. The CLI now carries its TodoWrite plan, and with no live
+  // tool action the now-line falls back to the in-progress step ("Plan · Wiring …").
+  agent({
+    id: 'r-dispatched', abbr: 'CC', name: 'rush-1604-cf-pages', host: 'yosemite-s0', hostLabel: 'yosemite-s0',
+    project: 'rush', phase: 'running', context: 'headless', tok: 0, since: '12s', lastActivityMs: Date.now() - 12_000,
+    worktreeSlug: 'rush1604-cf-pages',
+    verb: 'Plan', target: 'Wiring the /learn route to CF Pages',
+    prompt: 'Route /learn and /careers to CF Pages and update the redirects.',
+    summary: 'Device-dispatched on yosemite-s0; working through the plan.',
+    todos: [
+      { content: 'Add the CF Pages project', status: 'completed' },
+      { content: 'Wire the /learn route', status: 'in_progress' },
+      { content: 'Wire the /careers route', status: 'pending' },
+      { content: 'Update redirects + verify', status: 'pending' },
+    ],
+  }),
   agent({
     id: 'r3', abbr: 'GX', name: 'plan: dispatch-refactor', project: 'rush', phase: 'running',
     tok: 33, since: '8s', lastActivityMs: Date.now() - 8000,
