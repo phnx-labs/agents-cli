@@ -940,6 +940,7 @@ export async function readCodexMeta(
     topic: scan.topic,
     messageCount: scan.messageCount,
     tokenCount: scan.tokenCount,
+    outputTokens: scan.outputTokens,
     costUsd: scan.costUsd,
     durationMs: scan.durationMs,
     account: resolveAccount?.(),
