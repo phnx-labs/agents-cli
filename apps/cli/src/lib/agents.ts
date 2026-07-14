@@ -598,7 +598,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcp: true,
       mcpHttp: false,
       mcpHeaders: false,
-      allowlist: false,
+      allowlist: { since: '0.57.5' },
       skills: false,
       commands: true,
       plugins: true,
