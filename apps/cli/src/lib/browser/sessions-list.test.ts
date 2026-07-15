@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect } from 'vitest';
 import { resolveArtifact, renderBrowserSessions, type ProfileArtifacts } from './sessions-list.js';
 
 // Pure selection + rendering logic (no filesystem). The bug surface is the
