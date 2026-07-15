@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { selectSessionsToFetch, resolveMirrorWrite, reconcileCopies, type RemoteCopy } from './sync.js';
+import { selectSessionsToFetch, resolveMirrorWrite, reconcileCopies, deriveLastTs, type RemoteCopy } from './sync.js';
 import { sourceSignature } from './manifest.js';
+import { transcriptStats } from './crdt.js';
 import { SYNC_AGENTS } from './agents.js';
 import { toPosix } from '../../platform/index.js';
 
@@ -164,5 +165,57 @@ describe('dir-shaped per-file reconcile', () => {
     expect(out.merged).toBe(false);
     expect(out.content).toBe('{"a":1}');
     expect(toPosix(out.dest)).toContain('backups/kimi/zion/sessions/' + rel);
+  });
+
+  it('LWW over a mutable blob is not flagged as a CRDT merge', () => {
+    const rel = 'wd/session_x/state.json';
+    const list = [
+      fileCopy('zion', rel, 'h-old', '2026-06-20T10:00:00Z'),
+      fileCopy('s0', rel, 'h-new', '2026-06-20T12:00:00Z'),
+    ];
+    const out = resolveMirrorWrite(kimi, list, ['{"m":3}', '{"m":5}']);
+    expect(out.content).toBe('{"m":5}'); // newer still wins
+    expect(out.merged).toBe(false); // but it's a pick, not a line-union
+  });
+});
+
+// RUSH-1466 review regression: a manifest entry's lastTs is derived at PUSH time.
+// For append-only logs it is the latest embedded event timestamp; for mutable
+// blobs (state.json, task sidecars) transcriptStats returns '' — so lastTs must
+// fall back to the file mtime, else last-writer-wins degrades to hash-wins and can
+// silently keep the stale copy.
+describe('deriveLastTs (per-file manifest recency)', () => {
+  it('append-only .jsonl uses the latest embedded event timestamp', () => {
+    const rel = 'wd/session_x/agents/main/wire.jsonl';
+    const content = [
+      JSON.stringify({ t: 1, timestamp: '2026-06-20T10:00:00.000Z' }),
+      JSON.stringify({ t: 2, timestamp: '2026-06-20T10:05:00.000Z' }),
+    ].join('\n') + '\n';
+    expect(deriveLastTs(kimi, rel, content, Date.UTC(2000, 0, 1))).toBe('2026-06-20T10:05:00.000Z');
+  });
+
+  it('mutable state.json falls back to mtime, never the empty string', () => {
+    const rel = 'wd/session_x/state.json';
+    // Real Kimi state.json shape: updatedAt/createdAt, no top-level `timestamp`.
+    const content = JSON.stringify({ title: 'x', updatedAt: '2026-07-15T00:00:00Z', messages: 5 });
+    const mtime = Date.UTC(2026, 6, 15, 12, 0, 0);
+    expect(transcriptStats(content).lastTs).toBe(''); // the bug this guards
+    expect(deriveLastTs(kimi, rel, content, mtime)).toBe(new Date(mtime).toISOString());
+  });
+
+  it('newer state.json wins LWW once lastTs is derived from mtime (end-to-end)', () => {
+    const rel = 'wd/session_x/state.json';
+    const older = JSON.stringify({ title: 'old', messages: 3 });
+    const newer = JSON.stringify({ title: 'new', messages: 5 });
+    const tOld = Date.UTC(2026, 6, 15, 10, 0, 0);
+    const tNew = Date.UTC(2026, 6, 15, 12, 0, 0);
+    // Hashes chosen so hash-order ('h-old' > 'h-new') DISAGREES with time-order —
+    // if lastTs were still '' for both, the stale copy would win. It must not.
+    const list = [
+      fileCopy('zion', rel, 'h-old', deriveLastTs(kimi, rel, older, tOld)),
+      fileCopy('s0', rel, 'h-new', deriveLastTs(kimi, rel, newer, tNew)),
+    ];
+    const out = resolveMirrorWrite(kimi, list, [older, newer]);
+    expect(out.content).toBe(newer);
   });
 });

@@ -131,7 +131,7 @@ async function pushOwn(r2: R2Client, me: string, encKey: Buffer | null, opts: Sy
         // non-deterministic), so hash + manifest are computed on cleartext; only
         // the stored object body is sealed.
         const hash = hashContent(content);
-        const { lastTs } = transcriptStats(content);
+        const lastTs = deriveLastTs(spec, f.relKey, content, stat.mtimeMs);
         const entry: ManifestEntry = { relKey: f.relKey, size: stat.size, hash, lastTs };
         const body = encKey ? encryptTranscript(content, encKey) : content;
         const contentType = encKey ? 'application/json' : 'application/x-ndjson';
@@ -212,6 +212,22 @@ export function selectSessionsToFetch(
  *    so they resolve **last-writer-wins**: the copy with the latest event
  *    timestamp, tie-broken by content hash so the pick is deterministic fleet-wide.
  */
+/**
+ * The `lastTs` a manifest entry carries for one file. Append-only logs (a
+ * conversation `.jsonl`) embed per-line event timestamps, so their recency is
+ * the latest line timestamp (`transcriptStats`). Mutable blobs (Kimi
+ * `state.json`, the per-tool `tasks/*.json` sidecars) carry no event timestamp —
+ * their own `updatedAt`/`createdAt` fields are agent-specific and unreliable — so
+ * their "last written" signal is the file mtime. Without this, `transcriptStats`
+ * returns `''` for every blob and the last-writer-wins branch in
+ * `resolveMirrorWrite` silently degrades to "highest-hash-wins", which can pick a
+ * stale copy over the genuinely newer one.
+ */
+export function deriveLastTs(spec: SyncAgentSpec, relKey: string, content: string, mtimeMs: number): string {
+  if (isMergeableFile(spec, relKey)) return transcriptStats(content).lastTs;
+  return new Date(mtimeMs).toISOString();
+}
+
 export function resolveMirrorWrite(
   spec: SyncAgentSpec,
   copies: RemoteCopy[],
@@ -235,7 +251,9 @@ export function resolveMirrorWrite(
   return {
     dest: mirrorPath(spec, canonical.machine, canonical.entry.relKey),
     content,
-    merged: contents.length > 1,
+    // "merged" means an actual CRDT line-union happened — not a last-writer-wins
+    // pick of one mutable blob over another (that discards a copy, it doesn't merge).
+    merged: contents.length > 1 && isMergeableFile(spec, canonical.entry.relKey),
   };
 }
 
