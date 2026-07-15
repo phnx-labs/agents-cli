@@ -34,6 +34,8 @@ export interface SyncAgentSpec {
   id: string;
   /** Config subdir under the agent home that holds transcripts. */
   subdir: string;
+  /** File extension to walk for this agent (defaults to .jsonl). */
+  ext?: string;
   /** Derive the session id from a storage-relative key. */
   sessionIdFromRelKey(relKey: string): string;
 }
@@ -51,6 +53,44 @@ export const SYNC_AGENTS: SyncAgentSpec[] = [
     // Codex transcripts are rollout-<ts>-<uuid>.jsonl under date dirs; the uuid
     // is the session id (matches session_meta.payload.id).
     sessionIdFromRelKey: rel => path.basename(rel).match(UUID_RE)?.[0] ?? rel,
+  },
+  {
+    id: 'droid',
+    subdir: 'sessions',
+    // Droid writes <uuid>.jsonl under per-cwd subdirs (plus an optional
+    // <uuid>.settings.json sidecar for metadata). The JSONL is the canonical
+    // transcript; the sidecar is rebuilt from the transcript on the mirror.
+    sessionIdFromRelKey: rel => path.basename(rel).replace(/\.jsonl$/, ''),
+  },
+  {
+    id: 'grok',
+    subdir: 'sessions',
+    // Grok sessions are multi-file directories under ~/.grok/sessions/<cwd>/<uuid>/.
+    // events.jsonl is the canonical transcript stream; syncing it lets the mirror
+    // reconstruct the session (summary.json metadata is recomputed on read).
+    sessionIdFromRelKey: rel => path.basename(path.dirname(rel)),
+  },
+  {
+    id: 'kimi',
+    subdir: 'sessions',
+    ext: '.json',
+    // Kimi sessions are multi-file directories under
+    // ~/.kimi-code/sessions/<wd_hash>/session_<uuid>/. state.json carries the
+    // metadata the scanner reads; wire.jsonl (conversation) is a follow-up
+    // tracked by the multi-file-sessions ticket.
+    sessionIdFromRelKey: rel => {
+      const m = rel.match(/session_[^/]+/);
+      return m?.[0] ?? rel;
+    },
+  },
+  {
+    id: 'opencode',
+    subdir: 'sessions',
+    // OpenCode stores sessions in a single SQLite DB (~/.local/share/opencode/opencode.db)
+    // rather than transcript files. This entry reserves the agent slot so the
+    // sync matrix is complete; file-based round-tripping requires an SQLite-to-JSONL
+    // export step (not yet implemented).
+    sessionIdFromRelKey: rel => path.basename(rel),
   },
 ];
 
@@ -82,7 +122,7 @@ export function listLocalTranscripts(spec: SyncAgentSpec): LocalTranscript[] {
 
   for (const dir of getAgentSessionDirs(spec.id, spec.subdir)) {
     if (safeReal(dir).startsWith(mirror)) continue; // skip synced-in mirror dirs
-    for (const abs of walkForFiles(dir, '.jsonl', 100_000)) {
+    for (const abs of walkForFiles(dir, spec.ext ?? '.jsonl', 100_000)) {
       const relKey = path.relative(dir, abs);
       if (!relKey || relKey.startsWith('..')) continue;
       const sessionId = spec.sessionIdFromRelKey(relKey);
