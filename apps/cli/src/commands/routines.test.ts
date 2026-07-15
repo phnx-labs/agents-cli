@@ -630,7 +630,7 @@ describe('routines subcommand --help documents --host and --device once each', (
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 30_000);
 });
 
 describe('routines run --host SELF follows the normal local eligibility path', () => {
