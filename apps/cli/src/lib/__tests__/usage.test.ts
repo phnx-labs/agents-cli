@@ -18,6 +18,8 @@ import {
   writeClaudeUsageCache,
   normalizeKimiWindows,
   formatKimiPlan,
+  normalizeDroidWindows,
+  type DroidBillingLimitsResponse,
   type KimiUsagesResponse,
   type UsageSnapshot,
   type UsageWindow,
@@ -450,5 +452,78 @@ describe('normalizeKimiWindows', () => {
     expect(formatKimiPlan(payload)).toBe('Intermediate');
     expect(formatKimiPlan({ subType: 'TYPE_PURCHASE' })).toBe('Purchase');
     expect(formatKimiPlan({})).toBeNull();
+  });
+});
+
+describe('normalizeDroidWindows', () => {
+  // The shape droid itself consumes from GET /api/billing/limits: token-rate-
+  // limit billing exposes fiveHour/weekly/monthly windows, each with a
+  // usedPercent and a windowEnd timestamp.
+  const payload: DroidBillingLimitsResponse = {
+    usesTokenRateLimitsBilling: true,
+    limits: {
+      standard: {
+        fiveHour: { usedPercent: 12, windowEnd: '2026-07-15T18:00:00.000Z' },
+        weekly: { usedPercent: 34, windowEnd: '2026-07-20T00:00:00.000Z' },
+        monthly: { usedPercent: 5, windowEnd: '2026-08-01T00:00:00.000Z' },
+      },
+    },
+  };
+
+  it('maps fiveHour/weekly/monthly to session, week, and month windows', () => {
+    const windows = normalizeDroidWindows(payload);
+    expect(windows.map((w) => w.shortLabel)).toEqual(['S', 'W', 'M']);
+    const session = windows.find((w) => w.key === 'session')!;
+    const week = windows.find((w) => w.key === 'week')!;
+    const month = windows.find((w) => w.key === 'month')!;
+    expect(session.usedPercent).toBe(12);
+    expect(week.usedPercent).toBe(34);
+    expect(month.usedPercent).toBe(5);
+    expect(session.windowMinutes).toBe(300);
+    expect(month.windowMinutes).toBe(43200);
+    expect(session.resetsAt?.toISOString()).toBe('2026-07-15T18:00:00.000Z');
+  });
+
+  it('renders nothing for orgs on the legacy billing model', () => {
+    expect(normalizeDroidWindows({ ...payload, usesTokenRateLimitsBilling: false })).toEqual([]);
+    expect(normalizeDroidWindows({ ...payload, usesTokenRateLimitsBilling: undefined })).toEqual([]);
+  });
+
+  it('renders nothing when limits.standard is missing', () => {
+    expect(normalizeDroidWindows({ usesTokenRateLimitsBilling: true })).toEqual([]);
+    expect(normalizeDroidWindows({ usesTokenRateLimitsBilling: true, limits: {} })).toEqual([]);
+  });
+
+  it('drops a window without a numeric usedPercent and clamps out-of-range values', () => {
+    const windows = normalizeDroidWindows({
+      usesTokenRateLimitsBilling: true,
+      limits: {
+        standard: {
+          fiveHour: { windowEnd: '2026-07-15T18:00:00.000Z' }, // no usedPercent
+          weekly: { usedPercent: 250 },
+        },
+      },
+    });
+    expect(windows.map((w) => w.key)).toEqual(['week']);
+    expect(windows[0].usedPercent).toBe(100);
+  });
+
+  it('keeps the month window out of the compact summary but in the snapshot', () => {
+    const snapshot: UsageSnapshot = {
+      source: 'live',
+      sourceLabel: 'live account data',
+      capturedAt: new Date('2026-07-15T12:00:00Z'),
+      windows: normalizeDroidWindows(payload),
+    };
+    const summary = stripAnsi(formatUsageSummary(null, snapshot));
+    expect(summary).toContain('S:');
+    expect(summary).toContain('W:');
+    expect(summary).not.toContain('M:');
+    // ...but an exhausted month window still flips the account to rate-limited.
+    const exhausted = normalizeDroidWindows({
+      ...payload,
+      limits: { standard: { ...payload.limits!.standard, monthly: { usedPercent: 100 } } },
+    });
+    expect(deriveUsageStatusFromSnapshot({ ...snapshot, windows: exhausted })).toBe('rate_limited');
   });
 });

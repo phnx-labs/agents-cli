@@ -1117,7 +1117,7 @@ export interface ViewJsonVersion {
   // outstanding overage credits, undefined means we haven't fetched / can't say.
   overageCredits?: { amount: number; currency: string } | null;
   windows: Array<{
-    key: 'session' | 'week' | 'sonnet_week';
+    key: 'session' | 'week' | 'sonnet_week' | 'month';
     usedPercent: number;
     resetsAt: string | null;
   }>;

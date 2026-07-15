@@ -1,7 +1,8 @@
 /**
- * Usage and rate-limit tracking for Claude and Codex agents.
+ * Usage and rate-limit tracking for Claude, Codex, Kimi, and Droid agents.
  *
- * Fetches live usage data from the Anthropic OAuth API (Claude) or parses
+ * Fetches live usage data from each agent's usage API (Anthropic OAuth for
+ * Claude, Kimi Code /usages, Factory billing limits for Droid) or parses
  * rate-limit events from Codex session logs. Results are normalized into a
  * common UsageSnapshot shape, cached to disk, and rendered as terminal
  * progress bars for the `agents view` command.
@@ -15,7 +16,7 @@ import * as readline from 'readline';
 import { promisify } from 'util';
 import chalk from 'chalk';
 
-import type { AccountInfo } from './agents.js';
+import { decodeJwtPayload, decryptDroidAuthPayload, type AccountInfo } from './agents.js';
 import { walkForFiles } from './fs-walk.js';
 import {
   getKeychainToken,
@@ -45,13 +46,15 @@ const CACHED_CLAUDE_USAGE_SOURCE_LABEL = 'last seen live account data';
 
 const KIMI_USAGES_URL = 'https://api.kimi.com/coding/v1/usages';
 
+const DROID_USAGE_URL = 'https://api.factory.ai/api/billing/limits';
+
 const COMPACT_BAR_LEN = 5;
 const USAGE_BAR_LEN = 10;
 const FULL = '\u2588';
 const EMPTY = '\u2591';
 
 /** Discriminator for usage window types. */
-export type UsageWindowKey = 'session' | 'week' | 'sonnet_week';
+export type UsageWindowKey = 'session' | 'week' | 'sonnet_week' | 'month';
 
 /** A single rate-limit window with utilization percentage and reset time. */
 export interface UsageWindow {
@@ -188,6 +191,8 @@ export async function getUsageInfo(agentId: AgentId, options?: UsageOptions): Pr
       return getCodexUsageInfo(options);
     case 'kimi':
       return getKimiUsageInfo(options);
+    case 'droid':
+      return getDroidUsageInfo(options);
     default:
       return { snapshot: null, error: null };
   }
@@ -279,13 +284,15 @@ const inFlightRefreshes = new Map<string, Promise<void>>();
 export async function getUsageInfoForIdentity(input: UsageIdentityInput): Promise<UsageInfo> {
   const usageKey = getUsageLookupKey(input.info);
 
-  // Agents whose usage comes from a live network call (Claude, Kimi) go through
-  // the stale-while-revalidate cache below so `agents run`/`agents view` stay off
-  // the network on the hot path. Everything else (Codex reads local session
-  // logs) takes the legacy blocking path. The on-disk cache is shared and keyed
-  // by usageKey, which is namespaced per agent (`claude:org=…`, `kimi:user=…`),
-  // so one cache file holds every account without collision.
-  const usesNetworkUsage = input.agentId === 'claude' || input.agentId === 'kimi';
+  // Agents whose usage comes from a live network call (Claude, Kimi, Droid) go
+  // through the stale-while-revalidate cache below so `agents run`/`agents view`
+  // stay off the network on the hot path. Everything else (Codex reads local
+  // session logs) takes the legacy blocking path. The on-disk cache is shared and
+  // keyed by usageKey, which is namespaced per agent (`claude:org=…`,
+  // `kimi:user=…`, `droid:org=…`), so one cache file holds every account without
+  // collision.
+  const usesNetworkUsage =
+    input.agentId === 'claude' || input.agentId === 'kimi' || input.agentId === 'droid';
   if (!usesNetworkUsage || !usageKey) {
     return getUsageInfo(input.agentId, {
       home: input.home,
@@ -375,8 +382,12 @@ export function formatUsageSummary(
   }
 
   if (snapshot) {
+    // Compact rows show the two windows every agent shares (session + week);
+    // extra windows (Claude's Sonnet week, Droid's month) render only in the
+    // full per-version usage section. An exhausted month window still surfaces
+    // here as the rate-limited badge via deriveUsageStatusFromSnapshot.
     const windows = snapshot.windows
-      .filter((window) => window.key !== 'sonnet_week')
+      .filter((window) => window.key === 'session' || window.key === 'week')
       .map((window) =>
       `${chalk.gray(`${window.shortLabel}:`)} ${renderCompactUsageBar(window.usedPercent)}`
     );
@@ -739,6 +750,125 @@ export function formatKimiPlan(data: KimiUsagesResponse): string | null {
   const tail = raw.split('_').pop() || ''; // LEVEL_INTERMEDIATE -> INTERMEDIATE
   if (!tail) return null;
   return tail.charAt(0).toUpperCase() + tail.slice(1).toLowerCase();
+}
+
+/** A single Droid token-rate-limit window from /api/billing/limits. */
+interface DroidLimitWindow {
+  usedPercent?: number | null;
+  windowEnd?: string | null;
+}
+
+/** Response shape from Factory's billing limits endpoint (subset we render). */
+export interface DroidBillingLimitsResponse {
+  usesTokenRateLimitsBilling?: boolean | null;
+  limits?: {
+    standard?: {
+      fiveHour?: DroidLimitWindow | null;
+      weekly?: DroidLimitWindow | null;
+      monthly?: DroidLimitWindow | null;
+    } | null;
+  } | null;
+}
+
+/**
+ * Fetch Droid usage via Factory's billing limits API — the same endpoint the
+ * droid CLI polls for its token-limit banner. The WorkOS access token comes
+ * from the locally decrypted ~/.factory/auth.v2.file (the same credential
+ * account identity in agents.ts reads).
+ *
+ * Deliberately NO token refresh, for a sharper reason than Kimi's: WorkOS
+ * refresh tokens are single-use and rotate on every exchange, so refreshing
+ * here would race a concurrently running droid session and can permanently
+ * invalidate the user's login chain. Droid refreshes its own credential when
+ * it runs; if the stored token is expired we skip the live fetch and let the
+ * SWR cache serve the last-seen snapshot.
+ */
+async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
+  try {
+    const cred = decryptDroidAuthPayload(options?.home || os.homedir());
+    const accessToken = cred?.access_token;
+    if (typeof accessToken !== 'string' || !accessToken) {
+      return { snapshot: null, error: null };
+    }
+
+    const exp = decodeJwtPayload(accessToken)?.exp;
+    if (typeof exp === 'number' && Date.now() / 1000 >= exp) {
+      return { snapshot: null, error: null };
+    }
+
+    const response = await fetch(DROID_USAGE_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    // 401 => revoked/expired token; render nothing rather than a misleading
+    // empty bar.
+    if (!response.ok) {
+      return { snapshot: null, error: null };
+    }
+
+    const data = await response.json() as DroidBillingLimitsResponse;
+    const windows = normalizeDroidWindows(data);
+    if (windows.length === 0) {
+      return { snapshot: null, error: null };
+    }
+
+    return {
+      snapshot: {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(),
+        windows,
+      },
+      error: null,
+    };
+  } catch {
+    return { snapshot: null, error: null };
+  }
+}
+
+/**
+ * Normalize the Factory billing-limits payload into the common UsageWindow
+ * shape. Orgs on the legacy (non token-rate-limit) billing model have no
+ * meaningful windows, so they render nothing — mirrors droid's own gate on
+ * `usesTokenRateLimitsBilling` before it reads `limits.standard`.
+ */
+export function normalizeDroidWindows(data: DroidBillingLimitsResponse): UsageWindow[] {
+  if (data.usesTokenRateLimitsBilling !== true) return [];
+  const standard = data.limits?.standard;
+  if (!standard) return [];
+
+  const windows = [
+    normalizeDroidWindow(standard.fiveHour, 'session', 'Current session', 'S'),
+    normalizeDroidWindow(standard.weekly, 'week', 'Current week', 'W'),
+    normalizeDroidWindow(standard.monthly, 'month', 'Current month', 'M'),
+  ];
+
+  return windows.filter((window): window is UsageWindow => window !== null);
+}
+
+/** Normalize a single Droid billing-limits window. */
+function normalizeDroidWindow(
+  window: DroidLimitWindow | null | undefined,
+  key: UsageWindowKey,
+  label: string,
+  shortLabel: string
+): UsageWindow | null {
+  const usedPercent = normalizePercent(window?.usedPercent);
+  if (usedPercent === null) return null;
+
+  return {
+    key,
+    label,
+    shortLabel,
+    usedPercent,
+    resetsAt: parseDateValue(window?.windowEnd),
+    windowMinutes: inferWindowMinutes(key),
+  };
 }
 
 /** Collect Codex JSONL session files sorted newest-first. */
@@ -1196,6 +1326,8 @@ function inferWindowMinutes(key: UsageWindowKey): number | null {
     case 'week':
     case 'sonnet_week':
       return 10080;
+    case 'month':
+      return 43200;
   }
 }
 

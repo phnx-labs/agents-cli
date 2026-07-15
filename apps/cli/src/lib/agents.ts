@@ -1046,22 +1046,23 @@ function resolveAccountCredentialPath(base: string, ...segments: string[]): stri
   return null;
 }
 
+/** Decrypted contents of Droid's auth.v2.file (subset we consume). */
+export interface DroidAuthPayload {
+  access_token?: string;
+  active_organization_id?: string | null;
+}
+
 /**
  * Factory Droid stores its OAuth credential encrypted at ~/.factory/auth.v2.file
  * (AES-256-GCM, format `ivB64:tagB64:ctB64`) with the 32-byte key base64-stored
  * in ~/.factory/auth.v2.key. On the keyfile-v2 source there is no OS-keychain /
  * device binding — the key is on disk — so we can decrypt locally with no
- * network call. The decrypted JSON credential's `access_token` is a WorkOS JWT
- * carrying an `email` claim (plus org_id / role). We decode the claim WITHOUT
- * verifying `exp`: the email is stable identity for display, not an
- * authorization decision, so an expired token still yields the right address.
- * Every failure (missing key file — e.g. a keyring-v2/legacy login with no
- * on-disk key, a bad GCM tag, malformed JSON, or no email claim) returns null so
- * the caller falls back to the file-presence signed-in signal. Never throws.
+ * network call. Every failure (missing key file — e.g. a keyring-v2/legacy
+ * login with no on-disk key, a bad GCM tag, or malformed JSON) returns null.
+ * Never throws. Shared by account identity below and the Droid usage fetcher
+ * in usage.ts.
  */
-function decryptDroidCredential(
-  base: string
-): { email: string | null; orgId: string | null; role: string | null } | null {
+export function decryptDroidAuthPayload(base: string): DroidAuthPayload | null {
   const filePath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
   const keyPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.key');
   if (!filePath || !keyPath) return null;
@@ -1078,16 +1079,32 @@ function decryptDroidCredential(
       decipher.final(),
     ]).toString('utf-8');
     const cred = JSON.parse(plaintext);
-    const claims = typeof cred?.access_token === 'string' ? decodeJwtPayload(cred.access_token) : null;
-    if (!claims) return null;
-    return {
-      email: typeof claims.email === 'string' ? claims.email : null,
-      orgId: normalizeIdentityPart(claims.org_id ?? cred.active_organization_id),
-      role: typeof claims.role === 'string' ? claims.role : null,
-    };
+    return cred && typeof cred === 'object' ? (cred as DroidAuthPayload) : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * Derive Droid account identity from the decrypted credential. The
+ * `access_token` is a WorkOS JWT carrying an `email` claim (plus org_id /
+ * role). We decode the claim WITHOUT verifying `exp`: the email is stable
+ * identity for display, not an authorization decision, so an expired token
+ * still yields the right address. Returns null when the credential can't be
+ * decrypted or has no decodable claims, so the caller falls back to the
+ * file-presence signed-in signal.
+ */
+function decryptDroidCredential(
+  base: string
+): { email: string | null; orgId: string | null; role: string | null } | null {
+  const cred = decryptDroidAuthPayload(base);
+  const claims = typeof cred?.access_token === 'string' ? decodeJwtPayload(cred.access_token) : null;
+  if (!claims) return null;
+  return {
+    email: typeof claims.email === 'string' ? claims.email : null,
+    orgId: normalizeIdentityPart(claims.org_id ?? cred?.active_organization_id),
+    role: typeof claims.role === 'string' ? claims.role : null,
+  };
 }
 
 let cachedAgyKeychainSignedIn: boolean | undefined;
@@ -1643,7 +1660,7 @@ export function countSessionFiles(agentId: AgentId): number {
 }
 
 /** Decode the payload section of a JWT token without verifying its signature. */
-function decodeJwtPayload(token: string): Record<string, any> | null {
+export function decodeJwtPayload(token: string): Record<string, any> | null {
   const payload = token.split('.')[1];
   if (!payload) return null;
   try {
