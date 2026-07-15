@@ -14,6 +14,15 @@ import { capableAgents } from './capabilities.js';
 import { getSubagentsDir, getUserSubagentsDir, getTrashSubagentsDir } from './state.js';
 import { listInstalledVersions, getVersionHomePath } from './versions.js';
 import { safeJoin } from './paths.js';
+import {
+  subagentTarget,
+  writeSubagentToHome,
+  listInstalledSubagentNames,
+  listInstalledSubagentsRich,
+  removeSubagentFromHome,
+  trashSubagentFromHome,
+  copyDirWithRename,
+} from './subagents-registry.js';
 import type { AgentId, DiscoveredSubagent, InstalledSubagent, SubagentFrontmatter } from './types.js';
 
 /**
@@ -313,7 +322,9 @@ export function transformSubagentForDroid(subagentDir: string): string {
  * sections, `color` dropped), so this is an alias of transformSubagentForDroid.
  * See GitHub docs for custom agents.
  */
-export const transformSubagentForCopilot = transformSubagentForDroid;
+export function transformSubagentForCopilot(subagentDir: string): string {
+  return transformSubagentForDroid(subagentDir);
+}
 
 /**
  * Transform a subagent into a Cursor CLI custom subagent `.md` file.
@@ -325,7 +336,9 @@ export const transformSubagentForCopilot = transformSubagentForDroid;
  * an alias of transformSubagentForDroid, same as Copilot.
  * See https://cursor.com/docs/subagents.
  */
-export const transformSubagentForCursor = transformSubagentForDroid;
+export function transformSubagentForCursor(subagentDir: string): string {
+  return transformSubagentForDroid(subagentDir);
+}
 
 /**
  * Transform a subagent into a ForgeCode custom subagent `.md` file.
@@ -336,7 +349,9 @@ export const transformSubagentForCursor = transformSubagentForDroid;
  * no `color` field, so this is an alias of transformSubagentForDroid, same as
  * Copilot/Cursor. See https://forgecode.dev/docs/agent-definition-guide/.
  */
-export const transformSubagentForForge = transformSubagentForDroid;
+export function transformSubagentForForge(subagentDir: string): string {
+  return transformSubagentForDroid(subagentDir);
+}
 
 /**
  * Transform a subagent into Antigravity's custom-agent markdown shape.
@@ -652,22 +667,7 @@ export function syncSubagentToOpenclaw(
   targetDir: string
 ): { success: boolean; error?: string } {
   try {
-    // Ensure target directory exists
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    // Copy all files
-    for (const file of fs.readdirSync(subagentDir)) {
-      const sourcePath = path.join(subagentDir, file);
-      const targetFile = file === 'AGENT.md' ? 'AGENTS.md' : file;
-      const targetPath = path.join(targetDir, targetFile);
-
-      if (fs.statSync(sourcePath).isFile()) {
-        fs.copyFileSync(sourcePath, targetPath);
-      }
-    }
-
+    copyDirWithRename(subagentDir, targetDir, { 'AGENT.md': 'AGENTS.md' });
     return { success: true };
   } catch (err) {
     return { success: false, error: String(err) };
@@ -683,121 +683,14 @@ export function installSubagentToAgent(
   agent: AgentId,
   agentHome: string
 ): { success: boolean; error?: string } {
-  if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
-    // Claude / Gemini / Grok: flatten to single .md under the native agents dir.
-    const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
-    const agentsDir = path.join(agentHome, agentsRoot, 'agents');
-    if (!fs.existsSync(agentsDir)) {
-      fs.mkdirSync(agentsDir, { recursive: true });
-    }
-
-    try {
-      const transformed = transformSubagentForClaude(subagentDir);
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.md`), transformed);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'codex') {
-    // Codex: standalone TOML under ~/.codex/agents/<name>.toml
-    const agentsDir = path.join(agentHome, '.codex', 'agents');
-    if (!fs.existsSync(agentsDir)) {
-      fs.mkdirSync(agentsDir, { recursive: true });
-    }
-    try {
-      const toml = transformSubagentForCodex(subagentDir);
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.toml`), toml);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'kimi') {
-    // Kimi: YAML + sibling system-prompt md under ~/.kimi-code/agents/
-    try {
-      writeKimiSubagentFiles(path.join(agentHome, '.kimi-code', 'agents'), subagentDir, subagentName);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'opencode') {
-    // OpenCode: markdown agents under ~/.config/opencode/agents/
-    const agentsDir = path.join(agentHome, '.config', 'opencode', 'agents');
-    if (!fs.existsSync(agentsDir)) fs.mkdirSync(agentsDir, { recursive: true });
-    try {
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.md`), transformSubagentForOpenCode(subagentDir));
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'antigravity') {
-    // Antigravity: custom-agent markdown under ~/.gemini/config/agents/<name>/agent.md.
-    const agentDir = safeJoin(path.join(agentHome, '.gemini', 'config', 'agents'), subagentName);
-    if (!fs.existsSync(agentDir)) fs.mkdirSync(agentDir, { recursive: true });
-    try {
-      fs.writeFileSync(safeJoin(agentDir, 'agent.md'), transformSubagentForAntigravity(subagentDir));
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'openclaw') {
-    // OpenClaw: copy full directory
-    const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
-    return syncSubagentToOpenclaw(subagentDir, targetDir);
-  } else if (agent === 'kiro') {
-    // Kiro: JSON custom-agent file under ~/.kiro/agents/
-    const agentsDir = path.join(agentHome, '.kiro', 'agents');
-    if (!fs.existsSync(agentsDir)) {
-      fs.mkdirSync(agentsDir, { recursive: true });
-    }
-    try {
-      const transformed = transformSubagentForKiro(subagentDir);
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.json`), transformed);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'cursor') {
-    // Cursor: flattened .md custom subagent under ~/.cursor/agents/
-    const agentsDir = path.join(agentHome, '.cursor', 'agents');
-    if (!fs.existsSync(agentsDir)) {
-      fs.mkdirSync(agentsDir, { recursive: true });
-    }
-    try {
-      const transformed = transformSubagentForCursor(subagentDir);
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.md`), transformed);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'forge') {
-    // ForgeCode: flattened .md custom subagent under ~/.forge/agents/
-    const agentsDir = path.join(agentHome, '.forge', 'agents');
-    if (!fs.existsSync(agentsDir)) {
-      fs.mkdirSync(agentsDir, { recursive: true });
-    }
-    try {
-      const transformed = transformSubagentForForge(subagentDir);
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.md`), transformed);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else if (agent === 'goose') {
-    // Goose: recipe YAML custom-agent file under ~/.config/goose/agents/
-    const agentsDir = path.join(agentHome, '.config', 'goose', 'agents');
-    if (!fs.existsSync(agentsDir)) {
-      fs.mkdirSync(agentsDir, { recursive: true });
-    }
-    try {
-      const transformed = transformSubagentForGoose(subagentDir);
-      fs.writeFileSync(safeJoin(agentsDir, `${subagentName}.yaml`), transformed);
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: String(err) };
-    }
-  } else {
-    // Other agents don't support subagents yet
+  if (!subagentTarget(agent)) {
     return { success: false, error: `Agent '${agent}' does not support subagents` };
+  }
+  try {
+    writeSubagentToHome(agent, agentHome, { name: subagentName, path: subagentDir });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: String(err) };
   }
 }
 
@@ -809,71 +702,8 @@ export function removeSubagentFromAgent(
   agent: AgentId,
   agentHome: string
 ): { success: boolean; error?: string } {
-  try {
-    if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
-      const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
-      const targetPath = safeJoin(path.join(agentHome, agentsRoot, 'agents'), `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
-      return { success: true };
-    } else if (agent === 'codex') {
-      const targetPath = safeJoin(path.join(agentHome, '.codex', 'agents'), `${subagentName}.toml`);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
-      return { success: true };
-    } else if (agent === 'kimi') {
-      const agentsDir = path.join(agentHome, '.kimi-code', 'agents');
-      const targetPath = safeJoin(agentsDir, `${subagentName}.yaml`);
-      const promptPath = safeJoin(agentsDir, `${subagentName}.system.md`);
-      if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
-      if (fs.existsSync(promptPath)) fs.unlinkSync(promptPath);
-      return { success: true };
-    } else if (agent === 'opencode') {
-      const targetPath = safeJoin(path.join(agentHome, '.config', 'opencode', 'agents'), `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
-      return { success: true };
-    } else if (agent === 'antigravity') {
-      const targetDir = safeJoin(path.join(agentHome, '.gemini', 'config', 'agents'), subagentName);
-      if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
-      return { success: true };
-    } else if (agent === 'openclaw') {
-      const targetDir = safeJoin(path.join(agentHome, '.openclaw'), subagentName);
-      if (fs.existsSync(targetDir)) {
-        fs.rmSync(targetDir, { recursive: true });
-      }
-      return { success: true };
-    } else if (agent === 'kiro') {
-      const targetPath = safeJoin(path.join(agentHome, '.kiro', 'agents'), `${subagentName}.json`);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
-      return { success: true };
-    } else if (agent === 'cursor') {
-      const targetPath = safeJoin(path.join(agentHome, '.cursor', 'agents'), `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
-      return { success: true };
-    } else if (agent === 'forge') {
-      const targetPath = safeJoin(path.join(agentHome, '.forge', 'agents'), `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
-      return { success: true };
-    } else if (agent === 'goose') {
-      const targetPath = safeJoin(path.join(agentHome, '.config', 'goose', 'agents'), `${subagentName}.yaml`);
-      if (fs.existsSync(targetPath)) {
-        fs.unlinkSync(targetPath);
-      }
-      return { success: true };
-    } else {
-      return { success: true }; // No-op for unsupported agents
-    }
-  } catch (err) {
-    return { success: false, error: String(err) };
-  }
+  // No-op success for agents without a registry entry, matching prior behavior.
+  return removeSubagentFromHome(agent, agentHome, subagentName);
 }
 
 /**
@@ -912,220 +742,17 @@ export function subagentContentMatches(installedDir: string, sourceDir: string):
 // source of truth.
 
 /**
- * List subagents installed to a specific agent's home
- * Claude/Gemini/Grok: scans ~/.{agent}/agents/{name}.md
- * Kimi: scans ~/.kimi-code/agents/{name}.yaml (+ sibling .system.md)
- * Kiro: scans ~/.kiro/agents/{name}.json
- * OpenClaw: scans ~/.openclaw/{name}/AGENTS.md
+ * List subagents installed to a specific agent's home.
+ *
+ * Layout (target dir, file/dir shape, metadata reader) is declared once per
+ * agent in the subagent registry; this is a thin wrapper over the generic
+ * enumerator so a new agent needs no arm here -- just a registry entry.
  */
 export function listSubagentsForAgent(
   agentId: AgentId,
   home: string
 ): InstalledSubagent[] {
-  const subagents: InstalledSubagent[] = [];
-
-  if (agentId === 'claude' || agentId === 'gemini' || agentId === 'grok') {
-    // Claude / Gemini / Grok: flat .md files in agents/
-    const agentsRoot = agentId === 'grok' ? '.grok' : agentId === 'gemini' ? '.gemini' : '.claude';
-    const agentsDir = path.join(home, agentsRoot, 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.md')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-
-      const frontmatter = parseSubagentFrontmatter(filePath);
-      if (!frontmatter) continue;
-
-      const name = file.replace('.md', '');
-      subagents.push({
-        name,
-        path: filePath,
-        files: [file],
-        frontmatter,
-      });
-    }
-  } else if (agentId === 'kimi') {
-    // Kimi: flat YAML under .kimi-code/agents/ (exclude managed parent _*.yaml)
-    const agentsDir = path.join(home, '.kimi-code', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.yaml') || file.startsWith('_')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-
-      const name = file.replace(/\.yaml$/, '');
-      let description = '';
-      try {
-        const parsed = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as {
-          agent?: { description?: string; name?: string };
-        } | null;
-        description = parsed?.agent?.description ?? '';
-      } catch { /* leave description empty */ }
-
-      const files = [file];
-      const promptFile = `${name}.system.md`;
-      if (fs.existsSync(path.join(agentsDir, promptFile))) files.push(promptFile);
-
-      subagents.push({
-        name,
-        path: filePath,
-        files,
-        frontmatter: { name, description },
-      });
-    }
-  } else if (agentId === 'opencode') {
-    const agentsDir = path.join(home, '.config', 'opencode', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.md')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-      const name = file.replace(/\.md$/, '');
-      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
-      subagents.push({ name, path: filePath, files: [file], frontmatter });
-    }
-  } else if (agentId === 'antigravity') {
-    const agentsDir = path.join(home, '.gemini', 'config', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-    for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const filePath = path.join(agentsDir, entry.name, 'agent.md');
-      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) continue;
-      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name: entry.name, description: '' };
-      subagents.push({ name: entry.name, path: filePath, files: ['agent.md'], frontmatter });
-    }
-  } else if (agentId === 'copilot') {
-    // Copilot: flat `<name>.agent.md` files under ~/.copilot/agents/
-    const agentsDir = path.join(home, '.copilot', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.agent.md')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-      const name = file.replace(/\.agent\.md$/, '');
-      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
-      subagents.push({ name, path: filePath, files: [file], frontmatter });
-    }
-  } else if (agentId === 'openclaw') {
-    // OpenClaw: directories with AGENTS.md
-    const openclawDir = path.join(home, '.openclaw');
-    if (!fs.existsSync(openclawDir)) return subagents;
-
-    for (const dir of fs.readdirSync(openclawDir)) {
-      const dirPath = path.join(openclawDir, dir);
-      if (!fs.statSync(dirPath).isDirectory()) continue;
-
-      // OpenClaw uses AGENTS.md (not AGENT.md)
-      const agentsMd = path.join(dirPath, 'AGENTS.md');
-      if (!fs.existsSync(agentsMd)) continue;
-
-      // Parse frontmatter - OpenClaw may not have standard frontmatter
-      // Try to extract name/description from content
-      const content = fs.readFileSync(agentsMd, 'utf-8');
-      let frontmatter: SubagentFrontmatter = {
-        name: dir,
-        description: '',
-      };
-
-      // Try to parse frontmatter if present
-      const parsed = parseSubagentFrontmatter(agentsMd);
-      if (parsed) {
-        frontmatter = parsed;
-      } else {
-        // Extract first non-empty line as description
-        const firstLine = content.split('\n').find(l => l.trim() && !l.startsWith('#'));
-        frontmatter.description = firstLine?.slice(0, 80) || `OpenClaw agent: ${dir}`;
-      }
-
-      const files = fs.readdirSync(dirPath)
-        .filter(f => f.endsWith('.md'))
-        .sort();
-
-      subagents.push({
-        name: dir,
-        path: dirPath,
-        files,
-        frontmatter,
-      });
-    }
-  } else if (agentId === 'kiro') {
-    // Kiro: JSON files under ~/.kiro/agents/
-    const agentsDir = path.join(home, '.kiro', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-
-      let frontmatter: SubagentFrontmatter;
-      try {
-        const config = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as { name?: string; description?: string; model?: string };
-        frontmatter = {
-          name: config.name || file.replace('.json', ''),
-          description: config.description || '',
-          model: config.model,
-        };
-      } catch {
-        continue;
-      }
-
-      const name = file.replace('.json', '');
-      subagents.push({
-        name,
-        path: filePath,
-        files: [file],
-        frontmatter,
-      });
-    }
-  } else if (agentId === 'cursor') {
-    // Cursor: flat `<name>.md` files under ~/.cursor/agents/
-    const agentsDir = path.join(home, '.cursor', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.md')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-      const name = file.replace(/\.md$/, '');
-      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
-      subagents.push({ name, path: filePath, files: [file], frontmatter });
-    }
-  } else if (agentId === 'forge') {
-    // ForgeCode: flat `<name>.md` files under ~/.forge/agents/
-    const agentsDir = path.join(home, '.forge', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.md')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-      const name = file.replace(/\.md$/, '');
-      const frontmatter = parseSubagentFrontmatter(filePath) ?? { name, description: '' };
-      subagents.push({ name, path: filePath, files: [file], frontmatter });
-    }
-  } else if (agentId === 'goose') {
-    // Goose: recipe YAML files under ~/.config/goose/agents/
-    const agentsDir = path.join(home, '.config', 'goose', 'agents');
-    if (!fs.existsSync(agentsDir)) return subagents;
-    for (const file of fs.readdirSync(agentsDir)) {
-      if (!file.endsWith('.yaml')) continue;
-      const filePath = path.join(agentsDir, file);
-      if (!fs.statSync(filePath).isFile()) continue;
-      const name = file.replace(/\.yaml$/, '');
-      let frontmatter: SubagentFrontmatter;
-      try {
-        const recipe = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as { title?: string; description?: string } | null;
-        frontmatter = { name: recipe?.title || name, description: recipe?.description || '' };
-      } catch {
-        continue;
-      }
-      subagents.push({ name, path: filePath, files: [file], frontmatter });
-    }
-  }
-
-  return subagents;
+  return listInstalledSubagentsRich(agentId, home);
 }
 
 export interface VersionSubagentDiff {
@@ -1140,7 +767,6 @@ export interface VersionSubagentDiff {
  */
 export function diffVersionSubagents(agent: AgentId, version: string): VersionSubagentDiff {
   const versionHome = getVersionHomePath(agent, version);
-  const orphans: string[] = [];
 
   // Get all discovered subagent names
   const discovered = new Set<string>();
@@ -1154,97 +780,9 @@ export function diffVersionSubagents(agent: AgentId, version: string): VersionSu
     }
   }
 
-  // Check what's installed
-  if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
-    const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
-    const agentsDir = path.join(versionHome, agentsRoot, 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const file of fs.readdirSync(agentsDir)) {
-        if (!file.endsWith('.md')) continue;
-        const name = path.basename(file, '.md');
-        if (!discovered.has(name)) {
-          orphans.push(name);
-        }
-      }
-    }
-  } else if (agent === 'kimi') {
-    const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const file of fs.readdirSync(agentsDir)) {
-        if (!file.endsWith('.yaml') || file.startsWith('_')) continue;
-        const name = path.basename(file, '.yaml');
-        if (!discovered.has(name)) {
-          orphans.push(name);
-        }
-      }
-    }
-  } else if (agent === 'opencode') {
-    const agentsDir = path.join(versionHome, '.config', 'opencode', 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const file of fs.readdirSync(agentsDir)) {
-        if (!file.endsWith('.md')) continue;
-        const name = path.basename(file, '.md');
-        if (!discovered.has(name)) orphans.push(name);
-      }
-    }
-  } else if (agent === 'antigravity') {
-    const agentsDir = path.join(versionHome, '.gemini', 'config', 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const entry of fs.readdirSync(agentsDir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        if (!fs.existsSync(path.join(agentsDir, entry.name, 'agent.md'))) continue;
-        if (!discovered.has(entry.name)) orphans.push(entry.name);
-      }
-    }
-  } else if (agent === 'openclaw') {
-    const openclawDir = path.join(versionHome, '.openclaw');
-    if (fs.existsSync(openclawDir)) {
-      for (const entry of fs.readdirSync(openclawDir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        if (!discovered.has(entry.name)) {
-          orphans.push(entry.name);
-        }
-      }
-    }
-  } else if (agent === 'kiro') {
-    const agentsDir = path.join(versionHome, '.kiro', 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const file of fs.readdirSync(agentsDir)) {
-        if (!file.endsWith('.json')) continue;
-        const name = path.basename(file, '.json');
-        if (!discovered.has(name)) {
-          orphans.push(name);
-        }
-      }
-    }
-  } else if (agent === 'cursor') {
-    const agentsDir = path.join(versionHome, '.cursor', 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const file of fs.readdirSync(agentsDir)) {
-        if (!file.endsWith('.md')) continue;
-        const name = path.basename(file, '.md');
-        if (!discovered.has(name)) orphans.push(name);
-      }
-    }
-  } else if (agent === 'forge') {
-    const agentsDir = path.join(versionHome, '.forge', 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const file of fs.readdirSync(agentsDir)) {
-        if (!file.endsWith('.md')) continue;
-        const name = path.basename(file, '.md');
-        if (!discovered.has(name)) orphans.push(name);
-      }
-    }
-  } else if (agent === 'goose') {
-    const agentsDir = path.join(versionHome, '.config', 'goose', 'agents');
-    if (fs.existsSync(agentsDir)) {
-      for (const file of fs.readdirSync(agentsDir)) {
-        if (!file.endsWith('.yaml')) continue;
-        const name = path.basename(file, '.yaml');
-        if (!discovered.has(name)) orphans.push(name);
-      }
-    }
-  }
+  // Anything installed in the version home that isn't a discovered subagent is
+  // an orphan. Installed enumeration is registry-driven (per-agent layout).
+  const orphans = listInstalledSubagentNames(agent, versionHome).filter((name) => !discovered.has(name));
 
   return { agent, version, orphans: orphans.sort() };
 }
@@ -1279,79 +817,7 @@ export function removeSubagentFromVersion(
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const trashDir = path.join(getTrashSubagentsDir(), agent, version, subagentName);
 
-  try {
-    if (agent === 'claude' || agent === 'gemini' || agent === 'grok') {
-      const agentsRoot = agent === 'grok' ? '.grok' : agent === 'gemini' ? '.gemini' : '.claude';
-      const targetPath = path.join(versionHome, agentsRoot, 'agents', `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
-      }
-    } else if (agent === 'kimi') {
-      const agentsDir = path.join(versionHome, '.kimi-code', 'agents');
-      const yamlPath = path.join(agentsDir, `${subagentName}.yaml`);
-      const promptPath = path.join(agentsDir, `${subagentName}.system.md`);
-      if (fs.existsSync(yamlPath) || fs.existsSync(promptPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        if (fs.existsSync(yamlPath)) {
-          fs.renameSync(yamlPath, path.join(trashDir, `${subagentName}.yaml.${stamp}`));
-        }
-        if (fs.existsSync(promptPath)) {
-          fs.renameSync(promptPath, path.join(trashDir, `${subagentName}.system.md.${stamp}`));
-        }
-      }
-    } else if (agent === 'opencode') {
-      const targetPath = path.join(versionHome, '.config', 'opencode', 'agents', `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
-      }
-    } else if (agent === 'antigravity') {
-      const targetDir = path.join(versionHome, '.gemini', 'config', 'agents', subagentName);
-      if (fs.existsSync(targetDir)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetDir, path.join(trashDir, stamp));
-      }
-    } else if (agent === 'copilot') {
-      const targetPath = path.join(versionHome, '.copilot', 'agents', `${subagentName}.agent.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.agent.md.${stamp}`));
-      }
-    } else if (agent === 'openclaw') {
-      const targetDir = path.join(versionHome, '.openclaw', subagentName);
-      if (fs.existsSync(targetDir)) {
-        const trashDest = path.join(trashDir, stamp);
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetDir, trashDest);
-      }
-    } else if (agent === 'kiro') {
-      const targetPath = path.join(versionHome, '.kiro', 'agents', `${subagentName}.json`);
-      if (fs.existsSync(targetPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.json.${stamp}`));
-      }
-    } else if (agent === 'cursor') {
-      const targetPath = path.join(versionHome, '.cursor', 'agents', `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
-      }
-    } else if (agent === 'forge') {
-      const targetPath = path.join(versionHome, '.forge', 'agents', `${subagentName}.md`);
-      if (fs.existsSync(targetPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.md.${stamp}`));
-      }
-    } else if (agent === 'goose') {
-      const targetPath = path.join(versionHome, '.config', 'goose', 'agents', `${subagentName}.yaml`);
-      if (fs.existsSync(targetPath)) {
-        fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
-        fs.renameSync(targetPath, path.join(trashDir, `${subagentName}.yaml.${stamp}`));
-      }
-    }
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
+  // Registry-driven soft-delete: files land as `<basename>.<stamp>`, dirs as
+  // `<stamp>/`, matching the prior per-agent behavior for every layout.
+  return trashSubagentFromHome(agent, versionHome, subagentName, trashDir, stamp);
 }
