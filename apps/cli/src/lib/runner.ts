@@ -77,18 +77,22 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
     return cmd;
   }
 
+  // Past the workflow branch this is an agent (or resume) job — command jobs never
+  // reach buildJobCommand (execute*Job branches out first), and validateJob guarantees agent.
+  const agent = config.agent!;
+
   // Resume branch: reopen an EXISTING session via `agents run <agent> --resume <id>`
   // instead of starting fresh. The real session resumes with its full prior context
   // (index-based lookup, cwd-independent) and `resolvedPrompt` becomes its next turn —
   // so a self-scheduled wake (e.g. /hibernate) is handled by the session that scheduled
   // it, not a fresh, context-less agent that would refuse an "opaque" instruction.
   if (config.resume) {
-    return ['agents', 'run', config.agent, '--resume', config.resume, resolvedPrompt, '--mode', config.mode];
+    return ['agents', 'run', agent, '--resume', config.resume, resolvedPrompt, '--mode', config.mode];
   }
 
-  const template = AGENT_COMMANDS[config.agent];
+  const template = AGENT_COMMANDS[agent];
   if (!template) {
-    throw new Error(`Unsupported agent for daemon jobs: ${config.agent}`);
+    throw new Error(`Unsupported agent for daemon jobs: ${agent}`);
   }
 
   let cmd = template.map((part) => part.replace('{prompt}', resolvedPrompt));
@@ -194,10 +198,12 @@ export function buildJobCommand(config: JobConfig, resolvedPrompt: string): stri
  * Reasoning level (config.config.reasoning) maps to per-agent flags via models.ts.
  */
 function appendModelAndReasoning(cmd: string[], config: JobConfig): void {
+  // Only called from buildJobCommand's agent path — config.agent is set.
+  const agent = config.agent!;
   const model = config.config?.model as string | undefined;
   if (model) {
     if (config.version) {
-      const resolved = resolveModel(config.agent, config.version, model);
+      const resolved = resolveModel(agent, config.version, model);
       if (resolved.warning) {
         process.stderr.write(`[agents] ${resolved.warning}\n`);
       }
@@ -209,13 +215,34 @@ function appendModelAndReasoning(cmd: string[], config: JobConfig): void {
 
   const reasoning = config.config?.reasoning as string | undefined;
   if (reasoning) {
-    const flags = buildReasoningFlags(config.agent, reasoning);
+    const flags = buildReasoningFlags(agent, reasoning);
     if (flags.length > 0) cmd.push(...flags);
   }
 }
 
 function generateRunId(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+/**
+ * Build the argv for a command-mode routine: run the shell string directly
+ * through the platform shell. No agent binary, no rotation, no sandbox.
+ */
+function buildShellCommand(command: string): string[] {
+  return process.platform === 'win32'
+    ? ['cmd', '/c', command]
+    : ['/bin/sh', '-c', command];
+}
+
+/**
+ * Real (un-sandboxed) environment for a command routine. Command routines do
+ * `npm i -g` / `git pull` and need the actual $HOME / $PATH, not the sandbox
+ * overlay. Only TZ is injected when the routine pins a timezone.
+ */
+function commandSpawnEnv(config: JobConfig): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  if (config.timezone) env.TZ = config.timezone;
+  return env;
 }
 
 /** Pre-flight version/account selection for a routine job. */
@@ -245,7 +272,9 @@ export async function resolveRoutineLaunch(
     return { chain: [], rotation: null, pinned: false };
   }
 
-  const agent = config.agent;
+  // resolveRoutineLaunch is only called for agent jobs (workflow returns above;
+  // command jobs branch out of execute*Job before reaching this).
+  const agent = config.agent!;
   if (config.version) {
     const version = config.version;
     if (!isVersionInstalled(agent, version)) {
@@ -486,6 +515,14 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   if (eligibility) {
     throw new Error(eligibility.message);
   }
+
+  // Command-mode: run a plain shell command directly (no agent, no rotation,
+  // no pinning, no sandbox overlay). Reuses the run-record machinery so
+  // list/runs/overdue keep working.
+  if (config.command) {
+    return executeCommandJobForeground(config);
+  }
+
   maybeRotate();
 
   const launch = await resolveRoutineLaunch(config);
@@ -519,7 +556,8 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
 
   // Workflows run via `agents run <workflow>` which delegates to claude under the hood.
   // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
-  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent;
+  // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
+  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
 
   const meta: RunMeta = {
     jobName: config.name,
@@ -679,6 +717,107 @@ export async function executeJob(config: JobConfig, deps?: LoopDeps): Promise<Ru
   return { meta, reportPath: null };
 }
 
+/**
+ * Foreground execution for a command-mode routine (`config.command`). Runs a
+ * plain shell command in the REAL environment (no sandbox), captures stdout+
+ * stderr to `stdout.log`, awaits completion, and honors `config.timeout` with
+ * the same SIGTERM→SIGKILL kill mechanism the agent path uses. No agent is
+ * spawned; the run record carries `command` instead of `agent`. There is no
+ * agent report to extract, so `reportPath` is always null (the stdout log is
+ * the artifact — same location the agent path writes).
+ */
+async function executeCommandJobForeground(config: JobConfig): Promise<RunResult> {
+  const timer = createTimer('agent.run', {
+    jobName: config.name,
+    mode: config.mode,
+    schedule: config.schedule,
+  });
+
+  const runId = generateRunId();
+  const runDir = getRunDir(config.name, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const stdoutPath = path.join(runDir, 'stdout.log');
+  const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
+
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    command: config.command,
+    pid: null,
+    spawnedAt: Date.now(),
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+  };
+  writeRunMeta(meta);
+
+  const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
+  const cmd = buildShellCommand(config.command!);
+  const env = commandSpawnEnv(config);
+
+  process.stderr.write(`[agents] routine ${config.name}: running command\n`);
+
+  const result = await new Promise<{ exitCode: number | null; status: 'completed' | 'failed' | 'timeout'; error?: string }>((resolve) => {
+    const child = spawn(cmd[0], cmd.slice(1), {
+      stdio: ['ignore', stdoutFd, stdoutFd],
+      ...backgroundSpawnOptions({ fdStdio: true }),
+      env,
+    });
+
+    meta.pid = child.pid || null;
+    writeRunMeta(meta);
+
+    let settled = false;
+    const finish = (r: { exitCode: number | null; status: 'completed' | 'failed' | 'timeout'; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
+      resolve(r);
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      try {
+        if (child.pid) process.kill(-child.pid, 'SIGTERM');
+      } catch { /* process already exited */ }
+      setTimeout(() => {
+        try {
+          if (child.pid) process.kill(-child.pid, 'SIGKILL');
+        } catch { /* process already exited */ }
+      }, 5000);
+      finish({ exitCode: null, status: 'timeout' });
+    }, timeoutMs);
+
+    child.on('exit', (code) => {
+      clearTimeout(timeoutTimer);
+      finish({ exitCode: code, status: code === 0 ? 'completed' : 'failed' });
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeoutTimer);
+      finish({ exitCode: 1, status: 'failed', error: err.message });
+    });
+  });
+
+  meta.status = result.status;
+  meta.exitCode = result.exitCode ?? (result.status === 'completed' ? 0 : 1);
+  meta.completedAt = new Date().toISOString();
+  writeRunMeta(meta);
+
+  if (result.error) {
+    process.stderr.write(`[agents] routine ${config.name}: command spawn failed: ${result.error}\n`);
+  }
+  timer.end({
+    status: meta.status,
+    exitCode: meta.exitCode ?? undefined,
+    runId,
+    ...(result.error ? { error: result.error } : {}),
+  });
+
+  return { meta, reportPath: null };
+}
+
 /** Spawn a job as a detached process and return immediately with run metadata. */
 export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
   const eligibility = checkJobDeviceEligibility(config);
@@ -686,6 +825,14 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     process.stderr.write(`[agents] daemon: skipping '${config.name}' — ${eligibility.message}\n`);
     throw new Error(eligibility.message);
   }
+
+  // Command-mode: fire a plain shell command detached (no agent, no rotation,
+  // no pinning, no sandbox overlay). Still writes a run record so the daemon,
+  // list/runs, and overdue tracking keep working.
+  if (config.command) {
+    return executeCommandJobDetached(config);
+  }
+
   // Pre-flight: pick a healthy version/account so the daemon does not launch
   // into a credit-exhausted install. Detached cannot mid-run failover (no exit
   // wait); the next schedule tick re-selects if this attempt still fails.
@@ -696,7 +843,7 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
   let cmd = buildJobCommand(config, resolvedPrompt);
   // workflow AND resume dispatch through `agents run` — never binary-pin them (pinning
   // rewrites cmd[0] to the agent binary → broken `<binary> run …`).
-  if (!dispatchesViaAgentsRun(config) && version) {
+  if (!dispatchesViaAgentsRun(config) && version && config.agent) {
     cmd = pinJobBinary(cmd, config.agent, version);
   }
 
@@ -723,9 +870,10 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
         if (config.timezone) e.TZ = config.timezone;
         return e;
       })()
-    : buildRoutineSpawnEnv(baseEnv, config.agent, version, config.timezone);
+    // Non-command path only: config.agent is always set here (command/workflow branch earlier).
+    : buildRoutineSpawnEnv(baseEnv, config.agent!, version, config.timezone);
 
-  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent;
+  const effectiveAgent: AgentId = config.workflow ? 'claude' : config.agent!;
 
   const meta: RunMeta = {
     jobName: config.name,
@@ -753,6 +901,59 @@ export async function executeJobDetached(config: JobConfig): Promise<RunMeta> {
     meta.completedAt = new Date().toISOString();
     writeRunMeta(meta);
     process.stderr.write(`[agents] daemon: spawn failed for job "${config.name}": ${err.message}\n`);
+  });
+
+  child.unref();
+  try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
+
+  meta.pid = child.pid || null;
+  writeRunMeta(meta);
+
+  return meta;
+}
+
+/**
+ * Detached (fire-and-forget) execution for a command-mode routine. Mirrors the
+ * agent detached flow: write an initial running record, spawn the shell command
+ * un-sandboxed, unref, then record the pid. The daemon does not wait for exit;
+ * `monitorRunningJobs` reaps the record on the next tick.
+ */
+function executeCommandJobDetached(config: JobConfig): RunMeta {
+  const runId = generateRunId();
+  const runDir = getRunDir(config.name, runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const stdoutPath = path.join(runDir, 'stdout.log');
+  const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
+
+  const cmd = buildShellCommand(config.command!);
+  const env = commandSpawnEnv(config);
+
+  const meta: RunMeta = {
+    jobName: config.name,
+    runId,
+    command: config.command,
+    pid: null,
+    spawnedAt: Date.now(),
+    status: 'running',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    exitCode: null,
+  };
+
+  const child = spawn(cmd[0], cmd.slice(1), {
+    stdio: ['ignore', stdoutFd, stdoutFd],
+    ...backgroundSpawnOptions({ fdStdio: true }),
+    env,
+  });
+
+  child.on('error', (err) => {
+    try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
+    meta.status = 'failed';
+    meta.exitCode = 1;
+    meta.completedAt = new Date().toISOString();
+    writeRunMeta(meta);
+    process.stderr.write(`[agents] daemon: command spawn failed for job "${config.name}": ${err.message}\n`);
   });
 
   child.unref();
@@ -922,17 +1123,21 @@ export function monitorRunningJobs(): void {
         const runDirPath = path.join(jobRunsPath, runDirEntry.name);
         const stdoutPath = path.join(runDirPath, 'stdout.log');
 
+        // Command-mode records carry no agent; there is no stream-json report to
+        // parse or extract. Reap them on pid liveness alone.
+        const isCommandRun = Boolean(meta.command) || !meta.agent;
+
         const wallClockMs = Date.now() - Date.parse(meta.startedAt);
         if (Number.isFinite(wallClockMs) && wallClockMs > MAX_WALL_CLOCK_MS) {
           meta.status = 'timeout';
           meta.completedAt = new Date().toISOString();
           writeRunMeta(meta);
-          extractAndSaveReport(stdoutPath, meta.agent, runDirPath);
+          if (!isCommandRun) extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
           continue;
         }
 
         if (!isPidOurs(meta.pid, meta.spawnedAt)) {
-          const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent);
+          const inferred = isCommandRun ? null : inferFinalStatusFromLog(stdoutPath, meta.agent!);
           if (inferred) {
             meta.status = inferred.status;
             meta.exitCode = inferred.exitCode;
@@ -942,7 +1147,7 @@ export function monitorRunningJobs(): void {
           meta.completedAt = new Date().toISOString();
           writeRunMeta(meta);
 
-          extractAndSaveReport(stdoutPath, meta.agent, runDirPath);
+          if (!isCommandRun) extractAndSaveReport(stdoutPath, meta.agent!, runDirPath);
         }
       } catch { /* corrupt or unreadable meta.json */ }
     }

@@ -427,6 +427,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('-s, --schedule <cron>', 'Cron schedule in standard format (5 fields: minute hour day month weekday)')
     .option('-a, --agent <agent>', 'Which agent runs this routine: claude, codex, gemini, cursor, or opencode')
     .option('--workflow <name>', 'Run an installed workflow (~/.agents/workflows/<name>) via `agents run`. Mutually exclusive with --agent.')
+    .option('--command <sh>', 'Run a plain shell command directly (no agent, no auth, no sandbox) — for deterministic housekeeping routines. Mutually exclusive with --agent and --workflow; --prompt is not used.')
     .option('-p, --prompt <prompt>', 'Task instruction for the agent')
     .option('-m, --mode <mode>', "Execution mode: plan (read-only), edit (can write files), auto (smart classifier, the default), or skip (bypass all permission prompts). 'full' accepted as alias for skip.", 'auto')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto', 'auto')
@@ -445,7 +446,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
     .action(async (nameOrPath: string | undefined, options) => {
       // Check if inline mode (has flags) or file mode
-      const hasInlineFlags = options.schedule || options.agent || options.workflow || options.prompt || options.at || options.on;
+      const hasInlineFlags = options.schedule || options.agent || options.workflow || options.command || options.prompt || options.at || options.on;
 
       if (hasInlineFlags) {
         // Inline mode: create job from flags
@@ -455,9 +456,9 @@ export function registerRoutinesCommands(program: Command): void {
           process.exit(1);
         }
 
-        // Validate mutually exclusive --agent / --workflow
-        if (options.agent && options.workflow) {
-          console.log(chalk.red('--agent and --workflow are mutually exclusive; specify exactly one'));
+        // Validate mutually exclusive --agent / --workflow / --command
+        if ([options.agent, options.workflow, options.command].filter(Boolean).length > 1) {
+          console.log(chalk.red('--agent, --workflow, and --command are mutually exclusive; specify exactly one'));
           process.exit(1);
         }
 
@@ -488,12 +489,13 @@ export function registerRoutinesCommands(program: Command): void {
           process.exit(1);
         }
 
-        if (!options.agent && !options.workflow) {
-          console.log(chalk.red('An agent or workflow is required (use --agent or --workflow)'));
+        if (!options.agent && !options.workflow && !options.command) {
+          console.log(chalk.red('An agent, workflow, or command is required (use --agent, --workflow, or --command)'));
           process.exit(1);
         }
 
-        if (!options.prompt) {
+        // Command routines run a plain shell and take no prompt; agent/workflow routines require one.
+        if (!options.command && !options.prompt) {
           console.log(chalk.red('Prompt is required (use --prompt)'));
           process.exit(1);
         }
@@ -508,13 +510,14 @@ export function registerRoutinesCommands(program: Command): void {
           name: nameOrPath,
           ...(schedule ? { schedule } : {}),
           ...(trigger ? { trigger } : {}),
-          agent: options.agent,
+          ...(options.agent ? { agent: options.agent } : {}),
           ...(options.workflow ? { workflow: options.workflow } : {}),
+          ...(options.command ? { command: options.command } : {}),
           mode: options.mode,
           effort: options.effort,
           timeout: options.timeout,
           enabled: !options.disabled,
-          prompt: options.prompt,
+          prompt: options.prompt ?? '',
           timezone: options.timezone,
           ...(devices ? { devices } : {}),
           ...(runOnce ? { runOnce: true } : {}),
@@ -744,7 +747,7 @@ export function registerRoutinesCommands(program: Command): void {
         process.exit(1);
       }
 
-      const runLabel = job.workflow ? `workflow: ${job.workflow}` : `agent: ${job.agent}`;
+      const runLabel = job.command ? 'command' : job.workflow ? `workflow: ${job.workflow}` : `agent: ${job.agent}`;
       console.log(chalk.bold(`Running job '${name}' (${runLabel}, mode: ${job.mode})\n`));
       const spinner = ora('Executing...').start();
 
