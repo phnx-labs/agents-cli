@@ -72,8 +72,16 @@ export function parseVmStat(out: string): MemStats {
   const compressed = out.match(/Pages occupied by compressor:\s+([0-9]+)/);
   const free = out.match(/Pages free:\s+([0-9]+)/);
   if (!active || !wired || !compressed || !free) return {};
+  // macOS reclaims inactive + speculative pages on demand, so they count as
+  // available — folding them into "free" (as Activity Monitor / vm_pressure do)
+  // rather than "used" keeps the headroom bucket honest on a Mac.
+  const inactive = out.match(/Pages inactive:\s+([0-9]+)/);
+  const speculative = out.match(/Pages speculative:\s+([0-9]+)/);
   const usedPages = parseInt(active[1], 10) + parseInt(wired[1], 10) + parseInt(compressed[1], 10);
-  const freePages = parseInt(free[1], 10);
+  const freePages =
+    parseInt(free[1], 10) +
+    parseInt(inactive?.[1] ?? '0', 10) +
+    parseInt(speculative?.[1] ?? '0', 10);
   const totalPages = usedPages + freePages;
   if (totalPages <= 0) return {};
   return {
@@ -171,7 +179,10 @@ export function probeDeviceStats(
   let env: Record<string, string>;
   try {
     const shim = writeAskpassShim();
-    ({ args, env } = buildSshInvocation(device, ['sh', '-c', PROBE_SNIPPET], shim));
+    // buildSshInvocation joins the cmd with spaces and hands the string to the
+    // remote login shell, which evaluates the snippet's `;`/`||` directly — no
+    // `sh -c` wrapper needed (and a wrapper would only re-quote the first token).
+    ({ args, env } = buildSshInvocation(device, [PROBE_SNIPPET], shim));
   } catch {
     return Promise.resolve({ host, reachable: false, fetchedAt });
   }

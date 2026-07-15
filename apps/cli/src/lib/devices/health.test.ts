@@ -40,7 +40,24 @@ describe('parseLinuxMemInfo', () => {
 });
 
 describe('parseVmStat', () => {
-  it('computes used% from active+wired+compressed vs free', () => {
+  it('counts inactive + speculative as available, not used (macOS reclaims them)', () => {
+    const out = [
+      'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+      'Pages free:                          100000.',
+      'Pages active:                        250000.',
+      'Pages inactive:                      100000.',
+      'Pages speculative:                    50000.',
+      'Pages wired down:                    100000.',
+      'Pages occupied by compressor:         50000.',
+    ].join('\n');
+    const m = parseVmStat(out);
+    // used = 400000; available = free(100000)+inactive(100000)+speculative(50000)=250000
+    // total = 650000 -> 400000/650000 = 61.5%
+    expect(Math.round(m.memPercent!)).toBe(62);
+    expect(m.memTotalBytes).toBe(650000 * 16384);
+    expect(m.memFreeBytes).toBe(250000 * 16384);
+  });
+  it('still works when inactive/speculative are absent (older vm_stat)', () => {
     const out = [
       'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
       'Pages free:                          100000.',
@@ -49,9 +66,8 @@ describe('parseVmStat', () => {
       'Pages occupied by compressor:         50000.',
     ].join('\n');
     const m = parseVmStat(out);
-    // used = 400000 pages, total = 500000 pages -> 80%
+    // used = 400000, total = 500000 -> 80%
     expect(Math.round(m.memPercent!)).toBe(80);
-    expect(m.memTotalBytes).toBe(500000 * 16384); // total pages * page size
     expect(m.memFreeBytes).toBe(100000 * 16384);
   });
   it('returns nothing when a required page class is missing', () => {
