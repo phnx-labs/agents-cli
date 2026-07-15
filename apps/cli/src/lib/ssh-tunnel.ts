@@ -25,7 +25,7 @@ import { fileURLToPath } from 'url';
 import { randomBytes, createHash } from 'crypto';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
-import { sshExec, SSH_OPTS } from './ssh-exec.js';
+import { sshExec, SSH_OPTS, assertValidSshTarget } from './ssh-exec.js';
 import { backgroundSpawnOptions } from './platform/process.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
 import { getDevice, type DeviceProfile } from './devices/registry.js';
@@ -86,6 +86,17 @@ export function startSSHTunnel(
   opts: StartTunnelOptions = {},
 ): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
+    // `user`/`host` can originate from a browser ssh:// profile or a device
+    // record. buildTunnelArgs places `${user}@${host}` before `-N`/SSH_OPTS, so
+    // a `-`-leading user would be parsed as an ssh option flag (option
+    // injection). Validate at the spawn sink so every caller is covered; reject
+    // (rather than throw synchronously) to keep the Promise contract.
+    try {
+      assertValidSshTarget(`${user}@${host}`);
+    } catch (err) {
+      reject(err as Error);
+      return;
+    }
     const args = buildTunnelArgs(user, host, localPort, remotePort);
 
     const tunnel = spawn('ssh', args, {

@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   buildTunnelArgs,
+  startSSHTunnel,
   buildScpArgs,
   buildPushScript,
   buildVerifyPushScript,
@@ -25,6 +26,19 @@ import {
 } from './ssh-tunnel.js';
 import { SSH_OPTS } from './ssh-exec.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
+
+describe('startSSHTunnel — target validation (C5)', () => {
+  // buildTunnelArgs places `${user}@${host}` before `-N`/SSH_OPTS, so a
+  // `-`-leading user (from a crafted ssh:// profile or device record) would be
+  // parsed by ssh as an option flag. startSSHTunnel must reject before spawning.
+  it('rejects an option-injecting user before spawning ssh', async () => {
+    await expect(startSSHTunnel('-Fattacker', 'victim', 55000, 8765)).rejects.toThrow(/Invalid SSH target/);
+  });
+
+  it('rejects a host containing shell/option metacharacters', async () => {
+    await expect(startSSHTunnel('me', 'a b;rm', 55000, 8765)).rejects.toThrow(/Invalid SSH target/);
+  });
+});
 
 describe('buildTunnelArgs', () => {
   it('forwards localPort to the remote loopback port and stays hardened', () => {

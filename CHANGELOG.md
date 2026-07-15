@@ -4,6 +4,15 @@
 
 ### Security
 
+- **SSH option-injection containment for `browser` over `ssh://`.** The `user`/`host`
+  from an `ssh://` browser profile endpoint (git-tracked user config) are now validated
+  with `assertValidSshTarget` before every raw `ssh` spawn — the remote-launch
+  (`ensureRemoteBrowser`), remote-kill (`runSSHCommand`), and `-L` tunnel
+  (`startSSHTunnel`) sinks in `apps/cli/src/lib/browser/drivers/ssh.ts` and
+  `apps/cli/src/lib/ssh-tunnel.ts`. A crafted endpoint like `ssh://-Fattacker@victim`
+  can no longer place `-Fattacker` at the ssh target position (parsed as `-F <file>`),
+  which an attacker-supplied ssh config's `ProxyCommand` would have turned into local
+  code execution.
 - **Path-traversal containment for untrusted-input filesystem sinks.**
   - Routine job names (from routine YAML `name:` / file basename, which can arrive via a
     synced user/system config repo) are now contained to a single path segment beneath
