@@ -113,7 +113,7 @@ describe('agents mailboxes', () => {
     const text = await runMailboxes([]);
     const out = text.lines.join('\n');
     expect(out).toContain('fleet comms');
-    expect(out).toContain('awaiting you');
+    expect(out).toContain('awaiting delivery');
     expect(out).toContain('24h');
     expect(out).toContain('overvw01');
     expect(out).toContain('overview body');
@@ -178,7 +178,7 @@ describe('agents mailboxes', () => {
     expect(text.lines.join('\n')).toContain('3 messages');
   });
 
-  it('--between rejects a single box and unknown ids', async () => {
+  it('--between rejects a single box, unknown ids, and the same box twice', async () => {
     const one = await runMailboxes(['--between', 'alpha-a01']);
     expect(one.exitCode).toBe(1);
     expect(one.errs.join('\n')).toContain('exactly two boxes');
@@ -186,6 +186,24 @@ describe('agents mailboxes', () => {
     const missing = await runMailboxes(['--between', 'alpha-a01', 'no-such-box-xyz']);
     expect(missing.exitCode).toBe(1);
     expect(missing.errs.join('\n')).toContain('No mailbox matching');
+
+    const same = await runMailboxes(['--between', 'alpha-a01', 'alpha-a01']);
+    expect(same.exitCode).toBe(1);
+    expect(same.errs.join('\n')).toContain('two different boxes');
+  });
+
+  it('rejects mutually exclusive view combinations instead of dropping a flag', async () => {
+    const watchGraph = await runMailboxes(['--watch', '--graph']);
+    expect(watchGraph.exitCode).toBe(1);
+    expect(watchGraph.errs.join('\n')).toContain('combines with no other view');
+
+    const betweenGraph = await runMailboxes(['--between', 'alpha-a01', 'bravo-b01', '--graph']);
+    expect(betweenGraph.exitCode).toBe(1);
+    expect(betweenGraph.errs.join('\n')).toContain('Pick one view');
+
+    const idGraph = await runMailboxes(['alpha-a01', '--graph']);
+    expect(idGraph.exitCode).toBe(1);
+    expect(idGraph.errs.join('\n')).toContain('Pick one view');
   });
 
   it('--graph aggregates who-talks-to-whom edges, busiest first', async () => {

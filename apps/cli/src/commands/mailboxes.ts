@@ -176,7 +176,7 @@ function renderOverview(boxes: BoxView[], limit: number, filters: Filters): void
     host: os.hostname(),
     accent: 'cyan',
     right: `${live} live · ${boxes.length} boxes`,
-    stats: [`${msgs.length} messages`, `${awaiting} awaiting you`, `last ${relTime(msgs[0].ts)}`],
+    stats: [`${msgs.length} messages`, `${awaiting} awaiting delivery`, `last ${relTime(msgs[0].ts)}`],
   }));
   console.log(`  ${chalk.dim('24h')} ${chalk.cyan(sparkline(hourlyCounts(msgs, 24)))}`);
   console.log();
@@ -409,9 +409,16 @@ export function registerMailboxesCommand(program: Command): void {
         die(`--between takes exactly two boxes: \`agents mailboxes --between <a> <b>\`.`);
       }
 
-      // --watch streams the fleet; it never combines with the single-box views.
+      // The views are mutually exclusive — never silently drop a flag.
+      const viewCount = (id ? 1 : 0) + (opts.between ? 1 : 0) + (opts.graph ? 1 : 0);
+      if (opts.watch && viewCount > 0) {
+        die('--watch streams the whole fleet and combines with no other view. Drop <id>/--between/--graph, or use --from/--to/--since to filter the stream.');
+      }
+      if (!opts.watch && viewCount > 1) {
+        die('Pick one view: <id>, --between, or --graph.');
+      }
+
       if (opts.watch) {
-        if (id) die('--watch streams the whole fleet. Drop <id>, or use --to <id> to filter the stream.');
         await runWatch(root, { json: opts.json, filters });
         return;
       }
