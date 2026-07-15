@@ -133,6 +133,7 @@ import {
   loadRepo,
   loadSetup,
   loadFeed,
+  loadMailboxes,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
@@ -834,6 +835,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadWebhook);
   await reg(loadFunnel);
   await reg(loadFeed);
+  await reg(loadMailboxes);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');

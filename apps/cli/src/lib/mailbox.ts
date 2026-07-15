@@ -301,3 +301,49 @@ export function clear(boxDir: string): number {
   }
   return n;
 }
+
+/** Which bucket a stored message currently sits in. */
+export type MailboxState = 'inbox' | 'processing' | 'consumed';
+
+/** A message read back from a box, tagged with the bucket it was found in. */
+export interface StoredMessage extends MailboxMessage {
+  state: MailboxState;
+}
+
+/**
+ * Enumerate the box ids under `root` (directory names that are valid mailbox
+ * ids). Read-only; does not create the root. Sorted for stable output.
+ */
+export function listBoxes(root: string = getMailboxRootDir()): string[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(root);
+  } catch {
+    return [];
+  }
+  return names.filter((n) => isValidMailboxId(n) && fs.statSync(path.join(root, n)).isDirectory()).sort();
+}
+
+/**
+ * Read every message in a box across all three buckets (inbox, processing,
+ * consumed) WITHOUT consuming, sweeping, or archiving anything. Unlike `peek`,
+ * this includes `consumed/` — the delivered history — so callers can surface a
+ * communication log. Each row is tagged with its bucket. Sorted FIFO by msgId
+ * (which is time-sortable), oldest first.
+ */
+export function readBox(boxDir: string): StoredMessage[] {
+  const out: StoredMessage[] = [];
+  const buckets: [string, MailboxState][] = [
+    [inboxDir(boxDir), 'inbox'],
+    [processingDir(boxDir), 'processing'],
+    [consumedDir(boxDir), 'consumed'],
+  ];
+  for (const [dir, state] of buckets) {
+    for (const name of jsonFiles(dir)) {
+      const msg = readMessage(path.join(dir, name));
+      if (msg) out.push({ ...msg, state });
+    }
+  }
+  out.sort((a, b) => (a.msgId < b.msgId ? -1 : a.msgId > b.msgId ? 1 : 0));
+  return out;
+}
