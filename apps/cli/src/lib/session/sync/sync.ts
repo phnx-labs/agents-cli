@@ -346,23 +346,35 @@ async function pullAndReconcile(r2: R2Client, me: string, encKey: Buffer | null,
     // rather than materializing half a session and stamping it done.
     const writes: Array<{ dest: string; content: string; merged: boolean }> = [];
     let incomplete = false;
-    for (const group of byRel.values()) {
-      const fetched: Array<string | null> = [];
-      for (const c of group) {
-        try {
-          const body = await r2.get(objectKey(c.machine, agentId, sessionId, spec.dirShaped ? c.entry.relKey : undefined));
-          // Decrypt before the body reaches the CRDT union — merge + mirror always
-          // operate on plaintext. A legacy plaintext object passes through
-          // untouched; an envelope without a key throws (surfaced below).
-          fetched.push(body === null ? null : decryptTranscriptBody(body, encKey));
-        } catch (err) {
-          result.errors.push(`get ${c.machine}/${sessionId}/${c.entry.relKey}: ${(err as Error).message}`);
-          fetched.push(null);
+    try {
+      for (const group of byRel.values()) {
+        const fetched: Array<string | null> = [];
+        for (const c of group) {
+          try {
+            const body = await r2.get(objectKey(c.machine, agentId, sessionId, spec.dirShaped ? c.entry.relKey : undefined));
+            // Decrypt before the body reaches the CRDT union — merge + mirror always
+            // operate on plaintext. A legacy plaintext object passes through
+            // untouched; an envelope without a key throws (surfaced below).
+            fetched.push(body === null ? null : decryptTranscriptBody(body, encKey));
+          } catch (err) {
+            result.errors.push(`get ${c.machine}/${sessionId}/${c.entry.relKey}: ${(err as Error).message}`);
+            fetched.push(null);
+          }
         }
+        const resolved = reconcileCopies(spec, group, fetched);
+        if (!resolved) { incomplete = true; break; }
+        writes.push(resolved);
       }
-      const resolved = reconcileCopies(spec, group, fetched);
-      if (!resolved) { incomplete = true; break; }
-      writes.push(resolved);
+    } catch (err) {
+      // `reconcileCopies` -> `mirrorPath` now rejects unsafe peer-controlled
+      // machine/relKey (C1 containment). That rejection must stay scoped to this
+      // one session: without this catch a single malicious/malformed manifest
+      // entry would throw out of the whole `pending` loop, skip the
+      // `savePullState` below, and re-throw every tick — a peer-triggered DoS on
+      // everyone else's session-sync. Record it and skip; never stamp pull-state
+      // for a rejected entry (so nothing marks the bad session "done").
+      result.errors.push(`resolve mirror ${agentId}/${sessionId}: ${(err as Error).message}`);
+      continue;
     }
     if (incomplete) continue; // retry next tick, session intact
 

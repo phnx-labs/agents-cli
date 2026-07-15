@@ -87,6 +87,31 @@ describe('resolveMirrorWrite', () => {
   });
 });
 
+describe('resolveMirrorWrite / reconcileCopies — C1 containment propagates to the caller', () => {
+  // mirrorPath() rejects unsafe peer-controlled machine/relKey; that rejection
+  // surfaces here, at the exact call the pullAndReconcile loop now wraps in a
+  // per-session try/catch so one bad manifest entry can't wedge the whole tick.
+  it('resolveMirrorWrite throws on a relKey that escapes the mirror root', () => {
+    const list = [copy('mac', 's1', 'h1', '../../../../../../.ssh/authorized_keys')];
+    expect(() => resolveMirrorWrite(claude, list, ['ssh-ed25519 AAAA...\n'])).toThrow();
+  });
+
+  it('reconcileCopies throws on a traversal relKey (the sync.ts:363 sink)', () => {
+    const list = [copy('mac', 's1', 'h1', 'p/../../../../etc/cron.d/x')];
+    expect(() => reconcileCopies(claude, list, ['* * * * * root sh\n'])).toThrow();
+  });
+
+  it('reconcileCopies throws on a malicious machine segment', () => {
+    const list = [copy('..', 's1', 'h1', 'p/s1.jsonl')];
+    expect(() => reconcileCopies(claude, list, ['x\n'])).toThrow();
+  });
+
+  it('a benign relKey still resolves without throwing', () => {
+    const list = [copy('mac', 's1', 'h1', 'proj/s1.jsonl')];
+    expect(() => resolveMirrorWrite(claude, list, ['x\n'])).not.toThrow();
+  });
+});
+
 describe('reconcileCopies', () => {
   it('all copies present: unions and resolves a write', () => {
     const list = [copy('zion', 's1', 'h1', 'p/zion.jsonl'), copy('s0', 's1', 'h2', 'p/s0.jsonl')];
