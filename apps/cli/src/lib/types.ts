@@ -685,6 +685,15 @@ export interface ExtraRepoConfig {
 export interface Meta {
   agents?: Partial<Record<AgentId, string>>;
   run?: RunConfig;
+  /**
+   * `agents run --lease` config. `secretsBundle` names the keychain secrets bundle
+   * whose provider token (e.g. `HCLOUD_TOKEN`) crabbox uses to reach the cloud API.
+   * When unset, the bundle is resolved by env (`AGENTS_LEASE_SECRETS_BUNDLE`) then
+   * auto-detected (the first bundle that declares a provider token key).
+   */
+  lease?: {
+    secretsBundle?: string;
+  };
   /** macOS secrets-agent config. `policy` is the default prompt policy for
    * bundles without an explicit per-bundle policy: `daily` (the default) asks
    * once per ~7 days, `always` asks every time. `auto` (default on) lets the

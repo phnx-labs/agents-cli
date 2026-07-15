@@ -13,7 +13,8 @@
  */
 
 import { spawn, spawnSync } from 'child_process';
-import { readAndResolveBundleEnv } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv, listBundles, bundleExists, type SecretsBundle } from '../secrets/bundles.js';
+import { readMeta, writeMeta } from '../state.js';
 
 /** A crabbox machine as reported by `crabbox list --json`. */
 export interface CrabboxBox {
@@ -66,9 +67,56 @@ export function findCrabbox(): string {
   return 'crabbox';
 }
 
+/**
+ * Env keys that mark a secrets bundle as usable for `--lease` — the provider
+ * tokens crabbox reads to reach a cloud API. Presence of any one is enough to
+ * auto-pick the bundle; we only look at declared key NAMES, never values, so
+ * detection never touches the keychain.
+ */
+export const LEASE_PROVIDER_TOKEN_KEYS = ['HCLOUD_TOKEN', 'AWS_ACCESS_KEY_ID', 'DIGITALOCEAN_TOKEN', 'DO_TOKEN'];
+
+/** The first bundle that declares a provider token key, or undefined. Pure over `bundles`. */
+export function pickLeaseBundleFromList(bundles: SecretsBundle[]): string | undefined {
+  for (const b of bundles) {
+    if (Object.keys(b.vars ?? {}).some((k) => LEASE_PROVIDER_TOKEN_KEYS.includes(k))) return b.name;
+  }
+  return undefined;
+}
+
+/**
+ * The secrets bundle to feed crabbox, resolved WITHOUT touching the keychain:
+ *   1. `AGENTS_LEASE_SECRETS_BUNDLE` env var (explicit, highest priority)
+ *   2. `lease.secretsBundle` in agents config (set by `agents lease setup`)
+ *   3. auto-detect: the first bundle that DECLARES a provider token key
+ * Returns undefined when nothing matches — crabbox then falls back to its own
+ * `crabbox login` credentials. This is what lets a user who set up a bundle once
+ * run `--lease` with no env var and no flag ever again.
+ */
+export function resolveLeaseBundle(): string | undefined {
+  const env = process.env.AGENTS_LEASE_SECRETS_BUNDLE;
+  if (env) return env;
+  try {
+    const configured = readMeta().lease?.secretsBundle;
+    if (configured && bundleExists(configured)) return configured;
+  } catch {
+    /* config unreadable — fall through to auto-detect */
+  }
+  try {
+    return pickLeaseBundleFromList(listBundles());
+  } catch {
+    return undefined;
+  }
+}
+
+/** Persist `lease.secretsBundle` in agents config so `--lease` needs no env var. */
+export function setLeaseSecretsBundle(name: string): void {
+  const meta = readMeta();
+  writeMeta({ ...meta, lease: { ...meta.lease, secretsBundle: name } });
+}
+
 /** Build the child env for crabbox, injecting a secrets bundle when configured. */
 export function crabboxEnv(opts: CrabboxOptions): NodeJS.ProcessEnv {
-  const bundle = opts.secretsBundle ?? process.env.AGENTS_LEASE_SECRETS_BUNDLE;
+  const bundle = opts.secretsBundle ?? resolveLeaseBundle();
   if (!bundle) return process.env;
   try {
     // Reuse the same resolver `agents secrets exec` uses so a keychain-backed

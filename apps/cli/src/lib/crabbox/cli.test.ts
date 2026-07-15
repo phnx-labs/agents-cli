@@ -1,5 +1,34 @@
 import { describe, it, expect } from 'vitest';
-import { isReapSafe, reapSafeOrphans, REAP_MIN_IDLE_SECS, type CrabboxBox } from './cli.js';
+import { isReapSafe, reapSafeOrphans, REAP_MIN_IDLE_SECS, pickLeaseBundleFromList, type CrabboxBox } from './cli.js';
+import type { SecretsBundle } from '../secrets/bundles.js';
+
+describe('pickLeaseBundleFromList', () => {
+  const bundle = (name: string, keys: string[]): SecretsBundle =>
+    ({ name, vars: Object.fromEntries(keys.map((k) => [k, 'x'])) }) as SecretsBundle;
+
+  it('picks the first bundle that declares a provider token key', () => {
+    const bundles = [bundle('misc', ['OPENAI_API_KEY']), bundle('hetzner.com', ['HCLOUD_TOKEN'])];
+    expect(pickLeaseBundleFromList(bundles)).toBe('hetzner.com');
+  });
+
+  it('matches AWS and DigitalOcean token keys too', () => {
+    expect(pickLeaseBundleFromList([bundle('aws', ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'])])).toBe('aws');
+    expect(pickLeaseBundleFromList([bundle('do', ['DIGITALOCEAN_TOKEN'])])).toBe('do');
+  });
+
+  it('ignores bundles with no provider token key', () => {
+    expect(pickLeaseBundleFromList([bundle('misc', ['OPENAI_API_KEY', 'FOO'])])).toBeUndefined();
+  });
+
+  it('returns undefined for an empty list', () => {
+    expect(pickLeaseBundleFromList([])).toBeUndefined();
+  });
+
+  it('returns the first match in list order (deterministic)', () => {
+    const bundles = [bundle('a', ['HCLOUD_TOKEN']), bundle('b', ['HCLOUD_TOKEN'])];
+    expect(pickLeaseBundleFromList(bundles)).toBe('a');
+  });
+});
 
 const NOW = 1_800_000_000; // fixed "now" in unix seconds
 
