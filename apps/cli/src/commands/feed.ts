@@ -34,8 +34,20 @@ import { notifyUrgentBlock } from '../lib/notify.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
+import { GLYPH, masthead } from '../lib/comms-render.js';
 
 export const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
+
+/** Right-hand masthead summary: `N blocks · M agents`. */
+export function formatFeedMastheadRight(blocks: OpenBlock[]): string {
+  const agents = new Set(blocks.map((b) => b.mailboxId)).size;
+  return `${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${agents} agent${agents === 1 ? '' : 's'}`;
+}
+
+/** Reply hint matching the shared fleet-comms reply line. */
+export function formatFeedReplyHint(mailboxId: string): string {
+  return `↳ ag message ${mailboxId} "…"`;
+}
 
 export function parseRemoteFeed(stdout: string, machine: string): OpenBlock[] {
   let parsed: unknown;
@@ -85,7 +97,13 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   const cls = b.blockClass ? chalk.gray(`(${b.blockClass})`) : '';
   const consequence = b.consequence && b.consequence !== 'normal' ? chalk.red(`[${b.consequence}]`) : '';
   const cost = b.costOfDelay ? chalk.gray(`cost:${b.costOfDelay}`) : '';
-  console.log(`${indent}${chalk.cyan(b.mailboxId)}${host}  ${runtime}  ${age}  ${cls} ${consequence} ${cost}`.trimEnd());
+  // Shared fleet-comms glyphs: ▲ open ask, ✓ answered (see comms-render GLYPH).
+  const marker = b.answer
+    ? chalk.green(GLYPH.delivered)
+    : !b.parkedAt
+      ? chalk.yellow(GLYPH.ask)
+      : ' ';
+  console.log(`${indent}${marker} ${chalk.cyan(b.mailboxId)}${host}  ${runtime}  ${age}  ${cls} ${consequence} ${cost}`.trimEnd());
   for (const question of b.questions) {
     const header = question.header ? chalk.gray(`[${question.header}] `) : '';
     console.log(`${indent}  ${header}${question.text}`);
@@ -103,7 +121,7 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   }
 
   if (b.answer) {
-    const verified = b.answer.verified ? chalk.green('✓') : chalk.yellow('?');
+    const verified = b.answer.verified ? chalk.green(GLYPH.delivered) : chalk.yellow('?');
     const who = b.answer.answeredFrom + (b.answer.answeredBy ? ` (${b.answer.answeredBy})` : '');
     console.log(`${indent}  ${chalk.green('answered')} by ${who} ${verified}`);
   }
@@ -125,7 +143,7 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   }
 
   if (!b.answer && !b.parkedAt) {
-    console.log(`${indent}  ${chalk.dim('reply:')} agents message ${b.mailboxId} "<answer>"`);
+    console.log(`${indent}  ${chalk.dim(formatFeedReplyHint(b.mailboxId))}`);
   }
   console.log();
 }
@@ -313,21 +331,23 @@ export function registerFeedCommand(program: Command): void {
         return;
       }
 
+      // Shared fleet-comms masthead (same family as `agents mailboxes`).
+      console.log(
+        masthead({
+          title: 'they need you',
+          accent: 'amber',
+          host: self,
+          right: formatFeedMastheadRight(blocks),
+        }),
+      );
+      console.log();
+
       if (opts.flat) {
-        console.log(chalk.bold(`${blocks.length} open block${blocks.length === 1 ? '' : 's'}:\n`));
         for (const b of blocks) renderBlock(b, self);
         return;
       }
 
       const groups = groupBlocksByOutcome(blocks);
-      const openOutcomes = groups.filter((g) => g.counts.open > 0).length;
-      console.log(
-        chalk.bold(
-          `${groups.length} outcome${groups.length === 1 ? '' : 's'} · ${blocks.length} block${blocks.length === 1 ? '' : 's'}` +
-            (openOutcomes > 0 ? ` · ${openOutcomes} need you` : '') +
-            ':\n',
-        ),
-      );
       for (const g of groups) renderOutcomeGroup(g, self);
     });
 }
