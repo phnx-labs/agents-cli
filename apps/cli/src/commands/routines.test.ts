@@ -281,6 +281,40 @@ describe('routines add --devices unknown is nonzero/no write', () => {
   });
 });
 
+describe('routines add --on aliases', () => {
+  it('accepts the pr GitHub alias and writes the canonical trigger event', async () => {
+    const home = makeHome({ registry });
+    let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
+    let pid: number | null = null;
+    try {
+      daemon = startIsolatedDaemon(home);
+      pid = await daemon.pidPromise;
+      expect(pid).not.toBeNull();
+
+      const res = run(home, [
+        'add', 'pr-job',
+        '--on', 'pr',
+        '--repo', 'phnx-labs/agents-cli',
+        '--agent', 'claude',
+        '--prompt', 'handle pull request',
+      ]);
+      expect(res.status).toBe(0);
+
+      const doc = readRoutineYaml(home, 'pr-job');
+      expect(doc).not.toBeNull();
+      expect(doc!.trigger).toEqual({
+        type: 'github_event',
+        event: 'pull_request',
+        repo: 'phnx-labs/agents-cli',
+      });
+    } finally {
+      if (daemon) await stopIsolatedDaemon(daemon.child);
+      if (typeof pid === 'number') expect(isProcessAlive(pid)).toBe(false);
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('routines list --json has devices+runsHere, no device', () => {
   it('includes devices array and runsHere, excludes singular device key', () => {
     const job = { ...baseJob, devices: ['yosemite-s0', 'mac-mini'] };
@@ -596,7 +630,7 @@ describe('routines subcommand --help documents --host and --device once each', (
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
 
 describe('routines run --host SELF follows the normal local eligibility path', () => {

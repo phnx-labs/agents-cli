@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import * as crypto from 'crypto';
+import * as http from 'http';
 import type { JobConfig, RunMeta } from '../routines.js';
 import {
   matchJobsToWebhook,
@@ -6,7 +8,10 @@ import {
   webhookRepo,
   webhookBranches,
   fireWebhookJobs,
-  type GithubWebhook,
+  verifyGithubSignature,
+  verifyLinearSignature,
+  startWebhookServer,
+  type IncomingWebhook,
 } from './webhook.js';
 
 /** Build a JobConfig with sensible defaults for tests. */
@@ -23,8 +28,9 @@ function job(partial: Partial<JobConfig> & Pick<JobConfig, 'name'>): JobConfig {
 }
 
 /** A realistic `pull_request` webhook for repo x/y targeting branch main. */
-function pullRequestWebhook(repoFullName: string, baseRef = 'main', headRef = 'feature'): GithubWebhook {
+function pullRequestWebhook(repoFullName: string, baseRef = 'main', headRef = 'feature'): IncomingWebhook {
   return {
+    source: 'github',
     event: 'pull_request',
     payload: {
       action: 'opened',
@@ -35,10 +41,27 @@ function pullRequestWebhook(repoFullName: string, baseRef = 'main', headRef = 'f
 }
 
 /** A `push` webhook for repo x/y on branch main. */
-function pushWebhook(repoFullName: string, ref = 'refs/heads/main'): GithubWebhook {
+function pushWebhook(repoFullName: string, ref = 'refs/heads/main'): IncomingWebhook {
   return {
+    source: 'github',
     event: 'push',
     payload: { repository: { full_name: repoFullName }, ref },
+  };
+}
+
+function linearIssueWebhook(labels: string[] = ['agent']): IncomingWebhook {
+  return {
+    source: 'linear',
+    event: 'Issue',
+    payload: {
+      type: 'Issue',
+      action: 'update',
+      webhookTimestamp: Date.now(),
+      data: {
+        identifier: 'RUSH-1459',
+        labels: { nodes: labels.map((name) => ({ name })) },
+      },
+    },
   };
 }
 
@@ -102,6 +125,15 @@ describe('matchJobsToWebhook', () => {
       trigger: { type: 'github_event', event: 'pull_request', repo: 'x/y' },
     });
     expect(matchJobsToWebhook([disabled], pullRequestWebhook('x/y'))).toEqual([]);
+  });
+
+  it('matches Linear issue triggers by action, team key, and label', () => {
+    const linear = job({
+      name: 'linear-agent',
+      trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+    });
+    expect(jobMatchesWebhook(linear, linearIssueWebhook(['agent']))).toBe(true);
+    expect(jobMatchesWebhook(linear, linearIssueWebhook(['triage']))).toBe(false);
   });
 
   it('skips jobs pinned to other devices, keeps jobs pinned here', () => {
@@ -172,5 +204,284 @@ describe('fireWebhookJobs', () => {
 
     expect(dispatched).toEqual(['pr-job']);
     expect(fired).toEqual([{ jobName: 'pr-job', runId: 'run-pr-job' }]);
+  });
+});
+
+describe('webhook signature verification', () => {
+  it('verifies GitHub and Linear HMAC-SHA256 signatures against the raw body', () => {
+    const secret = 'test-secret';
+    const raw = Buffer.from(JSON.stringify({ hello: 'world' }));
+    const hex = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+
+    expect(verifyGithubSignature({ 'x-hub-signature-256': `sha256=${hex}` }, raw, secret)).toBe(true);
+    expect(verifyGithubSignature({ 'x-hub-signature-256': 'sha256=bad' }, raw, secret)).toBe(false);
+    expect(verifyLinearSignature({ 'linear-signature': hex }, raw, secret)).toBe(true);
+    expect(verifyLinearSignature({ 'linear-signature': 'bad' }, raw, secret)).toBe(false);
+  });
+});
+
+describe('startWebhookServer', () => {
+  it('rejects unsigned public deliveries and accepts signed Linear deliveries once', async () => {
+    const secret = 'linear-secret';
+    const jobs = [
+      job({
+        name: 'linear-agent',
+        trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+      }),
+    ];
+    const dispatched: string[] = [];
+    const server = startWebhookServer({
+      secrets: { linear: secret },
+      fire: {
+        jobs,
+        dispatch: async (config: JobConfig): Promise<RunMeta> => {
+          dispatched.push(config.name);
+          return {
+            jobName: config.name,
+            runId: `run-${config.name}`,
+            agent: config.agent,
+            pid: 1234,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+            completedAt: null,
+            exitCode: null,
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    try {
+      const payload = Buffer.from(JSON.stringify(linearIssueWebhook(['agent']).payload));
+      const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+      const send = (headers: Record<string, string>) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1',
+          port: address.port,
+          path: '/hooks/linear',
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'content-length': String(payload.length), ...headers },
+        }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(c as Buffer));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }));
+        });
+        req.on('error', reject);
+        req.end(payload);
+      });
+
+      expect((await send({})).status).toBe(401);
+      expect((await send({ 'linear-signature': sig, 'linear-delivery': 'delivery-1' })).status).toBe(200);
+      const duplicate = await send({ 'linear-signature': sig, 'linear-delivery': 'delivery-1' });
+      expect(duplicate.status).toBe(200);
+      expect(JSON.parse(duplicate.body).duplicate).toBe(true);
+      expect(dispatched).toEqual(['linear-agent']);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('does not burn a delivery id when a signed Linear delivery is stale', async () => {
+    const secret = 'linear-secret';
+    const jobs = [
+      job({
+        name: 'linear-agent',
+        trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+      }),
+    ];
+    const dispatched: string[] = [];
+    const server = startWebhookServer({
+      secrets: { linear: secret },
+      fire: {
+        jobs,
+        dispatch: async (config: JobConfig): Promise<RunMeta> => {
+          dispatched.push(config.name);
+          return {
+            jobName: config.name,
+            runId: `run-${config.name}`,
+            agent: config.agent,
+            pid: 1234,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+            completedAt: null,
+            exitCode: null,
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    try {
+      const send = (payload: Buffer, delivery = 'delivery-retry') => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const sig = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+        const req = http.request({
+          host: '127.0.0.1',
+          port: address.port,
+          path: '/hooks/linear',
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(payload.length),
+            'linear-signature': sig,
+            'linear-delivery': delivery,
+          },
+        }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(c as Buffer));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }));
+        });
+        req.on('error', reject);
+        req.end(payload);
+      });
+
+      const stale = linearIssueWebhook(['agent']).payload as Record<string, unknown>;
+      stale.webhookTimestamp = Date.now() - 120_000;
+      expect((await send(Buffer.from(JSON.stringify(stale)))).status).toBe(401);
+
+      const fresh = Buffer.from(JSON.stringify(linearIssueWebhook(['agent']).payload));
+      const retry = await send(fresh);
+      expect(retry.status).toBe(200);
+      expect(JSON.parse(retry.body).duplicate).toBeUndefined();
+      expect(dispatched).toEqual(['linear-agent']);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('does not let unsigned traffic consume the signed delivery rate limit', async () => {
+    const secret = 'linear-secret';
+    const jobs = [
+      job({
+        name: 'linear-agent',
+        trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+      }),
+    ];
+    const dispatched: string[] = [];
+    const server = startWebhookServer({
+      secrets: { linear: secret },
+      rateLimitPerMinute: 1,
+      fire: {
+        jobs,
+        dispatch: async (config: JobConfig): Promise<RunMeta> => {
+          dispatched.push(config.name);
+          return {
+            jobName: config.name,
+            runId: `run-${config.name}`,
+            agent: config.agent,
+            pid: 1234,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+            completedAt: null,
+            exitCode: null,
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    try {
+      const payload = Buffer.from(JSON.stringify(linearIssueWebhook(['agent']).payload));
+      const signedHeaders = {
+        'linear-signature': crypto.createHmac('sha256', secret).update(payload).digest('hex'),
+        'linear-delivery': 'delivery-rate-limit',
+      };
+      const send = (headers: Record<string, string>) => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1',
+          port: address.port,
+          path: '/hooks/linear',
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'content-length': String(payload.length), ...headers },
+        }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(c as Buffer));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }));
+        });
+        req.on('error', reject);
+        req.end(payload);
+      });
+
+      expect((await send({})).status).toBe(401);
+      expect((await send({})).status).toBe(401);
+      expect((await send(signedHeaders)).status).toBe(200);
+      expect(dispatched).toEqual(['linear-agent']);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('does not mark a delivery when dispatch fails so retry can finish matched routines', async () => {
+    const secret = 'linear-secret';
+    const jobs = [
+      job({
+        name: 'linear-agent',
+        trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+      }),
+      job({
+        name: 'linear-followup',
+        trigger: { type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' },
+      }),
+    ];
+    const dispatched: string[] = [];
+    let shouldFailFollowup = true;
+    const server = startWebhookServer({
+      secrets: { linear: secret },
+      fire: {
+        jobs,
+        dispatch: async (config: JobConfig): Promise<RunMeta> => {
+          dispatched.push(config.name);
+          if (config.name === 'linear-followup' && shouldFailFollowup) {
+            shouldFailFollowup = false;
+            throw new Error('dispatch failed after a previous match fired');
+          }
+          return {
+            jobName: config.name,
+            runId: `run-${config.name}`,
+            agent: config.agent,
+            pid: 1234,
+            status: 'running',
+            startedAt: new Date().toISOString(),
+            completedAt: null,
+            exitCode: null,
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    try {
+      const payload = Buffer.from(JSON.stringify(linearIssueWebhook(['agent']).payload));
+      const signedHeaders = {
+        'linear-signature': crypto.createHmac('sha256', secret).update(payload).digest('hex'),
+        'linear-delivery': 'delivery-partial',
+      };
+      const send = () => new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1',
+          port: address.port,
+          path: '/hooks/linear',
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'content-length': String(payload.length), ...signedHeaders },
+        }, (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (c) => chunks.push(c as Buffer));
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }));
+        });
+        req.on('error', reject);
+        req.end(payload);
+      });
+
+      expect((await send()).status).toBe(400);
+      const retry = await send();
+      expect(retry.status).toBe(200);
+      expect(JSON.parse(retry.body).duplicate).toBeUndefined();
+      expect(dispatched).toEqual(['linear-agent', 'linear-followup', 'linear-agent', 'linear-followup']);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

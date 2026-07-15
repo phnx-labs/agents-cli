@@ -37,6 +37,18 @@ export const GITHUB_TRIGGER_EVENTS: readonly GithubTriggerEvent[] = [
   'workflow_run',
 ];
 
+/** Linear webhook resource types a routine can be triggered by. */
+export type LinearTriggerEvent = 'Issue' | 'IssueLabel' | 'Comment' | 'Project' | 'Cycle';
+
+/** Canonical set of accepted Linear trigger events — single source for validation. */
+export const LINEAR_TRIGGER_EVENTS: readonly LinearTriggerEvent[] = [
+  'Issue',
+  'IssueLabel',
+  'Comment',
+  'Project',
+  'Cycle',
+];
+
 /**
  * Map a user-facing `--on` alias to a canonical GitHub trigger event.
  * Accepts the canonical names plus friendly shortcuts (e.g. `pr`, `pr_opened`
@@ -60,11 +72,11 @@ export function normalizeTriggerEvent(input: string): GithubTriggerEvent | null 
 
 /**
  * Event-based fire condition for a routine — an alternative (or complement) to
- * `schedule`. Currently only `github_event`: an incoming GitHub webhook whose
- * event (and optional repo/branch) match fires the job through the same
- * dispatch path a cron fire uses. See `src/lib/triggers/webhook.ts`.
+ * `schedule`. Incoming webhooks whose source-specific filters match fire the job
+ * through the same dispatch path a cron fire uses. See
+ * `src/lib/triggers/webhook.ts`.
  */
-export interface JobTrigger {
+export interface GithubJobTrigger {
   type: 'github_event';
   event: GithubTriggerEvent;
   /** `owner/name` — when set, only payloads for this repo match. */
@@ -72,6 +84,19 @@ export interface JobTrigger {
   /** git branch (ref short name) — when set, only payloads for this branch match. */
   branch?: string;
 }
+
+export interface LinearJobTrigger {
+  type: 'linear_event';
+  event: LinearTriggerEvent;
+  /** Linear action, e.g. `create`, `update`, `remove`. */
+  action?: string;
+  /** Issue identifier prefix such as `RUSH`; useful when one webhook spans teams. */
+  teamKey?: string;
+  /** Required issue label name. */
+  label?: string;
+}
+
+export type JobTrigger = GithubJobTrigger | LinearJobTrigger;
 
 /**
  * Full configuration for a routine (persisted as YAML).
@@ -470,17 +495,35 @@ export function validateTrigger(trigger: unknown): string[] {
     return ['trigger must be an object'];
   }
   const t = trigger as Partial<JobTrigger>;
-  if (t.type !== 'github_event') {
-    errors.push("trigger.type must be 'github_event'");
+  if (t.type !== 'github_event' && t.type !== 'linear_event') {
+    errors.push("trigger.type must be 'github_event' or 'linear_event'");
+    return errors;
   }
-  if (!t.event || !GITHUB_TRIGGER_EVENTS.includes(t.event as GithubTriggerEvent)) {
-    errors.push(`trigger.event must be one of: ${GITHUB_TRIGGER_EVENTS.join(', ')}`);
+  if (t.type === 'github_event') {
+    const github = t as Partial<GithubJobTrigger>;
+    if (!github.event || !GITHUB_TRIGGER_EVENTS.includes(github.event as GithubTriggerEvent)) {
+      errors.push(`trigger.event must be one of: ${GITHUB_TRIGGER_EVENTS.join(', ')}`);
+    }
+    if (github.repo !== undefined && (typeof github.repo !== 'string' || !/^[^/\s]+\/[^/\s]+$/.test(github.repo))) {
+      errors.push('trigger.repo must be in owner/name form');
+    }
+    if (github.branch !== undefined && typeof github.branch !== 'string') {
+      errors.push('trigger.branch must be a string');
+    }
+    return errors;
   }
-  if (t.repo !== undefined && (typeof t.repo !== 'string' || !/^[^/\s]+\/[^/\s]+$/.test(t.repo))) {
-    errors.push('trigger.repo must be in owner/name form');
+  const linear = t as Partial<LinearJobTrigger>;
+  if (!linear.event || !LINEAR_TRIGGER_EVENTS.includes(linear.event as LinearTriggerEvent)) {
+    errors.push(`trigger.event must be one of: ${LINEAR_TRIGGER_EVENTS.join(', ')}`);
   }
-  if (t.branch !== undefined && typeof t.branch !== 'string') {
-    errors.push('trigger.branch must be a string');
+  if (linear.action !== undefined && typeof linear.action !== 'string') {
+    errors.push('trigger.action must be a string');
+  }
+  if (linear.teamKey !== undefined && (typeof linear.teamKey !== 'string' || !/^[A-Z][A-Z0-9]*$/.test(linear.teamKey))) {
+    errors.push('trigger.teamKey must be an uppercase Linear team key');
+  }
+  if (linear.label !== undefined && typeof linear.label !== 'string') {
+    errors.push('trigger.label must be a string');
   }
   return errors;
 }

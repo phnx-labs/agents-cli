@@ -685,6 +685,13 @@ agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
 
 agents routines devices nightly-drain --set yosemite-s0,mac-mini  # update allowlist
 agents routines list --host yosemite-s0                            # query another device
+
+# Signed webhook trigger: Linear issue labeled "agent" fires a routine
+agents routines add agent-labeled-issue --on linear:Issue --action update \
+  --team-key RUSH --label agent --agent claude \
+  --prompt "Work the Linear issue that was just labeled agent"
+agents webhook serve --secrets-bundle webhooks --port 8787          # /hooks/linear, /hooks/github
+agents funnel up yosemite-s0 --local-port 8787 --port 443           # public HTTPS ingress
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.

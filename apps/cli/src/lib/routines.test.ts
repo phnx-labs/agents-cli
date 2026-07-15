@@ -82,8 +82,12 @@ describe('validateTrigger', () => {
     expect(validateTrigger({ type: 'github_event', event: 'pull_request', repo: 'x/y', branch: 'main' })).toEqual([]);
   });
 
+  it('accepts a well-formed linear_event trigger', () => {
+    expect(validateTrigger({ type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' })).toEqual([]);
+  });
+
   it('rejects a bad type', () => {
-    expect(validateTrigger({ type: 'gitlab', event: 'pull_request' })).toContain("trigger.type must be 'github_event'");
+    expect(validateTrigger({ type: 'gitlab', event: 'pull_request' })).toContain("trigger.type must be 'github_event' or 'linear_event'");
   });
 
   it('rejects an unknown event', () => {

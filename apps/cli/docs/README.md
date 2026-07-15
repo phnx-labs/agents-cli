@@ -37,7 +37,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Teams](teams.md) | Multi-agent DAG teams, boundary contracts, `--watch` supervisor, `--worktree` isolation, `--cloud` dispatch. |
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
 | [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--host`); track with `agents hosts ps` and view/follow with `agents logs`. |
-| [Routines](03-routines.md) | Cron-scheduled agent runs with sandboxed permissions and a long-running daemon. |
+| [Routines](03-routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
 
 ## Extensibility
 
