@@ -6,6 +6,10 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.294] - 2026-07-15
+
+- **Fix: extension failed to activate — every `agents.*` command reported "command not found" (e.g. `agents.dispatchTask`, `agents.configure`).** The published `0.9.293` VSIX shipped without its `node_modules`, so `require("yaml")` (in `core/agentInventory`, `sessions.persist`, `swarmifyConfig`) threw during `activate()`, aborting before any command registered. This release is a clean rebuild that bundles the runtime deps. To prevent recurrence, `scripts/build.sh` now unzips the freshly-packaged VSIX and hard-fails the build if `yaml`, `node-pty` (incl. its `darwin-arm64` native prebuild), `sql.js`, or `ws` are absent — a dependency-less package can no longer reach the marketplace. Source: `scripts/build.sh`.
+
 - **Factory Floor shows live plan progress for remote / device-dispatched agents (RUSH-1380).** The CLI now carries each session's latest `TodoWrite` on `ActiveSession.todos`; the remote adapter maps it onto the feed's checklist (previously hardcoded empty for status-only remote sessions), so a headless agent on another machine now renders an N/M pill in its header, the `CardChecklist` in its feed card, and a `TodoChecklist` in its detail pane. When there's no live tool action, the now-line falls back to the in-progress step. Source: `apps/factory/src/core/remoteSessions.ts` (`RemoteSession.todos`, `normalizeTodos`), `ui/settings/components/mission-control/floorAdapter.ts` (`toFloorAgentFromRemote`), `FeedItem.tsx`, `UnifiedAgentsPane.tsx`, `floor.css`.
 
 ## [0.9.292] - 2026-07-13

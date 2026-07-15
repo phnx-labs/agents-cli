@@ -43,6 +43,34 @@ echo "Creating dist directory..."
 mkdir -p "$DIST_DIR"
 
 echo "Packaging extension..."
-bunx @vscode/vsce package --out "$DIST_DIR/swarm-ext-${VERSION}.vsix"
+VSIX_OUT="$DIST_DIR/swarm-ext-${VERSION}.vsix"
+bunx @vscode/vsce package --out "$VSIX_OUT"
 
-echo "Build complete: $DIST_DIR/swarm-ext-${VERSION}.vsix"
+# Integrity guard: the extension `require()`s these at activation time (yaml in
+# core/agentInventory, sessions.persist, swarmifyConfig; ws in foreman.audio;
+# node-pty + sql.js in terminals). If vsce ever prunes them from the VSIX the
+# extension throws on activate() and EVERY `agents.*` command becomes
+# "command not found" (this shipped once as 0.9.293). Fail the build here rather
+# than let a dependency-less package escape to the marketplace.
+echo "Verifying packaged runtime dependencies..."
+VSIX_FILES="$(unzip -Z1 "$VSIX_OUT")"
+MISSING=""
+for dep in yaml node-pty sql.js ws; do
+    if ! printf '%s\n' "$VSIX_FILES" | grep -q "^extension/node_modules/${dep}/package.json$"; then
+        MISSING="${MISSING} ${dep}"
+    fi
+done
+# node-pty's native binding for this host's arch must ship or terminals break.
+if ! printf '%s\n' "$VSIX_FILES" | grep -q "^extension/node_modules/node-pty/prebuilds/darwin-arm64/pty.node$"; then
+    MISSING="${MISSING} node-pty/darwin-arm64-prebuild"
+fi
+if [ -n "$MISSING" ]; then
+    echo "Error: VSIX is missing runtime dependencies:${MISSING}" >&2
+    echo "       Run 'bun install' in $PROJECT_ROOT and rebuild — a dependency-less" >&2
+    echo "       package fails to activate (every agents.* command 'not found')." >&2
+    rm -f "$VSIX_OUT"
+    exit 1
+fi
+echo "Runtime dependencies present in VSIX (yaml, node-pty + native, sql.js, ws)."
+
+echo "Build complete: $VSIX_OUT"
