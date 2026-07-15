@@ -516,15 +516,23 @@ export function registerRunCommand(program: Command): void {
         // Copy the account the run's OWN strategy would pick (default `balanced`:
         // a healthy, non-rate-limited account weighted by remaining headroom) —
         // never the raw default signed-in one, which could be throttled or out of
-        // credits and would boot the box straight into a wall. Best-effort: fall
-        // back to the default account if strategy resolution fails.
+        // credits and would boot the box straight into a wall.
+        //
+        // Only claude's token is account-switched: resolveClaudeCredentialsBlob
+        // honors preferEmail across version-homes. The other runtimes'
+        // buildCredentialScript copies the single currently-active credential file
+        // with no switching, so run the balanced picker only for claude — otherwise
+        // the notice below would name a balanced-picked account that is NOT the one
+        // actually shipped. Best-effort: fall back to the default account on error.
         let leaseEmail = detected.find((d) => d.id === runtime)?.email ?? null;
-        try {
-          const strategy = getConfiguredRunStrategy(runtime, leaseCwd);
-          const { rotation } = await resolveRunVersion(runtime, strategy, leaseCwd);
-          if (rotation?.picked.email) leaseEmail = rotation.picked.email;
-        } catch {
-          /* strategy resolution is best-effort; keep the default signed-in account */
+        if (runtime === 'claude') {
+          try {
+            const strategy = getConfiguredRunStrategy(runtime, leaseCwd);
+            const { rotation } = await resolveRunVersion(runtime, strategy, leaseCwd);
+            if (rotation?.picked.email) leaseEmail = rotation.picked.email;
+          } catch {
+            /* strategy resolution is best-effort; keep the default signed-in account */
+          }
         }
 
         // Headless-by-contract: don't prompt, but print exactly what ships and
