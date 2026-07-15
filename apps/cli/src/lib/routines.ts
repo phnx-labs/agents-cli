@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { Cron } from 'croner';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
-import { safeJoin } from './paths.js';
+import { safeJoin, isSafeSegmentName } from './paths.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
@@ -414,6 +414,14 @@ export function validateJob(config: Partial<JobConfig>): string[] {
 
   if (!config.name || typeof config.name !== 'string') {
     errors.push('name is required');
+  } else if (!isSafeSegmentName(config.name)) {
+    // The name becomes a filesystem path segment (overlay HOME under the
+    // routines dir). Reject separators, '.'/'..', and null bytes so a synced
+    // config can't traverse out of ~/.agents/routines.
+    errors.push(
+      `invalid name ${JSON.stringify(config.name)}: must be a single path segment ` +
+      `(no '/', '\\\\', or null bytes, and not '.' or '..')`,
+    );
   }
   const hasSchedule = Boolean(config.schedule && typeof config.schedule === 'string');
   const hasTrigger = config.trigger !== undefined;
@@ -595,7 +603,7 @@ export function resolveJobPrompt(config: JobConfig): string {
   // Last report (special handling)
   const latestRun = getLatestRun(config.name);
   if (latestRun) {
-    const reportPath = path.join(getRunsDir(), config.name, latestRun.runId, 'report.md');
+    const reportPath = path.join(getJobRunsDir(config.name), latestRun.runId, 'report.md');
     if (fs.existsSync(reportPath)) {
       const report = fs.readFileSync(reportPath, 'utf-8');
       prompt = prompt.replace(/\{last_report\}/g, report);
@@ -633,8 +641,7 @@ export function parseTimeout(timeout: string): number | null {
 
 /** List all run metadata entries for a job, sorted chronologically. */
 export function listRuns(jobName: string): RunMeta[] {
-  const runsDir = getRunsDir();
-  const jobRunsDir = path.join(runsDir, jobName);
+  const jobRunsDir = getJobRunsDir(jobName);
   if (!fs.existsSync(jobRunsDir)) return [];
 
   const entries = fs.readdirSync(jobRunsDir, { withFileTypes: true })
@@ -659,14 +666,14 @@ export function getLatestRun(jobName: string): RunMeta | null {
 /** Persist run metadata to its run directory as meta.json. */
 export function writeRunMeta(meta: RunMeta): void {
   ensureAgentsDir();
-  const runDir = path.join(getRunsDir(), meta.jobName, meta.runId);
+  const runDir = path.join(getJobRunsDir(meta.jobName), meta.runId);
   fs.mkdirSync(runDir, { recursive: true });
   fs.writeFileSync(path.join(runDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
 }
 
 /** Read run metadata from disk. Returns null if missing or corrupt. */
 export function readRunMeta(jobName: string, runId: string): RunMeta | null {
-  const metaPath = path.join(getRunsDir(), jobName, runId, 'meta.json');
+  const metaPath = path.join(getJobRunsDir(jobName), runId, 'meta.json');
   if (!fs.existsSync(metaPath)) return null;
   try {
     return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as RunMeta;
@@ -675,9 +682,21 @@ export function readRunMeta(jobName: string, runId: string): RunMeta | null {
   }
 }
 
+/**
+ * Runs directory for a single job, with the (untrusted) job name contained to a
+ * single segment beneath the runs dir — same guard as `getJobHomePath`. The name
+ * comes from routine YAML and can arrive via a synced config repo; every runs-dir
+ * sink (run dir, meta read/write, last-report read) routes through here so a
+ * crafted `name` like `../../../../tmp/x` can't `mkdirSync`/write `stdout.log`,
+ * `meta.json`, or `report.md` outside `~/.agents/.history/runs`.
+ */
+export function getJobRunsDir(jobName: string): string {
+  return safeJoin(getRunsDir(), jobName);
+}
+
 /** Get the filesystem path for a specific run's directory. */
 export function getRunDir(jobName: string, runId: string): string {
-  return path.join(getRunsDir(), jobName, runId);
+  return path.join(getJobRunsDir(jobName), runId);
 }
 
 /** Discover routine YAML files in a repository's routines/ directory. */

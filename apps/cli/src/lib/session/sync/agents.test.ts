@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { SYNC_AGENTS, objectKey, isMergeableFile } from './agents.js';
+import * as path from 'path';
+import { SYNC_AGENTS, objectKey, isMergeableFile, mirrorPath } from './agents.js';
+import { getHistoryDir } from '../../state.js';
 
 function spec(id: string) {
   const s = SYNC_AGENTS.find(a => a.id === id);
@@ -98,5 +100,36 @@ describe('isMergeableFile (append-only union vs mutable-blob LWW)', () => {
   it('file-shaped agents (no mergeableExts): every file unions, as before', () => {
     expect(isMergeableFile(claude, 'proj/abc.jsonl')).toBe(true);
     expect(isMergeableFile(claude, 'proj/whatever.json')).toBe(true);
+  });
+});
+
+describe('mirrorPath — peer-controlled path containment (C1)', () => {
+  const claude = spec('claude');
+  const backupsRoot = path.resolve(getHistoryDir(), 'backups', claude.id);
+
+  it('returns a contained path for a benign machine + relKey', () => {
+    const p = mirrorPath(claude, 'laptop-a', 'projects/sess-1.jsonl');
+    expect(path.resolve(p).startsWith(backupsRoot + path.sep)).toBe(true);
+    expect(p.endsWith(path.join('laptop-a', claude.subdir, 'projects', 'sess-1.jsonl'))).toBe(true);
+  });
+
+  // A malicious fleet peer controls `relKey` in the manifest it PUTs to the
+  // shared bucket; without containment this reaches fs.writeFileSync on the
+  // pulling machine → overwrite ~/.ssh/authorized_keys → fleet compromise.
+  it('rejects a relKey that traverses out of the mirror root', () => {
+    expect(() => mirrorPath(claude, 'evil-peer', '../../../../../../.ssh/authorized_keys')).toThrow();
+  });
+
+  it('rejects a relKey with a mid-path parent escape', () => {
+    expect(() => mirrorPath(claude, 'evil-peer', 'projects/../../../../etc/cron.d/x')).toThrow();
+  });
+
+  it('rejects a machine segment that is itself a traversal', () => {
+    expect(() => mirrorPath(claude, '..', 'sess.jsonl')).toThrow();
+    expect(() => mirrorPath(claude, '../..', 'sess.jsonl')).toThrow();
+  });
+
+  it('rejects a machine segment containing separators', () => {
+    expect(() => mirrorPath(claude, 'a/b', 'sess.jsonl')).toThrow();
   });
 });

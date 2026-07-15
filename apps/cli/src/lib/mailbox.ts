@@ -310,6 +310,17 @@ export interface StoredMessage extends MailboxMessage {
   state: MailboxState;
 }
 
+/** A stored message enriched with the mailbox identity used by comms renderers. */
+export interface CommsMsg {
+  from: string;
+  to: string;
+  toLabel: string;
+  ts: string;
+  text: string;
+  state: MailboxState;
+  box: string;
+}
+
 /**
  * Enumerate the box ids under `root` (directory names that are valid mailbox
  * ids). Read-only; does not create the root. Sorted for stable output.
@@ -346,4 +357,81 @@ export function readBox(boxDir: string): StoredMessage[] {
   }
   out.sort((a, b) => (a.msgId < b.msgId ? -1 : a.msgId > b.msgId ? 1 : 0));
   return out;
+}
+
+/**
+ * Poll the complete spool and yield each message once when its box/msgId pair
+ * first appears. Existing messages establish the initial baseline unless
+ * `backfill` is requested; moving a message between buckets does not re-emit it.
+ */
+export async function* watchMessages(
+  root: string,
+  opts: { signal?: AbortSignal; intervalMs?: number; backfill?: boolean },
+): AsyncGenerator<CommsMsg> {
+  const seen = new Set<string>();
+  const requestedInterval = opts.intervalMs ?? 500;
+  const intervalMs = Number.isFinite(requestedInterval) ? Math.max(1, requestedInterval) : 500;
+  let firstPoll = true;
+
+  while (!opts.signal?.aborted) {
+    const fresh: Array<{ key: string; message: CommsMsg }> = [];
+    for (const box of listBoxes(root)) {
+      for (const stored of readBox(mailboxDir(box, root))) {
+        const key = `${box}\0${stored.msgId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (firstPoll && !opts.backfill) continue;
+        fresh.push({
+          key,
+          message: {
+            from: stored.from || 'operator',
+            to: stored.to,
+            toLabel: box.slice(0, 8),
+            ts: stored.ts,
+            text: stored.text,
+            state: stored.state,
+            box,
+          },
+        });
+      }
+    }
+    firstPoll = false;
+
+    fresh.sort((a, b) =>
+      compareWatched(a.message.ts, b.message.ts) ||
+      compareWatched(a.key, b.key));
+    for (const { message } of fresh) {
+      if (opts.signal?.aborted) return;
+      yield message;
+    }
+
+    if (!await waitForMailboxPoll(intervalMs, opts.signal)) return;
+  }
+}
+
+function compareWatched(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Wait for the next poll, resolving immediately when the watcher is aborted. */
+function waitForMailboxPoll(intervalMs: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const finish = (keepWatching: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      resolve(keepWatching);
+    };
+    const onAbort = () => finish(false);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) {
+      finish(false);
+      return;
+    }
+    timer = setTimeout(() => finish(true), intervalMs);
+  });
 }
