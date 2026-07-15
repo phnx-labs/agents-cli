@@ -240,6 +240,34 @@ describe('Claude usage scoping', () => {
     }
   });
 
+  it('falls back to <home>/.claude/.credentials.json when the keychain has no item (Linux/CI)', async () => {
+    // A fresh temp home yields a unique hashed keychain service, so the keychain
+    // read misses and loadClaudeOauth must fall back to the file the Linux Claude
+    // CLI writes. This is the regression guard for `agents view --host <linux>`
+    // rendering no usage bars.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-usage-oauth-file-'));
+    const claudeDir = path.join(home, '.claude');
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(claudeDir, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: 'file-token',
+          refreshToken: 'file-refresh',
+          expiresAt: Date.now() + 60 * 60 * 1000,
+        },
+      })
+    );
+
+    try {
+      const oauth = await loadClaudeOauth(home);
+      expect(oauth?.accessToken).toBe('file-token');
+      expect(oauth?.refreshToken).toBe('file-refresh');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it('keeps usage eligible when the live org is missing', () => {
     expect(isClaudeUsageOrgMatch('org-requested', null)).toBe(true);
   });

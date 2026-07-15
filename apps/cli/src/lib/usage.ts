@@ -986,19 +986,16 @@ function normalizeClaudeWindow(
 }
 
 /** Load Claude OAuth credentials from the system keychain/keyring. */
-export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredentials | null> {
-  // Windows not yet supported
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
-    return null;
-  }
-
+/**
+ * Parse a wrapped Claude OAuth payload — the `{ claudeAiOauth, organizationUuid }`
+ * shape written by BOTH the macOS Keychain item and the Linux `.credentials.json`
+ * file — into our credential struct. Returns null when there is no usable access
+ * token. Never throws (malformed JSON => null).
+ */
+function parseClaudeOauthPayload(raw: string): ClaudeOauthCredentials | null {
   try {
-    const service = getClaudeKeychainService(home);
-    const stdout = getKeychainToken(service);
-
-    const payload = JSON.parse(stdout.trim()) as ClaudeKeychainPayload;
-    if (typeof payload?.claudeAiOauth?.accessToken !== 'string') return null;
-    if (!payload.claudeAiOauth) {
+    const payload = JSON.parse(raw.trim()) as ClaudeKeychainPayload;
+    if (!payload?.claudeAiOauth || typeof payload.claudeAiOauth.accessToken !== 'string') {
       return null;
     }
     return {
@@ -1008,6 +1005,47 @@ export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredent
   } catch {
     return null;
   }
+}
+
+/**
+ * Load a version home's Claude OAuth credential from the two stores Claude Code
+ * uses, tried in order:
+ *
+ *  1. The OS keychain (`getKeychainToken`). Canonical on macOS — Claude Code
+ *     writes the token to the login keychain and we read it via `/usr/bin/security`.
+ *  2. `<home>/.claude/.credentials.json`. On a headless Linux box (the
+ *     `agents view --host <linux>` case) there is no reachable Secret Service, so
+ *     the Claude CLI stores its OAuth token in this plaintext file instead. The
+ *     keychain read above finds nothing on that platform, so we fall back to the
+ *     file. Same wrapped `{ claudeAiOauth }` shape, so one parser handles both.
+ *     Mirrors `readClaudeCredentialsBlob` (cloud/rush.ts), the proven pattern.
+ *
+ * Without step 2 the live usage fetch got no token on Linux, so `agents view`
+ * (run remotely over SSH by `--host`) rendered no usage bars even though the
+ * account + plan — read from the plaintext `.claude.json` — showed fine.
+ */
+export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredentials | null> {
+  // Windows not yet supported
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+    return null;
+  }
+
+  try {
+    const fromKeychain = parseClaudeOauthPayload(getKeychainToken(getClaudeKeychainService(home)));
+    if (fromKeychain) return fromKeychain;
+  } catch {
+    // No keychain item, or no reachable keyring (headless Linux) — fall through.
+  }
+
+  const credsPath = path.join(home ?? os.homedir(), '.claude', '.credentials.json');
+  try {
+    if (fs.existsSync(credsPath)) {
+      return parseClaudeOauthPayload(fs.readFileSync(credsPath, 'utf-8'));
+    }
+  } catch {
+    // Unreadable file — treat as not signed in.
+  }
+  return null;
 }
 
 /**
