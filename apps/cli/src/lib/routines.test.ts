@@ -77,6 +77,40 @@ describe('validateJob — resume', () => {
   });
 });
 
+describe('validateJob — command', () => {
+  it('accepts a command-only job (no agent, no prompt)', () => {
+    expect(
+      validateJob({ name: 'j', schedule: '0 3 * * *', command: 'echo hi' } as Partial<JobConfig>),
+    ).toEqual([]);
+  });
+
+  it('rejects a job with both agent and command', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', command: 'echo hi' }));
+    expect(errors.some((e) => /exactly one of agent, workflow, or command may be set/.test(e))).toBe(true);
+  });
+
+  it('rejects a job with both workflow and command', () => {
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *', workflow: 'autodev', command: 'echo hi' } as Partial<JobConfig>);
+    expect(errors.some((e) => /exactly one of agent, workflow, or command may be set/.test(e))).toBe(true);
+  });
+
+  it('rejects a whitespace-only command string', () => {
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *', command: '   ' } as Partial<JobConfig>);
+    expect(errors.some((e) => /command must be a non-empty shell command string/.test(e))).toBe(true);
+  });
+
+  it('rejects an empty-string command as a missing target', () => {
+    // '' is falsy, so hasCommand is false → the "exactly one required" guard fires.
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *', command: '' } as Partial<JobConfig>);
+    expect(errors.some((e) => /exactly one of agent, workflow, or command is required/.test(e))).toBe(true);
+  });
+
+  it('rejects a job with none of agent, workflow, or command', () => {
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *' } as Partial<JobConfig>);
+    expect(errors.some((e) => /exactly one of agent, workflow, or command is required/.test(e))).toBe(true);
+  });
+});
+
 describe('validateTrigger', () => {
   it('accepts a well-formed github_event trigger', () => {
     expect(validateTrigger({ type: 'github_event', event: 'pull_request', repo: 'x/y', branch: 'main' })).toEqual([]);

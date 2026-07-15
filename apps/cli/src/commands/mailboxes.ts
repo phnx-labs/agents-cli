@@ -1,21 +1,43 @@
 /**
- * `agents mailboxes` — inspect the agent mailbox spool.
+ * `agents mailboxes` — fleet comms: a read-only window onto the agent mailbox spool.
  *
  * The mailbox spool (`~/.agents/.history/mailbox/<id>/{inbox,processing,consumed}`)
  * is the transport under `agents message` / `agents feed` / `agents teams message`:
  * one box per logical agent (session UUID / teams agentId / loop runId). This
- * command is the read-only window onto it — which boxes exist, how much mail
- * each holds, and a recency-ordered log of the messages that flowed BETWEEN
- * agents (including already-consumed ones), so an operator can see the
- * agent-to-agent chatter after the fact.
+ * command surfaces which boxes exist, how much mail each holds, the messages that
+ * flowed BETWEEN agents (including already-consumed ones), and — with `--watch` —
+ * the live stream as it happens. Rendering rides the shared comms engine
+ * (`lib/comms-render.ts`): masthead, sparkline, aggregate, graphEdges.
  *
- *   agents mailboxes            overview: boxes + a recent cross-box message log
- *   agents mailboxes <id>       one box in full (inbox / processing / consumed)
+ *   agents mailboxes                     overview: masthead + 24h sparkline + boxes + recent log
+ *   agents mailboxes <id>                one box in full (inbox / processing / consumed)
+ *   agents mailboxes --watch             live tail of cross-box traffic until ⌃C
+ *   agents mailboxes --between <a> <b>   one relationship as a thread, either direction
+ *   agents mailboxes --graph             who-talks-to-whom adjacency, busiest first
+ *   --from/--to/--since                  filter the overview log and the --watch stream
  */
 import type { Command } from 'commander';
+import * as os from 'os';
+import * as path from 'path';
 import chalk from 'chalk';
-import { die, relTime, truncate } from '../lib/format.js';
-import { listBoxes, readBox, mailboxDir, isValidMailboxId, type StoredMessage } from '../lib/mailbox.js';
+import { die, humanDuration, relTime, truncate, visibleWidth } from '../lib/format.js';
+import {
+  listBoxes,
+  readBox,
+  mailboxDir,
+  isValidMailboxId,
+  watchMessages,
+  type StoredMessage,
+  type CommsMsg,
+} from '../lib/mailbox.js';
+import {
+  GLYPH,
+  masthead,
+  sparkline,
+  aggregate,
+  hourlyCounts,
+  graphEdges,
+} from '../lib/comms-render.js';
 import { getMailboxRootDir } from '../lib/state.js';
 import { getActiveSessions, type ActiveSession } from '../lib/session/active.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
@@ -26,6 +48,13 @@ interface BoxView {
   label: string;
   live: boolean;
   messages: StoredMessage[];
+}
+
+/** Recency/sender/recipient filter shared by the overview log, --watch, and --graph. */
+interface Filters {
+  from?: string;
+  to?: string;
+  sinceMs?: number;
 }
 
 /** Short, human label for a box id — the live session's topic when running, else the id stem. */
@@ -72,19 +101,91 @@ const STATE_TAG: Record<StoredMessage['state'], string> = {
   consumed: chalk.dim('delivered'),
 };
 
-function renderOverview(boxes: BoxView[], limit: number): void {
+/**
+ * The watching agent's own box id. Spawn wiring (`buildExecEnv`,
+ * lib/exec.ts) hands every agent `AGENTS_MAILBOX_DIR` keyed by its box, so
+ * `basename` is the id that resolves to "you". Unset for a human operator at
+ * a plain terminal — nothing in the spool is addressed to them.
+ */
+function selfMailboxId(): string | undefined {
+  const dir = process.env.AGENTS_MAILBOX_DIR;
+  if (!dir) return undefined;
+  const id = path.basename(dir.replace(/[/\\]+$/, ''));
+  return id || undefined;
+}
+
+/** Parse `--since`: relative offsets (30s/5m/2h/7d/4w) or an ISO/absolute date. Returns epoch ms. */
+function parseSinceArg(s: string): number {
+  const m = s.match(/^(\d+)([smhdw])$/);
+  if (m) {
+    const n = parseInt(m[1], 10);
+    const unitMs: Record<string, number> = {
+      s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000,
+    };
+    return Date.now() - n * unitMs[m[2]];
+  }
+  const ms = Date.parse(s);
+  if (Number.isNaN(ms)) die(`Invalid --since value: ${JSON.stringify(s)} (use e.g. 2h, 7d, or an ISO date).`);
+  return ms;
+}
+
+function buildFilters(opts: { from?: string; to?: string; since?: string }): Filters {
+  return {
+    from: opts.from,
+    to: opts.to,
+    sinceMs: opts.since ? parseSinceArg(opts.since) : undefined,
+  };
+}
+
+function hasFilters(f: Filters): boolean {
+  return Boolean(f.from || f.to || f.sinceMs != null);
+}
+
+/** Sender substring on `from`, recipient substring on box id/label, recency cutoff — all case-insensitive. */
+function matchesFilters(msg: { from: string; ts: string }, toLabel: string, boxId: string, f: Filters): boolean {
+  if (f.sinceMs != null) {
+    const t = Date.parse(msg.ts);
+    if (Number.isNaN(t) || t < f.sinceMs) return false;
+  }
+  if (f.from && !msg.from.toLowerCase().includes(f.from.toLowerCase())) return false;
+  if (f.to && !toLabel.toLowerCase().includes(f.to.toLowerCase()) && !boxId.toLowerCase().includes(f.to.toLowerCase())) return false;
+  return true;
+}
+
+/** HH:MM:SS local wall-clock for the --watch stream; unparseable stamps render as dashes. */
+function clockTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '--:--:--';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function renderOverview(boxes: BoxView[], limit: number, filters: Filters): void {
   const nonEmpty = boxes.filter((b) => b.messages.length > 0);
   if (nonEmpty.length === 0) {
     console.log(chalk.dim('No mailboxes with messages. Boxes are created on the first `agents message`.'));
     return;
   }
 
-  // 1. Box summary — one row per box that has ever held mail.
-  console.log(chalk.bold(`${nonEmpty.length} mailbox${nonEmpty.length === 1 ? '' : 'es'}`));
+  // 1. Masthead + 24h volume sparkline over the whole spool.
+  const msgs = aggregate(nonEmpty);
+  const live = boxes.filter((b) => b.live).length;
+  const awaiting = msgs.filter((m) => m.state !== 'consumed').length;
+  console.log(masthead({
+    title: 'fleet comms',
+    host: os.hostname(),
+    accent: 'cyan',
+    right: `${live} live · ${boxes.length} boxes`,
+    stats: [`${msgs.length} messages`, `${awaiting} awaiting delivery`, `last ${relTime(msgs[0].ts)}`],
+  }));
+  console.log(`  ${chalk.dim('24h')} ${chalk.cyan(sparkline(hourlyCounts(msgs, 24)))}`);
+  console.log();
+
+  // 2. Box summary — one row per box that has ever held mail.
   const rows = [...nonEmpty].sort((a, b) => lastTs(b) - lastTs(a));
   for (const box of rows) {
     const p = pending(box);
-    const dot = box.live ? chalk.green('●') : chalk.dim('○');
+    const dot = box.live ? chalk.green(GLYPH.live) : chalk.dim(GLYPH.idle);
     const counts = [
       p > 0 ? chalk.yellow(`${p} pending`) : null,
       chalk.dim(`${box.messages.length} total`),
@@ -94,27 +195,162 @@ function renderOverview(boxes: BoxView[], limit: number): void {
     console.log(`    ${chalk.dim(box.id)}`);
   }
 
-  // 2. Recent cross-box message log — the agent-to-agent chatter, newest first.
-  const all = boxes
-    .flatMap((b) => b.messages.map((m) => ({ m, toLabel: b.label })))
-    .sort((a, b) => (a.m.ts < b.m.ts ? 1 : a.m.ts > b.m.ts ? -1 : 0))
+  // 3. Recent cross-box message log — the agent-to-agent chatter, newest first.
+  const all = msgs
+    .filter((m) => matchesFilters(m, m.toLabel, m.box, filters))
     .slice(0, limit);
-  if (all.length > 0) {
-    console.log();
-    console.log(chalk.bold(`Recent messages`) + chalk.dim(` (${all.length})`));
-    for (const { m, toLabel } of all) {
-      const when = chalk.dim(relTime(m.ts).padStart(10));
-      const route = `${chalk.magenta(truncate(senderOf(m), 24))} ${chalk.dim('→')} ${chalk.cyan(toLabel)}`;
-      console.log(`  ${when}  ${STATE_TAG[m.state]}  ${route}`);
-      console.log(`    ${truncate(m.text.replace(/\s+/g, ' ').trim(), 100)}`);
-    }
+  console.log();
+  console.log(chalk.bold(`Recent messages`) + chalk.dim(` (${all.length})`));
+  if (all.length === 0) {
+    console.log(chalk.dim('  Nothing matches the current filters.'));
+  }
+  for (const m of all) {
+    const when = chalk.dim(relTime(m.ts).padStart(10));
+    const route = `${chalk.magenta(truncate(m.from, 24))} ${chalk.dim(GLYPH.route)} ${chalk.cyan(truncate(m.toLabel, 40))}`;
+    console.log(`  ${when}  ${STATE_TAG[m.state]}  ${route}`);
+    console.log(`    ${truncate(m.text.replace(/\s+/g, ' ').trim(), 100)}`);
   }
   console.log();
-  console.log(chalk.dim('Tip: `agents mailboxes <id>` for one box in full · `--json` for machine output'));
+  console.log(chalk.dim('Tip: `agents mailboxes <id>` one box · `--watch` live tail · `--between <a> <b>` thread · `--graph` routes · `--json` machine output'));
+}
+
+/**
+ * --watch: the money shot. Stream every new cross-box message as it lands,
+ * resolved to live labels; a message addressed to the watching agent's own
+ * box (AGENTS_MAILBOX_DIR) renders as `▲ you` so an orchestrator sees its
+ * replies light up. ⌃C aborts the poller cleanly via AbortController.
+ */
+async function runWatch(root: string, opts: { json?: boolean; filters: Filters }): Promise<void> {
+  const boxes = await collectBoxes(root);
+  const labels = new Map(boxes.map((b) => [b.id, b.label]));
+  const self = selfMailboxId();
+
+  const controller = new AbortController();
+  const onSigint = () => controller.abort();
+  process.on('SIGINT', onSigint);
+  try {
+    if (!opts.json) {
+      console.log(masthead({
+        title: 'fleet comms',
+        host: os.hostname(),
+        accent: 'cyan',
+        right: chalk.green(GLYPH.live) + chalk.dim(' live'),
+        stats: ['watching — ⌃C to stop'],
+      }));
+    }
+    // --since backfills: the watcher replays existing mail and the recency
+    // filter keeps only the requested window, then the tail continues live.
+    for await (const m of watchMessages(root, {
+      signal: controller.signal,
+      backfill: opts.filters.sinceMs != null,
+    })) {
+      const toLabel = labels.get(m.box) ?? m.toLabel;
+      if (!matchesFilters(m, toLabel, m.box, opts.filters)) continue;
+      const msg: CommsMsg = { ...m, toLabel };
+      if (opts.json) {
+        console.log(JSON.stringify(msg));
+        continue;
+      }
+      const addressedToYou = self != null && m.to === self;
+      const to = addressedToYou
+        ? chalk.yellow(`${GLYPH.ask} you`)
+        : chalk.cyan(truncate(toLabel, 24));
+      const text = truncate(m.text.replace(/\s+/g, ' ').trim(), 100);
+      console.log(`${chalk.dim(clockTime(m.ts))}  ${chalk.magenta(truncate(m.from, 24))} ${chalk.dim(GLYPH.stream)} ${to}   ${text}`);
+    }
+  } finally {
+    process.removeListener('SIGINT', onSigint);
+  }
+}
+
+/** Sender stamp match: `from` is freeform, so match the counterpart's full id, an id prefix, or its resolved label. */
+function senderIsBox(from: string, box: BoxView): boolean {
+  if (from === box.id) return true;
+  if (from.length >= 4 && box.id.startsWith(from)) return true;
+  return from.toLowerCase() === box.label.toLowerCase();
+}
+
+function renderBetween(boxes: BoxView[], a: string, b: string, json?: boolean): void {
+  const resolveBox = (q: string): BoxView => {
+    const found = boxes.find((x) => x.id === q)
+      ?? boxes.find((x) => x.id.startsWith(q))
+      ?? boxes.find((x) => x.label.toLowerCase().includes(q.toLowerCase()));
+    if (!found) die(`No mailbox matching ${JSON.stringify(q)}. Run \`agents mailboxes\` to list boxes.`);
+    return found;
+  };
+  const boxA = resolveBox(a);
+  const boxB = resolveBox(b);
+  if (boxA.id === boxB.id) die('--between needs two different boxes.');
+
+  // Both directions, each stamped with its route so the thread reads chronologically.
+  const thread: CommsMsg[] = [
+    ...boxB.messages.filter((m) => senderIsBox(senderOf(m), boxA)).map((m) => ({
+      from: senderOf(m), to: boxB.id, toLabel: boxB.label, ts: m.ts, text: m.text, state: m.state, box: boxB.id,
+    })),
+    ...boxA.messages.filter((m) => senderIsBox(senderOf(m), boxB)).map((m) => ({
+      from: senderOf(m), to: boxA.id, toLabel: boxA.label, ts: m.ts, text: m.text, state: m.state, box: boxA.id,
+    })),
+  ].sort((x, y) => (x.ts < y.ts ? -1 : x.ts > y.ts ? 1 : 0));
+
+  if (json) {
+    console.log(JSON.stringify({
+      a: { id: boxA.id, label: boxA.label },
+      b: { id: boxB.id, label: boxB.label },
+      count: thread.length,
+      messages: thread,
+    }, null, 2));
+    return;
+  }
+
+  const span = thread.length >= 2
+    ? humanDuration(Math.max(0, Date.parse(thread[thread.length - 1].ts) - Date.parse(thread[0].ts)))
+    : '0s';
+  console.log(
+    `  ${chalk.magenta(boxA.label)} ${chalk.dim(GLYPH.thread)} ${chalk.cyan(boxB.label)}` +
+    chalk.dim(`   ${thread.length} message${thread.length === 1 ? '' : 's'} · ${span}`),
+  );
+  if (thread.length === 0) {
+    console.log(chalk.dim('  No messages between these boxes yet. Sender stamps match on box id or label.'));
+    return;
+  }
+  console.log();
+  for (const m of thread) {
+    const when = chalk.dim(relTime(m.ts).padStart(10));
+    const route = `${chalk.magenta(truncate(m.from, 24))} ${chalk.dim(GLYPH.route)} ${chalk.cyan(truncate(m.toLabel, 24))}`;
+    console.log(`  ${when}  ${STATE_TAG[m.state]}  ${route}`);
+    console.log(`    ${truncate(m.text.replace(/\s+/g, ' ').trim(), 100)}`);
+  }
+}
+
+function renderGraph(boxes: BoxView[], filters: Filters, json?: boolean): void {
+  const nonEmpty = boxes.filter((b) => b.messages.length > 0);
+  const msgs = aggregate(nonEmpty).filter((m) => matchesFilters(m, m.toLabel, m.box, filters));
+  const edges = graphEdges(msgs);
+  if (json) {
+    console.log(JSON.stringify(edges, null, 2));
+    return;
+  }
+  console.log(masthead({
+    title: 'fleet comms',
+    host: os.hostname(),
+    accent: 'cyan',
+    right: `${edges.length} route${edges.length === 1 ? '' : 's'}`,
+    stats: [`${msgs.length} messages`],
+  }));
+  console.log();
+  if (edges.length === 0) {
+    console.log(chalk.dim('  No cross-box routes yet.'));
+    return;
+  }
+  for (const e of edges) {
+    const route = `  ${chalk.magenta(truncate(e.from, 28))} ${chalk.dim('└─▶')} ${chalk.cyan(truncate(e.to, 40))}`;
+    const dots = '.'.repeat(Math.max(2, 76 - visibleWidth(route)));
+    console.log(`${route} ${chalk.dim(dots)} ${e.count}`);
+  }
 }
 
 function renderBox(box: BoxView): void {
-  const dot = box.live ? chalk.green('● live') : chalk.dim('○ not running');
+  const dot = box.live ? chalk.green(`${GLYPH.live} live`) : chalk.dim(`${GLYPH.idle} not running`);
   console.log(chalk.bold(box.label) + '  ' + dot);
   console.log(chalk.dim(box.id));
   if (box.messages.length === 0) {
@@ -139,21 +375,68 @@ function newestMessage(box: BoxView): StoredMessage {
   return box.messages.reduce((a, b) => (a.ts >= b.ts ? a : b));
 }
 
+interface MailboxesOpts {
+  json?: boolean;
+  limit?: string;
+  watch?: boolean;
+  between?: string[];
+  from?: string;
+  to?: string;
+  since?: string;
+  graph?: boolean;
+}
+
 export function registerMailboxesCommand(program: Command): void {
   program
     .command('mailboxes')
     .alias('mailbox')
     .argument('[id]', 'A mailbox id (session UUID / teams agentId) to inspect in full')
-    .description('Inspect the agent mailbox spool — boxes and the messages that flowed between agents')
-    .option('--json', 'Output as JSON')
+    .description('Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool')
+    .option('--json', 'Output as JSON (NDJSON stream with --watch)')
     .option('-n, --limit <n>', 'Max recent messages in the overview log', '20')
-    .action(async (id: string | undefined, opts: { json?: boolean; limit?: string }) => {
+    .option('-f, --watch', 'Live tail: stream new cross-box messages until Ctrl-C')
+    .option('--between <boxes...>', 'Thread view: every message between two boxes (id or label), either direction')
+    .option('--from <agent>', 'Only messages whose sender contains <agent>')
+    .option('--to <agent>', 'Only messages to boxes whose id or label contains <agent>')
+    .option('--since <dur>', 'Only messages newer than <dur> (30s/5m/2h/7d or ISO date); with --watch, backfills the window')
+    .option('--graph', 'Who-talks-to-whom adjacency, busiest first')
+    .action(async (id: string | undefined, opts: MailboxesOpts) => {
       const root = getMailboxRootDir();
       const limit = Math.max(1, Number.parseInt(opts.limit ?? '20', 10) || 20);
+      const filters = buildFilters(opts);
+
+      if (opts.between && opts.between.length !== 2) {
+        die(`--between takes exactly two boxes: \`agents mailboxes --between <a> <b>\`.`);
+      }
+
+      // The views are mutually exclusive — never silently drop a flag.
+      const viewCount = (id ? 1 : 0) + (opts.between ? 1 : 0) + (opts.graph ? 1 : 0);
+      if (opts.watch && viewCount > 0) {
+        die('--watch streams the whole fleet and combines with no other view. Drop <id>/--between/--graph, or use --from/--to/--since to filter the stream.');
+      }
+      if (!opts.watch && viewCount > 1) {
+        die('Pick one view: <id>, --between, or --graph.');
+      }
+
+      if (opts.watch) {
+        await runWatch(root, { json: opts.json, filters });
+        return;
+      }
+
+      const boxes = await collectBoxes(root);
+
+      if (opts.between) {
+        renderBetween(boxes, opts.between[0], opts.between[1], opts.json);
+        return;
+      }
+
+      if (opts.graph) {
+        renderGraph(boxes, filters, opts.json);
+        return;
+      }
 
       if (id) {
         if (!isValidMailboxId(id)) die(`Invalid mailbox id ${JSON.stringify(id)}.`);
-        const boxes = await collectBoxes(root);
         const box = boxes.find((b) => b.id === id) ?? boxes.find((b) => b.id.startsWith(id));
         if (!box) die(`No mailbox ${JSON.stringify(id)} under ${root}.`);
         if (opts.json) {
@@ -164,15 +447,28 @@ export function registerMailboxesCommand(program: Command): void {
         return;
       }
 
-      const boxes = await collectBoxes(root);
       if (opts.json) {
+        // Unfiltered output keeps the legacy shape byte-for-byte; with filters
+        // the JSON mirrors the filtered overview log — pending/total recount.
         console.log(JSON.stringify(
-          boxes.map((b) => ({ id: b.id, label: b.label, live: b.live, pending: pending(b), total: b.messages.length, messages: b.messages })),
+          boxes.map((b) => {
+            const messages = hasFilters(filters)
+              ? b.messages.filter((m) => matchesFilters({ from: senderOf(m), ts: m.ts }, b.label, b.id, filters))
+              : b.messages;
+            return {
+              id: b.id,
+              label: b.label,
+              live: b.live,
+              pending: messages.filter((m) => m.state !== 'consumed').length,
+              total: messages.length,
+              messages,
+            };
+          }),
           null,
           2,
         ));
         return;
       }
-      renderOverview(boxes, limit);
+      renderOverview(boxes, limit, filters);
     });
 }

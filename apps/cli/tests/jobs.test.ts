@@ -93,9 +93,9 @@ describe('validateJob', () => {
     expect(errors).toContain('schedule (cron expression) or trigger is required');
   });
 
-  it('requires agent or workflow', () => {
+  it('requires agent, workflow, or command', () => {
     const errors = validateJob({ name: 'test', schedule: '* * * * *', prompt: 'hi' });
-    expect(errors).toContain('exactly one of agent or workflow is required');
+    expect(errors).toContain('exactly one of agent, workflow, or command is required');
   });
 
   it('requires prompt', () => {

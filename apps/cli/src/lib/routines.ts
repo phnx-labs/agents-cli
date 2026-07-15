@@ -111,8 +111,16 @@ export interface JobConfig {
   schedule?: string;
   /** Event/webhook fire condition. Optional when `schedule` is set. */
   trigger?: JobTrigger;
-  agent: AgentId;  // required when workflow is absent
+  /** Which agent runs the routine. Optional — omitted for `workflow`/`command` routines. Exactly one of agent/workflow/command must be set. */
+  agent?: AgentId;
   workflow?: string;
+  /**
+   * A plain shell command run directly instead of an agent/workflow — no LLM,
+   * no auth, no rotation, no tokens, no sandbox overlay. For deterministic
+   * housekeeping routines (version-check, `npm i -g`, `git pull`, notify).
+   * Mutually exclusive with `agent` and `workflow`.
+   */
+  command?: string;
   // 'full' is accepted as a permanent silent alias for 'skip' (see normalizeMode).
   mode: 'plan' | 'edit' | 'auto' | 'skip' | 'full';
   effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
@@ -152,8 +160,10 @@ export interface JobConfig {
 export interface RunMeta {
   jobName: string;
   runId: string;
-  agent: AgentId;  // undefined at runtime for workflow jobs
+  agent?: AgentId;  // undefined at runtime for workflow and command jobs
   workflow?: string;
+  /** The shell command that ran, for command-mode routines (no agent). */
+  command?: string;
   pid: number | null;
   /** Process birth time (epoch ms) recorded at spawn for pid-reuse detection. */
   spawnedAt?: number;
@@ -435,10 +445,15 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   }
   const hasAgent = Boolean(config.agent && typeof config.agent === 'string');
   const hasWorkflow = Boolean(config.workflow && typeof config.workflow === 'string');
-  if (!hasAgent && !hasWorkflow) {
-    errors.push('exactly one of agent or workflow is required');
-  } else if (hasAgent && hasWorkflow) {
-    errors.push('exactly one of agent or workflow must be set (not both)');
+  const hasCommand = Boolean(config.command && typeof config.command === 'string');
+  const set = [hasAgent, hasWorkflow, hasCommand].filter(Boolean).length;
+  if (set === 0) {
+    errors.push('exactly one of agent, workflow, or command is required');
+  } else if (set > 1) {
+    errors.push('exactly one of agent, workflow, or command may be set (not more)');
+  }
+  if (config.command !== undefined && (typeof config.command !== 'string' || config.command.trim() === '')) {
+    errors.push('command must be a non-empty shell command string');
   }
   if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
     errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
@@ -472,7 +487,8 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   if (config.effort && !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(config.effort)) {
     errors.push('effort must be low, medium, high, xhigh, max, or auto');
   }
-  if (!config.prompt || typeof config.prompt !== 'string') {
+  // command routines run a plain shell and never build a prompt; agent/workflow routines require one.
+  if (!hasCommand && (!config.prompt || typeof config.prompt !== 'string')) {
     errors.push('prompt is required');
   }
   if (config.timeout && !parseTimeout(config.timeout)) {

@@ -323,7 +323,12 @@ export async function runDaemon(): Promise<void> {
   }
 
   const scheduler = new JobScheduler(async (config) => {
-    log('INFO', `Triggering job '${config.name}' (agent: ${config.agent})`);
+    const jobLabel = config.command
+      ? 'command'
+      : config.workflow
+        ? `workflow: ${config.workflow}`
+        : `agent: ${config.agent}`;
+    log('INFO', `Triggering job '${config.name}' (${jobLabel})`);
     try {
       const meta = await executeJobDetached(config);
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
