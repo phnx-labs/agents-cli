@@ -345,6 +345,55 @@ function foldUserHooksYamlIntoAgentsYaml(): void {
  *
  * Idempotent: skips if profiles dir is absent or empty.
  */
+/**
+ * Fold the legacy GLOBAL browser captures root
+ * (`~/.agents/.cache/browser/sessions/<task>/`) into the new PER-PROFILE layout
+ * (`~/.agents/.cache/browser/<profile>/sessions/<task>/`), so each profile is one
+ * self-contained tree and the new `browser sessions` listing finds old captures.
+ *
+ * Attribution: a legacy `sessions/<task>` dir is owned by whichever profile's
+ * `tasks.json` still lists that task name. Tasks no profile claims (the profile
+ * was deleted, or tasks.json was cleared) move under a `_legacy` pseudo-profile so
+ * nothing is lost. Idempotent — once the global `sessions/` root is gone it no-ops.
+ */
+export function foldBrowserSessionsIntoProfiles(browserDir: string = path.join(CACHE_DIR, 'browser')): void {
+  const legacySessionsDir = path.join(browserDir, 'sessions');
+
+  let taskDirs: fs.Dirent[];
+  try {
+    taskDirs = fs.readdirSync(legacySessionsDir, { withFileTypes: true });
+  } catch {
+    return; // no legacy global sessions/ root — already folded or never existed
+  }
+
+  // Map task name -> owning profile from every profile's tasks.json (first wins).
+  const taskOwner = new Map<string, string>();
+  let profileDirs: fs.Dirent[] = [];
+  try {
+    profileDirs = fs.readdirSync(browserDir, { withFileTypes: true });
+  } catch { /* browserDir vanished mid-run */ }
+  for (const p of profileDirs) {
+    if (!p.isDirectory() || p.name === 'sessions' || p.name === '_legacy') continue;
+    try {
+      const state = JSON.parse(fs.readFileSync(path.join(browserDir, p.name, 'tasks.json'), 'utf-8'));
+      for (const taskName of Object.keys(state)) {
+        if (!taskOwner.has(taskName)) taskOwner.set(taskName, p.name);
+      }
+    } catch { /* missing or invalid tasks.json */ }
+  }
+
+  for (const taskEntry of taskDirs) {
+    if (!taskEntry.isDirectory()) continue;
+    const owner = taskOwner.get(taskEntry.name) ?? '_legacy';
+    moveFileOnce(
+      path.join(legacySessionsDir, taskEntry.name),
+      path.join(browserDir, owner, 'sessions', taskEntry.name)
+    );
+  }
+
+  rmEmptyDirTree(legacySessionsDir);
+}
+
 function foldBrowserProfilesIntoAgentsYaml(): void {
   const profilesDir = path.join(USER_DIR, 'browser', 'profiles');
   if (!fs.existsSync(profilesDir)) return;
@@ -1817,6 +1866,10 @@ export async function runMigration(): Promise<void> {
   // migrateRuntimeToCache so any legacy plugins/ still at the user-root from
   // very-old layouts have already been handled.
   migratePluginsBackToUserRoot();
+  // Browser captures: fold the legacy global browser/sessions/<task> root into the
+  // per-profile browser/<profile>/sessions/<task> layout. After the cache moves so
+  // the browser dir is at its canonical .cache location.
+  foldBrowserSessionsIntoProfiles();
 
   // System-repo sweep: move every remaining operational dir into its canonical
   // user-bucket location, then drop known-dead artifacts and warn about
