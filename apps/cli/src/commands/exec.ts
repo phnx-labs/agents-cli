@@ -494,6 +494,19 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const backend = typeof options.lease === 'string' ? options.lease : undefined;
+
+        // First-run: no provider credential resolves (no env var, no config, no
+        // detectable bundle) → guide the user through one-time setup, then continue.
+        const { resolveLeaseBundle } = await import('../lib/crabbox/cli.js');
+        if (!resolveLeaseBundle()) {
+          const { runLeaseSetup } = await import('./lease.js');
+          const ok = await runLeaseSetup({ provider: backend ?? 'hetzner' });
+          if (!ok) {
+            console.error(chalk.yellow('Leasing needs a cloud provider set up. Run `agents lease setup` and retry.'));
+            process.exit(1);
+          }
+        }
+
         const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime } = await import('../lib/crabbox/runtimes.js');
         const { leaseAndRun } = await import('../lib/crabbox/lease.js');
         const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/rotate.js');
