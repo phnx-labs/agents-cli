@@ -38,9 +38,10 @@ import {
   parseAtTime,
   jobRunsOnThisDevice,
   checkJobDeviceEligibility,
+  normalizeTriggerEvent,
 } from '../lib/routines.js';
-import type { JobConfig } from '../lib/routines.js';
-import { fireWebhookJobs, matchJobsToWebhook, type GithubWebhook } from '../lib/triggers/webhook.js';
+import type { JobConfig, JobTrigger, LinearTriggerEvent } from '../lib/routines.js';
+import { fireWebhookJobs, matchJobsToWebhook, type IncomingWebhook, type WebhookSource } from '../lib/triggers/webhook.js';
 import { getRoutinesDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';
@@ -78,12 +79,42 @@ export function formatRunDuration(startedAt: string, completedAt: string | null)
 function fireConditionLabel(job: JobConfig): string {
   if (job.schedule) return humanizeCron(job.schedule, job.timezone);
   if (job.trigger) {
-    const scope = job.trigger.repo
-      ? ` (${job.trigger.repo}${job.trigger.branch ? `@${job.trigger.branch}` : ''})`
-      : '';
-    return `on ${job.trigger.event}${scope}`;
+    if (job.trigger.type === 'github_event') {
+      const scope = job.trigger.repo
+        ? ` (${job.trigger.repo}${job.trigger.branch ? `@${job.trigger.branch}` : ''})`
+        : '';
+      return `on github:${job.trigger.event}${scope}`;
+    }
+    const filters = [
+      job.trigger.action ? `action=${job.trigger.action}` : null,
+      job.trigger.teamKey ? `team=${job.trigger.teamKey}` : null,
+      job.trigger.label ? `label=${job.trigger.label}` : null,
+    ].filter(Boolean).join(', ');
+    return `on linear:${job.trigger.event}${filters ? ` (${filters})` : ''}`;
   }
   return '-';
+}
+
+function parseRoutineTrigger(options: Record<string, unknown>): JobTrigger | undefined {
+  const raw = typeof options.on === 'string' ? options.on : undefined;
+  if (!raw) return undefined;
+  const [sourceMaybe, eventMaybe] = raw.includes(':') ? raw.split(':', 2) : ['github', raw];
+  if (sourceMaybe === 'github') {
+    const event = normalizeTriggerEvent(eventMaybe);
+    if (!event) throw new Error(`Unknown GitHub trigger event '${eventMaybe}'`);
+    const trigger: JobTrigger = { type: 'github_event', event };
+    if (typeof options.repo === 'string') trigger.repo = options.repo;
+    if (typeof options.branch === 'string') trigger.branch = options.branch;
+    return trigger;
+  }
+  if (sourceMaybe === 'linear') {
+    const trigger: JobTrigger = { type: 'linear_event', event: eventMaybe as LinearTriggerEvent };
+    if (typeof options.action === 'string') trigger.action = options.action;
+    if (typeof options.teamKey === 'string') trigger.teamKey = options.teamKey;
+    if (typeof options.label === 'string') trigger.label = options.label;
+    return trigger;
+  }
+  throw new Error('--on source must be github or linear');
 }
 
 /** Start or reload the background scheduler so newly-added jobs fire on time. */
@@ -403,12 +434,18 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')
     .option('--devices <names>', 'Fleet allowlist (comma-separated): only listed devices schedule and fire this routine. Omit for unrestricted.')
     .option('--at <time>', 'One-shot mode: run once at this time (e.g., "14:30" or "2026-02-24 09:00"), then disable')
+    .option('--on <source:event>', 'Webhook trigger instead of/in addition to a schedule: github:pull_request or linear:Issue')
+    .option('--repo <owner/name>', 'GitHub repo filter for --on github:<event>')
+    .option('--branch <name>', 'GitHub branch filter for --on github:<event>')
+    .option('--action <name>', 'Linear action filter for --on linear:<event> (e.g. update)')
+    .option('--team-key <key>', 'Linear team key filter for --on linear:<event> (e.g. RUSH)')
+    .option('--label <name>', 'Linear issue label filter for --on linear:Issue')
     .option('--end-at <iso>', 'Stop firing on or after this ISO 8601 timestamp (e.g., "2026-12-31T23:59:00Z"); routine auto-disables.')
     .option('--disabled', 'Create the routine but keep it paused (enable later with resume)')
     .option('--resume <sessionId>', 'At fire time, resume this existing session id (via `agents run <agent> --resume`) instead of starting fresh — the actual session reopens with full context and the prompt becomes its next turn. Powers self-scheduled wake-ups (e.g. /hibernate). Requires --agent claude or codex; runs un-sandboxed (the session store lives in the real home, not the job overlay).')
     .action(async (nameOrPath: string | undefined, options) => {
       // Check if inline mode (has flags) or file mode
-      const hasInlineFlags = options.schedule || options.agent || options.workflow || options.prompt || options.at;
+      const hasInlineFlags = options.schedule || options.agent || options.workflow || options.prompt || options.at || options.on;
 
       if (hasInlineFlags) {
         // Inline mode: create job from flags
@@ -425,7 +462,14 @@ export function registerRoutinesCommands(program: Command): void {
         }
 
         let schedule = options.schedule;
+        let trigger: JobTrigger | undefined;
         let runOnce = false;
+        try {
+          trigger = parseRoutineTrigger(options);
+        } catch (err) {
+          console.log(chalk.red((err as Error).message));
+          process.exit(1);
+        }
 
         // Handle --at for one-shot jobs
         if (options.at) {
@@ -439,8 +483,8 @@ export function registerRoutinesCommands(program: Command): void {
           runOnce = parsed.runOnce;
         }
 
-        if (!schedule) {
-          console.log(chalk.red('Schedule is required (use --schedule or --at)'));
+        if (!schedule && !trigger) {
+          console.log(chalk.red('Schedule or trigger is required (use --schedule, --at, or --on)'));
           process.exit(1);
         }
 
@@ -462,7 +506,8 @@ export function registerRoutinesCommands(program: Command): void {
 
         const config: JobConfig = {
           name: nameOrPath,
-          schedule,
+          ...(schedule ? { schedule } : {}),
+          ...(trigger ? { trigger } : {}),
           agent: options.agent,
           ...(options.workflow ? { workflow: options.workflow } : {}),
           mode: options.mode,
@@ -777,11 +822,17 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('webhook')
-    .description('Fire trigger-based routines from a single GitHub webhook payload (read from --file or stdin). One-shot: matches and fires, then exits. For a long-running receiver, run this behind your own HTTP forwarder.')
-    .requiredOption('--event <name>', 'GitHub event name, as sent in the X-GitHub-Event header (e.g. pull_request, push, workflow_run)')
+    .description('Fire trigger-based routines from a single webhook payload (read from --file or stdin). One-shot: matches and fires, then exits.')
+    .option('--source <name>', 'Webhook source: github or linear', 'github')
+    .requiredOption('--event <name>', 'Source event name: GitHub X-GitHub-Event value, or Linear payload type')
     .option('--file <path>', 'Read the webhook JSON payload from this file instead of stdin')
     .option('--dry-run', 'Show which routines would fire without firing them')
-    .action(async (options: { event: string; file?: string; dryRun?: boolean }) => {
+    .action(async (options: { source?: string; event: string; file?: string; dryRun?: boolean }) => {
+      const source = options.source as WebhookSource;
+      if (source !== 'github' && source !== 'linear') {
+        console.log(chalk.red(`Unknown webhook source "${options.source}". Use github or linear.`));
+        process.exit(1);
+      }
       // Load the raw JSON payload: --file wins, else drain stdin.
       let raw: string;
       if (options.file) {
@@ -813,7 +864,7 @@ export function registerRoutinesCommands(program: Command): void {
         process.exit(1);
       }
 
-      const webhook: GithubWebhook = { event: options.event, payload };
+      const webhook: IncomingWebhook = { source, event: options.event, payload };
 
       // Matching is intentionally user-layer only (fireWebhookJobs defaults to
       // listJobs() with no cwd), mirroring `run`/`catchup`: a webhook must never
@@ -822,10 +873,10 @@ export function registerRoutinesCommands(program: Command): void {
       if (options.dryRun) {
         const matched = matchJobsToWebhook(listAllJobs(), webhook);
         if (matched.length === 0) {
-          console.log(chalk.gray(`No routines match a ${options.event} event for this payload.`));
+          console.log(chalk.gray(`No routines match a ${source}:${options.event} event for this payload.`));
           return;
         }
-        console.log(chalk.bold(`${matched.length} routine(s) would fire on ${options.event}:\n`));
+        console.log(chalk.bold(`${matched.length} routine(s) would fire on ${source}:${options.event}:\n`));
         for (const job of matched) {
           console.log(`  ${chalk.cyan(job.name)} — ${fireConditionLabel(job)}`);
         }
@@ -844,11 +895,11 @@ export function registerRoutinesCommands(program: Command): void {
 
       const fired = await fireWebhookJobs(webhook);
       if (fired.length === 0) {
-        console.log(chalk.gray(`No routines match a ${options.event} event for this payload.`));
+        console.log(chalk.gray(`No routines match a ${source}:${options.event} event for this payload.`));
         return;
       }
 
-      console.log(chalk.bold(`Fired ${fired.length} routine(s) on ${options.event}:\n`));
+      console.log(chalk.bold(`Fired ${fired.length} routine(s) on ${source}:${options.event}:\n`));
       for (const f of fired) {
         console.log(`  ${chalk.cyan(f.jobName)} → ${chalk.green('started')} (run: ${f.runId})`);
       }

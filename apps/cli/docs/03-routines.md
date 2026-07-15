@@ -73,6 +73,67 @@ agents routines add reminder --at "14:30" --agent claude --prompt "Remind Muqsit
 
 `--at` accepts `"14:30"` (today at that time) or `"2026-02-24 09:00"` (absolute). The daemon converts it to a cron expression with `runOnce: true`.
 
+### Webhook Triggers
+
+Routines can fire from signed GitHub or Linear webhooks instead of a cron
+schedule. The same detached runner path is used as scheduled jobs.
+
+```bash
+agents routines add agent-labeled-issue \
+  --on linear:Issue \
+  --action update \
+  --team-key RUSH \
+  --label agent \
+  --agent claude \
+  --prompt "Work the Linear issue that was just labeled agent"
+```
+
+Equivalent YAML:
+
+```yaml
+name: agent-labeled-issue
+trigger:
+  type: linear_event
+  event: Issue
+  action: update
+  teamKey: RUSH
+  label: agent
+agent: claude
+prompt: "Work the Linear issue that was just labeled agent"
+```
+
+GitHub triggers use `type: github_event` with optional `repo` and `branch`:
+
+```bash
+agents routines add pr-review \
+  --on github:pull_request \
+  --repo phnx-labs/agents-cli \
+  --branch main \
+  --agent claude \
+  --prompt "Review the pull request"
+```
+
+Run the localhost receiver with signing keys from an `agents secrets` bundle:
+
+```bash
+agents webhook serve --secrets-bundle webhooks --port 8787
+```
+
+The bundle may contain `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`, or both.
+The receiver accepts `POST /hooks/github` and `POST /hooks/linear`, rejects
+unsigned deliveries, dedupes repeated delivery IDs, rate-limits each source, and
+binds `127.0.0.1` by default.
+
+Expose the receiver publicly from a Linux/macOS Tailscale node with Funnel:
+
+```bash
+agents funnel up yosemite-s0 --local-port 8787 --port 443
+agents funnel status yosemite-s0
+```
+
+Funnel public ports are limited to `443`, `8443`, and `10000`; `agents funnel up`
+validates that before running the remote Tailscale CLI.
+
 ### Device Allowlist
 
 `~/.agents/routines/` rides the user repo, so every routine syncs to every machine —

@@ -125,6 +125,8 @@ import {
   loadLogs,
   loadEvents,
   loadAudit,
+  loadWebhook,
+  loadFunnel,
   loadSsh,
   loadPull,
   loadPush,
@@ -263,6 +265,8 @@ Run and dispatch:
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
+  webhook                         Receive signed GitHub/Linear webhooks for trigger routines
+  funnel                          Expose a webhook receiver through Tailscale Funnel
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
   logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network
@@ -827,6 +831,8 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadLogs);
   await reg(loadEvents);
   await reg(loadAudit);
+  await reg(loadWebhook);
+  await reg(loadFunnel);
   await reg(loadFeed);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');

@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, jobRunsOnThisDevice, checkJobDeviceEligibility, type JobConfig } from './routines.js';
-import { getRoutinesDir, ensureAgentsDir } from './state.js';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, type JobConfig } from './routines.js';
+import { getRoutinesDir, getSystemRoutinesDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
@@ -82,8 +82,12 @@ describe('validateTrigger', () => {
     expect(validateTrigger({ type: 'github_event', event: 'pull_request', repo: 'x/y', branch: 'main' })).toEqual([]);
   });
 
+  it('accepts a well-formed linear_event trigger', () => {
+    expect(validateTrigger({ type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' })).toEqual([]);
+  });
+
   it('rejects a bad type', () => {
-    expect(validateTrigger({ type: 'gitlab', event: 'pull_request' })).toContain("trigger.type must be 'github_event'");
+    expect(validateTrigger({ type: 'gitlab', event: 'pull_request' })).toContain("trigger.type must be 'github_event' or 'linear_event'");
   });
 
   it('rejects an unknown event', () => {
@@ -135,6 +139,53 @@ describe('default execution mode (RUSH-1595: plan -> auto)', () => {
       expect(fs.readFileSync(file, 'utf-8')).toMatch(/^mode:\s*plan/m);
     } finally {
       deleteJob(name);
+    }
+  });
+});
+
+describe('system-layer routines (built-ins from ~/.agents/.system/routines/)', () => {
+  const sysDir = getSystemRoutinesDir();
+
+  it('listJobs surfaces a system routine, and a user routine of the same name shadows it', () => {
+    ensureAgentsDir();
+    const name = '__test-system-routine-union__';
+    const sysFile = path.join(sysDir, `${name}.yml`);
+    fs.mkdirSync(sysDir, { recursive: true });
+    try {
+      // A built-in shipped via the system repo — enabled, on a schedule.
+      fs.writeFileSync(
+        sysFile,
+        `name: ${name}\nschedule: '0 9 * * 1'\nagent: claude\nprompt: check for updates\n`,
+        'utf-8'
+      );
+
+      // Daemon-style call (no cwd) must see the system routine.
+      let found = listJobs().find((j) => j.name === name);
+      expect(found).toBeDefined();
+      expect(found!.enabled).toBe(true);
+      expect(readJob(name)?.prompt).toBe('check for updates');
+
+      // A user routine of the same name overrides it (here: disables the built-in).
+      writeJob({
+        name,
+        schedule: '0 9 * * 1',
+        agent: 'claude',
+        prompt: 'overridden',
+        mode: 'auto',
+        effort: 'auto',
+        timeout: '10m',
+        enabled: false,
+      } as JobConfig);
+
+      found = listJobs().find((j) => j.name === name);
+      expect(found).toBeDefined();
+      expect(found!.enabled).toBe(false);          // user copy wins
+      expect(found!.prompt).toBe('overridden');
+      // Only one entry for the name — user shadows system, no duplicate.
+      expect(listJobs().filter((j) => j.name === name).length).toBe(1);
+    } finally {
+      deleteJob(name);                              // removes the user override
+      try { fs.unlinkSync(sysFile); } catch { /* already gone */ }
     }
   });
 });

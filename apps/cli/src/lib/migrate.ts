@@ -1490,7 +1490,7 @@ function containsOnlyDsStore(dir: string): boolean {
 function warnSystemOrphans(): void {
   const SHIPPED_ALLOWLIST = new Set<string>([
     // resource directories shipped by the npm package
-    'commands', 'hooks', 'skills', 'rules', 'mcp', 'cli', 'permissions', 'subagents', 'profiles', 'agents',
+    'commands', 'hooks', 'skills', 'rules', 'mcp', 'cli', 'permissions', 'subagents', 'profiles', 'agents', 'routines',
     // top-level metadata files
     'agents.yaml', 'hooks.yaml', 'README.md', 'CHANGELOG.md',
     // git + repo metadata
