@@ -227,6 +227,16 @@ describe('shouldTapStdout (budget live-watcher attach gating, #346 FIX 3)', () =
     expect(shouldTapStdout(true, false, true)).toBe(false);
     expect(shouldTapStdout(true, true, true)).toBe(false);
   });
+
+  // Fallback chains need a stdout tail: Claude prints billing refusals (spend
+  // limit / out of credits) to stdout, so a stderr-only scan never cascades.
+  it('taps when a fallback chain requests a stdout tail, even at a TTY with no caps', () => {
+    expect(shouldTapStdout(false, false, false, /*captureTail*/ true)).toBe(true);
+  });
+
+  it('captureTail never overrides the interactive guard', () => {
+    expect(shouldTapStdout(true, false, false, true)).toBe(false);
+  });
 });
 
 describe('resolveInteractive (sanity for the gating inputs above)', () => {
