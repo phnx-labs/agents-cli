@@ -5,9 +5,15 @@ import { SYNC_AGENTS } from './agents.js';
 import { toPosix } from '../../platform/index.js';
 
 const claude = SYNC_AGENTS.find(s => s.id === 'claude')!;
+const kimi = SYNC_AGENTS.find(s => s.id === 'kimi')!;
 
 function copy(machine: string, sessionId: string, hash: string, relKey?: string): RemoteCopy {
   return { machine, entry: { relKey: relKey ?? `proj/${sessionId}.jsonl`, size: 1, hash, lastTs: '2026-06-20T00:00:00Z' } };
+}
+
+/** A copy with an explicit relKey + lastTs, for dir-shaped / LWW cases. */
+function fileCopy(machine: string, relKey: string, hash: string, lastTs: string): RemoteCopy {
+  return { machine, entry: { relKey, size: 1, hash, lastTs } };
 }
 
 function copies(...cs: Array<[string, RemoteCopy[]]>): Map<string, Map<string, RemoteCopy[]>> {
@@ -111,5 +117,52 @@ describe('reconcileCopies', () => {
   it('returns null when nothing was fetched', () => {
     const list = [copy('mac', 's1', 'h1')];
     expect(reconcileCopies(claude, list, [null])).toBeNull();
+  });
+});
+
+// RUSH-1466: a dir-shaped session (Kimi) spans several files with different merge
+// rules. Each file's copies share a relKey and are reconciled independently — the
+// append-only wire.jsonl unions, the mutable state.json takes last-writer-wins.
+describe('dir-shaped per-file reconcile', () => {
+  it('append-only .jsonl file unions across a fork (G-Set)', () => {
+    const rel = 'wd/session_x/agents/main/wire.jsonl';
+    const list = [fileCopy('zion', rel, 'h1', '2026-06-20T10:00:00Z'), fileCopy('s0', rel, 'h2', '2026-06-20T10:00:00Z')];
+    const e1 = JSON.stringify({ t: 1, timestamp: '2026-06-20T10:00:00.000Z' });
+    const e2 = JSON.stringify({ t: 2, timestamp: '2026-06-20T10:00:01.000Z' });
+    const out = resolveMirrorWrite(kimi, list, [e1 + '\n', [e1, e2].join('\n') + '\n']);
+    expect(out.merged).toBe(true);
+    expect(out.content).toBe([e1, e2].join('\n') + '\n'); // union = superset
+    expect(toPosix(out.dest)).toContain('backups/kimi/s0/sessions/' + rel); // smallest machine canonical
+  });
+
+  it('mutable state.json is NOT line-unioned — last-writer-wins by (lastTs, hash)', () => {
+    const rel = 'wd/session_x/state.json';
+    const older = JSON.stringify({ title: 'old', messages: 3 });
+    const newer = JSON.stringify({ title: 'new', messages: 5 });
+    const list = [
+      fileCopy('zion', rel, 'h-old', '2026-06-20T10:00:00Z'),
+      fileCopy('s0', rel, 'h-new', '2026-06-20T12:00:00Z'), // later timestamp wins
+    ];
+    const out = resolveMirrorWrite(kimi, list, [older, newer]);
+    expect(out.content).toBe(newer); // latest wins verbatim — never a corrupt line-merge
+    expect(JSON.parse(out.content)).toEqual({ title: 'new', messages: 5 }); // still valid JSON
+    // canonical path is deterministic (smallest machine) regardless of who won
+    expect(toPosix(out.dest)).toContain('backups/kimi/s0/sessions/' + rel);
+  });
+
+  it('LWW tie on lastTs breaks by hash, deterministically', () => {
+    const rel = 'wd/session_x/state.json';
+    const ts = '2026-06-20T10:00:00Z';
+    const list = [fileCopy('a', rel, 'hAAA', ts), fileCopy('b', rel, 'hZZZ', ts)];
+    const out = resolveMirrorWrite(kimi, list, ['contentA', 'contentZ']);
+    expect(out.content).toBe('contentZ'); // 'hZZZ' > 'hAAA'
+  });
+
+  it('single copy of any file is written verbatim (the common round-trip)', () => {
+    const rel = 'wd/session_x/state.json';
+    const out = resolveMirrorWrite(kimi, [fileCopy('zion', rel, 'h1', '2026-06-20T10:00:00Z')], ['{"a":1}']);
+    expect(out.merged).toBe(false);
+    expect(out.content).toBe('{"a":1}');
+    expect(toPosix(out.dest)).toContain('backups/kimi/zion/sessions/' + rel);
   });
 });

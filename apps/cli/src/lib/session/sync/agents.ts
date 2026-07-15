@@ -21,13 +21,20 @@ import { walkForFiles } from '../../fs-walk.js';
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
-export interface LocalTranscript {
+/** One constituent file of a session — a session has exactly one for file-shaped
+ *  agents (Claude, Codex, …), and many for directory-shaped ones (Kimi). */
+export interface SessionFile {
   /** Absolute path on this machine. */
   absPath: string;
-  /** Globally-unique session id (the grouping key across machines). */
-  sessionId: string;
   /** Path relative to the agent's subdir root — preserved in the mirror layout. */
   relKey: string;
+}
+
+export interface LocalTranscript {
+  /** Globally-unique session id (the grouping key across machines). */
+  sessionId: string;
+  /** Every file that makes up this session. Length 1 for file-shaped agents. */
+  files: SessionFile[];
 }
 
 export interface SyncAgentSpec {
@@ -36,8 +43,37 @@ export interface SyncAgentSpec {
   subdir: string;
   /** File extension to walk for this agent (defaults to .jsonl). */
   ext?: string;
+  /**
+   * A session is a DIRECTORY of files (e.g. Kimi: state.json + agents/…/wire.jsonl
+   * + per-tool task sidecars), not a single transcript. When set, every file under
+   * the session dir (matching `exts`, passing `fileFilter`) syncs, is stored under
+   * its own R2 sub-key, and is mirrored at its own relative path — instead of the
+   * file-shaped "one transcript per session" model.
+   */
+  dirShaped?: boolean;
+  /** Extensions a dir-shaped agent walks (defaults to `[ext ?? '.jsonl']`). */
+  exts?: string[];
+  /** Optional per-file exclusion for dir-shaped agents (lock/scratch files, …). */
+  fileFilter?(relKey: string): boolean;
+  /**
+   * Extensions whose files are append-only event logs and therefore CRDT-mergeable
+   * (G-Set union across forked copies). A dir-shaped session usually mixes an
+   * append-only conversation log (`wire.jsonl`) with mutable metadata blobs
+   * (`state.json`) — line-unioning the latter would corrupt it, so any file NOT
+   * matching an entry here is reconciled last-writer-wins instead. Undefined (the
+   * file-shaped default) means every file is mergeable — the single `.jsonl`
+   * transcript keeps its existing union behaviour.
+   */
+  mergeableExts?: string[];
   /** Derive the session id from a storage-relative key. */
   sessionIdFromRelKey(relKey: string): string;
+}
+
+/** True when a file at `relKey` is an append-only log that CRDT-unions across
+ *  forks; false when it must be reconciled last-writer-wins (mutable blob). */
+export function isMergeableFile(spec: SyncAgentSpec, relKey: string): boolean {
+  if (!spec.mergeableExts) return true; // file-shaped default: the transcript unions
+  return spec.mergeableExts.some(e => relKey.endsWith(e));
 }
 
 export const SYNC_AGENTS: SyncAgentSpec[] = [
@@ -73,11 +109,18 @@ export const SYNC_AGENTS: SyncAgentSpec[] = [
   {
     id: 'kimi',
     subdir: 'sessions',
-    ext: '.json',
-    // Kimi sessions are multi-file directories under
-    // ~/.kimi-code/sessions/<wd_hash>/session_<uuid>/. state.json carries the
-    // metadata the scanner reads; wire.jsonl (conversation) is a follow-up
-    // tracked by the multi-file-sessions ticket.
+    // Kimi stores a session as a DIRECTORY under
+    // ~/.kimi-code/sessions/<wd_hash>/session_<uuid>/: state.json (the metadata the
+    // scanner reads) + agents/<name>/wire.jsonl (the conversation the scanner
+    // parses) + agents/<name>/tasks/*.json (per-tool sidecars). All of them must
+    // sync for the session to reconstruct on another machine — hence dir-shaped
+    // with both extensions. wire.jsonl unions as an append-only log; the .json
+    // blobs reconcile last-writer-wins (see mergeableExts).
+    dirShaped: true,
+    exts: ['.json', '.jsonl'],
+    mergeableExts: ['.jsonl'],
+    // Lock files are machine-local and never part of the transcript.
+    fileFilter: rel => !rel.endsWith('.lock'),
     sessionIdFromRelKey: rel => {
       const m = rel.match(/session_[^/]+/);
       return m?.[0] ?? rel;
@@ -117,20 +160,35 @@ function safeReal(p: string): string {
  */
 export function listLocalTranscripts(spec: SyncAgentSpec): LocalTranscript[] {
   const mirror = mirrorRootReal();
-  const out: LocalTranscript[] = [];
-  const seen = new Set<string>();
+  const exts = spec.dirShaped ? (spec.exts ?? [spec.ext ?? '.jsonl']) : [spec.ext ?? '.jsonl'];
+  // sessionId -> its files. File-shaped: the first file per session wins (one
+  // transcript, unchanged behaviour). Dir-shaped: every matching file under the
+  // session directory is collected, deduped by relKey across version homes.
+  const bySession = new Map<string, LocalTranscript>();
+  const seenRel = new Set<string>();
 
   for (const dir of getAgentSessionDirs(spec.id, spec.subdir)) {
     if (safeReal(dir).startsWith(mirror)) continue; // skip synced-in mirror dirs
-    for (const abs of walkForFiles(dir, spec.ext ?? '.jsonl', 100_000)) {
-      const relKey = path.relative(dir, abs);
-      if (!relKey || relKey.startsWith('..')) continue;
-      const sessionId = spec.sessionIdFromRelKey(relKey);
-      if (seen.has(sessionId)) continue;
-      seen.add(sessionId);
-      out.push({ absPath: abs, sessionId, relKey });
+    for (const ext of exts) {
+      for (const abs of walkForFiles(dir, ext, 100_000)) {
+        const relKey = path.relative(dir, abs);
+        if (!relKey || relKey.startsWith('..')) continue;
+        if (spec.fileFilter && !spec.fileFilter(relKey)) continue;
+        const sessionId = spec.sessionIdFromRelKey(relKey);
+
+        let entry = bySession.get(sessionId);
+        if (!entry) bySession.set(sessionId, (entry = { sessionId, files: [] }));
+        if (!spec.dirShaped && entry.files.length > 0) continue; // file-shaped: one file wins
+        const dedupKey = `${sessionId} ${relKey}`;
+        if (seenRel.has(dedupKey)) continue; // same file across >1 version home
+        seenRel.add(dedupKey);
+        entry.files.push({ absPath: abs, relKey });
+      }
     }
   }
+  // Stable file order per session so the manifest is deterministic across runs.
+  const out = [...bySession.values()];
+  for (const t of out) t.files.sort((a, b) => (a.relKey < b.relKey ? -1 : a.relKey > b.relKey ? 1 : 0));
   return out;
 }
 
@@ -144,8 +202,15 @@ export function mirrorPath(spec: SyncAgentSpec, machine: string, relKey: string)
   return path.join(getHistoryDir(), 'backups', spec.id, machine, spec.subdir, relKey);
 }
 
-/** R2 object key for a transcript: sessions/<machine>/<agent>/<sessionId>.jsonl */
-export function objectKey(machine: string, agentId: string, sessionId: string): string {
+/**
+ * R2 object key for a transcript.
+ *  - file-shaped (relKey omitted): sessions/<machine>/<agent>/<sessionId>.jsonl —
+ *    unchanged, so existing claude/codex/droid objects keep their keys.
+ *  - dir-shaped (relKey given): sessions/<machine>/<agent>/<sessionId>/<relKey> —
+ *    one object per constituent file of the session directory.
+ */
+export function objectKey(machine: string, agentId: string, sessionId: string, relKey?: string): string {
+  if (relKey) return `sessions/${machine}/${agentId}/${sessionId}/${relKey}`;
   return `sessions/${machine}/${agentId}/${sessionId}.jsonl`;
 }
 

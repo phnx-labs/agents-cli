@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SYNC_AGENTS } from './agents.js';
+import { SYNC_AGENTS, objectKey, isMergeableFile } from './agents.js';
 
 function spec(id: string) {
   const s = SYNC_AGENTS.find(a => a.id === id);
@@ -21,8 +21,14 @@ describe('SYNC_AGENTS expanded beyond claude+codex', () => {
     expect(spec('claude').ext).toBeUndefined();
   });
 
-  it('kimi uses .json for state.json metadata files', () => {
-    expect(spec('kimi').ext).toBe('.json');
+  it('kimi is dir-shaped: walks .json + .jsonl, unions only the .jsonl log (RUSH-1466)', () => {
+    const kimi = spec('kimi');
+    expect(kimi.dirShaped).toBe(true);
+    expect(kimi.exts).toEqual(['.json', '.jsonl']);
+    expect(kimi.mergeableExts).toEqual(['.jsonl']); // wire.jsonl unions; state.json is LWW
+    // lock files are machine-local and excluded
+    expect(kimi.fileFilter!('session_x/agents/main/wire.jsonl')).toBe(true);
+    expect(kimi.fileFilter!('session_x/.lock')).toBe(false);
   });
 });
 
@@ -61,5 +67,36 @@ describe('sessionIdFromRelKey', () => {
 
   it('opencode: basename (placeholder until SQLite export lands)', () => {
     expect(spec('opencode').sessionIdFromRelKey('sessions/ses_abc123.jsonl')).toBe('ses_abc123.jsonl');
+  });
+});
+
+describe('objectKey (RUSH-1466 dir-shaped keys)', () => {
+  it('file-shaped (no relKey): flat key, unchanged from before', () => {
+    expect(objectKey('zion', 'claude', 'abc123')).toBe('sessions/zion/claude/abc123.jsonl');
+  });
+
+  it('dir-shaped (relKey): one nested object per constituent file', () => {
+    expect(objectKey('zion', 'kimi', 'session_uuid', 'wd/session_uuid/state.json')).toBe(
+      'sessions/zion/kimi/session_uuid/wd/session_uuid/state.json',
+    );
+    expect(objectKey('zion', 'kimi', 'session_uuid', 'wd/session_uuid/agents/main/wire.jsonl')).toBe(
+      'sessions/zion/kimi/session_uuid/wd/session_uuid/agents/main/wire.jsonl',
+    );
+  });
+});
+
+describe('isMergeableFile (append-only union vs mutable-blob LWW)', () => {
+  const kimi = spec('kimi');
+  const claude = spec('claude');
+
+  it('kimi: only .jsonl logs union; .json blobs are last-writer-wins', () => {
+    expect(isMergeableFile(kimi, 'wd/session_x/agents/main/wire.jsonl')).toBe(true);
+    expect(isMergeableFile(kimi, 'wd/session_x/state.json')).toBe(false);
+    expect(isMergeableFile(kimi, 'wd/session_x/agents/main/tasks/bash-1.json')).toBe(false);
+  });
+
+  it('file-shaped agents (no mergeableExts): every file unions, as before', () => {
+    expect(isMergeableFile(claude, 'proj/abc.jsonl')).toBe(true);
+    expect(isMergeableFile(claude, 'proj/whatever.json')).toBe(true);
   });
 });

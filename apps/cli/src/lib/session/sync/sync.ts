@@ -26,6 +26,7 @@ import {
   mirrorPath,
   objectKey,
   manifestKey,
+  isMergeableFile,
   SESSIONS_PREFIX,
   type SyncAgentSpec,
 } from './agents.js';
@@ -44,6 +45,8 @@ import {
   loadPullState,
   savePullState,
   sourceSignature,
+  manifestEntries,
+  type AgentManifest,
   type Manifest,
   type ManifestEntry,
   type PullState,
@@ -96,43 +99,56 @@ async function pushOwn(r2: R2Client, me: string, encKey: Buffer | null, opts: Sy
   }
 
   for (const spec of SYNC_AGENTS) {
-    const agentManifest: Record<string, ManifestEntry> = {};
+    const agentManifest: AgentManifest = {};
     for (const t of listLocalTranscripts(spec)) {
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(t.absPath);
-      } catch {
-        continue;
+      // A session is one file (file-shaped) or many (dir-shaped). Push each file
+      // that changed, reusing the prior manifest entry (keyed by relKey) for the
+      // ones the ledger shows unchanged. Object keys nest under the session id for
+      // dir-shaped agents and stay flat for file-shaped ones (unchanged keys).
+      const prevVal = prev?.agents?.[spec.id]?.[t.sessionId];
+      const prevByRel = new Map((prevVal ? manifestEntries(prevVal) : []).map(e => [e.relKey, e]));
+      const entries: ManifestEntry[] = [];
+      for (const f of t.files) {
+        let stat: fs.Stats;
+        try {
+          stat = fs.statSync(f.absPath);
+        } catch {
+          continue;
+        }
+        const prevEntry = prevByRel.get(f.relKey);
+        if (prevEntry && ledgerUnchanged(ledger, f.absPath, stat.size, stat.mtimeMs)) {
+          entries.push(prevEntry); // unchanged: reuse, no read, no upload
+          result.pushSkipped++;
+          continue;
+        }
+        let content: string;
+        try {
+          content = fs.readFileSync(f.absPath, 'utf-8');
+        } catch {
+          continue;
+        }
+        // Identity for CRDT merge is the PLAINTEXT hash (ciphertext is
+        // non-deterministic), so hash + manifest are computed on cleartext; only
+        // the stored object body is sealed.
+        const hash = hashContent(content);
+        const { lastTs } = transcriptStats(content);
+        const entry: ManifestEntry = { relKey: f.relKey, size: stat.size, hash, lastTs };
+        const body = encKey ? encryptTranscript(content, encKey) : content;
+        const contentType = encKey ? 'application/json' : 'application/x-ndjson';
+        try {
+          await r2.put(objectKey(me, spec.id, t.sessionId, spec.dirShaped ? f.relKey : undefined), body, contentType);
+          ledgerRecord(ledger, f.absPath, stat.size, stat.mtimeMs, hash);
+          entries.push(entry);
+          result.pushed++;
+          const label = spec.dirShaped ? `${t.sessionId.slice(0, 8)}/${f.relKey}` : t.sessionId.slice(0, 8);
+          if (opts.verbose) opts.log?.(`  push ${spec.id}/${label} (${stat.size}B)`);
+        } catch (err) {
+          result.errors.push(`push ${spec.id}/${t.sessionId}/${f.relKey}: ${(err as Error).message}`);
+        }
       }
-      const prevEntry = prev?.agents?.[spec.id]?.[t.sessionId];
-      if (prevEntry && ledgerUnchanged(ledger, t.absPath, stat.size, stat.mtimeMs)) {
-        agentManifest[t.sessionId] = prevEntry; // unchanged: reuse, no read, no upload
-        result.pushSkipped++;
-        continue;
-      }
-      let content: string;
-      try {
-        content = fs.readFileSync(t.absPath, 'utf-8');
-      } catch {
-        continue;
-      }
-      // Identity for CRDT merge is the PLAINTEXT hash (ciphertext is
-      // non-deterministic), so hash + manifest are computed on cleartext; only
-      // the stored object body is sealed.
-      const hash = hashContent(content);
-      const { lastTs } = transcriptStats(content);
-      const entry: ManifestEntry = { relKey: t.relKey, size: stat.size, hash, lastTs };
-      const body = encKey ? encryptTranscript(content, encKey) : content;
-      const contentType = encKey ? 'application/json' : 'application/x-ndjson';
-      try {
-        await r2.put(objectKey(me, spec.id, t.sessionId), body, contentType);
-        ledgerRecord(ledger, t.absPath, stat.size, stat.mtimeMs, hash);
-        agentManifest[t.sessionId] = entry;
-        result.pushed++;
-        if (opts.verbose) opts.log?.(`  push ${spec.id}/${t.sessionId.slice(0, 8)} (${stat.size}B)`);
-      } catch (err) {
-        result.errors.push(`push ${spec.id}/${t.sessionId}: ${(err as Error).message}`);
-      }
+      // File-shaped: store the single entry (byte-identical to the old format so
+      // older CLIs read it unchanged). Dir-shaped: store the per-file array.
+      if (entries.length > 0) agentManifest[t.sessionId] = spec.dirShaped ? entries : entries[0];
     }
     if (Object.keys(agentManifest).length > 0) manifest.agents[spec.id] = agentManifest;
   }
@@ -183,9 +199,18 @@ export function selectSessionsToFetch(
 }
 
 /**
- * Resolve the mirror destination + merged content for one session. Pure.
+ * Resolve the mirror destination + reconciled content for ONE file across its
+ * copies (every copy here is the same file — same relKey — held by a different
+ * machine). Pure.
+ *
  * The canonical path comes from the lexicographically-smallest machine so every
- * puller derives an identical location; the content is the CRDT union of copies.
+ * puller derives an identical location. The content depends on the file's kind
+ * (see `isMergeableFile`):
+ *  - append-only logs (a transcript `.jsonl`) take the CRDT G-Set union — every
+ *    machine converges to byte-identical output regardless of order.
+ *  - mutable blobs (Kimi `state.json`) can't be line-unioned without corruption,
+ *    so they resolve **last-writer-wins**: the copy with the latest event
+ *    timestamp, tie-broken by content hash so the pick is deterministic fleet-wide.
  */
 export function resolveMirrorWrite(
   spec: SyncAgentSpec,
@@ -193,7 +218,20 @@ export function resolveMirrorWrite(
   contents: string[],
 ): { dest: string; content: string; merged: boolean } {
   const canonical = [...copies].sort((a, b) => (a.machine < b.machine ? -1 : a.machine > b.machine ? 1 : 0))[0];
-  const content = contents.length === 1 ? contents[0] : mergeTranscripts(contents);
+  let content: string;
+  if (contents.length === 1) {
+    content = contents[0];
+  } else if (isMergeableFile(spec, canonical.entry.relKey)) {
+    content = mergeTranscripts(contents);
+  } else {
+    // Last-writer-wins: highest (lastTs, hash) among the copies.
+    let win = 0;
+    for (let i = 1; i < copies.length; i++) {
+      const a = copies[i].entry, b = copies[win].entry;
+      if (a.lastTs > b.lastTs || (a.lastTs === b.lastTs && a.hash > b.hash)) win = i;
+    }
+    content = contents[win];
+  }
   return {
     dest: mirrorPath(spec, canonical.machine, canonical.entry.relKey),
     content,
@@ -249,9 +287,12 @@ async function pullAndReconcile(r2: R2Client, me: string, encKey: Buffer | null,
       if (!specById(agentId)) continue;
       let byAgent = copies.get(agentId);
       if (!byAgent) copies.set(agentId, (byAgent = new Map()));
-      for (const [sessionId, entry] of Object.entries(sessions)) {
+      for (const [sessionId, value] of Object.entries(sessions)) {
         const list = byAgent.get(sessionId) ?? [];
-        list.push({ machine: m, entry });
+        // One RemoteCopy per (machine, file): file-shaped sessions contribute one,
+        // dir-shaped ones contribute an entry per constituent file. `manifestEntries`
+        // also normalizes a single-object entry written by an older CLI.
+        for (const entry of manifestEntries(value)) list.push({ machine: m, entry });
         byAgent.set(sessionId, list);
       }
     }
@@ -272,40 +313,63 @@ async function pullAndReconcile(r2: R2Client, me: string, encKey: Buffer | null,
   for (const { agentId, sessionId, copies: list, sig } of pending) {
     const spec = specById(agentId)!;
 
-    // Download each copy (could be a fork across >1 machine), keeping the
-    // result positionally aligned to `list` — null marks a copy we couldn't
-    // fetch this tick (404 / consistency lag / error).
-    const fetched: Array<string | null> = [];
+    // A dir-shaped session spans several files; reconcile each file independently
+    // (its copies across machines share one relKey). File-shaped sessions have a
+    // single group, so this collapses to the original one-file path.
+    const byRel = new Map<string, RemoteCopy[]>();
     for (const c of list) {
-      try {
-        const body = await r2.get(objectKey(c.machine, agentId, sessionId));
-        // Decrypt before the body reaches the CRDT union — the merge and the
-        // mirror always operate on plaintext. A legacy plaintext object passes
-        // through untouched; an envelope without a key throws (surfaced below).
-        fetched.push(body === null ? null : decryptTranscriptBody(body, encKey));
-      } catch (err) {
-        result.errors.push(`get ${c.machine}/${sessionId}: ${(err as Error).message}`);
-        fetched.push(null);
-      }
+      const g = byRel.get(c.entry.relKey);
+      if (g) g.push(c); else byRel.set(c.entry.relKey, [c]);
     }
-    // null ⇒ an incomplete fetch: skip the write AND the pull-state stamp so we
-    // retry next tick instead of persisting a partial union / abandoning a branch.
-    const resolved = reconcileCopies(spec, list, fetched);
-    if (!resolved) continue;
-    const { dest, content, merged } = resolved;
+
+    // Resolve every file's write before touching disk. If ANY file's fetch is
+    // incomplete (a copy 404s / consistency lag), abandon the WHOLE session this
+    // tick — no writes, no pull-state stamp — so it retries intact next time
+    // rather than materializing half a session and stamping it done.
+    const writes: Array<{ dest: string; content: string; merged: boolean }> = [];
+    let incomplete = false;
+    for (const group of byRel.values()) {
+      const fetched: Array<string | null> = [];
+      for (const c of group) {
+        try {
+          const body = await r2.get(objectKey(c.machine, agentId, sessionId, spec.dirShaped ? c.entry.relKey : undefined));
+          // Decrypt before the body reaches the CRDT union — merge + mirror always
+          // operate on plaintext. A legacy plaintext object passes through
+          // untouched; an envelope without a key throws (surfaced below).
+          fetched.push(body === null ? null : decryptTranscriptBody(body, encKey));
+        } catch (err) {
+          result.errors.push(`get ${c.machine}/${sessionId}/${c.entry.relKey}: ${(err as Error).message}`);
+          fetched.push(null);
+        }
+      }
+      const resolved = reconcileCopies(spec, group, fetched);
+      if (!resolved) { incomplete = true; break; }
+      writes.push(resolved);
+    }
+    if (incomplete) continue; // retry next tick, session intact
 
     try {
-      let existing: string | null = null;
-      try {
-        existing = fs.readFileSync(dest, 'utf-8');
-      } catch { /* not present yet */ }
-      if (existing !== content) {
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.writeFileSync(dest, content, 'utf-8');
-        if (merged) result.merged++;
+      let changed = false;
+      let mergedAny = false;
+      for (const { dest, content, merged } of writes) {
+        let existing: string | null = null;
+        try {
+          existing = fs.readFileSync(dest, 'utf-8');
+        } catch { /* not present yet */ }
+        if (existing !== content) {
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, content, 'utf-8');
+          changed = true;
+          if (merged) mergedAny = true;
+        }
+      }
+      if (changed) {
+        if (mergedAny) result.merged++;
         result.pulled++;
         if (opts.verbose) {
-          opts.log?.(`  pull ${agentId}/${sessionId.slice(0, 8)} <- ${list.map(c => c.machine).join('+')}`);
+          const machines = [...new Set(list.map(c => c.machine))].join('+');
+          const files = byRel.size > 1 ? ` (${byRel.size} files)` : '';
+          opts.log?.(`  pull ${agentId}/${sessionId.slice(0, 8)}${files} <- ${machines}`);
         }
       } else {
         result.pullSkipped++;
