@@ -347,6 +347,8 @@ agents hosts check gpu-box              # reachable? which agents-cli version?
 # Run there instead of locally
 agents run claude --host gpu-box "profile this build"   # headless: follows live by default
 agents run claude --host gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
+agents hosts ps                         # list dispatched runs + terminal status
+agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
 agents logs --host gpu-box              # pick a dispatched run — concise summary by default
 agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
 agents logs <id> -f                     # re-attach to a running one and follow

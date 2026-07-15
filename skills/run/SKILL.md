@@ -209,12 +209,15 @@ agents run claude "profile this build" --host gpu-box   # follows live
 agents run claude "..." --host gpu-box --no-follow       # detach
 
 agents hosts ps          # list dispatched runs
+agents hosts stop <id>   # terminate a hung/detached run (alias: kill)
 agents logs --host gpu-box   # pick one and view its log
 agents logs <id> -f          # re-attach to a running one and follow
 ```
 
 `agents logs [id]` is the unified viewer over both host-dispatch runs and local
 session transcripts; `agents hosts logs <id>` is the host-only equivalent.
+`agents hosts stop <id>` (alias `kill`) terminates the remote process group from
+this machine without deleting the remote log.
 
 ### Working directory on the host
 

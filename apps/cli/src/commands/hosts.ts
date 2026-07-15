@@ -241,11 +241,18 @@ async function doStop(ref: string): Promise<void> {
   }
   try {
     const stopped = stopDispatchedTask(task);
+    const statusColor = stopped.status === 'completed' ? chalk.green : chalk.yellow;
+    const exitNote =
+      stopped.exitCode === 143
+        ? 'exit 143 / SIGTERM'
+        : stopped.exitCode !== undefined
+          ? `exit ${stopped.exitCode}`
+          : stopped.status;
     console.log(
       chalk.green(`Stopped ${stopped.id}`) +
         chalk.gray(` on ${stopped.host}`) +
-        chalk.yellow('  failed') +
-        chalk.gray(' (exit 143 / SIGTERM)'),
+        '  ' + statusColor(stopped.status) +
+        chalk.gray(` (${exitNote})`),
     );
     console.log(chalk.gray(`Logs: agents hosts logs ${stopped.id}`));
   } catch (err: any) {

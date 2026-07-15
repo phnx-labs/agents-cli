@@ -103,12 +103,42 @@ export function terminateDispatchedTask(task: HostTask): void {
 }
 
 /**
+ * Build the remote shell used by {@link stopDispatchedTask}. Exported for
+ * unit tests — the keep-log / no-clobber contract lives in this script.
+ *
+ * Protocol (printed to stdout for the local caller):
+ * - `SIGNALED`  — process group was live; SIGTERM/KILL applied; wrote 143
+ * - `ALREADY` + code — group gone; adopted existing `.exit` (never overwrite)
+ * - `GONE` — group gone and no `.exit`; write 143 as the local stop outcome
+ * Exit 1 if the group is still alive after TERM/KILL (can't stop it).
+ */
+export function buildStopRemoteCommand(pid: number, remoteExit: string): string {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    throw new Error(`Invalid remote task pid: ${pid}`);
+  }
+  // Only force-write 143 when we actually signaled a live group (or nothing
+  // left a code). Never `echo 143` over a real completed-run exit code.
+  return (
+    `if kill -TERM -- -${pid} 2>/dev/null; then ` +
+      `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
+      `echo 143 > ${remoteExit}; echo SIGNALED; ` +
+    `elif kill -0 -- -${pid} 2>/dev/null; then ` +
+      `exit 1; ` +
+    `else ` +
+      `code=$(cat ${remoteExit} 2>/dev/null | tr -d '[:space:]'); ` +
+      `if [ -n "$code" ]; then echo "ALREADY $code"; ` +
+      `else echo 143 > ${remoteExit}; echo GONE; fi; ` +
+    `fi`
+  );
+}
+
+/**
  * Stop a running host task from the origin machine (`agents hosts stop <id>`).
  *
  * Unlike {@link terminateDispatchedTask} (rollback cleanup after a failed
  * persist), this keeps the remote log so `agents hosts logs <id>` still works,
- * writes a terminal `.exit` marker (143 = SIGTERM) for reconcile, and marks the
- * local record failed.
+ * writes a terminal `.exit` marker only when we actually stopped a live group
+ * (or no code existed), and never clobbers a real completed-run exit code.
  */
 export function stopDispatchedTask(task: HostTask): HostTask {
   if (task.status !== 'running') {
@@ -117,14 +147,7 @@ export function stopDispatchedTask(task: HostTask): HostTask {
   if (!task.pid) {
     throw new Error(`Cannot stop remote task ${task.id}: launch returned no PID.`);
   }
-  const pid = task.pid;
-  // TERM process group, then KILL; write 143 to .exit so `hosts ps`/reconcile
-  // see a terminal state. Keep the log for `hosts logs`.
-  const command =
-    `if kill -TERM -- -${pid} 2>/dev/null; then ` +
-      `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
-    `elif kill -0 -- -${pid} 2>/dev/null; then exit 1; fi; ` +
-    `echo 143 > ${task.remoteExit}`;
+  const command = buildStopRemoteCommand(task.pid, task.remoteExit);
   const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true });
   if (result.code !== 0) {
     throw new Error(
@@ -132,7 +155,14 @@ export function stopDispatchedTask(task: HostTask): HostTask {
       `${(result.stderr || result.stdout).trim() || 'ssh error'}`,
     );
   }
-  return updateTask(task.id, terminalPatch(143)) ?? { ...task, ...terminalPatch(143) };
+  const line = result.stdout.trim().split('\n').pop() ?? '';
+  let code = 143;
+  if (line.startsWith('ALREADY ')) {
+    const parsed = parseInt(line.slice('ALREADY '.length), 10);
+    if (Number.isFinite(parsed)) code = parsed;
+  }
+  // SIGNALED / GONE / ALREADY all end with a terminal local record.
+  return updateTask(task.id, terminalPatch(code)) ?? { ...task, ...terminalPatch(code) };
 }
 
 /** Options shared by every detached dispatch. */
