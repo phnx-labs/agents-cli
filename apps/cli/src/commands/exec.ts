@@ -494,44 +494,57 @@ export function registerRunCommand(program: Command): void {
           process.exit(1);
         }
         const backend = typeof options.lease === 'string' ? options.lease : undefined;
-        const { detectSignedInRuntimes, pickRuntimes, resolveClaudeCredentialsBlob } = await import('../lib/crabbox/runtimes.js');
+        const { detectSignedInRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime } = await import('../lib/crabbox/runtimes.js');
         const { leaseAndRun } = await import('../lib/crabbox/lease.js');
-        const { confirm } = await import('@inquirer/prompts');
+        const { getConfiguredRunStrategy, resolveRunVersion } = await import('../lib/rotate.js');
 
         const detected = await detectSignedInRuntimes();
-        const runtimes = await pickRuntimes(detected);
-        if (runtimes.length === 0) {
-          console.error(chalk.yellow('No runtimes selected. Sign into one locally (e.g. run `claude` once) then retry.'));
+        const agentName = agentSpec.split('@')[0];
+        const leaseCwd = options.cwd ?? process.cwd();
+
+        // `--lease` requires a prompt (guarded above), so it is headless by
+        // contract — never block on an interactive picker. Provision exactly the
+        // one runtime this run needs, inferred from the agent, not every
+        // signed-in CLI (which would ship unrelated tokens to a throwaway box).
+        const runtime = inferLeaseRuntime(agentName, detected);
+        if (!runtime) {
+          console.error(chalk.yellow('No signed-in runtime to provision on the box. Sign into one locally (e.g. run `claude` once) then retry.'));
           process.exit(1);
+        }
+        const runtimes = [runtime];
+
+        // Copy the account the run's OWN strategy would pick (default `balanced`:
+        // a healthy, non-rate-limited account weighted by remaining headroom) —
+        // never the raw default signed-in one, which could be throttled or out of
+        // credits and would boot the box straight into a wall. Best-effort: fall
+        // back to the default account if strategy resolution fails.
+        let leaseEmail = detected.find((d) => d.id === runtime)?.email ?? null;
+        try {
+          const strategy = getConfiguredRunStrategy(runtime, leaseCwd);
+          const { rotation } = await resolveRunVersion(runtime, strategy, leaseCwd);
+          if (rotation?.picked.email) leaseEmail = rotation.picked.email;
+        } catch {
+          /* strategy resolution is best-effort; keep the default signed-in account */
         }
 
-        // Security gate: copying auth tokens to an ephemeral cloud box is opt-in
-        // per run. Name the runtimes + accounts so the user sees what ships.
-        const names = runtimes
-          .map((id) => {
-            const d = detected.find((x) => x.id === id);
-            return `${d?.label ?? id}${d?.email ? ` (${d.email})` : ''}`;
-          })
-          .join(', ');
-        // Claude ships its OAuth token (not just the .claude.json config) — name it
-        // explicitly so the consent covers the actual credential transferred.
-        const whatShips = runtimes.includes('claude') ? 'credentials + Claude OAuth token' : 'credentials';
-        const ok = await confirm({
-          message: `Copy ${whatShips} for ${names} to a disposable cloud box, run there, then destroy it?`,
-          default: false,
-        });
-        if (!ok) {
-          console.error(chalk.yellow('Aborted — no credentials pushed, no box leased.'));
-          process.exit(1);
-        }
+        // Headless-by-contract: don't prompt, but print exactly what ships and
+        // where — copying an auth token to a cloud box is a credential transfer.
+        // The box is destroyed after the run, so the credential's lifetime is
+        // bounded by the run.
+        const whatShips = runtime === 'claude' ? 'credentials + Claude OAuth token' : 'credentials';
+        console.error(
+          chalk.gray(
+            `Leasing a ${backend ?? 'hetzner'} box · shipping ${runtime}${leaseEmail ? ` (${leaseEmail})` : ''} ${whatShips}; the box is destroyed after the run.`,
+          ),
+        );
 
         // Read the Claude OAuth token from the local Keychain (silent) so it can be
         // written to ~/.claude/.credentials.json on the box — otherwise Claude boots
-        // "Not logged in". Consent above already covered this transfer.
+        // "Not logged in". `preferEmail` targets the strategy-picked account so the
+        // token matches the account this run resolved to.
         let claudeCredentialsJson: string | null = null;
-        if (runtimes.includes('claude')) {
-          const claudeEmail = detected.find((d) => d.id === 'claude')?.email ?? null;
-          claudeCredentialsJson = await resolveClaudeCredentialsBlob({ preferEmail: claudeEmail });
+        if (runtime === 'claude') {
+          claudeCredentialsJson = await resolveClaudeCredentialsBlob({ preferEmail: leaseEmail });
           if (!claudeCredentialsJson) {
             console.error(chalk.yellow('Warning: could not read the local Claude OAuth token — the box may come up "Not logged in".'));
           }
@@ -543,7 +556,6 @@ export function registerRunCommand(program: Command): void {
         // box-side marker. Rule: only ONE spinner phase is active at a time, and no
         // other output is written to stderr while it spins — so it can never storm.
         const { createLeaseOutputRouter, createSpinner } = await import('../lib/crabbox/progress.js');
-        const agentName = agentSpec.split('@')[0];
         const spinner = createSpinner({ stream: process.stderr });
         let warmupTimer: ReturnType<typeof setInterval> | undefined;
         const stopTimer = () => { if (warmupTimer) { clearInterval(warmupTimer); warmupTimer = undefined; } };
