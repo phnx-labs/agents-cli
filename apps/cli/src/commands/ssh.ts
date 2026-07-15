@@ -164,7 +164,7 @@ function printFleetResults(results: FleetRunResult[]): void {
       r.status === 'skipped' ? chalk.gray('skipped'.padEnd(8)) :
       chalk.red('failed'.padEnd(8));
     const detail =
-      r.status === 'skipped' ? chalk.gray(skipLabel(r.reason as 'offline' | 'no-address' | 'self-local')) :
+      r.status === 'skipped' ? chalk.gray(skipLabel(r.reason as 'offline' | 'no-address')) :
       r.status === 'failed' ? chalk.red(r.detail || `exit ${r.code ?? '?'}`) :
       chalk.gray(r.code === 0 ? 'exit 0' : '');
     console.log(`${r.name.padEnd(nameW)}  ${status}  ${detail}`);
@@ -380,13 +380,19 @@ Typical workflow:
     .description('Roll out agents-cli to every online registered device (`agents upgrade --yes` on each). Offline devices are skipped.')
     .argument('[version]', 'Target version or dist-tag (default: latest)')
     .action(async (version: string | undefined) => {
+      let cmd: string[];
+      try {
+        cmd = upgradeCommand(version);
+      } catch (err: any) {
+        console.error(chalk.red(err?.message ?? err));
+        process.exit(1);
+      }
       const reg = await loadDevices();
       const targets = planFleetTargets(reg);
       if (targets.length === 0) {
         console.log(chalk.gray("No devices. Run 'agents devices sync' first."));
         return;
       }
-      const cmd = upgradeCommand(version);
       console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
       const results = runFleet(targets, cmd);
       printFleetResults(results);

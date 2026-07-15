@@ -63,12 +63,33 @@ describe('runFleet', () => {
       { name: 'c', status: 'failed', code: 1, detail: 'npm ERR' },
     ]);
   });
+
+  it('records a throwing device as failed and continues the rest', () => {
+    const targets: FleetTarget[] = [
+      { device: device({ name: 'a' }) },
+      { device: device({ name: 'b' }) },
+      { device: device({ name: 'c' }) },
+    ];
+    const results = runFleet(targets, ['true'], (d) => {
+      if (d.name === 'b') throw new Error('password auth but no secrets bundle');
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    expect(results.map((r) => r.status)).toEqual(['ok', 'failed', 'ok']);
+    expect(results[1].detail).toMatch(/password auth/);
+  });
 });
 
 describe('upgradeCommand', () => {
   it('defaults to latest with --yes', () => {
     expect(upgradeCommand()).toEqual(['agents', 'upgrade', '--yes']);
     expect(upgradeCommand('1.20.62')).toEqual(['agents', 'upgrade', '1.20.62', '--yes']);
+    expect(upgradeCommand('latest')).toEqual(['agents', 'upgrade', 'latest', '--yes']);
+  });
+
+  it('rejects shell metacharacters in the version pin', () => {
+    expect(() => upgradeCommand('1.0.0; curl evil')).toThrow(/Invalid version/);
+    expect(() => upgradeCommand('$(reboot)')).toThrow(/Invalid version/);
+    expect(() => upgradeCommand('1.0.0 && true')).toThrow(/Invalid version/);
   });
 });
 

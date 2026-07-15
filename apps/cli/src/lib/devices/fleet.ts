@@ -3,15 +3,19 @@
  *
  * Used by `agents fleet update` / `agents fleet run` (aliases of the same
  * subcommands under `agents devices`). Offline devices are skipped with a
- * reason so a single dead node never blocks the rest of the rollout.
+ * reason so a single dead node never blocks the rest of the rollout. Per-device
+ * throws (misconfigured auth, etc.) become `failed` rows — they never abort
+ * the remaining devices.
  */
 
 import { spawnSync } from 'child_process';
-import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from './registry.js';
 import { buildSshInvocation, sshTargetFor, writeAskpassShim } from './connect.js';
 
-export type FleetSkipReason = 'offline' | 'no-address' | 'self-local';
+export type FleetSkipReason = 'offline' | 'no-address';
+
+/** npm dist-tags / semver pins only — rejects shell metacharacters. */
+export const FLEET_VERSION_RE = /^[A-Za-z0-9._-]+$/;
 
 export interface FleetTarget {
   device: DeviceProfile;
@@ -33,10 +37,8 @@ export interface FleetRunResult {
  *
  * - Tailscale-offline → skip `offline`
  * - No address → skip `no-address`
- * - This machine (`machineId`) is included as a normal target when it has an
- *   address (remote path); callers that want a local-spawn path can detect
- *   `name === machineId()` themselves. We do **not** skip self by default —
- *   rolling the CLI out to "every box including this one" is the common case.
+ * - Everything else is a target (including this machine, reached over ssh when
+ *   it has a registry address — same path as any other box).
  */
 export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
   const names = Object.keys(reg).sort();
@@ -61,44 +63,63 @@ export function skipLabel(reason: FleetSkipReason): string {
       return 'offline';
     case 'no-address':
       return 'no address';
-    case 'self-local':
-      return 'this machine';
   }
 }
 
 /**
  * Run `cmd` on one device via the same ssh path as `agents ssh <name> …`.
  * Captures stdout/stderr (not inherited) so the fleet table can summarize.
+ * Throws from buildSshInvocation are returned as a non-zero result so a single
+ * misconfigured device cannot abort the fleet loop.
  */
 export function runOnDevice(
   device: DeviceProfile,
   cmd: string[],
   opts: { timeoutMs?: number } = {},
 ): { code: number | null; stdout: string; stderr: string } {
-  const shim = writeAskpassShim();
-  const { args, env } = buildSshInvocation(device, cmd, shim);
-  const res = spawnSync('ssh', args, {
-    encoding: 'utf-8',
-    env: { ...process.env, ...env },
-    timeout: opts.timeoutMs ?? 600_000,
-  });
-  return {
-    code: res.status,
-    stdout: res.stdout?.toString() ?? '',
-    stderr: (res.stderr?.toString() ?? '') + (res.error ? String(res.error.message) : ''),
-  };
+  try {
+    const shim = writeAskpassShim();
+    const { args, env } = buildSshInvocation(device, cmd, shim);
+    const res = spawnSync('ssh', args, {
+      encoding: 'utf-8',
+      env: { ...process.env, ...env },
+      timeout: opts.timeoutMs ?? 600_000,
+    });
+    return {
+      code: res.status,
+      stdout: res.stdout?.toString() ?? '',
+      stderr: (res.stderr?.toString() ?? '') + (res.error ? String(res.error.message) : ''),
+    };
+  } catch (err) {
+    return {
+      code: 1,
+      stdout: '',
+      stderr: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
-/** Run `agents upgrade --yes` (or a pin) on a device. */
+/**
+ * Build `agents upgrade --yes` argv, optionally pinned to a version/dist-tag.
+ * Rejects anything that is not a plain npm version/tag token so a version pin
+ * cannot inject shell metacharacters into the remote command line.
+ */
 export function upgradeCommand(version?: string): string[] {
-  return version
-    ? ['agents', 'upgrade', version, '--yes']
-    : ['agents', 'upgrade', '--yes'];
+  if (version !== undefined && version !== '') {
+    if (!FLEET_VERSION_RE.test(version)) {
+      throw new Error(
+        `Invalid version '${version}'. Use a semver or dist-tag (letters, digits, . _ - only).`,
+      );
+    }
+    return ['agents', 'upgrade', version, '--yes'];
+  }
+  return ['agents', 'upgrade', '--yes'];
 }
 
 /**
  * Execute a command across planned targets. Pure orchestration over
- * {@link runOnDevice}; testable by injecting `runner`.
+ * {@link runOnDevice}; testable by injecting `runner`. Per-device throws from
+ * the runner are recorded as `failed` so one bad device never aborts the rest.
  */
 export function runFleet(
   targets: FleetTarget[],
@@ -116,20 +137,24 @@ export function runFleet(
       });
       continue;
     }
-    const res = runner(t.device, cmd);
-    const ok = res.code === 0;
-    const detail = (res.stderr || res.stdout).trim().slice(0, 200);
-    results.push({
-      name: t.device.name,
-      status: ok ? 'ok' : 'failed',
-      code: res.code,
-      detail: ok ? undefined : detail || undefined,
-    });
+    try {
+      const res = runner(t.device, cmd);
+      const ok = res.code === 0;
+      const detail = (res.stderr || res.stdout).trim().slice(0, 200);
+      results.push({
+        name: t.device.name,
+        status: ok ? 'ok' : 'failed',
+        code: res.code,
+        detail: ok ? undefined : detail || undefined,
+      });
+    } catch (err) {
+      results.push({
+        name: t.device.name,
+        status: 'failed',
+        code: 1,
+        detail: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+      });
+    }
   }
   return results;
-}
-
-/** Whether this process is running on `name` (local machine). Exported for tests. */
-export function isLocalDevice(name: string): boolean {
-  return name === machineId();
 }
