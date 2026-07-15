@@ -15,6 +15,15 @@ describe('inferLeaseRuntime', () => {
     expect(inferLeaseRuntime('codex', [signedIn('codex', null)])).toBe('codex');
   });
 
+  it('returns null when the named runtime is not signed in — never substitutes another', () => {
+    // `run codex --lease` while only claude is signed in must NOT provision claude.
+    expect(inferLeaseRuntime('codex', [signedIn('claude', 'a@b.com')])).toBeNull();
+    expect(inferLeaseRuntime('grok', [
+      { id: 'grok', label: 'Grok CLI', email: null, signedIn: false, credPath: null },
+      signedIn('claude', 'a@b.com'),
+    ])).toBeNull();
+  });
+
   it('falls back to the signed-in runtime (preferring claude) for a custom agent', () => {
     const detected = [signedIn('claude', 'a@b.com'), signedIn('grok', 'g@x.ai')];
     expect(inferLeaseRuntime('my-workflow', detected)).toBe('claude');

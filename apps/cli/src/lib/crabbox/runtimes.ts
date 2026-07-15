@@ -120,9 +120,15 @@ export async function pickRuntimes(
  * under a non-obvious runtime are resolved separately — see RUSH-1725.
  */
 export function inferLeaseRuntime(agentName: string, detected: DetectedRuntime[]): AgentId | null {
-  const direct = LEASE_RUNTIMES.find((c) => c.id === agentName);
-  if (direct) return direct.id;
   const signedIn = detected.filter((d) => d.signedIn && d.credPath);
+  // The agent names a lease runtime directly: require that runtime to be signed
+  // in — never silently substitute a different one for an explicit `run <runtime>`
+  // (that would lease a billable box only to boot it "Not logged in"). Not signed
+  // in → null, so the caller exits with "sign into it locally first".
+  if (LEASE_RUNTIMES.some((c) => c.id === agentName)) {
+    return signedIn.find((d) => d.id === agentName)?.id ?? null;
+  }
+  // Custom/workflow agent: fall back to the signed-in runtime (preferring claude).
   return signedIn.find((d) => d.id === 'claude')?.id ?? signedIn[0]?.id ?? null;
 }
 
