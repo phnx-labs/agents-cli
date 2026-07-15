@@ -47,6 +47,13 @@ import {
   buildSshInvocation,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
+import {
+  planFleetTargets,
+  runFleet,
+  skipLabel,
+  upgradeCommand,
+  type FleetRunResult,
+} from '../lib/devices/fleet.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet. */
@@ -143,11 +150,38 @@ async function runInteractiveDeviceSync(): Promise<void> {
   console.log(parts.join(chalk.gray(' · ')));
 }
 
-/** Register the `agents devices` command tree. */
+/** Print a per-device result table for fleet update/run. */
+function printFleetResults(results: FleetRunResult[]): void {
+  const nameW = Math.max(8, ...results.map((r) => r.name.length));
+  console.log(
+    chalk.bold('DEVICE'.padEnd(nameW)) + '  ' +
+    chalk.bold('STATUS'.padEnd(8)) + '  ' +
+    chalk.bold('DETAIL'),
+  );
+  for (const r of results) {
+    const status =
+      r.status === 'ok' ? chalk.green('ok'.padEnd(8)) :
+      r.status === 'skipped' ? chalk.gray('skipped'.padEnd(8)) :
+      chalk.red('failed'.padEnd(8));
+    const detail =
+      r.status === 'skipped' ? chalk.gray(skipLabel(r.reason as 'offline' | 'no-address' | 'self-local')) :
+      r.status === 'failed' ? chalk.red(r.detail || `exit ${r.code ?? '?'}`) :
+      chalk.gray(r.code === 0 ? 'exit 0' : '');
+    console.log(`${r.name.padEnd(nameW)}  ${status}  ${detail}`);
+  }
+  const ok = results.filter((r) => r.status === 'ok').length;
+  const failed = results.filter((r) => r.status === 'failed').length;
+  const skipped = results.filter((r) => r.status === 'skipped').length;
+  console.log(chalk.gray(`${ok} ok · ${failed} failed · ${skipped} skipped`));
+  if (failed > 0) process.exitCode = 1;
+}
+
+/** Register the `agents devices` command tree (also aliased as `fleet`). */
 function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
     .command('devices')
-    .description('Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale.')
+    .alias('fleet')
+    .description('Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.')
     .addHelpText('after', `
 Typical workflow:
   agents devices sync            # curate: pick which tailscale nodes to keep (TTY)
@@ -156,6 +190,10 @@ Typical workflow:
   agents devices ignore ipad165  # dismiss a node so it's never re-suggested
   agents devices set win-mini --auth password --bundle muqsit
   agents devices render --write  # write ~/.ssh/config.d/agents include
+  agents fleet update            # roll out latest agents-cli to every online device
+  agents fleet run uname -a      # run a command on every online device
+
+\`agents fleet\` is an alias for \`agents devices\` — same subcommands.
 `);
 
   devicesCmd
@@ -335,6 +373,43 @@ Typical workflow:
       fs.writeFileSync(file, text, { mode: 0o600 });
       console.log(chalk.green(`Wrote ${file}`));
       console.log(chalk.gray('Add this to ~/.ssh/config (once):  Include config.d/agents'));
+    });
+
+  devicesCmd
+    .command('update')
+    .description('Roll out agents-cli to every online registered device (`agents upgrade --yes` on each). Offline devices are skipped.')
+    .argument('[version]', 'Target version or dist-tag (default: latest)')
+    .action(async (version: string | undefined) => {
+      const reg = await loadDevices();
+      const targets = planFleetTargets(reg);
+      if (targets.length === 0) {
+        console.log(chalk.gray("No devices. Run 'agents devices sync' first."));
+        return;
+      }
+      const cmd = upgradeCommand(version);
+      console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
+      const results = runFleet(targets, cmd);
+      printFleetResults(results);
+    });
+
+  devicesCmd
+    .command('run <cmd...>')
+    .description('Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …')
+    .allowUnknownOption()
+    .action(async (cmd: string[]) => {
+      if (!cmd.length) {
+        console.error(chalk.red('Usage: agents fleet run <cmd...>'));
+        process.exit(1);
+      }
+      const reg = await loadDevices();
+      const targets = planFleetTargets(reg);
+      if (targets.length === 0) {
+        console.log(chalk.gray("No devices. Run 'agents devices sync' first."));
+        return;
+      }
+      console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
+      const results = runFleet(targets, cmd);
+      printFleetResults(results);
     });
 }
 

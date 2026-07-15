@@ -1,8 +1,8 @@
 ---
 name: devices
 description: "Register and connect to your machines over Tailscale SSH with agents-cli. Use this skill to sync devices from the tailnet, list them, open a shell on another machine, or see agent sessions running across your whole fleet."
-argument-hint: "[sync|list|show|add|set|ssh]"
-allowed-tools: Bash(agents devices*), Bash(agents ssh*), Bash(agents sessions*), Bash(agents run*), Bash(agents hosts*), Bash(agents logs*)
+argument-hint: "[sync|list|show|add|set|ssh|update|run|fleet]"
+allowed-tools: Bash(agents devices*), Bash(agents fleet*), Bash(agents ssh*), Bash(agents sessions*), Bash(agents run*), Bash(agents hosts*), Bash(agents logs*)
 user-invocable: true
 ---
 
@@ -10,8 +10,12 @@ user-invocable: true
 
 Manage a registry of SSH device profiles and reach your other machines. The
 registry self-populates from `tailscale status --json`, so on a tailnet you
-rarely hand-enter a host. This skill teaches the `agents devices` and
-`agents ssh` CLIs, plus the fleet-wide `agents sessions --active` view.
+rarely hand-enter a host. This skill teaches the `agents devices` /
+`agents fleet` (alias) and `agents ssh` CLIs, plus the fleet-wide
+`agents sessions --active` view.
+
+`agents fleet` is a synonym for `agents devices` — every subcommand works under
+either name (`agents fleet list` == `agents devices list`).
 
 ## Register devices
 
@@ -62,6 +66,20 @@ agents ssh <name>
 # Run a one-off command and return.
 agents ssh <name> uname -a
 ```
+
+## Fleet-wide rollout
+
+```bash
+# Roll out the latest agents-cli to every online registered device.
+agents fleet update
+agents fleet update 1.20.62     # pin a version / dist-tag
+
+# Run an arbitrary command on every online device; offline ones are skipped.
+agents fleet run uname -a
+agents fleet run 'agents --version'
+```
+
+Both print a per-device result table (`ok` / `failed` / `skipped`).
 
 To use plain `ssh <name>`, render the registry into your ssh config:
 
