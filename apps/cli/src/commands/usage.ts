@@ -4,6 +4,7 @@
  * Lists every installed agent with the best available usage snapshot:
  *   - claude: live OAuth API call (cached for 2 minutes)
  *   - codex:  parsed from latest session log's rate_limits event
+ *   - droid:  live Factory billing/limits API call (cached for 2 minutes)
  *   - others: marked as "not exposed by CLI" (Gemini, OpenCode, Cursor, etc.
  *     don't publish per-account usage today)
  */
@@ -24,7 +25,7 @@ import { listInstalledVersions, getGlobalDefault, getVersionHomePath } from '../
 import { formatUsageSection, getUsageInfoForIdentity } from '../lib/usage.js';
 
 /** Agents whose CLI surfaces usage data we can read today. */
-const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex']);
+const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex', 'droid']);
 
 export function registerUsageCommand(program: Command): void {
   addHostOption(program.command('usage [agent]'))
