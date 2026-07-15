@@ -67,6 +67,31 @@ describe('foldBrowserSessionsIntoProfiles', () => {
     expect(fs.existsSync(dest)).toBe(true);
   });
 
+  it('merges into a pre-existing destination and preserves nested recordings/ (no stranding)', () => {
+    // The collision case: a new capture already landed in the per-profile dir
+    // before migration runs, and the legacy dir has a top-level file plus a
+    // nested recordings/ subdir. A plain file-move would EISDIR on the dir and
+    // silently strand the legacy captures; moveDirOnce must merge them in.
+    writeTasks('work', ['shared-task']);
+    // pre-existing new-layout capture at the destination
+    const destDir = path.join(browserDir, 'work', 'sessions', 'shared-task');
+    fs.mkdirSync(destDir, { recursive: true });
+    fs.writeFileSync(path.join(destDir, 'new.png'), 'new');
+    // legacy capture with a top-level file and a nested recordings/ file
+    writeLegacyCapture('shared-task', 'old.png');
+    const legacyRec = path.join(browserDir, 'sessions', 'shared-task', 'recordings');
+    fs.mkdirSync(legacyRec, { recursive: true });
+    fs.writeFileSync(path.join(legacyRec, 'old.webm'), 'rec');
+
+    foldBrowserSessionsIntoProfiles(browserDir);
+
+    expect(fs.existsSync(path.join(destDir, 'new.png'))).toBe(true);           // kept
+    expect(fs.existsSync(path.join(destDir, 'old.png'))).toBe(true);           // merged in
+    expect(fs.existsSync(path.join(destDir, 'recordings', 'old.webm'))).toBe(true); // nested merged in
+    // nothing stranded at the legacy root
+    expect(fs.existsSync(path.join(browserDir, 'sessions', 'shared-task'))).toBe(false);
+  });
+
   it('does not treat the shared sessions/ dir name as a profile owner', () => {
     // A capture whose task name collides with nothing still folds cleanly; the
     // reserved 'sessions' and '_legacy' dir names are never scanned for tasks.json.

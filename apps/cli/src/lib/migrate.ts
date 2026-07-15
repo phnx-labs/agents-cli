@@ -337,15 +337,6 @@ function foldUserHooksYamlIntoAgentsYaml(): void {
 }
 
 /**
- * Fold ~/.agents/browser/profiles/*.yaml into ~/.agents/agents.yaml under a
- * `browser:` key, then delete the profiles directory. Single user file to sync.
- *
- * On collision (a profile name already exists in agents.yaml browser:), the
- * existing agents.yaml entry wins and the standalone copy is dropped.
- *
- * Idempotent: skips if profiles dir is absent or empty.
- */
-/**
  * Fold the legacy GLOBAL browser captures root
  * (`~/.agents/.cache/browser/sessions/<task>/`) into the new PER-PROFILE layout
  * (`~/.agents/.cache/browser/<profile>/sessions/<task>/`), so each profile is one
@@ -385,7 +376,10 @@ export function foldBrowserSessionsIntoProfiles(browserDir: string = path.join(C
   for (const taskEntry of taskDirs) {
     if (!taskEntry.isDirectory()) continue;
     const owner = taskOwner.get(taskEntry.name) ?? '_legacy';
-    moveFileOnce(
+    // A capture dir can hold a nested recordings/ subdir and may collide with a
+    // dest that already has newer captures — moveDirOnce merges (skip-existing),
+    // moveFileOnce would EISDIR on unlink and silently strand the captures.
+    moveDirOnce(
       path.join(legacySessionsDir, taskEntry.name),
       path.join(browserDir, owner, 'sessions', taskEntry.name)
     );
@@ -394,6 +388,15 @@ export function foldBrowserSessionsIntoProfiles(browserDir: string = path.join(C
   rmEmptyDirTree(legacySessionsDir);
 }
 
+/**
+ * Fold ~/.agents/browser/profiles/*.yaml into ~/.agents/agents.yaml under a
+ * `browser:` key, then delete the profiles directory. Single user file to sync.
+ *
+ * On collision (a profile name already exists in agents.yaml browser:), the
+ * existing agents.yaml entry wins and the standalone copy is dropped.
+ *
+ * Idempotent: skips if profiles dir is absent or empty.
+ */
 function foldBrowserProfilesIntoAgentsYaml(): void {
   const profilesDir = path.join(USER_DIR, 'browser', 'profiles');
   if (!fs.existsSync(profilesDir)) return;

@@ -1018,7 +1018,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
     // Bumping the suffix re-runs migrations for every user; binary releases that
     // don't change the schema must NOT re-run (they would destroy user content
     // when migration steps overlap with user-authored paths). See issue #20.
-    const sentinelValue = 'v12';
+    const sentinelValue = 'v13';
     let needRun = true;
     try {
       if (fs.existsSync(sentinel) && fs.readFileSync(sentinel, 'utf-8').trim() === sentinelValue) {
