@@ -429,29 +429,85 @@ export async function checkGitHubRepoExists(owner: string, repo: string): Promis
   }
 }
 
+/** Result of {@link commitAndPush}. */
+export type CommitAndPushResult = {
+  success: boolean;
+  error?: string;
+  /** Human detail for success: "already up to date", "pushed abc..def", "committed and pushed …". */
+  detail?: string;
+  branch?: string;
+  committed?: boolean;
+  pushed?: boolean;
+};
+
 /**
- * Commit and push changes in a repo.
+ * Commit (if dirty) and push a repo.
+ *
+ * Clean tree + local ahead of origin still pushes — "nothing to commit" is not
+ * "nothing to push". Reports "already up to date" only when `ahead === 0` and
+ * there is nothing to commit.
  */
-export async function commitAndPush(repoPath: string, message: string): Promise<{ success: boolean; error?: string }> {
+export async function commitAndPush(repoPath: string, message: string): Promise<CommitAndPushResult> {
   try {
     const git = simpleGit(repoPath);
+    let status = await git.status();
+    const branch = status.current || 'main';
 
-    // Check for changes
-    const status = await git.status();
-    if (status.files.length === 0) {
-      return { success: true }; // Nothing to commit
+    let committed = false;
+    if (status.files.length > 0) {
+      await git.add('-A');
+      await git.commit(message);
+      committed = true;
+      status = await git.status();
     }
 
-    // Stage all changes
-    await git.add('-A');
+    const ahead = status.ahead ?? 0;
+    if (!committed && ahead === 0) {
+      return {
+        success: true,
+        detail: 'already up to date',
+        branch,
+        committed: false,
+        pushed: false,
+      };
+    }
 
-    // Commit
-    await git.commit(message);
+    // Capture remote tip before push for a real ref range in the detail string.
+    let before = '';
+    try {
+      before = (await git.raw(['rev-parse', '--short=8', `origin/${branch}`])).trim();
+    } catch {
+      /* origin/<branch> may not exist yet (first push) */
+    }
 
-    // Push
-    await git.push('origin', 'main');
+    await git.push('origin', branch);
 
-    return { success: true };
+    let after = '';
+    try {
+      after = (await git.raw(['rev-parse', '--short=8', 'HEAD'])).trim();
+    } catch {
+      after = 'unknown';
+    }
+
+    const range =
+      before && after && before !== after
+        ? `${before}..${after}`
+        : after || undefined;
+    const detail = committed
+      ? range
+        ? `committed and pushed ${range}`
+        : 'committed and pushed'
+      : range
+        ? `pushed ${range}`
+        : 'pushed';
+
+    return {
+      success: true,
+      detail,
+      branch,
+      committed,
+      pushed: true,
+    };
   } catch (err) {
     return { success: false, error: (err as Error).message };
   }
@@ -720,8 +776,14 @@ export function displayHomePath(dir: string): string {
 /**
  * Pull changes in an existing repo.
  * Refuses to pull if the working tree is dirty -- user must commit or discard changes first.
+ *
+ * Uses `git pull --rebase` (same strategy as {@link syncRepoGit}) so a diverged
+ * branch reconciles instead of failing with "Need to specify how to reconcile
+ * divergent branches".
  */
-export async function pullRepo(dir: string): Promise<{ success: boolean; commit: string; error?: string }> {
+export async function pullRepo(
+  dir: string,
+): Promise<{ success: boolean; commit: string; error?: string; branch?: string }> {
   try {
     const git = simpleGit(dir);
     const status = await git.status();
@@ -734,8 +796,9 @@ export async function pullRepo(dir: string): Promise<{ success: boolean; commit:
       };
     }
 
-    await git.fetch();
-    await git.pull();
+    const branch = status.current || 'main';
+    await git.fetch('origin');
+    await git.pull('origin', branch, { '--rebase': 'true' });
 
     installGithooksSymlinks(dir);
 
@@ -743,6 +806,7 @@ export async function pullRepo(dir: string): Promise<{ success: boolean; commit:
     return {
       success: true,
       commit: log.latest?.hash.slice(0, 8) || 'unknown',
+      branch,
     };
   } catch (err) {
     return { success: false, commit: '', error: (err as Error).message };
