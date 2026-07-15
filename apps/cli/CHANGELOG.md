@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Fix: mailbox GC actually archives expired messages on live boxes (RUSH-1611).**
+  The live-box branch of `gcMailbox` only incremented `messagesDroppedExpired`
+  without moving the file to `consumed/`, so `agents feed --dispatch` could report
+  drops while leaving expired messages in `inbox/`/`processing/`. GC now reuses
+  `sweepExpired` (the same path as drain/peek). Source: `apps/cli/src/lib/mailbox-gc.ts`.
 - **Fix: Antigravity sign-in detection on Linux when the OAuth grant lives in Secret Service (RUSH-1329).** `agy` uses the Go keyring library, which prefers libsecret (gnome-keyring) over the file fallback whenever a Secret Service daemon is running — so `~/.gemini/antigravity-cli/antigravity-oauth-token` may be absent even when the user is signed in. After the file check, `getAccountInfo` now probes `secret-tool lookup service gemini username antigravity` (exit 0 = present; stdout discarded), mirroring the macOS `security find-generic-password` probe from #506. Missing `secret-tool`, locked collections, and timeouts all read as signed out. Opt out with `AGENTS_NO_KEYCHAIN_PROBE=1`. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/agents.test.ts`.
 - **Extend session sync to Droid, Grok, Kimi, and OpenCode (RUSH-1467).** `agents sessions sync` now includes these four agents in its upload/download matrix. `SyncAgentSpec` gains an optional `ext` field so agents with non-`.jsonl` transcript files (e.g., Kimi `state.json`) are walked correctly. Droid `.jsonl` rollouts, Grok `events.jsonl` streams, and Kimi `state.json` metadata files round-trip through the R2 mirror; OpenCode is slotted in `SYNC_AGENTS` but remains a placeholder because its sessions live in a SQLite DB and still require an SQLite-to-JSONL export step. Source: `apps/cli/src/lib/session/sync/agents.ts`, `apps/cli/src/lib/session/sync/agents.test.ts`, `apps/cli/src/commands/sessions-sync.ts`.
 
