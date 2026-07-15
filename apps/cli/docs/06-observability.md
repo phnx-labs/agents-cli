@@ -298,7 +298,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Claude | email + plan | live (`api.anthropic.com`) | email/plan/quota from the local OAuth credential + usage API |
 | Codex | email + plan | last-seen (session logs) | email/plan from the auth JWT; quota parsed from the newest session's rate-limit event |
 | Gemini, Grok | email | — | email read from the local auth file |
-| Droid | email | — | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. No network. Plan needs an authed call, so it's omitted. |
+| Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
 | Antigravity | `signed in` | — | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`) |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
@@ -309,11 +309,13 @@ Two deliberate boundaries worth knowing:
   show their own email — the same thing the `droid` CLI does. If it can't be
   decrypted (a `keyring-v2`/legacy login with no on-disk key), the row falls
   back to `signed in` rather than blanking.
-- **Kimi usage never refreshes the token.** `agents view` is a read/inspect
-  command, so it must not rotate the user's OAuth credential (rewriting the
-  file, invalidating the refresh token, racing a running `kimi`). An expired
-  token simply falls back to the cached snapshot; the `kimi` CLI refreshes on
-  its own launch.
+- **Kimi and Droid usage never refresh the token.** `agents view` is a
+  read/inspect command, so it must not rotate the user's OAuth credential
+  (rewriting the file, invalidating the single-use refresh token, racing a
+  running `kimi` / `droid`). An expired token simply falls back to the cached
+  snapshot; each agent's own CLI refreshes on its next launch (Droid's token
+  lives 24h). Droid surfaces the `standard` (primary) rate-limit pool, not the
+  free `core` fallback pool.
 
 The same fields are exposed programmatically via `agents view --json`
 (`email`, `accountId`, `plan`, `usageStatus`, `windows`).
