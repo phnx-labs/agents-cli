@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, type JobConfig } from './routines.js';
-import { getRoutinesDir, getSystemRoutinesDir, ensureAgentsDir } from './state.js';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, type JobConfig } from './routines.js';
+import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
@@ -408,5 +408,41 @@ describe('writeJob extension handling', () => {
       if (fs.existsSync(ymlFile)) fs.unlinkSync(ymlFile);
       if (fs.existsSync(yamlFile)) fs.unlinkSync(yamlFile);
     }
+  });
+});
+
+describe('routine name path containment (C4)', () => {
+  const runsDir = path.resolve(getRunsDir());
+
+  it('validateJob rejects a traversal name', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', name: '../../../../etc' })))
+      .toContain(
+        `invalid name "../../../../etc": must be a single path segment ` +
+        `(no '/', '\\\\', or null bytes, and not '.' or '..')`,
+      );
+  });
+
+  it('validateJob rejects a name with a separator', () => {
+    const errs = validateJob(baseJob({ schedule: '0 3 * * *', name: 'a/b' }));
+    expect(errs.some(e => e.startsWith('invalid name'))).toBe(true);
+  });
+
+  it('validateJob accepts a normal single-segment name', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', name: 'daily-standup' }))).toEqual([]);
+  });
+
+  // getRunDir is the run-directory sink reached on the daemon's load/schedule
+  // path (runner.ts executeJob/executeJobDetached) — which never calls
+  // validateJob — so it must contain the untrusted name itself.
+  it('getJobRunsDir / getRunDir contain a benign name under the runs dir', () => {
+    const p = getRunDir('daily-standup', 'run-1');
+    expect(p).toBe(path.join(runsDir, 'daily-standup', 'run-1'));
+    expect(path.resolve(p).startsWith(runsDir + path.sep)).toBe(true);
+  });
+
+  it('getRunDir rejects a traversal name so mkdirSync/writes cannot escape the runs dir', () => {
+    expect(() => getRunDir('../../../../tmp/evil-routine', 'run-1')).toThrow();
+    expect(() => getJobRunsDir('..')).toThrow();
+    expect(() => getJobRunsDir('a/b')).toThrow();
   });
 });

@@ -4,18 +4,25 @@
 
 ### Security
 
-- **Path-traversal containment for two untrusted-input filesystem sinks.**
+- **Path-traversal containment for untrusted-input filesystem sinks.**
   - Routine job names (from routine YAML `name:` / file basename, which can arrive via a
     synced user/system config repo) are now contained to a single path segment beneath
-    the routines dir. A crafted name such as `../../../..` can no longer steer the overlay
-    HOME setup — whose teardown does a recursive `rmSync` — at a path outside
-    `~/.agents/routines`. (`apps/cli/src/lib/sandbox.ts`, validated in
-    `apps/cli/src/lib/routines.ts`.)
+    the routines dir at **every** sink. A crafted name such as `../../../..` can no longer
+    steer the overlay HOME setup — whose teardown does a recursive `rmSync`
+    (`apps/cli/src/lib/sandbox.ts`) — nor the per-run directory that the daemon's
+    load/schedule path `mkdirSync`s and writes `stdout.log`/`meta.json`/`report.md` into
+    (`getJobRunsDir`/`getRunDir` in `apps/cli/src/lib/routines.ts`, used by
+    `apps/cli/src/lib/runner.ts`), outside `~/.agents/routines` and
+    `~/.agents/.history/runs`. `validateJob` also rejects unsafe names.
   - Session-sync **pull** now validates the peer-controlled `machine` and `relKey` fields
     before writing a mirrored transcript, matching the guard the push side already applied.
     A malicious fleet peer can no longer use a manifest `relKey` like
-    `../../../.ssh/authorized_keys` to write attacker content outside the backups mirror.
-    (`apps/cli/src/lib/session/sync/agents.ts`.)
+    `../../../.ssh/authorized_keys` to write attacker content outside the backups mirror
+    (`apps/cli/src/lib/session/sync/agents.ts`). The new containment rejection is caught
+    per-session in `apps/cli/src/lib/session/sync/sync.ts` and around the umbrella-sync
+    stage in `apps/cli/src/lib/sync-umbrella.ts`, so one malicious manifest entry can't
+    wedge the whole sync tick (skipping `savePullState`) or the `agents sync` reconcile
+    stage for everyone else.
   - Shared containment helpers `isSafeSegmentName` / `assertWithin` added to
     `apps/cli/src/lib/paths.ts`.
 
