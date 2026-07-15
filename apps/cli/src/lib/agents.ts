@@ -1093,28 +1093,71 @@ function decryptDroidCredential(
 let cachedAgyKeychainSignedIn: boolean | undefined;
 
 /**
- * Antigravity (`agy`, a Codeium/Windsurf-based CLI) stores its OAuth token in
- * the macOS keychain — service `gemini`, account `antigravity` — NOT a file.
- * The file path (`antigravity-oauth-token`) only exists on Linux, where the Go
- * keyring falls back to disk. Probe the keychain for existence (metadata only;
- * `-w` omitted so it never prompts). Cached per process — the keychain is
- * account-global, so one probe covers every installed version. Returns false on
- * non-macOS (the file path handles those).
+ * Antigravity (`agy`) stores its OAuth token via the Go keyring library
+ * (zalando/go-keyring), which is platform-split:
+ *
+ *   - macOS: login keychain, service `gemini`, account `antigravity` — no file.
+ *   - Linux with Secret Service (libsecret / gnome-keyring): attributes
+ *     service=`gemini`, username=`antigravity` (go-keyring's Secret Service
+ *     mapping of service+user). Prefer this over the file when a keyring
+ *     daemon is running.
+ *   - Linux without Secret Service: file fallback at
+ *     `~/.gemini/antigravity-cli/antigravity-oauth-token`.
+ *
+ * Probe the OS keyring for existence after the file check. On macOS,
+ * `security find-generic-password` without `-w` is metadata-only (never
+ * prompts). On Linux, `secret-tool lookup` exit 0 means the item exists
+ * (stdout is the secret — discarded, never logged). Cached per process —
+ * the keyring is account-global, so one probe covers every installed version.
+ * Returns false when the platform has no probe (Windows) or the tool is
+ * missing. Guard with `AGENTS_NO_KEYCHAIN_PROBE=1` for hermetic tests.
  */
+export function antigravityOsKeyringProbe(
+  platform: NodeJS.Platform = process.platform,
+): { cmd: string; args: string[] } | null {
+  if (platform === 'darwin') {
+    return {
+      cmd: 'security',
+      args: ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'],
+    };
+  }
+  if (platform === 'linux') {
+    // go-keyring secret_service attributes: "service" + "username" (not
+    // "account" — that flag is the macOS security(1) spelling of the same user).
+    return {
+      cmd: 'secret-tool',
+      args: ['lookup', 'service', 'gemini', 'username', 'antigravity'],
+    };
+  }
+  return null;
+}
+
+/** @internal test hook — clear the per-process keyring probe cache. */
+export function __resetAntigravityKeychainCacheForTest(): void {
+  cachedAgyKeychainSignedIn = undefined;
+}
+
 async function antigravityKeychainSignedIn(): Promise<boolean> {
-  if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
-  // Test isolation: the real macOS keychain can't be sandboxed per-test, so
-  // allow suites asserting "signed out" to opt out of the probe (same spirit as
-  // AGENTS_REAL_HOME). Not cached, so tests can toggle it.
+  // Test isolation first (before cache): real OS keyrings can't be sandboxed
+  // per-test. Same spirit as AGENTS_REAL_HOME. Not cached, so tests can toggle.
   if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return false;
-  if (process.platform !== 'darwin') {
+  if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
+
+  const probe = antigravityOsKeyringProbe();
+  if (!probe) {
     cachedAgyKeychainSignedIn = false;
     return false;
   }
   try {
-    await execFileAsync('security', ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'], { timeout: 3000 });
+    // Discard stdout: Linux secret-tool lookup prints the secret value.
+    await execFileAsync(probe.cmd, probe.args, {
+      timeout: 3000,
+      // encoding so stdout is a string we can drop without ever logging it
+      encoding: 'utf8',
+    });
     cachedAgyKeychainSignedIn = true;
   } catch {
+    // Missing tool (ENOENT), missing item, locked collection, timeout → signed out.
     cachedAgyKeychainSignedIn = false;
   }
   return cachedAgyKeychainSignedIn;
@@ -1349,10 +1392,12 @@ export async function getAccountInfo(
         // Antigravity (`agy`) stores a consumer Google OAuth grant (access +
         // refresh token, no id_token) — presence of a refresh token is the only
         // signed-in signal we can derive without a network call. Storage is
-        // platform-split: on Linux it's a file at
-        // ~/.gemini/antigravity-cli/antigravity-oauth-token; on macOS the Go
-        // keyring puts it in the keychain (service 'gemini', account
-        // 'antigravity'), so no file exists — check both.
+        // platform-split via go-keyring:
+        //   - file ~/.gemini/antigravity-cli/antigravity-oauth-token (Linux
+        //     fallback when no Secret Service is available)
+        //   - macOS keychain / Linux libsecret (service gemini + user
+        //     antigravity) when a keyring daemon is present
+        // Check the file first, then the OS keyring probe.
         const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));

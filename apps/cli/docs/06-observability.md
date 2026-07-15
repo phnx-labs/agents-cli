@@ -300,7 +300,7 @@ contains — this is a data-availability limit, not a policy choice:
 | Gemini, Grok | email | — | email read from the local auth file |
 | Droid | email | — | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. No network. Plan needs an authed call, so it's omitted. |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
-| Antigravity | `signed in` | — | OAuth grant with no id_token — presence is the only signal |
+| Antigravity | `signed in` | — | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`) |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 
 Two deliberate boundaries worth knowing:
