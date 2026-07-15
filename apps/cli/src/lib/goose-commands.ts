@@ -37,15 +37,35 @@ interface SlashCommandEntry {
   recipe_path: string;
 }
 
+/**
+ * Read the goose config.yaml as a mutable object. Throws — rather than returning
+ * `{}` — when a NON-EMPTY file fails to parse or isn't a mapping, so the caller
+ * (which rewrites the whole file) never silently clobbers a real user config
+ * (`mcp_servers`, `GOOSE_MODEL`, `extensions`, …). A missing or genuinely empty
+ * file returns `{}`.
+ */
 function readGooseConfig(configPath: string): Record<string, unknown> {
   if (!fs.existsSync(configPath)) return {};
+  const raw = fs.readFileSync(configPath, 'utf-8');
+  if (raw.trim() === '') return {};
+
+  let parsed: unknown;
   try {
-    const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as Record<string, unknown>;
-    }
-  } catch { /* malformed config — treat as empty, callers preserve nothing they can't parse */ }
-  return {};
+    parsed = yaml.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `Refusing to rewrite goose config at ${configPath}: existing file is not valid YAML ` +
+      `(${(err as Error).message}). Fix or remove it, then re-sync.`
+    );
+  }
+  if (parsed === null || parsed === undefined) return {}; // comments/whitespace only
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(
+      `Refusing to rewrite goose config at ${configPath}: expected a YAML mapping but found ` +
+      `${Array.isArray(parsed) ? 'a list' : typeof parsed}.`
+    );
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function readSlashCommands(config: Record<string, unknown>): SlashCommandEntry[] {
@@ -133,11 +153,14 @@ export function listGooseCommandsInVersion(versionHome: string): string[] {
 export function gooseCommandMatches(versionHome: string, commandName: string, sourcePath: string): boolean {
   const recipePath = safeJoin(gooseCommandsDir(versionHome), `${commandName}.yaml`);
   if (!fs.existsSync(recipePath) || !fs.existsSync(sourcePath)) return false;
-  // The slash_commands entry must also be registered for the command to be live.
-  const registered = readSlashCommands(readGooseConfig(gooseCommandConfigPath(versionHome)))
-    .some((e) => e.command === commandName);
-  if (!registered) return false;
   try {
+    // The slash_commands entry must also be registered for the command to be live.
+    // (An unparseable config.yaml surfaces here as "not a match" → a re-sync, which
+    // fails loudly rather than clobbering, instead of a crash during a read-only diff.)
+    const registered = readSlashCommands(readGooseConfig(gooseCommandConfigPath(versionHome)))
+      .some((e) => e.command === commandName);
+    if (!registered) return false;
+
     const installed = fs.readFileSync(recipePath, 'utf-8').trim();
     const expected = buildGooseCommandRecipe(commandName, sourcePath).trim();
     return installed === expected;

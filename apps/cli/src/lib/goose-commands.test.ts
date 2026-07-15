@@ -80,6 +80,23 @@ describe('installGooseCommandToVersion', () => {
     expect(config.slash_commands?.map(e => e.command)).toEqual(['alpha', 'zeta']); // sorted, both kept
   });
 
+  it('refuses to clobber a pre-existing but unparseable config.yaml (fails, preserves the file)', () => {
+    const src = makeTempDir();
+    const versionHome = makeTempDir();
+    const configPath = gooseCommandConfigPath(versionHome);
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    // A real user config that happens to be malformed YAML (e.g. a bad hand-edit).
+    const badContent = 'mcp_servers:\n  ctx:\n    command: ctx\n\tbad: [unclosed\n';
+    fs.writeFileSync(configPath, badContent, 'utf-8');
+
+    const r = installGooseCommandToVersion(versionHome, 'deploy', writeSource(src, 'deploy', '---\ndescription: D\n---\nDo D.'));
+    // Must fail loudly rather than silently discarding the user's config.
+    expect(r.success).toBe(false);
+    expect(r.error).toMatch(/not valid YAML|Refusing to rewrite/);
+    // The original file must be untouched (no clobber).
+    expect(fs.readFileSync(configPath, 'utf-8')).toBe(badContent);
+  });
+
   it('is idempotent — re-installing the same command does not duplicate entries', () => {
     const src = makeTempDir();
     const versionHome = makeTempDir();
