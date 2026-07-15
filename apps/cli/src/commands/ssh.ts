@@ -30,6 +30,7 @@ import {
   type DeviceAuthMethod,
   type DevicePlatform,
   type DeviceProfile,
+  type DeviceRegistry,
 } from '../lib/devices/registry.js';
 import {
   nodeToDeviceInput,
@@ -54,6 +55,14 @@ import {
   upgradeCommand,
   type FleetRunResult,
 } from '../lib/devices/fleet.js';
+import {
+  fleetCapacity,
+  fmtBytes,
+  headroom,
+  probeFleetStats,
+  type DeviceStats,
+  type Headroom,
+} from '../lib/devices/health.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet. */
@@ -69,6 +78,93 @@ function deviceSummary(d: DeviceProfile, isSelf = false): string {
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
   return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}`;
+}
+
+const HEADROOM_BADGE: Record<Headroom, string> = {
+  idle: chalk.green('○ idle'),
+  light: chalk.green('● light'),
+  busy: chalk.yellow('● busy'),
+  loaded: chalk.red('● loaded'),
+  unknown: chalk.gray('· —'),
+};
+
+/** A right-aligned percentage cell, colored by severity (green/yellow/red). */
+function pctCell(v: number | undefined, width: number): string {
+  if (v === undefined) return chalk.gray('—'.padStart(width));
+  const s = `${Math.round(v)}%`.padStart(width);
+  if (v < 40) return chalk.green(s);
+  if (v < 75) return chalk.yellow(s);
+  return chalk.red(s);
+}
+
+/**
+ * Render the device list. When `statsMap` is provided, resource columns are
+ * appended — normalized load, memory, a headroom badge, and (in `full` mode)
+ * core count and free/total memory — so it's obvious which boxes have room.
+ * Without it (probe skipped) the classic reachability line is used. A fleet
+ * capacity summary is appended whenever stats were gathered.
+ */
+function renderDeviceTable(
+  reg: DeviceRegistry,
+  names: string[],
+  self: string | undefined,
+  statsMap?: Map<string, DeviceStats>,
+  full = false,
+): string[] {
+  if (!statsMap) return names.map((n) => deviceSummary(reg[n], n === self));
+
+  const lines: string[] = [];
+  const head =
+    '  ' +
+    chalk.gray('device'.padEnd(16)) +
+    chalk.gray('platform'.padEnd(8)) +
+    ' ' +
+    (full ? chalk.gray('cores'.padStart(6)) : '') +
+    chalk.gray('load'.padStart(5)) +
+    chalk.gray('mem'.padStart(6)) +
+    (full ? '  ' + chalk.gray('free/total'.padEnd(12)) : '') +
+    '  ' +
+    chalk.gray('headroom');
+  lines.push(head);
+
+  for (const name of names) {
+    const d = reg[name];
+    const isSelf = name === self;
+    const marker = isSelf ? chalk.cyan('▸ ') : '  ';
+    const label = isSelf ? chalk.bold.cyan(name.padEnd(16)) : chalk.bold(name.padEnd(16));
+    const plat = String(d.platform).padEnd(8);
+    const offline = d.tailscale && !d.tailscale.online;
+    const stats = statsMap.get(name);
+    if (offline) {
+      lines.push(`${marker}${label}${plat} ${chalk.gray('offline')}`);
+      continue;
+    }
+    const relay = !isSelf && d.tailscale?.online && !d.tailscale.direct ? chalk.yellow(' relay') : '';
+    const cores = full ? chalk.gray(String(stats?.ncpu ?? '—').padStart(6)) : '';
+    const load = pctCell(stats?.loadPercent, 5);
+    const mem = pctCell(stats?.memPercent, 6);
+    const freeTotal = full
+      ? '  ' +
+        (stats?.reachable && stats.memTotalBytes
+          ? `${fmtBytes(stats.memFreeBytes)}/${fmtBytes(stats.memTotalBytes)}`.padEnd(12)
+          : chalk.gray('—'.padEnd(12)))
+      : '';
+    const badge = HEADROOM_BADGE[headroom(stats)];
+    const here = isSelf ? chalk.cyan('  ← this machine') : '';
+    lines.push(`${marker}${label}${plat} ${cores}${load}${mem}${freeTotal}  ${badge}${relay}${here}`);
+  }
+
+  // Fleet capacity summary — total cores + how much RAM is free right now.
+  const cap = fleetCapacity(statsMap.values());
+  if (cap.reachable > 0) {
+    const freePct = cap.memTotalBytes > 0 ? Math.round((cap.memFreeBytes / cap.memTotalBytes) * 100) : 0;
+    lines.push(
+      chalk.gray(
+        `  Fleet capacity: ${cap.cores} cores · ${fmtBytes(cap.memFreeBytes)} free / ${fmtBytes(cap.memTotalBytes)} RAM (${freePct}% free) across ${cap.reachable} reachable device${cap.reachable === 1 ? '' : 's'}`,
+      ),
+    );
+  }
+  return lines;
 }
 
 /** Resolve a device or exit with a clear error. */
@@ -267,12 +363,15 @@ Typical workflow:
   devicesCmd
     .command('list')
     .alias('ls')
-    .description('List registered devices with platform, address, and reachability.')
+    .description('List registered devices with platform, address, reachability, and live resource headroom.')
     .option('--json', 'output the registry as a JSON array (for scripts and hooks)')
-    .action(async (opts: { json?: boolean }) => {
+    .option('--no-stats', 'skip the live resource probe (instant; names/addresses only)')
+    .option('-f, --full', 'full mode: add per-device core count and free/total memory')
+    .action(async (opts: { json?: boolean; stats?: boolean; full?: boolean }) => {
       const reg = await loadDevices();
       const names = Object.keys(reg).sort();
       if (opts.json) {
+        // Registry-only, always fast — the Factory extension polls this path.
         process.stdout.write(JSON.stringify(names.map((n) => reg[n]), null, 2) + '\n');
         return;
       }
@@ -281,8 +380,26 @@ Typical workflow:
         return;
       }
       const self = machineId();
+
+      let statsMap: Map<string, DeviceStats> | undefined;
+      if (opts.stats !== false) {
+        // Probe only reachable devices, in parallel, bounded by the per-probe
+        // timeout — a slow box degrades to "—", it never hangs the table.
+        const probeable = planFleetTargets(reg)
+          .filter((t) => !t.skip)
+          .map((t) => t.device);
+        const spinner = isInteractiveTerminal()
+          ? ora(`Probing ${probeable.length} device${probeable.length === 1 ? '' : 's'}…`).start()
+          : undefined;
+        try {
+          statsMap = await probeFleetStats(probeable, { selfName: self });
+        } finally {
+          spinner?.stop();
+        }
+      }
+
       console.log(chalk.bold(`Devices (${names.length})`));
-      for (const name of names) console.log(deviceSummary(reg[name], name === self));
+      for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full)) console.log(line);
     });
 
   devicesCmd
