@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { OpenBlock } from '../lib/feed.js';
 import {
+  formatFeedMastheadRight,
+  formatFeedReplyHint,
   formatOutcomeHeader,
   mergeFeedBlocks,
   parseRemoteFeed,
@@ -9,6 +11,7 @@ import {
   shouldIncludeLocalFeed,
 } from './feed.js';
 import { groupBlocksByOutcome } from '../lib/feed-outcome.js';
+import { GLYPH } from '../lib/comms-render.js';
 
 function block(id: string, host: string, ts: string, extra?: Partial<OpenBlock>): OpenBlock {
   return {
@@ -82,6 +85,26 @@ describe('formatOutcomeHeader', () => {
       }),
     ]);
     expect(formatOutcomeHeader(groups[0])).toBe('RUSH-1125 · 2 agents · 1 needs you · 1 answered');
+  });
+});
+
+describe('formatFeedMastheadRight', () => {
+  it('counts blocks and unique mailbox agents', () => {
+    expect(formatFeedMastheadRight([
+      block('a', 'zion', '2026-07-13T00:00:00Z'),
+      block('b', 'zion', '2026-07-13T00:00:00Z'),
+      block('a-again', 'zion', '2026-07-13T00:00:00Z', { mailboxId: 'a', sessionId: 'a-again', blockId: 'block-a-again' }),
+    ])).toBe('3 blocks · 2 agents');
+    expect(formatFeedMastheadRight([block('solo', 'zion', '2026-07-13T00:00:00Z')])).toBe('1 block · 1 agent');
+  });
+});
+
+describe('formatFeedReplyHint', () => {
+  it('matches the shared fleet-comms reply line (↳ ag message …)', () => {
+    expect(formatFeedReplyHint('agent-1')).toBe(`↳ ag message agent-1 "…"`);
+    expect(formatFeedReplyHint('agent-1').startsWith('↳')).toBe(true);
+    expect(GLYPH.ask).toBe('▲');
+    expect(GLYPH.delivered).toBe('✓');
   });
 });
 
