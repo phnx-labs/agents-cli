@@ -17,25 +17,30 @@ import {
   parseBundle,
   planImport,
   writeImport,
+  mergeRecords,
+  makeHeader,
   type ImportPlanItem,
   type ParsedBundle,
 } from '../lib/session/bundle.js';
+import { pullBundlesFromHosts } from '../lib/session/remote-bundle.js';
 import { setHelpSections } from '../lib/help.js';
 
 interface ImportOptions {
   dryRun?: boolean;
   overwrite?: boolean;
   decrypt?: string | boolean; // commander: true when --decrypt bare, string when --decrypt <key>
+  fromHost?: string[];
   agent?: string; // read from the parent `sessions` command via optsWithGlobals
 }
 
 export function registerSessionsImportCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
-    .command('import <bundle>')
-    .description('Restore an export bundle (file, or - for stdin) into the local session store, deduping against what you already have.')
+    .command('import [bundle]')
+    .description('Restore an export bundle (file, - for stdin, or --from-host <h>) into the local session store, deduping against what you already have.')
     .option('--dry-run', 'Show what would be placed without writing anything')
     .option('--overwrite', 'Replace local files that differ from the bundle (default: keep local)')
-    .option('--decrypt [key]', 'Decrypt an encrypted bundle (key optional if the r2.backups sync key is configured)');
+    .option('--decrypt [key]', 'Decrypt an encrypted bundle (key optional if the r2.backups sync key is configured)')
+    .option('--from-host <target...>', 'Pull sessions live from remote peer(s) over SSH instead of a file (repeatable)');
 
   setHelpSections(cmd, {
     examples: `# Preview what a bundle would restore
@@ -44,35 +49,51 @@ agents sessions import week.bundle --dry-run
 # Restore it
 agents sessions import week.bundle
 
-# Pull straight off another machine over SSH
+# Pull straight off another machine (one command, over SSH)
+agents sessions import --from-host yosemite-s1 --since 7d
+
+# Or the equivalent raw pipe
 agents ssh boxB 'agents sessions export --since 7d --stdout' | agents sessions import -`,
     notes: `Sessions land under the cross-machine mirror keyed by their origin machine, so
 they show up in 'agents sessions' tagged with that machine and never overwrite
-your own local sessions. Byte-exact duplicates are skipped.`,
+your own local sessions. Byte-exact duplicates are skipped. --from-host reuses
+the same SSH transport as the cross-machine listing (no R2, no daemon).`,
   });
 
-  cmd.action(async (bundlePath: string, options: ImportOptions, command: Command) => {
-    const agent = (command.optsWithGlobals() as { agent?: string }).agent;
-    await runImport(bundlePath, { ...options, agent });
+  cmd.action(async (bundlePath: string | undefined, options: ImportOptions, command: Command) => {
+    const g = command.optsWithGlobals() as { agent?: string; since?: string; all?: boolean; limit?: string };
+    await runImport(bundlePath, { ...options, agent: g.agent }, g, command);
   });
 }
 
-async function runImport(bundlePath: string, options: ImportOptions): Promise<void> {
-  // 1. Read the bundle (stdin or file).
-  let text: string;
-  try {
-    text = bundlePath === '-' ? fs.readFileSync(0, 'utf-8') : fs.readFileSync(bundlePath, 'utf-8');
-  } catch (err) {
-    process.stderr.write(chalk.red(`Cannot read bundle: ${(err as Error).message}\n`));
-    process.exit(1);
-  }
-
+async function runImport(
+  bundlePath: string | undefined,
+  options: ImportOptions,
+  g: { since?: string; all?: boolean; limit?: string },
+  command: Command,
+): Promise<void> {
+  // 1. Obtain the bundle — from remote peer(s), stdin, or a file.
   let bundle: ParsedBundle;
-  try {
-    bundle = parseBundle(text);
-  } catch (err) {
-    process.stderr.write(chalk.red(`${(err as Error).message}\n`));
-    process.exit(1);
+  if (options.fromHost && options.fromHost.length > 0) {
+    bundle = await pullForImport(options.fromHost, bundlePath, g, command);
+  } else {
+    if (!bundlePath) {
+      process.stderr.write(chalk.red('Provide a bundle path, - for stdin, or --from-host <host>.\n'));
+      process.exit(1);
+    }
+    let text: string;
+    try {
+      text = bundlePath === '-' ? await readStdin() : fs.readFileSync(bundlePath, 'utf-8');
+    } catch (err) {
+      process.stderr.write(chalk.red(`Cannot read bundle: ${(err as Error).message}\n`));
+      process.exit(1);
+    }
+    try {
+      bundle = parseBundle(text);
+    } catch (err) {
+      process.stderr.write(chalk.red(`${(err as Error).message}\n`));
+      process.exit(1);
+    }
   }
 
   // 2. Optional agent filter.
@@ -110,6 +131,51 @@ async function runImport(bundlePath: string, options: ImportOptions): Promise<vo
   if (res.conflicts) parts.push(chalk.yellow(`${res.conflicts} conflict${res.conflicts === 1 ? '' : 's'} kept local (use --overwrite)`));
   if (res.unknown) parts.push(chalk.yellow(`${res.unknown} unknown-agent skipped`));
   process.stderr.write(chalk.green(`Imported: ${parts.join(', ') || 'nothing to do'}.\n`));
+}
+
+/** Drain all of stdin to a string. Works for pipes (non-seekable) and redirects
+ *  alike — unlike readFileSync(0), which fails on a pipe. */
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+/**
+ * --from-host: run `agents sessions export …` on each peer over SSH and merge
+ * the streamed bundles into one for import. The optional positional acts as a
+ * remote selector (id/query); the parent selection flags (--since, -a, --all,
+ * -n) forward too.
+ */
+async function pullForImport(
+  hosts: string[],
+  selector: string | undefined,
+  g: { since?: string; all?: boolean; limit?: string },
+  command: Command,
+): Promise<ParsedBundle> {
+  const args: string[] = [];
+  if (selector && selector !== '-') args.push(selector);
+  if (g.since) args.push('--since', g.since);
+  const agent = (command.optsWithGlobals() as { agent?: string }).agent;
+  if (agent) args.push('-a', agent);
+  if (g.all !== false) args.push('--all');
+  if (command.parent?.getOptionValueSource?.('limit') === 'cli' && g.limit) args.push('-n', String(g.limit));
+
+  const { bundles, errors } = await pullBundlesFromHosts(hosts, args);
+  for (const e of errors) process.stderr.write(chalk.yellow(`  ${e}\n`));
+  const records = mergeRecords(bundles.map(b => b.records));
+  if (records.length === 0) {
+    process.stderr.write(chalk.red('No sessions pulled from the given host(s).\n'));
+    process.exit(1);
+  }
+  const header = makeHeader({
+    origin: hosts.join(','),
+    exportedAt: new Date().toISOString(),
+    encrypted: false,
+    redacted: bundles.some(b => b.header.redacted),
+    records,
+  });
+  return { header, records };
 }
 
 /**

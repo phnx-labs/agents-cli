@@ -191,6 +191,19 @@ describe('import placement + dedup', () => {
     expect(fs.readFileSync(wireTarget, 'utf-8')).toBe(wireJsonl);
   });
 
+  it('mergeRecords dedups by agent + origin machine + session + file (fan-out pull)', () => {
+    const rec = (machine: string, sessionId: string, relKey: string): import('./bundle.js').BundleRecord => ({
+      agent: 'claude', machine, sessionId, relKey, size: 1, hash: 'h', encrypted: false, body: 'x',
+    });
+    // hostA and hostB both return session s1 (same origin machineX) + each a unique one.
+    const fromA = [rec('machineX', 's1', 's1.jsonl'), rec('machineX', 's2', 's2.jsonl')];
+    const fromB = [rec('machineX', 's1', 's1.jsonl'), rec('machineY', 's3', 's3.jsonl')];
+    const merged = B.mergeRecords([fromA, fromB]);
+    expect(merged.length).toBe(3); // s1 deduped, s2, s3 kept
+    const keys = merged.map(r => `${r.machine}:${r.sessionId}`).sort();
+    expect(keys).toEqual(['machineX:s1', 'machineX:s2', 'machineY:s3']);
+  });
+
   it('an unknown agent is reported, never placed', () => {
     const abs = writeFixture(SRC, 'unknown.jsonl', '{}\n');
     const rec = B.buildRecord(

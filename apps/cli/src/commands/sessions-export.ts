@@ -32,11 +32,14 @@ import { resolveSyncEncKey, generateSyncEncKey } from '../lib/session/sync/trans
 import {
   buildRecord,
   makeHeader,
+  mergeRecords,
   serializeBundle,
   specForAgent,
+  type BundleHeader,
   type BundleRecord,
   type FileToExport,
 } from '../lib/session/bundle.js';
+import { pullBundlesFromHosts } from '../lib/session/remote-bundle.js';
 import { setHelpSections } from '../lib/help.js';
 
 /** Default cap when exporting a scope (not explicit ids) and the user gave no -n. */
@@ -79,11 +82,20 @@ interface GlobalSelection {
   encrypt?: boolean;
   output?: string;
   stdout?: boolean;
+  host?: string[];
   claude?: boolean; codex?: boolean; kimi?: boolean; grok?: boolean; opencode?: boolean; antigravity?: boolean;
 }
 
 async function runExport(selectors: string[], command: Command): Promise<void> {
   const g = command.optsWithGlobals() as GlobalSelection;
+
+  // --host: export sessions that live on remote peer(s) — run export there and
+  // stream the bundle back over the existing SSH transport (RUSH-1712).
+  if (g.host && g.host.length > 0) {
+    await runRemoteExport(g, selectors, command);
+    return;
+  }
+
   const explicitLimit = command.parent?.getOptionValueSource?.('limit') === 'cli';
   const limit = explicitLimit ? Math.max(1, parseInt(String(g.limit), 10) || DEFAULT_LIMIT) : DEFAULT_LIMIT;
   const agentFilter = parseAgentFilter(resolveAgentShorthand(g));
@@ -159,9 +171,51 @@ async function runExport(selectors: string[], command: Command): Promise<void> {
     redacted: redact,
     records,
   });
-  const wire = serializeBundle(header, records);
+  emitBundle(header, records, g);
+}
 
-  // 6. Emit.
+/**
+ * --host path: run `agents sessions export …` on each peer over SSH, stream the
+ * bundles back, merge (dedup by origin machine) and emit one local bundle.
+ * Encryption is not combined with a remote pull (each peer would seal under its
+ * own key); the SSH transport already encrypts the stream in transit.
+ */
+async function runRemoteExport(g: GlobalSelection, selectors: string[], command: Command): Promise<void> {
+  if (g.encrypt) {
+    process.stderr.write(chalk.yellow('Note: --encrypt is ignored with --host (the SSH stream is already encrypted). Encrypt a local bundle instead.\n'));
+  }
+  const { bundles, errors } = await pullBundlesFromHosts(g.host!, forwardExportArgs(g, selectors, command));
+  for (const e of errors) process.stderr.write(chalk.yellow(`  ${e}\n`));
+  const records = mergeRecords(bundles.map(b => b.records));
+  if (records.length === 0) {
+    process.stderr.write(chalk.red('No sessions pulled from the given host(s).\n'));
+    process.exit(1);
+  }
+  const header = makeHeader({
+    origin: g.host!.join(','),
+    exportedAt: new Date().toISOString(),
+    encrypted: false,
+    redacted: g.redact !== false,
+    records,
+  });
+  emitBundle(header, records, g);
+}
+
+/** Reconstruct the export flags to forward to a peer's own `sessions export`. */
+function forwardExportArgs(g: GlobalSelection, selectors: string[], command: Command): string[] {
+  const args = [...selectors];
+  if (g.since) args.push('--since', g.since);
+  const agent = resolveAgentShorthand(g);
+  if (agent) args.push('-a', agent);
+  if (g.all !== false) args.push('--all');
+  if (g.redact === false) args.push('--no-redact');
+  if (command.parent?.getOptionValueSource?.('limit') === 'cli' && g.limit) args.push('-n', String(g.limit));
+  return args;
+}
+
+/** Write the assembled bundle to stdout or a file. */
+function emitBundle(header: BundleHeader, records: BundleRecord[], g: GlobalSelection): void {
+  const wire = serializeBundle(header, records);
   if (g.stdout) {
     process.stdout.write(wire);
     return;

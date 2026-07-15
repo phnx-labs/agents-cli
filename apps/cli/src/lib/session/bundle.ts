@@ -153,6 +153,25 @@ export function makeHeader(args: {
   };
 }
 
+/**
+ * Merge record sets from several bundles (e.g. a fan-out pull across hosts),
+ * deduping by agent + origin machine + session + file so the same session seen
+ * from two peers lands once. First occurrence wins.
+ */
+export function mergeRecords(sets: BundleRecord[][]): BundleRecord[] {
+  const seen = new Set<string>();
+  const out: BundleRecord[] = [];
+  for (const set of sets) {
+    for (const r of set) {
+      const key = `${r.agent}:${r.machine}:${r.sessionId}:${r.relKey}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
 /** Serialize a bundle to its NDJSON wire form (header line + one line per record). */
 export function serializeBundle(header: BundleHeader, records: BundleRecord[]): string {
   const lines = [JSON.stringify(header)];
