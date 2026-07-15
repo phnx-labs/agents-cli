@@ -176,21 +176,15 @@ async function resolveTargetHost(name: string, any: boolean): Promise<Host> {
  * @param allArgs `process.argv.slice(2)` — the command name followed by its args.
  */
 export async function maybeRunOnHost(command: string, allArgs: string[]): Promise<boolean> {
-  // `--device` is a first-class alias of `--host` (mirrors `agents run`); the
-  // device registry is the source of truth for machine identity. Reject a
-  // conflicting pair rather than silently preferring one — same rule as run.
   const hostFlag = flagValue(allArgs, 'host', 'H');
   const deviceFlag = flagValue(allArgs, 'device');
-  if (hostFlag && deviceFlag && hostFlag !== deviceFlag) {
-    console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
-    process.exitCode = 1;
-    return true;
-  }
-
   const hostName = hostFlag ?? deviceFlag;
   if (!hostName) return false;
 
-  // Commands with their own richer --host semantics must reach local commander.
+  // Commands with their own richer --host semantics must reach local commander
+  // BEFORE any single-target conflict gate. sessions/feed merge --host and
+  // --device into a multi-host list; rejecting "conflicting" pairs would break
+  // `agents sessions --host a --device b` / `agents feed --host a --device b`.
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
   // Placement, not routing: `teams add`/`teams create` read `--device`/`--devices`
@@ -227,6 +221,14 @@ export async function maybeRunOnHost(command: string, allArgs: string[]): Promis
           ' Run without the flag, or use a host-routable group (repos, view, sync, teams, doctor, …).',
         ),
     );
+    process.exitCode = 1;
+    return true;
+  }
+
+  // Single-target remote path only: reject a conflicting --host/--device pair
+  // rather than silently preferring one (same rule as `agents run`).
+  if (hostFlag && deviceFlag && hostFlag !== deviceFlag) {
+    console.error(chalk.red('Conflicting --host/--device values — pass just one.'));
     process.exitCode = 1;
     return true;
   }

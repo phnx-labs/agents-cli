@@ -91,10 +91,20 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
 
   it('rejects a conflicting --host/--device pair without attempting SSH', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // Handled (returns true) but as an error — never guesses which host wins.
+    // Single-target remote path: handled (returns true) but as an error —
+    // never guesses which host wins.
     expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--host', 'a', '--device', 'b'])).toBe(true);
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;
+  });
+
+  it('falls through for OWN_HOST multi-host aggregators with both --host and --device', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    // sessions/feed merge --host and --device into one list — the conflict gate
+    // must not fire for them (regression: pre-OWN_HOST ordering broke this).
+    expect(await maybeRunOnHost('sessions', ['sessions', '--active', '--host', 'a', '--device', 'b'])).toBe(false);
+    expect(await maybeRunOnHost('feed', ['feed', '--host', 'a', '--device', 'b', '--json'])).toBe(false);
+    expect(process.exitCode ?? 0).toBe(0);
   });
 
   it('routes routines --host to a non-self target (rejected by assertValidSshTarget)', async () => {
