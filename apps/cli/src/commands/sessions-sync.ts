@@ -91,6 +91,10 @@ export async function runSessionsSync(options: SyncCmdOptions): Promise<void> {
       );
     }
 
+    if (!options.json && result.warnings.length > 0) {
+      for (const w of result.warnings) console.error(chalk.yellow(`  warning: ${w}`));
+    }
+
     if (result.errors.length > 0) {
       for (const e of result.errors) console.error(chalk.yellow(`  ! ${e}`));
       process.exitCode = 1;
