@@ -2,6 +2,8 @@
 
 Using agents-cli as a programmatic observability layer for agent fleets.
 
+`agents feed` and `agents mailboxes` share one fleet-comms visual language (masthead + glyphs from `comms-render`) so the two operator surfaces read as one product.
+
 ## Audit Event Log (`agents events`)
 
 Separate from the fleet-state sources below (which answer "what's running *now*"),
