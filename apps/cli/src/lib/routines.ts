@@ -12,7 +12,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { Cron } from 'croner';
 import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
-import { safeJoin } from './paths.js';
+import { safeJoin, isSafeSegmentName } from './paths.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
@@ -404,6 +404,14 @@ export function validateJob(config: Partial<JobConfig>): string[] {
 
   if (!config.name || typeof config.name !== 'string') {
     errors.push('name is required');
+  } else if (!isSafeSegmentName(config.name)) {
+    // The name becomes a filesystem path segment (overlay HOME under the
+    // routines dir). Reject separators, '.'/'..', and null bytes so a synced
+    // config can't traverse out of ~/.agents/routines.
+    errors.push(
+      `invalid name ${JSON.stringify(config.name)}: must be a single path segment ` +
+      `(no '/', '\\\\', or null bytes, and not '.' or '..')`,
+    );
   }
   const hasSchedule = Boolean(config.schedule && typeof config.schedule === 'string');
   const hasTrigger = config.trigger !== undefined;

@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Security
+
+- **Path-traversal containment for two untrusted-input filesystem sinks.**
+  - Routine job names (from routine YAML `name:` / file basename, which can arrive via a
+    synced user/system config repo) are now contained to a single path segment beneath
+    the routines dir. A crafted name such as `../../../..` can no longer steer the overlay
+    HOME setup — whose teardown does a recursive `rmSync` — at a path outside
+    `~/.agents/routines`. (`apps/cli/src/lib/sandbox.ts`, validated in
+    `apps/cli/src/lib/routines.ts`.)
+  - Session-sync **pull** now validates the peer-controlled `machine` and `relKey` fields
+    before writing a mirrored transcript, matching the guard the push side already applied.
+    A malicious fleet peer can no longer use a manifest `relKey` like
+    `../../../.ssh/authorized_keys` to write attacker content outside the backups mirror.
+    (`apps/cli/src/lib/session/sync/agents.ts`.)
+  - Shared containment helpers `isSafeSegmentName` / `assertWithin` added to
+    `apps/cli/src/lib/paths.ts`.
+
 ### Added
 
 - **`agents run --lease` is now frictionless end-to-end (RUSH-1723).** Leasing a

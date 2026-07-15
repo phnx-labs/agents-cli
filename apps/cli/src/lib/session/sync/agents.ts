@@ -18,6 +18,7 @@ import * as path from 'path';
 import { getHistoryDir } from '../../state.js';
 import { getAgentSessionDirs } from '../discover.js';
 import { walkForFiles } from '../../fs-walk.js';
+import { isSafeSegmentName, assertWithin } from '../../paths.js';
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
@@ -197,9 +198,26 @@ export function localSessionIds(spec: SyncAgentSpec): Set<string> {
   return new Set(listLocalTranscripts(spec).map(t => t.sessionId));
 }
 
-/** Absolute mirror path for a remote machine's transcript — lands in a scan root. */
+/**
+ * Absolute mirror path for a remote machine's transcript — lands in a scan root.
+ *
+ * `machine` and `relKey` come from a peer's manifest (untrusted: any peer with
+ * write access to the shared bucket controls them). Unlike the push side, which
+ * already drops `relKey` starting with `..` when building the manifest, the pull
+ * side would otherwise `fs.writeFileSync` at this path with peer-controlled
+ * content. `machine` is constrained to a single segment and `relKey` (which may
+ * legitimately nest, e.g. `projects/x/y.jsonl`) is contained beneath the
+ * per-machine mirror root, so a crafted `relKey` like `../../../.ssh/authorized_keys`
+ * cannot write outside `~/.agents/.history/backups/<agent>/<machine>/<subdir>`.
+ */
 export function mirrorPath(spec: SyncAgentSpec, machine: string, relKey: string): string {
-  return path.join(getHistoryDir(), 'backups', spec.id, machine, spec.subdir, relKey);
+  if (!isSafeSegmentName(machine)) {
+    throw new Error(`Unsafe sync machine segment: ${JSON.stringify(machine)}`);
+  }
+  const machineRoot = path.join(getHistoryDir(), 'backups', spec.id, machine, spec.subdir);
+  const dest = path.join(machineRoot, relKey);
+  assertWithin(machineRoot, dest);
+  return dest;
 }
 
 /**
