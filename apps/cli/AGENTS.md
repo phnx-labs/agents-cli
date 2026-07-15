@@ -131,6 +131,7 @@ src/
     resources.ts       # resolveResource() / listResources() — layered resolution
     capabilities.ts    # supports() — the per-agent write gate
     agents.ts          # Per-agent capability table
+    subagents-registry.ts  # SUBAGENT_TARGETS — declarative per-agent subagent shape (dir/layout/transform); generic install/list/remove engine
     versions.ts        # Install, remove, syncResourcesToVersion
     shims.ts           # Shim generation, config symlink switching
     hooks.ts           # hooks.yaml parser + per-agent registrar

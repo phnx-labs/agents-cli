@@ -4,9 +4,11 @@ Lightweight named agent definitions that parent agents can spawn for focused sub
 
 ## Overview
 
-A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents with `subagents: true` in the capability matrix (today Claude, OpenClaw, Droid, Codex, Kiro, and Cursor — see `capableAgents('subagents')` in `src/lib/agents.ts`) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
+A subagent is a directory in `~/.agents/subagents/<name>/` containing an `AGENT.md` file with YAML frontmatter and an instruction body. Parent agents whose capability matrix declares `subagents` (see `capableAgents('subagents')` in `src/lib/capabilities.ts` — today Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Copilot, Kiro, Goose, Antigravity, Grok, Kimi, Droid, and Forge) discover installed subagents and can spawn them using their native task-dispatch mechanism (e.g., Claude's `Task()` tool). Each subagent definition specifies a model, a display color, and a focused instruction set. The resource resolution order is `project > user > system`, matching every other resource kind.
 
 Subagents are one of three patterns for specialization. Plugins can bundle subagent definitions alongside skills and hooks. Workflows declare `allowedAgents` in their frontmatter to constrain which subagents the orchestrator can reach. In all cases the on-disk format is the same `AGENT.md` file.
+
+**How an agent's subagents are stored is declared once, declaratively.** Two things gate a subagent integration: the `subagents` capability flag on `AgentConfig` (`src/lib/agents.ts`) is the *version gate*, and a single entry in the **subagent-target registry** (`src/lib/subagents-registry.ts`, `SUBAGENT_TARGETS`) is the *shape* — target dir, file/dir layout, transform, ownership marker. All install / list / detect / orphan / remove logic is generic over that table, so adding a standard integration is one registry entry, not near-identical `else if (agent === '...')` arms across the writer, detector, and `subagents.ts`. A test pins `Object.keys(SUBAGENT_TARGETS)` to `capableAgents('subagents')` so the two can never drift.
 
 For the sync model that governs how subagents reach version homes, see [02-resource-sync.md](02-resource-sync.md).
 
@@ -22,17 +24,24 @@ Central storage (project > user > system):
     AGENT.md                           Required: frontmatter + instruction body
 
                       agents subagents add / agents use
+                     (generic engine iterates SUBAGENT_TARGETS)
                                   │
                                   ▼
-  <version-home>/
-    .claude/
-      agents/<name>.md               Claude native format (copied + converted)
-    .openclaw/
-      agents/<name>.yaml             OpenClaw YAML format
-    .kiro/
-      agents/<name>.json             Kiro custom-agent JSON format
-    .cursor/
-      agents/<name>.md               Cursor native format (flattened, no color)
+  <version-home>/                    (target dir + shape per registry entry)
+    .claude/agents/<name>.md         flat-file  (Claude flatten)          [Tier 1]
+    .codex/agents/<name>.toml        flat-file  (Codex TOML)              [Tier 1]
+    .gemini/agents/<name>.md         flat-file  (Claude-compatible)       [Tier 1]
+    .cursor/agents/<name>.md         flat-file  (no color)                [Tier 1]
+    .grok/agents/<name>.md           flat-file  (Claude-compatible)       [Tier 2]
+    .factory/droids/<name>.md        flat-file  (Droid custom droid)      [Tier 2]
+    .copilot/agents/<name>.agent.md  flat-file  (Copilot custom agent)    [Tier 2]
+    .kiro/agents/<name>.json         flat-file  (Kiro JSON)               [Tier 2]
+    .config/opencode/agents/<name>.md   flat-file (OpenCode)             [Tier 2]
+    .config/goose/agents/<name>.yaml    flat-file (Goose recipe)         [Tier 3]
+    .forge/agents/<name>.md          flat-file  (ForgeCode)               [Tier 3]
+    .gemini/config/agents/<name>/agent.md   dir-file (Antigravity)       [Tier 3]
+    .openclaw/<name>/AGENTS.md       dir-copy   (AGENT.md → AGENTS.md)    [Tier 2]
+    .kimi-code/agents/<name>.yaml + <name>.system.md   bespoke (+parent index) [Tier 3]
 
                       Parent agent session (Claude example)
                                   │
@@ -41,6 +50,28 @@ Central storage (project > user > system):
   Spawns subagent via Task() with subagent's model + instructions
   Subagent executes with its own focused instruction set
 ```
+
+## Integration tiers
+
+Not every "wire subagents for X" is worth equal effort. Integrations are tiered by
+importance so a "wire X" ticket can be scoped by tier instead of treated
+identically — the long tail should cost far less than the core.
+
+| Tier | Agents | What it means for a "wire X" ticket |
+|------|--------|-------------------------------------|
+| **Tier 1 — core** | `claude`, `codex`, `gemini`, `cursor` | First-class. Full support; bespoke transform/format work where the native format demands it. New subagent capabilities land here first. |
+| **Tier 2 — established** | `openclaw`, `grok`, `droid`, `copilot`, `kiro`, `opencode` | Supported, ride the generic registry path. A bespoke `transform` only where the on-disk format differs — never bespoke install/list/remove logic. |
+| **Tier 3 — long-tail** | `goose`, `forge`, `antigravity`, `kimi` | Config-only; spend the minimum. A new one is a single `SUBAGENT_TARGETS` entry. `kimi` is the sole current entry that still needs a bespoke handler (two files per subagent + a managed parent index). |
+
+**Adding a standard integration (Tier 2/3) is one entry, not six edits.** Give the
+agent a `subagents` gate in `src/lib/agents.ts`, add one entry to `SUBAGENT_TARGETS`
+in `src/lib/subagents-registry.ts` via a layout builder (`flatFile` / `dirFile` /
+`dirCopy`), and — only if the native format is bespoke — a
+`transformSubagentFor<Agent>` in `src/lib/subagents.ts`. The staleness writer, the
+detector, `listSubagentsForAgent`, `diffVersionSubagents`, and
+`removeSubagentFromVersion` are all generic over the table, so they need no new
+arm. The completeness test (`subagents-registry.test.ts`) fails if the capability
+flag and the registry entry ever disagree.
 
 ## Command Reference
 
