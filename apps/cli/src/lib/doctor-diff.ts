@@ -47,6 +47,7 @@ import { markdownToToml } from './convert.js';
 import { resolveImports, supportsRulesImports } from './rules/compile.js';
 import { listCommandsInVersionHome, getVersionCommandsDir } from './commands.js';
 import { shouldInstallCommandAsSkill, commandSkillMatches, commandSkillName } from './command-skills.js';
+import { gooseCommandMatches, gooseCommandsDir } from './goose-commands.js';
 import { supports } from './capabilities.js';
 import { listSkillsInVersionHome, getVersionSkillsDir } from './skills.js';
 import { listHooksInVersionHome, getVersionHooksDir, listHookEntriesFromDir } from './hooks.js';
@@ -210,6 +211,19 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
       });
       continue;
     }
+    if (agent === 'goose') {
+      // Compare against the installed Goose recipe YAML + slash_commands registration.
+      const matches = gooseCommandMatches(getVersionHomePath(agent, version), name, src.path);
+      rows.push({
+        kind: 'commands',
+        name,
+        status: matches ? 'ok' : 'diff',
+        source: src.layer,
+        sourcePath: src.path,
+        homePath: path.join(gooseCommandsDir(getVersionHomePath(agent, version)), `${name}.yaml`),
+      });
+      continue;
+    }
     const homePath = path.join(homeDir, `${name}${ext}`);
     const installedContent = readSafe(homePath);
     const sourceContent = readSafe(src.path);
@@ -233,7 +247,9 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
     if (seen.has(name)) continue;
     const extraHome = asSkill
       ? path.join(agentDir, 'skills', commandSkillName(name), 'SKILL.md')
-      : path.join(homeDir, `${name}${ext}`);
+      : agent === 'goose'
+        ? path.join(gooseCommandsDir(getVersionHomePath(agent, version)), `${name}.yaml`)
+        : path.join(homeDir, `${name}${ext}`);
     rows.push({ kind: 'commands', name, status: 'extra', homePath: extraHome });
   }
 

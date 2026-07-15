@@ -23,6 +23,12 @@ import {
   removeCommandSkillFromVersion,
   shouldInstallCommandAsSkill,
 } from './command-skills.js';
+import {
+  installGooseCommandToVersion,
+  listGooseCommandsInVersion,
+  gooseCommandMatches,
+  removeGooseCommandFromVersion,
+} from './goose-commands.js';
 
 /** Scope of a command: user-global or project-local. */
 export type CommandScope = 'user' | 'project';
@@ -305,6 +311,21 @@ export function installCommand(
   ensureCommandsDir(agentId);
 
   const home = getEffectiveHome(agentId);
+
+  // Goose: a slash command is a recipe YAML registered in config.yaml, not a
+  // native command file under commandsSubdir.
+  if (agentId === 'goose') {
+    const result = installGooseCommandToVersion(home, commandName, sourcePath);
+    if (!result.success) {
+      return { path: '', method: 'copy', error: result.error, warnings: validation.warnings };
+    }
+    return {
+      path: path.join(home, '.config', 'goose', 'commands', `${commandName}.yaml`),
+      method: 'copy',
+      warnings: validation.warnings,
+    };
+  }
+
   const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
   fs.mkdirSync(commandsDir, { recursive: true });
 
@@ -352,6 +373,9 @@ export function listCommandsInVersionHome(agent: AgentId, version: string): stri
   if (shouldInstallCommandAsSkill(agent, version)) {
     return listCommandSkillsInVersion(agentDir);
   }
+  if (agent === 'goose') {
+    return listGooseCommandsInVersion(versionHome);
+  }
 
   const dir = getVersionCommandsDir(agent, version);
   if (!fs.existsSync(dir)) return [];
@@ -374,6 +398,9 @@ function versionCommandMatches(agent: AgentId, version: string, commandName: str
   const agentDir = path.join(versionHome, agentConfigDirName(agent));
   if (shouldInstallCommandAsSkill(agent, version)) {
     return commandSkillMatches(agentDir, commandName, sourcePath);
+  }
+  if (agent === 'goose') {
+    return gooseCommandMatches(versionHome, commandName, sourcePath);
   }
 
   const agentConfig = AGENTS[agent];
@@ -491,6 +518,12 @@ export function installCommandToVersion(
     );
   }
 
+  // Goose: a slash command is a recipe YAML registered in config.yaml, not a
+  // native command file. Write the recipe + slash_commands entry.
+  if (agent === 'goose') {
+    return installGooseCommandToVersion(versionHome, commandName, sourcePath);
+  }
+
   const agentConfig = AGENTS[agent];
   const commandsDir = getVersionCommandsDir(agent, version);
   fs.mkdirSync(commandsDir, { recursive: true });
@@ -530,6 +563,10 @@ export function removeCommandFromVersion(
   const agentDir = path.join(versionHome, agentConfigDirName(agent));
   if (shouldInstallCommandAsSkill(agent, version)) {
     return removeCommandSkillFromVersion(agentDir, commandName);
+  }
+  if (agent === 'goose') {
+    const trashDir = path.join(getTrashCommandsDir(), agent, version, commandName);
+    return removeGooseCommandFromVersion(versionHome, commandName, trashDir);
   }
 
   const ext = AGENTS[agent].format === 'toml' ? '.toml' : '.md';

@@ -456,9 +456,12 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
     // Workflows sync as Goose recipe YAML; permissions sync to permission.yaml.
+    // Commands: a Goose slash command is a recipe YAML under
+    // ~/.config/goose/commands/<name>.yaml, registered in ~/.config/goose/config.yaml
+    // under `slash_commands: [{ command, recipe_path }]` (see goose-commands.ts).
     // Subagents: recipe YAML named agents under ~/.config/goose/agents/<name>.yaml
     // (goose auto-discovers and delegates to them by name in autonomous mode).
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: { since: '1.25.0' }, commands: false, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'] },
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
