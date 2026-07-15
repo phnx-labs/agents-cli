@@ -25,6 +25,7 @@ import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { listTasks, loadTask, findTaskByName, findTaskBySessionId } from '../lib/hosts/tasks.js';
 import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import { showHostTaskLog } from '../lib/hosts/logs.js';
+import { stopDispatchedTask } from '../lib/hosts/dispatch.js';
 
 interface AddOptions { cap?: string[]; os?: string; enroll?: boolean; }
 
@@ -220,6 +221,39 @@ async function doLogs(ref: string, follow: boolean, full: boolean): Promise<void
   if (res.exitCode !== undefined) process.exitCode = res.exitCode;
 }
 
+/** Resolve a host-task ref (id, --name handle, or session id) or null. */
+function resolveTaskRef(ref: string) {
+  return loadTask(ref) ?? findTaskByName(ref) ?? findTaskBySessionId(ref);
+}
+
+async function doStop(ref: string): Promise<void> {
+  // Heal first so we don't try to kill a process that already exited.
+  const current = resolveTaskRef(ref);
+  if (!current) {
+    console.log(chalk.red(`Unknown task "${ref}".`));
+    process.exitCode = 1;
+    return;
+  }
+  const task = reconcileRunningTasks([current])[0] ?? current;
+  if (task.status !== 'running') {
+    console.log(chalk.gray(`Task ${task.id} is already ${task.status}` + (task.exitCode !== undefined ? ` (exit ${task.exitCode})` : '') + '.'));
+    return;
+  }
+  try {
+    const stopped = stopDispatchedTask(task);
+    console.log(
+      chalk.green(`Stopped ${stopped.id}`) +
+        chalk.gray(` on ${stopped.host}`) +
+        chalk.yellow('  failed') +
+        chalk.gray(' (exit 143 / SIGTERM)'),
+    );
+    console.log(chalk.gray(`Logs: agents hosts logs ${stopped.id}`));
+  } catch (err: any) {
+    console.error(chalk.red(err?.message ?? err));
+    process.exitCode = 1;
+  }
+}
+
 /** Register the `agents hosts` command tree. */
 export function registerHostsCommand(program: Command): void {
   const hosts = program
@@ -264,4 +298,10 @@ export function registerHostsCommand(program: Command): void {
     .option('-f, --follow', 'Follow live output')
     .option('-m, --full', 'Show the full raw combined-stdout log instead of the concise summary')
     .action((id: string, opts: { follow?: boolean; full?: boolean }) => doLogs(id, !!opts.follow, !!opts.full));
+
+  hosts
+    .command('stop <id>')
+    .alias('kill')
+    .description('Terminate a running host task from this machine (SIGTERM process group; marks failed/143).')
+    .action((id: string) => doStop(id));
 }

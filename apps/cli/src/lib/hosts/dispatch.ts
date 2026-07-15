@@ -102,6 +102,39 @@ export function terminateDispatchedTask(task: HostTask): void {
   updateTask(task.id, terminalPatch(143));
 }
 
+/**
+ * Stop a running host task from the origin machine (`agents hosts stop <id>`).
+ *
+ * Unlike {@link terminateDispatchedTask} (rollback cleanup after a failed
+ * persist), this keeps the remote log so `agents hosts logs <id>` still works,
+ * writes a terminal `.exit` marker (143 = SIGTERM) for reconcile, and marks the
+ * local record failed.
+ */
+export function stopDispatchedTask(task: HostTask): HostTask {
+  if (task.status !== 'running') {
+    throw new Error(`Task ${task.id} is already ${task.status}`);
+  }
+  if (!task.pid) {
+    throw new Error(`Cannot stop remote task ${task.id}: launch returned no PID.`);
+  }
+  const pid = task.pid;
+  // TERM process group, then KILL; write 143 to .exit so `hosts ps`/reconcile
+  // see a terminal state. Keep the log for `hosts logs`.
+  const command =
+    `if kill -TERM -- -${pid} 2>/dev/null; then ` +
+      `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
+    `elif kill -0 -- -${pid} 2>/dev/null; then exit 1; fi; ` +
+    `echo 143 > ${task.remoteExit}`;
+  const result = sshExec(task.target, command, { timeoutMs: 10000, multiplex: true });
+  if (result.code !== 0) {
+    throw new Error(
+      `Failed to stop remote task ${task.id} on ${task.host}: ` +
+      `${(result.stderr || result.stdout).trim() || 'ssh error'}`,
+    );
+  }
+  return updateTask(task.id, terminalPatch(143)) ?? { ...task, ...terminalPatch(143) };
+}
+
 /** Options shared by every detached dispatch. */
 interface LaunchOptions {
   /** `agents …` args (command name first), each already un-quoted (we quote them). */

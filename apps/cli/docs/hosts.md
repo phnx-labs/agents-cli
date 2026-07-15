@@ -228,6 +228,12 @@ agents run <agent> ["<task>"] --host <host>
 > `agents sessions` and `agents sessions <name>` resolves it. Omitting `--name` is
 > a no-op — unnamed runs stay id-only, render `-` in the NAME column, and show the
 > `[host/<name>]` tag as their session label.
+>
+> `agents hosts ps` re-probes each still-`running` task against the remote `.exit`
+> marker so a finished (or crashed) run does not stay stuck at `running` after the
+> local follower dies. `agents hosts stop <id>` (alias `kill`) terminates the
+> remote process group from this machine, writes exit `143`, and keeps the log
+> for `agents hosts logs <id>`.
 
 ### Host sources — owned (registered) + leased on demand (crabbox)
 
