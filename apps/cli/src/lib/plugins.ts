@@ -1276,7 +1276,14 @@ export function installHermesPlugin(plugin: DiscoveredPlugin, versionHome: strin
       `plugin=${plugin.name}\n`,
       'utf-8'
     );
-    setHermesPluginEnabled(plugin.name, versionHome, enable);
+    // Enable only when trusted — never DOWN-toggle here. An un-flagged background
+    // re-sync of an exec-surface plugin passes enable=false; forcing the allowlist
+    // to false then would clobber a plugin the user deliberately enabled with
+    // --allow-exec-surfaces. Mirror addPluginToSettings: add-if-trusted, else leave
+    // the existing enabled state untouched. (Removal still unregisters explicitly.)
+    if (enable) {
+      setHermesPluginEnabled(plugin.name, versionHome, true);
+    }
     return true;
   } catch {
     return false;

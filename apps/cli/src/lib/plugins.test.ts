@@ -1764,6 +1764,23 @@ describe('syncPluginToVersion (hermes plugin install)', () => {
     expect(config.plugins?.disabled).toEqual(['banned']); // deny-list untouched
   });
 
+  it('does not disable an already-enabled exec-surface plugin on an un-flagged re-sync', async () => {
+    // A plugin with hooks that the user deliberately enabled via allowExecSurfaces
+    // must stay in plugins.enabled across ordinary background re-syncs (which pass
+    // no flag) — the install path must never DOWN-toggle the allowlist.
+    const { versionHome, plugin } = setupHermesPlugin('hooky', true);
+    const { syncPluginToVersion } = await import('./plugins.js');
+    const configPath = path.join(versionHome, '.hermes', 'config.yaml');
+    const enabled = () => (yaml.parse(fs.readFileSync(configPath, 'utf-8')) as { plugins?: { enabled?: string[] } }).plugins?.enabled ?? [];
+
+    syncPluginToVersion(plugin, 'hermes', versionHome, { allowExecSurfaces: true });
+    expect(enabled()).toContain('hooky');
+
+    // Re-sync WITHOUT the flag (as the staleness writer does) — must stay enabled.
+    syncPluginToVersion(plugin, 'hermes', versionHome);
+    expect(enabled()).toContain('hooky');
+  });
+
   it('removePluginFromVersion deletes the dir and drops it from plugins.enabled', async () => {
     const { pluginRoot, versionHome, plugin } = setupHermesPlugin();
     const { syncPluginToVersion, removePluginFromVersion, isPluginSynced } = await import('./plugins.js');
