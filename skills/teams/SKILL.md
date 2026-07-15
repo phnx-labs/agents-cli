@@ -2,7 +2,7 @@
 name: teams
 description: "Organize AI coding agents into teams that collaborate on a shared task. Create teams, add teammates, start them, monitor progress, and collect results. Use this skill when you need parallel agent execution. For single-agent dispatch, use `agents run` instead."
 argument-hint: "[create|add|start|status|disband]"
-allowed-tools: Bash(agents teams*), Bash(agents run*)
+allowed-tools: Bash(agents teams*), Bash(agents run*), Bash(agents feed*), Bash(agents mailboxes*), Bash(agents message*)
 user-invocable: true
 ---
 
