@@ -186,6 +186,10 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   fleet: [loadSsh],
   pull: [loadPull],
   push: [loadPush],
+  // `repos` is the canonical command name; `repo` remains a convenience alias
+  // (see commands/repo.ts). List both so lazy registration loads the tree
+  // whichever the user types.
+  repos: [loadRepo],
   repo: [loadRepo],
   setup: [loadSetup],
   sessions: [loadSessions],

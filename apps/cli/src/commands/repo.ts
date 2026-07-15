@@ -1,9 +1,9 @@
 /**
  * Extra DotAgent repo management.
  *
- * Registers `agents repo add|init|list|remove|enable|disable` which manage
- * additional DotAgent repos alongside the primary ~/.agents/.system/ repo so
- * private, work, or team skills can ship separately from public ones.
+ * Registers `agents repos add|init|list|remove|enable|disable` (`repo` alias)
+ * which manage additional DotAgent repos alongside the primary ~/.agents/.system/
+ * repo so private, work, or team skills can ship separately from public ones.
  *
  * Extras are user-level config: managed clones live at ~/.agents-<alias>/ as
  * peer dirs to ~/.agents/, and user-owned repos may live anywhere. All extras
@@ -56,7 +56,15 @@ import {
   resolveExtraRepoDir,
   updateMeta,
 } from '../lib/state.js';
-import { parseSource, pullRepo, commitAndPush, isGitRepo, isSystemRepoOrigin, adoptRepo } from '../lib/git.js';
+import {
+  parseSource,
+  pullRepo,
+  commitAndPush,
+  isGitRepo,
+  isSystemRepoOrigin,
+  adoptRepo,
+  displayHomePath,
+} from '../lib/git.js';
 import { DEFAULT_SYSTEM_REPO } from '../lib/types.js';
 import type { AgentId, ExtraRepoConfig } from '../lib/types.js';
 import { ALL_AGENT_IDS, isAgentName, resolveAgentName } from '../lib/agents.js';
@@ -562,35 +570,44 @@ async function listRepos(alias: string | undefined, opts: { verbose?: boolean } 
   console.log('');
 }
 
-/** Register the `agents repo` command tree. */
+/**
+ * Label for push/pull spinners and results: alias + resolved dir + tracking ref.
+ * e.g. `user (~/.agents → origin/main)`.
+ */
+function formatRepoTarget(alias: string, dir: string, branch?: string): string {
+  const ref = branch ? `origin/${branch}` : 'origin';
+  return `${alias} (${displayHomePath(dir)} → ${ref})`;
+}
+
+/** Register the `agents repos` command tree (`repo` is a convenience alias). */
 export function registerRepoCommands(program: Command): void {
   const repoCmd = program
-    .command('repo')
-    .alias('repos')
+    .command('repos')
+    .alias('repo')
     .description('Manage extra DotAgent repos alongside ~/.agents/ (for private or team skills).');
 
   setHelpSections(repoCmd, {
     examples: `
       # Scaffold an editable repo (default: ~/.agents/)
-      agents repo init
+      agents repos init
 
       # Scaffold a named repo at ~/.agents-work/
-      agents repo init work
+      agents repos init work
 
       # Register an existing repo (clones to ~/.agents-<alias>/)
-      agents repo add gh:yourname/.agents-work
+      agents repos add gh:yourname/.agents-work
 
       # Register with a custom alias
-      agents repo add git@github.com:acme/team-skills.git --as acme
+      agents repos add git@github.com:acme/team-skills.git --as acme
 
       # See what's registered
-      agents repo list
+      agents repos list
 
       # View one repo's contents (git state + resource counts); omit the name for a picker
       agents repos view system
 
       # Temporarily disable without deleting
-      agents repo disable acme
+      agents repos disable acme
     `,
     notes: `
       Managed extras live at ~/.agents-<alias>/ as peer dirs to ~/.agents/. User-owned
@@ -948,12 +965,12 @@ export function registerRepoCommands(program: Command): void {
           }
           continue;
         }
-        const spinner = ora(`Pulling ${t.alias}...`).start();
+        const spinner = ora(`Pulling ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await pullRepo(t.dir);
         if (result.success) {
-          spinner.succeed(`${t.alias} -> ${result.commit}`);
+          spinner.succeed(`${formatRepoTarget(t.alias, t.dir, result.branch)}: ${result.commit}`);
         } else {
-          spinner.fail(`${t.alias}: ${result.error}`);
+          spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
         }
       }
     });
@@ -961,7 +978,7 @@ export function registerRepoCommands(program: Command): void {
   repoCmd
     .command('push [alias]')
     .description('Commit and push the user repo or a user-owned extra. Refuses to push the system repo.')
-    .option('-m, --message <msg>', 'Commit message', 'Update via agents repo push')
+    .option('-m, --message <msg>', 'Commit message', 'Update via agents repos push')
     .action(async (alias: string | undefined, options: { message: string }) => {
       const targets = collectRepoTargets(alias);
       if (!targets) {
@@ -991,12 +1008,14 @@ export function registerRepoCommands(program: Command): void {
         return;
       }
       for (const t of pushable) {
-        const spinner = ora(`Pushing ${t.alias}...`).start();
+        const spinner = ora(`Pushing ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await commitAndPush(t.dir, options.message);
         if (result.success) {
-          spinner.succeed(`${t.alias} pushed`);
+          spinner.succeed(
+            `${formatRepoTarget(t.alias, t.dir, result.branch)}: ${result.detail ?? 'pushed'}`,
+          );
         } else {
-          spinner.fail(`${t.alias}: ${result.error}`);
+          spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
         }
       }
     });
