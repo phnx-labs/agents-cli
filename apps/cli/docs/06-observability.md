@@ -232,6 +232,77 @@ agents sessions <id> --json --last 50 --include tools,assistant
 agents sessions <id> --markdown
 ```
 
+## Fleet comms (`agents mailboxes`)
+
+The three sources above tell you what agents are running; `agents mailboxes`
+shows what they are **saying to each other**. Every `agents message` /
+`agents teams message` / feed answer rides the mailbox spool
+(`~/.agents/.history/mailbox/<id>/{inbox,processing,consumed}`) — one box per
+logical agent. `agents mailboxes` (alias `agents mailbox`) is the read-only
+window onto it, including already-`consumed` (delivered) mail, so agent-to-agent
+chatter is visible after the fact.
+
+```bash
+agents mailboxes                 # masthead + 24h sparkline + boxes + recent cross-box log
+agents mailboxes <id>            # one box in full, across all three buckets
+agents mailboxes --watch         # live tail of cross-box traffic until Ctrl-C
+agents mailboxes --between a b   # one relationship as a thread, either direction
+agents mailboxes --graph         # who-talks-to-whom adjacency, busiest first
+```
+
+The overview opens with a `fleet comms` masthead (`N live · M boxes`, total
+messages, messages still awaiting delivery, last activity) and a 24-hour
+hourly-volume sparkline, then one row per box (live dot, pending/total counts,
+last activity, resolved live-session label), then the recency-ordered message
+log.
+
+### Live tail (`--watch`, `-f`) — the money shot
+
+```bash
+agents mailboxes --watch                 # stream new cross-box messages as they land
+agents mailboxes --watch --since 1h      # backfill the last hour, then keep tailing
+agents mailboxes --watch --from claude   # only one sender
+agents mailboxes --watch --json          # NDJSON, one message per line
+```
+
+Each line is `HH:MM:SS  <from> ─→ <toLabel>   <text>`. When a message is
+addressed to the box of the agent running the watch (spawn wiring sets
+`AGENTS_MAILBOX_DIR`), the target renders as `▲ you` in amber — an orchestrator
+agent sees its replies light up in the stream. Ctrl-C aborts the poller
+cleanly. Without `--since` the watcher does not replay history; it baselines
+the spool and streams only what arrives after that.
+
+### Filters (`--from`, `--to`, `--since`)
+
+All three apply to the overview recency log, the `--watch` stream, and
+`--graph`:
+
+| Flag | Matches |
+|---|---|
+| `--from <agent>` | Sender label contains `<agent>` (case-insensitive) |
+| `--to <agent>` | Recipient box id or resolved label contains `<agent>` |
+| `--since <dur>` | `30s` / `5m` / `2h` / `7d` / `4w` or an ISO date |
+
+### Thread (`--between <a> <b>`)
+
+Reads one relationship: every message between the two boxes in either
+direction, chronological, under a `a ⇄ b   N messages · span` header. Boxes
+resolve by full id, id prefix, or label substring. Thread reconstruction keys
+on the sender stamp (`from`), matched against the counterpart's box id (full
+or prefix) or its resolved label.
+
+### Routes (`--graph`)
+
+Aggregates the whole spool into `from └─▶ to ···· count` adjacency rows,
+busiest first — the shape of the fleet's chatter at a glance.
+
+### JSON mirroring
+
+`--json` works on every view: overview dumps per-box
+`{id, label, live, pending, total, messages}` (filters recount when present),
+`<id>` dumps one box, `--between` dumps `{a, b, count, messages}`, `--graph`
+dumps the edge list, and `--watch` streams NDJSON.
+
 ## Cost & Duration Rollup (`agents cost`)
 
 Every session is priced at scan time: `cost_usd = Σ tokens × per-model price`
