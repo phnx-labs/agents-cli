@@ -55,14 +55,19 @@ bunx @vscode/vsce package --out "$VSIX_OUT"
 echo "Verifying packaged runtime dependencies..."
 VSIX_FILES="$(unzip -Z1 "$VSIX_OUT")"
 MISSING=""
+# Exact-line literal match (-xF): the deps contain regex metachars (sql.js) and
+# we want the top-level entry, not a substring.
 for dep in yaml node-pty sql.js ws; do
-    if ! printf '%s\n' "$VSIX_FILES" | grep -q "^extension/node_modules/${dep}/package.json$"; then
+    if ! printf '%s\n' "$VSIX_FILES" | grep -qxF "extension/node_modules/${dep}/package.json"; then
         MISSING="${MISSING} ${dep}"
     fi
 done
-# node-pty's native binding for this host's arch must ship or terminals break.
-if ! printf '%s\n' "$VSIX_FILES" | grep -q "^extension/node_modules/node-pty/prebuilds/darwin-arm64/pty.node$"; then
-    MISSING="${MISSING} node-pty/darwin-arm64-prebuild"
+# node-pty ships one prebuilt native binding per platform; `bun install` fetches
+# only the current host's triple. Check for THIS host's arch (not a hardcoded
+# one) so a Linux/x64 CI build doesn't false-fail on an otherwise valid package.
+PTY_ARCH="$(node -e "console.log(process.platform + '-' + process.arch)")"
+if ! printf '%s\n' "$VSIX_FILES" | grep -qxF "extension/node_modules/node-pty/prebuilds/${PTY_ARCH}/pty.node"; then
+    MISSING="${MISSING} node-pty/${PTY_ARCH}-prebuild"
 fi
 if [ -n "$MISSING" ]; then
     echo "Error: VSIX is missing runtime dependencies:${MISSING}" >&2
