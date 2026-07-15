@@ -1257,7 +1257,15 @@ export function registerRunCommand(program: Command): void {
         if (nativeResume(agent)) {
           resumeNative = true;
           resumeSessionId = session.id;
-          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''}\n`));
+          // Native `--resume` (claude/codex) resolves the transcript relative to the
+          // working directory (projects/<cwd-hash>/). The session may have been started
+          // in a different directory than we're standing in now — most importantly when a
+          // routine daemon fires `agents run --resume` from its own cwd. Spawn from the
+          // session's ORIGIN cwd so the resume actually finds it; otherwise the agent
+          // exits "No conversation found with session ID". Honor an explicit --cwd only if
+          // the caller passed one (they're overriding on purpose).
+          if (!options.cwd && session.cwd) options.cwd = session.cwd;
+          if (!options.quiet) process.stderr.write(chalk.gray(`Resuming ${agent} ${session.shortId} (native)${version ? ` @${version}` : ''}${!options.cwd || options.cwd === session.cwd ? ` in ${session.cwd ?? cwd}` : ''}\n`));
         } else {
           // Tier-2: launch fresh with a /continue <id> first message; the agent
           // loads the transcript via `agents sessions <id>` and picks up.

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`agents run --resume <id>` now spawns from the session's origin directory.**
+  Native resume (claude/codex) resolves the transcript relative to the working
+  directory (`projects/<cwd-hash>/`), but the resolver found the session across all
+  projects and then invoked the agent from the *current* cwd — so a resume from a
+  different directory (most importantly a routine daemon firing `agents run --resume`)
+  failed with "No conversation found with session ID". It now `cd`s to the resolved
+  session's own `cwd` (honoring an explicit `--cwd`). This makes `routines add
+  --resume` (self-scheduled wake-ups) actually reopen the session end-to-end.
+
 ### Added
 
 - **Allowlist (permissions) support for OpenClaw (RUSH-1570).** Permission
