@@ -245,6 +245,28 @@ function commandSpawnEnv(config: JobConfig): Record<string, string> {
   return env;
 }
 
+/** POSIX single-quote a string so it is safe to embed in a `/bin/sh -c` script. */
+function shSingleQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Detached command routines write their own exit code to `<runDir>/exit-code`
+ * (see the wrapper in executeCommandJobDetached). `monitorRunningJobs` reads it
+ * to recover the true terminal status when the daemon restarted between spawn and
+ * exit and so missed the in-process `child.on('exit')`. Returns null when the
+ * file is absent/unparseable (child killed or crashed before writing it).
+ */
+function readCommandExitCode(runDir: string): number | null {
+  try {
+    const raw = fs.readFileSync(path.join(runDir, 'exit-code'), 'utf-8').trim();
+    if (!/^-?\d+$/.test(raw)) return null;
+    return parseInt(raw, 10);
+  } catch {
+    return null;
+  }
+}
+
 /** Pre-flight version/account selection for a routine job. */
 export interface RoutineLaunchPlan {
   /** Ordered attempts: primary first, then same-agent failover accounts. */
@@ -926,7 +948,18 @@ function executeCommandJobDetached(config: JobConfig): RunMeta {
   const stdoutPath = path.join(runDir, 'stdout.log');
   const stdoutFd = fs.openSync(stdoutPath, 'w', 0o600);
 
-  const cmd = buildShellCommand(config.command!);
+  // Wrap the shell so the child records its own exit code to <runDir>/exit-code.
+  // The in-process `child.on('exit')` below writes the terminal record while the
+  // daemon is alive (the common case); the file lets monitorRunningJobs recover
+  // the real status if the daemon restarted between spawn and exit. (win32 relies
+  // on the exit event only.)
+  const exitCodePath = path.join(runDir, 'exit-code');
+  // Run the command in a SUBSHELL `( … )` so that if it calls `exit`, only the
+  // subshell exits — the outer shell still captures `$?` and writes the file.
+  const cmd = process.platform === 'win32'
+    ? buildShellCommand(config.command!)
+    : ['/bin/sh', '-c',
+        `(\n${config.command!}\n)\n__ac_rc=$?; printf '%s' "$__ac_rc" > ${shSingleQuote(exitCodePath)} 2>/dev/null; exit $__ac_rc`];
   const env = commandSpawnEnv(config);
 
   const meta: RunMeta = {
@@ -947,12 +980,21 @@ function executeCommandJobDetached(config: JobConfig): RunMeta {
     env,
   });
 
-  child.on('error', (err) => {
-    try { fs.closeSync(stdoutFd); } catch { /* fd already closed */ }
-    meta.status = 'failed';
-    meta.exitCode = 1;
+  // Record the real terminal status ourselves — the daemon stays alive after this
+  // fire-and-forget call, so the exit event fires here. (monitorRunningJobs no
+  // longer force-fails command jobs; it reads exit-code only on the restart edge.)
+  let settled = false;
+  const settle = (status: RunMeta['status'], exitCode: number) => {
+    if (settled) return;
+    settled = true;
+    meta.status = status;
+    meta.exitCode = exitCode;
     meta.completedAt = new Date().toISOString();
     writeRunMeta(meta);
+  };
+  child.on('exit', (code) => settle(code === 0 ? 'completed' : 'failed', code ?? 1));
+  child.on('error', (err) => {
+    settle('failed', 1);
     process.stderr.write(`[agents] daemon: command spawn failed for job "${config.name}": ${err.message}\n`);
   });
 
@@ -1137,12 +1179,23 @@ export function monitorRunningJobs(): void {
         }
 
         if (!isPidOurs(meta.pid, meta.spawnedAt)) {
-          const inferred = isCommandRun ? null : inferFinalStatusFromLog(stdoutPath, meta.agent!);
-          if (inferred) {
-            meta.status = inferred.status;
-            meta.exitCode = inferred.exitCode;
+          if (isCommandRun) {
+            // Command routines normally record their own terminal status via
+            // child.on('exit') (so this record would already be non-'running' and
+            // skipped above). Reaching here means the daemon restarted mid-run and
+            // missed the exit event — recover the true code from the exit-code file
+            // the child wrote; its absence means the child was killed/crashed.
+            const ec = readCommandExitCode(runDirPath);
+            meta.status = ec === 0 ? 'completed' : 'failed';
+            meta.exitCode = ec;
           } else {
-            meta.status = 'failed';
+            const inferred = inferFinalStatusFromLog(stdoutPath, meta.agent!);
+            if (inferred) {
+              meta.status = inferred.status;
+              meta.exitCode = inferred.exitCode;
+            } else {
+              meta.status = 'failed';
+            }
           }
           meta.completedAt = new Date().toISOString();
           writeRunMeta(meta);

@@ -180,7 +180,7 @@ async function pickJob(
       message,
       choices: jobs.map((job) => ({
         value: job.name,
-        name: `${job.name} ${chalk.gray(`(${job.workflow ? `wf:${job.workflow}` : job.agent}, ${job.schedule ?? fireConditionLabel(job)})`)}`,
+        name: `${job.name} ${chalk.gray(`(${job.command ? 'command' : job.workflow ? `wf:${job.workflow}` : job.agent}, ${job.schedule ?? fireConditionLabel(job)})`)}`,
       })),
     });
   } catch (err) {
@@ -315,6 +315,7 @@ export function registerRoutinesCommands(program: Command): void {
             name: job.name,
             agent: job.agent ?? null,
             workflow: job.workflow ?? null,
+            command: job.command ?? null,
             repo: job.repo ?? null,
             schedule: job.schedule ?? null,
             scheduleHuman: fireConditionLabel(job),
@@ -404,9 +405,11 @@ export function registerRoutinesCommands(program: Command): void {
 
         const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
 
-        const agentLabelPadded = job.workflow
-          ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
-          : (job.agent || '').padEnd(10);
+        const agentLabelPadded = job.command
+          ? chalk.magenta('command'.padEnd(10))
+          : job.workflow
+            ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
+            : (job.agent || '').padEnd(10);
         console.log(
           `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
         );
