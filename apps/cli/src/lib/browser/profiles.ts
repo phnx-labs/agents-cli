@@ -32,6 +32,25 @@ export function getProfileRuntimeDir(name: string): string {
   return path.join(getBrowserRuntimeDir(), name);
 }
 
+/**
+ * Default destination for browser downloads for a profile. Set browser-global at
+ * connect time (see BrowserService), so downloads land here even when the agent
+ * never calls `browser download --path`. Keyed by the same composite name as the
+ * runtime dir, so every profile is one self-contained tree.
+ */
+export function getProfileDownloadsDir(name: string): string {
+  return path.join(getProfileRuntimeDir(name), 'downloads');
+}
+
+/**
+ * Per-profile directory for a task's captured artifacts (screenshots, PDFs,
+ * recordings). Replaces the legacy global `browser/sessions/<task>/` root — the
+ * one-shot migration in migrate.ts folds old captures into here.
+ */
+export function getProfileSessionsDir(name: string, task: string): string {
+  return path.join(getProfileRuntimeDir(name), 'sessions', task);
+}
+
 function configToProfile(name: string, config: BrowserProfileConfig): BrowserProfile {
   validateRemoteBrowserBinaries(config);
   return {

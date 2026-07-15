@@ -48,6 +48,7 @@ import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
+import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
 
@@ -2312,7 +2313,8 @@ export function registerSessionsCommands(program: Command): void {
     .option('--no-live', 'Do not enrich the listing with live status/preview for running sessions')
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-H, --host <target...>', 'Run this query on remote machine(s) over SSH (host alias or user@host; repeatable)')
-    .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable)');
+    .option('--device <target...>', 'Alias for --host (device alias from `agents devices`; repeatable)')
+    .option('--browser', 'List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`');
 
   setHelpSections(sessionsCmd, {
     examples: `
@@ -2356,6 +2358,11 @@ export function registerSessionsCommands(program: Command): void {
   });
 
   sessionsCmd.action(async (query: string | undefined, options: SessionsOptions) => {
+    if ((options as { browser?: boolean }).browser) {
+      // Alias for `agents browser sessions`: a profile positional narrows to one profile.
+      runBrowserSessions({ profile: query, json: options.json });
+      return;
+    }
     await sessionsAction(query, options);
   });
 

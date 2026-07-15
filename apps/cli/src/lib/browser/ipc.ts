@@ -502,11 +502,12 @@ export class BrowserIPCServer {
       }
 
       case 'set-download-path': {
-        if (!request.task || !request.downloadPath) {
-          return { ok: false, error: 'Task and download path required' };
+        if (!request.task) {
+          return { ok: false, error: 'Task required' };
         }
-        await this.service.setDownloadPath(request.task, request.downloadPath, request.tabId);
-        return { ok: true };
+        // downloadPath optional: omitted → service defaults to the profile's downloads dir.
+        const resolved = await this.service.setDownloadPath(request.task, request.downloadPath, request.tabId);
+        return { ok: true, downloadPath: resolved };
       }
 
       case 'wait-download': {

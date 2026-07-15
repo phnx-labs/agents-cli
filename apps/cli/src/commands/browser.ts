@@ -34,6 +34,7 @@ import {
   listAllProfileSnapshots,
 } from '../lib/browser/runtime-state.js';
 import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
+import { runBrowserSessions } from '../lib/browser/sessions-list.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
 import {
@@ -2032,10 +2033,10 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('download')
-    .description('Set download directory for a task')
+    .description("Set the download directory for a task (defaults to the profile's downloads dir)")
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
-    .requiredOption('-p, --path <dir>', 'Download directory path')
+    .option('-p, --path <dir>', "Download directory path (default: the profile's downloads dir)")
     .action(async (opts) => {
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
@@ -2050,7 +2051,17 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      console.log(`Download path set to ${opts.path}`);
+      console.log(response.downloadPath ? `Download path set to ${response.downloadPath}` : 'Download path set');
+    });
+
+  browser
+    .command('sessions')
+    .description('List a profile\'s captured screenshots, PDFs, recordings, and downloads')
+    .option('--profile <name>', 'Only this profile (default: all profiles with captures)')
+    .option('--open [selector]', "Open a capture in the OS default app: 'latest' or a filename")
+    .option('--json', 'Emit machine-readable JSON')
+    .action((opts) => {
+      runBrowserSessions({ profile: opts.profile, open: opts.open, json: opts.json });
     });
 
   // ─── Recording ─────────────────────────────────────────────────────────────
