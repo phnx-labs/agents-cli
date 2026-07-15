@@ -2,7 +2,32 @@
 
 ## Unreleased
 
+- **`agents fleet` alias + fleet-wide rollout (RUSH-1632).** `fleet` is an alias
+  for `devices`. New subcommands `update [version]` and `run <cmd…>` roll out
+  across every online device with a per-device result table. Source:
+  `apps/cli/src/commands/ssh.ts`, `apps/cli/src/lib/devices/fleet.ts`.
+- **`agents hosts stop <id>` (alias `kill`) terminates a detached host run from the origin machine (RUSH-1360).**
+  Sends SIGTERM to the remote process group, writes exit `143` only when a live
+  group was signaled (or no `.exit` existed), and keeps the remote log for
+  `agents hosts logs <id>`. Source: `apps/cli/src/lib/hosts/dispatch.ts`,
+  `apps/cli/src/commands/hosts.ts`.
+- **Fix: mailbox GC actually archives expired messages on live boxes (RUSH-1611).**
+  The live-box branch of `gcMailbox` only incremented `messagesDroppedExpired`
+  without moving the file to `consumed/`, so `agents feed --dispatch` could report
+  drops while leaving expired messages in `inbox/`/`processing/`. GC now reuses
+  `sweepExpired` (the same path as drain/peek). Source: `apps/cli/src/lib/mailbox-gc.ts`.
+- **Fix: Antigravity sign-in detection on Linux when the OAuth grant lives in Secret Service (RUSH-1329).** `agy` uses the Go keyring library, which prefers libsecret (gnome-keyring) over the file fallback whenever a Secret Service daemon is running — so `~/.gemini/antigravity-cli/antigravity-oauth-token` may be absent even when the user is signed in. After the file check, `getAccountInfo` now probes `secret-tool lookup service gemini username antigravity` (exit 0 = present; stdout discarded), mirroring the macOS `security find-generic-password` probe from #506. Missing `secret-tool`, locked collections, and timeouts all read as signed out. Opt out with `AGENTS_NO_KEYCHAIN_PROBE=1`. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/agents.test.ts`.
+- **Client-side (zero-knowledge) encryption of session transcripts before R2 upload (RUSH-1463).** Transcripts carry secrets, tokens, and absolute file paths; R2's server-side encryption uses Cloudflare's key, so anyone with bucket-read access (or Cloudflare) could read them as plaintext NDJSON. `agents sessions sync` now seals each transcript BODY client-side with AES-256-GCM before upload and decrypts on pull, so R2 only ever stores ciphertext. The 32-byte key is a new `R2_SYNC_ENC_KEY` in the `r2.backups` bundle — shared across the sync fabric (every machine derives the identical key) and deliberately separate from the R2 access key so rotating the token never orphans encrypted objects. CRDT identity stays over plaintext (the manifest hash is cleartext; pull decrypts before the G-Set union), so cross-machine merge is unaffected. Pull transparently reads legacy plaintext objects (migration-safe); a push with no key configured still uploads but emits a loud per-cycle warning. A new `R2_ENDPOINT` override points sync at any S3-compatible store (MinIO/other providers), which is also how the flow is verified end-to-end without live R2. Source: `apps/cli/src/lib/session/sync/transcript-crypto.ts`, `apps/cli/src/lib/session/sync/transcript-crypto.test.ts`, `apps/cli/src/lib/session/sync/sync.ts`, `apps/cli/src/lib/session/sync/config.ts`, `apps/cli/src/commands/sessions-sync.ts`, `apps/cli/src/lib/daemon.ts`.
 - **Extend session sync to Droid, Grok, Kimi, and OpenCode (RUSH-1467).** `agents sessions sync` now includes these four agents in its upload/download matrix. `SyncAgentSpec` gains an optional `ext` field so agents with non-`.jsonl` transcript files (e.g., Kimi `state.json`) are walked correctly. Droid `.jsonl` rollouts, Grok `events.jsonl` streams, and Kimi `state.json` metadata files round-trip through the R2 mirror; OpenCode is slotted in `SYNC_AGENTS` but remains a placeholder because its sessions live in a SQLite DB and still require an SQLite-to-JSONL export step. Source: `apps/cli/src/lib/session/sync/agents.ts`, `apps/cli/src/lib/session/sync/agents.test.ts`, `apps/cli/src/commands/sessions-sync.ts`.
+- **`agents repos` is canonical (`repo` alias); push/pull echo the resolved target; push no longer no-ops when clean-but-ahead; pull rebases on diverge (RUSH-1454).** Help now prints `Usage: agents repos …`. Push/pull report `user (~/.agents → origin/main): …` instead of the bare alias. `commitAndPush` still `git push`es when the tree is clean but local is ahead of origin (previously returned success without pushing). `pullRepo` uses `git pull --rebase` so divergent branches reconcile instead of failing with a raw git error. Source: `apps/cli/src/commands/repo.ts`, `apps/cli/src/lib/git.ts`, `apps/cli/src/lib/startup/command-registry.ts`.
+- **`agents run --host <name> --copy-creds` provisions runtime credentials on a persistent host (RUSH-1608).**
+  Reuses the `--lease` credential path (`resolveClaudeCredentialsBlob` + the
+  `~/.claude/.credentials.json` bootstrap) but makes copying tokens to a
+  persistent host strictly opt-in per run. The user picks runtimes, sees a
+  consent prompt naming accounts and the Claude OAuth token, and the files are
+  shredded after the run. Source: `apps/cli/src/commands/exec.ts`,
+  `apps/cli/src/lib/hosts/dispatch.ts`, `apps/cli/src/lib/hosts/credentials.ts`,
+  `apps/cli/src/lib/hosts/credentials.test.ts`.
 
 ## 1.20.62
 

@@ -5,7 +5,17 @@ import * as crypto from 'crypto';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AGENTS, ALL_AGENT_IDS, deprecationNotice, getAccountInfo, resolveAgentName, resolveLastActive, warnAgentDeprecated } from './agents.js';
+import {
+  AGENTS,
+  ALL_AGENT_IDS,
+  __resetAntigravityKeychainCacheForTest,
+  antigravityOsKeyringProbe,
+  deprecationNotice,
+  getAccountInfo,
+  resolveAgentName,
+  resolveLastActive,
+  warnAgentDeprecated,
+} from './agents.js';
 import { IS_WINDOWS } from './platform/index.js';
 import type { CapabilityName } from './types.js';
 
@@ -448,6 +458,87 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     );
     const info = await getAccountInfo('antigravity', home);
     expect(info.signedIn).toBe(false);
+  });
+
+  it('selects the macOS security probe and the Linux secret-tool probe (RUSH-1329)', () => {
+    expect(antigravityOsKeyringProbe('darwin')).toEqual({
+      cmd: 'security',
+      args: ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'],
+    });
+    // go-keyring Secret Service attributes are service + username (not account).
+    expect(antigravityOsKeyringProbe('linux')).toEqual({
+      cmd: 'secret-tool',
+      args: ['lookup', 'service', 'gemini', 'username', 'antigravity'],
+    });
+    expect(antigravityOsKeyringProbe('win32')).toBeNull();
+  });
+
+  it('marks Antigravity signed in via Linux secret-tool when no token file exists (RUSH-1329)', async () => {
+    // Hermetic: a fake secret-tool on PATH that exits 0 only for the exact
+    // go-keyring attributes. The real keyring is unreachable under
+    // AGENTS_NO_KEYCHAIN_PROBE for other tests; here we exercise the live path.
+    if (process.platform !== 'linux') return;
+
+    const binDir = makeTempDir();
+    const fake = path.join(binDir, 'secret-tool');
+    fs.writeFileSync(
+      fake,
+      [
+        '#!/bin/sh',
+        '# Fake Secret Service probe for RUSH-1329.',
+        'if [ "$1" = "lookup" ] && [ "$2" = "service" ] && [ "$3" = "gemini" ] \\',
+        '   && [ "$4" = "username" ] && [ "$5" = "antigravity" ]; then',
+        '  printf "%s" "fake-refresh-token"',
+        '  exit 0',
+        'fi',
+        'exit 1',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    fs.chmodSync(fake, 0o755);
+
+    const prevPath = process.env.PATH;
+    const prevNoKeychain = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.PATH = `${binDir}${path.delimiter}${prevPath ?? ''}`;
+    delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    __resetAntigravityKeychainCacheForTest();
+
+    try {
+      const info = await getAccountInfo('antigravity', makeTempDir());
+      expect(info.signedIn).toBe(true);
+      expect(info.email).toBeNull();
+    } finally {
+      process.env.PATH = prevPath;
+      if (prevNoKeychain === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+      else process.env.AGENTS_NO_KEYCHAIN_PROBE = prevNoKeychain;
+      __resetAntigravityKeychainCacheForTest();
+    }
+  });
+
+  it('treats Antigravity as signed out when secret-tool has no matching grant (RUSH-1329)', async () => {
+    if (process.platform !== 'linux') return;
+
+    const binDir = makeTempDir();
+    const fake = path.join(binDir, 'secret-tool');
+    fs.writeFileSync(fake, '#!/bin/sh\nexit 1\n', 'utf-8');
+    fs.chmodSync(fake, 0o755);
+
+    const prevPath = process.env.PATH;
+    const prevNoKeychain = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.PATH = `${binDir}${path.delimiter}${prevPath ?? ''}`;
+    delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    __resetAntigravityKeychainCacheForTest();
+
+    try {
+      const info = await getAccountInfo('antigravity', makeTempDir());
+      expect(info.signedIn).toBe(false);
+    } finally {
+      process.env.PATH = prevPath;
+      if (prevNoKeychain === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+      else process.env.AGENTS_NO_KEYCHAIN_PROBE = prevNoKeychain;
+      __resetAntigravityKeychainCacheForTest();
+    }
   });
 
   it('marks Kimi signed in and derives a stable account key from the JWT user_id', async () => {

@@ -411,6 +411,7 @@ export async function runDaemon(): Promise<void> {
         log('INFO', `sessions sync: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}` +
           (r.errors.length ? `, ${r.errors.length} error(s): ${r.errors[0]}` : ''));
       }
+      if (r.warnings.length) log('WARN', `sessions sync: ${r.warnings[0]}`);
     } catch (err) {
       log('ERROR', `sessions sync failed: ${(err as Error).message}`);
     } finally {

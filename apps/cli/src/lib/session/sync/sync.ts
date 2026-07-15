@@ -30,6 +30,7 @@ import {
   type SyncAgentSpec,
 } from './agents.js';
 import { mergeTranscripts, transcriptStats } from './crdt.js';
+import { resolveSyncEncKey, encryptTranscript, decryptTranscriptBody } from './transcript-crypto.js';
 import {
   emptyManifest,
   parseManifest,
@@ -56,6 +57,9 @@ export interface SyncResult {
   merged: number;
   pullSkipped: number;
   errors: string[];
+  /** Non-fatal advisories (e.g. transcripts uploaded unencrypted). Unlike
+   *  `errors` these do not set a failing exit code. */
+  warnings: string[];
 }
 
 export interface SyncOptions {
@@ -75,10 +79,21 @@ function specById(id: string): SyncAgentSpec | undefined {
 }
 
 /** Upload this machine's changed transcripts and publish its manifest. */
-async function pushOwn(r2: R2Client, me: string, opts: SyncOptions, result: SyncResult): Promise<void> {
+async function pushOwn(r2: R2Client, me: string, encKey: Buffer | null, opts: SyncOptions, result: SyncResult): Promise<void> {
   const ledger = loadLedger();
   const prev = loadLocalManifest();
   const manifest: Manifest = emptyManifest(me, nowIso());
+
+  // The transcript body is sealed client-side before it leaves the machine
+  // (AES-256-GCM under the shared bundle key). Without a key we still upload —
+  // the feature predates encryption — but flag it LOUDLY once per cycle so an
+  // unencrypted upload never happens silently.
+  if (!encKey) {
+    result.warnings.push(
+      `R2_SYNC_ENC_KEY not set in the r2.backups bundle — transcripts are uploaded UNENCRYPTED ` +
+      `(readable by anyone with bucket access). Add the shared key to enable client-side encryption.`,
+    );
+  }
 
   for (const spec of SYNC_AGENTS) {
     const agentManifest: Record<string, ManifestEntry> = {};
@@ -101,11 +116,16 @@ async function pushOwn(r2: R2Client, me: string, opts: SyncOptions, result: Sync
       } catch {
         continue;
       }
+      // Identity for CRDT merge is the PLAINTEXT hash (ciphertext is
+      // non-deterministic), so hash + manifest are computed on cleartext; only
+      // the stored object body is sealed.
       const hash = hashContent(content);
       const { lastTs } = transcriptStats(content);
       const entry: ManifestEntry = { relKey: t.relKey, size: stat.size, hash, lastTs };
+      const body = encKey ? encryptTranscript(content, encKey) : content;
+      const contentType = encKey ? 'application/json' : 'application/x-ndjson';
       try {
-        await r2.put(objectKey(me, spec.id, t.sessionId), content, 'application/x-ndjson');
+        await r2.put(objectKey(me, spec.id, t.sessionId), body, contentType);
         ledgerRecord(ledger, t.absPath, stat.size, stat.mtimeMs, hash);
         agentManifest[t.sessionId] = entry;
         result.pushed++;
@@ -208,7 +228,7 @@ export function reconcileCopies(
 }
 
 /** Fetch other machines' manifests, union changed sessions into the mirror. */
-async function pullAndReconcile(r2: R2Client, me: string, opts: SyncOptions, result: SyncResult): Promise<void> {
+async function pullAndReconcile(r2: R2Client, me: string, encKey: Buffer | null, opts: SyncOptions, result: SyncResult): Promise<void> {
   const prefixes = await r2.listPrefixes(SESSIONS_PREFIX); // sessions/<machine>/
   const machines = prefixes
     .map(p => p.slice(SESSIONS_PREFIX.length).replace(/\/$/, ''))
@@ -258,7 +278,11 @@ async function pullAndReconcile(r2: R2Client, me: string, opts: SyncOptions, res
     const fetched: Array<string | null> = [];
     for (const c of list) {
       try {
-        fetched.push(await r2.get(objectKey(c.machine, agentId, sessionId)));
+        const body = await r2.get(objectKey(c.machine, agentId, sessionId));
+        // Decrypt before the body reaches the CRDT union — the merge and the
+        // mirror always operate on plaintext. A legacy plaintext object passes
+        // through untouched; an envelope without a key throws (surfaced below).
+        fetched.push(body === null ? null : decryptTranscriptBody(body, encKey));
       } catch (err) {
         result.errors.push(`get ${c.machine}/${sessionId}: ${(err as Error).message}`);
         fetched.push(null);
@@ -300,6 +324,7 @@ export async function syncSessions(opts: SyncOptions = {}): Promise<SyncResult> 
   const cfg = loadR2Config();
   const me = machineId();
   const r2 = new R2Client(cfg);
+  const encKey = resolveSyncEncKey(cfg); // shared client-side transcript key, or null
   const result: SyncResult = {
     machine: me,
     pushed: 0,
@@ -308,9 +333,10 @@ export async function syncSessions(opts: SyncOptions = {}): Promise<SyncResult> 
     merged: 0,
     pullSkipped: 0,
     errors: [],
+    warnings: [],
   };
 
-  if (opts.push !== false) await pushOwn(r2, me, opts, result);
-  if (opts.pull !== false) await pullAndReconcile(r2, me, opts, result);
+  if (opts.push !== false) await pushOwn(r2, me, encKey, opts, result);
+  if (opts.pull !== false) await pullAndReconcile(r2, me, encKey, opts, result);
   return result;
 }

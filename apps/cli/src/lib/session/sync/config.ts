@@ -21,6 +21,14 @@ export interface R2Config {
   secretAccessKey: string;
   /** S3-compatible endpoint for the account (no bucket, no trailing slash). */
   endpoint: string;
+  /**
+   * Shared 32-byte key (hex or base64) for client-side transcript encryption,
+   * held in the bundle as `R2_SYNC_ENC_KEY`. Optional and deliberately separate
+   * from the R2 credentials so rotating the access token never orphans already
+   * encrypted objects. When absent, transcripts upload unencrypted (with a loud
+   * per-cycle warning) — see transcript-crypto.ts + pushOwn.
+   */
+  syncEncKey?: string;
 }
 
 /**
@@ -34,6 +42,7 @@ function resolveR2Config(): R2Config {
   const bucket = env.R2_BUCKET_NAME?.trim();
   const accessKeyId = env.R2_ACCESS_KEY_ID?.trim();
   const secretAccessKey = env.R2_SECRET_ACCESS_KEY?.trim();
+  const syncEncKey = env.R2_SYNC_ENC_KEY?.trim() || undefined;
 
   const missing = [
     !accountId && 'R2_ACCOUNT_ID',
@@ -53,7 +62,11 @@ function resolveR2Config(): R2Config {
     bucket: bucket!,
     accessKeyId: accessKeyId!,
     secretAccessKey: secretAccessKey!,
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    // Default to the account's R2 endpoint; an explicit R2_ENDPOINT override
+    // points sync at any S3-compatible store (MinIO, another provider) — which
+    // is also how the feature is verified end-to-end without live R2.
+    endpoint: env.R2_ENDPOINT?.trim() || `https://${accountId}.r2.cloudflarestorage.com`,
+    syncEncKey,
   };
 }
 

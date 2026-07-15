@@ -181,8 +181,15 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   events: [loadEvents],
   ssh: [loadSsh],
   devices: [loadSsh],
+  // `fleet` is a commander alias of `devices` (see commands/ssh.ts); list it so
+  // lazy registration loads the devices tree when the user types `agents fleet`.
+  fleet: [loadSsh],
   pull: [loadPull],
   push: [loadPush],
+  // `repos` is the canonical command name; `repo` remains a convenience alias
+  // (see commands/repo.ts). List both so lazy registration loads the tree
+  // whichever the user types.
+  repos: [loadRepo],
   repo: [loadRepo],
   setup: [loadSetup],
   sessions: [loadSessions],

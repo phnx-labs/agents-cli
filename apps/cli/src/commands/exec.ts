@@ -10,6 +10,7 @@ import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import type { ExecOptions, ExecMode, ExecEffort, FallbackEntry } from '../lib/exec.js';
 import type { AgentId } from '../lib/types.js';
+import type { DetectedRuntime } from '../lib/crabbox/runtimes.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import { setHelpSections } from '../lib/help.js';
 import { parseLoopInterval } from '../lib/loop.js';
@@ -69,6 +70,7 @@ interface ExecCommandActionOptions {
   remoteCwd?: string;
   follow?: boolean; // --no-follow sets this false
   any?: boolean;
+  copyCreds?: boolean;
   lease?: string | boolean; // --lease [backend]: true when bare, backend string when given
   keepBox?: boolean; // --keep-box: don't tear down the leased box after the run
   secretsKeys?: string; // --secrets-keys: comma-separated key subset for --secrets bundles
@@ -393,6 +395,10 @@ export function registerRunCommand(program: Command): void {
     .option('--no-follow', 'With --host, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
     .option('--any', 'With --host <cap> (a capability tag), pick any matching host instead of erroring when several match.')
     .option(
+      '--copy-creds',
+      'With --host, copy the picked runtime credentials (and Claude OAuth token) to the host, then shred them after the run. Opt-in per run.',
+    )
+    .option(
       '--lease [backend]',
       'Invent a disposable cloud box for this run and tear it down after (via crabbox). Optional backend selects the cloud (hetzner/aws/do). Unlike --host, no machine is registered.',
     )
@@ -693,6 +699,49 @@ export function registerRunCommand(program: Command): void {
           // concrete id.
           const resumeId = typeof options.resume === 'string' ? options.resume : undefined;
 
+          // --copy-creds: provision runtime credentials (and the Claude OAuth token)
+          // on the remote host before the run, then shred them after. Unlike
+          // --lease, a host is persistent, so this is strictly opt-in per run.
+          let hostCopyCreds: { runtimes: AgentId[]; detected: DetectedRuntime[]; claudeCredentialsJson?: string | null } | undefined;
+          if (options.copyCreds) {
+            const { detectSignedInRuntimes, pickRuntimes, resolveClaudeCredentialsBlob } = await import('../lib/crabbox/runtimes.js');
+            const { confirm } = await import('@inquirer/prompts');
+
+            const detected = await detectSignedInRuntimes();
+            const runtimes = await pickRuntimes(detected);
+            if (runtimes.length === 0) {
+              console.error(chalk.yellow('No runtimes selected. Sign into one locally then retry, or omit --copy-creds.'));
+              process.exit(1);
+            }
+
+            const names = runtimes
+              .map((id) => {
+                const d = detected.find((x) => x.id === id);
+                return `${d?.label ?? id}${d?.email ? ` (${d.email})` : ''}`;
+              })
+              .join(', ');
+            const whatShips = runtimes.includes('claude') ? 'credentials + Claude OAuth token' : 'credentials';
+            const ok = await confirm({
+              message: `Copy ${whatShips} for ${names} to host "${host.name}", run there, then shred them after?`,
+              default: false,
+            });
+            if (!ok) {
+              console.error(chalk.yellow('Aborted — no credentials pushed, no run dispatched.'));
+              process.exit(1);
+            }
+
+            let claudeCredentialsJson: string | null = null;
+            if (runtimes.includes('claude')) {
+              const claudeEmail = detected.find((d) => d.id === 'claude')?.email ?? null;
+              claudeCredentialsJson = await resolveClaudeCredentialsBlob({ preferEmail: claudeEmail });
+              if (!claudeCredentialsJson) {
+                console.error(chalk.yellow('Warning: could not read the local Claude OAuth token — the host may boot Claude "Not logged in".'));
+              }
+            }
+
+            hostCopyCreds = { runtimes, detected, claudeCredentialsJson };
+          }
+
           // Decide whether this host run is interactive. No prompt always means
           // interactive (matching local resolveInteractive); --interactive forces
           // interactive even when a prompt is provided; --headless forces headless
@@ -745,6 +794,7 @@ export function registerRunCommand(program: Command): void {
               passthroughArgs,
               raw: options.raw || options.tmux === false || options.disableTmux === true,
               forceInteractive: options.interactive,
+              copyCreds: hostCopyCreds,
             });
             process.exit(exitCode);
           }
@@ -775,6 +825,7 @@ export function registerRunCommand(program: Command): void {
             name: options.name,
             resume: resumeId,
             follow: options.follow !== false,
+            copyCreds: hostCopyCreds,
           });
           // Register the dispatched run in the LOCAL session index so it shows
           // up in `agents sessions` and resolves by id/name, even though its
