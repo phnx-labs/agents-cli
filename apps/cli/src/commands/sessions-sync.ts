@@ -104,7 +104,7 @@ export async function runSessionsSync(options: SyncCmdOptions): Promise<void> {
 export function registerSessionsSyncCommand(sessionsCmd: Command): void {
   const syncCmd = sessionsCmd
     .command('sync')
-    .description('Sync session transcripts across machines via R2 (CRDT merge). Claude and Codex.')
+    .description('Sync session transcripts across machines via R2 (CRDT merge). Claude, Codex, Droid, Grok, Kimi, and OpenCode.')
     .option('-v, --verbose', 'Log each pushed and pulled session')
     .option('--json', 'Output the sync result as JSON')
     .option('--enable', 'Opt in to automatic background sync (beta; alias for: agents beta enable session-sync)')
