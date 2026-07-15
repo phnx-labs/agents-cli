@@ -985,7 +985,6 @@ function normalizeClaudeWindow(
   };
 }
 
-/** Load Claude OAuth credentials from the system keychain/keyring. */
 /**
  * Parse a wrapped Claude OAuth payload — the `{ claudeAiOauth, organizationUuid }`
  * shape written by BOTH the macOS Keychain item and the Linux `.credentials.json`
