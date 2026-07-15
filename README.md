@@ -361,9 +361,18 @@ agents doctor --device mac-mini         # same matrix, scoped to one device
 
 # Your Tailscale fleet, auto-discovered
 agents devices sync                     # ingest `tailscale status`
+agents devices list                     # fleet + live headroom: load, mem, idle/busy — which box has room
+agents devices list --full              # add per-device cores and free/total RAM
+agents devices list --no-stats          # instant: names/addresses only, skip the probe
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain
 ```
+
+`agents devices list` probes every reachable box in parallel (bounded timeout, so a
+slow node degrades to `—` instead of hanging) and shows normalized load, memory
+pressure, and an idle/light/busy/loaded headroom badge, plus a fleet-capacity summary
+(`164 cores · 421G free / 518G RAM`). It answers "which machine has room right now?" —
+the utilization signal the teammate scheduler doesn't yet see.
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
 
