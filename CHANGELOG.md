@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+### Added
+
+- **`agents run --lease` is now frictionless end-to-end (RUSH-1723).** Leasing a
+  disposable cloud box to run an agent — the BYO-your-own-cloud way to offload heavy
+  work when local CPU cores are exhausted — no longer needs an env var, a flag, or a
+  hand-made keychain bundle:
+  - **Headless by default (RUSH-1724).** `--lease` no longer blocks on an interactive
+    runtime picker or confirm — it infers the one runtime the run needs from the agent,
+    and copies the account the run's own `balanced` strategy would pick (a healthy,
+    non-rate-limited one), never the whole set of signed-in tokens and never a throttled
+    account.
+  - **`agents lease setup` (RUSH-1728).** A one-time wizard opens the Hetzner token page,
+    validates the token against the live API, stores it in the `hetzner.com` keychain
+    bundle, and sets it as the default. First-run `--lease` detects a missing credential
+    and runs this automatically, then continues.
+  - **No more `AGENTS_LEASE_SECRETS_BUNDLE=` (RUSH-1728).** New `lease.secretsBundle`
+    config, plus auto-detection of the first bundle that declares a provider token
+    (`HCLOUD_TOKEN`/`AWS_ACCESS_KEY_ID`/`DIGITALOCEAN_TOKEN`) — only that key is injected
+    into crabbox (least privilege).
+  - **`agents lease gc` (RUSH-1726).** Reclaim expired, idle "orphan" boxes that hold a
+    provider's server quota (the cause of a Hetzner `server_limit` 403, which is now an
+    actionable error). Conservative: only stops boxes whose lease expired AND that have
+    been untouched past a safety window, and requires `--yes` or a TTY confirm.
+
+  Source: `apps/cli/src/commands/lease.ts`, `apps/cli/src/commands/exec.ts`,
+  `apps/cli/src/lib/crabbox/cli.ts`, `apps/cli/src/lib/crabbox/runtimes.ts`,
+  `apps/cli/src/lib/crabbox/lease.ts`, `apps/cli/src/lib/types.ts`.
+
 ### Fixed
 
 - **`agents run --resume <id>` now spawns from the session's origin directory.**
