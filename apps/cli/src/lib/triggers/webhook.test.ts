@@ -413,7 +413,7 @@ describe('startWebhookServer', () => {
     }
   });
 
-  it('does not mark a delivery when dispatch fails so retry can finish matched routines', async () => {
+  it('tracks completed jobs so retry only finishes failed matches', async () => {
     const secret = 'linear-secret';
     const jobs = [
       job({
@@ -479,7 +479,10 @@ describe('startWebhookServer', () => {
       const retry = await send();
       expect(retry.status).toBe(200);
       expect(JSON.parse(retry.body).duplicate).toBeUndefined();
-      expect(dispatched).toEqual(['linear-agent', 'linear-followup', 'linear-agent', 'linear-followup']);
+      const duplicate = await send();
+      expect(duplicate.status).toBe(200);
+      expect(JSON.parse(duplicate.body).duplicate).toBe(true);
+      expect(dispatched).toEqual(['linear-agent', 'linear-followup', 'linear-followup']);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

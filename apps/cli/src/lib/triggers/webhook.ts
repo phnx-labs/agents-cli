@@ -167,6 +167,10 @@ export interface FireWebhookOptions {
    * matching without spawning real agent processes.
    */
   dispatch?: (config: JobConfig) => Promise<RunMeta>;
+  /** Matched job names that already completed for this delivery. */
+  skipJobNames?: ReadonlySet<string>;
+  /** Called immediately after a single matched job dispatch succeeds. */
+  onJobFired?: (job: JobConfig, fired: FiredJob) => void;
 }
 
 /** Result of firing one matched job. */
@@ -196,14 +200,18 @@ export async function fireWebhookJobs(
 ): Promise<FiredJob[]> {
   const jobs = options.jobs ?? listJobs();
   const dispatch = options.dispatch ?? executeJobDetached;
+  const skipJobNames = options.skipJobNames ?? new Set<string>();
   const matched = matchJobsToWebhook(jobs, webhook);
 
   const fired: FiredJob[] = [];
   const failures: { jobName: string; error: Error }[] = [];
   for (const job of matched) {
+    if (skipJobNames.has(job.name)) continue;
     try {
       const meta = await dispatch(job);
-      fired.push({ jobName: job.name, runId: meta.runId });
+      const firedJob = { jobName: job.name, runId: meta.runId };
+      fired.push(firedJob);
+      options.onJobFired?.(job, firedJob);
     } catch (err) {
       failures.push({ jobName: job.name, error: err as Error });
     }
@@ -258,19 +266,41 @@ export interface WebhookSecrets {
 export interface DeliveryStore {
   seen(id: string): boolean;
   mark(id: string): void;
+  completedJobs(id: string): ReadonlySet<string>;
+  markJob(id: string, jobName: string): void;
 }
 
 export function createMemoryDeliveryStore(maxEntries = 1000): DeliveryStore {
-  const seen = new Map<string, number>();
-  return {
-    seen: (id) => seen.has(id),
-    mark: (id) => {
-      seen.set(id, Date.now());
-      while (seen.size > maxEntries) {
-        const oldest = seen.keys().next().value as string | undefined;
-        if (!oldest) break;
-        seen.delete(oldest);
+  const seen = new Map<string, { complete: boolean; jobs: Set<string>; updatedAt: number }>();
+  const touch = (id: string) => {
+    let current = seen.get(id);
+    if (!current) {
+      current = { complete: false, jobs: new Set<string>(), updatedAt: Date.now() };
+      seen.set(id, current);
+    }
+    current.updatedAt = Date.now();
+    while (seen.size > maxEntries) {
+      let oldestId: string | null = null;
+      let oldestAt = Number.POSITIVE_INFINITY;
+      for (const [key, value] of seen) {
+        if (value.updatedAt < oldestAt) {
+          oldestAt = value.updatedAt;
+          oldestId = key;
+        }
       }
+      if (!oldestId) break;
+      seen.delete(oldestId);
+    }
+    return current;
+  };
+  return {
+    seen: (id) => seen.get(id)?.complete === true,
+    mark: (id) => {
+      touch(id).complete = true;
+    },
+    completedJobs: (id) => new Set(seen.get(id)?.jobs ?? []),
+    markJob: (id, jobName) => {
+      touch(id).jobs.add(jobName);
     },
   };
 }
@@ -406,7 +436,15 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           event: source === 'github' ? (header(req.headers, 'x-github-event') ?? '') : String(payload.type ?? ''),
           payload,
         };
-        const fired = await fireWebhookJobs(webhook, options.fire);
+        const fireOptions = options.fire ?? {};
+        const fired = await fireWebhookJobs(webhook, {
+          ...fireOptions,
+          skipJobNames: deliveryStore.completedJobs(id),
+          onJobFired: (job, firedJob) => {
+            deliveryStore.markJob(id, job.name);
+            fireOptions.onJobFired?.(job, firedJob);
+          },
+        });
         deliveryStore.mark(id);
         options.onDelivery?.(webhook, fired);
         res.writeHead(200, { 'content-type': 'application/json' });
