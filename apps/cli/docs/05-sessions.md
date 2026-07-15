@@ -204,12 +204,71 @@ no recursion; the target must be a host alias or `user@host` (validated against
 `SSH_TARGET_RE` to block argv-flag smuggling). SSH access is the only auth — if you
 can `ssh <host>`, you own the box; there is no identity layer.
 
-This is the **live** counterpart to `agents sessions sync` (R2 + CRDT union, eventual
-~90s): no upfront copy and always current, but the peer must be reachable. Use sync
-to make every machine's sessions show up in plain `agents sessions`; use `--host` to
-peek at a specific machine on demand.
+**`--host` is the default cross-machine recall path.** Online machines are the norm,
+so a live pull covers almost all recall with zero storage, zero lag, and no daemon —
+always current, nothing to configure beyond SSH. The two mechanisms below are for the
+cases a live pull can't reach: a machine that is **offline / asleep / decommissioned**.
+
+- **Export / import (portable bundles)** — user-driven, no daemon. Bundle the sessions
+  you want and carry them anywhere, or pull them off a peer in one command. This is the
+  primary durable-archive / hand-off tool (below).
+- **R2 + CRDT background sync** — an **opt-in beta, off by default**. A backup fabric for
+  the "every machine's sessions show up automatically, even offline" case. Prefer
+  on-demand `--host` reads and explicit export/import; reach for sync only when you want
+  a passive always-on mirror (further below).
+
+## Export / Import (portable bundles)
+
+`agents sessions export` bundles selected sessions into a portable, self-describing
+archive; `agents sessions import` restores one. This is the user-driven successor to
+background sync for the durable-archive / hand-off case: no daemon, no cloud bucket —
+you choose what to carry and when.
+
+```bash
+# Bundle the last week to a file (secrets redacted by default)
+agents sessions export --since 7d -o week.bundle
+
+# Bundle specific sessions (by id or query), encrypted
+agents sessions export 4f8a2b1c "auth bug" --encrypt -o pick.bundle
+
+# Restore — preview first, then import
+agents sessions import week.bundle --dry-run
+agents sessions import week.bundle
+
+# Pull straight off another machine in one command (over SSH, no R2)
+agents sessions import --from-host yosemite-s1 --since 7d
+
+# …which is just sugar for the raw pipe
+agents ssh yosemite-s1 'agents sessions export --since 7d --stdout' | agents sessions import -
+```
+
+A bundle is **self-describing NDJSON**: a header line (origin machine, encrypted /
+redacted flags, session + file counts) followed by one line per transcript file
+(agent, origin machine, session id, storage-relative key, SHA-256 hash, optional
+label, body). NDJSON — not tar — so it pipes cleanly over SSH with no external
+archiver, stays greppable with `head`, and carries a per-file AES-256-GCM envelope
+when `--encrypt` is on. Selection reuses the same flags as `agents sessions`
+(`--since`, `-n/--limit`, `--all`, `-a/--agent`, `--no-redact`); dir-shaped sessions
+(Kimi) carry all their constituent files.
+
+**Import placement reuses the sync mirror model verbatim.** Each session lands at
+`~/.agents/.history/backups/<agent>/<origin-machine>/<subdir>/<relKey>` — the same
+scan root cross-machine sync writes to — so imported sessions show up in
+`agents sessions` tagged with their origin machine and **never overwrite your own
+local sessions** ("local always wins" falls out of the scanner's live-home-first
+dedup, no extra logic). Dedup is byte-exact: a bundle file identical to one already on
+disk is skipped; a file that differs is a conflict, kept local unless `--overwrite`.
+`--from-host` reuses the exact SSH transport as the cross-machine listing
+(`resolveExplicitTargets` + `ssh-exec`) — no second transport, no R2, no daemon.
+Source: `src/lib/session/bundle.ts`, `src/lib/session/remote-bundle.ts`,
+`src/commands/sessions-export.ts`, `src/commands/sessions-import.ts`.
 
 ## Cross-machine sync (R2 + CRDT)
+
+> **Opt-in beta, off by default — a backup fabric, not the primary recall path.**
+> Prefer `--host` (live) and export/import (portable) above. Sync exists for the
+> "sessions from an offline machine show up automatically in plain `agents sessions`"
+> case; enable it only if you want that passive mirror.
 
 `agents sessions sync` copies transcripts between your machines through a single
 Cloudflare R2 bucket, so every machine's `agents sessions` list folds in the others'
