@@ -18,6 +18,7 @@ import { remoteShellFor } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { saveTask, updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { followHostTask } from './progress.js';
+import { wrapHostCommandWithCredentials, type HostCredentials } from './credentials.js';
 
 // Use $HOME (not ~) so the path is correct whether or not it's quoted and
 // regardless of the run's cwd. Task ids are 8 hex chars, so these paths are
@@ -180,6 +181,8 @@ interface LaunchOptions {
   sessionId?: string;
   /** Durable `--name` handle, persisted on the task record for name resolution. */
   name?: string;
+  /** Copy runtime credentials to the host before the run and shred them after. */
+  copyCreds?: HostCredentials;
 }
 
 /**
@@ -211,7 +214,10 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
   // Inner command run under a login shell so PATH resolves `agents`.
   const invocation = ['agents', ...opts.forwardedArgs].map(shellQuote).join(' ');
   const cwd = remoteCdPrefix(opts.remoteCwd);
-  const inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
+  let inner = `${cwd}${invocation} > ${remoteLog} 2>&1; echo $? > ${remoteExit}`;
+  if (opts.copyCreds) {
+    inner = wrapHostCommandWithCredentials(inner, opts.copyCreds);
+  }
 
   // Outer: ensure dir, launch the login-shell wrapper as a new process-group
   // leader, and print that leader PID.
@@ -308,6 +314,8 @@ export interface DispatchOptions {
   /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
+  /** Copy runtime credentials to the host before the run and shred them after. */
+  copyCreds?: HostCredentials;
 }
 
 /**
@@ -369,6 +377,8 @@ export interface InteractiveDispatchOptions {
   raw?: boolean;
   /** Forward `--interactive` to the remote so a prompt-bearing run still starts the TUI. */
   forceInteractive?: boolean;
+  /** Copy runtime credentials to the host before the run and shred them after. */
+  copyCreds?: HostCredentials;
 }
 
 /**
@@ -417,7 +427,10 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
 
   const invocation = ['agents', ...buildInteractiveRunForwardedArgs(opts)].map(shellQuote).join(' ');
   const cwd = remoteCdPrefix(opts.remoteCwd);
-  const remoteCmd = `${cwd}${invocation}`;
+  let remoteCmd = `${cwd}${invocation}`;
+  if (opts.copyCreds) {
+    remoteCmd = wrapHostCommandWithCredentials(remoteCmd, opts.copyCreds);
+  }
   return sshStream(target, remoteCmd, { tty: process.stdin.isTTY, multiplex: true });
 }
 
@@ -438,6 +451,7 @@ export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise
     // On resume the remote session keeps its existing id; record that id so the
     // task stays mapped to the same session.
     sessionId: opts.resume ?? opts.sessionId,
+    copyCreds: opts.copyCreds,
   });
 }
 
