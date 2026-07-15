@@ -22,16 +22,28 @@ describe('flagValue', () => {
 });
 
 describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
+  const originalArgv = process.argv.slice();
+
   afterEach(() => {
     delete process.env.AGENTS_SYNC_MACHINE_ID;
+    process.argv = originalArgv.slice();
+    process.exitCode = 0;
   });
 
-  it('returns false when the command is not host-routable', async () => {
+  it('falls through for OWN_HOST commands (secrets owns its --host)', async () => {
     expect(await maybeRunOnHost('secrets', ['secrets', 'list', '--host', 'mac'])).toBe(false);
   });
 
   it('leaves feed host lists to the command-level fleet aggregator', async () => {
     expect(await maybeRunOnHost('feed', ['feed', '--host', 'mac', '--json'])).toBe(false);
+  });
+
+  it('rejects --host on a non-routable, non-OWN_HOST group with a clear error (not unknown option)', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    // setup has no remote semantics and no own-host handler — must not fall
+    // through to commander (which would print "unknown option '--host'").
+    expect(await maybeRunOnHost('setup', ['setup', '--host', 'mac'])).toBe(true);
+    expect(process.exitCode).toBe(1);
   });
 
   it('returns false when no --host is given', async () => {
@@ -45,8 +57,12 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
   it('returns false when --host names this very machine (runs locally instead)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     expect(machineId()).toBe('mybox');
+    process.argv = ['node', 'agents', 'view', '--host', 'mybox'];
     expect(await maybeRunOnHost('view', ['view', '--host', 'mybox'])).toBe(false);
+    // Self-host strips routing flags so local commander never sees them.
+    expect(process.argv).toEqual(['node', 'agents', 'view']);
     // case-insensitive: the self-check must not SSH to `MyBox` either
+    process.argv = ['node', 'agents', 'view', '--host', 'MyBox'];
     expect(await maybeRunOnHost('view', ['view', '--host', 'MyBox'])).toBe(false);
   });
 
@@ -54,8 +70,23 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // --device naming this machine must short-circuit to a local run, exactly
     // like --host would — otherwise the alias would SSH to itself.
+    process.argv = ['node', 'agents', 'message', 'abc', 'hi', '--device', 'mybox'];
     expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--device', 'mybox'])).toBe(false);
+    expect(process.argv).toEqual(['node', 'agents', 'message', 'abc', 'hi']);
+    process.argv = ['node', 'agents', 'message', 'abc', 'hi', '--device=mybox'];
     expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--device=mybox'])).toBe(false);
+  });
+
+  it('routes repos/repo --host to a non-self target (the RUSH-1691 repro path)', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    // Invalid target rejected by assertValidSshTarget before SSH — proves
+    // repos is in REMOTE_PASSTHROUGH (previously fell through → unknown option).
+    for (const cmd of ['repos', 'repo'] as const) {
+      const result = await maybeRunOnHost(cmd, [cmd, 'list', '--host', '--evil']);
+      expect(result).toBe(true);
+      expect(process.exitCode).toBeGreaterThan(0);
+      process.exitCode = 0;
+    }
   });
 
   it('rejects a conflicting --host/--device pair without attempting SSH', async () => {

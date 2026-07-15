@@ -22,6 +22,7 @@ import { confirm, input } from '@inquirer/prompts';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
 import { itemPicker } from '../lib/picker.js';
+import { addHostOption } from '../lib/hosts/option.js';
 import {
   inspectRepo,
   resolveRepoTarget,
@@ -581,10 +582,14 @@ function formatRepoTarget(alias: string, dir: string, branch?: string): string {
 
 /** Register the `agents repos` command tree (`repo` is a convenience alias). */
 export function registerRepoCommands(program: Command): void {
-  const repoCmd = program
-    .command('repos')
-    .alias('repo')
-    .description('Manage extra DotAgent repos alongside ~/.agents/ (for private or team skills).');
+  // addHostOption on the group so --help documents --host/--device; remote
+  // routing is handled pre-parse by maybeRunOnHost (passthrough.ts).
+  const repoCmd = addHostOption(
+    program
+      .command('repos')
+      .alias('repo')
+      .description('Manage extra DotAgent repos alongside ~/.agents/ (for private or team skills).'),
+  );
 
   setHelpSections(repoCmd, {
     examples: `

@@ -111,10 +111,13 @@ target either from an existing `~/.ssh/config` stanza (connection details stay i
 ssh config; agents-cli stores only a caps/os overlay) or *inline* (with its own
 `user@address`). The host registry lives in `agents.yaml` under `hosts:` and **is**
 git-synced with `agents repo push`/`pull`, so a fleet definition travels between
-machines. The `-H, --host <name>` flag routes a command over SSH to that machine —
-supported today on the read-only/config commands (`view`, `inspect`, `usage`,
-`cost`, `doctor`, `list`, `sync`), on `agents run`, and across the `agents teams`
-lifecycle. The target may be a registered host name, a capability tag
+machines. The `-H, --host <name>` (alias `--device`) flag routes a command over
+SSH to that machine — supported on virtually every first-class group (`repos`,
+`view`, `inspect`, `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`,
+`status`, `teams`, `routines`, …), plus commands with their own richer host
+handling (`run`, `sessions`, `feed`, `computer`, `secrets`, `logs`). Groups with
+no remote semantics reject the flag with a clear message rather than commander's
+raw `unknown option`. The target may be a registered host name, a capability tag
 (`--host gpu --any`), or a raw `user@host`.
 
 The two systems are parallel and independent — a machine can appear in both.
