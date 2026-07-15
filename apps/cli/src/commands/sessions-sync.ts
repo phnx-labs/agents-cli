@@ -20,6 +20,7 @@ interface SyncCmdOptions {
   enable?: boolean;
   disable?: boolean;
   status?: boolean;
+  setup?: boolean;
 }
 
 export async function runSessionsSync(options: SyncCmdOptions): Promise<void> {
@@ -40,6 +41,11 @@ export async function runSessionsSync(options: SyncCmdOptions): Promise<void> {
       chalk.green('Automatic session sync enabled') +
       chalk.dim(' — the daemon resumes on its next cycle. (Same as: agents beta enable session-sync)'),
     );
+    return;
+  }
+  if (options.setup) {
+    const { promptAndProvisionSessionSync } = await import('./sync-provision.js');
+    await promptAndProvisionSessionSync({ explicit: true });
     return;
   }
   if (options.status) {
@@ -65,7 +71,8 @@ export async function runSessionsSync(options: SyncCmdOptions): Promise<void> {
       `  agents secrets add ${SYNC_BUNDLE} R2_ACCOUNT_ID\n` +
       `  agents secrets add ${SYNC_BUNDLE} R2_BUCKET_NAME\n` +
       `  agents secrets add ${SYNC_BUNDLE} R2_ACCESS_KEY_ID\n` +
-      `  agents secrets add ${SYNC_BUNDLE} R2_SECRET_ACCESS_KEY`,
+      `  agents secrets add ${SYNC_BUNDLE} R2_SECRET_ACCESS_KEY\n` +
+      chalk.dim('\nOr let a guided prompt mint the bundle for you: ') + chalk.cyan('agents sessions sync --setup'),
     );
     process.exitCode = 1;
     return;
@@ -111,12 +118,16 @@ export function registerSessionsSyncCommand(sessionsCmd: Command): void {
     .description('Sync session transcripts across machines via R2 (CRDT merge). Claude, Codex, Droid, Grok, Kimi, and OpenCode.')
     .option('-v, --verbose', 'Log each pushed and pulled session')
     .option('--json', 'Output the sync result as JSON')
+    .option('--setup', 'Guided provisioning: mint the r2.backups bundle, verify connectivity, and enable sync')
     .option('--enable', 'Opt in to automatic background sync (beta; alias for: agents beta enable session-sync)')
     .option('--disable', 'Opt out of automatic background sync (alias for: agents beta disable session-sync)')
     .option('--status', 'Show whether automatic sync is opted-in (beta) and configured');
 
   setHelpSections(syncCmd, {
     examples: `
+      # Guided first-time setup (mint R2 bundle, verify, enable)
+      agents sessions sync --setup
+
       # One sync cycle (push local changes, pull + merge from other machines)
       agents sessions sync
 
