@@ -29,6 +29,7 @@ import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.
 import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '../lib/session/state.js';
+import { inferSessionState } from '../lib/session/state.js';
 import { discoverSessions, countSessionsInScope, resolveSessionById, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { filterTeamSessions } from '../lib/session/team-filter.js';
 import { parseSession } from '../lib/session/parse.js';
@@ -1481,10 +1482,10 @@ async function renderSession(
   }
 
   const spinner = ora(`Parsing ${session.agent} session...`).start();
-  let events = parseSession(session.filePath, session.agent);
+  const parsedEvents = parseSession(session.filePath, session.agent);
   spinner.stop();
 
-  events = filterEvents(events, filters);
+  let events = filterEvents(parsedEvents, filters);
 
   const agentColor = colorAgent(session.agent);
   console.log('');
@@ -1535,7 +1536,11 @@ async function renderSession(
   // engine (plan text, PR, worktree, ticket). Pre-1.20.51 emitted a bare event
   // array; consumers that JSON.parse this now read `output.events` for the
   // array. See issue #743 (plan surfaced) and CHANGELOG for the shape change.
-  process.stdout.write(renderJson(events, session));
+  // `todos` (RUSH-1503) is computed from the UNFILTERED transcript so the
+  // checklist reflects true session state regardless of any `--include` filter;
+  // it lets the Factory panel read the CLI's checklist instead of re-parsing.
+  const todos = inferSessionState(parsedEvents, { cwd: session.cwd }).todos;
+  process.stdout.write(renderJson(events, todos ? { ...session, todos } : session));
 }
 
 function renderTopicCell(

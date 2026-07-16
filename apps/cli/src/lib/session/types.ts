@@ -48,6 +48,31 @@ export interface SessionAttachment {
   sizeBytes?: number;
 }
 
+/** One checklist item, as Claude's `TodoWrite` (`content`) or Codex's `update_plan` (`step`) emits it. */
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  /** Present-continuous label shown while this item is the active step. */
+  activeForm?: string;
+}
+
+/**
+ * Live plan progress derived from the most recent checklist write in the transcript
+ * (Claude `TodoWrite` / Codex `update_plan`, RUSH-1380). Lets consumers show "N/M
+ * done" + the current step for any session — including remote / device-dispatched
+ * agents that carry no local tool-call stream — instead of only a coarse
+ * working/idle verb.
+ */
+export interface TodoProgress {
+  items: TodoItem[];
+  /** Count of completed items. */
+  done: number;
+  /** Total items. */
+  total: number;
+  /** The in-progress item's activeForm (falls back to its content). The live step. */
+  activeForm?: string;
+}
+
 /** Metadata attached when a session was spawned by `agents teams`. */
 export interface TeamOrigin {
   /** Teammate name if set, otherwise first 8 chars of the agent UUID. */
@@ -124,6 +149,13 @@ export interface SessionMeta {
    * recover the plan text — the CLI now carries it on the metadata row.
    */
   plan?: string;
+  /**
+   * Live plan progress from the most recent checklist write (Claude `TodoWrite`
+   * / Codex `update_plan`, RUSH-1503). Populated on `agents sessions <id> --json`
+   * from the state engine so the Factory panel reads the CLI's computed checklist
+   * instead of re-parsing the transcript. Absent when the session wrote no list.
+   */
+  todos?: TodoProgress;
   /**
    * True when the session was spawned programmatically (SDK entrypoint) rather
    * than by a human at the Claude CLI. Captured at scan time from the JSONL

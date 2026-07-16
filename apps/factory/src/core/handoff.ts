@@ -2,12 +2,16 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { homedir } from 'os';
 import { execFile } from 'child_process';
+import { todoProgressFromCli, type TodoProgress } from './session.activity';
 
 export interface SessionToolStats {
   toolCalls: number;
   filesEdited: number;
   filesRead: number;
   recentFiles: string[];
+  /** Live checklist progress from the CLI's `session.todos` (RUSH-1503); undefined
+   *  when the session wrote no todo list or an older CLI omitted the field. */
+  todos?: TodoProgress;
 }
 
 export interface HandoffMessage {
@@ -139,6 +143,11 @@ async function computeSessionToolStats(
   )
     ? parsedStats
     : (parsedStats.events ?? []);
+  // Live checklist rides the SAME CLI call (RUSH-1503): `session.todos` is the
+  // state engine's computed checklist, so the panel no longer re-parses the tail.
+  const todos = Array.isArray(parsedStats)
+    ? undefined
+    : (todoProgressFromCli(parsedStats.session?.todos) ?? undefined);
   const toolUses = events.filter(ev => ev.type === 'tool_use');
   const editedFiles = new Set<string>();
   const readFiles = new Set<string>();
@@ -161,6 +170,7 @@ async function computeSessionToolStats(
     filesEdited: editedFiles.size,
     filesRead: readFiles.size,
     recentFiles: recentFiles.slice(-20),
+    todos,
   };
 }
 

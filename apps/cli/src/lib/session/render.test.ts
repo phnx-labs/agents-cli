@@ -33,6 +33,30 @@ describe('renderJson single-session output shape', () => {
     expect(parsed.events).toHaveLength(2);
   });
 
+  it('surfaces meta.todos (checklist progress) at session top level (RUSH-1503)', () => {
+    const meta: SessionMeta = {
+      id: 'abc-123',
+      shortId: 'abc-1234',
+      agent: 'claude',
+      timestamp: '2026-06-24T00:00:00Z',
+      filePath: '/tmp/session.jsonl',
+      todos: {
+        items: [
+          { content: 'Step one', status: 'completed' },
+          { content: 'Step two', status: 'in_progress', activeForm: 'Doing step two' },
+        ],
+        done: 1,
+        total: 2,
+        activeForm: 'Doing step two',
+      },
+    };
+    const parsed = JSON.parse(renderJson(events, meta));
+    expect(parsed.session.todos.done).toBe(1);
+    expect(parsed.session.todos.total).toBe(2);
+    expect(parsed.session.todos.items).toHaveLength(2);
+    expect(parsed.session.todos.items[1].content).toBe('Step two');
+  });
+
   it('strips internal bookkeeping fields (_matchedTerms/_bm25Score/_remote) from session', () => {
     const meta: SessionMeta = {
       id: 'abc-123',

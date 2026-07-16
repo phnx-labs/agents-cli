@@ -10,6 +10,10 @@ import { isSensitiveEnvKey } from './terminals';
  * waiting-for-input, output-token throughput — were deleted in issue #741: the
  * CLI's state engine computes them and `agents sessions --active --json` carries
  * them as ActiveSession.activity / awaitingReason / tokPerSec.
+ *
+ * The todo/plan-progress transcript parser was likewise deleted in RUSH-1503: the
+ * CLI carries the computed checklist on `agents sessions <id> --json` as
+ * `session.todos`, mapped into the panel shape by `todoProgressFromCli`.
  */
 
 export type ActivityType =
@@ -45,91 +49,42 @@ export interface TodoProgress {
 }
 
 /**
- * Extract the agent's CURRENT task checklist + progress from a session transcript.
+ * Map the CLI's computed checklist into the panel's TodoProgress shape (RUSH-1503).
  *
- * Fine-grained progress rides the per-task detail STREAM (the transcript tail the
- * caller already read for recent activity) — NOT the floor poll — so
- * this adds no extra I/O.
- *
- * The LATEST plan write fully supersedes earlier ones (the agent rewrites the whole
- * list each time), so we walk from the end and stop at the first valid match:
- *   - Claude: a `TodoWrite` tool_use with `input.todos: [{content,status,activeForm}]`.
- *   - Codex:  an `update_plan` function_call with `arguments.plan: [{step,status}]`.
- *   - Gemini: has no plan/todo tool — always null.
- * Returns null when there is no plan write or the latest one is empty. Pure so it's
- * unit-tested.
+ * The CLI state engine derives the latest `TodoWrite` (Claude) / `update_plan`
+ * (Codex) for EVERY agent and carries it on `agents sessions <id> --json` as
+ * `session.todos` ({ items: [{ content, status, activeForm }], done, total }). The
+ * extension consumes that here instead of re-parsing the raw transcript itself — one
+ * source of truth for checklist state. `done`/`total` are recomputed from the mapped
+ * items so a malformed tally can't drive the progress bar. Returns null when the
+ * payload carries no usable checklist. Pure, so it's unit-tested.
  */
-export function extractTodoProgress(
-  sessionContent: string,
-  agentType: AgentType
-): TodoProgress | null {
-  if (agentType !== 'claude' && agentType !== 'codex') return null;
-  const marker = agentType === 'claude' ? 'TodoWrite' : 'update_plan';
-  const lines = sessionContent.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i];
-    if (!line || line[0] !== '{') continue;
-    if (!line.includes(marker)) continue;
-    let raw: any;
-    try { raw = JSON.parse(line); } catch { continue; }
-    const todos = agentType === 'claude' ? parseClaudeTodos(raw) : parseCodexPlan(raw);
-    if (!todos) continue;
-    if (todos.length === 0) return null;
-    return {
-      todos,
-      done: todos.filter(t => t.status === 'completed').length,
-      total: todos.length,
-    };
+export function todoProgressFromCli(raw: unknown): TodoProgress | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const items = (raw as { items?: unknown }).items;
+  if (!Array.isArray(items)) return null;
+  const todos: TodoProgressItem[] = [];
+  for (const it of items) {
+    if (!it || typeof it !== 'object') continue;
+    const content = typeof (it as { content?: unknown }).content === 'string'
+      ? ((it as { content: string }).content).trim()
+      : '';
+    if (!content) continue;
+    const item: TodoProgressItem = { content, status: normalizeTodoStatus((it as { status?: unknown }).status) };
+    const activeForm = (it as { activeForm?: unknown }).activeForm;
+    if (typeof activeForm === 'string' && activeForm.trim()) item.activeForm = activeForm.trim();
+    todos.push(item);
   }
-  return null;
+  if (todos.length === 0) return null;
+  return {
+    todos,
+    done: todos.filter(t => t.status === 'completed').length,
+    total: todos.length,
+  };
 }
 
 function normalizeTodoStatus(s: unknown): TodoProgressStatus {
   return s === 'completed' || s === 'in_progress' ? s : 'pending';
-}
-
-/** Parse a Claude `TodoWrite` tool_use line into checklist items (null if not one). */
-function parseClaudeTodos(raw: any): TodoProgressItem[] | null {
-  if (raw?.type !== 'assistant') return null;
-  const content = raw?.message?.content;
-  if (!Array.isArray(content)) return null;
-  for (const block of content) {
-    if (block?.type !== 'tool_use' || block?.name !== 'TodoWrite') continue;
-    const list = block?.input?.todos;
-    if (!Array.isArray(list)) return null;
-    const todos: TodoProgressItem[] = [];
-    for (const it of list) {
-      const text = typeof it?.content === 'string' ? it.content.trim() : '';
-      if (!text) continue;
-      const item: TodoProgressItem = { content: text, status: normalizeTodoStatus(it?.status) };
-      if (typeof it?.activeForm === 'string' && it.activeForm.trim()) item.activeForm = it.activeForm.trim();
-      todos.push(item);
-    }
-    return todos;
-  }
-  return null;
-}
-
-/** Parse a Codex `update_plan` function_call line into checklist items (null if not one). */
-function parseCodexPlan(raw: any): TodoProgressItem[] | null {
-  if (raw?.type !== 'response_item') return null;
-  const payload = raw?.payload;
-  if (payload?.type !== 'function_call' || payload?.name !== 'update_plan') return null;
-  let args: any = {};
-  if (typeof payload?.arguments === 'string') {
-    try { args = JSON.parse(payload.arguments); } catch { return null; }
-  } else if (payload?.arguments && typeof payload.arguments === 'object') {
-    args = payload.arguments;
-  }
-  const list = args?.plan;
-  if (!Array.isArray(list)) return null;
-  const todos: TodoProgressItem[] = [];
-  for (const it of list) {
-    const text = typeof it?.step === 'string' ? it.step.trim() : '';
-    if (!text) continue;
-    todos.push({ content: text, status: normalizeTodoStatus(it?.status) });
-  }
-  return todos;
 }
 
 /**

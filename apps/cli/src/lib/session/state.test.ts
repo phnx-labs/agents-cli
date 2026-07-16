@@ -406,6 +406,40 @@ describe('extractTodoProgress (RUSH-1380)', () => {
     expect(extractTodoProgress({ todos: [{ status: 'pending' }] })).toBeUndefined();
   });
 
+  it('parses Codex update_plan (plan: [{step,status}]) into the same shape (RUSH-1503)', () => {
+    const p = extractTodoProgress({
+      plan: [
+        { step: 'Investigate', status: 'completed' },
+        { step: 'Implement', status: 'in_progress' },
+        { step: 'Verify', status: 'pending' },
+      ],
+    });
+    expect(p?.done).toBe(1);
+    expect(p?.total).toBe(3);
+    expect(p?.items[0]).toEqual({ content: 'Investigate', status: 'completed' });
+    expect(p?.items[1]).toEqual({ content: 'Implement', status: 'in_progress' });
+    // Codex plans carry no activeForm, so the live step falls back to content.
+    expect(p?.activeForm).toBe('Implement');
+  });
+
+  it('inferActivity attaches todos from a Codex update_plan tool call (RUSH-1503)', () => {
+    const s = inferActivity(
+      [
+        msg('user', 'do the thing'),
+        tool('update_plan', {
+          plan: [
+            { step: 'Step one', status: 'completed' },
+            { step: 'Step two', status: 'in_progress' },
+          ],
+        }),
+      ],
+      { pidAlive: true, mtimeMs: fresh },
+    );
+    expect(s.todos?.done).toBe(1);
+    expect(s.todos?.total).toBe(2);
+    expect(s.todos?.activeForm).toBe('Step two');
+  });
+
   it('inferActivity attaches todos from the latest TodoWrite, even mid-work', () => {
     const s = inferActivity(
       [

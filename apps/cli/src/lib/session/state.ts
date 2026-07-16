@@ -15,8 +15,12 @@
  * shape + mtime — same function, driven off the normalized events.
  */
 
-import type { SessionAttachment, SessionEvent } from './types.js';
+import type { SessionAttachment, SessionEvent, TodoItem, TodoProgress } from './types.js';
 import { summarizeToolUse } from './parse.js';
+
+// TodoItem / TodoProgress moved to ./types.ts so SessionMeta can carry `todos`
+// without a state↔types import cycle; re-exported here for existing importers.
+export type { TodoItem, TodoProgress };
 
 export type SessionActivity = 'working' | 'waiting_input' | 'idle';
 export type AwaitingReason = 'question' | 'plan_review' | 'permission';
@@ -45,30 +49,6 @@ export interface StructuredQuestion {
   text: string;
   reason: AwaitingReason;
   options?: QuestionOption[];
-}
-
-/** One `TodoWrite` checklist item, as Claude's plan tool emits it. */
-export interface TodoItem {
-  content: string;
-  status: 'pending' | 'in_progress' | 'completed';
-  /** Present-continuous label shown while this item is the active step. */
-  activeForm?: string;
-}
-
-/**
- * Live plan progress derived from the most recent `TodoWrite` in the transcript
- * (RUSH-1380). Lets the Factory Floor show "N/M done" + the current step for any
- * session — including remote / device-dispatched agents that carry no local
- * tool-call stream — instead of only a coarse working/idle verb.
- */
-export interface TodoProgress {
-  items: TodoItem[];
-  /** Count of completed items. */
-  done: number;
-  /** Total items. */
-  total: number;
-  /** The in-progress item's activeForm (falls back to its content). The live step. */
-  activeForm?: string;
 }
 
 export interface DetectedPr {
@@ -181,15 +161,23 @@ const PROSE_QUESTION_FRESH_MS = 30 * 60_000;
 const PLAN_TOOL = 'ExitPlanMode';
 const ASK_TOOL = 'AskUserQuestion';
 
-/** Claude's live plan/checklist tool. */
+/** The live plan/checklist tools: Claude's `TodoWrite` and Codex's `update_plan`. */
 const TODO_TOOL = 'TodoWrite';
+const CODEX_PLAN_TOOL = 'update_plan';
 
 /**
- * Derive live plan progress from a `TodoWrite` tool call's args. Returns undefined
- * when there is no usable list, so a session with no plan carries no `todos` field.
+ * Derive live plan progress from a checklist tool call's args. Accepts both
+ * Claude's `TodoWrite` (`todos: [{content,status,activeForm}]`) and Codex's
+ * `update_plan` (`plan: [{step,status}]`) shapes, so the CLI is the single source
+ * of checklist state for every agent. Returns undefined when there is no usable
+ * list, so a session with no plan carries no `todos` field.
  */
 export function extractTodoProgress(args?: Record<string, any>): TodoProgress | undefined {
-  const raw = args?.todos;
+  const raw = Array.isArray(args?.todos)
+    ? args!.todos
+    : Array.isArray(args?.plan)
+      ? args!.plan
+      : undefined;
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
   const items: TodoItem[] = [];
   for (const t of raw) {
@@ -199,7 +187,9 @@ export function extractTodoProgress(args?: Record<string, any>): TodoProgress | 
         ? t.content
         : typeof t?.text === 'string' && t.text
           ? t.text
-          : activeForm ?? '';
+          : typeof t?.step === 'string' && t.step
+            ? t.step
+            : activeForm ?? '';
     if (!content) continue;
     const status: TodoItem['status'] =
       t?.status === 'completed' || t?.status === 'in_progress' ? t.status : 'pending';
@@ -454,7 +444,7 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
   // Live plan progress: the most recent TodoWrite's checklist (RUSH-1380). Attached
   // to `base` so every return path below carries it — a working, waiting, or idle
   // session all keep showing how far the plan got.
-  const lastTodo = lastOf(meaningful, e => e.type === 'tool_use' && e.tool === TODO_TOOL);
+  const lastTodo = lastOf(meaningful, e => e.type === 'tool_use' && (e.tool === TODO_TOOL || e.tool === CODEX_PLAN_TOOL));
   const todos = lastTodo ? extractTodoProgress(lastTodo.args) : undefined;
 
   const base: SessionState = {

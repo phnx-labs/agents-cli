@@ -33,7 +33,7 @@ import { getSessionPathBySessionId, getSessionPreviewInfo, SessionPreviewInfo, r
 import { extractLinearTicketId } from '../core/utils';
 import { readPrompts } from './settings.vscode';
 import { BUILT_IN_AGENTS } from '../core/agents';
-import { parseLineForActivity, formatActivity, extractTodoProgress, type TodoProgress } from '../core/session.activity';
+import { parseLineForActivity, formatActivity, type TodoProgress } from '../core/session.activity';
 import { getSessionToolStatsViaAgentsCli } from '../core/handoff';
 import {
   extractPrUrls as extractPrUrlsHelper,
@@ -481,8 +481,8 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
 
           const tailLines = await readTailLines(filePath, 80);
           snapshot.recentActivity = collectRecentActivity(tailLines, entry.agentType, 5);
-          // Fine-grained progress rides the SAME tail — no extra read, no floor poll.
-          snapshot.todoProgress = extractTodoProgress(tailLines.join('\n'), entry.agentType as 'claude' | 'codex' | 'gemini') ?? undefined;
+          // todoProgress now comes from the CLI's computed `session.todos` via the
+          // tool-stats call below (RUSH-1503) — no transcript re-parse here.
           // Scan the full transcript-by-tail PLUS first/last user messages so a
           // PR mentioned in a wrap-up message isn't dropped. extractPrUrls
           // returns every match deduped, not just the first.
@@ -502,6 +502,9 @@ class AgentPanelProvider implements vscode.WebviewViewProvider {
     if (sessionId && cwd) {
       try {
         const stats = await getSessionToolStatsViaAgentsCli(sessionId, cwd, sessionFilePath);
+        // Live checklist rides the same CLI call — the state engine's computed
+        // `session.todos`, not a local transcript re-parse (RUSH-1503).
+        snapshot.todoProgress = stats.todos;
         // recentFiles from the helper is chronological; the last entry is the
         // newest edit. Reverse so the panel shows newest-first, then enrich
         // with mtime where the file still exists.

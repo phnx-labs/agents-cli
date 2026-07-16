@@ -94,7 +94,13 @@ Fields:
 `agents sessions <id> --json` returns a `{ session, events }` wrapper — the
 `SessionMeta` for the session (durable signals like `plan`, `prUrl`, `ticketId`
 live here) alongside the normalized event array. Pre-1.20.51 emitted a bare
-event array; consumers that JSON.parse the output should read `output.events`:
+event array; consumers that JSON.parse the output should read `output.events`.
+The `session` object here additionally carries `todos` — the live checklist
+progress (`{ items: [{ content, status, activeForm? }], done, total, activeForm? }`)
+computed by the state engine from the most recent `TodoWrite` (Claude) or
+`update_plan` (Codex) in the **unfiltered** transcript, so it is stable regardless
+of any `--include` filter. Absent when the session wrote no checklist. (It is
+detail-output only — the listing `--json` above does not compute it per row.)
 
 ```json
 {
@@ -102,6 +108,7 @@ event array; consumers that JSON.parse the output should read `output.events`:
     "id": "c07ec355-...",
     "agent": "claude",
     "plan": "# Plan\n\n1. ...",
+    "todos": { "items": [{ "content": "Step one", "status": "completed" }], "done": 1, "total": 2, "activeForm": "Doing step two" },
     "prUrl": "https://github.com/.../pull/38",
     "..."
   },
