@@ -2,6 +2,13 @@
 
 For release notes. User impact, not implementation.
 
+> **Where the note goes.** If the repo uses the fragment model (a `.changelog/`
+> directory — see the `code:changelog` skill), do **not** edit `CHANGELOG.md` by
+> hand. Drop one new file at `.changelog/next/<ticket>.md` with your note. Every
+> PR writes a different file, so the changelog can never become a merge conflict;
+> the release folds the queue and regenerates `CHANGELOG.md`. The guidance below
+> is about *what to write* — it applies either way.
+
 ## Core Principle
 
 **What changed for users, not what you did.** Group by impact, not by commit.

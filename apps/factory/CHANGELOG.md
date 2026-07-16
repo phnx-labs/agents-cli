@@ -6,6 +6,13 @@ All notable changes to the Factory extension are documented here. Format follows
 
 ## [Unreleased]
 
+- **Cloud agent activity feed no longer freezes on the first streamed event (RUSH-1558).**
+  `parseCloudSummaryIncremental` was returning its internal mutable cache array by
+  reference; React's `useMemo` in `CloudActivityFeed` keyed off that reference and
+  never saw it change as new events were pushed in place, so the detail pane's
+  live feed rendered only the first commit and stopped advancing. It now always
+  returns a fresh array. Source: `ui/settings/components/mission-control/cloudActivity.ts`.
+
 ## [0.9.294] - 2026-07-15
 
 - **Fix: extension failed to activate — every `agents.*` command reported "command not found" (e.g. `agents.dispatchTask`, `agents.configure`).** The published `0.9.293` VSIX shipped without its `node_modules`, so `require("yaml")` (in `core/agentInventory`, `sessions.persist`, `swarmifyConfig`) threw during `activate()`, aborting before any command registered. This release is a clean rebuild that bundles the runtime deps. To prevent recurrence, `scripts/build.sh` now unzips the freshly-packaged VSIX and hard-fails the build if `yaml`, `node-pty` (incl. its `darwin-arm64` native prebuild), `sql.js`, or `ws` are absent — a dependency-less package can no longer reach the marketplace. Source: `scripts/build.sh`.

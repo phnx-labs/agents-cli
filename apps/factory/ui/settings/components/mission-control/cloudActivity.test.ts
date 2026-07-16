@@ -3,6 +3,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   parseCloudSummary,
+  parseCloudSummaryIncremental,
+  emptyCloudParseCache,
   toolHeadline,
   simpleDiff,
   type CloudEvent,
@@ -143,6 +145,59 @@ describe('parseCloudSummary', () => {
     expect(events).toEqual([
       { kind: 'result', subtype: 'success', durationMs: 12345, numTurns: 7, totalCostUsd: 0.42 },
     ]);
+  });
+});
+
+describe('parseCloudSummaryIncremental', () => {
+  test('matches a full reparse at every step of a growing append-only stream', () => {
+    const lines = [
+      JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-sonnet-4-6', tools: ['Read'], cwd: '/w' }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Looking into it.' }] } }),
+      JSON.stringify({
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: '/w/a.ts' } }] },
+      }),
+      JSON.stringify({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'contents', is_error: false }] },
+      }),
+      JSON.stringify({ type: 'result', subtype: 'success', duration_ms: 100, num_turns: 1, total_cost_usd: 0.01 }),
+    ];
+    const cache = emptyCloudParseCache();
+    let summary = '';
+    for (const line of lines) {
+      summary += line + '\n';
+      const incremental = parseCloudSummaryIncremental(summary, cache);
+      expect(incremental).toEqual(parseCloudSummary(summary));
+    }
+  });
+
+  test('returns a fresh array identity on every call so React memoization sees new events', () => {
+    // Regression for RUSH-1558: the feed rendered off `useMemo(() => groupEvents(events), [events])`
+    // in CloudActivityFeed. If this function ever hands back the live cache.events reference
+    // on the common (no-tail) path, that reference's identity stops changing across calls even
+    // though its length keeps growing via push() -- React's dependency check sees the "same"
+    // array and freezes the rendered feed on whatever it first committed.
+    const cache = emptyCloudParseCache();
+    const line1 = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'one' }] } });
+    const line2 = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'two' }] } });
+
+    const first = parseCloudSummaryIncremental(line1 + '\n', cache);
+    expect(first).toHaveLength(1);
+
+    const second = parseCloudSummaryIncremental(line1 + '\n' + line2 + '\n', cache);
+    expect(second).toHaveLength(2);
+    expect(second).not.toBe(first);
+  });
+
+  test('resets and reparses when the buffer is truncated/replaced (not append-only)', () => {
+    const cache = emptyCloudParseCache();
+    const line1 = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'one' }] } });
+    parseCloudSummaryIncremental(line1 + '\n', cache);
+
+    const replaced = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'other' }] } });
+    const result = parseCloudSummaryIncremental(replaced + '\n', cache);
+    expect(result).toEqual(parseCloudSummary(replaced + '\n'));
   });
 });
 
