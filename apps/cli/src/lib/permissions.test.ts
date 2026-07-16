@@ -12,6 +12,7 @@ import {
   convertDenyToCodexRules,
   convertToKimiFormat,
   convertToDroidFormat,
+  convertToOpenClawFormat,
   convertToGooseFormat,
   convertToKiroFormat,
   formatComputerPermissionGrantHint,
@@ -64,6 +65,68 @@ describe('Droid permissions', () => {
       commandAllowlist: ['ls', 'git *'],
       commandDenylist: ['shutdown', 'rm -rf *'],
     });
+  });
+});
+
+describe('OpenClaw permissions', () => {
+  it('maps only blanket tool rules and skips sub-command/path/domain patterns', () => {
+    expect(convertToOpenClawFormat({
+      name: 'openclaw',
+      allow: ['Bash(git:*)', 'Read(**)', 'Bash(*)'],
+      deny: ['Write(secrets/**)', 'Write(**)', 'WebSearch(*)'],
+    })).toEqual({
+      alsoAllow: ['exec', 'read'],
+      deny: ['web_search', 'write'],
+    });
+  });
+
+  it('treats bare tool names as blanket and maps edit -> write', () => {
+    expect(convertToOpenClawFormat({
+      name: 'openclaw',
+      allow: ['Bash', 'Edit(**)', 'WebFetch(*)'],
+    })).toEqual({
+      alsoAllow: ['exec', 'web_fetch', 'write'],
+      deny: [],
+    });
+  });
+
+  it('writes and merges openclaw.json tools without clobbering unrelated keys', () => {
+    const home = makeTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      mcp: { servers: {} },
+      tools: { alsoAllow: ['read'], deny: ['browser'] },
+    }));
+
+    expect(applyPermissionsToVersion('openclaw', {
+      name: 'set',
+      allow: ['Bash(*)', 'Bash(git:*)'],
+      deny: ['Write(**)'],
+    }, home, true)).toEqual({ success: true });
+
+    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'openclaw.json'), 'utf-8'))).toEqual({
+      mcp: { servers: {} },
+      tools: { alsoAllow: ['read', 'exec'], deny: ['browser', 'write'] },
+    });
+  });
+
+  it('never touches tools.allow (the absolute allowlist)', () => {
+    const home = makeTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      tools: { allow: ['read'] },
+    }));
+
+    applyPermissionsToVersion('openclaw', {
+      name: 'set',
+      allow: ['Bash(*)'],
+    }, home, true);
+
+    const written = JSON.parse(fs.readFileSync(path.join(configDir, 'openclaw.json'), 'utf-8'));
+    expect(written.tools.allow).toEqual(['read']);
+    expect(written.tools.alsoAllow).toEqual(['exec']);
   });
 });
 

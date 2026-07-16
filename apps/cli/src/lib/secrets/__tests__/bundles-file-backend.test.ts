@@ -98,6 +98,16 @@ describe('file-backed bundle routing', () => {
     expect(enc).not.toContain('sealed-value');
   });
 
+  it('agentOnly does NOT block a file-backed bundle (no biometry prompt to guard)', () => {
+    // Regression: the headless guard's agentOnly must only gate keychain reads.
+    // A file-backed bundle resolves via passphrase with no Touch ID, and the
+    // broker never holds file bundles — so agentOnly:true must still resolve it,
+    // not throw "not unlocked in the secrets agent".
+    createFileBundle('ci', 'API_KEY', 'shh');
+    const { env } = readAndResolveBundleEnv('ci', { caller: 'test', agentOnly: true });
+    expect(env.API_KEY).toBe('shh');
+  });
+
   it('resolution fails clearly when the passphrase is wrong', () => {
     createFileBundle('rel', 'TOKEN', 'sealed-value');
     process.env.AGENTS_SECRETS_PASSPHRASE = 'wrong';

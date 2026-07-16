@@ -9,8 +9,10 @@ import {
   listWorkflowsForAgent,
   resolveAllowedSubagents,
   pruneStaleWorkflowSubagents,
+  ensureSubagentDispatchTool,
   syncWorkflowToVersion,
   transformWorkflowForKimi,
+  transformWorkflowForAntigravity,
 } from './workflows.js';
 
 describe('parseLoopBlock — defensive coercion (issue #332)', () => {
@@ -130,6 +132,35 @@ describe('pruneStaleWorkflowSubagents — fail-closed cleanup (issue #401)', () 
   });
 });
 
+describe('ensureSubagentDispatchTool — keep Task for orchestrators', () => {
+  const base = ['Read', 'Grep', 'Glob', 'Bash', 'Edit', 'Write', 'WebFetch'];
+
+  it('appends Task when the workflow ships subagents and Task is missing', () => {
+    // This is the doc-gaps / blog-engine bug: a `tools:` list that omits Task
+    // while shipping a subagents/ dir strips the orchestrator's only dispatch
+    // path, so the run silently no-ops.
+    expect(ensureSubagentDispatchTool(base, true)).toEqual([...base, 'Task']);
+  });
+
+  it('leaves the list unchanged when the workflow has no subagents', () => {
+    const out = ensureSubagentDispatchTool(base, false);
+    expect(out).toEqual(base);
+    expect(out).not.toContain('Task');
+  });
+
+  it('does not duplicate Task when it is already listed', () => {
+    const withTask = [...base, 'Task'];
+    expect(ensureSubagentDispatchTool(withTask, true)).toEqual(withTask);
+    expect(ensureSubagentDispatchTool(withTask, true).filter(t => t === 'Task')).toHaveLength(1);
+  });
+
+  it('does not mutate the input array', () => {
+    const input = [...base];
+    ensureSubagentDispatchTool(input, true);
+    expect(input).toEqual(base);
+  });
+});
+
 describe('parseWorkflowFrontmatter — loop block', () => {
   function writeWorkflow(frontmatter: string): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wf-loop-test-'));
@@ -218,6 +249,49 @@ describe('workflow native projections', () => {
       expect(listWorkflowsForAgent('kimi', kimiHome)).toEqual(['native-flow']);
     } finally {
       fs.rmSync(kimiHome, { recursive: true, force: true });
+    }
+  });
+
+  it('converts a workflow into an Antigravity workflow markdown file', () => {
+    const dir = writeWorkflow('---\nname: Ship Flow\ndescription: Ship safely\n---\n\n1. Test\n2. Release');
+
+    const workflow = transformWorkflowForAntigravity(dir, 'ship-flow');
+
+    // Required `description` frontmatter (agy's discovery contract) + ownership marker.
+    expect(workflow).toContain('description: Ship safely');
+    expect(workflow).toContain('name: Ship Flow');
+    expect(workflow).toContain('agents_workflow: ship-flow');
+    // Numbered-step body preserved verbatim below the frontmatter.
+    expect(workflow).toContain('1. Test');
+    expect(workflow).toContain('2. Release');
+  });
+
+  it('syncs Antigravity workflows to the shared HOME-global dir, guarding user-owned files', () => {
+    const dir = writeWorkflow('---\nname: Global Flow\ndescription: Global projection\n---\n\nRun the steps.');
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-agy-home-'));
+    const realHome = process.env.HOME;
+    // Antigravity workflows are HOME-global (agy scans ~/.gemini/config/global_workflows/),
+    // not version-isolated — so the writer ignores versionHome and resolves from $HOME.
+    process.env.HOME = fakeHome;
+
+    try {
+      const globalDir = path.join(fakeHome, '.gemini', 'config', 'global_workflows');
+      fs.mkdirSync(globalDir, { recursive: true });
+      // A user-authored workflow of the same name (no ownership marker) must not be clobbered.
+      fs.writeFileSync(path.join(globalDir, 'global-flow.md'), '---\ndescription: User-owned\n---\n\nHand-written.\n');
+      // versionHome is intentionally unused for antigravity; pass a dummy to prove it.
+      expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(false);
+      expect(listWorkflowsForAgent('antigravity', '/nonexistent-version-home')).toEqual([]);
+
+      fs.rmSync(path.join(globalDir, 'global-flow.md'), { force: true });
+      expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(true);
+      expect(fs.existsSync(path.join(globalDir, 'global-flow.md'))).toBe(true);
+      expect(listWorkflowsForAgent('antigravity', '/nonexistent-version-home')).toEqual(['global-flow']);
+      // Re-syncing an agents-cli-managed file is idempotent (marker matches).
+      expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(true);
+    } finally {
+      if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+      fs.rmSync(fakeHome, { recursive: true, force: true });
     }
   });
 });

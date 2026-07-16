@@ -702,3 +702,66 @@ describe('normalizeRecentSession outcome metrics', () => {
     expect(s.tokenCount).toBe(0);
   });
 });
+
+describe('normalizeActiveSession — todos plan progress (RUSH-1380)', () => {
+  test('carries the CLI TodoWrite checklist through to the card', () => {
+    const s = normalizeActiveSession(
+      {
+        kind: 'claude',
+        status: 'running',
+        activity: 'working',
+        cwd: '/x/y',
+        sessionFile: '/x/bbbbbbbb.jsonl',
+        todos: {
+          items: [
+            { content: 'Read the code', status: 'completed', activeForm: 'Reading the code' },
+            { content: 'Ship it', status: 'in_progress', activeForm: 'Shipping it' },
+            { content: 'Verify', status: 'pending' },
+          ],
+          done: 1,
+          total: 3,
+          activeForm: 'Shipping it',
+        },
+      } as RawActiveSession,
+      'yosemite-s0',
+      FETCHED_AT
+    );
+    expect(s.todos).toEqual([
+      { content: 'Read the code', status: 'completed', activeForm: 'Reading the code' },
+      { content: 'Ship it', status: 'in_progress', activeForm: 'Shipping it' },
+      { content: 'Verify', status: 'pending' },
+    ]);
+  });
+
+  test('drops contentless items and coerces an unknown status to pending', () => {
+    const s = normalizeActiveSession(
+      {
+        kind: 'claude',
+        status: 'running',
+        sessionFile: '/x/cccccccc.jsonl',
+        todos: { items: [{ status: 'in_progress' }, { content: 'Do it', status: 'weird' }] },
+      } as RawActiveSession,
+      'zion',
+      FETCHED_AT
+    );
+    expect(s.todos).toEqual([{ content: 'Do it', status: 'pending' }]);
+  });
+
+  test('no todos payload ⇒ field absent', () => {
+    const s = normalizeActiveSession(
+      { kind: 'claude', status: 'running', sessionFile: '/x/dddddddd.jsonl' } as RawActiveSession,
+      'zion',
+      FETCHED_AT
+    );
+    expect(s.todos).toBeUndefined();
+  });
+
+  test('empty items array ⇒ field absent', () => {
+    const s = normalizeActiveSession(
+      { kind: 'claude', status: 'running', sessionFile: '/x/eeeeeeee.jsonl', todos: { items: [] } } as RawActiveSession,
+      'zion',
+      FETCHED_AT
+    );
+    expect(s.todos).toBeUndefined();
+  });
+});

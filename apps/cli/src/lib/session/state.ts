@@ -47,6 +47,30 @@ export interface StructuredQuestion {
   options?: QuestionOption[];
 }
 
+/** One `TodoWrite` checklist item, as Claude's plan tool emits it. */
+export interface TodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  /** Present-continuous label shown while this item is the active step. */
+  activeForm?: string;
+}
+
+/**
+ * Live plan progress derived from the most recent `TodoWrite` in the transcript
+ * (RUSH-1380). Lets the Factory Floor show "N/M done" + the current step for any
+ * session — including remote / device-dispatched agents that carry no local
+ * tool-call stream — instead of only a coarse working/idle verb.
+ */
+export interface TodoProgress {
+  items: TodoItem[];
+  /** Count of completed items. */
+  done: number;
+  /** Total items. */
+  total: number;
+  /** The in-progress item's activeForm (falls back to its content). The live step. */
+  activeForm?: string;
+}
+
 export interface DetectedPr {
   url: string;
   number?: number;
@@ -110,6 +134,12 @@ export interface SessionState {
    * render the actual plan without re-parsing the transcript.
    */
   plan?: string;
+  /**
+   * Live plan progress from the most recent `TodoWrite` (RUSH-1380). Present when
+   * the session has written a todo list; drives the Factory Floor N/M pill +
+   * checklist, notably for remote/device-dispatched agents with no local stream.
+   */
+  todos?: TodoProgress;
   /** Last few assistant turns (most-recent last), one line each — panel context. */
   tail?: string[];
   lastActivityMs?: number;
@@ -150,6 +180,41 @@ const PROSE_QUESTION_FRESH_MS = 30 * 60_000;
 /** Claude tool names that structurally mean "the agent handed control back to you". */
 const PLAN_TOOL = 'ExitPlanMode';
 const ASK_TOOL = 'AskUserQuestion';
+
+/** Claude's live plan/checklist tool. */
+const TODO_TOOL = 'TodoWrite';
+
+/**
+ * Derive live plan progress from a `TodoWrite` tool call's args. Returns undefined
+ * when there is no usable list, so a session with no plan carries no `todos` field.
+ */
+export function extractTodoProgress(args?: Record<string, any>): TodoProgress | undefined {
+  const raw = args?.todos;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const items: TodoItem[] = [];
+  for (const t of raw) {
+    const activeForm = typeof t?.activeForm === 'string' && t.activeForm ? t.activeForm : undefined;
+    const content =
+      typeof t?.content === 'string' && t.content
+        ? t.content
+        : typeof t?.text === 'string' && t.text
+          ? t.text
+          : activeForm ?? '';
+    if (!content) continue;
+    const status: TodoItem['status'] =
+      t?.status === 'completed' || t?.status === 'in_progress' ? t.status : 'pending';
+    items.push(activeForm ? { content, status, activeForm } : { content, status });
+  }
+  if (items.length === 0) return undefined;
+  const done = items.filter(i => i.status === 'completed').length;
+  const inProgress = items.find(i => i.status === 'in_progress');
+  return {
+    items,
+    done,
+    total: items.length,
+    activeForm: inProgress ? inProgress.activeForm ?? inProgress.content : undefined,
+  };
+}
 
 /** Trailing '?' or a leading interrogative — a question aimed at the user. */
 const QUESTION_TRAILING = /\?["'”)\]]?\s*$/;
@@ -386,12 +451,19 @@ export function inferActivity(events: SessionEvent[], ctx: StateContext = {}): S
     .map(e => oneLine(e.content ?? ''))
     .filter(Boolean);
 
+  // Live plan progress: the most recent TodoWrite's checklist (RUSH-1380). Attached
+  // to `base` so every return path below carries it — a working, waiting, or idle
+  // session all keep showing how far the plan got.
+  const lastTodo = lastOf(meaningful, e => e.type === 'tool_use' && e.tool === TODO_TOOL);
+  const todos = lastTodo ? extractTodoProgress(lastTodo.args) : undefined;
+
   const base: SessionState = {
     activity: 'idle',
     lastRole: lastMsg?.role,
     lastEventKind: last?.type,
     lastActivityMs: ctx.mtimeMs,
     preview: previewSource ? describeEvent(previewSource) : undefined,
+    todos,
     tail: tail.length ? tail : undefined,
   };
 

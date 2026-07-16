@@ -109,11 +109,27 @@ vi.mock('../src/lib/plugins.js', () => ({
   cleanOrphanedPluginSkills: () => [],
 }));
 
+// The subagent registry (imported transitively via the staleness writer) reads
+// every transform binding when it builds its target table at import time, so the
+// mock must define them all even though these tests never invoke them
+// (listInstalledSubagents returns [] — nothing syncs).
 vi.mock('../src/lib/subagents.js', () => ({
   listInstalledSubagents: () => [],
+  parseSubagentFrontmatter: () => null,
   transformSubagentForClaude: () => '',
+  transformSubagentForCodex: () => '',
+  transformSubagentForCopilot: () => '',
+  transformSubagentForCursor: () => '',
+  transformSubagentForDroid: () => '',
+  transformSubagentForForge: () => '',
+  transformSubagentForGoose: () => '',
+  transformSubagentForKiro: () => '',
+  transformSubagentForOpenCode: () => '',
+  transformSubagentForAntigravity: () => '',
+  writeKimiSubagentFiles: () => {},
+  buildKimiSubagentsParentYaml: () => '',
+  KIMI_SUBAGENTS_PARENT_FILE: '_agents-cli.yaml',
   syncSubagentToOpenclaw: () => ({ success: false }),
-  SUBAGENT_CAPABLE_AGENTS: ['claude', 'openclaw'],
 }));
 
 vi.mock('../src/lib/hooks.js', () => ({

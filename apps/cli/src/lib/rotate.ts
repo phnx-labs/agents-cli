@@ -530,10 +530,14 @@ export function rotationFailoverChain(
  *   would break a previously-working `agents run … --loop` / `--acp`.
  * - `resumeCheckpoint` runs take the loop path (same guard).
  * - `interactive` / no-prompt runs can't be re-dispatched headlessly.
- * - `explicitFallback` (a user `--fallback` chain OR a profile fallback already
- *   unshifted) defines its own recovery; don't layer rotation failover on top.
  * - `hasRotation`/`hasVersion` gate on an actual pre-flight rotation having
  *   picked an account, so pinned and non-rotation runs are untouched.
+ *
+ * An explicit `--fallback` chain does NOT disarm rotation failover: the
+ * synthesized same-agent entries are unshifted AHEAD of the user's cross-agent
+ * entries, so a rate limit exhausts the other accounts of the same agent
+ * before cascading to a different CLI. Profile fallbacks never reach here —
+ * strategy resolution is skipped for profiles, so hasRotation is false.
  *
  * Pure so the arming matrix is unit-testable without invoking the run command.
  */
@@ -541,7 +545,6 @@ export interface FailoverArmingContext {
   hasRotation: boolean;
   hasVersion: boolean;
   hasPrompt: boolean;
-  explicitFallback: boolean;
   interactive: boolean;
   acp: boolean;
   loop: boolean;
@@ -553,7 +556,6 @@ export function shouldArmRotationFailover(ctx: FailoverArmingContext): boolean {
     ctx.hasRotation &&
     ctx.hasVersion &&
     ctx.hasPrompt &&
-    !ctx.explicitFallback &&
     !ctx.interactive &&
     !ctx.acp &&
     !ctx.loop &&

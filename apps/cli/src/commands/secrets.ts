@@ -36,6 +36,7 @@ import {
   migrateLegacyBundles,
   parseDotenv,
   readAndResolveBundleEnv,
+  isHeadlessSecretsContext,
   readBundle,
   renameBundle,
   rotateBundleSecret,
@@ -921,7 +922,10 @@ export function registerSecretsCommands(program: Command): void {
           console.error(chalk.red(`Secrets bundle '${item}' not found.`));
           process.exit(1);
         }
-        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key] });
+        // `secrets get` is the scriptable automation primitive ($(agents secrets
+        // get bundle KEY)); when embedded in a headless routine/CI script it must
+        // not pop an unwatched Touch ID prompt. Interactive use still prompts.
+        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], agentOnly: isHeadlessSecretsContext() });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
           process.exit(1);
@@ -1521,7 +1525,7 @@ Examples:
               );
             }
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export` });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, agentOnly: isHeadlessSecretsContext() });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
           // Drive the remote's own `agents secrets import --from -` so the values
@@ -1589,7 +1593,7 @@ Examples:
         if (opts.to1password) {
           assertOpAvailable();
           const vault = await resolveVault(opts.vault);
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}` });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, agentOnly: isHeadlessSecretsContext() });
           let created = 0;
           let overwritten = 0;
           let skipped = 0;
@@ -1624,7 +1628,15 @@ Examples:
           console.error(chalk.red('export prints secrets in the clear and requires --plaintext (works for TTY and pipes alike).'));
           process.exit(1);
         }
-        const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `export to shell` });
+        // `agents secrets export --plaintext` is what release/CI scripts eval.
+        // When it runs detached (both stdio non-TTY) or under a headless agent,
+        // resolve broker-only so it can never pop a Touch ID sheet on the
+        // interactive user's screen. An interactive `eval "$(...)"` keeps its
+        // terminal stdin, so it is not headless and still prompts.
+        const { env } = readAndResolveBundleEnv(resolvedBundleName, {
+          caller: `export to shell`,
+          agentOnly: isHeadlessSecretsContext(),
+        });
         if (opts.format === 'json') {
           // Lossless, machine-readable form consumed by `remoteResolveEnv` over
           // SSH. Single object of KEY -> value; values verbatim (newlines, quotes).
@@ -1682,6 +1694,7 @@ Examples:
             caller: `command ${cmd}`,
             keys: keysSubset,
             allowExpired: execOpts.allowExpired,
+            agentOnly: isHeadlessSecretsContext(),
           }).env;
         }
         const { spawn } = await import('child_process');

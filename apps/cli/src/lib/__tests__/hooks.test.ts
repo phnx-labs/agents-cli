@@ -5,6 +5,7 @@ import * as os from 'os';
 
 import { registerHooksToSettings, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks.js';
 import * as TOML from 'smol-toml';
+import * as yaml from 'yaml';
 import { CODEX_HOOKS_MIN_VERSION } from '../agents.js';
 import { compareVersions } from '../versions.js';
 import { toPosix } from '../platform/index.js';
@@ -1105,6 +1106,144 @@ describe('registerHooksToSettings - Cursor', () => {
     parsed = JSON.parse(fs.readFileSync(outPath, 'utf-8'));
     expect(parsed.hooks.preToolUse).toBeUndefined();
     expect(parsed.hooks.postToolUse).toHaveLength(1);
+  });
+});
+
+describe('registerHooksToSettings - Hermes', () => {
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-test-'));
+    agentsDir = path.join(tmpDir, '.agents');
+    fs.mkdirSync(path.join(agentsDir, 'hooks'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeHermesScript(name: string): string {
+    const scriptPath = path.join(agentsDir, 'hooks', name);
+    fs.writeFileSync(scriptPath, '#!/bin/sh\necho hello\n', 'utf-8');
+    fs.chmodSync(scriptPath, 0o755);
+    return scriptPath;
+  }
+
+  function readConfig(versionHome: string): Record<string, unknown> {
+    return yaml.parse(
+      fs.readFileSync(path.join(versionHome, '.hermes', 'config.yaml'), 'utf-8')
+    );
+  }
+
+  it('writes ~/.hermes/config.yaml with snake_case events and no version wrapper', () => {
+    makeHermesScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': {
+        script: 'on-prompt.sh',
+        events: ['UserPromptSubmit', 'SessionStart', 'Stop'],
+        timeout: 45,
+      },
+    };
+
+    const result = registerHooksToSettings('hermes', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+    expect(result.registered).toContain('on-prompt -> pre_llm_call');
+    expect(result.registered).toContain('on-prompt -> on_session_start');
+    expect(result.registered).toContain('on-prompt -> on_session_finalize');
+
+    const parsed = readConfig(versionHome);
+    expect(parsed.version).toBeUndefined();
+    const hooks = parsed.hooks as Record<string, Array<{ command: string; timeout: number }>>;
+    expect(hooks.on_session_start).toHaveLength(1);
+    expect(hooks.pre_llm_call[0].timeout).toBe(45);
+    expect(resolvedCommand(hooks.on_session_finalize[0].command)).toContain('on-prompt.sh');
+  });
+
+  it('maps tool events and clamps timeout at 300s', () => {
+    makeHermesScript('guard.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    registerHooksToSettings(
+      'hermes',
+      versionHome,
+      { guard: { script: 'guard.sh', events: ['PreToolUse', 'PostToolUse'], matcher: 'Shell|Write', timeout: 999 } },
+      agentsDir
+    );
+    const hooks = readConfig(versionHome).hooks as Record<
+      string,
+      Array<{ matcher?: string; timeout: number }>
+    >;
+    expect(hooks.pre_tool_call[0].matcher).toBe('Shell|Write');
+    expect(hooks.pre_tool_call[0].timeout).toBe(300);
+    expect(hooks.post_tool_call[0].matcher).toBe('Shell|Write');
+  });
+
+  it('does not duplicate on repeated sync', () => {
+    makeHermesScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const manifest: Record<string, ManifestHook> = {
+      'on-prompt': { script: 'on-prompt.sh', events: ['PreToolUse'] },
+    };
+    registerHooksToSettings('hermes', versionHome, manifest, agentsDir);
+    registerHooksToSettings('hermes', versionHome, manifest, agentsDir);
+    const hooks = readConfig(versionHome).hooks as Record<string, unknown[]>;
+    expect(hooks.pre_tool_call).toHaveLength(1);
+  });
+
+  it('preserves existing mcp_servers key (shared config.yaml)', () => {
+    makeHermesScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const configPath = path.join(versionHome, '.hermes', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      yaml.stringify({
+        mcp_servers: { fs: { command: 'mcp-fs', args: ['--root', '/tmp'] } },
+        model: 'hermes-4',
+      }),
+      'utf-8'
+    );
+
+    registerHooksToSettings(
+      'hermes',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['SessionStart'] } },
+      agentsDir
+    );
+
+    const parsed = readConfig(versionHome) as {
+      mcp_servers?: Record<string, unknown>;
+      model?: string;
+      hooks?: Record<string, unknown>;
+    };
+    expect(parsed.mcp_servers).toBeDefined();
+    expect((parsed.mcp_servers as { fs: { command: string } }).fs.command).toBe('mcp-fs');
+    expect(parsed.model).toBe('hermes-4');
+    expect(parsed.hooks?.on_session_start).toBeDefined();
+  });
+
+  it('preserves user-authored entries outside managed prefixes', () => {
+    makeHermesScript('on-prompt.sh');
+    const versionHome = path.join(tmpDir, 'home');
+    const configPath = path.join(versionHome, '.hermes', 'config.yaml');
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      yaml.stringify({
+        hooks: { on_session_start: [{ command: '/usr/local/bin/my-custom-hook', timeout: 60 }] },
+      }),
+      'utf-8'
+    );
+
+    registerHooksToSettings(
+      'hermes',
+      versionHome,
+      { 'on-prompt': { script: 'on-prompt.sh', events: ['SessionStart'] } },
+      agentsDir
+    );
+
+    const hooks = readConfig(versionHome).hooks as Record<string, Array<{ command: string }>>;
+    const cmds = hooks.on_session_start.map((h) => h.command);
+    expect(cmds).toContain('/usr/local/bin/my-custom-hook');
+    expect(cmds.some((c) => c.includes('on-prompt') || resolvedCommand(c).includes('on-prompt'))).toBe(true);
   });
 });
 

@@ -153,6 +153,16 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   // Only the new-session command in the `;`-chained invocation emits output.
   const pane = /^%\d+$/.test(res.stdout.trim()) ? res.stdout.trim() : undefined;
 
+  // Keep the agent pane around after its process exits (so runInTmux can read
+  // the exit status and capture the final error), but do NOT keep that behavior
+  // for user-created splits. Apply remain-on-exit to the agent pane only, then
+  // revert the global default so future splits close automatically when their
+  // command finishes. The global-on above protects a fast-exiting agent during
+  // the brief window before the pane option is stamped.
+  if (pane) {
+    await runTmux({ socket, args: ['set-option', '-pt', pane, 'remain-on-exit', 'on', ';', 'set-option', '-g', 'remain-on-exit', 'off'], throwOnError: false }).catch(() => {});
+  }
+
   const meta: SessionMeta = {
     name: opts.name,
     socket,
@@ -359,8 +369,13 @@ export async function setSessionHook(name: string, hook: string, command: string
  *        in the tmux server instead of launching a second tmux client against
  *        the same socket from inside the hook. That self-client could race the
  *        server under load and leave the dead split behind.
+ *   v5 — `run-shell -b -C "kill-pane -t #{hook_pane}"` runs the targeted kill-pane
+ *        in the background inside the server command queue. The synchronous
+ *        variant could stall the hook on a loaded CI runner, letting the dead
+ *        split survive until the test's wait timeout expired (flake in CI shard
+ *        3: pane-guarded pane-died hook / user split exit).
  */
-export const AGENT_HOOK_SCHEMA = 4;
+export const AGENT_HOOK_SCHEMA = 5;
 /** Per-session tmux user-option that records which AGENT_HOOK_SCHEMA a session's hook is at. */
 const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 
@@ -368,17 +383,18 @@ const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
  * The guarded `pane-died` hook. Detach the client ONLY when the agent pane dies
  * (so the blocking attach in runInTmux returns and the exit status can be read);
  * a user split's death runs the else-branch, closing just that split. The
- * else-branch goes through `run-shell -C` with an explicit `-t #{hook_pane}`
+ * else-branch goes through `run-shell -b -C` with an explicit `-t #{hook_pane}`
  * target: tmux format-expands the command at fire time and executes it inside
- * the server command queue, so the event pane is always the one killed without
- * launching a second tmux client against the same socket. A bare `kill-pane`
- * relied on the hook context supplying a "current pane", while an external
- * self-client could race the server under load. Single source of truth: both
- * the spawn-wrap (exec.ts) and the daemon reconcile build the hook here, so the
+ * the server command queue in the background, so the event pane is always the
+ * one killed without launching a second tmux client against the same socket and
+ * without stalling the hook on a loaded runner. A bare `kill-pane` relied on
+ * the hook context supplying a "current pane", while an external self-client
+ * could race the server under load. Single source of truth: both the
+ * spawn-wrap (exec.ts) and the daemon reconcile build the hook here, so the
  * two can never drift.
  */
 export function agentPaneDiedHook(sessionName: string, agentPane: string): string {
-  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'run-shell -C "kill-pane -t #{hook_pane}"'`;
+  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'run-shell -b -C "kill-pane -t #{hook_pane}"'`;
 }
 
 /** Stamp a session's hook-schema marker to the current version. */

@@ -98,6 +98,7 @@ import {
   loadTrash,
   loadRestore,
   loadDoctor,
+  loadApply,
   loadCheck,
   loadStatus,
   loadProfiles,
@@ -125,12 +126,15 @@ import {
   loadLogs,
   loadEvents,
   loadAudit,
+  loadWebhook,
+  loadFunnel,
   loadSsh,
   loadPull,
   loadPush,
   loadRepo,
   loadSetup,
   loadFeed,
+  loadMailboxes,
   type ModuleLoader,
 } from './lib/startup/command-registry.js';
 import { applyGlobalHelpConventions } from './lib/help.js';
@@ -263,6 +267,8 @@ Run and dispatch:
   defaults                        Configure run defaults by agent/version selector
   teams                           Coordinate multiple agents on shared work
   routines                        Run agents on a cron schedule (scheduler auto-starts)
+  webhook                         Receive signed GitHub/Linear webhooks for trigger routines
+  funnel                          Expose a webhook receiver through Tailscale Funnel
   sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
   logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
   browser                         Automate a browser — navigate, click, screenshot, console, network
@@ -799,6 +805,7 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadTrash);
   await reg(loadRestore);
   await reg(loadDoctor);
+  await reg(loadApply);
   await reg(loadCheck);
   await reg(loadStatus);
   registerExecAliasCommand(program);
@@ -827,7 +834,10 @@ async function registerAllEagerCommands(): Promise<void> {
   await reg(loadLogs);
   await reg(loadEvents);
   await reg(loadAudit);
+  await reg(loadWebhook);
+  await reg(loadFunnel);
   await reg(loadFeed);
+  await reg(loadMailboxes);
   await reg(loadSsh);
   registerJobsCronAliasCommand(program, 'jobs');
   registerJobsCronAliasCommand(program, 'cron');
@@ -1018,7 +1028,7 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1') {
     // Bumping the suffix re-runs migrations for every user; binary releases that
     // don't change the schema must NOT re-run (they would destroy user content
     // when migration steps overlap with user-authored paths). See issue #20.
-    const sentinelValue = 'v12';
+    const sentinelValue = 'v13';
     let needRun = true;
     try {
       if (fs.existsSync(sentinel) && fs.readFileSync(sentinel, 'utf-8').trim() === sentinelValue) {

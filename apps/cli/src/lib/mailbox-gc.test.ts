@@ -75,4 +75,24 @@ describe('mailbox GC', () => {
     expect(result.consumedPruned).toBe(1);
     expect(fs.existsSync(consumedFile)).toBe(false);
   });
+
+  it('archives expired messages from a live box (not just metrics)', () => {
+    const root = tmpRoot();
+    const box = mailboxDir(BOX, root);
+    const msgId = enqueue(box, { to: BOX, text: 'stale', ttlSeconds: 1 });
+    const inboxFile = path.join(box, 'inbox', `${msgId}.json`);
+    // Force expiry in the past so GC sees it without sleeping.
+    const raw = JSON.parse(fs.readFileSync(inboxFile, 'utf-8'));
+    raw.expiresAt = '2000-01-01T00:00:00.000Z';
+    fs.writeFileSync(inboxFile, JSON.stringify(raw, null, 2), 'utf-8');
+
+    const result = gcMailbox(new Set([BOX]), { root, now: new Date('2026-07-14T00:00:00.000Z') });
+
+    expect(result.messagesDroppedExpired).toBe(1);
+    expect(fs.existsSync(inboxFile)).toBe(false);
+    const consumed = fs.readdirSync(path.join(box, 'consumed'));
+    expect(consumed).toHaveLength(1);
+    const archived = JSON.parse(fs.readFileSync(path.join(box, 'consumed', consumed[0]), 'utf-8'));
+    expect(archived.dropped).toBe('expired');
+  });
 });

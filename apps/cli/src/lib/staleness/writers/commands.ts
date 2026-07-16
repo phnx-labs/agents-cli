@@ -26,6 +26,7 @@ import { safeJoin } from '../../paths.js';
 import { markdownToToml } from '../../convert.js';
 import { commandAppliesTo, parseCommandMetadata } from '../../commands.js';
 import { installCommandSkillToVersion, shouldInstallCommandAsSkill } from '../../command-skills.js';
+import { installGooseCommandToVersion } from '../../goose-commands.js';
 import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
 import { resolveCommandSource, trustedSkillRoots } from './sources.js';
 import { lazyAgentMap } from './lazy-map.js';
@@ -62,6 +63,10 @@ function buildCommandsWriter(agent: AgentId): ResourceWriter<string[]> {
 
         if (commandsAsSkills) {
           const installed = installCommandSkillToVersion(agentDir, cmd, srcFile, skillRoots);
+          if (!installed.success) continue;
+        } else if (agent === 'goose') {
+          // Goose: recipe YAML + config.yaml slash_commands entry, not a file copy.
+          const installed = installGooseCommandToVersion(versionHome, cmd, srcFile);
           if (!installed.success) continue;
         } else if (agentConfig.format === 'toml') {
           const content = fs.readFileSync(srcFile, 'utf-8');

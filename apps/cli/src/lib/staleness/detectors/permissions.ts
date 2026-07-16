@@ -263,6 +263,29 @@ function buildKiroDetector(): ResourceDetector {
   };
 }
 
+function buildOpenClawDetector(): ResourceDetector {
+  return {
+    kind: 'permissions',
+    agent: 'openclaw',
+    list({ versionHome }: DetectArgs): string[] {
+      const configPath = path.join(versionHome, '.openclaw', 'openclaw.json');
+      if (!fs.existsSync(configPath)) return [];
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
+          tools?: { alsoAllow?: unknown[]; deny?: unknown[] };
+        };
+        const tools = config.tools;
+        const hasAllow = Array.isArray(tools?.alsoAllow) && tools.alsoAllow.length > 0;
+        const hasDeny = Array.isArray(tools?.deny) && tools.deny.length > 0;
+        if (hasAllow || hasDeny) {
+          return discoverPermissionGroups().map(g => g.name);
+        }
+      } catch { /* parse fail */ }
+      return [];
+    },
+  };
+}
+
 const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   claude: buildClaudeDetector,
   codex: buildCodexDetector,
@@ -275,6 +298,7 @@ const handlers: Partial<Record<AgentId, () => ResourceDetector>> = {
   cursor: buildCursorDetector,
   droid: buildDroidDetector,
   kiro: buildKiroDetector,
+  openclaw: buildOpenClawDetector,
 };
 
 export const permissionsDetectors = lazyAgentMap<ResourceDetector>(() => {

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ComputerHelperWin;
@@ -30,13 +31,24 @@ string? expectedToken = null;
 if (tokenFile != null && File.Exists(tokenFile))
     expectedToken = File.ReadAllText(tokenFile).Trim();
 
+// Authentication is mandatory. Loopback TCP on Windows is NOT user/session
+// scoped, so a token-less daemon hands full screen capture + input injection +
+// program launch to ANY local process. Refuse to start unless a shared-secret
+// token file was provided; the CLI (`agents computer setup --host`) provisions
+// one and passes --token-file.
+if (string.IsNullOrEmpty(expectedToken))
+{
+    Console.Error.WriteLine("computer-helper-win: refusing to start — a --token-file with a non-empty token is required (authentication is mandatory).");
+    return 2;
+}
+
 var dispatcher = new Dispatcher();
 
 // Bind loopback only — never expose the daemon to the network. The SSH tunnel
 // is the sole ingress.
 var listener = new TcpListener(IPAddress.Loopback, port);
 listener.Start();
-Console.Error.WriteLine($"computer-helper-win listening on 127.0.0.1:{port} (auth={(expectedToken != null ? "token" : "none")})");
+Console.Error.WriteLine($"computer-helper-win listening on 127.0.0.1:{port} (auth=token)");
 
 while (true)
 {
@@ -51,7 +63,7 @@ async Task HandleConnection(TcpClient client)
     {
         var buffer = new List<byte>();
         var chunk = new byte[8192];
-        bool authed = expectedToken == null; // no token configured → open (tunnel-gated)
+        bool authed = false; // token is mandatory (enforced at startup); require the auth frame
 
         while (true)
         {
@@ -96,7 +108,8 @@ byte[]? HandleLine(byte[] lineBytes, ref bool authed)
         if (method != "auth")
             return null; // silently drop unauthenticated callers
         string? tok = @params.ValueKind == JsonValueKind.Object ? P.StringOpt(@params, "token") : null;
-        if (tok != null && tok == expectedToken)
+        if (tok != null && CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(tok), Encoding.UTF8.GetBytes(expectedToken)))
         {
             authed = true;
             return Encode(idEl, new Dictionary<string, object?> { ["ok"] = true });

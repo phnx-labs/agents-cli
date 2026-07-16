@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
+  isHeadlessSecretsContext,
   listBundles,
   readAndResolveBundleEnv,
   readBundle,
@@ -129,13 +130,35 @@ describe('readAndResolveBundleEnv agent-only reads', () => {
     process.env.AGENTS_SECRETS_NO_AGENT = '1';
     try {
       expect(() => readAndResolveBundleEnv('claude', { caller: 'daemon', agentOnly: true }))
-        .toThrow("Secrets bundle 'claude' is not unlocked in the secrets agent.");
+        .toThrow("Secrets bundle 'claude' is not unlocked in the secrets agent");
       expect(keychainCalls).toBe(0);
     } finally {
       setKeychainBackendForTest(previousBackend);
       if (previousNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
       else process.env.AGENTS_SECRETS_NO_AGENT = previousNoAgent;
     }
+  });
+});
+
+describe('isHeadlessSecretsContext', () => {
+  it('is true for headless/teams runtime on darwin (where the Touch ID sheet exists)', () => {
+    expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'headless' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
+    expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'teams' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
+  });
+
+  it('is ALWAYS false off-darwin — no biometry prompt to suppress on Linux/Windows', () => {
+    // Critical: forcing broker-only off-darwin would break every headless
+    // Linux/Windows read (CI, `agents run --headless`, routines, the release flow),
+    // because the broker is a no-op off-darwin and the read would throw before the
+    // real (prompt-less) backend answers.
+    expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'headless' } as NodeJS.ProcessEnv, 'linux')).toBe(false);
+    expect(isHeadlessSecretsContext({ AGENTS_RUNTIME: 'teams' } as NodeJS.ProcessEnv, 'win32')).toBe(false);
+    expect(isHeadlessSecretsContext({ AGENTS_SECRETS_NO_PROMPT: '1' } as NodeJS.ProcessEnv, 'linux')).toBe(false);
+  });
+
+  it('honors AGENTS_SECRETS_NO_PROMPT override on darwin (1 forces headless-safe, 0 force-allows)', () => {
+    expect(isHeadlessSecretsContext({ AGENTS_SECRETS_NO_PROMPT: '1', AGENTS_RUNTIME: 'terminal' } as NodeJS.ProcessEnv, 'darwin')).toBe(true);
+    expect(isHeadlessSecretsContext({ AGENTS_SECRETS_NO_PROMPT: '0', AGENTS_RUNTIME: 'headless' } as NodeJS.ProcessEnv, 'darwin')).toBe(false);
   });
 });
 

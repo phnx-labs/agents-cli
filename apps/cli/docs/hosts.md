@@ -1,13 +1,15 @@
 # Hosts — dispatch agents to your own machines
 
-> **Status:** Implemented. `agents hosts` and the `-H, --host` flag ship today —
-> on the read-only/config commands (`view`, `inspect`, `usage`, `cost`, `doctor`,
-> `list`, `sync`), on `agents run`, and across the `agents teams` lifecycle. This
-> document is the design rationale; see
-> [00-concepts.md](00-concepts.md#devices--hosts) for the concept overview and how
-> hosts relate to the Tailscale-backed `agents devices` registry, and
-> [09-ssh-transport.md](09-ssh-transport.md) for the shared, multiplexed SSH
-> transport every `--host` command rides.
+> **Status:** Implemented. `agents hosts` and the `-H, --host` / `--device` flags
+> ship today across virtually every first-class group (`repos`, `view`, `inspect`,
+> `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`, `status`,
+> `teams`, `routines`, …), on `agents run`, and on multi-host aggregators
+> (`sessions`, `feed`, `logs`). Groups with no remote semantics reject the flag
+> with a clear message — never a raw commander `unknown option`. This document is
+> the design rationale; see [00-concepts.md](00-concepts.md#devices--hosts) for
+> the concept overview and how hosts relate to the Tailscale-backed
+> `agents devices` registry, and [09-ssh-transport.md](09-ssh-transport.md) for
+> the shared, multiplexed SSH transport every `--host` command rides.
 
 `agents hosts` lets you run any agent (`claude`, `codex`, `droid`, …) on any of
 *your* machines — a Mac mini, a Windows mini, a couple of DGX Sparks — addressed
@@ -228,6 +230,12 @@ agents run <agent> ["<task>"] --host <host>
 > `agents sessions` and `agents sessions <name>` resolves it. Omitting `--name` is
 > a no-op — unnamed runs stay id-only, render `-` in the NAME column, and show the
 > `[host/<name>]` tag as their session label.
+>
+> `agents hosts ps` re-probes each still-`running` task against the remote `.exit`
+> marker so a finished (or crashed) run does not stay stuck at `running` after the
+> local follower dies. `agents hosts stop <id>` (alias `kill`) terminates the
+> remote process group from this machine, writes exit `143`, and keeps the log
+> for `agents hosts logs <id>`.
 
 ### Host sources — owned (registered) + leased on demand (crabbox)
 

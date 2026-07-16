@@ -211,7 +211,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
   });
 
   it('paneExitStatus reports the dead pane exit code once the process finishes', async () => {
-    // remain-on-exit (set globally by createSession) keeps the pane around dead,
+    // remain-on-exit (set on the agent pane by createSession) keeps the pane around dead,
     // so we can read the wrapped command's exit status — the spawn-wrap's exit-code path.
     const meta = await createSession({ name: 'exitcode', cmd: 'sh -c "exit 3"', socket });
     expect(meta.pane).toBeTruthy();
@@ -231,7 +231,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     // The exact scenario runInTmux now surfaces: an agent that dies the instant
     // it spawns (e.g. a gutted install crashing with ENOENT). Before the fix the
     // pane-died hook detached the client and the error vanished; the recap works
-    // only because remain-on-exit keeps the dead pane capturable until teardown.
+    // only because remain-on-exit on the agent pane keeps the dead pane capturable until teardown.
     const meta = await createSession({
       name: 'fastfail',
       cmd: `sh -c 'echo "spawn .../codex ENOENT" >&2; exit 1'`,
@@ -251,7 +251,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
 
   it('remain-on-exit keeps the pane around after the launched command finishes', async () => {
     // A short-lived command would normally collapse the pane and the session
-    // with it. With remain-on-exit on, the session stays alive.
+    // with it. With remain-on-exit on the agent pane, the session stays alive.
     await createSession({ name: 'short', cmd: 'echo BRIEF && true', socket });
     // Let the command finish.
     await wait(400);
@@ -300,7 +300,7 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
 
   it('pane-guarded pane-died hook: exiting the agent pane fires the guard (dead husk kept for status read)', async () => {
     // The true-branch: when the AGENT pane exits, the hook fires. remain-on-exit
-    // keeps it as a dead husk so runInTmux can read the exit status before teardown.
+    // on the agent pane keeps it as a dead husk so runInTmux can read the exit status before teardown.
     const meta = await createSession({ name: 'guardagent', cmd: 'sh -c "exit 7"', socket });
     const agentPane = meta.pane!;
     await setSessionHook(

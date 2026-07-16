@@ -116,8 +116,10 @@ describe('SessionWatcher', () => {
       const fact = facts.find((f) => f.forkedFromId === parentId)!;
       expect(fact.agentType).toBe('claude');
       expect(fact.fileSessionId).toBe(forkId);
+      expect(warmth).toHaveLength(0);
+      await sleep(SETTLE_MS);
 
-      // A subsequent write to the same file should produce a warmth signal.
+      // A subsequent write to the parsed file should produce a warmth signal.
       fs.appendFileSync(file, JSON.stringify({ type: 'assistant' }) + '\n');
       await waitFor(
         () => warmth.some((w) => path.basename(w.filePath) === `${forkId}.jsonl`),

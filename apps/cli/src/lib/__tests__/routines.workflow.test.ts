@@ -20,12 +20,12 @@ describe('validateJob — workflow field', () => {
 
   it('rejects both agent and workflow set', () => {
     const errors = validateJob(baseJob({ agent: 'claude', workflow: 'autodev' }));
-    expect(errors.some((e) => e.includes('exactly one of agent or workflow'))).toBe(true);
+    expect(errors.some((e) => e.includes('exactly one of agent, workflow, or command'))).toBe(true);
   });
 
   it('rejects neither agent nor workflow', () => {
     const errors = validateJob(baseJob());
-    expect(errors.some((e) => e.includes('exactly one of agent or workflow'))).toBe(true);
+    expect(errors.some((e) => e.includes('exactly one of agent, workflow, or command'))).toBe(true);
   });
 
   it('rejects workflow with uppercase or spaces', () => {

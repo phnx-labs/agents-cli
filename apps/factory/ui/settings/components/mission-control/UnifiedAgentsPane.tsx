@@ -9,6 +9,7 @@ import { renderTodoDescription, renderMarkdown } from '../../utils/markdown'
 import { CMD_PALETTE_EVENTS } from './CommandPalette'
 import { CloudActivityFeed } from './CloudActivityFeed'
 import { VerticalTimeline } from './Timeline'
+import { TodoChecklist } from './TodoChecklist'
 import { TerminalExpandedDetail } from './TerminalDetail'
 import { useNow } from './useNow'
 import {
@@ -1928,6 +1929,14 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
                 </div>
               ) : null
             })()}
+            {/* Plan checklist (RUSH-1380): the agent's latest TodoWrite, carried by the CLI
+                for remote / device-dispatched agents that have no local tool-call stream. */}
+            {a.todos.length > 0 && (
+              <div className="sw-unified-detail-section">
+                <div className="sw-section-label">Checklist</div>
+                <TodoChecklist todos={a.todos} />
+              </div>
+            )}
             {/* Progress timeline: the recent tool calls as a vertical rail, oldest -> now.
                 For cloud rows the existing CloudActivityFeed still drives the AgentDetailView. */}
             {a.recent.length > 0 && (

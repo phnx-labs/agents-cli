@@ -222,6 +222,17 @@ export function summarizeToolUse(tool: string, args?: Record<string, any>): stri
       const steps = Array.isArray(args.plan) ? args.plan.length : 0;
       return `Plan: ${steps} step${steps === 1 ? '' : 's'}`;
     }
+    // Claude's live checklist: show progress + the current step, not a bare "TodoWrite".
+    case 'TodoWrite': {
+      const todos = Array.isArray(args.todos) ? args.todos : [];
+      if (todos.length === 0) return 'Plan: 0 steps';
+      const done = todos.filter((t: any) => t?.status === 'completed').length;
+      const active = todos.find((t: any) => t?.status === 'in_progress');
+      const step = active?.activeForm || active?.content;
+      return step
+        ? `Plan ${done}/${todos.length}: ${truncate(String(step), 80)}`
+        : `Plan: ${done}/${todos.length} done`;
+    }
     // Codex tools
     case 'exec_command':
       return `Bash: ${truncate(String(args.command || args.cmd || '').replace(/\n/g, ' ').trim(), 120)}`;

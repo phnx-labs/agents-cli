@@ -81,6 +81,10 @@ const SYSTEM_PERMISSIONS_DIR = path.join(SYSTEM_AGENTS_DIR, 'permissions');
 const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
 const SYSTEM_WORKFLOWS_DIR = path.join(SYSTEM_AGENTS_DIR, 'workflows');
 const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
+// Built-in routines shipped in the system repo (gh:phnx-labs/.agents-system).
+// Unioned under user routines by listJobs()/readJob() so a routine shipped here
+// fires for every install, while a user routine of the same name overrides it.
+const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
 const SYSTEM_INSTRUCTIONS_FILE = path.join(SYSTEM_AGENTS_DIR, 'instructions.md');
@@ -346,12 +350,21 @@ export function getPackagesDir(): string { return PACKAGES_DIR; }
 export function getRoutinesDir(): string { return ROUTINES_DIR; }
 
 /**
+ * Path to built-in routine definitions shipped in the system repo
+ * (`~/.agents/.system/routines/`). Unioned under the user routines dir by
+ * listJobs()/readJob(): a routine shipped here fires for every install, and a
+ * user routine of the same name overrides it (a user copy with `enabled: false`
+ * disables the built-in). The daemon fires these; the directory need not exist.
+ */
+export function getSystemRoutinesDir(): string { return SYSTEM_ROUTINES_DIR; }
+
+/**
  * Path to a project-scoped routines directory (`<project>/.agents/routines/`),
  * or null when no project `.agents/` is found by walking up from cwd.
  *
  * Project routines participate in `list`/`view`/`run` for inspection but are
- * NOT fired by the daemon (which runs from $HOME and only loads user routines).
- * Opt-in firing for project routines is tracked as a follow-up.
+ * NOT fired by the daemon (which runs from $HOME and loads only user + system
+ * routines). Opt-in firing for project routines is tracked as a follow-up.
  */
 export function getProjectRoutinesDir(cwd: string = process.cwd()): string | null {
   const projectAgentsDir = getProjectAgentsDir(cwd);

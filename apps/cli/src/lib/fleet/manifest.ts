@@ -1,0 +1,149 @@
+/**
+ * Parse + validate the `fleet:` block of a profile manifest and resolve it into
+ * per-device desired state.
+ *
+ * `fleet:` is additive to the `Meta` schema (`types.ts`). Any `-f <file>` that
+ * carries a `fleet:` block is a valid manifest, so `ag apply -f agents.yaml`
+ * works against the project file. The functions here are pure (no SSH, no
+ * registry I/O) so they're fully unit-testable; device enumeration is injected.
+ */
+
+import * as fs from 'fs';
+import * as yaml from 'yaml';
+import type {
+  FleetManifest,
+  FleetDefaults,
+  FleetDeviceOverride,
+  FleetLoginMode,
+  DeviceDesired,
+} from './types.js';
+
+const LOGIN_MODES: readonly FleetLoginMode[] = ['sync', 'skip'];
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string');
+}
+
+function validateLogin(v: unknown, where: string): FleetLoginMode | undefined {
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string' || !LOGIN_MODES.includes(v as FleetLoginMode)) {
+    throw new Error(`fleet: ${where}.login must be one of ${LOGIN_MODES.join(' | ')} (got ${JSON.stringify(v)}).`);
+  }
+  return v as FleetLoginMode;
+}
+
+function validateDefaults(v: unknown, where: string): FleetDefaults {
+  if (v === undefined) return {};
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    throw new Error(`fleet: ${where} must be a mapping.`);
+  }
+  const o = v as Record<string, unknown>;
+  if (o.agents !== undefined && !isStringArray(o.agents)) {
+    throw new Error(`fleet: ${where}.agents must be a list of agent specs (e.g. [claude@latest]).`);
+  }
+  if (o.sync !== undefined && !isStringArray(o.sync)) {
+    throw new Error(`fleet: ${where}.sync must be a list of scope names (e.g. [user]).`);
+  }
+  return {
+    agents: o.agents as string[] | undefined,
+    sync: o.sync as string[] | undefined,
+    login: validateLogin(o.login, where),
+  };
+}
+
+/** Validate a raw `fleet:` object (already YAML-parsed) into a typed manifest. */
+export function parseFleetManifest(raw: unknown): FleetManifest {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('fleet: block must be a mapping with a `devices:` key.');
+  }
+  const o = raw as Record<string, unknown>;
+  const defaults = validateDefaults(o.defaults, 'defaults');
+
+  if (o.devices === undefined) {
+    throw new Error('fleet: a `devices:` key is required (use `devices: all` or an explicit map).');
+  }
+  let devices: FleetManifest['devices'];
+  if (o.devices === 'all') {
+    devices = 'all';
+  } else if (typeof o.devices === 'object' && o.devices !== null && !Array.isArray(o.devices)) {
+    const map: Record<string, FleetDeviceOverride> = {};
+    for (const [name, ov] of Object.entries(o.devices as Record<string, unknown>)) {
+      // An empty entry (`device: {}`) inherits defaults — represent as {}.
+      const merged = ov == null ? {} : validateDefaults(ov, `devices.${name}`);
+      map[name] = merged;
+    }
+    devices = map;
+  } else {
+    throw new Error(`fleet: devices must be the string 'all' or a mapping of device -> overrides (got ${JSON.stringify(o.devices)}).`);
+  }
+
+  return { defaults, devices };
+}
+
+/** Read a YAML file and extract + validate its `fleet:` block. */
+export function readFleetFile(filePath: string): FleetManifest {
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Manifest not found: ${filePath}`);
+  }
+  let doc: unknown;
+  try {
+    doc = yaml.parse(fs.readFileSync(filePath, 'utf-8'));
+  } catch (e) {
+    throw new Error(`Failed to parse YAML in ${filePath}: ${(e as Error).message}`);
+  }
+  if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
+    throw new Error(`${filePath} is not a mapping — no fleet: block to apply.`);
+  }
+  const fleet = (doc as Record<string, unknown>).fleet;
+  if (fleet === undefined) {
+    throw new Error(`${filePath} has no fleet: block. Add one to declare the profile (see \`agents apply --help\`).`);
+  }
+  return parseFleetManifest(fleet);
+}
+
+/** Merge a per-device override over defaults into a concrete desired state. */
+function mergeDesired(device: string, defaults: FleetDefaults, override: FleetDeviceOverride): DeviceDesired {
+  return {
+    device,
+    agents: override.agents ?? defaults.agents ?? [],
+    sync: override.sync ?? defaults.sync ?? [],
+    login: override.login ?? defaults.login ?? 'sync',
+  };
+}
+
+export interface ResolveContext {
+  /** Device names currently online (used to expand `devices: all`). */
+  onlineDevices: string[];
+  /** All registered device names (used to validate explicit entries). */
+  registeredDevices: string[];
+  /** The source machine, always excluded from the target set. */
+  source: string;
+}
+
+/**
+ * Expand a manifest into concrete per-device desired states. `devices: all`
+ * expands to every online registered device minus the source; an explicit map
+ * validates each name against the registry. Devices with no desired agents,
+ * sync scopes, and `login: skip` are still returned (probe/report only).
+ */
+export function resolveDesired(manifest: FleetManifest, ctx: ResolveContext): DeviceDesired[] {
+  const defaults = manifest.defaults ?? {};
+  const out: DeviceDesired[] = [];
+
+  if (manifest.devices === 'all') {
+    for (const name of ctx.onlineDevices) {
+      if (name === ctx.source) continue;
+      out.push(mergeDesired(name, defaults, {}));
+    }
+    return out;
+  }
+
+  for (const [name, override] of Object.entries(manifest.devices)) {
+    if (name === ctx.source) continue;
+    if (!ctx.registeredDevices.includes(name)) {
+      throw new Error(`fleet: device '${name}' is not a registered device. Run \`agents devices add ${name}\` or fix the manifest.`);
+    }
+    out.push(mergeDesired(name, defaults, override));
+  }
+  return out;
+}

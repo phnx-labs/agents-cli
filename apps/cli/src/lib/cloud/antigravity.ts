@@ -29,7 +29,7 @@ import type {
   ProviderCapabilities,
 } from './types.js';
 import { resolveDispatchRepos, normalizeProviderStatus } from './types.js';
-import { readAndResolveBundleEnv } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../secrets/bundles.js';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 const DEFAULT_MODEL = 'antigravity-preview-05-2026';
@@ -97,7 +97,7 @@ export class AntigravityCloudProvider implements CloudProvider {
   private resolveApiKey(): string {
     if (this.secretsBundle) {
       try {
-        const { env } = readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity' });
+        const { env } = readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: isHeadlessSecretsContext() });
         for (const k of KEY_NAMES) {
           if (env[k]) return env[k];
         }

@@ -5,7 +5,17 @@ import * as crypto from 'crypto';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AGENTS, ALL_AGENT_IDS, deprecationNotice, getAccountInfo, resolveAgentName, resolveLastActive, warnAgentDeprecated } from './agents.js';
+import {
+  AGENTS,
+  ALL_AGENT_IDS,
+  __resetAntigravityKeychainCacheForTest,
+  antigravityOsKeyringProbe,
+  deprecationNotice,
+  getAccountInfo,
+  resolveAgentName,
+  resolveLastActive,
+  warnAgentDeprecated,
+} from './agents.js';
 import { IS_WINDOWS } from './platform/index.js';
 import type { CapabilityName } from './types.js';
 
@@ -450,6 +460,87 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     expect(info.signedIn).toBe(false);
   });
 
+  it('selects the macOS security probe and the Linux secret-tool probe (RUSH-1329)', () => {
+    expect(antigravityOsKeyringProbe('darwin')).toEqual({
+      cmd: 'security',
+      args: ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'],
+    });
+    // go-keyring Secret Service attributes are service + username (not account).
+    expect(antigravityOsKeyringProbe('linux')).toEqual({
+      cmd: 'secret-tool',
+      args: ['lookup', 'service', 'gemini', 'username', 'antigravity'],
+    });
+    expect(antigravityOsKeyringProbe('win32')).toBeNull();
+  });
+
+  it('marks Antigravity signed in via Linux secret-tool when no token file exists (RUSH-1329)', async () => {
+    // Hermetic: a fake secret-tool on PATH that exits 0 only for the exact
+    // go-keyring attributes. The real keyring is unreachable under
+    // AGENTS_NO_KEYCHAIN_PROBE for other tests; here we exercise the live path.
+    if (process.platform !== 'linux') return;
+
+    const binDir = makeTempDir();
+    const fake = path.join(binDir, 'secret-tool');
+    fs.writeFileSync(
+      fake,
+      [
+        '#!/bin/sh',
+        '# Fake Secret Service probe for RUSH-1329.',
+        'if [ "$1" = "lookup" ] && [ "$2" = "service" ] && [ "$3" = "gemini" ] \\',
+        '   && [ "$4" = "username" ] && [ "$5" = "antigravity" ]; then',
+        '  printf "%s" "fake-refresh-token"',
+        '  exit 0',
+        'fi',
+        'exit 1',
+        '',
+      ].join('\n'),
+      'utf-8'
+    );
+    fs.chmodSync(fake, 0o755);
+
+    const prevPath = process.env.PATH;
+    const prevNoKeychain = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.PATH = `${binDir}${path.delimiter}${prevPath ?? ''}`;
+    delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    __resetAntigravityKeychainCacheForTest();
+
+    try {
+      const info = await getAccountInfo('antigravity', makeTempDir());
+      expect(info.signedIn).toBe(true);
+      expect(info.email).toBeNull();
+    } finally {
+      process.env.PATH = prevPath;
+      if (prevNoKeychain === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+      else process.env.AGENTS_NO_KEYCHAIN_PROBE = prevNoKeychain;
+      __resetAntigravityKeychainCacheForTest();
+    }
+  });
+
+  it('treats Antigravity as signed out when secret-tool has no matching grant (RUSH-1329)', async () => {
+    if (process.platform !== 'linux') return;
+
+    const binDir = makeTempDir();
+    const fake = path.join(binDir, 'secret-tool');
+    fs.writeFileSync(fake, '#!/bin/sh\nexit 1\n', 'utf-8');
+    fs.chmodSync(fake, 0o755);
+
+    const prevPath = process.env.PATH;
+    const prevNoKeychain = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.PATH = `${binDir}${path.delimiter}${prevPath ?? ''}`;
+    delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    __resetAntigravityKeychainCacheForTest();
+
+    try {
+      const info = await getAccountInfo('antigravity', makeTempDir());
+      expect(info.signedIn).toBe(false);
+    } finally {
+      process.env.PATH = prevPath;
+      if (prevNoKeychain === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+      else process.env.AGENTS_NO_KEYCHAIN_PROBE = prevNoKeychain;
+      __resetAntigravityKeychainCacheForTest();
+    }
+  });
+
   it('marks Kimi signed in and derives a stable account key from the JWT user_id', async () => {
     const home = makeTempDir();
     const dir = path.join(home, '.kimi-code', 'credentials');
@@ -509,6 +600,122 @@ describe('getAccountInfo — token-only agents (no local email)', () => {
     const info = await getAccountInfo('droid', makeTempDir());
     expect(info.signedIn).toBe(false);
     expect(info.email).toBeNull();
+  });
+});
+
+describe('getAccountInfo — OpenCode provider credentials', () => {
+  // OpenCode stores its login at $XDG_DATA_HOME/opencode/auth.json (defaulting
+  // to ~/.local/share/opencode/auth.json on every platform). getAccountInfo
+  // checks the passed per-version home first, then $XDG_DATA_HOME, then the
+  // active real home. Pin XDG_DATA_HOME and AGENTS_REAL_HOME at fresh empty dirs
+  // so assertions can't leak into (or false-positive from) the developer's real
+  // OpenCode login, and so "signed out" is hermetic.
+  let prevXdg: string | undefined;
+  let prevRealHome: string | undefined;
+  beforeEach(() => {
+    prevXdg = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = makeTempDir();
+    prevRealHome = process.env.AGENTS_REAL_HOME;
+    process.env.AGENTS_REAL_HOME = makeTempDir();
+  });
+  afterEach(() => {
+    if (prevXdg === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = prevXdg;
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+  });
+
+  function writeOpenCodeAuth(home: string, auth: Record<string, unknown>): void {
+    const dir = path.join(home, '.local', 'share', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify(auth), 'utf-8');
+  }
+
+  it('marks OpenCode signed in and surfaces the provider id for an api credential', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { 'muse-spark': { type: 'api', key: 'sk-secret-value' } });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    // Non-secret provider id is surfaced; the secret key never is.
+    expect(info.accountId).toBe('muse-spark');
+    expect(info.accountKey).toBe('opencode:providers=muse-spark');
+    expect(info.email).toBeNull();
+    expect(JSON.stringify(info)).not.toContain('sk-secret-value');
+  });
+
+  it('detects oauth credentials and joins multiple providers into a stable sorted key', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {
+      openai: { type: 'oauth', access: 'at', refresh: 'rt', expires: 0 },
+      anthropic: { type: 'api', key: 'sk-ant' },
+    });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    // Providers are sorted so the key is stable regardless of file order.
+    expect(info.accountId).toBe('anthropic+openai');
+    expect(info.accountKey).toBe('opencode:providers=anthropic+openai');
+  });
+
+  it('detects a wellknown credential requiring both key and token', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, { github: { type: 'wellknown', key: 'k', token: 't' } });
+
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(true);
+    expect(info.accountId).toBe('github');
+  });
+
+  it('resolves auth.json under $XDG_DATA_HOME when the per-version home has none', async () => {
+    // No auth under the passed home; the login lives at $XDG_DATA_HOME/opencode.
+    const xdg = process.env.XDG_DATA_HOME!;
+    fs.mkdirSync(path.join(xdg, 'opencode'), { recursive: true });
+    fs.writeFileSync(
+      path.join(xdg, 'opencode', 'auth.json'),
+      JSON.stringify({ anthropic: { type: 'api', key: 'sk-xdg' } }),
+      'utf-8'
+    );
+
+    const info = await getAccountInfo('opencode', makeTempDir());
+    expect(info.signedIn).toBe(true);
+    expect(info.accountId).toBe('anthropic');
+  });
+
+  it('treats OpenCode as signed out when auth.json is missing', async () => {
+    const info = await getAccountInfo('opencode', makeTempDir());
+    expect(info.signedIn).toBe(false);
+    expect(info.accountId).toBeNull();
+  });
+
+  it('treats OpenCode as signed out when auth.json holds an empty object', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {});
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(false);
+  });
+
+  it('ignores corrupt/incomplete entries that carry no real credential', async () => {
+    const home = makeTempDir();
+    writeOpenCodeAuth(home, {
+      // Missing key -> not signed in via this entry.
+      broken: { type: 'api' },
+      // Empty-string secret -> not a real credential.
+      blank: { type: 'oauth', access: '', refresh: '' },
+      // Unknown type -> ignored.
+      weird: { type: 'mystery', key: 'x' },
+    });
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(false);
+  });
+
+  it('does not throw and reads signed out when auth.json is malformed JSON', async () => {
+    const home = makeTempDir();
+    const dir = path.join(home, '.local', 'share', 'opencode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'auth.json'), '{ not valid json', 'utf-8');
+    const info = await getAccountInfo('opencode', home);
+    expect(info.signedIn).toBe(false);
   });
 });
 

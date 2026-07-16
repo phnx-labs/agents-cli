@@ -123,6 +123,13 @@ describe('gemini allowlist', () => {
   });
 });
 
+describe('openclaw allowlist', () => {
+  it('is capable of allowlist', () => {
+    expect(supports('openclaw', 'allowlist')).toEqual({ ok: true });
+    expect(capableAgents('allowlist')).toContain('openclaw');
+  });
+});
+
 describe('unsupported agents skip regardless of version', () => {
   it('cursor hooks are supported', () => {
     expect(supports('cursor', 'hooks').ok).toBe(true);
@@ -245,6 +252,11 @@ describe('capableAgents()', () => {
     expect(agents).toContain('cursor');
   });
 
+  it('includes hermes for hooks (Hermes Agent config.yaml hooks since 0.11.0)', () => {
+    const agents = capableAgents('hooks');
+    expect(agents).toContain('hermes');
+  });
+
   it('excludes opencode/amp for hooks', () => {
     const agents = capableAgents('hooks');
     expect(agents).not.toContain('opencode');
@@ -265,6 +277,22 @@ describe('goose hooks version gate', () => {
   it('passes 1.34.0 and above', () => {
     expect(supports('goose', 'hooks', '1.34.0')).toEqual({ ok: true });
     expect(supports('goose', 'hooks', '1.37.0')).toEqual({ ok: true });
+  });
+});
+
+describe('hermes hooks version gate', () => {
+  it('gates versions below 0.11.0 as too_old', () => {
+    const result = supports('hermes', 'hooks', '0.10.0');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 0.11.0');
+    }
+  });
+
+  it('passes 0.11.0 and above', () => {
+    expect(supports('hermes', 'hooks', '0.11.0')).toEqual({ ok: true });
+    expect(supports('hermes', 'hooks', '0.14.2')).toEqual({ ok: true });
   });
 });
 
@@ -358,13 +386,38 @@ describe('antigravity subagents version gate', () => {
   });
 });
 
+describe('cursor subagents version gate', () => {
+  it('gates pre-2.4 cursor-agent (CalVer) builds as too_old', () => {
+    // cursor-agent reports CalVer build tags, e.g. 2025.11.25-<hash>; compareVersions
+    // parses each dot-segment as an int so 2025.11.25 < 2026.1.22 (Cursor 2.4).
+    const result = supports('cursor', 'subagents', '2025.11.25');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('too_old');
+      expect(result.need).toBe('>= 2026.1.22');
+    }
+    expect(supports('cursor', 'subagents', '2026.1.21').ok).toBe(false);
+  });
+
+  it('passes 2026.1.22 (Cursor 2.4) and above', () => {
+    expect(supports('cursor', 'subagents', '2026.1.22')).toEqual({ ok: true });
+    expect(supports('cursor', 'subagents', '2026.2.1')).toEqual({ ok: true });
+  });
+});
+
 describe('workflow capability gates', () => {
-  it('includes Claude, Goose, and Kimi for version-home workflow sync', () => {
+  it('includes Antigravity, Claude, Goose, and Kimi for workflow sync', () => {
     expect(supports('claude', 'workflows')).toEqual({ ok: true });
-    expect(supports('antigravity', 'workflows')).toEqual({ ok: false, reason: 'unsupported' });
+    expect(supports('antigravity', 'workflows')).toEqual({ ok: true });
     expect(supports('goose', 'workflows')).toEqual({ ok: true });
     expect(supports('kimi', 'workflows')).toEqual({ ok: true });
-    expect(capableAgents('workflows').sort()).toEqual(['claude', 'goose', 'kimi']);
+    expect(capableAgents('workflows').sort()).toEqual(['antigravity', 'claude', 'goose', 'kimi']);
+  });
+
+  it('gates Antigravity workflows at >= 1.0.6', () => {
+    expect(supports('antigravity', 'workflows', '1.0.5')).toEqual({ ok: false, reason: 'too_old', need: '>= 1.0.6' });
+    expect(supports('antigravity', 'workflows', '1.0.6')).toEqual({ ok: true });
+    expect(supports('antigravity', 'workflows', '1.1.0')).toEqual({ ok: true });
   });
 });
 

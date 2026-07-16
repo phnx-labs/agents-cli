@@ -4,7 +4,7 @@
  * bundle (OS keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
-import { readAndResolveBundleEnv } from '../../secrets/bundles.js';
+import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../../secrets/bundles.js';
 
 /** Secrets bundle holding the R2 credentials. */
 export const SYNC_BUNDLE = 'r2.backups';
@@ -21,6 +21,14 @@ export interface R2Config {
   secretAccessKey: string;
   /** S3-compatible endpoint for the account (no bucket, no trailing slash). */
   endpoint: string;
+  /**
+   * Shared 32-byte key (hex or base64) for client-side transcript encryption,
+   * held in the bundle as `R2_SYNC_ENC_KEY`. Optional and deliberately separate
+   * from the R2 credentials so rotating the access token never orphans already
+   * encrypted objects. When absent, transcripts upload unencrypted (with a loud
+   * per-cycle warning) — see transcript-crypto.ts + pushOwn.
+   */
+  syncEncKey?: string;
 }
 
 /**
@@ -29,11 +37,18 @@ export interface R2Config {
  * without real credentials (no silent fallback).
  */
 function resolveR2Config(): R2Config {
-  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync' });
+  // The daemon monitor loop is headless by construction (no TTY, ever), so
+  // isHeadlessSecretsContext() is true here and this resolves broker-only — a
+  // broker miss can never pop an unattended Touch ID sheet on the user's screen
+  // (same rationale as daemon.ts readDaemonClaudeOAuthToken). Using the shared
+  // predicate rather than a literal keeps it consistent with the other callers
+  // and lets any interactive caller of loadR2Config still prompt.
+  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync', agentOnly: isHeadlessSecretsContext() });
   const accountId = env.R2_ACCOUNT_ID?.trim();
   const bucket = env.R2_BUCKET_NAME?.trim();
   const accessKeyId = env.R2_ACCESS_KEY_ID?.trim();
   const secretAccessKey = env.R2_SECRET_ACCESS_KEY?.trim();
+  const syncEncKey = env.R2_SYNC_ENC_KEY?.trim() || undefined;
 
   const missing = [
     !accountId && 'R2_ACCOUNT_ID',
@@ -53,7 +68,11 @@ function resolveR2Config(): R2Config {
     bucket: bucket!,
     accessKeyId: accessKeyId!,
     secretAccessKey: secretAccessKey!,
-    endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+    // Default to the account's R2 endpoint; an explicit R2_ENDPOINT override
+    // points sync at any S3-compatible store (MinIO, another provider) — which
+    // is also how the feature is verified end-to-end without live R2.
+    endpoint: env.R2_ENDPOINT?.trim() || `https://${accountId}.r2.cloudflarestorage.com`,
+    syncEncKey,
   };
 }
 

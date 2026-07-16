@@ -93,6 +93,8 @@ function getAgentConfigPath(agent: AgentId, versionHome: string): string | null 
       return path.join(versionHome, '.factory', 'settings.json');
     case 'kiro':
       return path.join(versionHome, '.kiro', 'settings', 'permissions.yaml');
+    case 'openclaw':
+      return path.join(versionHome, '.openclaw', 'openclaw.json');
     case 'goose':
       return path.join(versionHome, '.config', 'goose', 'permission.yaml');
     default:

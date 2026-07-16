@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { getProfileRuntimeDir } from './profiles.js';
 import { discoverBrowserWsUrl, registerPipeTransport } from './cdp.js';
-import { readAndResolveBundleEnv, bundleExists } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv, bundleExists, isHeadlessSecretsContext } from '../secrets/bundles.js';
 import { writeProfileRuntime, readProfileRuntime } from './runtime-state.js';
 import type { ChromeOptions } from './types.js';
 import type { Readable, Writable } from 'stream';
@@ -290,7 +290,7 @@ export async function launchBrowser(
   let env: NodeJS.ProcessEnv = { ...process.env };
   if (secrets && bundleExists(secrets)) {
     try {
-      const { env: bundleEnv } = readAndResolveBundleEnv(secrets, { caller: 'browser profile' });
+      const { env: bundleEnv } = readAndResolveBundleEnv(secrets, { caller: 'browser profile', agentOnly: isHeadlessSecretsContext() });
       env = { ...env, ...bundleEnv };
     } catch {
       // Bundle failed to resolve, continue without secrets

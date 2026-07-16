@@ -4,6 +4,8 @@
  * Lists every installed agent with the best available usage snapshot:
  *   - claude: live OAuth API call (cached for 2 minutes)
  *   - codex:  parsed from latest session log's rate_limits event
+ *   - kimi:   live Kimi Code /usages API call (cached for 2 minutes)
+ *   - droid:  live Factory billing/limits API call (cached for 2 minutes)
  *   - others: marked as "not exposed by CLI" (Gemini, OpenCode, Cursor, etc.
  *     don't publish per-account usage today)
  */
@@ -23,8 +25,13 @@ import type { AgentId } from '../lib/types.js';
 import { listInstalledVersions, getGlobalDefault, getVersionHomePath } from '../lib/versions.js';
 import { formatUsageSection, getUsageInfoForIdentity } from '../lib/usage.js';
 
-/** Agents whose CLI surfaces usage data we can read today. */
-const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex']);
+/**
+ * Agents whose CLI surfaces usage data we can read today. Kept in sync with the
+ * live/last-seen sources `getUsageInfo` dispatches on in `../lib/usage.js`
+ * (claude, codex, kimi, droid) — an agent with a usage source but missing here
+ * would wrongly print "does not publish usage data" for a signed-in account.
+ */
+const USAGE_SUPPORTED: ReadonlySet<AgentId> = new Set<AgentId>(['claude', 'codex', 'kimi', 'droid']);
 
 export function registerUsageCommand(program: Command): void {
   addHostOption(program.command('usage [agent]'))

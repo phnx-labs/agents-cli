@@ -58,6 +58,29 @@ export function markdownToToml(skillName: string, markdown: string): string {
   return lines.join('\n');
 }
 
+/**
+ * Convert a Markdown command file to a Goose recipe YAML object.
+ *
+ * Goose has no native slash-command file format — a slash command is a recipe
+ * (registered in `config.yaml` under `slash_commands`). The recipe schema matches
+ * the one agents-cli already emits for Goose workflow/subagent recipes:
+ * `version`, `title`, `description`, `instructions`, `prompt`. The Markdown body
+ * (with `$ARGUMENTS` preserved) becomes both `instructions` and `prompt`.
+ * Returns a plain object so the caller can `yaml.stringify` it.
+ */
+export function markdownToGooseRecipe(commandName: string, markdown: string): Record<string, unknown> {
+  const { frontmatter, body } = parseMarkdownFrontmatter(markdown);
+  const description = frontmatter.description || `Run ${commandName} command`;
+  const prompt = body.trim() || description;
+  return {
+    version: '1.0.0',
+    title: commandName,
+    description,
+    instructions: prompt,
+    prompt,
+  };
+}
+
 /** Convert a Gemini TOML command file back to Markdown format, translating {{args}} to $ARGUMENTS. */
 export function tomlToMarkdown(toml: string): string {
   const nameMatch = toml.match(/name\s*=\s*"([^"]+)"/);
