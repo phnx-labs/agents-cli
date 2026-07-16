@@ -41,7 +41,7 @@ import {
 import { fileStore } from './filestore.js';
 import { emit } from '../events.js';
 import { readMeta } from '../state.js';
-import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, DEFAULT_TTL_MS } from './agent.js';
+import { agentGetSync, agentAutoLoadSync, agentGetMetaSync, agentAutoLoadMetaSync, agentEvictSync, secretsAgentAutoEnabled, secretsHoldMs, DEFAULT_TTL_MS } from './agent.js';
 import { createHash } from 'node:crypto';
 
 /** Which store carries a bundle's items. */
@@ -1122,7 +1122,7 @@ export function readAndResolveBundleEnv(
       bundlePolicy(bundle) === 'daily' &&
       secretsAgentAutoEnabled()
     ) {
-      agentAutoLoadSync(name, bundle, env, DEFAULT_TTL_MS);
+      agentAutoLoadSync(name, bundle, env, secretsHoldMs());
     }
     return { bundle, env };
   } catch (err) {

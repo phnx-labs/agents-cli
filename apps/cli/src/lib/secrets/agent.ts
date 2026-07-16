@@ -821,18 +821,55 @@ export function secretsAgentAutoEnabled(): boolean {
   }
 }
 
+/** Minimum / maximum bounds for the configurable hold window. A too-small value
+ * would defeat the broker (constant re-prompts); a too-large one pins secrets in
+ * memory far longer than intended. */
+export const MIN_HOLD_MS = 60 * 1000;            // 1m
+export const MAX_HOLD_MS = 30 * 24 * 60 * 60 * 1000; // 30d
+
+/**
+ * How long an unlocked / auto-cached bundle is held before the next read
+ * re-prompts. Defaults to DEFAULT_TTL_MS (7d); override with
+ * `secrets.agent.holdMs` (milliseconds) in agents.yaml — e.g. 86400000 for a 24h
+ * cap. Clamped to [MIN_HOLD_MS, MAX_HOLD_MS] so a typo can neither disable the
+ * hold nor pin a secret in memory indefinitely. Best-effort: an unreadable or
+ * non-numeric value falls back to the 7d default. Pure except for the meta read.
+ */
+export function secretsHoldMs(): number {
+  try {
+    return clampHoldMs(readMeta().secrets?.agent?.holdMs);
+  } catch {
+    return DEFAULT_TTL_MS;
+  }
+}
+
+/** Pure clamp for a configured `holdMs`: a positive finite number is bounded to
+ * [MIN_HOLD_MS, MAX_HOLD_MS]; anything else (absent, 0, negative, NaN, non-number)
+ * falls back to the 7d default. Exported for direct unit testing. */
+export function clampHoldMs(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+    return Math.min(Math.max(Math.floor(v), MIN_HOLD_MS), MAX_HOLD_MS);
+  }
+  return DEFAULT_TTL_MS;
+}
+
 /**
  * Fire-and-forget: populate the broker with a freshly-resolved bundle so the
  * NEXT process reads it without a prompt. Used by the auto-cache path after a
- * real keychain read of a `daily`-policy bundle. Adds no latency to the caller
- * — it spawns a detached `secrets _agent-load` worker (passing the resolved env
- * over stdin, never argv) and returns immediately.
+ * real keychain read of a `daily`-policy bundle, so the NEXT concurrent read is
+ * silent. Env travels over stdin, never argv.
  *
- * The worker reuses the robust `ensureAgentRunning` path (spawn-then-ping with a
- * generous budget) rather than a tight inline retry loop: under heavy load the
- * broker is itself a cold-starting full CLI and can take several seconds to bind
- * the socket, so a short fixed budget would give up before it's ready and the
- * cache would silently never populate. Best-effort; never throws. macOS only.
+ * Reliability (this is what makes `daily` actually "stick"): when a broker is
+ * ALREADY listening, warm it SYNCHRONOUSLY with a bounded wait so the bundle is
+ * held by the time this process exits. The old detached-only path lost the race
+ * under load — a short-lived reader (`agents secrets export`, a release-script
+ * loop) exited before the unref'd worker connected, so the cache silently never
+ * populated and every read re-prompted despite the `daily` policy. Only when the
+ * broker must COLD-START (no socket yet) do we fall back to the detached worker,
+ * so a first-ever read never blocks on a multi-second broker boot.
+ *
+ * The worker reuses the robust `ensureAgentRunning` path (spawn-then-ping) rather
+ * than a tight inline retry loop. Best-effort; never throws. macOS only.
  */
 export function agentAutoLoadSync(
   name: string,
@@ -841,10 +878,24 @@ export function agentAutoLoadSync(
   ttlMs: number,
 ): void {
   if (!onDarwin()) return;
+  const payload = JSON.stringify({ name, bundle, env, ttlMs });
+  // Broker already up → deterministic synchronous warm (bounded so a slow/stale
+  // broker can't hang the read; the read already paid a Touch ID, so <1s here is
+  // invisible). A clean exit means the worker connected and attempted the load
+  // before we returned.
+  if (agentSocketExists()) {
+    try {
+      const { cmd, args } = cliSpawn(['secrets', '_agent-load']);
+      const r = spawnSync(cmd, args, { input: payload, timeout: 3000, stdio: ['pipe', 'ignore', 'ignore'] });
+      if (!r.error && r.status === 0) return;
+    } catch {
+      // fall through to the detached best-effort path
+    }
+  }
   try {
     const { cmd, args } = cliSpawn(['secrets', '_agent-load']);
     const worker = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'], detached: true });
-    worker.stdin?.write(JSON.stringify({ name, bundle, env, ttlMs }));
+    worker.stdin?.write(payload);
     worker.stdin?.end();
     worker.unref();
   } catch {

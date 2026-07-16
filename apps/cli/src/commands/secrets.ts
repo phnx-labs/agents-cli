@@ -69,7 +69,7 @@ import {
   type OpVault,
 } from '../lib/onepassword.js';
 import {
-  DEFAULT_TTL_MS,
+  secretsHoldMs,
   agentLoad,
   agentLock,
   agentPing,
@@ -79,6 +79,8 @@ import {
   runSecretsAgent,
   uninstallSecretsAgentService,
 } from '../lib/secrets/agent.js';
+import { getCliVersionFresh } from '../lib/version.js';
+import { readMeta } from '../lib/state.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { emit } from '../lib/events.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
@@ -1870,7 +1872,7 @@ Examples:
         console.error(chalk.red('Specify one or more bundle names, or --all.'));
         process.exit(1);
       }
-      let ttlMs = DEFAULT_TTL_MS;
+      let ttlMs = secretsHoldMs(); // default hold, capped by secrets.agent.holdMs
       if (opts.ttl) {
         const secs = parseDuration(opts.ttl);
         if (!secs) {
@@ -1936,23 +1938,40 @@ Examples:
         console.log(chalk.gray('secrets-agent is macOS-only.'));
         return;
       }
-      const brokerUp = (await agentPing()).reachable;
+      const ping = await agentPing();
+      const brokerUp = ping.reachable;
       console.log(
         chalk.gray('broker: ') +
         (brokerUp
           ? chalk.green('running') + chalk.gray(isDaemonRunning() ? ' (hosted by the daemon)' : ' (standalone)')
           : chalk.yellow('not running — starts on demand, or run `agents secrets start` to bring the daemon up now')),
       );
+      // Diagnostic: version skew is the top reason a `daily` bundle keeps
+      // re-prompting — a broker on an older build gets torn down when the CLI
+      // version changes (e.g. `agents-cli-update`), wiping every held bundle.
+      const onDisk = getCliVersionFresh();
+      if (brokerUp && ping.cliVersion && ping.cliVersion !== onDisk) {
+        console.log(chalk.yellow(
+          `  warning: broker is running an older build (${ping.cliVersion} vs ${onDisk} on disk). ` +
+          `A version change can wipe held bundles — reads re-warm on the next access.`,
+        ));
+      }
+      // Surface the hold window so "why did it prompt again" is answerable.
+      const holdHrs = Math.round(secretsHoldMs() / 3_600_000);
+      const holdStr = holdHrs < 48 ? `${holdHrs} hour${holdHrs === 1 ? '' : 's'}` : `${Math.round(holdHrs / 24)} days`;
+      const configured = (() => { try { return typeof readMeta().secrets?.agent?.holdMs === 'number'; } catch { return false; } })();
+      console.log(chalk.gray(`hold: ${holdStr}${configured ? ' (secrets.agent.holdMs)' : ' (default)'} — a daily bundle prompts once, then stays silent for this long or until sleep/logout.`));
       const entries = await agentStatus();
       if (entries.length === 0) {
-        console.log(chalk.gray('No bundles unlocked. The secrets broker is idle or not running.'));
-        console.log(chalk.gray('Try: agents secrets unlock <bundle>'));
+        console.log(chalk.gray('No bundles held. The next read of each daily bundle will prompt once, then hold.'));
+        console.log(chalk.gray('Pre-warm now with: agents secrets unlock <bundle>  (or --all)'));
         return;
       }
       console.log(chalk.bold(`${'BUNDLE'.padEnd(24)} ${'KEYS'.padEnd(5)} LOCKS IN`));
       for (const e of entries) {
         console.log(`${chalk.cyan(e.name.padEnd(24))} ${String(e.keyCount).padEnd(5)} ${humanRemaining(e.expiresAt)}`);
       }
+      console.log(chalk.gray('Reads of held bundles are silent; any bundle not listed prompts once on its next read.'));
     });
 
   cmd
