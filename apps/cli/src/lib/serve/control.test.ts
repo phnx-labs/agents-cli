@@ -242,6 +242,35 @@ describe('control server — GET /api/session/:id/stream (SSE event bridge)', ()
     expect(res.status).toBe(401);
     await res.body?.cancel();
   });
+
+  it('does not hang on a negative/garbage offset — clamps to 0 and replays', async () => {
+    // Regression for the prix-cloud finding: Buffer.subarray(negative) indexes
+    // from the end, so an unclamped negative offset read nothing forever. The
+    // stream must clamp to 0, emit every event, and close on the terminal event.
+    tmpStreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ctl-stream-'));
+    const file = path.join(tmpStreamDir, 'run.ndjson');
+    fs.writeFileSync(file, '{"type":"assistant","t":"one"}\n{"type":"result"}\n');
+    const base = await bootStream(file);
+    const res = await fetch(base + '/api/session/sid-x/stream?offset=-1', { headers: auth });
+    const buf = await readFrames(res, (b) => b.includes('event: end'));
+    expect(buf).toContain('event: assistant');
+    expect(buf).toContain('event: result');
+    expect(buf).toContain('event: end'); // reaching here proves it did not hang
+  });
+
+  it('advances the cursor past trailing non-JSON lines (no re-scan stall)', async () => {
+    tmpStreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ctl-stream-'));
+    const file = path.join(tmpStreamDir, 'run.ndjson');
+    // A real event, then trailing noise AFTER it, then (later) the terminal.
+    fs.writeFileSync(file, '{"type":"assistant","t":"x"}\nsome banner noise\n');
+    const base = await bootStream(file);
+    const res = await fetch(base + '/api/session/sid-x/stream', { headers: auth });
+    // Append the terminal after the stream is already tailing past the noise.
+    setTimeout(() => fs.appendFileSync(file, '{"type":"result"}\n'), 60);
+    const buf = await readFrames(res, (b) => b.includes('event: end'));
+    expect(buf).toContain('event: assistant');
+    expect(buf).toContain('event: result');
+  });
 });
 
 describe('spawnDetached — crash safety on spawn failure', () => {

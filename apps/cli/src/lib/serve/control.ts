@@ -139,7 +139,12 @@ export function startSessionStream(
       : req.headers['last-event-id'] ?? '',
     10,
   );
-  let offset = Number.isFinite(qOffset) ? qOffset : Number.isFinite(lastId) ? lastId : 0;
+  // Clamp at the source: a negative/garbage offset (or Last-Event-ID) is
+  // meaningless and, worse, `Buffer.subarray(neg)` indexes from the END — so an
+  // unclamped negative offset would read nothing and never self-correct. A bad
+  // resume value replays from the start, the EventSource-friendly behavior.
+  const wanted = Number.isFinite(qOffset) ? qOffset : Number.isFinite(lastId) ? lastId : 0;
+  let offset = Math.max(0, wanted);
 
   let closed = false;
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -151,11 +156,15 @@ export function startSessionStream(
 
   const tick = () => {
     if (closed) return;
-    const { events, done } = readNewEvents(file, offset);
+    const { events, newOffset, done } = readNewEvents(file, offset);
     for (const { event, offset: at } of events) {
-      offset = at;
+      // `at` is the per-event resume point the CLIENT echoes as Last-Event-ID.
       res.write(`id: ${at}\nevent: ${event.type}\ndata: ${JSON.stringify(event.raw)}\n\n`);
     }
+    // The SERVER cursor always adopts newOffset — past every complete line,
+    // including trailing blank/non-JSON lines after the last event — so the
+    // stream always makes progress (even on an empty read) and never re-scans.
+    offset = newOffset;
     if (done && !closed) {
       res.write('event: end\ndata: {"ok":true}\n\n');
       stop();
