@@ -240,13 +240,7 @@ describe('Claude usage scoping', () => {
     }
   });
 
-  // loadClaudeOauth intentionally returns null off darwin/linux (usage.ts), so the
-  // .credentials.json fallback this guards is macOS/Linux-only — asserting it on
-  // Windows fails deterministically. Skip on Windows, and belt-and-suspenders the
-  // runtime skip too, since the release matrix has shown `it.skipIf` alone failing
-  // to keep a test off Windows runners (see secrets.test.ts).
-  it.skipIf(process.platform === 'win32')('falls back to <home>/.claude/.credentials.json when the keychain has no item (Linux/CI)', async () => {
-    if (process.platform === 'win32') return;
+  it('falls back to <home>/.claude/.credentials.json when the keychain has no item (Linux/CI)', async () => {
     // A fresh temp home yields a unique hashed keychain service, so the keychain
     // read misses and loadClaudeOauth must fall back to the file the Linux Claude
     // CLI writes. This is the regression guard for `agents view --host <linux>`
