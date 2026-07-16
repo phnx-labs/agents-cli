@@ -4,6 +4,15 @@
 
 ### Security
 
+- **Plugin exec-surface detection now sees inline manifest `hooks`/`mcpServers`.**
+  `inspectPluginCapabilities` classified a plugin as having an execution surface only
+  from filesystem artifacts (a `hooks/` dir, a `.mcp.json` file), but the official plugin
+  format also allows `hooks`/`mcpServers` declared **inline** in `.claude-plugin/plugin.json`.
+  A cloned repo's project plugin declaring exec config inline was therefore not detected,
+  so `project-launch` auto-enabled it — clone-to-code-execution on the next agent launch
+  without `--allow-exec-surfaces`. Detection now also treats a non-empty inline
+  `hooks`/`mcpServers` (event map or path string) as an execution surface
+  (`apps/cli/src/lib/plugins.ts`). (`apps/cli/src/lib/types.ts` gains the manifest fields.)
 - **SSH option-injection containment for `browser` over `ssh://`.** The `user`/`host`
   from an `ssh://` browser profile endpoint (git-tracked user config) are now validated
   with `assertValidSshTarget` before every raw `ssh` spawn — the remote-launch

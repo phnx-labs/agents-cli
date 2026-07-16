@@ -186,12 +186,34 @@ export function pluginResourceGroups(plugin: DiscoveredPlugin): PluginResourceGr
   return out;
 }
 
+/**
+ * True when a manifest field declares an inline execution surface — a non-empty
+ * path string, a non-empty array, or an object with at least one key. The
+ * official plugin format lets `hooks`/`mcpServers` live inline in the manifest
+ * (a path or an inline map) instead of as a `hooks/` dir or `.mcp.json` file, so
+ * filesystem-only detection would miss them and auto-enable a hostile plugin.
+ */
+function manifestDeclaresExecSurface(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return false;
+}
+
 export function inspectPluginCapabilities(pluginRoot: string): PluginCapabilities {
   const manifest = loadPluginManifest(pluginRoot);
   const plugin = manifest ? buildDiscoveredPlugin(pluginRoot, manifest) : null;
   return {
-    hasHooks: (plugin?.hooks.length || 0) > 0 || pluginHasDirectoryEntries(pluginRoot, 'hooks'),
-    hasMcp: fs.existsSync(path.join(pluginRoot, '.mcp.json')),
+    // Inline manifest `hooks`/`mcpServers` are execution surfaces too — a cloned
+    // repo's project plugin must not be auto-enabled just because it ships the
+    // exec config inline in plugin.json rather than as a hooks/ dir or .mcp.json.
+    hasHooks:
+      (plugin?.hooks.length || 0) > 0 ||
+      pluginHasDirectoryEntries(pluginRoot, 'hooks') ||
+      manifestDeclaresExecSurface(manifest?.hooks),
+    hasMcp:
+      fs.existsSync(path.join(pluginRoot, '.mcp.json')) ||
+      manifestDeclaresExecSurface(manifest?.mcpServers),
     hasBin: (plugin?.bin.length || 0) > 0,
     hasScripts: (plugin?.scripts.length || 0) > 0,
     hasSettings: pluginHasNonPermissionSettings(pluginRoot),
