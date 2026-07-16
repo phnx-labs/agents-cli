@@ -25,6 +25,8 @@
   and `runWithFallback` now tees a bounded stdout tail per attempt
   (`captureStdoutTail`) and scans it alongside stderr. Output remains mirrored
   to the parent's stdout exactly as before.
+
+- **`agents run --resume <id>` now spawns from the session's origin directory.**
   Native resume (claude/codex) resolves the transcript relative to the working
   directory (`projects/<cwd-hash>/`), but the resolver found the session across all
   projects and then invoked the agent from the *current* cwd — so a resume from a
