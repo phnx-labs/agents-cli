@@ -138,6 +138,9 @@ export const REMOTE_TASK_NAME = 'AgentsComputerHelper';
 /** Basename of the cross-published exe under native/computer-win/dist. */
 export const WIN_HELPER_EXE = 'computer-helper-win.exe';
 
+/** Basename of the daemon's shared-secret token file under %LOCALAPPDATA%\agents. */
+export const WIN_HELPER_TOKEN_FILE = 'helper-token';
+
 /**
  * Locate a locally built Windows daemon exe — a repo-checkout build output from
  * `scripts/build-win.sh`, or one bundled next to the package. Local paths are
@@ -295,6 +298,39 @@ export function clearRemoteState(device: string): void {
   }
 }
 
+/**
+ * Local file holding the shared-secret token for a device's helper daemon.
+ * Written at `setup --host` (0600), read at `start --host` so the RPC client
+ * authenticates. The remote daemon reads the same value from its own
+ * `--token-file`; the CLI is the source of truth and never round-trips it back.
+ */
+export function helperTokenPath(device: string): string {
+  return path.join(remoteStateDir(), `${device}.token`);
+}
+
+export function readHelperToken(device: string): string | null {
+  try {
+    const t = fs.readFileSync(helperTokenPath(device), 'utf-8').trim();
+    return t.length > 0 ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeHelperToken(device: string, token: string): void {
+  const dir = remoteStateDir();
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(helperTokenPath(device), token, { mode: 0o600 });
+}
+
+export function clearHelperToken(device: string): void {
+  try {
+    fs.unlinkSync(helperTokenPath(device));
+  } catch {
+    /* already gone */
+  }
+}
+
 /** Resolve a registered device to its ssh pieces, or throw a clear error. */
 export async function resolveRemoteDevice(
   name: string,
@@ -351,10 +387,27 @@ export function buildVerifyPushScript(remotePath: string, expectedBytes: number)
  * survives ssh disconnect — the same rationale as the browser WMI launch. The
  * task is started immediately so the caller need not log out/in.
  */
-export function buildRegisterTaskScript(port: number, taskName: string): string {
+/**
+ * PowerShell that writes the shared-secret token under %LOCALAPPDATA%\agents
+ * with an owner-only ACL (inheritance removed, read granted only to the current
+ * user) and echoes the resolved path so the caller can pass it to `--token-file`.
+ */
+export function buildWriteTokenScript(token: string): string {
+  return [
+    `$dir = Join-Path $env:LOCALAPPDATA 'agents'`,
+    `New-Item -ItemType Directory -Force -Path $dir | Out-Null`,
+    `$tok = Join-Path $dir '${WIN_HELPER_TOKEN_FILE}'`,
+    `Set-Content -LiteralPath $tok -Value ${psSingleQuote(token)} -NoNewline -Encoding ascii`,
+    `icacls $tok /inheritance:r /grant:r ("$($env:USERNAME):(R)") | Out-Null`,
+    `Write-Output $tok`,
+  ].join('; ');
+}
+
+export function buildRegisterTaskScript(port: number, taskName: string, tokenPath: string): string {
+  const argument = `--port ${port} --token-file "${tokenPath}"`;
   return [
     `$exe = Join-Path (Join-Path $env:LOCALAPPDATA 'agents') '${WIN_HELPER_EXE}'`,
-    `$action = New-ScheduledTaskAction -Execute $exe -Argument '--port ${port}'`,
+    `$action = New-ScheduledTaskAction -Execute $exe -Argument ${psSingleQuote(argument)}`,
     `$trigger = New-ScheduledTaskTrigger -AtLogOn`,
     `$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest`,
     `$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)`,
@@ -452,13 +505,30 @@ export async function setupRemoteHelper(name: string): Promise<{ target: string;
     throw new Error(`verifying helper exe on '${name}' failed (exit ${verify.code ?? 'null'}): ${verify.stderr.trim() || verify.stdout.trim()}`);
   }
 
-  // Register + start the LOGON task.
-  const reg = sshExec(target, encodePowerShell(buildRegisterTaskScript(REMOTE_HELPER_PORT, REMOTE_TASK_NAME)), {
+  // Provision the auth token: generate it locally, write it on the remote with
+  // an owner-only ACL, and register the task with --token-file. The daemon now
+  // refuses to start without a token, so a token-less (open-to-any-local-process)
+  // daemon can no longer be stood up through the CLI.
+  const token = generateToken();
+  const tokWrite = sshExec(target, encodePowerShell(buildWriteTokenScript(token)), { timeoutMs: 60_000 });
+  if (tokWrite.code !== 0) {
+    throw new Error(`writing helper token on '${name}' failed (exit ${tokWrite.code ?? 'null'}): ${tokWrite.stderr.trim() || tokWrite.stdout.trim()}`);
+  }
+  const remoteTokenPath = tokWrite.stdout.trim().split(/\r?\n/).filter(Boolean).at(-1);
+  if (!remoteTokenPath) {
+    throw new Error(`writing helper token on '${name}' did not return a destination path`);
+  }
+
+  // Register + start the LOGON task, pointing it at the token file.
+  const reg = sshExec(target, encodePowerShell(buildRegisterTaskScript(REMOTE_HELPER_PORT, REMOTE_TASK_NAME, remoteTokenPath)), {
     timeoutMs: 60_000,
   });
   if (reg.code !== 0) {
     throw new Error(`registering scheduled task on '${name}' failed (exit ${reg.code ?? 'null'}): ${reg.stderr.trim() || reg.stdout.trim()}`);
   }
+
+  // Persist the token locally so `start --host` authenticates to the daemon.
+  writeHelperToken(name, token);
 
   return { target, taskName: REMOTE_TASK_NAME };
 }
@@ -491,9 +561,15 @@ export async function startRemoteTunnel(name: string): Promise<RemoteTunnelState
 
   // Verify the daemon answers through the tunnel before we record it. This is
   // the real end-to-end check: tunnel up + daemon listening + RPC round-trips.
-  const token: string | null = null; // tunnel-gated; the daemon runs token-less
+  // The daemon now requires a token, so the probe must authenticate with the one
+  // provisioned at `setup`. A missing token means setup predates auth — guide
+  // the user to re-run it rather than silently failing the RPC.
+  const token = readHelperToken(name);
   const prevTcp = process.env.COMPUTER_HELPER_TCP;
+  const prevTok = process.env.COMPUTER_HELPER_TOKEN;
   process.env.COMPUTER_HELPER_TCP = `127.0.0.1:${localPort}`;
+  if (token) process.env.COMPUTER_HELPER_TOKEN = token;
+  else delete process.env.COMPUTER_HELPER_TOKEN;
   const client = openComputerClient();
   let ok = false;
   let probeErr = '';
@@ -507,12 +583,16 @@ export async function startRemoteTunnel(name: string): Promise<RemoteTunnelState
     await client.close();
     if (prevTcp === undefined) delete process.env.COMPUTER_HELPER_TCP;
     else process.env.COMPUTER_HELPER_TCP = prevTcp;
+    if (prevTok === undefined) delete process.env.COMPUTER_HELPER_TOKEN;
+    else process.env.COMPUTER_HELPER_TOKEN = prevTok;
   }
   if (!ok) {
     try { if (tunnelPid) process.kill(tunnelPid); } catch { /* gone */ }
+    const hint = token
+      ? `Is it installed? Run: agents computer setup --host ${name}`
+      : `No auth token on record for '${name}' — re-run: agents computer setup --host ${name}`;
     throw new Error(
-      `tunnel to '${name}' opened but the daemon did not answer (${probeErr}). ` +
-        `Is it installed? Run: agents computer setup --host ${name}`,
+      `tunnel to '${name}' opened but the daemon did not answer (${probeErr}). ${hint}`,
     );
   }
 
@@ -556,6 +636,7 @@ export async function stopRemoteHelper(name: string): Promise<{ tunnelKilled: bo
   }
 
   clearRemoteState(name);
+  clearHelperToken(name);
   return { tunnelKilled, taskRemoved };
 }
 
