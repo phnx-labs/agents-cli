@@ -717,6 +717,55 @@ function countExpiringSoon(meta: Record<string, VarMeta> | undefined): number {
   return n;
 }
 
+/**
+ * Resolve an existing import target bundle (inheriting its backend) or create a
+ * new one with the requested backend. Refuses to silently downgrade a
+ * keychain-backed bundle to `file` — shared by every `import` source so the
+ * guard can't drift between them.
+ */
+function resolveImportBundle(name: string, backendOpt: string | undefined): SecretsBundle {
+  const requestedBackend = parseBackendOpt(backendOpt);
+  if (bundleExists(name)) {
+    const bundle = readBundle(name);
+    if (requestedBackend === 'file' && bundle.backend !== 'file') {
+      throw new Error(
+        `Bundle '${name}' already exists with a keychain backend; ` +
+        `--backend file cannot change it. Delete it first to recreate as file-backed.`
+      );
+    }
+    return bundle;
+  }
+  return { name, backend: requestedBackend === 'file' ? 'file' : undefined, vars: {} };
+}
+
+/**
+ * Apply KEY=VALUE entries into a bundle (keychain item or plaintext literal),
+ * honoring `--force`, then persist. Returns the added/skipped tally. Shared by
+ * the .env, --from-file, and --from-ssh import paths.
+ */
+function applyEnvToBundle(
+  bundle: SecretsBundle,
+  env: Record<string, string>,
+  opts: { force?: boolean; allPlaintext?: boolean }
+): { added: number; skipped: number } {
+  const store = bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' });
+  let added = 0;
+  let skipped = 0;
+  for (const [key, value] of Object.entries(env)) {
+    if (!opts.force && key in bundle.vars) { skipped++; continue; }
+    if (opts.allPlaintext) {
+      bundle.vars[key] = { value };
+    } else {
+      const item = secretsKeychainItem(bundle.name, key);
+      store.set(item, value);
+      bundle.vars[key] = keychainRef(key);
+    }
+    added++;
+  }
+  writeBundle(bundle);
+  return { added, skipped };
+}
+
 /** Register the `agents secrets` command tree. */
 export function registerSecretsCommands(program: Command): void {
   const cmd = program
@@ -1469,28 +1518,8 @@ Examples:
           }
           const env = importBundleFromFile(opts.fromFile, passphrase);
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-          const requestedBackend = parseBackendOpt(opts.backend);
-          let bundle: SecretsBundle;
-          if (bundleExists(resolvedBundleName)) {
-            bundle = readBundle(resolvedBundleName);
-          } else {
-            bundle = { name: resolvedBundleName, backend: requestedBackend === 'file' ? 'file' : undefined, vars: {} };
-          }
-          const store = bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' });
-          let added = 0;
-          let skipped = 0;
-          for (const [key, value] of Object.entries(env)) {
-            if (!opts.force && key in bundle.vars) { skipped++; continue; }
-            if (opts.allPlaintext) {
-              bundle.vars[key] = { value };
-            } else {
-              const item = secretsKeychainItem(resolvedBundleName, key);
-              store.set(item, value);
-              bundle.vars[key] = keychainRef(key);
-            }
-            added++;
-          }
-          writeBundle(bundle);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend);
+          const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           console.log(chalk.green(`Imported ${added} key(s) from file${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
           return;
         }
@@ -1503,28 +1532,8 @@ Examples:
           const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
           const target = await resolveSshTarget(opts.host);
           const env = await remoteResolveEnv(target, resolvedBundleName, { osLookupName: opts.host });
-          const requestedBackend = parseBackendOpt(opts.backend);
-          let bundle: SecretsBundle;
-          if (bundleExists(resolvedBundleName)) {
-            bundle = readBundle(resolvedBundleName);
-          } else {
-            bundle = { name: resolvedBundleName, backend: requestedBackend === 'file' ? 'file' : undefined, vars: {} };
-          }
-          const store = bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' });
-          let added = 0;
-          let skipped = 0;
-          for (const [key, value] of Object.entries(env)) {
-            if (!opts.force && key in bundle.vars) { skipped++; continue; }
-            if (opts.allPlaintext) {
-              bundle.vars[key] = { value };
-            } else {
-              const item = secretsKeychainItem(resolvedBundleName, key);
-              store.set(item, value);
-              bundle.vars[key] = keychainRef(key);
-            }
-            added++;
-          }
-          writeBundle(bundle);
+          const bundle = resolveImportBundle(resolvedBundleName, opts.backend);
+          const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           console.log(chalk.green(`Imported ${added} key(s) from ${opts.host}${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
           return;
         }
@@ -1549,50 +1558,20 @@ Examples:
         }
 
         const resolvedBundleName = bundleName ?? (await pickBundleName('import into'));
-        // Read the bundle if it exists (inheriting its backend); otherwise
-        // create it with the requested backend so a single `import --backend
-        // file` works (this is what `export --host ... --remote-backend file`
-        // drives on the remote).
-        let bundle: SecretsBundle;
-        if (bundleExists(resolvedBundleName)) {
-          bundle = readBundle(resolvedBundleName);
-          if (requestedBackend === 'file' && bundle.backend !== 'file') {
-            throw new Error(
-              `Bundle '${resolvedBundleName}' already exists with a keychain backend; ` +
-              `--backend file cannot change it. Delete it first to recreate as file-backed.`
-            );
-          }
-        } else {
-          bundle = {
-            name: resolvedBundleName,
-            backend: requestedBackend === 'file' ? 'file' : undefined,
-            vars: {},
-          };
-        }
-        const store = bundleItemStore(bundle.backend, { noAcl: bundlePolicy(bundle) === 'never' });
-        let added = 0;
-        let skipped = 0;
+        // resolveImportBundle inherits an existing bundle's backend (and refuses
+        // to downgrade keychain -> file) or creates it with the requested backend
+        // so a single `import --backend file` works (what `export --host ...
+        // --remote-backend file` drives on the remote).
+        const bundle = resolveImportBundle(resolvedBundleName, opts.backend);
 
         if (source.kind === '1password') {
           assertOpAvailable();
           const vault = await resolveVault(source.vault);
           const items = listItems(vault);
           const { secrets, skipped: opSkipped } = extractSecrets(items, vault);
-          for (const { envKey, value } of secrets) {
-            if (!opts.force && envKey in bundle.vars) {
-              skipped++;
-              continue;
-            }
-            if (opts.allPlaintext) {
-              bundle.vars[envKey] = { value };
-            } else {
-              const item = secretsKeychainItem(resolvedBundleName, envKey);
-              store.set(item, value);
-              bundle.vars[envKey] = keychainRef(envKey);
-            }
-            added++;
-          }
-          writeBundle(bundle);
+          const env: Record<string, string> = {};
+          for (const { envKey, value } of secrets) env[envKey] = value;
+          const { added, skipped } = applyEnvToBundle(bundle, env, opts);
           if (opSkipped.length) {
             console.log(chalk.yellow(`Skipped ${opSkipped.length} item(s) with no importable fields.`));
           }
@@ -1600,21 +1579,7 @@ Examples:
         } else {
           const raw = readImportDotenv(source.path);
           const pairs = parseDotenv(raw);
-          for (const [key, value] of Object.entries(pairs)) {
-            if (!opts.force && key in bundle.vars) {
-              skipped++;
-              continue;
-            }
-            if (opts.allPlaintext) {
-              bundle.vars[key] = { value };
-            } else {
-              const item = secretsKeychainItem(resolvedBundleName, key);
-              store.set(item, value);
-              bundle.vars[key] = keychainRef(key);
-            }
-            added++;
-          }
-          writeBundle(bundle);
+          const { added, skipped } = applyEnvToBundle(bundle, pairs, opts);
           console.log(chalk.green(`Imported ${added} key(s)${skipped ? `, skipped ${skipped} (already set, pass --force)` : ''}.`));
         }
       } catch (err) {
