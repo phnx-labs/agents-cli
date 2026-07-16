@@ -1024,16 +1024,16 @@ function parseClaudeOauthPayload(raw: string): ClaudeOauthCredentials | null {
  * account + plan — read from the plaintext `.claude.json` — showed fine.
  */
 export async function loadClaudeOauth(home?: string): Promise<ClaudeOauthCredentials | null> {
-  // Windows not yet supported
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
-    return null;
-  }
-
-  try {
-    const fromKeychain = parseClaudeOauthPayload(getKeychainToken(getClaudeKeychainService(home)));
-    if (fromKeychain) return fromKeychain;
-  } catch {
-    // No keychain item, or no reachable keyring (headless Linux) — fall through.
+  // The OS keychain/keyring step is macOS/Linux-only. Windows skips straight
+  // to the .credentials.json fallback — the Claude CLI has no keychain
+  // integration there and stores its OAuth token in that file too.
+  if (process.platform === 'darwin' || process.platform === 'linux') {
+    try {
+      const fromKeychain = parseClaudeOauthPayload(getKeychainToken(getClaudeKeychainService(home)));
+      if (fromKeychain) return fromKeychain;
+    } catch {
+      // No keychain item, or no reachable keyring (headless Linux) — fall through.
+    }
   }
 
   const credsPath = path.join(home ?? os.homedir(), '.claude', '.credentials.json');

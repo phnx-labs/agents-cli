@@ -103,7 +103,7 @@ describe('agents mailboxes', () => {
   afterAll(() => {
     if (savedMailboxEnv === undefined) delete process.env.AGENTS_MAILBOX_DIR;
     else process.env.AGENTS_MAILBOX_DIR = savedMailboxEnv;
-    fs.rmSync(TEST_HOME, { recursive: true, force: true });
+    fs.rmSync(TEST_HOME, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('renders the masthead + sparkline overview and the preserved --json box shape', async () => {
