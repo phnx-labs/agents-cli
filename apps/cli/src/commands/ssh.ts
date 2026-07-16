@@ -474,17 +474,26 @@ Typical workflow:
       // Tailscale as an `unknown`-platform node), mark it control-only so the
       // fleet stops trying to dial it for sessions/placement.
       let marked = false;
+      let unknownName = false;
       if (name) {
         const existing = await getDevice(name);
         if (existing) {
           await upsertDevice(name, { role: 'control' });
           marked = true;
+        } else {
+          unknownName = true;
         }
       }
       const port = parseInt(opts.port ?? '', 10) || DEFAULT_SERVE_PORT;
 
       console.log(chalk.green(`Paired cockpit '${label}'`) + chalk.gray(` (token id ${id})`));
       if (marked) console.log(chalk.gray(`Marked device '${name}' role=control — the fleet won't dial it.`));
+      if (unknownName) {
+        console.log(
+          chalk.yellow(`Note: no registered device named '${name}' — token minted, but no device was marked role=control.`) +
+            chalk.gray(` Run \`agents devices sync\` first if this phone should appear in the fleet.`),
+        );
+      }
       console.log();
       console.log(chalk.bold('Control token (shown once — enter it in the app):'));
       console.log('  ' + chalk.cyan(token));

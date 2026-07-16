@@ -11,7 +11,7 @@ import chalk from 'chalk';
 import { SSH_OPTS, controlOpts, assertValidSshTarget, shellQuote } from './ssh-exec.js';
 import { sshTargetFor } from './devices/connect.js';
 import { resolveExplicitTargets } from './devices/resolve-target.js';
-import { loadDevices, type DeviceProfile } from './devices/registry.js';
+import { loadDevices, isControlDevice, type DeviceProfile } from './devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand } from './hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './machine-id.js';
 
@@ -80,6 +80,11 @@ export async function gatherRemoteAgentsJson<T>(
     for (const device of Object.values(devices)) {
       if (device.tailscale?.online !== true) continue;
       if (normalizeHost(device.name) === self) continue;
+      // Control-only devices (a phone/tablet cockpit) drive the fleet but never
+      // run agents — never dial them, whatever their platform reads as. Keyed on
+      // role, not platform, so this holds even for a control device that carries
+      // a real OS value (mirrors the skip in session/remote-list.ts).
+      if (isControlDevice(device)) continue;
       if (!['windows', 'linux', 'macos'].includes(device.platform)) continue;
       try {
         targets.push({
