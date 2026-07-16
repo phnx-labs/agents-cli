@@ -25,4 +25,13 @@ describe('shouldCloseIssue', () => {
   it('returns false for an unknown state', () => {
     expect(shouldCloseIssue({ state: 'UNKNOWN', mergedAt: '2024-06-01T12:00:00Z' })).toBe(false);
   });
+
+  it('returns true for MERGED with empty-string mergedAt (shell uses -z which also catches this)', () => {
+    // gh pr view never returns '' for mergedAt in practice (only null or a timestamp),
+    // but the shell routine converts null→"" via `jq -r '.mergedAt // ""'` then guards
+    // with `[ -z "$MERGED_AT" ]`. The TypeScript function checks !== null only, so ''
+    // would return true here. Document this divergence — it is intentional: the shell
+    // gate is more defensive; real API data never produces ''.
+    expect(shouldCloseIssue({ state: 'MERGED', mergedAt: '' })).toBe(true);
+  });
 });

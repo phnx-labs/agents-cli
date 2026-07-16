@@ -44,10 +44,12 @@ command: |
 
   linear_gql() {
     local query="$1" vars="${2:-{}}"
+    local body
+    body=$(jq -n --arg q "$query" --argjson v "$vars" '{"query":$q,"variables":$v}')
     curl -sf 'https://api.linear.app/graphql' \
       -H "Authorization: $LINEAR_KEY" \
       -H 'Content-Type: application/json' \
-      --data-binary "{\"query\":\"$query\",\"variables\":$vars}"
+      --data-binary "$body"
   }
 
   # ── fetch open issues with GitHub PR attachments ────────────────────────────
@@ -121,7 +123,7 @@ command: |
     COMPLETED_STATE=$(linear_gql \
       'query($t:String!){ workflowStates(filter:{ team:{ id:{ eq:$t } }, type:{ eq:"completed" } },first:5){ nodes{ id position } } }' \
       "{\"t\":\"$TEAM_ID\"}" \
-      | jq -r '[ .data.workflowStates.nodes | sort_by(.position)[] ] | first | .id // ""')
+      | jq -r '.data.workflowStates.nodes | sort_by(.position) | first | .id // ""')
 
     if [ -z "$COMPLETED_STATE" ]; then
       echo "ERROR: no completed state for $IDENTIFIER (team $TEAM_ID) — skipping"
