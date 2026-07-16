@@ -481,6 +481,20 @@ export function renderPolicyCol(b: SecretsBundle, held?: Map<string, number>): s
   return exp ? chalk.green(`daily · held ${compactRemaining(exp)}`) : chalk.gray('daily');
 }
 
+/** Human-readable hold window for `secrets status`. Sub-hour values render in
+ * minutes (so a near-floor `holdMs` never shows a confusing "0 hours"), whole
+ * hours up to 2 days, whole days beyond. Pure — unit-tested. */
+export function formatHoldWindow(ms: number): string {
+  if (ms < 3_600_000) { // under an hour → minutes (never a confusing "0 hours")
+    const mins = Math.max(1, Math.round(ms / 60_000));
+    return `${mins} minute${mins === 1 ? '' : 's'}`;
+  }
+  const hrs = Math.round(ms / 3_600_000);
+  if (hrs < 48) return `${hrs} hour${hrs === 1 ? '' : 's'}`;
+  const days = Math.round(hrs / 24);
+  return `${days} day${days === 1 ? '' : 's'}`;
+}
+
 /** Below this width the fixed date columns no longer fit; `list` uses cards. */
 const SECRETS_WIDE = 96;
 
@@ -1957,8 +1971,7 @@ Examples:
         ));
       }
       // Surface the hold window so "why did it prompt again" is answerable.
-      const holdHrs = Math.round(secretsHoldMs() / 3_600_000);
-      const holdStr = holdHrs < 48 ? `${holdHrs} hour${holdHrs === 1 ? '' : 's'}` : `${Math.round(holdHrs / 24)} days`;
+      const holdStr = formatHoldWindow(secretsHoldMs());
       const configured = (() => { try { return typeof readMeta().secrets?.agent?.holdMs === 'number'; } catch { return false; } })();
       console.log(chalk.gray(`hold: ${holdStr}${configured ? ' (secrets.agent.holdMs)' : ' (default)'} — a daily bundle prompts once, then stays silent for this long or until sleep/logout.`));
       const entries = await agentStatus();

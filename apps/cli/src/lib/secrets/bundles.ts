@@ -1112,9 +1112,12 @@ export function readAndResolveBundleEnv(
     emitReadAudit('success');
     // Auto-cache: this was a real keychain read (the agent fast-path returned
     // earlier on a hit). If the bundle opts into the `daily` policy and the user
-    // enabled `secrets.agent.auto`, populate the broker in the background so the
-    // next concurrent run reads silently. Skipped when noAgent (e.g. `unlock`,
-    // which loads the agent itself). Fire-and-forget — never blocks this read.
+    // enabled `secrets.agent.auto`, populate the broker so the next concurrent
+    // run reads silently. Skipped when noAgent (e.g. `unlock`, which loads the
+    // agent itself). When a broker is already up this warms it synchronously
+    // (bounded ~3s) so `daily` reliably sticks; only a cold-start broker uses the
+    // detached fire-and-forget path (see agentAutoLoadSync). The costly Touch ID
+    // prompt already happened, so the bounded wait is invisible.
     if (
       backend === 'keychain' &&
       !opts.noAgent &&

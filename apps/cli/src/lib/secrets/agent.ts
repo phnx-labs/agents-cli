@@ -906,8 +906,14 @@ export function agentAutoLoadSync(
 /**
  * Body of the hidden `secrets _agent-load` worker. Reads one `{name, bundle,
  * env, ttlMs}` payload from stdin, ensures the broker is up (robust, generous
- * budget), and loads the bundle into it. Detached from the originating read, so
- * its latency is invisible — which is why it can afford a long ensure budget.
+ * budget), and loads the bundle into it.
+ *
+ * Exit code is load-truthful: 0 ONLY when the bundle was actually loaded into a
+ * reachable broker; non-zero on any failure (malformed payload, broker couldn't
+ * be brought up, or the load transport failed). The synchronous caller
+ * (agentAutoLoadSync) relies on this to decide whether to skip the detached
+ * fallback — a bare "process exited 0" would otherwise be a false-positive
+ * success that silently reintroduces the very re-prompt storm this path fixes.
  */
 export async function runAgentLoadFromStdin(): Promise<void> {
   if (!onDarwin()) return;
@@ -917,13 +923,21 @@ export async function runAgentLoadFromStdin(): Promise<void> {
   try {
     payload = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
   } catch {
-    return; // malformed payload — nothing to load
+    process.exitCode = 1; // malformed payload — nothing loaded
+    return;
   }
-  if (!payload || !payload.name || !payload.bundle || !payload.env) return;
+  if (!payload || !payload.name || !payload.bundle || !payload.env) {
+    process.exitCode = 1;
+    return;
+  }
   // Generous budget: the broker is a cold-starting full CLI; under load it can
   // take several seconds to bind. We're detached, so waiting costs nothing.
-  if (!(await ensureAgentRunning(20000))) return;
-  await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS);
+  if (!(await ensureAgentRunning(20000))) {
+    process.exitCode = 1; // broker couldn't be brought up — did NOT load
+    return;
+  }
+  const loaded = await agentLoad(payload.name, payload.bundle, payload.env, payload.ttlMs ?? DEFAULT_TTL_MS);
+  if (!loaded) process.exitCode = 1; // transport failed — did NOT load
 }
 
 /** Store a resolved bundle in the broker. Returns false on transport failure. */
