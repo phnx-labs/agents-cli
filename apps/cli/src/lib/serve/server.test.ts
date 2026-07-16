@@ -6,7 +6,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import type { Server, IncomingMessage } from 'http';
 import net from 'net';
-import { startServeServer, SERVE_HOST } from './server.js';
+import { startServeServer, SERVE_HOST, isAllowedServeHost } from './server.js';
 import type { ServeState } from './data.js';
 
 let server: Server | null = null;
@@ -31,6 +31,38 @@ describe('serve server', () => {
     const addr = started.server.address();
     expect(typeof addr).toBe('object');
     expect((addr as { address: string }).address).toBe('127.0.0.1');
+  });
+
+  it('rejects an explicit non-loopback Host header (DNS-rebind guard)', async () => {
+    const base = await boot();
+    const port = Number(new URL(base).port);
+    // Raw socket so we fully control the Host header (undici forbids overriding it).
+    const rawGet = (hostHeader: string): Promise<number> =>
+      new Promise((resolve, reject) => {
+        const sock = net.connect(port, '127.0.0.1', () => {
+          sock.write(`GET /api/state HTTP/1.1\r\nHost: ${hostHeader}\r\nConnection: close\r\n\r\n`);
+        });
+        let buf = '';
+        sock.on('data', (d) => { buf += d.toString(); });
+        sock.on('end', () => {
+          const m = buf.match(/^HTTP\/1\.\d (\d{3})/);
+          m ? resolve(Number(m[1])) : reject(new Error('no status line: ' + buf.slice(0, 80)));
+        });
+        sock.on('error', reject);
+      });
+    // A rebound browser reaches 127.0.0.1 but sends the attacker's hostname.
+    expect(await rawGet('attacker.example')).toBe(403);
+    // A loopback Host (what a real browser at localhost sends) is served.
+    expect(await rawGet('localhost:4477')).toBe(200);
+  });
+
+  it('isAllowedServeHost trusts only loopback (or a missing Host)', () => {
+    for (const h of ['localhost', 'localhost:4477', '127.0.0.1', '127.0.0.1:4477', '[::1]:4477', undefined]) {
+      expect(isAllowedServeHost(h)).toBe(true);
+    }
+    for (const h of ['attacker.example', 'evil.com:4477', '10.0.0.5', 'foo.localhost']) {
+      expect(isAllowedServeHost(h)).toBe(false);
+    }
   });
 
   it('serves the HTML page at /', async () => {

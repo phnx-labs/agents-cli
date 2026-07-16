@@ -22,6 +22,23 @@ import { renderPage } from './page.js';
 
 /** Loopback address — the server binds here and nowhere else. */
 export const SERVE_HOST = '127.0.0.1';
+
+/**
+ * DNS-rebinding guard. The socket binds loopback, but binding alone does not
+ * stop a remote page: an attacker can point a hostname's DNS at 127.0.0.1 and
+ * drive the victim's browser to `GET /api/state`, which exposes uncommitted
+ * `git diff HEAD` of every worktree plus routine + cloud config. A browser
+ * always sends a `Host` header naming the site it *thinks* it reached, so we
+ * trust only a Host that is itself loopback. A missing Host (HTTP/1.0 or a raw
+ * non-browser client like curl-without-Host) is not a rebind vector and is
+ * allowed; any explicit non-loopback Host is rejected.
+ */
+export function isAllowedServeHost(hostHeader: string | undefined): boolean {
+  if (!hostHeader) return true;
+  const host = hostHeader.replace(/:\d+$/, '').toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 /** Default port for `agents serve`. */
 export const DEFAULT_SERVE_PORT = 4477;
 /** Default SSE push cadence. */
@@ -141,6 +158,12 @@ export function createServeServer(opts: ServeOptions = {}): http.Server {
   const ctx = resolveServeContext(opts);
 
   const server = createServer(async (req, res) => {
+    // DNS-rebind guard: reject any explicit non-loopback Host before doing work.
+    if (!isAllowedServeHost(req.headers.host)) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      res.end('forbidden: non-local Host');
+      return;
+    }
     // Read-only: reject anything that could mutate. Only GET is served.
     if (req.method !== 'GET') {
       res.writeHead(405, { 'content-type': 'text/plain', allow: 'GET' });
