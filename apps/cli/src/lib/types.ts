@@ -761,6 +761,13 @@ export interface Meta {
    * are never copied. `inline` hosts carry their own address/user.
    */
   hosts?: Record<string, HostEntry>;
+  /**
+   * Declarative fleet profile (`agents apply` / `ag apply`). Additive to the
+   * schema — project `agents:` version-pins are untouched. Declares which agents
+   * every device should have, which config to sync, and how login propagates.
+   * Full shape in `lib/fleet/types.ts` (FleetManifest).
+   */
+  fleet?: import('./fleet/types.js').FleetManifest;
 }
 
 /** Persisted agent-host entry in agents.yaml (overlay or inline). */
