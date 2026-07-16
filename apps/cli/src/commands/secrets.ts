@@ -36,6 +36,7 @@ import {
   migrateLegacyBundles,
   parseDotenv,
   readAndResolveBundleEnv,
+  isHeadlessSecretsContext,
   readBundle,
   renameBundle,
   rotateBundleSecret,
@@ -921,7 +922,10 @@ export function registerSecretsCommands(program: Command): void {
           console.error(chalk.red(`Secrets bundle '${item}' not found.`));
           process.exit(1);
         }
-        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key] });
+        // `secrets get` is the scriptable automation primitive ($(agents secrets
+        // get bundle KEY)); when embedded in a headless routine/CI script it must
+        // not pop an unwatched Touch ID prompt. Interactive use still prompts.
+        const { env } = readAndResolveBundleEnv(item, { caller: 'secrets get', keys: [key], agentOnly: isHeadlessSecretsContext() });
         if (!(key in env)) {
           console.error(chalk.red(`Key '${key}' not in bundle '${item}'.`));
           process.exit(1);
@@ -1495,7 +1499,7 @@ Examples:
       format?: string;
     }) => {
       try {
-        const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName, isHeadlessSecretsContext } = await import('../lib/secrets/bundles.js');
+        const { readAndResolveBundleEnv, bundleToEnvPrefix, isReservedEnvName } = await import('../lib/secrets/bundles.js');
         const resolvedBundleName = bundleName ?? (await pickBundleName('export'));
 
         // The presence of --host selects SSH push: --host is the destination
@@ -1521,7 +1525,7 @@ Examples:
               );
             }
           }
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export` });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `ssh export`, agentOnly: isHeadlessSecretsContext() });
           const dotenv = bundleEnvToDotenv(env);
           const keyCount = Object.keys(env).length;
           // Drive the remote's own `agents secrets import --from -` so the values
@@ -1589,7 +1593,7 @@ Examples:
         if (opts.to1password) {
           assertOpAvailable();
           const vault = await resolveVault(opts.vault);
-          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}` });
+          const { env } = readAndResolveBundleEnv(resolvedBundleName, { caller: `1Password vault ${vault}`, agentOnly: isHeadlessSecretsContext() });
           let created = 0;
           let overwritten = 0;
           let skipped = 0;
@@ -1690,6 +1694,7 @@ Examples:
             caller: `command ${cmd}`,
             keys: keysSubset,
             allowExpired: execOpts.allowExpired,
+            agentOnly: isHeadlessSecretsContext(),
           }).env;
         }
         const { spawn } = await import('child_process');
