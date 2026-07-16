@@ -37,7 +37,10 @@ export interface R2Config {
  * without real credentials (no silent fallback).
  */
 function resolveR2Config(): R2Config {
-  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync' });
+  // The daemon monitor loop is headless by construction (no TTY, ever). Resolve
+  // broker-only so a broker miss can never pop an unattended Touch ID sheet on
+  // the user's screen — same rationale as daemon.ts readDaemonClaudeOAuthToken.
+  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync', agentOnly: true });
   const accountId = env.R2_ACCOUNT_ID?.trim();
   const bucket = env.R2_BUCKET_NAME?.trim();
   const accessKeyId = env.R2_ACCESS_KEY_ID?.trim();

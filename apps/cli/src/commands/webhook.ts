@@ -8,7 +8,7 @@
 import type { Command } from 'commander';
 import type { Server } from 'http';
 import chalk from 'chalk';
-import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { startWebhookServer, type WebhookSecrets } from '../lib/triggers/webhook.js';
 
 const DEFAULT_HOST = '127.0.0.1';
@@ -22,6 +22,9 @@ function positiveInt(value: string | undefined, fallback: number): number {
 function readWebhookSecrets(bundleName: string): WebhookSecrets {
   const { env } = readAndResolveBundleEnv(bundleName, {
     caller: 'webhook serve',
+    // `webhook serve` is a long-running background server; when started detached
+    // (no TTY) it must resolve broker-only rather than pop an unanswerable prompt.
+    agentOnly: isHeadlessSecretsContext(),
   });
   const secrets: WebhookSecrets = {};
   if (env.GITHUB_WEBHOOK_SECRET) secrets.github = env.GITHUB_WEBHOOK_SECRET;
