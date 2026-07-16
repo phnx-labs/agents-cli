@@ -161,6 +161,30 @@ describe('resolveClaudeCredentialsBlob', () => {
     expect(reads.filter((r) => r !== 'bare')[0]).toBe('svc:/home/match');
   });
 
+  itDarwin('returns the bare-service blob when preferEmail matches the bare service account', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      preferEmail: 'want@b.com',
+      service: (home) => (home ? `svc:${home}` : 'bare'),
+      readItem: (svc) => (svc === 'bare' ? WRAPPED : (() => { throw new Error('miss'); })()),
+      listVersions: () => [],
+      versionHome: (v) => v,
+      accountEmail: async (_home) => 'want@b.com',
+    });
+    expect(blob).toBe(WRAPPED);
+  });
+
+  itDarwin('falls through bare service and returns null when preferEmail does not match', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      preferEmail: 'want@b.com',
+      service: (home) => (home ? `svc:${home}` : 'bare'),
+      readItem: (svc) => (svc === 'bare' ? WRAPPED : (() => { throw new Error('miss'); })()),
+      listVersions: () => [],
+      versionHome: (v) => v,
+      accountEmail: async (_home) => 'other@b.com',
+    });
+    expect(blob).toBeNull();
+  });
+
   itDarwin('rejects a payload without a claudeAiOauth.accessToken', async () => {
     const blob = await resolveClaudeCredentialsBlob({
       service: () => 'bare',
