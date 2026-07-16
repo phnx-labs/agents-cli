@@ -4,7 +4,7 @@
  * bundle (OS keychain on macOS, libsecret on Linux) — never from env or disk.
  */
 
-import { readAndResolveBundleEnv } from '../../secrets/bundles.js';
+import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../../secrets/bundles.js';
 
 /** Secrets bundle holding the R2 credentials. */
 export const SYNC_BUNDLE = 'r2.backups';
@@ -37,10 +37,13 @@ export interface R2Config {
  * without real credentials (no silent fallback).
  */
 function resolveR2Config(): R2Config {
-  // The daemon monitor loop is headless by construction (no TTY, ever). Resolve
-  // broker-only so a broker miss can never pop an unattended Touch ID sheet on
-  // the user's screen — same rationale as daemon.ts readDaemonClaudeOAuthToken.
-  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync', agentOnly: true });
+  // The daemon monitor loop is headless by construction (no TTY, ever), so
+  // isHeadlessSecretsContext() is true here and this resolves broker-only — a
+  // broker miss can never pop an unattended Touch ID sheet on the user's screen
+  // (same rationale as daemon.ts readDaemonClaudeOAuthToken). Using the shared
+  // predicate rather than a literal keeps it consistent with the other callers
+  // and lets any interactive caller of loadR2Config still prompt.
+  const { env } = readAndResolveBundleEnv(SYNC_BUNDLE, { caller: 'sessions-sync', agentOnly: isHeadlessSecretsContext() });
   const accountId = env.R2_ACCOUNT_ID?.trim();
   const bucket = env.R2_BUCKET_NAME?.trim();
   const accessKeyId = env.R2_ACCESS_KEY_ID?.trim();
