@@ -2,6 +2,8 @@
 
 Using agents-cli as a programmatic observability layer for agent fleets.
 
+`agents feed` and `agents mailboxes` share one fleet-comms visual language (masthead + glyphs from `comms-render`) so the two operator surfaces read as one product.
+
 ## Audit Event Log (`agents events`)
 
 Separate from the fleet-state sources below (which answer "what's running *now*"),
@@ -232,6 +234,77 @@ agents sessions <id> --json --last 50 --include tools,assistant
 agents sessions <id> --markdown
 ```
 
+## Fleet comms (`agents mailboxes`)
+
+The three sources above tell you what agents are running; `agents mailboxes`
+shows what they are **saying to each other**. Every `agents message` /
+`agents teams message` / feed answer rides the mailbox spool
+(`~/.agents/.history/mailbox/<id>/{inbox,processing,consumed}`) — one box per
+logical agent. `agents mailboxes` (alias `agents mailbox`) is the read-only
+window onto it, including already-`consumed` (delivered) mail, so agent-to-agent
+chatter is visible after the fact.
+
+```bash
+agents mailboxes                 # masthead + 24h sparkline + boxes + recent cross-box log
+agents mailboxes <id>            # one box in full, across all three buckets
+agents mailboxes --watch         # live tail of cross-box traffic until Ctrl-C
+agents mailboxes --between a b   # one relationship as a thread, either direction
+agents mailboxes --graph         # who-talks-to-whom adjacency, busiest first
+```
+
+The overview opens with a `fleet comms` masthead (`N live · M boxes`, total
+messages, messages still awaiting delivery, last activity) and a 24-hour
+hourly-volume sparkline, then one row per box (live dot, pending/total counts,
+last activity, resolved live-session label), then the recency-ordered message
+log.
+
+### Live tail (`--watch`, `-f`) — the money shot
+
+```bash
+agents mailboxes --watch                 # stream new cross-box messages as they land
+agents mailboxes --watch --since 1h      # backfill the last hour, then keep tailing
+agents mailboxes --watch --from claude   # only one sender
+agents mailboxes --watch --json          # NDJSON, one message per line
+```
+
+Each line is `HH:MM:SS  <from> ─→ <toLabel>   <text>`. When a message is
+addressed to the box of the agent running the watch (spawn wiring sets
+`AGENTS_MAILBOX_DIR`), the target renders as `▲ you` in amber — an orchestrator
+agent sees its replies light up in the stream. Ctrl-C aborts the poller
+cleanly. Without `--since` the watcher does not replay history; it baselines
+the spool and streams only what arrives after that.
+
+### Filters (`--from`, `--to`, `--since`)
+
+All three apply to the overview recency log, the `--watch` stream, and
+`--graph`:
+
+| Flag | Matches |
+|---|---|
+| `--from <agent>` | Sender label contains `<agent>` (case-insensitive) |
+| `--to <agent>` | Recipient box id or resolved label contains `<agent>` |
+| `--since <dur>` | `30s` / `5m` / `2h` / `7d` / `4w` or an ISO date |
+
+### Thread (`--between <a> <b>`)
+
+Reads one relationship: every message between the two boxes in either
+direction, chronological, under a `a ⇄ b   N messages · span` header. Boxes
+resolve by full id, id prefix, or label substring. Thread reconstruction keys
+on the sender stamp (`from`), matched against the counterpart's box id (full
+or prefix) or its resolved label.
+
+### Routes (`--graph`)
+
+Aggregates the whole spool into `from └─▶ to ···· count` adjacency rows,
+busiest first — the shape of the fleet's chatter at a glance.
+
+### JSON mirroring
+
+`--json` works on every view: overview dumps per-box
+`{id, label, live, pending, total, messages}` (filters recount when present),
+`<id>` dumps one box, `--between` dumps `{a, b, count, messages}`, `--graph`
+dumps the edge list, and `--watch` streams NDJSON.
+
 ## Cost & Duration Rollup (`agents cost`)
 
 Every session is priced at scan time: `cost_usd = Σ tokens × per-model price`
@@ -298,9 +371,9 @@ contains — this is a data-availability limit, not a policy choice:
 | Claude | email + plan | live (`api.anthropic.com`) | email/plan/quota from the local OAuth credential + usage API |
 | Codex | email + plan | last-seen (session logs) | email/plan from the auth JWT; quota parsed from the newest session's rate-limit event |
 | Gemini, Grok | email | — | email read from the local auth file |
-| Droid | email | — | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. No network. Plan needs an authed call, so it's omitted. |
+| Droid | email | live (`api.factory.ai`) | `~/.factory/auth.v2.file` is AES-256-GCM (key on disk at `auth.v2.key`); decrypt locally, read the email from the WorkOS access-token JWT. That same token authorizes `GET /api/billing/limits` for the three rolling rate-limit windows (5-hour → `S`, weekly → `W`, monthly, detailed-view only). |
 | Kimi | `id:<user_id>` + tier | live (`api.kimi.com/coding/v1/usages`) | JWT carries no email — only an opaque `user_id`. Quota + membership tier come from the `/usages` endpoint. |
-| Antigravity | `signed in` | — | OAuth grant with no id_token — presence is the only signal |
+| Antigravity | `signed in` | — | OAuth grant with no id_token — presence only. File `~/.gemini/antigravity-cli/antigravity-oauth-token`, else macOS keychain / Linux libsecret (`service gemini` + user `antigravity`) |
 | others | `not signed in` unless a credential exists | — | `default` case: no detector |
 
 Two deliberate boundaries worth knowing:
@@ -309,11 +382,13 @@ Two deliberate boundaries worth knowing:
   show their own email — the same thing the `droid` CLI does. If it can't be
   decrypted (a `keyring-v2`/legacy login with no on-disk key), the row falls
   back to `signed in` rather than blanking.
-- **Kimi usage never refreshes the token.** `agents view` is a read/inspect
-  command, so it must not rotate the user's OAuth credential (rewriting the
-  file, invalidating the refresh token, racing a running `kimi`). An expired
-  token simply falls back to the cached snapshot; the `kimi` CLI refreshes on
-  its own launch.
+- **Kimi and Droid usage never refresh the token.** `agents view` is a
+  read/inspect command, so it must not rotate the user's OAuth credential
+  (rewriting the file, invalidating the single-use refresh token, racing a
+  running `kimi` / `droid`). An expired token simply falls back to the cached
+  snapshot; each agent's own CLI refreshes on its next launch (Droid's token
+  lives 24h). Droid surfaces the `standard` (primary) rate-limit pool, not the
+  free `core` fallback pool.
 
 The same fields are exposed programmatically via `agents view --json`
 (`email`, `accountId`, `plan`, `usageStatus`, `windows`).

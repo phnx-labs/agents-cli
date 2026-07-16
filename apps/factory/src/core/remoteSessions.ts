@@ -124,6 +124,14 @@ export function reconcileHosts(devices: RegisteredDeviceInput[], localHost: stri
  * name remotely) — never the raw `host` field of the CLI payload, which is the
  * terminal-emulator name (e.g. "ghostty").
  */
+/** One live checklist item from the CLI's TodoProgress (RUSH-1380). */
+export interface RemoteTodoItem {
+  content: string;
+  status: 'pending' | 'in_progress' | 'completed';
+  /** Present-continuous label for the active step (drives the live verb). */
+  activeForm?: string;
+}
+
 export interface RemoteSession {
   host: string;
   sessionId: string;
@@ -148,6 +156,10 @@ export interface RemoteSession {
   question: RemoteQuestion | null;
   /** Last few assistant turns (most-recent last), one line each — panel context. [] when none. */
   tail: string[];
+  /** Live plan checklist from the CLI's most recent `TodoWrite` (RUSH-1380). Lets the
+   *  Factory Floor show an N/M pill + checklist for remote / device-dispatched agents
+   *  that have no local tool-call stream. Absent when the session wrote no todo list. */
+  todos?: RemoteTodoItem[];
   /** Raw CLI output text, when the active-session payload carries it. */
   output: string;
   /** Attachment refs/names from the CLI payload, normalized for thumbnail + preview. */
@@ -301,6 +313,15 @@ export interface RawActiveSession {
   question?: { text?: string; reason?: string; options?: Array<{ label?: string; description?: string; key?: string } | null> } | null;
   /** Last few assistant turns (most-recent last), from the CLI state engine. */
   tail?: string[];
+  /** Live plan progress (CLI ActiveSession.todos, RUSH-1380): the latest TodoWrite
+   *  checklist + a done/total tally + the current step. Present only when the session
+   *  has written a todo list. */
+  todos?: {
+    items?: Array<{ content?: string; status?: string; activeForm?: string } | null>;
+    done?: number;
+    total?: number;
+    activeForm?: string;
+  } | null;
   output?: string;
   attachments?: unknown[];
   pr?: { url?: string; number?: number } | null;
@@ -329,6 +350,27 @@ export interface RawActiveSession {
 }
 
 const TICKET_RE = /\b[A-Z][A-Z0-9]*-\d+\b/;
+
+/**
+ * Normalize the CLI's `ActiveSession.todos` items into the flat checklist the UI
+ * renders (RUSH-1380). Drops contentless items; coerces an unknown status to
+ * 'pending'. Returns [] when the payload carries no usable list.
+ */
+function normalizeTodos(raw: RawActiveSession['todos']): RemoteTodoItem[] {
+  const items = raw?.items;
+  if (!Array.isArray(items)) return [];
+  const out: RemoteTodoItem[] = [];
+  for (const it of items) {
+    if (!it) continue;
+    const content = asStr(it.content);
+    if (!content) continue;
+    const status: RemoteTodoItem['status'] =
+      it.status === 'completed' || it.status === 'in_progress' ? it.status : 'pending';
+    const activeForm = asStr(it.activeForm);
+    out.push(activeForm ? { content, status, activeForm } : { content, status });
+  }
+  return out;
+}
 
 /**
  * Coerce an untyped JSON field to a string. The session JSON is not schema-validated,
@@ -492,6 +534,7 @@ export function normalizeActiveSession(
   // line; it was previously never read, leaving remote cards blank.
   const preview = asStr(raw.preview);
   const worktreeSlug = asStr(raw.worktree?.slug) || worktreeSlugOf(cwd);
+  const todos = normalizeTodos(raw.todos);
 
   return {
     host,
@@ -510,6 +553,7 @@ export function normalizeActiveSession(
     lastResponse: preview,
     question: normalizeQuestion(raw.question),
     tail: Array.isArray(raw.tail) ? raw.tail.map((t) => asStr(t)).filter(Boolean) : [],
+    todos: todos.length ? todos : undefined,
     output: asStr(raw.output),
     attachments: Array.isArray(raw.attachments)
       ? raw.attachments.map(normalizeAttachment).filter((a): a is RemoteAttachment => Boolean(a))

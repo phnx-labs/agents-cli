@@ -26,11 +26,11 @@ Every agents-cli installation maintains two repos:
 | Repo | Path | Owner | Purpose |
 |------|------|-------|---------|
 | **System repo** | `~/.agents/.system/` | agents-cli maintainers | Core resources and defaults shipped with every install. Updated via `npm update -g agents-cli`. |
-| **User repo** | `~/.agents/` | You | Your personal additions and overrides. Synced with `agents repo push` / `agents repo pull`. To git-back a fresh/Windows machine whose `~/.agents` isn't a clone yet, run `agents repo pull user <git-url>` once — it adopts the existing directory in place. |
+| **User repo** | `~/.agents/` | You | Your personal additions and overrides. Synced with `agents repos push` / `agents repos pull` (`repo` is an alias). To git-back a fresh/Windows machine whose `~/.agents` isn't a clone yet, run `agents repos pull user <git-url>` once — it adopts the existing directory in place. |
 
 A project can also have a local repo — drop a `.agents/` directory at the project root. Its resources apply only while you're inside that project tree.
 
-Extra repos can be registered via `agents repo add <source>`. They clone into `~/.agents-<alias>/` (peer of `~/.agents/`) and participate in resolution after the user repo.
+Extra repos can be registered via `agents repos add <source>`. They clone into `~/.agents-<alias>/` (peer of `~/.agents/`) and participate in resolution after the user repo.
 
 ---
 
@@ -49,7 +49,7 @@ A **resource** is any named item inside a DotAgents repo. Resources are typed by
 | `profiles` | Model + endpoint + auth bundles | YAML, consumed by `agents run` and shims |
 | `subagents` | Subagent workflow definitions | `.md` files |
 
-Resources are installed once in `~/.agents/` and synced to every supported agent's native format automatically. Sync happens when you run `agents use`, `agents repo pull`, or explicitly via `agents sync`.
+Resources are installed once in `~/.agents/` and synced to every supported agent's native format automatically. Sync happens when you run `agents use`, `agents repos pull`, or explicitly via `agents sync`.
 
 To inspect what's installed, use the per-kind listers — `agents commands list`, `agents skills list`, `agents hooks list`, `agents mcp list`, `agents permissions list`, `agents subagents list`, `agents profiles list`. There is no single `agents resources` viewer that prints a merged cross-kind table today; if you want one, file an issue.
 
@@ -111,10 +111,13 @@ target either from an existing `~/.ssh/config` stanza (connection details stay i
 ssh config; agents-cli stores only a caps/os overlay) or *inline* (with its own
 `user@address`). The host registry lives in `agents.yaml` under `hosts:` and **is**
 git-synced with `agents repo push`/`pull`, so a fleet definition travels between
-machines. The `-H, --host <name>` flag routes a command over SSH to that machine —
-supported today on the read-only/config commands (`view`, `inspect`, `usage`,
-`cost`, `doctor`, `list`, `sync`), on `agents run`, and across the `agents teams`
-lifecycle. The target may be a registered host name, a capability tag
+machines. The `-H, --host <name>` (alias `--device`) flag routes a command over
+SSH to that machine — supported on virtually every first-class group (`repos`,
+`view`, `inspect`, `usage`, `cost`, `doctor`, `list`, `sync`, `plugins`, `skills`,
+`status`, `teams`, `routines`, …), plus commands with their own richer host
+handling (`run`, `sessions`, `feed`, `computer`, `secrets`, `logs`). Groups with
+no remote semantics reject the flag with a clear message rather than commander's
+raw `unknown option`. The target may be a registered host name, a capability tag
 (`--host gpu --any`), or a raw `user@host`.
 
 The two registries feed **one host pool** behind the `HostProvider` seam:
@@ -144,26 +147,30 @@ contract.
 | Agent | Hooks | MCP | Permissions | Skills | Commands | Plugins | Subagents | Rules | Workflows |
 |------|-------|-----|-------------|--------|----------|---------|-----------|-------|-----------|
 | Claude | yes | yes | yes | yes | yes | yes | yes | `CLAUDE.md` | yes |
-| Codex | >= 0.116.0 | yes | >= 0.138.0 | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | no | `AGENTS.md` | no |
-| Gemini † | >= 0.26.0 | yes | no | yes | yes (.toml) | no | no | `GEMINI.md` | no |
+| Codex | >= 0.116.0 | yes | >= 0.138.0 | yes | < 0.117.0 · skills ($name, >= 0.117) | >= 0.128.0 | >= 0.117.0 | `AGENTS.md` | no |
+| Gemini † | >= 0.26.0 | yes | yes | yes | yes (.toml) | >= 0.8.0 | >= 0.36.0 | `GEMINI.md` | no |
 | Cursor | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
-| OpenCode | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| OpenClaw | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
+| OpenCode | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
+| OpenClaw | yes | yes | yes | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Copilot | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Kiro | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |
-| Goose | no | yes | no | no | no | no | no | `AGENTS.md` | no |
+| Goose | >= 1.34.0 | yes | yes | >= 1.25.0 | yes | yes | yes | `AGENTS.md` | yes |
 | Roo Code | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
-| Antigravity | yes | yes | yes | yes | yes | yes | no | `AGENTS.md` | no |
+| Antigravity | yes | yes | yes | yes | yes | yes | >= 1.0.16 | `AGENTS.md` | >= 1.0.6 |
 | Grok | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
-| Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | no |
+| Kimi | yes | yes | yes | yes | no | yes | yes | `AGENTS.md` | yes |
 | Droid | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
-| Hermes | no | yes | no | yes | no | no | no | `MEMORY.md` | no |
-| ForgeCode | no | yes | no | yes | no | no | no | `AGENTS.md` | no |
+| Hermes | no | yes | no | yes | no | yes | no | `MEMORY.md` | no |
+| ForgeCode | no | yes | no | yes | yes | no | yes | `AGENTS.md` | no |
 
 **† Gemini is deprecated.** Google retired the Gemini CLI for free/Pro/Ultra tiers on June 18, 2026 (announced at Google I/O 2026); Antigravity CLI (`antigravity`) is the successor. agents-cli still manages existing Gemini installs but warns on `agents add gemini` / `agents teams add … gemini`.
 
-Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Antigravity, Grok, Kimi, Kiro 2.8.0+, OpenCode, and Droid >= 0.57.5). **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
+Permissions sync is gated on the `allowlist` capability (Claude, Codex >= 0.138.0, Gemini, Cursor, OpenCode >= 1.1.1, Antigravity, Grok, Kimi, Kiro 2.8.0+, Goose, Droid >= 0.57.5, and OpenClaw). Workflow sync writes Claude workflow bundles, Kimi `type: flow` skills with an `agents_workflow` ownership marker, Goose recipe YAML, and Antigravity workflow markdown (since 1.0.6). Antigravity workflows are the one non-version-isolated target: `agy` scans a single shared `~/.gemini/config/global_workflows/` at startup (a real HOME directory, never symlinked per version), so agents-cli writes there once for all installed antigravity versions and reads it back the same way — the `agents_workflow` marker guards user-authored files from being overwritten or removed. **Host CLIs** (`agents cli`) are agent-agnostic PATH binaries — not in this matrix. Install paths call `supports(agent, cap, version)` before writing; gated capabilities skip with a clear reason instead of silently ignored config.
+
+Gemini permission sync maps canonical Bash rules to its native `ShellTool(...)` entries under `tools.core` / `tools.exclude`. Other canonical permission tools are not representable in Gemini's native allowlist grammar and are skipped.
+
+OpenClaw gates at tool granularity only, so permission sync maps just **blanket** (whole-tool) rules to `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) / `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`, `webfetch → web_fetch`, `websearch → web_search`. Sub-command/path/domain rules (`Bash(git:*)`, `Write(secrets/**)`, `WebFetch(domain:x)`) have no tool-level equivalent and are skipped. The absolute `tools.allow` list is never touched.
 
 ### Per-command targeting
 

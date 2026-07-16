@@ -1,2 +1,7 @@
 # Copied from repo-root README.md at prepack time (see package.json). Do not commit.
 /README.md
+
+# `bun build --compile` (scripts/build-bin.sh) drops this compile-intermediate in
+# apps/cli/ and can leave it behind, dirtying the tree and tripping release.sh's
+# clean-tree preflight.
+*.bun-build

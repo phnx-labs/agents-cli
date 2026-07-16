@@ -4,10 +4,17 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   buildTunnelArgs,
+  startSSHTunnel,
   buildScpArgs,
   buildPushScript,
   buildVerifyPushScript,
   buildRegisterTaskScript,
+  buildWriteTokenScript,
+  WIN_HELPER_TOKEN_FILE,
+  helperTokenPath,
+  readHelperToken,
+  writeHelperToken,
+  clearHelperToken,
   buildUnregisterTaskScript,
   downloadWinHelperExe,
   parseSha256Asset,
@@ -25,6 +32,19 @@ import {
 } from './ssh-tunnel.js';
 import { SSH_OPTS } from './ssh-exec.js';
 import { encodePowerShell } from './browser/drivers/ssh.js';
+
+describe('startSSHTunnel — target validation (C5)', () => {
+  // buildTunnelArgs places `${user}@${host}` before `-N`/SSH_OPTS, so a
+  // `-`-leading user (from a crafted ssh:// profile or device record) would be
+  // parsed by ssh as an option flag. startSSHTunnel must reject before spawning.
+  it('rejects an option-injecting user before spawning ssh', async () => {
+    await expect(startSSHTunnel('-Fattacker', 'victim', 55000, 8765)).rejects.toThrow(/Invalid SSH target/);
+  });
+
+  it('rejects a host containing shell/option metacharacters', async () => {
+    await expect(startSSHTunnel('me', 'a b;rm', 55000, 8765)).rejects.toThrow(/Invalid SSH target/);
+  });
+});
 
 describe('buildTunnelArgs', () => {
   it('forwards localPort to the remote loopback port and stays hardened', () => {
@@ -98,8 +118,10 @@ describe('buildPushScript', () => {
 });
 
 describe('buildRegisterTaskScript', () => {
-  it('registers an interactive LOGON task running the exe with --port', () => {
-    const s = buildRegisterTaskScript(REMOTE_HELPER_PORT, REMOTE_TASK_NAME);
+  const TOKEN_PATH = 'C:\\Users\\me\\AppData\\Local\\agents\\helper-token';
+
+  it('registers an interactive LOGON task running the exe with --port and --token-file', () => {
+    const s = buildRegisterTaskScript(REMOTE_HELPER_PORT, REMOTE_TASK_NAME, TOKEN_PATH);
     expect(s).toContain('-AtLogOn'); // survives ssh disconnect
     expect(s).toContain('-LogonType Interactive'); // real desktop session for UIA/screenshot
     expect(s).toContain('-RunLevel Highest');
@@ -108,6 +130,46 @@ describe('buildRegisterTaskScript', () => {
     expect(s).toContain('Register-ScheduledTask');
     expect(s).toContain('Start-ScheduledTask'); // start now, no logout/in
     expect(s).toContain(WIN_HELPER_EXE);
+    // C2: the daemon requires a token, so the task must point at the token file
+    // (quoted so a path with spaces stays one argv entry).
+    expect(s).toContain(`--token-file "${TOKEN_PATH}"`);
+  });
+});
+
+describe('buildWriteTokenScript', () => {
+  it('writes the token owner-only and echoes the path', () => {
+    const s = buildWriteTokenScript('deadbeefcafe');
+    expect(s).toContain(WIN_HELPER_TOKEN_FILE);
+    expect(s).toContain('Set-Content');
+    expect(s).toContain("'deadbeefcafe'"); // ps-single-quoted token value
+    expect(s).toContain('icacls'); // owner-only ACL, inheritance removed
+    expect(s).toContain('/inheritance:r');
+    expect(s).toContain('Write-Output $tok'); // returns the resolved path
+  });
+});
+
+describe('helper token persistence (C2)', () => {
+  // Uses the real cache dir with a test-only device name (repo convention:
+  // real services, no mocking), cleaned up after each case.
+  const DEV = '__test-tok-device__';
+  afterEach(() => clearHelperToken(DEV));
+
+  it('round-trips a token for a device and clears it', () => {
+    expect(readHelperToken(DEV)).toBeNull();
+    writeHelperToken(DEV, 'sekret-token');
+    expect(readHelperToken(DEV)).toBe('sekret-token');
+    // written owner-only (POSIX only — Windows has no 0600 bit; statSync reports 0666)
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(helperTokenPath(DEV)).mode & 0o777).toBe(0o600);
+    }
+    clearHelperToken(DEV);
+    expect(readHelperToken(DEV)).toBeNull();
+  });
+
+  it('reads null for a missing/empty token', () => {
+    expect(readHelperToken(DEV)).toBeNull();
+    writeHelperToken(DEV, '   ');
+    expect(readHelperToken(DEV)).toBeNull(); // whitespace-only trims to empty
   });
 });
 

@@ -2,7 +2,173 @@
 
 ## Unreleased
 
+### Security
+
+- **The Windows `computer` daemon now requires authentication.** `computer-helper-win`
+  previously started with `authed = expectedToken == null` and the CLI never provisioned a
+  token, so it ran open on `127.0.0.1` — and loopback TCP on Windows is not user/session
+  scoped, letting **any** local process drive full screen capture, input injection, and
+  program launch. The daemon now **refuses to start without a `--token-file`**
+  (`native/computer-win/Program.cs`), and `agents computer setup --host` generates a
+  shared-secret token, writes it on the remote with an owner-only ACL, registers the task
+  with `--token-file`, and persists it locally so `start --host` authenticates
+  (`apps/cli/src/lib/ssh-tunnel.ts`). Existing token-less setups must re-run
+  `agents computer setup --host <device>` (the daemon will otherwise refuse to start).
+- **Plugin exec-surface detection now sees inline manifest `hooks`/`mcpServers`.**
+  `inspectPluginCapabilities` classified a plugin as having an execution surface only
+  from filesystem artifacts (a `hooks/` dir, a `.mcp.json` file), but the official plugin
+  format also allows `hooks`/`mcpServers` declared **inline** in `.claude-plugin/plugin.json`.
+  A cloned repo's project plugin declaring exec config inline was therefore not detected,
+  so `project-launch` auto-enabled it — clone-to-code-execution on the next agent launch
+  without `--allow-exec-surfaces`. Detection now also treats a non-empty inline
+  `hooks`/`mcpServers` (event map or path string) as an execution surface
+  (`apps/cli/src/lib/plugins.ts`). (`apps/cli/src/lib/types.ts` gains the manifest fields.)
+- **SSH option-injection containment for `browser` over `ssh://`.** The `user`/`host`
+  from an `ssh://` browser profile endpoint (git-tracked user config) are now validated
+  with `assertValidSshTarget` before every raw `ssh` spawn — the remote-launch
+  (`ensureRemoteBrowser`), remote-kill (`runSSHCommand`), and `-L` tunnel
+  (`startSSHTunnel`) sinks in `apps/cli/src/lib/browser/drivers/ssh.ts` and
+  `apps/cli/src/lib/ssh-tunnel.ts`. A crafted endpoint like `ssh://-Fattacker@victim`
+  can no longer place `-Fattacker` at the ssh target position (parsed as `-F <file>`),
+  which an attacker-supplied ssh config's `ProxyCommand` would have turned into local
+  code execution.
+- **Path-traversal containment for untrusted-input filesystem sinks.**
+  - Routine job names (from routine YAML `name:` / file basename, which can arrive via a
+    synced user/system config repo) are now contained to a single path segment beneath
+    the routines dir at **every** sink. A crafted name such as `../../../..` can no longer
+    steer the overlay HOME setup — whose teardown does a recursive `rmSync`
+    (`apps/cli/src/lib/sandbox.ts`) — nor the per-run directory that the daemon's
+    load/schedule path `mkdirSync`s and writes `stdout.log`/`meta.json`/`report.md` into
+    (`getJobRunsDir`/`getRunDir` in `apps/cli/src/lib/routines.ts`, used by
+    `apps/cli/src/lib/runner.ts`), outside `~/.agents/routines` and
+    `~/.agents/.history/runs`. `validateJob` also rejects unsafe names.
+  - Session-sync **pull** now validates the peer-controlled `machine` and `relKey` fields
+    before writing a mirrored transcript, matching the guard the push side already applied.
+    A malicious fleet peer can no longer use a manifest `relKey` like
+    `../../../.ssh/authorized_keys` to write attacker content outside the backups mirror
+    (`apps/cli/src/lib/session/sync/agents.ts`). The new containment rejection is caught
+    per-session in `apps/cli/src/lib/session/sync/sync.ts` and around the umbrella-sync
+    stage in `apps/cli/src/lib/sync-umbrella.ts`, so one malicious manifest entry can't
+    wedge the whole sync tick (skipping `savePullState`) or the `agents sync` reconcile
+    stage for everyone else.
+  - Shared containment helpers `isSafeSegmentName` / `assertWithin` added to
+    `apps/cli/src/lib/paths.ts`.
+
 ### Added
+
+- **`agents run --lease` is now frictionless end-to-end (RUSH-1723).** Leasing a
+  disposable cloud box to run an agent — the BYO-your-own-cloud way to offload heavy
+  work when local CPU cores are exhausted — no longer needs an env var, a flag, or a
+  hand-made keychain bundle:
+  - **Headless by default (RUSH-1724).** `--lease` no longer blocks on an interactive
+    runtime picker or confirm — it infers the one runtime the run needs from the agent,
+    and copies the account the run's own `balanced` strategy would pick (a healthy,
+    non-rate-limited one), never the whole set of signed-in tokens and never a throttled
+    account.
+  - **`agents lease setup` (RUSH-1728).** A one-time wizard opens the Hetzner token page,
+    validates the token against the live API, stores it in the `hetzner.com` keychain
+    bundle, and sets it as the default. First-run `--lease` detects a missing credential
+    and runs this automatically, then continues.
+  - **No more `AGENTS_LEASE_SECRETS_BUNDLE=` (RUSH-1728).** New `lease.secretsBundle`
+    config, plus auto-detection of the first bundle that declares a provider token
+    (`HCLOUD_TOKEN`/`AWS_ACCESS_KEY_ID`/`DIGITALOCEAN_TOKEN`) — only that key is injected
+    into crabbox (least privilege).
+  - **`agents lease gc` (RUSH-1726).** Reclaim expired, idle "orphan" boxes that hold a
+    provider's server quota (the cause of a Hetzner `server_limit` 403, which is now an
+    actionable error). Conservative: only stops boxes whose lease expired AND that have
+    been untouched past a safety window, and requires `--yes` or a TTY confirm.
+
+  Source: `apps/cli/src/commands/lease.ts`, `apps/cli/src/commands/exec.ts`,
+  `apps/cli/src/lib/crabbox/cli.ts`, `apps/cli/src/lib/crabbox/runtimes.ts`,
+  `apps/cli/src/lib/crabbox/lease.ts`, `apps/cli/src/lib/types.ts`.
+
+### Fixed
+
+- **`agents run <agent> --fallback …` no longer disables account rotation.**
+  A `--fallback` chain skipped strategy resolution entirely ("strategy balanced
+  ignored: --fallback pins versions directly"), so the bare primary always ran on
+  the pinned default version — one fixed account, every run. On a multi-account
+  host this silently stopped rotation for exactly the runs that most need it
+  (unattended monitors dispatching with a cross-agent fallback chain). The
+  fallback chain only names where to cascade; it never pinned the primary, so
+  the strategy now resolves the primary's version/account as usual. The
+  same-agent rotation failover (#348) also now composes with an explicit chain:
+  the other healthy accounts are unshifted ahead of the cross-agent entries, so
+  a rate limit exhausts same-agent accounts before switching CLIs. Explicit
+  `@version` pins and profiles keep their pinning behavior.
+
+- **Fallback now cascades on Claude billing refusals ("monthly spend limit",
+  "out of usage credits").** Two gaps: the messages matched no
+  `RATE_LIMIT_PATTERNS` entry, and Claude prints them to **stdout** while the
+  cascade only scanned stderr — so a capped account failed the whole run
+  (exit 1) with codex/droid sitting unused in the chain. Added both patterns,
+  and `runWithFallback` now tees a bounded stdout tail per attempt
+  (`captureStdoutTail`) and scans it alongside stderr. Output remains mirrored
+  to the parent's stdout exactly as before.
+
+- **`agents run --resume <id>` now spawns from the session's origin directory.**
+  Native resume (claude/codex) resolves the transcript relative to the working
+  directory (`projects/<cwd-hash>/`), but the resolver found the session across all
+  projects and then invoked the agent from the *current* cwd — so a resume from a
+  different directory (most importantly a routine daemon firing `agents run --resume`)
+  failed with "No conversation found with session ID". It now `cd`s to the resolved
+  session's own `cwd` (honoring an explicit `--cwd`). This makes `routines add
+  --resume` (self-scheduled wake-ups) actually reopen the session end-to-end.
+
+### Added
+
+- **Allowlist (permissions) support for OpenClaw (RUSH-1570).** Permission
+  groups now sync to OpenClaw. Because OpenClaw gates at TOOL granularity only,
+  just **blanket** (whole-tool) rules map into `~/.openclaw/openclaw.json`
+  `tools.alsoAllow` (allow) / `tools.deny` (deny) — `bash → exec`,
+  `read → read`, `write`/`edit → write`, `webfetch → web_fetch`,
+  `websearch → web_search`; sub-command/path/domain rules (`Bash(git:*)`,
+  `Write(secrets/**)`, `WebFetch(domain:x)`) are skipped. The absolute
+  `tools.allow` list and all other config keys are preserved. Source:
+  `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/permissions.ts`,
+  `apps/cli/src/lib/resources/permissions.ts`,
+  `apps/cli/src/lib/staleness/detectors/permissions.ts`.
+
+### Fixed
+
+- **`agents add grok@latest` now places the Grok binary in the new version's
+  isolated home.** The x.ai installer writes to `~/.grok/downloads`, which
+  resolved to the previous default home during install, leaving `agents view`
+  and `agents run` pointing at the old version. The installer-dropped binary is
+  now relocated into the target version home automatically.
+
+- **`agents run` user splits close automatically instead of leaving dead husks.**
+  `createSession` now applies `remain-on-exit` only to the agent pane and reverts
+  the global default, so splits opened with `agents tmux split` (or tmux
+  keybindings) close when their shell exits. The guarded `pane-died` hook still
+  detaches the client on agent pane death, and its `kill-pane` fallback remains
+  for legacy sessions that still carry the old global setting. This removes the
+  async cleanup race that made the guarded-hook test flake in CI.
+
+### Added
+
+- **Hooks support for Hermes Agent (RUSH-1687).** Central hooks now register into
+  Hermes' `~/.hermes/config.yaml` under a `hooks:` block (YAML, gated to Hermes
+  ≥ 0.11.0). The registrar read-modify-writes the shared config so `mcp_servers`
+  and other keys survive, maps canonical events to Hermes' snake_case lifecycle
+  names (`pre_tool_call`, `post_tool_call`, `on_session_start`, `on_session_end`,
+  `pre_llm_call`, `on_session_finalize`, `subagent_stop`), and caps each timeout
+  at 300s. Source: `apps/cli/src/lib/agents.ts`, `apps/cli/src/lib/hooks.ts`,
+  `apps/cli/src/lib/staleness/writers/hooks.ts`.
+
+- **`agents routines add --resume <sessionId>` — wake an existing session instead
+  of starting fresh.** At fire time the job runs `agents run <agent> --resume <id>`,
+  so the *actual* prior session reopens with its full context and the routine's
+  `--prompt` becomes its next turn. Powers self-scheduled wake-ups (an agent that
+  hibernates on a long external wait and resumes itself later). Without it, a routine
+  spawns a context-less fresh agent, which correctly refuses an opaque instruction it
+  has no memory of. Requires `--agent claude` or `codex` (native resume, validated);
+  the job runs **un-sandboxed** so `--resume` can find the session in the real agent
+  home, and — like workflow jobs — its command is never binary-pinned.
+- **Cursor CLI receives synced subagents.** cursor-agent custom subagents are
+  installed as `.md` profiles under `~/.cursor/agents/` (matching cursor-agent's
+  native format), with matching list, remove, and stale-state behavior.
+  (RUSH-1388)
 
 - **`agents output` — productivity: token burn vs shipped output.** A new command
   that joins spend (`$` cost, from the offline price table) to what actually

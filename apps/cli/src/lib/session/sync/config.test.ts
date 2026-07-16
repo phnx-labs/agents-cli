@@ -39,11 +39,18 @@ beforeEach(() => {
   be = new CountingBackend();
   prev = setKeychainBackendForTest(be);
   process.env.AGENTS_SECRETS_NO_AGENT = '1'; // force keychain path, skip secrets-agent
+  // The bun/vitest runner has no TTY, so isHeadlessSecretsContext() would treat
+  // resolveR2Config as headless (agentOnly → broker-only) and skip the simulated
+  // keychain backend. Force the interactive/direct-read path so `gets` still
+  // counts real backend reads — the daemon itself has no such override, so in
+  // production this resolves broker-only as intended.
+  process.env.AGENTS_SECRETS_NO_PROMPT = '0';
   clearR2ConfigCache();
 });
 afterEach(() => {
   setKeychainBackendForTest(prev);
   delete process.env.AGENTS_SECRETS_NO_AGENT;
+  delete process.env.AGENTS_SECRETS_NO_PROMPT;
   clearR2ConfigCache();
 });
 

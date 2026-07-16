@@ -859,3 +859,60 @@ describe('adaptTickets', () => {
     expect(t.labels).toEqual(['bug'])
   })
 })
+
+describe('toFloorAgentFromRemote — plan progress (RUSH-1380)', () => {
+  const remote = (over: Partial<RemoteSessionLike>): RemoteSessionLike => ({
+    host: 'yosemite-s0',
+    sessionId: 's1',
+    agentType: 'claude',
+    cwd: '/home/u/src/web',
+    project: 'web',
+    phase: 'running',
+    activity: '',
+    tokPerSec: 0,
+    waitingForInput: false,
+    lastResponse: '',
+    prUrl: null,
+    ticket: null,
+    branch: '',
+    sinceMs: 1_000,
+    startedAtMs: NOW - 1_000,
+    topic: '',
+    context: 'headless',
+    ...over,
+  } as RemoteSessionLike)
+
+  test('maps the CLI todos onto the FloorAgent checklist', () => {
+    const a = toFloorAgentFromRemote(remote({
+      activity: 'Bash: bun test',
+      todos: [
+        { content: 'Read the code', status: 'completed', activeForm: 'Reading the code' },
+        { content: 'Ship it', status: 'in_progress', activeForm: 'Shipping it' },
+      ],
+    }), new Set())
+    expect(a.todos).toEqual([
+      { content: 'Read the code', status: 'completed' },
+      { content: 'Ship it', status: 'in_progress' },
+    ])
+    // A live tool action is present, so it stays the now-line verb (not overridden).
+    expect(a.verb).toBe('Bash:')
+  })
+
+  test('with no live activity, surfaces the in-progress step as the now-line', () => {
+    const a = toFloorAgentFromRemote(remote({
+      activity: '',
+      todos: [
+        { content: 'Done', status: 'completed' },
+        { content: 'Ship it', status: 'in_progress', activeForm: 'Shipping it' },
+      ],
+    }), new Set())
+    expect(a.verb).toBe('Plan')
+    expect(a.target).toBe('Shipping it')
+  })
+
+  test('no todos ⇒ empty checklist, no verb override', () => {
+    const a = toFloorAgentFromRemote(remote({ activity: '' }), new Set())
+    expect(a.todos).toEqual([])
+    expect(a.verb).toBe('')
+  })
+})

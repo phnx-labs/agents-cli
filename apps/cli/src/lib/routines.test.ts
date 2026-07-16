@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, jobRunsOnThisDevice, checkJobDeviceEligibility, type JobConfig } from './routines.js';
-import { getRoutinesDir, ensureAgentsDir } from './state.js';
+import { validateJob, validateTrigger, normalizeTriggerEvent, writeJob, readJob, deleteJob, listJobs, jobRunsOnThisDevice, checkJobDeviceEligibility, getJobRunsDir, getRunDir, type JobConfig } from './routines.js';
+import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir } from './state.js';
 
 /** Minimal valid schedule-based job. */
 function baseJob(partial: Partial<JobConfig> = {}): Partial<JobConfig> {
@@ -50,13 +50,78 @@ describe('validateJob — schedule OR trigger', () => {
   });
 });
 
+describe('validateJob — resume', () => {
+  it('accepts resume with a native-resume agent', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: 'sess-1' }))).toEqual([]);
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', agent: 'codex', resume: 'sess-1' }))).toEqual([]);
+  });
+
+  it('rejects resume on an agent without native --resume', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'gemini', resume: 'sess-1' }));
+    expect(errors.some((e) => /resume is only supported for agents with native --resume/.test(e))).toBe(true);
+  });
+
+  it('rejects resume combined with a workflow', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: undefined, workflow: 'autodev', resume: 'sess-1' }));
+    expect(errors.some((e) => /resume cannot be combined with workflow/.test(e))).toBe(true);
+  });
+
+  it('rejects resume combined with a loop', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: 'sess-1', loop: { maxIterations: 3 } as never }));
+    expect(errors.some((e) => /resume cannot be combined with loop/.test(e))).toBe(true);
+  });
+
+  it('rejects an empty resume session id', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', agent: 'claude', resume: '  ' }));
+    expect(errors.some((e) => /resume must be a non-empty session id/.test(e))).toBe(true);
+  });
+});
+
+describe('validateJob — command', () => {
+  it('accepts a command-only job (no agent, no prompt)', () => {
+    expect(
+      validateJob({ name: 'j', schedule: '0 3 * * *', command: 'echo hi' } as Partial<JobConfig>),
+    ).toEqual([]);
+  });
+
+  it('rejects a job with both agent and command', () => {
+    const errors = validateJob(baseJob({ schedule: '0 3 * * *', command: 'echo hi' }));
+    expect(errors.some((e) => /exactly one of agent, workflow, or command may be set/.test(e))).toBe(true);
+  });
+
+  it('rejects a job with both workflow and command', () => {
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *', workflow: 'autodev', command: 'echo hi' } as Partial<JobConfig>);
+    expect(errors.some((e) => /exactly one of agent, workflow, or command may be set/.test(e))).toBe(true);
+  });
+
+  it('rejects a whitespace-only command string', () => {
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *', command: '   ' } as Partial<JobConfig>);
+    expect(errors.some((e) => /command must be a non-empty shell command string/.test(e))).toBe(true);
+  });
+
+  it('rejects an empty-string command as a missing target', () => {
+    // '' is falsy, so hasCommand is false → the "exactly one required" guard fires.
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *', command: '' } as Partial<JobConfig>);
+    expect(errors.some((e) => /exactly one of agent, workflow, or command is required/.test(e))).toBe(true);
+  });
+
+  it('rejects a job with none of agent, workflow, or command', () => {
+    const errors = validateJob({ name: 'j', schedule: '0 3 * * *' } as Partial<JobConfig>);
+    expect(errors.some((e) => /exactly one of agent, workflow, or command is required/.test(e))).toBe(true);
+  });
+});
+
 describe('validateTrigger', () => {
   it('accepts a well-formed github_event trigger', () => {
     expect(validateTrigger({ type: 'github_event', event: 'pull_request', repo: 'x/y', branch: 'main' })).toEqual([]);
   });
 
+  it('accepts a well-formed linear_event trigger', () => {
+    expect(validateTrigger({ type: 'linear_event', event: 'Issue', action: 'update', teamKey: 'RUSH', label: 'agent' })).toEqual([]);
+  });
+
   it('rejects a bad type', () => {
-    expect(validateTrigger({ type: 'gitlab', event: 'pull_request' })).toContain("trigger.type must be 'github_event'");
+    expect(validateTrigger({ type: 'gitlab', event: 'pull_request' })).toContain("trigger.type must be 'github_event' or 'linear_event'");
   });
 
   it('rejects an unknown event', () => {
@@ -108,6 +173,53 @@ describe('default execution mode (RUSH-1595: plan -> auto)', () => {
       expect(fs.readFileSync(file, 'utf-8')).toMatch(/^mode:\s*plan/m);
     } finally {
       deleteJob(name);
+    }
+  });
+});
+
+describe('system-layer routines (built-ins from ~/.agents/.system/routines/)', () => {
+  const sysDir = getSystemRoutinesDir();
+
+  it('listJobs surfaces a system routine, and a user routine of the same name shadows it', () => {
+    ensureAgentsDir();
+    const name = '__test-system-routine-union__';
+    const sysFile = path.join(sysDir, `${name}.yml`);
+    fs.mkdirSync(sysDir, { recursive: true });
+    try {
+      // A built-in shipped via the system repo — enabled, on a schedule.
+      fs.writeFileSync(
+        sysFile,
+        `name: ${name}\nschedule: '0 9 * * 1'\nagent: claude\nprompt: check for updates\n`,
+        'utf-8'
+      );
+
+      // Daemon-style call (no cwd) must see the system routine.
+      let found = listJobs().find((j) => j.name === name);
+      expect(found).toBeDefined();
+      expect(found!.enabled).toBe(true);
+      expect(readJob(name)?.prompt).toBe('check for updates');
+
+      // A user routine of the same name overrides it (here: disables the built-in).
+      writeJob({
+        name,
+        schedule: '0 9 * * 1',
+        agent: 'claude',
+        prompt: 'overridden',
+        mode: 'auto',
+        effort: 'auto',
+        timeout: '10m',
+        enabled: false,
+      } as JobConfig);
+
+      found = listJobs().find((j) => j.name === name);
+      expect(found).toBeDefined();
+      expect(found!.enabled).toBe(false);          // user copy wins
+      expect(found!.prompt).toBe('overridden');
+      // Only one entry for the name — user shadows system, no duplicate.
+      expect(listJobs().filter((j) => j.name === name).length).toBe(1);
+    } finally {
+      deleteJob(name);                              // removes the user override
+      try { fs.unlinkSync(sysFile); } catch { /* already gone */ }
     }
   });
 });
@@ -354,5 +466,39 @@ describe('validateJob — host placement', () => {
 
   it('rejects remoteCwd without host', () => {
     expect(validateJob(baseJob({ remoteCwd: '~/proj' }))).toContainEqual(expect.stringContaining('remoteCwd only applies'));
+
+describe('routine name path containment (C4)', () => {
+  const runsDir = path.resolve(getRunsDir());
+
+  it('validateJob rejects a traversal name', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', name: '../../../../etc' })))
+      .toContain(
+        `invalid name "../../../../etc": must be a single path segment ` +
+        `(no '/', '\\\\', or null bytes, and not '.' or '..')`,
+      );
+  });
+
+  it('validateJob rejects a name with a separator', () => {
+    const errs = validateJob(baseJob({ schedule: '0 3 * * *', name: 'a/b' }));
+    expect(errs.some(e => e.startsWith('invalid name'))).toBe(true);
+  });
+
+  it('validateJob accepts a normal single-segment name', () => {
+    expect(validateJob(baseJob({ schedule: '0 3 * * *', name: 'daily-standup' }))).toEqual([]);
+  });
+
+  // getRunDir is the run-directory sink reached on the daemon's load/schedule
+  // path (runner.ts executeJob/executeJobDetached) — which never calls
+  // validateJob — so it must contain the untrusted name itself.
+  it('getJobRunsDir / getRunDir contain a benign name under the runs dir', () => {
+    const p = getRunDir('daily-standup', 'run-1');
+    expect(p).toBe(path.join(runsDir, 'daily-standup', 'run-1'));
+    expect(path.resolve(p).startsWith(runsDir + path.sep)).toBe(true);
+  });
+
+  it('getRunDir rejects a traversal name so mkdirSync/writes cannot escape the runs dir', () => {
+    expect(() => getRunDir('../../../../tmp/evil-routine', 'run-1')).toThrow();
+    expect(() => getJobRunsDir('..')).toThrow();
+    expect(() => getJobRunsDir('a/b')).toThrow();
   });
 });

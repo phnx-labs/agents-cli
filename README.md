@@ -52,6 +52,7 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [Run any agent](#run-any-agent)
 - [Sessions across agents](#sessions-across-agents)
 - [Control the fleet](#control-the-fleet)
+- [Sync the fleet](#sync-the-fleet)
 - [Run open models through Claude Code](#run-open-models-through-claude-code)
 - [Teams](#teams)
 - [Cloud](#cloud)
@@ -161,9 +162,11 @@ Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON outpu
 
 Treat `skip` as a last-resort escape hatch. In direct-exec runs (without `--acp`),
 agents-cli forwards the harness's native no-prompt flag; it does not add another
-safety layer. Prefer `auto` where the harness has a smart classifier (Claude Code and
-GitHub Copilot), or `edit` everywhere else. Harnesses without a native bypass flag
-reject direct-exec `skip`.
+safety layer. Prefer `auto` where it adds a safer automatic policy (smart classifier
+on Claude/Copilot, native high-auto mode on Droid, or interactive Kimi), or `edit`
+everywhere else. For headless Kimi, `edit`, `auto`, and `skip` all use the same
+already-auto-approved `-p` behavior, so prefer `edit` rather than signaling a blanket
+bypass. Harnesses without a native bypass flag reject direct-exec `skip`.
 
 | Harness | Direct-exec `--mode skip` becomes |
 |---|---|
@@ -179,8 +182,9 @@ reject direct-exec `skip`.
 | Droid | `--skip-permissions-unsafe` |
 
 With `--acp`, these native flags are not used. agents-cli instead grants `skip`
-permission requests at the ACP protocol layer with `allow_always`; the same
-last-resort warning applies.
+permission requests at the ACP protocol layer: it selects `allow_always` when offered,
+otherwise the first permission option offered by the server. The same last-resort
+warning applies.
 
 Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
 to sandboxed `edit` and can still prompt. `agents run codex --mode skip` is different:
@@ -292,6 +296,34 @@ agents watchdog --watch    # daemon loop: a tick every --interval
 
 ---
 
+## Sync the fleet
+
+One machine is set up the way you like it. Make every other machine match -- same agents installed, same config, logins seeded -- in one command.
+
+```yaml
+# agents.yaml -- add a fleet: block
+fleet:
+  devices: all              # every online registered device (minus this one)
+  defaults:
+    agents: [claude@latest, codex@latest, gemini@latest]
+    sync: [user]            # config scopes to reconcile
+    login: sync             # propagate logins where the token is portable
+```
+
+```bash
+agents apply --plan                 # device x dimension matrix; changes nothing
+agents apply                        # reconcile the fleet (confirms first; -y to skip)
+agents apply --device yosemite-s0   # scope to one device
+agents apply --only agents,config   # limit dimensions (agents, config, login)
+agents apply --no-login             # skip login propagation
+```
+
+`agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agents-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, gemini, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
+
+See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcile semantics.
+
+---
+
 ## Run open models through Claude Code (experimental)
 
 > **Note:** Profiles are experimental, but available by default — no enable step needed.
@@ -344,6 +376,9 @@ agents hosts check gpu-box              # reachable? which agents-cli version?
 # Run there instead of locally
 agents run claude --host gpu-box "profile this build"   # headless: follows live by default
 agents run claude --host gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
+agents run claude --host gpu-box --copy-creds "fix auth" # copy local runtime creds + Claude token, shred after
+agents hosts ps                         # list dispatched runs + terminal status
+agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
 agents logs --host gpu-box              # pick a dispatched run — concise summary by default
 agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
 agents logs <id> -f                     # re-attach to a running one and follow
@@ -355,6 +390,9 @@ agents doctor --device mac-mini         # same matrix, scoped to one device
 
 # Your Tailscale fleet, auto-discovered
 agents devices sync                     # ingest `tailscale status`
+agents devices list                     # fleet + live headroom: load, mem, idle/busy — which box has room
+agents devices list --full              # add per-device cores and free/total RAM
+agents devices list --no-stats          # instant: names/addresses only, skip the probe
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # PowerShell on Windows, password-from-Keychain
 agents hosts list                       # devices show up here too (one host pool)
@@ -364,6 +402,12 @@ agents hosts add mac-mini --cap gpu     # tag a device for capability routing (-
 agents cloud run "nightly benchmark" --host gpu-box --agent claude   # task in cloud ps AND hosts ps
 agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" --run-on gpu-box
 ```
+
+`agents devices list` probes every reachable box in parallel (bounded timeout, so a
+slow node degrades to `—` instead of hanging) and shows normalized load, memory
+pressure, and an idle/light/busy/loaded headroom badge, plus a fleet-capacity summary
+(`164 cores · 421G free / 518G RAM`). It answers "which machine has room right now?" —
+the utilization signal the teammate scheduler doesn't yet see.
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--host` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/00-concepts.md](apps/cli/docs/00-concepts.md#devices--hosts).
 
@@ -685,6 +729,13 @@ agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
 
 agents routines devices nightly-drain --set yosemite-s0,mac-mini  # update allowlist
 agents routines list --host yosemite-s0                            # query another device
+
+# Signed webhook trigger: Linear issue labeled "agent" fires a routine
+agents routines add agent-labeled-issue --on linear:Issue --action update \
+  --team-key RUSH --label agent --agent claude \
+  --prompt "Work the Linear issue that was just labeled agent"
+agents webhook serve --secrets-bundle webhooks --port 8787          # /hooks/linear, /hooks/github
+agents funnel up yosemite-s0 --local-port 8787 --port 443           # public HTTPS ingress
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
@@ -858,7 +909,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Grok Build | yes | yes | yes | yes | yes | skills ($name) | yes | no | `AGENTS.md` | no |
 | OpenClaw | yes | yes | yes | no | yes | gateway | yes | yes | `workspace/AGENTS.md` | no |
 | Cursor | yes | no | yes | no | yes | yes | no | no | `.cursorrules` | no |
-| OpenCode | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
+| OpenCode | yes | no | yes | >= 1.1.1 | yes | yes | no | no | `AGENTS.md` | no |
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Kiro | yes | no | yes | >= 2.8.0 | yes | yes | no | >= 1.23.0 | `AGENTS.md` | no |

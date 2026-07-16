@@ -1143,6 +1143,9 @@ export function registerHooksToSettings(
   if (agentId === 'cursor') {
     return registerHooksForCursor(versionHome, manifest, resolveScript, managedPrefixes);
   }
+  if (agentId === 'hermes') {
+    return registerHooksForHermes(versionHome, manifest, resolveScript, managedPrefixes);
+  }
   return { registered: [], errors: [] };
 }
 
@@ -2542,6 +2545,151 @@ function registerHooksForCursor(
     );
   } catch (err) {
     errors.push(`Failed to write hooks.json: ${(err as Error).message}`);
+  }
+
+  return { registered, errors };
+}
+
+/**
+ * Canonical → Hermes (Nous Research) snake_case lifecycle events.
+ *
+ * Hermes ≥ 0.11.0 runs configurable hooks declared under `hooks:` in
+ * ~/.hermes/config.yaml. Only events with a documented Hermes equivalent are
+ * mapped; unmapped canonical events (the manifest may declare events for other
+ * agents) are skipped silently. UserPromptSubmit maps to `pre_llm_call` (the
+ * closest pre-turn phase) and Stop to `on_session_finalize`.
+ */
+const HERMES_EVENT_MAP: Record<string, string> = {
+  SessionStart: 'on_session_start',
+  SessionEnd: 'on_session_end',
+  PreToolUse: 'pre_tool_call',
+  PostToolUse: 'post_tool_call',
+  SubagentStop: 'subagent_stop',
+  UserPromptSubmit: 'pre_llm_call',
+  Stop: 'on_session_finalize',
+};
+
+/** Hermes caps hook timeouts at 300s (default 60s). */
+const HERMES_TIMEOUT_CAP = 300;
+const HERMES_TIMEOUT_DEFAULT = 60;
+
+/**
+ * Register hooks for Hermes Agent (Nous Research ≥ 0.11.0).
+ *
+ * Read-modify-writes the shared `~/.hermes/config.yaml` (under the version
+ * home): it merges a `hooks:` block of the form
+ *   hooks: { <event>: [ { command, timeout, matcher? } ] }
+ * into the YAML doc WITHOUT touching sibling keys (`mcp_servers` in
+ * particular — a naive overwrite would wipe the user's MCP servers). No
+ * `version` wrapper: Hermes' config is a flat YAML map.
+ *
+ * GC: rewrite managed entries by command path under managedPrefixes; preserve
+ * user-authored entries whose command is outside managed roots. Keyed by
+ * event|command|matcher so a matcher or event change drops the stale entry.
+ */
+function registerHooksForHermes(
+  versionHome: string,
+  manifest: Record<string, ManifestHook>,
+  resolveScript: (script: string) => string | null,
+  managedPrefixes: string[]
+): { registered: string[]; errors: string[] } {
+  const registered: string[] = [];
+  const errors: string[] = [];
+
+  const configDir = path.join(versionHome, '.hermes');
+  const configPath = path.join(configDir, 'config.yaml');
+
+  type HermesEntry = { command: string; timeout: number; matcher?: string };
+
+  // Read-modify-write: preserve the full existing YAML doc (mcp_servers, etc.).
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        config = parsed as Record<string, unknown>;
+      }
+    } catch {
+      errors.push('Failed to parse existing config.yaml');
+      return { registered, errors };
+    }
+  }
+
+  const existingHooks =
+    config.hooks && typeof config.hooks === 'object' && !Array.isArray(config.hooks)
+      ? (config.hooks as Record<string, HermesEntry[]>)
+      : {};
+
+  // Desired managed entries keyed by event|command|matcher so a matcher or
+  // event change drops the stale entry instead of retaining it by command alone.
+  const desiredManaged = new Set<string>();
+  for (const [hookName, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+    const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
+    if (!resolved) continue;
+    for (const event of hookDef.events) {
+      const hermesEvent = HERMES_EVENT_MAP[event];
+      if (!hermesEvent) continue;
+      desiredManaged.add(`${hermesEvent}|${resolved}|${hookDef.matcher ?? ''}`);
+    }
+  }
+
+  // GC managed entries that are no longer in the manifest; preserve user entries.
+  const hooks: Record<string, HermesEntry[]> = {};
+  for (const [event, entries] of Object.entries(existingHooks)) {
+    if (!Array.isArray(entries)) continue;
+    hooks[event] = entries.filter((e) => {
+      if (typeof e?.command !== 'string') return true;
+      if (!isManagedHookCommand(e.command, managedPrefixes)) return true;
+      return desiredManaged.has(`${event}|${e.command}|${e.matcher ?? ''}`);
+    });
+    if (hooks[event].length === 0) delete hooks[event];
+  }
+
+  for (const [name, hookDef] of Object.entries(manifest)) {
+    if (!hookDef.events || hookDef.events.length === 0) continue;
+
+    const commandPath = resolveHookCommand(name, hookDef, resolveScript);
+    if (!commandPath) {
+      errors.push(`${name}: script not found in user or system hooks dir`);
+      continue;
+    }
+
+    const timeout = Math.min(HERMES_TIMEOUT_CAP, hookDef.timeout ?? HERMES_TIMEOUT_DEFAULT);
+
+    for (const event of hookDef.events) {
+      const hermesEvent = HERMES_EVENT_MAP[event];
+      if (!hermesEvent) continue;
+
+      if (!hooks[hermesEvent]) hooks[hermesEvent] = [];
+
+      const entry: HermesEntry = { command: commandPath, timeout };
+      if (hookDef.matcher) entry.matcher = hookDef.matcher;
+
+      const existingIdx = hooks[hermesEvent].findIndex(
+        (h) => h.command === entry.command && (h.matcher ?? '') === (entry.matcher ?? '')
+      );
+      if (existingIdx >= 0) {
+        hooks[hermesEvent][existingIdx] = entry;
+      } else {
+        hooks[hermesEvent].push(entry);
+      }
+
+      registered.push(`${name} -> ${hermesEvent}`);
+    }
+  }
+
+  if (Object.keys(hooks).length > 0) {
+    config.hooks = hooks;
+  } else {
+    delete config.hooks;
+  }
+
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+  } catch (err) {
+    errors.push(`Failed to write config.yaml: ${(err as Error).message}`);
   }
 
   return { registered, errors };

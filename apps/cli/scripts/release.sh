@@ -12,6 +12,8 @@
 # squash-merge the PR, verify the merged tree matches what we built, then tag
 # v<version> at the merge commit and npm-publish locally (publishing must stay on
 # macOS because the tarball bundles the signed + notarized keychain helper).
+# If a publish fails after the PR merge, a retry rebuilds from that merged PR's
+# exact CI-tested tree even when newer commits have since landed on main.
 #
 # Usage: scripts/release.sh <version> [--apply]
 #
@@ -125,6 +127,8 @@ NPMRC_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-npmrc.XXXXXX")"
 chmod 600 "$NPMRC_TMP"
 # Use ${NPM_TOKEN} env var reference - npm expands it at runtime.
 # Writing the token directly causes 404 errors for scoped packages.
+# npm, not this shell, expands the literal reference.
+# shellcheck disable=SC2016
 printf '//registry.npmjs.org/:_authToken=${NPM_TOKEN}\nalways-auth=true\n' > "$NPMRC_TMP"
 export NPM_TOKEN
 export NPM_CONFIG_USERCONFIG="$NPMRC_TMP"
@@ -133,6 +137,14 @@ export NPM_CONFIG_USERCONFIG="$NPMRC_TMP"
 NPM_USER="$(npm whoami 2>/dev/null || true)"
 [[ -n "$NPM_USER" ]] || die "npm whoami failed with the resolved NPM_TOKEN -- token may be expired or lack publish scope"
 green "npm authenticated as $NPM_USER (via npmjs.com bundle)"
+
+remote_tag_commit() {
+  local tag="$1" refs peeled direct
+  refs="$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+  peeled="$(awk '$2 ~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  direct="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  printf '%s' "${peeled:-$direct}"
+}
 
 # ----- Validate version bump -----
 # Compare against current published latest of the canonical package.
@@ -217,9 +229,83 @@ fi
 gray "  $PHNX_PKG@$TARGET     $($PHNX_TARGET_PUBLISHED && echo 'already published — will skip' || echo 'will publish')"
 echo
 
+# ----- Detect prior-run state (for idempotent re-runs + dry-run reporting) -----
+# Everything keys off external truth (npm registry + git + PRs), never local
+# commit subjects. Resolve this before building so a retry can build the exact
+# merged release tree rather than whatever newer code now happens to be on main.
+RELEASE_BRANCH="release/v$TARGET"
+MAIN_AT_TARGET=false
+if [[ "$(git show "origin/$DEFAULT_BRANCH:apps/cli/package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo '')" == "$TARGET" ]]; then
+  MAIN_AT_TARGET=true
+fi
+EXISTING_PR="$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+MERGED_RELEASE_JSON="$(gh pr list --head "$RELEASE_BRANCH" --base "$DEFAULT_BRANCH" --state merged --limit 1 --json number,mergeCommit,headRefOid 2>/dev/null || echo '[]')"
+MERGED_RELEASE_PR="$(jq -r '.[0].number // empty' <<<"$MERGED_RELEASE_JSON")"
+MERGED_RELEASE_SHA="$(jq -r '.[0].mergeCommit.oid // empty' <<<"$MERGED_RELEASE_JSON")"
+MERGED_RELEASE_HEAD="$(jq -r '.[0].headRefOid // empty' <<<"$MERGED_RELEASE_JSON")"
+
+HISTORICAL_CATCHUP=false
+HISTORICAL_WT=""
+INVOKING_ROOT="$ROOT"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PKG_BUMPED=false
+remove_historical_worktree() {
+  if [[ -n "${HISTORICAL_WT:-}" ]]; then
+    cd "$INVOKING_ROOT"
+    git -C "$REPO_ROOT" worktree remove --force "$HISTORICAL_WT" >/dev/null 2>&1 || true
+    HISTORICAL_WT=""
+  fi
+}
+cleanup_early() {
+  rm -f "${NPMRC_TMP:-}"
+  remove_historical_worktree
+}
+trap cleanup_early EXIT
+
+if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]] && [[ "$MERGED_RELEASE_SHA" != "$BASE_SHA" ]]; then
+  [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_HEAD" ]] \
+    || die "main is ahead of the unpublished $TARGET release, but release PR metadata is incomplete"
+  git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
+    || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
+  CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
+  [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
+    || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
+  [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" == "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]] \
+    || die "merged release PR #$MERGED_RELEASE_PR tree differs from its CI-tested head -- refusing catch-up publish"
+  [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+    || die "merged release PR #$MERGED_RELEASE_PR is not version $TARGET"
+
+  if [[ "$(uname)" == "Darwin" ]]; then
+    [[ -d "$INVOKING_ROOT/bin/Agents CLI.app" ]] \
+      || die "historical publish retry needs the staged SHA-pinned helper: $INVOKING_ROOT/bin/Agents CLI.app"
+  fi
+
+  HISTORICAL_CATCHUP=true
+  HISTORICAL_WT="$REPO_ROOT/.agents/worktrees/retry-release-v$TARGET-$$"
+  git worktree add --quiet --detach "$HISTORICAL_WT" "$MERGED_RELEASE_SHA" \
+    || die "could not create historical release worktree at $HISTORICAL_WT"
+  cd "$HISTORICAL_WT/apps/cli"
+  ROOT="$(pwd)"
+  bold "Retrying from merged release PR #$MERGED_RELEASE_PR at ${MERGED_RELEASE_SHA:0:9} (current main: ${BASE_SHA:0:9})..."
+  bun install --frozen-lockfile >/dev/null \
+    || die "dependency install failed in historical release worktree"
+  if [[ "$(uname)" == "Darwin" ]]; then
+    mkdir -p bin
+    cp -R "$INVOKING_ROOT/bin/Agents CLI.app" bin/
+    scripts/verify-keychain-helper.sh \
+      || die "staged keychain helper does not match the historical release pin"
+    bold "Building the menu-bar helper from the historical release tree..."
+    menubar/scripts/build.sh release \
+      || die "historical menu-bar helper build failed"
+    rm -rf bin/MenubarHelper.app
+    cp -R menubar/dist/MenubarHelper.app bin/MenubarHelper.app
+    codesign --verify --deep --strict bin/MenubarHelper.app \
+      || die "historical menu-bar helper signature verification failed"
+  fi
+fi
+
 # ----- Sync package.json with target -----
 ORIGINAL_PKG_VERSION="$(jq -r .version package.json)"
-PKG_BUMPED=false
 restore_package_json() {
   if $PKG_BUMPED; then
     tmp="$(mktemp)"
@@ -227,6 +313,7 @@ restore_package_json() {
     mv "$tmp" package.json
     yellow "Reverted package.json to $ORIGINAL_PKG_VERSION"
   fi
+  cleanup_early
 }
 # Initial trap; replaced later by cleanup_all once SHIM_TMP and NPMRC_TMP exist.
 trap restore_package_json EXIT
@@ -361,6 +448,7 @@ cleanup_all() {
   git checkout -q HEAD -- package.json CHANGELOG.md 2>/dev/null || restore_package_json
   rm -rf "${SHIM_TMP:-}"
   rm -f "${NPMRC_TMP:-}"
+  remove_historical_worktree
 }
 trap cleanup_all EXIT
 
@@ -398,20 +486,6 @@ EOF
 bold "Tarball preview ($SWARMIFY_PKG@$TARGET shim)"
 ( cd "$SHIM_TMP" && npm pack --dry-run 2>&1 | tail -10 )
 echo
-
-# ----- Detect prior-run state (for idempotent re-runs + dry-run reporting) -----
-# Everything keys off external truth (npm registry + git + open PRs), never off
-# local commit subjects, so a half-finished release re-runs cleanly.
-RELEASE_BRANCH="release/v$TARGET"
-MAIN_AT_TARGET=false
-if [[ "$(git show "origin/$DEFAULT_BRANCH:apps/cli/package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo '')" == "$TARGET" ]]; then
-  MAIN_AT_TARGET=true   # a prior run already merged the chore(release) PR
-fi
-EXISTING_PR="$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-MERGED_RELEASE_JSON="$(gh pr list --head "$RELEASE_BRANCH" --base "$DEFAULT_BRANCH" --state merged --limit 1 --json number,mergeCommit,headRefOid 2>/dev/null || echo '[]')"
-MERGED_RELEASE_PR="$(jq -r '.[0].number // empty' <<<"$MERGED_RELEASE_JSON")"
-MERGED_RELEASE_SHA="$(jq -r '.[0].mergeCommit.oid // empty' <<<"$MERGED_RELEASE_JSON")"
-MERGED_RELEASE_HEAD="$(jq -r '.[0].headRefOid // empty' <<<"$MERGED_RELEASE_JSON")"
 
 # ----- Bail out here in DRY-RUN mode -----
 if ! $APPLY; then
@@ -452,11 +526,18 @@ PKG_BUMPED=false
 # just make sure the tag exists on the merged commit and is pushed.
 if $PHNX_TARGET_PUBLISHED; then
   green "$PHNX_PKG@$TARGET is already on the registry."
-  if ! git ls-remote --exit-code --tags origin "v$TARGET" >/dev/null 2>&1; then
-    git tag -f "v$TARGET" "origin/$DEFAULT_BRANCH" >/dev/null
+  TAG_TARGET="${MERGED_RELEASE_SHA:-origin/$DEFAULT_BRANCH}"
+  [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+    || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
+  VERIFIED_TAG_SHA="$(git rev-parse "$TAG_TARGET^{commit}")"
+  REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
+  if [[ -z "$REMOTE_TAG_SHA" ]]; then
+    git tag -f "v$TARGET" "$VERIFIED_TAG_SHA" >/dev/null
     git push origin "v$TARGET" && green "Pushed missing tag v$TARGET"
   else
-    gray "Tag v$TARGET already on origin, nothing to do."
+    [[ "$REMOTE_TAG_SHA" == "$VERIFIED_TAG_SHA" ]] \
+      || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, not verified release commit $VERIFIED_TAG_SHA"
+    gray "Tag v$TARGET already points at the verified release commit."
   fi
   exit 0
 fi
@@ -507,15 +588,15 @@ wait_for_ci_green() {
 if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED; then
   [[ -n "$MERGED_RELEASE_PR" && -n "$MERGED_RELEASE_SHA" && -n "$MERGED_RELEASE_HEAD" ]] \
     || die "main is already at $TARGET but no complete merged $RELEASE_BRANCH PR exists -- refusing an unverified catch-up publish; cut the next patch through the normal release PR flow"
-  [[ "$MERGED_RELEASE_SHA" == "$BASE_SHA" ]] \
-    || die "merged release PR #$MERGED_RELEASE_PR ended at ${MERGED_RELEASE_SHA:0:9}, but main is now ${BASE_SHA:0:9} -- refusing to publish a later tree under $TARGET"
-  git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
-    || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
-  CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
+  if [[ -z "${CI_TESTED_HEAD:-}" ]]; then
+    git fetch --quiet origin "pull/$MERGED_RELEASE_PR/head" \
+      || die "could not fetch the CI-tested head for merged release PR #$MERGED_RELEASE_PR"
+    CI_TESTED_HEAD="$(git rev-parse FETCH_HEAD)"
+  fi
   [[ "$CI_TESTED_HEAD" == "$MERGED_RELEASE_HEAD" ]] \
     || die "fetched PR head ${CI_TESTED_HEAD:0:9} != recorded release head ${MERGED_RELEASE_HEAD:0:9} -- refusing catch-up publish"
-  [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" == "$(git rev-parse "$BASE_SHA^{tree}")" ]] \
-    || die "current main tree differs from CI-tested release PR #$MERGED_RELEASE_PR head -- refusing catch-up publish"
+  [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" == "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]] \
+    || die "merged release PR #$MERGED_RELEASE_PR tree differs from its CI-tested head -- refusing catch-up publish"
   bold "Re-validating CI from merged release PR #$MERGED_RELEASE_PR before catch-up publish..."
   wait_for_ci_green "$MERGED_RELEASE_PR"
 fi
@@ -604,7 +685,11 @@ fi
 
 # ----- Resolve the merged commit + integrity guards (before any publish) -----
 git fetch --quiet origin "$DEFAULT_BRANCH"
-MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+if $HISTORICAL_CATCHUP; then
+  MERGED_SHA="$MERGED_RELEASE_SHA"
+else
+  MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+fi
 MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
 [[ "$MERGED_VER" == "$TARGET" ]] || die "merged $DEFAULT_BRANCH is at $MERGED_VER, not $TARGET -- refusing to tag/publish"
 # A normal release compares against the release-commit tree. A catch-up release
@@ -612,7 +697,11 @@ MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
 # exact base tree that passed preflight and was built locally. Either way, a
 # concurrent merge must abort before the tag or registry can point at artifacts
 # produced from a different source tree.
-EXPECTED_TREE="${BRANCH_TREE:-$(git rev-parse "$BASE_SHA^{tree}")}"
+if $HISTORICAL_CATCHUP; then
+  EXPECTED_TREE="$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")"
+else
+  EXPECTED_TREE="${BRANCH_TREE:-$(git rev-parse "$BASE_SHA^{tree}")}"
+fi
 [[ "$(git rev-parse "$MERGED_SHA^{tree}")" == "$EXPECTED_TREE" ]] \
   || die "merged tree != built tree -- refusing to publish (concurrent merge or stray push on $RELEASE_BRANCH)"
 
@@ -622,8 +711,13 @@ EXPECTED_TREE="${BRANCH_TREE:-$(git rev-parse "$BASE_SHA^{tree}")}"
 git checkout -q "$MERGED_SHA" -- package.json CHANGELOG.md
 
 # ----- Tag at the merged commit (idempotent) -----
+REMOTE_TAG_SHA="$(remote_tag_commit "v$TARGET")"
+[[ -z "$REMOTE_TAG_SHA" || "$REMOTE_TAG_SHA" == "$MERGED_SHA" ]] \
+  || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, not verified release commit $MERGED_SHA"
 if git rev-parse --verify --quiet "refs/tags/v$TARGET" >/dev/null; then
-  gray "Tag v$TARGET already exists locally, leaving alone"
+  [[ "$(git rev-parse "refs/tags/v$TARGET^{commit}")" == "$MERGED_SHA" ]] \
+    || die "local tag v$TARGET does not point at the verified release commit $MERGED_SHA"
+  gray "Tag v$TARGET already exists locally at the verified release commit"
 else
   git tag "v$TARGET" "$MERGED_SHA"
   green "Created tag v$TARGET at $(git rev-parse --short "$MERGED_SHA")"

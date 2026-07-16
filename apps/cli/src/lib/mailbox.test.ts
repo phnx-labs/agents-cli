@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, isExpired, sweepExpired, type MailboxMessage } from './mailbox.js';
+import { mailboxDir, enqueue, drain, peek, clear, assertValidMailboxId, isExpired, sweepExpired, listBoxes, readBox, watchMessages, type MailboxMessage } from './mailbox.js';
 import { blockIdForSession, getBlockReceipts, publishBlock } from './feed.js';
 
 function tmpRoot(): string {
@@ -199,5 +199,105 @@ describe('mailbox', () => {
     } finally {
       process.env.AGENTS_FEED_DIR = previous;
     }
+  });
+});
+
+describe('listBoxes', () => {
+  it('enumerates only valid box directories, sorted, ignoring files and junk', () => {
+    const root = tmpRoot();
+    // Two real boxes (created by enqueue), one stray file, one traversal-unsafe name.
+    enqueue(mailboxDir('b2', root), { to: 'b2', text: 'x' });
+    enqueue(mailboxDir('a1', root), { to: 'a1', text: 'y' });
+    fs.writeFileSync(path.join(root, 'notabox.json'), '{}', 'utf-8'); // a file, not a dir
+    fs.mkdirSync(path.join(root, 'bad name'), { recursive: true }); // fails isValidMailboxId
+
+    expect(listBoxes(root)).toEqual(['a1', 'b2']);
+  });
+
+  it('returns [] for a missing root instead of throwing', () => {
+    expect(listBoxes(path.join(os.tmpdir(), 'agents-mailbox-does-not-exist-xyz'))).toEqual([]);
+  });
+});
+
+describe('readBox', () => {
+  it('reads all three buckets, tags state, and sorts FIFO — including consumed', () => {
+    const box = mailboxDir(BOX, tmpRoot());
+    enqueue(box, { to: BOX, text: 'first', from: 'claude/alpha' });
+    enqueue(box, { to: BOX, text: 'second' });
+    // Consume the two so they land in consumed/, then queue a fresh pending one.
+    drain(box);
+    enqueue(box, { to: BOX, text: 'third-still-pending' });
+
+    const all = readBox(box);
+    expect(all.map((m) => m.text)).toEqual(['first', 'second', 'third-still-pending']);
+    expect(all.map((m) => m.state)).toEqual(['consumed', 'consumed', 'inbox']);
+    // Sender is preserved so the communication log can show from -> to.
+    expect(all[0].from).toBe('claude/alpha');
+  });
+
+  it('does not consume — a readBox followed by drain still delivers pending mail', () => {
+    const box = mailboxDir(BOX, tmpRoot());
+    enqueue(box, { to: BOX, text: 'pending' });
+    expect(readBox(box).map((m) => m.state)).toEqual(['inbox']);
+    // readBox was non-destructive: the message is still deliverable.
+    expect(drain(box).map((m) => m.text)).toEqual(['pending']);
+  });
+});
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe('watchMessages', () => {
+  it('skips the initial backlog, yields new mail once, and deduplicates bucket moves', async () => {
+    const root = tmpRoot();
+    const box = mailboxDir(BOX, root);
+    enqueue(box, { to: BOX, from: 'claude/old', text: 'historical' });
+
+    const controller = new AbortController();
+    const watcher = watchMessages(root, { signal: controller.signal, intervalMs: 5 });
+    const first = watcher.next();
+    await sleep(20);
+    enqueue(box, { to: BOX, from: 'claude/new', text: 'fresh' });
+
+    const emitted = await first;
+    expect(emitted.done).toBe(false);
+    expect(emitted.value).toMatchObject({
+      from: 'claude/new',
+      to: BOX,
+      toLabel: BOX,
+      text: 'fresh',
+      state: 'inbox',
+      box: BOX,
+    });
+
+    drain(box);
+    const second = watcher.next();
+    expect(await Promise.race([
+      second.then(() => 'message'),
+      sleep(40).then(() => 'waiting'),
+    ])).toBe('waiting');
+
+    enqueue(box, { to: BOX, text: 'another' });
+    expect((await second).value?.text).toBe('another');
+    controller.abort();
+    expect((await watcher.next()).done).toBe(true);
+  });
+
+  it('backfills on request and a pending read stops immediately on AbortSignal', async () => {
+    const root = tmpRoot();
+    const box = mailboxDir('long-mailbox-id', root);
+    enqueue(box, { to: 'long-mailbox-id', text: 'existing' });
+
+    const controller = new AbortController();
+    const watcher = watchMessages(root, {
+      signal: controller.signal,
+      intervalMs: 60_000,
+      backfill: true,
+    });
+    const backfilled = await watcher.next();
+    expect(backfilled.value).toMatchObject({ text: 'existing', toLabel: 'long-mai' });
+
+    const pending = watcher.next();
+    controller.abort();
+    expect(await pending).toEqual({ value: undefined, done: true });
   });
 });

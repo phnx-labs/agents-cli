@@ -312,6 +312,8 @@
 .swarmify-root .pill.cifail { background: var(--status-failed-bg); color: var(--status-failed); }
 .swarmify-root .pill.cirun { background: var(--status-pending-bg); color: var(--status-pending); }
 .swarmify-root .pill.bg { background: var(--status-pending-bg); color: var(--status-pending); border: 1px solid color-mix(in srgb, var(--status-pending) 45%, transparent); }
+/* Plan progress N/M pill (RUSH-1380) — glanceable "how far along" in the header, incl. compact rows. */
+.swarmify-root .pill.todo { background: var(--status-idle-bg); color: var(--ds-text-muted); font-variant-numeric: tabular-nums; }
 .swarmify-root .savedviews { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0 12px; align-items: center; }
 /* Feed header bar (RUSH-1526): Save view + group-by + status/agent filters in one row. */
 .swarmify-root .savedviews.feed-header-bar { gap: 6px; }

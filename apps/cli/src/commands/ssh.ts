@@ -17,7 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
 import {
   addIgnored,
@@ -30,6 +30,7 @@ import {
   type DeviceAuthMethod,
   type DevicePlatform,
   type DeviceProfile,
+  type DeviceRegistry,
 } from '../lib/devices/registry.js';
 import {
   nodeToDeviceInput,
@@ -47,6 +48,21 @@ import {
   buildSshInvocation,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
+import {
+  planFleetTargets,
+  runFleet,
+  skipLabel,
+  upgradeCommand,
+  type FleetRunResult,
+} from '../lib/devices/fleet.js';
+import {
+  fleetCapacity,
+  fmtBytes,
+  headroom,
+  probeFleetStats,
+  type DeviceStats,
+  type Headroom,
+} from '../lib/devices/health.js';
 
 /** One-line summary of a device for `list`. `isSelf` marks the machine this
  * command is running on so it stands out from the rest of the tailnet. */
@@ -62,6 +78,93 @@ function deviceSummary(d: DeviceProfile, isSelf = false): string {
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
   return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}`;
+}
+
+const HEADROOM_BADGE: Record<Headroom, string> = {
+  idle: chalk.green('○ idle'),
+  light: chalk.green('● light'),
+  busy: chalk.yellow('● busy'),
+  loaded: chalk.red('● loaded'),
+  unknown: chalk.gray('· —'),
+};
+
+/** A right-aligned percentage cell, colored by severity (green/yellow/red). */
+function pctCell(v: number | undefined, width: number): string {
+  if (v === undefined) return chalk.gray('—'.padStart(width));
+  const s = `${Math.round(v)}%`.padStart(width);
+  if (v < 40) return chalk.green(s);
+  if (v < 75) return chalk.yellow(s);
+  return chalk.red(s);
+}
+
+/**
+ * Render the device list. When `statsMap` is provided, resource columns are
+ * appended — normalized load, memory, a headroom badge, and (in `full` mode)
+ * core count and free/total memory — so it's obvious which boxes have room.
+ * Without it (probe skipped) the classic reachability line is used. A fleet
+ * capacity summary is appended whenever stats were gathered.
+ */
+function renderDeviceTable(
+  reg: DeviceRegistry,
+  names: string[],
+  self: string | undefined,
+  statsMap?: Map<string, DeviceStats>,
+  full = false,
+): string[] {
+  if (!statsMap) return names.map((n) => deviceSummary(reg[n], n === self));
+
+  const lines: string[] = [];
+  const head =
+    '  ' +
+    chalk.gray('device'.padEnd(16)) +
+    chalk.gray('platform'.padEnd(8)) +
+    ' ' +
+    (full ? chalk.gray('cores'.padStart(6)) : '') +
+    chalk.gray('load'.padStart(5)) +
+    chalk.gray('mem'.padStart(6)) +
+    (full ? '  ' + chalk.gray('free/total'.padEnd(12)) : '') +
+    '  ' +
+    chalk.gray('headroom');
+  lines.push(head);
+
+  for (const name of names) {
+    const d = reg[name];
+    const isSelf = name === self;
+    const marker = isSelf ? chalk.cyan('▸ ') : '  ';
+    const label = isSelf ? chalk.bold.cyan(name.padEnd(16)) : chalk.bold(name.padEnd(16));
+    const plat = String(d.platform).padEnd(8);
+    const offline = d.tailscale && !d.tailscale.online;
+    const stats = statsMap.get(name);
+    if (offline) {
+      lines.push(`${marker}${label}${plat} ${chalk.gray('offline')}`);
+      continue;
+    }
+    const relay = !isSelf && d.tailscale?.online && !d.tailscale.direct ? chalk.yellow(' relay') : '';
+    const cores = full ? chalk.gray(String(stats?.ncpu ?? '—').padStart(6)) : '';
+    const load = pctCell(stats?.loadPercent, 5);
+    const mem = pctCell(stats?.memPercent, 6);
+    const freeTotal = full
+      ? '  ' +
+        (stats?.reachable && stats.memTotalBytes
+          ? `${fmtBytes(stats.memFreeBytes)}/${fmtBytes(stats.memTotalBytes)}`.padEnd(12)
+          : chalk.gray('—'.padEnd(12)))
+      : '';
+    const badge = HEADROOM_BADGE[headroom(stats)];
+    const here = isSelf ? chalk.cyan('  ← this machine') : '';
+    lines.push(`${marker}${label}${plat} ${cores}${load}${mem}${freeTotal}  ${badge}${relay}${here}`);
+  }
+
+  // Fleet capacity summary — total cores + how much RAM is free right now.
+  const cap = fleetCapacity(statsMap.values());
+  if (cap.reachable > 0) {
+    const freePct = cap.memTotalBytes > 0 ? Math.round((cap.memFreeBytes / cap.memTotalBytes) * 100) : 0;
+    lines.push(
+      chalk.gray(
+        `  Fleet capacity: ${cap.cores} cores · ${fmtBytes(cap.memFreeBytes)} free / ${fmtBytes(cap.memTotalBytes)} RAM (${freePct}% free) across ${cap.reachable} reachable device${cap.reachable === 1 ? '' : 's'}`,
+      ),
+    );
+  }
+  return lines;
 }
 
 /** Resolve a device or exit with a clear error. */
@@ -143,11 +246,38 @@ async function runInteractiveDeviceSync(): Promise<void> {
   console.log(parts.join(chalk.gray(' · ')));
 }
 
-/** Register the `agents devices` command tree. */
+/** Print a per-device result table for fleet update/run. */
+function printFleetResults(results: FleetRunResult[]): void {
+  const nameW = Math.max(8, ...results.map((r) => r.name.length));
+  console.log(
+    chalk.bold('DEVICE'.padEnd(nameW)) + '  ' +
+    chalk.bold('STATUS'.padEnd(8)) + '  ' +
+    chalk.bold('DETAIL'),
+  );
+  for (const r of results) {
+    const status =
+      r.status === 'ok' ? chalk.green('ok'.padEnd(8)) :
+      r.status === 'skipped' ? chalk.gray('skipped'.padEnd(8)) :
+      chalk.red('failed'.padEnd(8));
+    const detail =
+      r.status === 'skipped' ? chalk.gray(skipLabel(r.reason as 'offline' | 'no-address')) :
+      r.status === 'failed' ? chalk.red(r.detail || `exit ${r.code ?? '?'}`) :
+      chalk.gray(r.code === 0 ? 'exit 0' : '');
+    console.log(`${r.name.padEnd(nameW)}  ${status}  ${detail}`);
+  }
+  const ok = results.filter((r) => r.status === 'ok').length;
+  const failed = results.filter((r) => r.status === 'failed').length;
+  const skipped = results.filter((r) => r.status === 'skipped').length;
+  console.log(chalk.gray(`${ok} ok · ${failed} failed · ${skipped} skipped`));
+  if (failed > 0) process.exitCode = 1;
+}
+
+/** Register the `agents devices` command tree (also aliased as `fleet`). */
 function registerDevicesCommands(program: Command): void {
   const devicesCmd = program
     .command('devices')
-    .description('Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale.')
+    .alias('fleet')
+    .description('Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.')
     .addHelpText('after', `
 Typical workflow:
   agents devices sync            # curate: pick which tailscale nodes to keep (TTY)
@@ -156,6 +286,10 @@ Typical workflow:
   agents devices ignore ipad165  # dismiss a node so it's never re-suggested
   agents devices set win-mini --auth password --bundle muqsit
   agents devices render --write  # write ~/.ssh/config.d/agents include
+  agents fleet update            # roll out latest agents-cli to every online device
+  agents fleet run uname -a      # run a command on every online device
+
+\`agents fleet\` is an alias for \`agents devices\` — same subcommands.
 `);
 
   devicesCmd
@@ -229,12 +363,15 @@ Typical workflow:
   devicesCmd
     .command('list')
     .alias('ls')
-    .description('List registered devices with platform, address, and reachability.')
+    .description('List registered devices with platform, address, reachability, and live resource headroom.')
     .option('--json', 'output the registry as a JSON array (for scripts and hooks)')
-    .action(async (opts: { json?: boolean }) => {
+    .option('--no-stats', 'skip the live resource probe (instant; names/addresses only)')
+    .option('-f, --full', 'full mode: add per-device core count and free/total memory')
+    .action(async (opts: { json?: boolean; stats?: boolean; full?: boolean }) => {
       const reg = await loadDevices();
       const names = Object.keys(reg).sort();
       if (opts.json) {
+        // Registry-only, always fast — the Factory extension polls this path.
         process.stdout.write(JSON.stringify(names.map((n) => reg[n]), null, 2) + '\n');
         return;
       }
@@ -243,8 +380,26 @@ Typical workflow:
         return;
       }
       const self = machineId();
+
+      let statsMap: Map<string, DeviceStats> | undefined;
+      if (opts.stats !== false) {
+        // Probe only reachable devices, in parallel, bounded by the per-probe
+        // timeout — a slow box degrades to "—", it never hangs the table.
+        const probeable = planFleetTargets(reg)
+          .filter((t) => !t.skip)
+          .map((t) => t.device);
+        const spinner = isInteractiveTerminal()
+          ? ora(`Probing ${probeable.length} device${probeable.length === 1 ? '' : 's'}…`).start()
+          : undefined;
+        try {
+          statsMap = await probeFleetStats(probeable, { selfName: self });
+        } finally {
+          spinner?.stop();
+        }
+      }
+
       console.log(chalk.bold(`Devices (${names.length})`));
-      for (const name of names) console.log(deviceSummary(reg[name], name === self));
+      for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full)) console.log(line);
     });
 
   devicesCmd
@@ -336,6 +491,49 @@ Typical workflow:
       console.log(chalk.green(`Wrote ${file}`));
       console.log(chalk.gray('Add this to ~/.ssh/config (once):  Include config.d/agents'));
     });
+
+  devicesCmd
+    .command('update')
+    .description('Roll out agents-cli to every online registered device (`agents upgrade --yes` on each). Offline devices are skipped.')
+    .argument('[version]', 'Target version or dist-tag (default: latest)')
+    .action(async (version: string | undefined) => {
+      let cmd: string[];
+      try {
+        cmd = upgradeCommand(version);
+      } catch (err: any) {
+        console.error(chalk.red(err?.message ?? err));
+        process.exit(1);
+      }
+      const reg = await loadDevices();
+      const targets = planFleetTargets(reg);
+      if (targets.length === 0) {
+        console.log(chalk.gray("No devices. Run 'agents devices sync' first."));
+        return;
+      }
+      console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
+      const results = runFleet(targets, cmd);
+      printFleetResults(results);
+    });
+
+  devicesCmd
+    .command('run <cmd...>')
+    .description('Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …')
+    .allowUnknownOption()
+    .action(async (cmd: string[]) => {
+      if (!cmd.length) {
+        console.error(chalk.red('Usage: agents fleet run <cmd...>'));
+        process.exit(1);
+      }
+      const reg = await loadDevices();
+      const targets = planFleetTargets(reg);
+      if (targets.length === 0) {
+        console.log(chalk.gray("No devices. Run 'agents devices sync' first."));
+        return;
+      }
+      console.log(chalk.gray(`Running \`${cmd.join(' ')}\` on ${targets.filter((t) => !t.skip).length} online device(s)…`));
+      const results = runFleet(targets, cmd);
+      printFleetResults(results);
+    });
 }
 
 /** Register the `agents ssh` smart wrapper. */
@@ -412,7 +610,7 @@ async function runAskpass(): Promise<void> {
     process.exit(1);
   }
   try {
-    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh' });
+    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh', agentOnly: isHeadlessSecretsContext() });
     const value = env[key];
     if (value === undefined) {
       console.error(`askpass: key '${key}' not found in bundle '${bundle}'`);

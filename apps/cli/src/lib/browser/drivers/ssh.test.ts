@@ -316,4 +316,22 @@ describe('raw-ssh spawns reuse SSH_OPTS so unreachable hosts fail fast (#746)', 
     rec.child.emit('close'); // settle so the 3s kill timer is cleared
     await p;
   });
+
+  // C5: user/host come from a git-tracked ssh:// browser profile. A crafted
+  // endpoint like `ssh://-Fattacker@victim` puts `-Fattacker` at the ssh target
+  // position, where OpenSSH reads it as `-F <file>` and an attacker-supplied ssh
+  // config's ProxyCommand runs locally. The target must be validated before spawn.
+  it('ensureRemoteBrowser rejects an option-injecting target before spawning', async () => {
+    await expect(
+      ensureRemoteBrowser('-Fattacker', 'victim', 'chrome', 9222, 'posix'),
+    ).rejects.toThrow(/Invalid SSH target/);
+    expect(cp.calls.length).toBe(0); // guard runs before the raw ssh spawn
+  });
+
+  it('killRemoteBrowser (runSSHCommand) rejects an option-injecting target before spawning', async () => {
+    await expect(
+      killRemoteBrowser('-Fattacker', 'victim', 'posix', 9222),
+    ).rejects.toThrow(/Invalid SSH target/);
+    expect(cp.calls.length).toBe(0);
+  });
 });

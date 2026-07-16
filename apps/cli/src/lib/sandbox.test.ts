@@ -1,7 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
-import { buildSpawnEnv } from './sandbox.js';
-import { getUserAgentsDir } from './state.js';
+import { buildSpawnEnv, getJobHomePath } from './sandbox.js';
+import { getUserAgentsDir, getRoutinesDir } from './state.js';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -39,5 +39,35 @@ describe('buildSpawnEnv', () => {
       if (prev === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
       else process.env.CLAUDE_CODE_OAUTH_TOKEN = prev;
     }
+  });
+});
+
+describe('getJobHomePath — routine-name path containment (C4)', () => {
+  const routinesDir = path.resolve(getRoutinesDir());
+
+  it('returns a contained overlay path for a normal job name', () => {
+    const p = getJobHomePath('daily-standup');
+    expect(p).toBe(path.join(routinesDir, 'daily-standup', 'home'));
+    expect(p.startsWith(routinesDir + path.sep)).toBe(true);
+  });
+
+  it('allows dot-prefixed names', () => {
+    expect(() => getJobHomePath('.hidden-job')).not.toThrow();
+  });
+
+  // A synced user/system routine YAML controls `name`; without containment,
+  // `../../../..` steers cleanJobHome's recursive rmSync at the user's home.
+  it('rejects parent-traversal names so rmSync cannot escape the routines dir', () => {
+    expect(() => getJobHomePath('../../../../..')).toThrow();
+    expect(() => getJobHomePath('..')).toThrow();
+  });
+
+  it('rejects names containing path separators', () => {
+    expect(() => getJobHomePath('a/b')).toThrow();
+    expect(() => getJobHomePath('a\\b')).toThrow();
+  });
+
+  it('rejects names with null bytes', () => {
+    expect(() => getJobHomePath('evil\x00')).toThrow();
   });
 });

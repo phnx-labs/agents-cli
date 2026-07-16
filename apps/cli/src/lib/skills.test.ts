@@ -329,6 +329,33 @@ describe('diffVersionSkills — orphan detection', () => {
     expect(result.matched).toHaveLength(0);
     expect(result.orphans).toHaveLength(0);
   });
+
+  it('reports central skills as matched for Goose without a per-version copy', () => {
+    const home = makeTempHome();
+    const version = '1.43.0';
+    const skillName = 'native-central-skill';
+
+    const centralSkillsDir = path.join(home, '.agents', 'skills');
+    fs.mkdirSync(centralSkillsDir, { recursive: true });
+    makeSkillDir(centralSkillsDir, skillName);
+
+    const result = runSkills(
+      home,
+      `skills.diffVersionSkills('goose', '${version}')`
+    ) as { toAdd: string[]; toUpdate: string[]; matched: string[]; orphans: string[] };
+
+    expect(result).toEqual({
+      agent: 'goose',
+      version,
+      toAdd: [],
+      toUpdate: [],
+      matched: [skillName],
+      orphans: [],
+    });
+    expect(fs.existsSync(
+      path.join(home, '.agents', '.history', 'versions', 'goose', version, 'home', '.config', 'goose', 'skills')
+    )).toBe(false);
+  });
 });
 
 // ─── iterSkillsCapableVersions ────────────────────────────────────────────────

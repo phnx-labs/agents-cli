@@ -144,6 +144,15 @@ export async function runSetup(program: Command, options: { force?: boolean; sup
     console.log(chalk.gray(`Discovered ${dev.synced} device${dev.synced === 1 ? '' : 's'} on your tailnet (agents devices list).`));
   }
 
+  // Offer guided cross-machine session-sync provisioning (interactive, opt-in,
+  // and never blocking — any failure/decline falls through to the rest of setup).
+  try {
+    const { promptAndProvisionSessionSync } = await import('./sync-provision.js');
+    await promptAndProvisionSessionSync({ explicit: false });
+  } catch (err) {
+    console.log(chalk.yellow(`Session-sync setup skipped: ${(err as Error).message}`));
+  }
+
   // Offer to import existing unmanaged installations
   if (unmanaged.length > 0 && isInteractiveTerminal()) {
     console.log(chalk.bold('\nFound existing installations:\n'));

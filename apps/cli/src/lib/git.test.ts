@@ -12,7 +12,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import simpleGit from 'simple-git';
-import { adoptRepo, assertSafeGitTransport, displayHomePath, parseSource, pullRepo, syncRepoGit } from './git.js';
+import {
+  adoptRepo,
+  assertSafeGitTransport,
+  commitAndPush,
+  displayHomePath,
+  parseSource,
+  pullRepo,
+  syncRepoGit,
+} from './git.js';
 
 describe('assertSafeGitTransport', () => {
   const allowed = [
@@ -212,6 +220,149 @@ describe('pullRepo dirty-tree hint', () => {
     expect(res.error).toContain(`cd ${displayHomePath(repo)} && git status`);
     // ... not the old hardcoded ~/.agents (which is not even a git repo).
     expect(res.error).not.toContain('cd ~/.agents ');
+  });
+});
+
+/**
+ * Real-repo tests for commitAndPush + pullRepo rebase — RUSH-1454.
+ * Bare remote + clones; no mocks.
+ */
+describe('commitAndPush (clean-but-ahead + dirty)', () => {
+  let root: string;
+  let remote: string;
+  let local: string;
+
+  async function configIdentity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    await g.addConfig('core.autocrlf', 'false');
+  }
+
+  async function commitFile(dir: string, name: string, body: string, msg: string): Promise<void> {
+    const g = simpleGit(dir);
+    fs.writeFileSync(path.join(dir, name), body);
+    await g.add('-A');
+    await g.commit(msg);
+  }
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'commitpush-'));
+    remote = path.join(root, 'remote.git');
+    local = path.join(root, 'local');
+
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+    await simpleGit().clone(remote, local);
+    await configIdentity(local);
+    fs.writeFileSync(path.join(local, '.gitattributes'), '* -text\n');
+    await commitFile(local, 'README.md', 'v1\n', 'init');
+    await simpleGit(local).push('origin', 'main');
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('reports already up to date when clean and not ahead', async () => {
+    const res = await commitAndPush(local, 'noop');
+    expect(res.success).toBe(true);
+    expect(res.pushed).toBe(false);
+    expect(res.committed).toBe(false);
+    expect(res.detail).toBe('already up to date');
+    expect(res.branch).toBe('main');
+  });
+
+  it('pushes when the tree is clean but local is ahead of origin', async () => {
+    // Commit locally without push (simulates post-rebase ahead state).
+    await commitFile(local, 'local-only.txt', 'ahead\n', 'local ahead');
+    // Confirm we're clean but ahead before calling commitAndPush.
+    const pre = await simpleGit(local).status();
+    expect(pre.isClean()).toBe(true);
+    expect(pre.ahead).toBe(1);
+
+    const res = await commitAndPush(local, 'should not create a new commit');
+    expect(res.success).toBe(true);
+    expect(res.committed).toBe(false);
+    expect(res.pushed).toBe(true);
+    expect(res.detail).toMatch(/pushed /);
+    expect(res.detail).not.toBe('already up to date');
+
+    // Remote carries the local-only commit.
+    const verify = path.join(root, 'verify-ahead');
+    await simpleGit().clone(remote, verify);
+    expect(fs.existsSync(path.join(verify, 'local-only.txt'))).toBe(true);
+  });
+
+  it('commits dirty changes and pushes them', async () => {
+    fs.writeFileSync(path.join(local, 'dirty.txt'), 'new\n');
+    const res = await commitAndPush(local, 'add dirty');
+    expect(res.success).toBe(true);
+    expect(res.committed).toBe(true);
+    expect(res.pushed).toBe(true);
+    expect(res.detail).toMatch(/committed and pushed/);
+
+    const verify = path.join(root, 'verify-dirty');
+    await simpleGit().clone(remote, verify);
+    expect(fs.readFileSync(path.join(verify, 'dirty.txt'), 'utf8')).toBe('new\n');
+  });
+});
+
+describe('pullRepo divergent rebase', () => {
+  let root: string;
+  let remote: string;
+  let local: string;
+  let author: string;
+
+  async function configIdentity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    await g.addConfig('core.autocrlf', 'false');
+  }
+
+  async function commitFile(dir: string, name: string, body: string, msg: string): Promise<void> {
+    const g = simpleGit(dir);
+    fs.writeFileSync(path.join(dir, name), body);
+    await g.add('-A');
+    await g.commit(msg);
+  }
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'pullrepo-'));
+    remote = path.join(root, 'remote.git');
+    local = path.join(root, 'local');
+    author = path.join(root, 'author');
+
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+    await simpleGit().clone(remote, author);
+    await configIdentity(author);
+    fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
+    await commitFile(author, 'README.md', 'v1\n', 'init');
+    await simpleGit(author).push('origin', 'main');
+
+    await simpleGit().clone(remote, local);
+    await configIdentity(local);
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rebases local commits onto divergent upstream instead of failing', async () => {
+    // Upstream and local each add a different file → diverged histories.
+    await commitFile(author, 'up.txt', 'from-author\n', 'author commit');
+    await simpleGit(author).push('origin', 'main');
+    await commitFile(local, 'down.txt', 'from-local\n', 'local commit');
+
+    const res = await pullRepo(local);
+    expect(res.success).toBe(true);
+    expect(res.branch).toBe('main');
+    expect(res.commit).toMatch(/^[0-9a-f]{7,8}$/);
+    // Both sides' files present after rebase.
+    expect(fs.existsSync(path.join(local, 'up.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(local, 'down.txt'))).toBe(true);
   });
 });
 

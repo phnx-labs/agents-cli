@@ -370,7 +370,9 @@ class TcpClient extends BaseClient {
       this.failPending('helper_exited', 'tcp connection closed before reply');
     });
     // Kick off the auth handshake synchronously so its frame (id 1) is the
-    // first thing written. No token → daemon is open (tunnel-gated).
+    // first thing written. The Windows daemon now REQUIRES a token (it refuses to
+    // start without one); a null token here means no auth frame is sent, the
+    // daemon drops the connection, and the caller is told to re-run `setup`.
     this.authReady = token ? this.authenticate(token) : Promise.resolve();
   }
 

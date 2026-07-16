@@ -37,8 +37,8 @@ Permission mode controls what the agent can do.
 |------|----------------|
 | `plan` (default) | Read-only — research, audit, analysis. No writes, no shell side-effects. |
 | `edit` | Read + write files; prompts for shell / risky operations |
-| `auto` | Smart classifier auto-approves safe ops (incl. commit + push to the current branch) and blocks risky ones (force-push, push to `main`, `git reset --hard`). Claude/copilot only. |
-| `skip` | Last-resort bypass of every permission prompt. Direct exec uses the native unsafe flag; ACP uses `allow_always`. `full` remains an alias. |
+| `auto` | Harness-native automatic approval: Claude/Copilot use the smart classifier; Droid uses `--auto high`; Kimi uses `--auto` interactively, while headless `-p` already auto-approves and emits no mode flag. |
+| `skip` | Last-resort bypass of every permission prompt. Direct exec uses the native unsafe flag; ACP selects a protocol permission option. `full` remains an alias. |
 
 ```bash
 agents run claude "fix lint errors in src/" --mode edit
@@ -47,8 +47,10 @@ agents run claude "/code:commit" --mode auto          # run a command unattended
 
 **Treat `skip` as a last resort.** In direct-exec runs (without `--acp`), agents-cli
 forwards the harness's native bypass flag; it does not add another safety layer. Prefer
-`auto` where the harness has a smart classifier (Claude Code and GitHub Copilot), or
-`edit` everywhere else.
+`auto` where it adds a safer automatic policy (smart classifier on Claude/Copilot,
+native high-auto mode on Droid, or interactive Kimi), or `edit` everywhere else.
+For headless Kimi, `edit`, `auto`, and `skip` all use the same already-auto-approved
+`-p` behavior, so prefer `edit` rather than signaling a blanket bypass.
 
 | Harness | Direct-exec `--mode skip` becomes |
 |---|---|
@@ -64,8 +66,9 @@ forwards the harness's native bypass flag; it does not add another safety layer.
 | Droid | `--skip-permissions-unsafe` |
 
 With `--acp`, these native flags are not used. agents-cli instead grants `skip`
-permission requests at the ACP protocol layer with `allow_always`; the same
-last-resort warning applies.
+permission requests at the ACP protocol layer: it selects `allow_always` when offered,
+otherwise the first permission option offered by the server. The same last-resort
+warning applies.
 
 Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
 to sandboxed `edit` and can still prompt. `agents run codex --mode skip` instead
@@ -206,6 +209,7 @@ agents run claude "profile this build" --host gpu-box   # follows live
 agents run claude "..." --host gpu-box --no-follow       # detach
 
 agents hosts ps          # list dispatched runs
+agents hosts stop <id>   # terminate a hung/detached run (alias: kill)
 agents logs --host gpu-box   # pick one and view its log
 agents logs <id> -f          # re-attach to a running one and follow
 ```
@@ -215,12 +219,12 @@ silently drops at the SSH boundary:
 
 - **Forwarded** (same behavior remote as local): `--mode --model --name
   --effort --env --add-dir --timeout --strategy/--balanced/--fallback`, the
-  `--loop` family, `--json --verbose --yes`, `--resume <id>`, and `--
+  `--loop` family, `--json --verbose --yes --acp`, `--resume <id>`, and `--
   <passthrough>`.
 - **Rejected loud** (exit non-zero before dispatch): `--secrets/--secrets-keys/
   --allow-expired` (Keychain values never cross SSH implicitly — provision with
   `agents secrets export --host` instead), bare `--resume` (the picker can't
-  cross a detached dispatch — pass a concrete id), `--acp`,
+  cross a detached dispatch — pass a concrete id),
   `--resume-checkpoint`.
 - **Local-only** (consumed by the dispatching side): `--quiet --no-follow
   --cwd/--project/--remote-cwd --host/--device/--any --lease`.
@@ -231,6 +235,8 @@ Hosts are also a task backend (`agents cloud run "…" --host <name>` — see th
 
 `agents logs [id]` is the unified viewer over both host-dispatch runs and local
 session transcripts; `agents hosts logs <id>` is the host-only equivalent.
+`agents hosts stop <id>` (alias `kill`) terminates the remote process group from
+this machine without deleting the remote log.
 
 ### Working directory on the host
 

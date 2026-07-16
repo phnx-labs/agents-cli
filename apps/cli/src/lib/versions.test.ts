@@ -570,6 +570,77 @@ describe('installVersion version validation', () => {
   });
 });
 
+function runInstallVersionWithScript(
+  home: string,
+  agent: string,
+  version: string,
+  installScript: string,
+  extraPathDir?: string
+): { ok: boolean; error?: string; result?: { success: boolean; installedVersion?: string; error?: string } } {
+  const moduleUrl = pathToFileURL(path.resolve('src/lib/versions.ts')).href;
+  const agentsUrl = pathToFileURL(path.resolve('src/lib/agents.ts')).href;
+  const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+  const child = spawnSync(process.execPath, [tsxBin, '-e', `
+    import { installVersion } from ${JSON.stringify(moduleUrl)};
+    import { AGENTS } from ${JSON.stringify(agentsUrl)};
+    (async () => {
+      try {
+        AGENTS[${JSON.stringify(agent)}].installScript = ${JSON.stringify(installScript)};
+        const r = await installVersion(${JSON.stringify(agent)}, ${JSON.stringify(version)});
+        console.log(JSON.stringify({ ok: true, result: r }));
+      } catch (err) {
+        console.log(JSON.stringify({ ok: false, error: err.message }));
+      }
+    })();
+  `], {
+    env: {
+      ...process.env,
+      HOME: home,
+      ...(extraPathDir ? { PATH: `${extraPathDir}${path.delimiter}${process.env.PATH}` } : {}),
+    },
+    encoding: 'utf-8',
+  });
+  expect(child.status, child.stderr).toBe(0);
+  return JSON.parse(child.stdout.trim());
+}
+
+describe('installVersion Grok binary relocation', () => {
+  it.skipIf(process.platform === 'win32')('moves the installer-dropped binary from the previous default home into the target version home', () => {
+    const home = makeTempHome();
+    const oldConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.32', 'home', '.grok');
+    const hostGrok = path.join(home, '.grok');
+    const binDir = path.join(home, 'fakebin');
+
+    fs.mkdirSync(path.join(oldConfigDir, 'downloads'), { recursive: true });
+    fs.symlinkSync(oldConfigDir, hostGrok, 'dir');
+
+    // A `grok` on PATH lets `getCliVersionFromPath` resolve `latest` to 0.2.101.
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'grok');
+    fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.101"; exit 0; fi\nexit 0\n', 'utf-8');
+    fs.chmodSync(stub, 0o755);
+
+    const script = [
+      'mkdir -p ~/.grok/downloads',
+      'printf \'#!/bin/sh\\nif [ "$1" = "--version" ]; then echo "grok 0.2.101"; exit 0; fi\\nexit 0\\n\' > ~/.grok/downloads/grok-0.2.101-macos-aarch64',
+      'chmod +x ~/.grok/downloads/grok-0.2.101-macos-aarch64',
+      'cp ~/.grok/downloads/grok-0.2.101-macos-aarch64 ~/.grok/downloads/grok-macos-aarch64',
+    ].join(' && ');
+
+    const outcome = runInstallVersionWithScript(home, 'grok', 'latest', script, binDir);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result?.success).toBe(true);
+    expect(outcome.result?.installedVersion).toBe('0.2.101');
+
+    const targetDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.101', 'home', '.grok', 'downloads');
+    expect(fs.existsSync(path.join(targetDownloads, 'grok-0.2.101-macos-aarch64'))).toBe(true);
+    expect(fs.existsSync(path.join(targetDownloads, 'grok-macos-aarch64'))).toBe(true);
+
+    const result = runVersionSync(home, "listInstalledVersions('grok')") as string[];
+    expect(result).toContain('0.2.101');
+  });
+});
+
 // `resolveVersionAlias` is the shared @selector vocabulary (latest / oldest /
 // default / pinned / explicit) every `agents <cmd> agent@<token>` reads. droid
 // installs a single global binary (~/.local/bin/droid) shared across version

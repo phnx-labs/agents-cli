@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import {
@@ -12,6 +12,8 @@ import {
   convertDenyToCodexRules,
   convertToKimiFormat,
   convertToDroidFormat,
+  convertToOpenClawFormat,
+  convertToGooseFormat,
   convertToKiroFormat,
   formatComputerPermissionGrantHint,
 } from './permissions.js';
@@ -66,7 +68,188 @@ describe('Droid permissions', () => {
   });
 });
 
+describe('OpenClaw permissions', () => {
+  it('maps only blanket tool rules and skips sub-command/path/domain patterns', () => {
+    expect(convertToOpenClawFormat({
+      name: 'openclaw',
+      allow: ['Bash(git:*)', 'Read(**)', 'Bash(*)'],
+      deny: ['Write(secrets/**)', 'Write(**)', 'WebSearch(*)'],
+    })).toEqual({
+      alsoAllow: ['exec', 'read'],
+      deny: ['web_search', 'write'],
+    });
+  });
+
+  it('treats bare tool names as blanket and maps edit -> write', () => {
+    expect(convertToOpenClawFormat({
+      name: 'openclaw',
+      allow: ['Bash', 'Edit(**)', 'WebFetch(*)'],
+    })).toEqual({
+      alsoAllow: ['exec', 'web_fetch', 'write'],
+      deny: [],
+    });
+  });
+
+  it('writes and merges openclaw.json tools without clobbering unrelated keys', () => {
+    const home = makeTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      mcp: { servers: {} },
+      tools: { alsoAllow: ['read'], deny: ['browser'] },
+    }));
+
+    expect(applyPermissionsToVersion('openclaw', {
+      name: 'set',
+      allow: ['Bash(*)', 'Bash(git:*)'],
+      deny: ['Write(**)'],
+    }, home, true)).toEqual({ success: true });
+
+    expect(JSON.parse(fs.readFileSync(path.join(configDir, 'openclaw.json'), 'utf-8'))).toEqual({
+      mcp: { servers: {} },
+      tools: { alsoAllow: ['read', 'exec'], deny: ['browser', 'write'] },
+    });
+  });
+
+  it('never touches tools.allow (the absolute allowlist)', () => {
+    const home = makeTempHome();
+    const configDir = path.join(home, '.openclaw');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'openclaw.json'), JSON.stringify({
+      tools: { allow: ['read'] },
+    }));
+
+    applyPermissionsToVersion('openclaw', {
+      name: 'set',
+      allow: ['Bash(*)'],
+    }, home, true);
+
+    const written = JSON.parse(fs.readFileSync(path.join(configDir, 'openclaw.json'), 'utf-8'));
+    expect(written.tools.allow).toEqual(['read']);
+    expect(written.tools.alsoAllow).toEqual(['exec']);
+  });
+});
+
+describe('Goose permissions', () => {
+  it('maps canonical rules to user permission categories', () => {
+    expect(convertToGooseFormat({
+      name: 'goose',
+      allow: ['Bash(git:*)', 'Read(**)', 'WebFetch(domain:docs.example.com)'],
+      deny: ['Write(secrets/**)'],
+    })).toEqual({
+      user: {
+        always_allow: ['developer__fetch', 'developer__shell'],
+        ask_before: [],
+        never_allow: ['developer__text_editor'],
+      },
+    });
+  });
+
+  it('writes and merges permission.yaml without replacing unrelated tools', () => {
+    const home = makeTempHome();
+    const configDir = path.join(home, '.config', 'goose');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, 'permission.yaml'), yaml.stringify({
+      user: {
+        always_allow: ['developer__analyze'],
+        ask_before: ['custom__tool'],
+        never_allow: ['developer__text_editor'],
+      },
+      smart_approve: {
+        always_allow: [],
+        ask_before: ['developer__shell'],
+        never_allow: [],
+      },
+    }));
+
+    const result = applyPermissionsToVersion('goose', {
+      name: 'set',
+      allow: ['Bash(git:*)', 'Write(src/**)'],
+      deny: ['Read(**/.env)'],
+    }, home, true);
+    expect(result.success).toBe(true);
+
+    const config = yaml.parse(fs.readFileSync(path.join(configDir, 'permission.yaml'), 'utf-8'));
+    expect(config).toEqual({
+      user: {
+        always_allow: ['developer__analyze', 'developer__shell'],
+        ask_before: ['custom__tool'],
+        never_allow: ['developer__text_editor'],
+      },
+      smart_approve: {
+        always_allow: [],
+        ask_before: ['developer__shell'],
+        never_allow: [],
+      },
+    });
+  });
+});
+
 describe('permission path handling', () => {
+  it('builds selected permission groups with separate allow and deny sections', async () => {
+    const home = makeTempHome();
+    const groupsDir = path.join(home, '.agents', 'permissions', 'groups');
+    fs.mkdirSync(groupsDir, { recursive: true });
+    fs.writeFileSync(path.join(groupsDir, 'goose-safe.yaml'), [
+      'name: goose-safe',
+      'allow:',
+      '  - "Bash(git:*)"',
+      'deny:',
+      '  - "Write(secrets/**)"',
+      '',
+    ].join('\n'));
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      vi.resetModules();
+      const { buildPermissionsFromGroups: buildFromGroups } = await import('./permissions.js');
+      expect(buildFromGroups(['goose-safe'])).toEqual({
+        name: 'built',
+        description: 'Built from groups: goose-safe',
+        allow: ['Bash(git:*)'],
+        deny: ['Write(secrets/**)'],
+      });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      vi.resetModules();
+    }
+  });
+
+  it('keeps legacy bare-list permission group entries as allow rules', async () => {
+    const home = makeTempHome();
+    const groupsDir = path.join(home, '.agents', 'permissions', 'groups');
+    fs.mkdirSync(groupsDir, { recursive: true });
+    fs.writeFileSync(path.join(groupsDir, 'legacy-web.yaml'), [
+      '- "WebFetch(domain:cloud.google.com)"',
+      '- "WebFetch(domain:docs.aws.amazon.com)"',
+      '',
+    ].join('\n'));
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      vi.resetModules();
+      const { buildPermissionsFromGroups: buildFromGroups } = await import('./permissions.js');
+      expect(buildFromGroups(['legacy-web'])).toEqual({
+        name: 'built',
+        description: 'Built from groups: legacy-web',
+        allow: ['WebFetch(domain:cloud.google.com)', 'WebFetch(domain:docs.aws.amazon.com)'],
+      });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      vi.resetModules();
+    }
+  });
+
   it('rejects traversal in permission group names', async () => {
     makeTempHome();
 

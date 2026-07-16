@@ -3,7 +3,7 @@ import { Icon } from './icons'
 import { FileIcon, ImageIcon } from './dispatchIcons'
 import { AgentAvatar, agentIdFromPrefix } from './AgentAvatar'
 import { StructuredReply, type ReplyCallbacks } from './StructuredReply'
-import { heartbeatLevel, linearIssueLabel, linearIssueUrl, sessionTaskLine, type FloorAgent, type FloorAttachment, type FloorTicket } from './floorModel'
+import { heartbeatLevel, linearIssueLabel, linearIssueUrl, sessionTaskLine, todoProgress, type FloorAgent, type FloorAttachment, type FloorTicket } from './floorModel'
 import { sinceFromMs } from './floorAdapter'
 import { useNow } from './useNow'
 import { CardChecklist } from './TodoChecklist'
@@ -148,6 +148,13 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const rateBadge = a.rateLimited
     ? <span className="pill rate" title="This session hit a rate or usage limit">rate limited</span>
     : null
+  // Plan progress pill (RUSH-1380): a glanceable N/M in the header — the one at-a-glance
+  // "how far along" signal that also survives compact (plain) rows, where the fuller
+  // CardChecklist below is suppressed. Sourced from the same TodoWrite the checklist uses.
+  const todoTally = a.todos.length ? todoProgress(a.todos) : null
+  const todoBadge = todoTally && todoTally.total > 0
+    ? <span className="pill todo" title={`Plan: ${todoTally.done} of ${todoTally.total} tasks done`}>{todoTally.done}/{todoTally.total}</span>
+    : null
   const ticketHref = linearIssueUrl(a.ticket)
   const ticketBadge = a.ticket
     ? ticketHref
@@ -169,6 +176,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         {!plain && wt && <span className="wtchip mono" title={a.worktreePath || wt}>{wt}</span>}
         <span className="when">
           {marker}
+          {todoBadge}
           {ticketBadge}
           {bgBadge}
           {rateBadge}

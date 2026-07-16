@@ -11,8 +11,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { Cron } from 'croner';
-import { getRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
-import { safeJoin } from './paths.js';
+import { getRoutinesDir, getSystemRoutinesDir, getRunsDir, ensureAgentsDir, getProjectRoutinesDir } from './state.js';
+import { safeJoin, isSafeSegmentName } from './paths.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import type { AgentId } from './types.js';
 import { ALL_AGENT_IDS } from './agents.js';
@@ -35,6 +35,18 @@ export const GITHUB_TRIGGER_EVENTS: readonly GithubTriggerEvent[] = [
   'push',
   'issue_comment',
   'workflow_run',
+];
+
+/** Linear webhook resource types a routine can be triggered by. */
+export type LinearTriggerEvent = 'Issue' | 'IssueLabel' | 'Comment' | 'Project' | 'Cycle';
+
+/** Canonical set of accepted Linear trigger events — single source for validation. */
+export const LINEAR_TRIGGER_EVENTS: readonly LinearTriggerEvent[] = [
+  'Issue',
+  'IssueLabel',
+  'Comment',
+  'Project',
+  'Cycle',
 ];
 
 /**
@@ -60,11 +72,11 @@ export function normalizeTriggerEvent(input: string): GithubTriggerEvent | null 
 
 /**
  * Event-based fire condition for a routine — an alternative (or complement) to
- * `schedule`. Currently only `github_event`: an incoming GitHub webhook whose
- * event (and optional repo/branch) match fires the job through the same
- * dispatch path a cron fire uses. See `src/lib/triggers/webhook.ts`.
+ * `schedule`. Incoming webhooks whose source-specific filters match fire the job
+ * through the same dispatch path a cron fire uses. See
+ * `src/lib/triggers/webhook.ts`.
  */
-export interface JobTrigger {
+export interface GithubJobTrigger {
   type: 'github_event';
   event: GithubTriggerEvent;
   /** `owner/name` — when set, only payloads for this repo match. */
@@ -72,6 +84,19 @@ export interface JobTrigger {
   /** git branch (ref short name) — when set, only payloads for this branch match. */
   branch?: string;
 }
+
+export interface LinearJobTrigger {
+  type: 'linear_event';
+  event: LinearTriggerEvent;
+  /** Linear action, e.g. `create`, `update`, `remove`. */
+  action?: string;
+  /** Issue identifier prefix such as `RUSH`; useful when one webhook spans teams. */
+  teamKey?: string;
+  /** Required issue label name. */
+  label?: string;
+}
+
+export type JobTrigger = GithubJobTrigger | LinearJobTrigger;
 
 /**
  * Full configuration for a routine (persisted as YAML).
@@ -86,8 +111,16 @@ export interface JobConfig {
   schedule?: string;
   /** Event/webhook fire condition. Optional when `schedule` is set. */
   trigger?: JobTrigger;
-  agent: AgentId;  // required when workflow is absent
+  /** Which agent runs the routine. Optional — omitted for `workflow`/`command` routines. Exactly one of agent/workflow/command must be set. */
+  agent?: AgentId;
   workflow?: string;
+  /**
+   * A plain shell command run directly instead of an agent/workflow — no LLM,
+   * no auth, no rotation, no tokens, no sandbox overlay. For deterministic
+   * housekeeping routines (version-check, `npm i -g`, `git pull`, notify).
+   * Mutually exclusive with `agent` and `workflow`.
+   */
+  command?: string;
   // 'full' is accepted as a permanent silent alias for 'skip' (see normalizeMode).
   mode: 'plan' | 'edit' | 'auto' | 'skip' | 'full';
   effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
@@ -123,6 +156,13 @@ export interface JobConfig {
   runOnce?: boolean;
   // RFC3339 timestamp; routine auto-disables at the next fire on/after this time.
   endAt?: string;
+  /**
+   * When set, the job resumes this existing agent session id at fire time
+   * (`agents run <agent> --resume <id>`) instead of starting a fresh conversation,
+   * so the actual session reopens with full context and `prompt` becomes its next
+   * turn. Powers self-scheduled wake-ups (e.g. /hibernate). claude/codex only.
+   */
+  resume?: string;
   /** When set, executeJob runs this job through the loop driver instead of once. */
   loop?: LoopConfig;
 }
@@ -131,8 +171,10 @@ export interface JobConfig {
 export interface RunMeta {
   jobName: string;
   runId: string;
-  agent: AgentId;  // undefined at runtime for workflow jobs
+  agent?: AgentId;  // undefined at runtime for workflow and command jobs
   workflow?: string;
+  /** The shell command that ran, for command-mode routines (no agent). */
+  command?: string;
   pid: number | null;
   /** Process birth time (epoch ms) recorded at spawn for pid-reuse detection. */
   spawnedAt?: number;
@@ -199,10 +241,13 @@ const JOB_DEFAULTS: Partial<JobConfig> = {
 };
 
 /**
- * List all job configs, scanning project > user routine dirs.
- * Project routines (`<project>/.agents/routines/`) shadow user routines of the
- * same name. Project discovery is opt-in via `cwd`; the daemon (which calls
- * `listJobs()` with no argument) only sees user routines.
+ * List all job configs, scanning project > user > system routine dirs.
+ * Higher layers shadow lower ones of the same name (first-seen wins): a project
+ * routine shadows a user routine, and a user routine shadows a built-in system
+ * routine (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system).
+ * Project discovery is opt-in via `cwd`; the daemon (which calls `listJobs()`
+ * with no argument) sees user + system routines, so a built-in routine fires for
+ * every install unless the user overrides or disables it by name.
  */
 export function listJobs(cwd?: string): JobConfig[] {
   ensureAgentsDir();
@@ -215,6 +260,7 @@ export function listJobs(cwd?: string): JobConfig[] {
     if (projectDir) dirs.push(projectDir);
   }
   dirs.push(getRoutinesDir());
+  dirs.push(getSystemRoutinesDir());
 
   for (const dir of dirs) {
     if (!fs.existsSync(dir)) continue;
@@ -231,9 +277,10 @@ export function listJobs(cwd?: string): JobConfig[] {
 }
 
 /**
- * Read a single job config by name, checking project > user.
+ * Read a single job config by name, checking project > user > system.
  * Project discovery is opt-in via `cwd`; daemon callers pass no argument and
- * only resolve user routines.
+ * resolve user + system routines (a user routine of the same name shadows a
+ * built-in system routine).
  */
 export function readJob(name: string, cwd?: string): JobConfig | null {
   ensureAgentsDir();
@@ -243,6 +290,7 @@ export function readJob(name: string, cwd?: string): JobConfig | null {
     if (projectDir) dirs.push(projectDir);
   }
   dirs.push(getRoutinesDir());
+  dirs.push(getSystemRoutinesDir());
 
   for (const dir of dirs) {
     for (const ext of ['.yml', '.yaml']) {
@@ -307,7 +355,52 @@ export function writeJob(config: JobConfig): void {
   const devArr = output.devices as string[] | undefined;
   if (!devArr || devArr.length === 0) delete output.devices;
 
-  atomicWriteFileSync(filePath, yaml.stringify(output));
+  let existingText: string | null = null;
+  if (ymlExists || yamlExists) {
+    try {
+      existingText = fs.readFileSync(filePath, 'utf-8');
+    } catch {
+      existingText = null;
+    }
+  }
+  atomicWriteFileSync(filePath, serializeJob(output, existingText));
+}
+
+/**
+ * Serialize a job config, preserving the on-disk formatting of an existing file.
+ *
+ * A full `yaml.stringify(config)` re-emits the whole document — restyling every
+ * scalar (unquoting `schedule`, re-wrapping the folded `prompt` block, reordering
+ * keys). When a routine is only being toggled (pause/resume) or re-pinned
+ * (`devices --set`), that rewrites the entire file, leaving the git-backed
+ * `~/.agents` tree perpetually dirty so `agents repo pull` refuses to sync across
+ * the fleet. To keep the diff to the field that actually changed, we edit the
+ * existing document in place and only re-render touched nodes; untouched nodes
+ * (notably the large `prompt` block) keep their byte-for-byte formatting.
+ *
+ * `existingText` is the current file contents, or null for a new file. New,
+ * unparseable, and non-mapping documents fall back to canonical `yaml.stringify`.
+ */
+export function serializeJob(output: Record<string, unknown>, existingText: string | null): string {
+  if (existingText == null) return yaml.stringify(output);
+
+  const doc = yaml.parseDocument(existingText);
+  if (doc.errors.length > 0 || !yaml.isMap(doc.contents)) return yaml.stringify(output);
+
+  const existing = (doc.toJS() ?? {}) as Record<string, unknown>;
+
+  // Update or add only the keys that actually changed; leave the rest untouched
+  // so their original formatting is preserved.
+  for (const [key, value] of Object.entries(output)) {
+    if (JSON.stringify(existing[key]) !== JSON.stringify(value)) doc.set(key, value);
+  }
+  // Drop keys that no longer belong (e.g. an omitted default, or `devices`
+  // cleared back to fleet-wide).
+  for (const key of Object.keys(existing)) {
+    if (!(key in output)) doc.delete(key);
+  }
+
+  return doc.toString();
 }
 
 /** Delete a job config file by name. Returns true if the file existed. */
@@ -337,6 +430,14 @@ export function validateJob(config: Partial<JobConfig>): string[] {
 
   if (!config.name || typeof config.name !== 'string') {
     errors.push('name is required');
+  } else if (!isSafeSegmentName(config.name)) {
+    // The name becomes a filesystem path segment (overlay HOME under the
+    // routines dir). Reject separators, '.'/'..', and null bytes so a synced
+    // config can't traverse out of ~/.agents/routines.
+    errors.push(
+      `invalid name ${JSON.stringify(config.name)}: must be a single path segment ` +
+      `(no '/', '\\\\', or null bytes, and not '.' or '..')`,
+    );
   }
   const hasSchedule = Boolean(config.schedule && typeof config.schedule === 'string');
   const hasTrigger = config.trigger !== undefined;
@@ -360,10 +461,15 @@ export function validateJob(config: Partial<JobConfig>): string[] {
   }
   const hasAgent = Boolean(config.agent && typeof config.agent === 'string');
   const hasWorkflow = Boolean(config.workflow && typeof config.workflow === 'string');
-  if (!hasAgent && !hasWorkflow) {
-    errors.push('exactly one of agent or workflow is required');
-  } else if (hasAgent && hasWorkflow) {
-    errors.push('exactly one of agent or workflow must be set (not both)');
+  const hasCommand = Boolean(config.command && typeof config.command === 'string');
+  const set = [hasAgent, hasWorkflow, hasCommand].filter(Boolean).length;
+  if (set === 0) {
+    errors.push('exactly one of agent, workflow, or command is required');
+  } else if (set > 1) {
+    errors.push('exactly one of agent, workflow, or command may be set (not more)');
+  }
+  if (config.command !== undefined && (typeof config.command !== 'string' || config.command.trim() === '')) {
+    errors.push('command must be a non-empty shell command string');
   }
   if (hasAgent && config.agent && !ALL_AGENT_IDS.includes(config.agent as AgentId)) {
     errors.push(`agent must be one of: ${ALL_AGENT_IDS.join(', ')}`);
@@ -373,13 +479,32 @@ export function validateJob(config: Partial<JobConfig>): string[] {
       errors.push('workflow must be a lowercase alphanumeric name (hyphens and underscores allowed, e.g. autodev)');
     }
   }
+  if (config.resume !== undefined) {
+    // Only claude/codex support native `--resume`; other agents would emit a resume
+    // flag they don't understand. Resume reopens an agent session, so it is
+    // incompatible with workflow and loop jobs (which have no single session to reopen).
+    const RESUMABLE_AGENTS = ['claude', 'codex'];
+    if (typeof config.resume !== 'string' || config.resume.trim() === '') {
+      errors.push('resume must be a non-empty session id string');
+    }
+    if (hasWorkflow) {
+      errors.push('resume cannot be combined with workflow (resume reopens an existing agent session)');
+    }
+    if (config.loop) {
+      errors.push('resume cannot be combined with loop');
+    }
+    if (hasAgent && config.agent && !RESUMABLE_AGENTS.includes(config.agent)) {
+      errors.push(`resume is only supported for agents with native --resume (${RESUMABLE_AGENTS.join(', ')}); got '${config.agent}'`);
+    }
+  }
   if (config.mode && !['plan', 'edit', 'auto', 'skip', 'full'].includes(config.mode)) {
     errors.push("mode must be plan, edit, auto, or skip ('full' accepted as alias for skip)");
   }
   if (config.effort && !['low', 'medium', 'high', 'xhigh', 'max', 'auto'].includes(config.effort)) {
     errors.push('effort must be low, medium, high, xhigh, max, or auto');
   }
-  if (!config.prompt || typeof config.prompt !== 'string') {
+  // command routines run a plain shell and never build a prompt; agent/workflow routines require one.
+  if (!hasCommand && (!config.prompt || typeof config.prompt !== 'string')) {
     errors.push('prompt is required');
   }
   if (config.timeout && !parseTimeout(config.timeout)) {
@@ -432,17 +557,35 @@ export function validateTrigger(trigger: unknown): string[] {
     return ['trigger must be an object'];
   }
   const t = trigger as Partial<JobTrigger>;
-  if (t.type !== 'github_event') {
-    errors.push("trigger.type must be 'github_event'");
+  if (t.type !== 'github_event' && t.type !== 'linear_event') {
+    errors.push("trigger.type must be 'github_event' or 'linear_event'");
+    return errors;
   }
-  if (!t.event || !GITHUB_TRIGGER_EVENTS.includes(t.event as GithubTriggerEvent)) {
-    errors.push(`trigger.event must be one of: ${GITHUB_TRIGGER_EVENTS.join(', ')}`);
+  if (t.type === 'github_event') {
+    const github = t as Partial<GithubJobTrigger>;
+    if (!github.event || !GITHUB_TRIGGER_EVENTS.includes(github.event as GithubTriggerEvent)) {
+      errors.push(`trigger.event must be one of: ${GITHUB_TRIGGER_EVENTS.join(', ')}`);
+    }
+    if (github.repo !== undefined && (typeof github.repo !== 'string' || !/^[^/\s]+\/[^/\s]+$/.test(github.repo))) {
+      errors.push('trigger.repo must be in owner/name form');
+    }
+    if (github.branch !== undefined && typeof github.branch !== 'string') {
+      errors.push('trigger.branch must be a string');
+    }
+    return errors;
   }
-  if (t.repo !== undefined && (typeof t.repo !== 'string' || !/^[^/\s]+\/[^/\s]+$/.test(t.repo))) {
-    errors.push('trigger.repo must be in owner/name form');
+  const linear = t as Partial<LinearJobTrigger>;
+  if (!linear.event || !LINEAR_TRIGGER_EVENTS.includes(linear.event as LinearTriggerEvent)) {
+    errors.push(`trigger.event must be one of: ${LINEAR_TRIGGER_EVENTS.join(', ')}`);
   }
-  if (t.branch !== undefined && typeof t.branch !== 'string') {
-    errors.push('trigger.branch must be a string');
+  if (linear.action !== undefined && typeof linear.action !== 'string') {
+    errors.push('trigger.action must be a string');
+  }
+  if (linear.teamKey !== undefined && (typeof linear.teamKey !== 'string' || !/^[A-Z][A-Z0-9]*$/.test(linear.teamKey))) {
+    errors.push('trigger.teamKey must be an uppercase Linear team key');
+  }
+  if (linear.label !== undefined && typeof linear.label !== 'string') {
+    errors.push('trigger.label must be a string');
   }
   return errors;
 }
@@ -492,7 +635,7 @@ export function resolveJobPrompt(config: JobConfig): string {
   // Last report (special handling)
   const latestRun = getLatestRun(config.name);
   if (latestRun) {
-    const reportPath = path.join(getRunsDir(), config.name, latestRun.runId, 'report.md');
+    const reportPath = path.join(getJobRunsDir(config.name), latestRun.runId, 'report.md');
     if (fs.existsSync(reportPath)) {
       const report = fs.readFileSync(reportPath, 'utf-8');
       prompt = prompt.replace(/\{last_report\}/g, report);
@@ -530,8 +673,7 @@ export function parseTimeout(timeout: string): number | null {
 
 /** List all run metadata entries for a job, sorted chronologically. */
 export function listRuns(jobName: string): RunMeta[] {
-  const runsDir = getRunsDir();
-  const jobRunsDir = path.join(runsDir, jobName);
+  const jobRunsDir = getJobRunsDir(jobName);
   if (!fs.existsSync(jobRunsDir)) return [];
 
   const entries = fs.readdirSync(jobRunsDir, { withFileTypes: true })
@@ -556,14 +698,14 @@ export function getLatestRun(jobName: string): RunMeta | null {
 /** Persist run metadata to its run directory as meta.json. */
 export function writeRunMeta(meta: RunMeta): void {
   ensureAgentsDir();
-  const runDir = path.join(getRunsDir(), meta.jobName, meta.runId);
+  const runDir = path.join(getJobRunsDir(meta.jobName), meta.runId);
   fs.mkdirSync(runDir, { recursive: true });
   fs.writeFileSync(path.join(runDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
 }
 
 /** Read run metadata from disk. Returns null if missing or corrupt. */
 export function readRunMeta(jobName: string, runId: string): RunMeta | null {
-  const metaPath = path.join(getRunsDir(), jobName, runId, 'meta.json');
+  const metaPath = path.join(getJobRunsDir(jobName), runId, 'meta.json');
   if (!fs.existsSync(metaPath)) return null;
   try {
     return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as RunMeta;
@@ -572,9 +714,21 @@ export function readRunMeta(jobName: string, runId: string): RunMeta | null {
   }
 }
 
+/**
+ * Runs directory for a single job, with the (untrusted) job name contained to a
+ * single segment beneath the runs dir — same guard as `getJobHomePath`. The name
+ * comes from routine YAML and can arrive via a synced config repo; every runs-dir
+ * sink (run dir, meta read/write, last-report read) routes through here so a
+ * crafted `name` like `../../../../tmp/x` can't `mkdirSync`/write `stdout.log`,
+ * `meta.json`, or `report.md` outside `~/.agents/.history/runs`.
+ */
+export function getJobRunsDir(jobName: string): string {
+  return safeJoin(getRunsDir(), jobName);
+}
+
 /** Get the filesystem path for a specific run's directory. */
 export function getRunDir(jobName: string, runId: string): string {
-  return path.join(getRunsDir(), jobName, runId);
+  return path.join(getJobRunsDir(jobName), runId);
 }
 
 /** Discover routine YAML files in a repository's routines/ directory. */

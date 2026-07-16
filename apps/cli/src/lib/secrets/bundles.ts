@@ -879,6 +879,44 @@ export function resolveBundleEnv(bundle: SecretsBundle, _opts: ResolveBundleOpti
 }
 
 /**
+ * True when the current process is a background / non-interactive context that
+ * must NEVER raise a Keychain biometry prompt on the interactive user's screen —
+ * a prompt nobody is watching. Two signals, either sufficient:
+ *   - `AGENTS_RUNTIME` is `headless` or `teams` (set on the child env by
+ *     `agents run --headless`, scheduled routines, and teammates — see
+ *     exec.ts:resolveInteractive, runner.ts, teams/agents.ts).
+ *   - neither stdin nor stdout is a TTY (a detached/backgrounded task whose
+ *     stdio is redirected to a log — e.g. a release script run in the
+ *     background as `( ... ) >log 2>&1 </dev/null`).
+ * `AGENTS_SECRETS_NO_PROMPT=1` forces headless-safe; `=0` force-allows a prompt
+ * even in a non-TTY context. An interactive `eval "$(agents secrets export X)"`
+ * keeps its terminal stdin, so it is NOT classified headless and still prompts.
+ *
+ * Only **macOS keychain** reads pop an interactive Touch ID sheet — the secrets
+ * broker itself is a no-op off darwin (see agent.ts), and libsecret (Linux) /
+ * the Windows credential store resolve without any prompt. So off-darwin this
+ * ALWAYS returns false: forcing broker-only there would break every headless
+ * Linux/Windows read (CI, `agents run --headless`, routines, the Linux-driven
+ * release flow) for no benefit — there is no prompt to suppress.
+ *
+ * A read in a macOS headless context resolves broker-only (agentOnly) and fails
+ * fast with an actionable error instead of hijacking Touch ID. This generalizes
+ * the per-caller pattern already used by the daemon (daemon.ts:readDaemonClaudeOAuthToken).
+ */
+export function isHeadlessSecretsContext(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform !== 'darwin') return false; // no biometry prompt to suppress off-darwin
+  const override = env.AGENTS_SECRETS_NO_PROMPT;
+  if (override === '1') return true;
+  if (override === '0') return false;
+  const runtime = env.AGENTS_RUNTIME;
+  if (runtime === 'headless' || runtime === 'teams') return true;
+  return !process.stdin.isTTY && !process.stdout.isTTY;
+}
+
+/**
  * Read a bundle's metadata AND resolve its env in a single Touch ID prompt.
  *
  * `readBundle` + `resolveBundleEnv` issued two separate `LAContext` calls
@@ -926,8 +964,17 @@ export function readAndResolveBundleEnv(
     }
   }
 
-  if (opts.agentOnly) {
-    throw new Error(`Secrets bundle '${name}' is not unlocked in the secrets agent.`);
+  // Only keychain-backed bundles can pop a Touch ID prompt and are the only ones
+  // the broker ever holds. A file-backed bundle resolves via passphrase with no
+  // prompt, so agentOnly must never block it — the broker never holds file
+  // bundles, so the throw would fire unconditionally and break a legitimate read.
+  if (opts.agentOnly && backend === 'keychain') {
+    throw new Error(
+      `Secrets bundle '${name}' is not unlocked in the secrets agent, and this is a ` +
+      `headless/background process that must not raise a Touch ID prompt on the ` +
+      `interactive user's screen. Run 'agents secrets unlock ${name}' in a terminal ` +
+      `first, or set AGENTS_SECRETS_NO_PROMPT=0 to force an interactive prompt.`
+    );
   }
 
   if (backend === 'file') assertFileBackendUsable(name);

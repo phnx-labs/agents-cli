@@ -56,6 +56,7 @@ export const loadPrune: ModuleLoader = async () => (await import('../../commands
 export const loadTrash: ModuleLoader = async () => (await import('../../commands/trash.js')).registerTrashCommands;
 export const loadRestore: ModuleLoader = async () => (await import('../../commands/trash.js')).registerRestoreCommand;
 export const loadDoctor: ModuleLoader = async () => (await import('../../commands/doctor.js')).registerDoctorCommand;
+export const loadApply: ModuleLoader = async () => (await import('../../commands/apply.js')).registerApplyCommand;
 export const loadCheck: ModuleLoader = async () => (await import('../../commands/check.js')).registerCheckCommand;
 export const loadStatus: ModuleLoader = async () => (await import('../../commands/status.js')).registerStatusCommand;
 export const loadProfiles: ModuleLoader = async () => (await import('../../commands/profiles.js')).registerProfilesCommands;
@@ -80,6 +81,7 @@ export const loadWatchdog: ModuleLoader = async () => (await import('../../comma
 export const loadBrowser: ModuleLoader = async () => (await import('../../commands/browser.js')).registerBrowserCommand;
 export const loadComputer: ModuleLoader = async () => (await import('../../commands/computer.js')).registerComputerCommand;
 export const loadHosts: ModuleLoader = async () => (await import('../../commands/hosts.js')).registerHostsCommand;
+export const loadLease: ModuleLoader = async () => (await import('../../commands/lease.js')).registerLeaseCommand;
 export const loadLogs: ModuleLoader = async () => (await import('../../commands/logs.js')).registerLogsCommand;
 export const loadEvents: ModuleLoader = async () => (await import('../../commands/events.js')).registerEventsCommand;
 export const loadSsh: ModuleLoader = async () => (await import('../../commands/ssh.js')).registerSshCommands;
@@ -92,8 +94,11 @@ export const loadTeams: ModuleLoader = async () => (await import('../../commands
 export const loadCloud: ModuleLoader = async () => (await import('../../commands/cloud.js')).registerCloudCommands;
 export const loadMessage: ModuleLoader = async () => (await import('../../commands/message.js')).registerMessageCommand;
 export const loadFeed: ModuleLoader = async () => (await import('../../commands/feed.js')).registerFeedCommand;
+export const loadMailboxes: ModuleLoader = async () => (await import('../../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../../commands/serve.js')).registerServeCommand;
 export const loadAudit: ModuleLoader = async () => (await import('../../commands/audit.js')).registerAuditCommands;
+export const loadWebhook: ModuleLoader = async () => (await import('../../commands/webhook.js')).registerWebhookCommand;
+export const loadFunnel: ModuleLoader = async () => (await import('../../commands/funnel.js')).registerFunnelCommand;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -153,6 +158,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   trash: [loadTrash],
   restore: [loadRestore],
   doctor: [loadDoctor],
+  apply: [loadApply],
   check: [loadCheck],
   status: [loadStatus],
   profiles: [loadProfiles],
@@ -177,12 +183,20 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   browser: [loadBrowser],
   computer: [loadComputer],
   hosts: [loadHosts],
+  lease: [loadLease],
   logs: [loadLogs],
   events: [loadEvents],
   ssh: [loadSsh],
   devices: [loadSsh],
+  // `fleet` is a commander alias of `devices` (see commands/ssh.ts); list it so
+  // lazy registration loads the devices tree when the user types `agents fleet`.
+  fleet: [loadSsh],
   pull: [loadPull],
   push: [loadPush],
+  // `repos` is the canonical command name; `repo` remains a convenience alias
+  // (see commands/repo.ts). List both so lazy registration loads the tree
+  // whichever the user types.
+  repos: [loadRepo],
   repo: [loadRepo],
   setup: [loadSetup],
   sessions: [loadSessions],
@@ -190,6 +204,10 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   cloud: [loadCloud],
   message: [loadMessage],
   feed: [loadFeed],
+  mailboxes: [loadMailboxes],
+  mailbox: [loadMailboxes],
   serve: [loadServe],
   audit: [loadAudit],
+  webhook: [loadWebhook],
+  funnel: [loadFunnel],
 };

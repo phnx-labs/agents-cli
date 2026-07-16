@@ -11,6 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { execFileSync } from 'child_process';
 import type { AgentId, DiscoveredPlugin, PluginManifest, MarketplaceSpec } from './types.js';
 import { getPluginsDir, getTrashPluginsDir, getExtraPluginsDir, getProjectPluginsDir, getSystemPluginsDir } from './state.js';
@@ -46,6 +47,8 @@ import {
 
 const PLUGIN_MANIFEST_DIR = '.claude-plugin';
 const PLUGIN_MANIFEST_FILE = 'plugin.json';
+const GEMINI_EXTENSION_MANIFEST_FILE = 'gemini-extension.json';
+const HERMES_PLUGIN_MANIFEST_FILE = 'plugin.yaml';
 const USER_CONFIG_FILE = '.user-config.json';
 const SOURCE_FILE = '.source';
 
@@ -183,12 +186,34 @@ export function pluginResourceGroups(plugin: DiscoveredPlugin): PluginResourceGr
   return out;
 }
 
+/**
+ * True when a manifest field declares an inline execution surface — a non-empty
+ * path string, a non-empty array, or an object with at least one key. The
+ * official plugin format lets `hooks`/`mcpServers` live inline in the manifest
+ * (a path or an inline map) instead of as a `hooks/` dir or `.mcp.json` file, so
+ * filesystem-only detection would miss them and auto-enable a hostile plugin.
+ */
+function manifestDeclaresExecSurface(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return false;
+}
+
 export function inspectPluginCapabilities(pluginRoot: string): PluginCapabilities {
   const manifest = loadPluginManifest(pluginRoot);
   const plugin = manifest ? buildDiscoveredPlugin(pluginRoot, manifest) : null;
   return {
-    hasHooks: (plugin?.hooks.length || 0) > 0 || pluginHasDirectoryEntries(pluginRoot, 'hooks'),
-    hasMcp: fs.existsSync(path.join(pluginRoot, '.mcp.json')),
+    // Inline manifest `hooks`/`mcpServers` are execution surfaces too — a cloned
+    // repo's project plugin must not be auto-enabled just because it ships the
+    // exec config inline in plugin.json rather than as a hooks/ dir or .mcp.json.
+    hasHooks:
+      (plugin?.hooks.length || 0) > 0 ||
+      pluginHasDirectoryEntries(pluginRoot, 'hooks') ||
+      manifestDeclaresExecSurface(manifest?.hooks),
+    hasMcp:
+      fs.existsSync(path.join(pluginRoot, '.mcp.json')) ||
+      manifestDeclaresExecSurface(manifest?.mcpServers),
     hasBin: (plugin?.bin.length || 0) > 0,
     hasScripts: (plugin?.scripts.length || 0) > 0,
     hasSettings: pluginHasNonPermissionSettings(pluginRoot),
@@ -592,10 +617,42 @@ export function syncPluginToVersion(
     return result;
   }
 
+  // Gemini CLI loads extensions from $HOME/.gemini/extensions/<name>/.
+  // Copy the plugin bundle as an extension and synthesize gemini-extension.json.
+  if (agent === 'gemini') {
+    const enablePlugin = options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root));
+    if (!enablePlugin) {
+      return result;
+    }
+    const ok = installGeminiPlugin(plugin, versionHome);
+    result.success = ok;
+    if (ok) {
+      result.skills = plugin.skills.map(s => `${plugin.name}:${s}`);
+      result.commands = plugin.commands.map(c => `${plugin.name}:${c}`);
+      result.agentDefs = plugin.agentDefs.map(a => `${plugin.name}:${a}`);
+      result.bin = plugin.bin;
+      result.hooks = plugin.hooks;
+      result.mcp = plugin.hasMcp;
+      result.settings = plugin.hasSettings;
+      result.permissions = pluginHasPermissions(plugin);
+    }
+    return result;
+  }
+
   // Goose loads Open Plugins from $HOME/.agents/plugins/<name>/ (same layout as
   // agents-cli's source tree). Under the shim HOME is the version home.
   if (agent === 'goose') {
     const ok = installGoosePlugin(plugin, versionHome);
+    result.success = ok;
+    if (ok) result.skills.push(plugin.name);
+    return result;
+  }
+
+  // Hermes loads plugins from a flat $HOME/.hermes/plugins/<name>/ dir with a
+  // plugin.yaml manifest, gated by a plugins.enabled allowlist in config.yaml.
+  if (agent === 'hermes') {
+    const enablePlugin = options.allowExecSurfaces === true || !hasPluginExecSurfaces(inspectPluginCapabilities(plugin.root));
+    const ok = installHermesPlugin(plugin, versionHome, enablePlugin);
     result.success = ok;
     if (ok) result.skills.push(plugin.name);
     return result;
@@ -1024,6 +1081,95 @@ export function removeOpenCodePlugin(pluginName: string, versionHome: string): b
 }
 
 
+// ─── Gemini extensions ───────────────────────────────────────────────────────
+
+/**
+ * Gemini CLI extensions live under `$HOME/.gemini/extensions/<name>/` and
+ * require a `gemini-extension.json` manifest at the extension root.
+ */
+export function geminiExtensionsDir(versionHome: string): string {
+  return path.join(versionHome, '.gemini', 'extensions');
+}
+
+function readPluginMcpConfigForGemini(pluginRoot: string): Record<string, unknown> | undefined {
+  const mcpPath = path.join(pluginRoot, '.mcp.json');
+  if (!fs.existsSync(mcpPath)) return undefined;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(mcpPath, 'utf-8')) as { mcpServers?: Record<string, unknown> };
+    if (!parsed.mcpServers || typeof parsed.mcpServers !== 'object') return undefined;
+    return rewriteGeminiExtensionVars(parsed.mcpServers) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function rewriteGeminiExtensionVars(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return value
+      .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, '${extensionPath}')
+      .replace(/\$\{CLAUDE_PLUGIN_DATA\}/g, '${extensionPath}/.data');
+  }
+  if (Array.isArray(value)) return value.map(rewriteGeminiExtensionVars);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, rewriteGeminiExtensionVars(item)])
+    );
+  }
+  return value;
+}
+
+function writeGeminiExtensionManifest(plugin: DiscoveredPlugin, destRoot: string): void {
+  const manifest: Record<string, unknown> = {
+    name: plugin.manifest.name,
+    version: plugin.manifest.version,
+    description: plugin.manifest.description,
+  };
+  const mcpServers = readPluginMcpConfigForGemini(destRoot);
+  if (mcpServers && Object.keys(mcpServers).length > 0) {
+    manifest.mcpServers = mcpServers;
+  }
+  fs.writeFileSync(
+    path.join(destRoot, GEMINI_EXTENSION_MANIFEST_FILE),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+    'utf-8'
+  );
+}
+
+export function installGeminiPlugin(plugin: DiscoveredPlugin, versionHome: string): boolean {
+  const destRoot = path.join(geminiExtensionsDir(versionHome), plugin.name);
+  try {
+    if (fs.existsSync(destRoot)) {
+      fs.rmSync(destRoot, { recursive: true, force: true });
+    }
+    fs.cpSync(plugin.root, destRoot, { recursive: true });
+    const userConfig = loadUserConfig(plugin.name);
+    if (Object.keys(userConfig).length > 0) {
+      expandUserConfigInDir(destRoot, userConfig);
+    }
+    writeGeminiExtensionManifest(plugin, destRoot);
+    fs.writeFileSync(
+      path.join(destRoot, '.agents-cli-managed'),
+      `plugin=${plugin.name}\n`,
+      'utf-8'
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isGeminiPluginInstalled(pluginName: string, versionHome: string): boolean {
+  return fs.existsSync(path.join(geminiExtensionsDir(versionHome), pluginName, GEMINI_EXTENSION_MANIFEST_FILE));
+}
+
+export function removeGeminiPlugin(pluginName: string, versionHome: string): boolean {
+  const destRoot = path.join(geminiExtensionsDir(versionHome), pluginName);
+  if (!fs.existsSync(destRoot)) return false;
+  fs.rmSync(destRoot, { recursive: true, force: true });
+  return true;
+}
+
+
 // ─── Goose plugins (Open Plugins under .agents/plugins/) ─────────────────────
 
 /**
@@ -1067,6 +1213,118 @@ export function removeGoosePlugin(pluginName: string, versionHome: string): bool
   return true;
 }
 
+// ─── Hermes plugins (flat ~/.hermes/plugins/ + config.yaml enable toggle) ─────
+
+/**
+ * Hermes (Nous Research) loads plugins from a flat `$HOME/.hermes/plugins/<name>/`
+ * directory holding a `plugin.yaml` manifest — NOT the Claude marketplace layout.
+ * Under agents-cli version isolation HOME is the version home, so we install to:
+ *   {versionHome}/.hermes/plugins/<name>/
+ * A plugin does not load until its name is added to `plugins.enabled` (a YAML
+ * array) in `{versionHome}/.hermes/config.yaml`; a deny-list `plugins.disabled`
+ * wins on conflict, so agents-cli only manages the `enabled` allowlist and never
+ * touches `disabled` (user-owned).
+ */
+export function hermesPluginsDir(versionHome: string): string {
+  return path.join(versionHome, '.hermes', 'plugins');
+}
+
+function hermesConfigPath(versionHome: string): string {
+  return path.join(versionHome, '.hermes', 'config.yaml');
+}
+
+function writeHermesPluginManifest(plugin: DiscoveredPlugin, destRoot: string): void {
+  const manifest: Record<string, unknown> = {
+    name: plugin.manifest.name,
+    version: plugin.manifest.version,
+    description: plugin.manifest.description,
+  };
+  fs.writeFileSync(
+    path.join(destRoot, HERMES_PLUGIN_MANIFEST_FILE),
+    yaml.stringify(manifest),
+    'utf-8'
+  );
+}
+
+/**
+ * Add or remove a plugin name in `plugins.enabled` within ~/.hermes/config.yaml,
+ * preserving every other key (read → mutate → write). Never touches
+ * `plugins.disabled`. No-op (no rewrite) when the desired state already holds.
+ */
+export function setHermesPluginEnabled(pluginName: string, versionHome: string, enabled: boolean): void {
+  const configPath = hermesConfigPath(versionHome);
+
+  let config: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    const parsed = yaml.parse(fs.readFileSync(configPath, 'utf-8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      config = parsed as Record<string, unknown>;
+    }
+  }
+
+  if (!config.plugins || typeof config.plugins !== 'object' || Array.isArray(config.plugins)) {
+    config.plugins = {};
+  }
+  const plugins = config.plugins as Record<string, unknown>;
+  const current = Array.isArray(plugins.enabled) ? (plugins.enabled as unknown[]).filter((n): n is string => typeof n === 'string') : [];
+  const has = current.includes(pluginName);
+
+  if (enabled && !has) {
+    plugins.enabled = [...current, pluginName];
+  } else if (!enabled && has) {
+    plugins.enabled = current.filter((n) => n !== pluginName);
+  } else {
+    return; // desired state already holds — no rewrite
+  }
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, yaml.stringify(config), 'utf-8');
+}
+
+export function installHermesPlugin(plugin: DiscoveredPlugin, versionHome: string, enable: boolean): boolean {
+  const destRoot = path.join(hermesPluginsDir(versionHome), plugin.name);
+  try {
+    if (fs.existsSync(destRoot)) {
+      fs.rmSync(destRoot, { recursive: true, force: true });
+    }
+    fs.cpSync(plugin.root, destRoot, { recursive: true });
+    const userConfig = loadUserConfig(plugin.name);
+    if (Object.keys(userConfig).length > 0) {
+      expandUserConfigInDir(destRoot, userConfig);
+    }
+    writeHermesPluginManifest(plugin, destRoot);
+    fs.writeFileSync(
+      path.join(destRoot, '.agents-cli-managed'),
+      `plugin=${plugin.name}\n`,
+      'utf-8'
+    );
+    // Enable only when trusted — never DOWN-toggle here. An un-flagged background
+    // re-sync of an exec-surface plugin passes enable=false; forcing the allowlist
+    // to false then would clobber a plugin the user deliberately enabled with
+    // --allow-exec-surfaces. Mirror addPluginToSettings: add-if-trusted, else leave
+    // the existing enabled state untouched. (Removal still unregisters explicitly.)
+    if (enable) {
+      setHermesPluginEnabled(plugin.name, versionHome, true);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isHermesPluginInstalled(pluginName: string, versionHome: string): boolean {
+  return fs.existsSync(path.join(hermesPluginsDir(versionHome), pluginName, HERMES_PLUGIN_MANIFEST_FILE));
+}
+
+export function removeHermesPlugin(pluginName: string, versionHome: string): boolean {
+  const destRoot = path.join(hermesPluginsDir(versionHome), pluginName);
+  const existed = fs.existsSync(destRoot);
+  if (existed) fs.rmSync(destRoot, { recursive: true, force: true });
+  // Always drop it from the enabled allowlist, even if the dir was already gone.
+  setHermesPluginEnabled(pluginName, versionHome, false);
+  return existed;
+}
+
 // ─── Sync status ──────────────────────────────────────────────────────────────
 
 /**
@@ -1083,8 +1341,14 @@ export function isPluginSynced(
   if (agent === 'opencode') {
     return isOpenCodePluginInstalled(plugin.name, versionHome);
   }
+  if (agent === 'gemini') {
+    return isGeminiPluginInstalled(plugin.name, versionHome);
+  }
   if (agent === 'goose') {
     return isGoosePluginInstalled(plugin.name, versionHome);
+  }
+  if (agent === 'hermes') {
+    return isHermesPluginInstalled(plugin.name, versionHome);
   }
   const spec = marketplaceSpecForName(plugin.marketplace);
   if (!isInstalledInMarketplace(plugin.name, spec, agent, versionHome)) return false;
@@ -1136,9 +1400,25 @@ export function removePluginFromVersion(
     return result;
   }
 
+  // Gemini: remove extension directory from ~/.gemini/extensions/.
+  if (agent === 'gemini') {
+    if (removeGeminiPlugin(pluginName, versionHome)) {
+      result.skills.push(pluginName);
+    }
+    return result;
+  }
+
   // Goose: remove Open Plugin directory from versionHome/.agents/plugins/.
   if (agent === 'goose') {
     if (removeGoosePlugin(pluginName, versionHome)) {
+      result.skills.push(pluginName);
+    }
+    return result;
+  }
+
+  // Hermes: remove the flat plugin dir and drop it from config.yaml plugins.enabled.
+  if (agent === 'hermes') {
+    if (removeHermesPlugin(pluginName, versionHome)) {
       result.skills.push(pluginName);
     }
     return result;

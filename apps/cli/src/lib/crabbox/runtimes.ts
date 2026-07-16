@@ -107,6 +107,31 @@ export async function pickRuntimes(
   return checkbox({ message: 'Provision which runtime(s) on the leased box?', choices });
 }
 
+/**
+ * The lease runtime to provision for a headless run of `agentName`.
+ *
+ * When the agent is itself a lease-capable runtime (claude/codex/gemini/grok)
+ * that IS the runtime to install. Otherwise fall back to the single signed-in
+ * lease runtime (preferring claude), or null when none is signed in. This is the
+ * non-interactive replacement for the runtime checkbox picker: `--lease` requires
+ * a prompt, so it is headless by contract and must never block on a TTY.
+ *
+ * Profile-dispatch agents (kimi/deepseek) and custom workflow agents that run
+ * under a non-obvious runtime are resolved separately — see RUSH-1725.
+ */
+export function inferLeaseRuntime(agentName: string, detected: DetectedRuntime[]): AgentId | null {
+  const signedIn = detected.filter((d) => d.signedIn && d.credPath);
+  // The agent names a lease runtime directly: require that runtime to be signed
+  // in — never silently substitute a different one for an explicit `run <runtime>`
+  // (that would lease a billable box only to boot it "Not logged in"). Not signed
+  // in → null, so the caller exits with "sign into it locally first".
+  if (LEASE_RUNTIMES.some((c) => c.id === agentName)) {
+    return signedIn.find((d) => d.id === agentName)?.id ?? null;
+  }
+  // Custom/workflow agent: fall back to the signed-in runtime (preferring claude).
+  return signedIn.find((d) => d.id === 'claude')?.id ?? signedIn[0]?.id ?? null;
+}
+
 // A long random sentinel makes an accidental (or malicious) collision with a
 // token's contents effectively impossible, so the quoted heredoc can never be
 // closed early by the credential body.
@@ -172,7 +197,15 @@ export async function resolveClaudeCredentialsBlob(opts?: {
   if (process.platform === 'darwin') {
     // 1) Bare service — the default native (non-managed) install.
     const bare = tryRead(service(undefined));
-    if (bare) return bare;
+    if (bare) {
+      if (!opts?.preferEmail) return bare;
+      // preferEmail is set — verify the bare service belongs to the right account
+      // before handing it back; on mismatch fall through to managed installs.
+      const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
+      const bareEmail = await accountEmail(realHome).catch(() => null);
+      if (bareEmail === opts.preferEmail) return bare;
+      // email mismatch — fall through
+    }
 
     // 2) Managed installs — hash-suffixed service keyed to each version home.
     //    Prefer the version whose account email matches the copied config.

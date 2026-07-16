@@ -2,11 +2,16 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import {
   parseLoopBlock,
   parseWorkflowFrontmatter,
+  listWorkflowsForAgent,
   resolveAllowedSubagents,
   pruneStaleWorkflowSubagents,
+  syncWorkflowToVersion,
+  transformWorkflowForKimi,
+  transformWorkflowForAntigravity,
 } from './workflows.js';
 
 describe('parseLoopBlock — defensive coercion (issue #332)', () => {
@@ -163,5 +168,168 @@ describe('parseWorkflowFrontmatter — loop block', () => {
     ].join('\n'));
     const fm = parseWorkflowFrontmatter(dir)!;
     expect(fm.loop).toBeUndefined();
+  });
+});
+
+describe('workflow native projections', () => {
+  function writeWorkflow(body: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-wf-projection-'));
+    fs.writeFileSync(path.join(dir, 'WORKFLOW.md'), body, 'utf-8');
+    return dir;
+  }
+
+  it('converts a workflow into a Kimi flow skill', () => {
+    const dir = writeWorkflow('---\nname: Review Flow\ndescription: Review code\n---\n\nCheck the diff and report findings.');
+
+    const skill = transformWorkflowForKimi(dir, 'review-flow');
+
+    expect(skill).toContain('name: review-flow');
+    expect(skill).toContain('type: flow');
+    expect(skill).toContain('agents_workflow: review-flow');
+    expect(skill).toContain('description: Review code');
+    expect(skill).toContain('```d2');
+    expect(skill).toContain('BEGIN -> step -> END');
+    expect(skill).toContain('Check the diff and report findings.');
+  });
+
+  it('preserves an existing Mermaid diagram for Kimi flow skills', () => {
+    const dir = writeWorkflow('---\nname: Mermaid Flow\ndescription: Has diagram\n---\n\n```mermaid\nflowchart TD\nBEGIN --> END\n```');
+
+    const skill = transformWorkflowForKimi(dir, 'mermaid-flow');
+
+    expect(skill).toContain('type: flow');
+    expect(skill).toContain('```mermaid');
+    expect(skill).toContain('BEGIN --> END');
+  });
+
+  it('syncs and lists only agents-cli managed Kimi workflow destinations', () => {
+    const dir = writeWorkflow('---\nname: Native Flow\ndescription: Native projection\n---\n\nDo the work.');
+    const kimiHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-kimi-wf-home-'));
+
+    try {
+      const nativeSkillDir = path.join(kimiHome, '.kimi-code', 'skills', 'native-flow');
+      fs.mkdirSync(nativeSkillDir, { recursive: true });
+      fs.writeFileSync(path.join(nativeSkillDir, 'SKILL.md'), '---\nname: Native Flow\ndescription: User-owned\ntype: flow\n---\n\n```d2\nBEGIN -> END\n```\n');
+      expect(syncWorkflowToVersion(dir, 'native-flow', 'kimi', kimiHome).success).toBe(false);
+      expect(listWorkflowsForAgent('kimi', kimiHome)).toEqual([]);
+
+      fs.rmSync(nativeSkillDir, { recursive: true, force: true });
+      expect(syncWorkflowToVersion(dir, 'native-flow', 'kimi', kimiHome).success).toBe(true);
+      expect(fs.existsSync(path.join(kimiHome, '.kimi-code', 'skills', 'native-flow', 'SKILL.md'))).toBe(true);
+      expect(listWorkflowsForAgent('kimi', kimiHome)).toEqual(['native-flow']);
+    } finally {
+      fs.rmSync(kimiHome, { recursive: true, force: true });
+    }
+  });
+
+  it('converts a workflow into an Antigravity workflow markdown file', () => {
+    const dir = writeWorkflow('---\nname: Ship Flow\ndescription: Ship safely\n---\n\n1. Test\n2. Release');
+
+    const workflow = transformWorkflowForAntigravity(dir, 'ship-flow');
+
+    // Required `description` frontmatter (agy's discovery contract) + ownership marker.
+    expect(workflow).toContain('description: Ship safely');
+    expect(workflow).toContain('name: Ship Flow');
+    expect(workflow).toContain('agents_workflow: ship-flow');
+    // Numbered-step body preserved verbatim below the frontmatter.
+    expect(workflow).toContain('1. Test');
+    expect(workflow).toContain('2. Release');
+  });
+
+  it('syncs Antigravity workflows to the shared HOME-global dir, guarding user-owned files', () => {
+    const dir = writeWorkflow('---\nname: Global Flow\ndescription: Global projection\n---\n\nRun the steps.');
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-agy-home-'));
+    const realHome = process.env.HOME;
+    // Antigravity workflows are HOME-global (agy scans ~/.gemini/config/global_workflows/),
+    // not version-isolated — so the writer ignores versionHome and resolves from $HOME.
+    process.env.HOME = fakeHome;
+
+    try {
+      const globalDir = path.join(fakeHome, '.gemini', 'config', 'global_workflows');
+      fs.mkdirSync(globalDir, { recursive: true });
+      // A user-authored workflow of the same name (no ownership marker) must not be clobbered.
+      fs.writeFileSync(path.join(globalDir, 'global-flow.md'), '---\ndescription: User-owned\n---\n\nHand-written.\n');
+      // versionHome is intentionally unused for antigravity; pass a dummy to prove it.
+      expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(false);
+      expect(listWorkflowsForAgent('antigravity', '/nonexistent-version-home')).toEqual([]);
+
+      fs.rmSync(path.join(globalDir, 'global-flow.md'), { force: true });
+      expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(true);
+      expect(fs.existsSync(path.join(globalDir, 'global-flow.md'))).toBe(true);
+      expect(listWorkflowsForAgent('antigravity', '/nonexistent-version-home')).toEqual(['global-flow']);
+      // Re-syncing an agents-cli-managed file is idempotent (marker matches).
+      expect(syncWorkflowToVersion(dir, 'global-flow', 'antigravity', '/nonexistent-version-home').success).toBe(true);
+    } finally {
+      if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Goose workflow recipe sync', () => {
+  it('writes a recipe YAML and subrecipe YAML files', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-goose-workflow-'));
+    try {
+      const workflowDir = path.join(root, 'wf');
+      const subagentsDir = path.join(workflowDir, 'subagents');
+      const versionHome = path.join(root, 'home');
+      fs.mkdirSync(subagentsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(workflowDir, 'WORKFLOW.md'),
+        [
+          '---',
+          'name: Review workflow',
+          'description: Review code',
+          'model: claude-sonnet-4',
+          'allowedAgents:',
+          '  - reviewer',
+          '---',
+          'Coordinate the review.',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(subagentsDir, 'reviewer.md'),
+        '---\nname: reviewer\ndescription: Reviews code\n---\n\nInspect code changes.',
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(subagentsDir, 'ignored.md'),
+        '---\nname: ignored\ndescription: Ignored\n---\n\nDo not include.',
+        'utf-8'
+      );
+
+      const result = syncWorkflowToVersion(workflowDir, 'review-wf', 'goose', versionHome);
+      expect(result).toEqual({ success: true });
+
+      const recipePath = path.join(versionHome, '.config', 'goose', 'recipes', 'review-wf.yaml');
+      const recipe = yaml.parse(fs.readFileSync(recipePath, 'utf-8'));
+      expect(recipe).toMatchObject({
+        version: '1.0.0',
+        title: 'Review workflow',
+        description: 'Review code',
+        instructions: 'Coordinate the review.',
+        prompt: 'Coordinate the review.',
+        settings: { goose_model: 'claude-sonnet-4' },
+      });
+      expect(recipe.sub_recipes).toEqual([{
+        name: 'reviewer',
+        path: './review-wf.subrecipes/reviewer.yaml',
+        description: 'Workflow subrecipe reviewer',
+      }]);
+
+      const subrecipe = yaml.parse(fs.readFileSync(path.join(versionHome, '.config', 'goose', 'recipes', 'review-wf.subrecipes', 'reviewer.yaml'), 'utf-8'));
+      expect(subrecipe).toMatchObject({
+        version: '1.0.0',
+        title: 'reviewer',
+        description: 'Reviews code',
+        instructions: 'Inspect code changes.',
+      });
+      expect(fs.existsSync(path.join(versionHome, '.config', 'goose', 'recipes', 'review-wf.subrecipes', 'ignored.yaml'))).toBe(false);
+      expect(listWorkflowsForAgent('goose', versionHome)).toEqual(['review-wf']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

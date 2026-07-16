@@ -323,7 +323,12 @@ export async function runDaemon(): Promise<void> {
   }
 
   const scheduler = new JobScheduler(async (config) => {
-    log('INFO', `Triggering job '${config.name}' (agent: ${config.agent})`);
+    const jobLabel = config.command
+      ? 'command'
+      : config.workflow
+        ? `workflow: ${config.workflow}`
+        : `agent: ${config.agent}`;
+    log('INFO', `Triggering job '${config.name}' (${jobLabel})`);
     try {
       const meta = await executeJobDetached(config);
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
@@ -411,6 +416,7 @@ export async function runDaemon(): Promise<void> {
         log('INFO', `sessions sync: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}` +
           (r.errors.length ? `, ${r.errors.length} error(s): ${r.errors[0]}` : ''));
       }
+      if (r.warnings.length) log('WARN', `sessions sync: ${r.warnings[0]}`);
     } catch (err) {
       log('ERROR', `sessions sync failed: ${(err as Error).message}`);
     } finally {

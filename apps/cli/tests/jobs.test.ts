@@ -22,6 +22,9 @@ vi.mock('../src/lib/state.js', () => {
   const state = () => gt.__agents_cli_jobs_test_state__ as JobsHoistedState;
   return {
     get getRoutinesDir() { return () => nodePath.join(state().TEST_DIR, 'routines'); },
+    // System-layer routines dir — a nested path that won't exist under TEST_DIR,
+    // so listJobs()/readJob() union it but find nothing (existing tests unchanged).
+    get getSystemRoutinesDir() { return () => nodePath.join(state().TEST_DIR, '.system', 'routines'); },
     get getRunsDir() { return () => nodePath.join(state().TEST_DIR, 'runs'); },
     get getUserAgentsDir() { return () => state().TEST_DIR; },
     get getCliVersionCachePath() { return () => nodePath.join(state().TEST_DIR, '.cli-version-cache.json'); },
@@ -90,9 +93,9 @@ describe('validateJob', () => {
     expect(errors).toContain('schedule (cron expression) or trigger is required');
   });
 
-  it('requires agent or workflow', () => {
+  it('requires agent, workflow, or command', () => {
     const errors = validateJob({ name: 'test', schedule: '* * * * *', prompt: 'hi' });
-    expect(errors).toContain('exactly one of agent or workflow is required');
+    expect(errors).toContain('exactly one of agent, workflow, or command is required');
   });
 
   it('requires prompt', () => {

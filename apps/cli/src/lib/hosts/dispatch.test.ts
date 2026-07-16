@@ -6,12 +6,44 @@ import {
   buildDetachedLaunchCommand,
   buildRunForwardedArgs,
   buildInteractiveRunForwardedArgs,
+  buildStopRemoteCommand,
   remoteCdPrefix,
   terminateDispatchedTask,
 } from './dispatch.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
+
+describe('buildStopRemoteCommand', () => {
+  const exit = '$HOME/.agents/.cache/hosts/abc12345.exit';
+
+  it('rejects non-positive pids before any remote shell is built', () => {
+    expect(() => buildStopRemoteCommand(0, exit)).toThrow(/Invalid remote task pid/);
+    expect(() => buildStopRemoteCommand(-1, exit)).toThrow(/Invalid remote task pid/);
+    expect(() => buildStopRemoteCommand(1.5, exit)).toThrow(/Invalid remote task pid/);
+  });
+
+  it('writes 143 only after signaling a live group; keeps the log path untouched', () => {
+    const cmd = buildStopRemoteCommand(4242, exit);
+    // Live group: TERM then write 143 and report SIGNALED.
+    expect(cmd).toContain('kill -TERM -- -4242');
+    expect(cmd).toContain(`echo 143 > ${exit}`);
+    expect(cmd).toContain('echo SIGNALED');
+    // Already-dead group with a real exit code: adopt it, never overwrite.
+    expect(cmd).toContain('echo "ALREADY $code"');
+    expect(cmd).toContain(`cat ${exit}`);
+    // Never deletes the log (contrast terminateRemoteLaunch's rm -f).
+    expect(cmd).not.toMatch(/rm\s+-f/);
+    expect(cmd).not.toContain('.log');
+  });
+
+  it('when the group is gone with no .exit, still writes 143 (GONE) without requiring kill success', () => {
+    const cmd = buildStopRemoteCommand(99, exit);
+    expect(cmd).toContain('echo GONE');
+    // GONE branch is under the final else (group dead).
+    expect(cmd).toMatch(/else[\s\S]*echo GONE/);
+  });
+});
 
 describe('buildRunForwardedArgs', () => {
   it('forwards --session-id for a fresh run so the remote session gets our id', () => {

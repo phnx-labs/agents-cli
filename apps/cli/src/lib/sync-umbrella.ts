@@ -74,7 +74,7 @@ export interface UmbrellaResult {
   plan: UmbrellaPlan;
   repos?: { pulled: number; errors: string[] };
   secrets?: { pulled: number; skipped: boolean; reason?: string; errors: string[] };
-  sessions?: { ran: boolean; pushed: number; pulled: number; merged: number };
+  sessions?: { ran: boolean; pushed: number; pulled: number; merged: number; error?: string };
   devices?: { synced: number; pending: number; skipped: boolean };
   reconciled: boolean;
 }
@@ -156,9 +156,19 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     const { isSyncConfigured } = await import('./session/sync/config.js');
     if (isBetaEnabled('session-sync') && isSyncConfigured()) {
       const { syncSessions } = await import('./session/sync/sync.js');
-      const r = await syncSessions();
-      result.sessions = { ran: true, pushed: r.pushed, pulled: r.pulled, merged: r.merged };
-      log(`sessions: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}`);
+      // Record a failure here instead of letting it throw: like the fetchSecrets
+      // block above, a failure in one fetch stage must not abort the others or
+      // the reconcile below (see this function's doc comment). Without this,
+      // syncSessions() throwing — e.g. via the C1 containment reject on a
+      // malicious peer manifest — would skip `plan.reconcile` entirely.
+      try {
+        const r = await syncSessions();
+        result.sessions = { ran: true, pushed: r.pushed, pulled: r.pulled, merged: r.merged };
+        log(`sessions: pushed ${r.pushed}, pulled ${r.pulled}, merged ${r.merged}`);
+      } catch (err) {
+        result.sessions = { ran: false, pushed: 0, pulled: 0, merged: 0, error: (err as Error).message };
+        log(`sessions: failed — ${(err as Error).message}`);
+      }
     } else {
       result.sessions = { ran: false, pushed: 0, pulled: 0, merged: 0 };
     }

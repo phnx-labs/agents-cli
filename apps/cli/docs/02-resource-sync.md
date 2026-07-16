@@ -14,7 +14,7 @@ For the conceptual model — what a DotAgents repo is, what resources are, and h
 | Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
 | MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
 | Permissions | `…/.agents/permissions/groups/*.yaml` (same layering) | Agent-native config (`settings.json`, TOML, YAML, or `.rules`) | Convert + merge |
-| Plugins | `…/.agents/plugins/{name}/` (same layering, Claude + OpenClaw only) | `.{agent}/plugins/marketplaces/agents-cli/plugins/<name>/` | Copy + synthetic marketplace + enable in settings |
+| Plugins | `…/.agents/plugins/{name}/` (same layering) | Agent-native plugin or extension directory | Copy + native manifest/registration |
 
 `resolveResource(kind, name)` returns the single winner; `listResources(kind)` returns the union with `source: 'project' \| 'user' \| 'system'`. Same name in a higher layer overrides lower layers; otherwise everything unions.
 
@@ -179,12 +179,12 @@ a format rewrite.
 │ allow: [Read, Grep] │ ─Groups()──────────▶  │   "Grep",        │              deny:  [...]
 │ deny:  [Write]      │ concat per group      │   "Bash(git *)"  │            }}
 │                     │                       │ ],               │
-│ git-safe.yaml       │                       │ deny: [          │          OpenCode (TOML):
-│ ───────             │                       │   "Write"        │          [permission]
-│ allow: [Bash(git *)]│                       │ ],               │          [permission.bash]
-│                     │                       │ additional-      │          "git *" = "allow"
-│ 99-deny.yaml ──────▶│ rules go to deny      │   Directories:   │          "rm *" = "deny"
-│ allow: [Bash(rm *)] │ (naming convention)   │   [...]          │
+│ git-safe.yaml       │                       │ deny: [          │          OpenCode (JSONC/JSON):
+│ ───────             │                       │   "Write"        │          { "permission": {
+│ allow: [Bash(git *)]│                       │ ],               │              "bash": {
+│                     │                       │ additional-      │                "git *": "allow",
+│ 99-deny.yaml ──────▶│ rules go to deny      │   Directories:   │                "rm *": "deny"
+│ allow: [Bash(rm *)] │ (naming convention)   │   [...]          │              }}}
 └─────────────────────┘                       └──────────────────┘          Codex (Starlark file):
                                                                             agents-deny.rules
                                                                             (generated text)
@@ -199,8 +199,10 @@ Per-agent conversion is lossy in both directions:
 
 - Claude's native format is closest to canonical — near 1:1 passthrough
   (`permissions.ts:362-369`).
-- OpenCode maps `Bash(pattern)` rules into a pattern → `allow`/`deny` map
-  (`permissions.ts:385-405`). Non-bash rules are dropped.
+- OpenCode 1.1.1+ maps `Bash(pattern)` rules into the `permission.bash`
+  `allow`/`deny` map in `~/.config/opencode/opencode.jsonc` (or `.json`) for
+  user scope, or project-root `opencode.jsonc` (or `.json`). Non-bash rules are
+  dropped.
 - Codex (>= 0.138.0) writes `approval_policy` and `sandbox_mode` to
   `.codex/config.toml`, plus `sandbox_workspace_write.network_access=true` when
   web tools are allowed. Deny rules are emitted as Starlark to a generated
@@ -208,13 +210,26 @@ Per-agent conversion is lossy in both directions:
 - Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3
   capability rules under `.kiro/settings/permissions.yaml`. Existing user
   rules are preserved when managed rules are merged.
+- Goose maps canonical tool families into `.config/goose/permission.yaml`
+  `user.always_allow` / `user.never_allow` entries using the Goose Developer
+  extension tool names. Existing non-managed permission categories and
+  unrelated user tool entries are preserved.
+- OpenClaw gates at tool granularity only, so only **blanket** (whole-tool)
+  rules map into `~/.openclaw/openclaw.json` `tools.alsoAllow` (allow) /
+  `tools.deny` (deny): `bash → exec`, `read → read`, `write`/`edit → write`,
+  `webfetch → web_fetch`, `websearch → web_search`. Sub-command/path/domain
+  rules (`Bash(git:*)`, `Write(secrets/**)`, `WebFetch(domain:x)`) have no
+  tool-level equivalent and are skipped. The absolute `tools.allow` list is
+  never touched, and all other keys (`mcp`, `exec`, `agents`, …) are preserved.
 
 ## Plugins: Synthetic Marketplace + Exec-Surface Gate
 
 Plugins bundle skills, commands, hooks, MCP servers, settings, and permissions
 under a single `.claude-plugin/plugin.json` manifest. Sync copies the bundle
-into each version home, registers a synthetic per-user marketplace named
-`agents-cli`, and enables the plugin in Claude's / OpenClaw's settings.
+into each capable version home and writes the agent-native registration:
+Claude-style harnesses use the synthetic `agents-cli` marketplace, Gemini
+0.8.0+ receives a generated `gemini-extension.json`, and Goose receives the
+bundle under `.agents/plugins/<name>/`.
 
 ```
 Source: ~/.agents/plugins/<name>/        Per-version destination:
@@ -263,8 +278,7 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
    code on every session.
 
 5. **Capability gating.** Only agents where `supports(agent, 'plugins', version)`
-   passes participate (`capableAgents('plugins')` in `src/lib/agents.ts` —
-   today Claude, OpenClaw, Antigravity, Grok, and Codex >= 0.128.0). Plugins
+   passes participate (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins
    can additionally declare `agents: [...]` in their manifest to narrow further;
    `pluginSupportsAgent()` (`plugins.ts:179`) intersects both lists.
 
@@ -311,3 +325,4 @@ prompt = "Review changes and create a commit with a descriptive message."
 | `getNewResources()` | versions.ts | Diff available vs synced |
 | `syncResourcesToVersion()` | versions.ts | Create symlinks in version home |
 | `markdownToToml()` | convert.ts | Convert command format for Gemini |
+| `syncWorkflowToGooseRecipe()` | workflows.ts | Convert workflows into Goose recipes and subrecipes |

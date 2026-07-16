@@ -25,13 +25,27 @@ export interface ManifestEntry {
   lastTs: string;
 }
 
-/** sessionId -> entry */
-export type AgentManifest = Record<string, ManifestEntry>;
+/**
+ * sessionId -> the session's file entries.
+ *  - file-shaped agents (claude/codex/droid) store a single `ManifestEntry`,
+ *    byte-identical to the pre-multi-file format, so a machine on an older CLI
+ *    reads them unchanged.
+ *  - dir-shaped agents (kimi) store a `ManifestEntry[]`, one per constituent file.
+ *    A machine that predates multi-file support skips these (an unknown agent is
+ *    skipped whole; a kimi-aware-but-file-shaped reader fails to find the flat
+ *    object key and simply retries — it never crashes or corrupts).
+ */
+export type AgentManifest = Record<string, ManifestEntry | ManifestEntry[]>;
+
+/** Normalize a manifest value to its file-entry list (single entry -> length-1). */
+export function manifestEntries(value: ManifestEntry | ManifestEntry[]): ManifestEntry[] {
+  return Array.isArray(value) ? value : [value];
+}
 
 export interface Manifest {
   machine: string;
   updatedAt: string;
-  /** agentId -> (sessionId -> entry) */
+  /** agentId -> (sessionId -> entry | entry[]) */
   agents: Record<string, AgentManifest>;
 }
 

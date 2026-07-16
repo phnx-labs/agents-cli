@@ -17,7 +17,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 | [Self-healing installs](self-healing.md) | Detect, surface, and repair a broken agent binary (gutted install / `ENOENT`) instead of dying cryptically. |
 | [Resource sync](02-resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
 | [Sessions](05-sessions.md) | Unified transcript discovery across Claude, Codex, Gemini, OpenCode. |
-| [Observability](06-observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view. |
+| [Observability](06-observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view, plus `agents mailboxes` fleet comms. |
 | [SSH transport](09-ssh-transport.md) | The one multiplexed engine every `--host` command rides — default connection reuse, keepalive, one-round-trip follow. |
 | [Optimizations](99-optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
 | [Landscape](04-landscape.md) | Where agents-cli sits next to similar tools. |
@@ -34,10 +34,11 @@ How agents-cli is laid out on disk and how it decides what to load.
 
 | Doc | What it covers |
 |---|---|
+| [Fleet profile sync](fleet.md) | `agents apply` — reconcile every device to a declared `fleet:` profile: install agents, sync config, propagate logins so one signed-in host seeds the fleet. |
 | [Teams](teams.md) | Multi-agent DAG teams, boundary contracts, `--watch` supervisor, `--worktree` isolation, `--cloud` dispatch. |
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
 | [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--host`); track with `agents hosts ps` and view/follow with `agents logs`. |
-| [Routines](03-routines.md) | Cron-scheduled agent runs with sandboxed permissions and a long-running daemon. |
+| [Routines](03-routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
 
 ## Extensibility
 

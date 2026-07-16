@@ -287,7 +287,8 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       url: 'https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/',
     },
     // gemini hooks: shipped in v0.26.0 (Jan 2026); older binaries silently ignore the `hooks` key.
-    capabilities: { hooks: { since: '0.26.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: false, skills: true, commands: true, plugins: false, subagents: false, rules: { file: 'GEMINI.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
+    // extensions: gemini-extension.json bundles shipped in v0.8.0; custom subagents in v0.36.0.
+    capabilities: { hooks: { since: '0.26.0' }, mcp: true, mcpHttp: true, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: { since: '0.8.0' }, subagents: { since: '0.36.0' }, rules: { file: 'GEMINI.md' }, workflows: false, memory: false, modes: ['plan', 'edit', 'skip'], rulesImports: true },
   },
   cursor: {
     id: 'cursor',
@@ -312,7 +313,15 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
+    // Subagents: `.cursor/agents/<name>.md` (project) or `~/.cursor/agents/<name>.md`
+    // (user), Markdown with YAML frontmatter (name, description, model, readonly,
+    // is_background — no `color`). Shipped in cursor-agent CLI 2026.01 (Cursor 2.4,
+    // 2026-01-22); cursor-agent uses CalVer build tags (e.g. 2025.11.25-<hash>), so
+    // gate at `>= 2026.1.22`. The `agents sync` path enforces this (versions.ts skips
+    // + warns for pre-2.4 installs); the direct `subagents add --agents cursor` path
+    // writes unconditionally, same as the other since-gated agents.
+    // See transformSubagentForCursor / https://cursor.com/docs/subagents.
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '2026.1.22' }, rules: { file: '.cursorrules' }, workflows: false, memory: false, modes: ['edit', 'skip'] }, // allowlist: ~/.cursor/cli-config.json
   },
   opencode: {
     id: 'opencode',
@@ -351,7 +360,11 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     format: 'markdown',
     variableSyntax: '{{ARGUMENTS}}',
     supportsHooks: true,
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
+    // allowlist: maps blanket (whole-tool) rules to ~/.openclaw/openclaw.json
+    // tools.alsoAllow (allow) / tools.deny (deny). OpenClaw gates at tool
+    // granularity only, so sub-command/path/domain patterns are skipped.
+    // OpenClaw is self-updating (no pinned since), so `true` is correct.
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: false, plugins: true, subagents: true, rules: { file: 'workspace/AGENTS.md' }, workflows: false, memory: true, modes: ['plan', 'edit', 'skip'] },
   },
   copilot: {
     id: 'copilot',
@@ -442,7 +455,13 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     supportsHooks: true,
     // Plugins: Open Plugins under ~/.agents/plugins/<name>/ (same layout as
     // agents-cli source). Version isolation copies into versionHome/.agents/plugins/.
-    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: false, skills: { since: '1.25.0' }, commands: false, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit'] },
+    // Workflows sync as Goose recipe YAML; permissions sync to permission.yaml.
+    // Commands: a Goose slash command is a recipe YAML under
+    // ~/.config/goose/commands/<name>.yaml, registered in ~/.config/goose/config.yaml
+    // under `slash_commands: [{ command, recipe_path }]` (see goose-commands.ts).
+    // Subagents: recipe YAML named agents under ~/.config/goose/agents/<name>.yaml
+    // (goose auto-discovers and delegates to them by name in autonomous mode).
+    capabilities: { hooks: { since: '1.34.0' }, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: { since: '1.25.0' }, commands: true, plugins: true, subagents: true, rules: { file: 'AGENTS.md' }, workflows: true, memory: false, modes: ['edit'] },
   },
   // Google Antigravity CLI (`agy`) — official replacement for Gemini CLI as of IO 2026.
   // configDir nests inside `~/.gemini/` since agy shares the parent dir with the Gemini
@@ -471,7 +490,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     variableSyntax: '{{args}}',
     supportsHooks: true,
     cloudProvider: 'antigravity',
-    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: false, rules: { file: 'AGENTS.md' }, workflows: false, memory: false, modes: ['edit', 'skip'], rulesImports: false },
+    capabilities: { hooks: true, mcp: true, mcpHttp: false, mcpHeaders: false, allowlist: true, skills: true, commands: true, plugins: true, subagents: { since: '1.0.16' }, rules: { file: 'AGENTS.md' }, workflows: { since: '1.0.6' }, memory: false, modes: ['edit', 'skip'], rulesImports: false }, // workflows: markdown files in the shared, HOME-global ~/.gemini/config/global_workflows/ (agy scans it at startup; not version-isolated — see workflows.ts), invoked as /<name> slash commands
   },
   // xAI Grok Build CLI (`grok`) — early beta, SuperGrok Heavy. Auth via OAuth on
   // first launch, or XAI_API_KEY env var for headless. MCP servers configured inline
@@ -545,7 +564,7 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       plugins: true,
       subagents: true, // YAML agent files under ~/.kimi-code/agents/ (see transformSubagentForKimi)
       rules: { file: 'AGENTS.md' },
-      workflows: false,
+      workflows: true,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,
@@ -631,16 +650,25 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     instructionsFile: 'MEMORY.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    supportsHooks: false,
+    supportsHooks: true,
+    // Plugins: Hermes loads plugins from a flat `~/.hermes/plugins/<name>/` dir
+    // with a `plugin.yaml` manifest; a plugin only loads once its name is in the
+    // `plugins.enabled` allowlist in `~/.hermes/config.yaml` (deny-list
+    // `plugins.disabled` wins). Not the Claude marketplace layout, so it installs
+    // via a flat-copy branch (mirrors goose) plus a YAML allowlist toggle.
+    // See https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins
     capabilities: {
-      hooks: false,
+      // Lifecycle hooks land in ~/.hermes/config.yaml under a `hooks:` block
+      // (YAML, shared with `mcp_servers`); gated to Hermes ≥ 0.11.0 which
+      // introduced the configurable hook runner.
+      hooks: { since: '0.11.0' },
       mcp: true,
       mcpHttp: true,
       mcpHeaders: false,
       allowlist: false,
       skills: true,
       commands: false,
-      plugins: false,
+      plugins: true,
       subagents: false,
       rules: { file: 'MEMORY.md' },
       workflows: false,
@@ -659,14 +687,20 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
     npmPackage: '',
     installScript: 'curl -fsSL https://forgecode.dev/cli | sh',
     configDir: path.join(HOME, '.forge'),
-    commandsDir: '',
-    commandsSubdir: '',
+    commandsDir: path.join(HOME, '.forge', 'commands'),
+    commandsSubdir: 'commands',
     skillsDir: path.join(HOME, '.forge', 'skills'),
     hooksDir: 'hooks',
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: false,
+    // Commands: ForgeCode reads Markdown slash commands from `~/.forge/commands/<name>.md`
+    // (also the shared `~/.agents/commands/`); the filename is the command name.
+    // Subagents: named `.md` agent definitions with YAML frontmatter under
+    // `~/.forge/agents/<name>.md` — same Markdown+frontmatter shape as Droid/Copilot
+    // (no `color` field), so transformSubagentForForge aliases transformSubagentForDroid.
+    // See https://forgecode.dev/docs/commands/ and /docs/agent-definition-guide/.
     capabilities: {
       hooks: false,
       mcp: true,
@@ -674,9 +708,9 @@ export const AGENTS: Record<AgentId, AgentConfig> = {
       mcpHeaders: false,
       allowlist: false,
       skills: true,
-      commands: false,
+      commands: true,
       plugins: false,
-      subagents: false,
+      subagents: true,
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: false,
@@ -1012,22 +1046,23 @@ function resolveAccountCredentialPath(base: string, ...segments: string[]): stri
   return null;
 }
 
+/** Decrypted contents of Droid's auth.v2.file (subset we consume). */
+export interface DroidAuthPayload {
+  access_token?: string;
+  active_organization_id?: string | null;
+}
+
 /**
  * Factory Droid stores its OAuth credential encrypted at ~/.factory/auth.v2.file
  * (AES-256-GCM, format `ivB64:tagB64:ctB64`) with the 32-byte key base64-stored
  * in ~/.factory/auth.v2.key. On the keyfile-v2 source there is no OS-keychain /
  * device binding — the key is on disk — so we can decrypt locally with no
- * network call. The decrypted JSON credential's `access_token` is a WorkOS JWT
- * carrying an `email` claim (plus org_id / role). We decode the claim WITHOUT
- * verifying `exp`: the email is stable identity for display, not an
- * authorization decision, so an expired token still yields the right address.
- * Every failure (missing key file — e.g. a keyring-v2/legacy login with no
- * on-disk key, a bad GCM tag, malformed JSON, or no email claim) returns null so
- * the caller falls back to the file-presence signed-in signal. Never throws.
+ * network call. Every failure (missing key file — e.g. a keyring-v2/legacy
+ * login with no on-disk key, a bad GCM tag, or malformed JSON) returns null.
+ * Never throws. Shared by account identity below and the Droid usage fetcher
+ * in usage.ts.
  */
-function decryptDroidCredential(
-  base: string
-): { email: string | null; orgId: string | null; role: string | null } | null {
+export function decryptDroidAuthPayload(base: string): DroidAuthPayload | null {
   const filePath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
   const keyPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.key');
   if (!filePath || !keyPath) return null;
@@ -1044,46 +1079,159 @@ function decryptDroidCredential(
       decipher.final(),
     ]).toString('utf-8');
     const cred = JSON.parse(plaintext);
-    const claims = typeof cred?.access_token === 'string' ? decodeJwtPayload(cred.access_token) : null;
-    if (!claims) return null;
-    return {
-      email: typeof claims.email === 'string' ? claims.email : null,
-      orgId: normalizeIdentityPart(claims.org_id ?? cred.active_organization_id),
-      role: typeof claims.role === 'string' ? claims.role : null,
-    };
+    return cred && typeof cred === 'object' ? (cred as DroidAuthPayload) : null;
   } catch {
     return null;
   }
 }
 
+/**
+ * Derive Droid account identity from the decrypted credential. The
+ * `access_token` is a WorkOS JWT carrying an `email` claim (plus org_id /
+ * role). We decode the claim WITHOUT verifying `exp`: the email is stable
+ * identity for display, not an authorization decision, so an expired token
+ * still yields the right address. Returns null when the credential can't be
+ * decrypted or has no decodable claims, so the caller falls back to the
+ * file-presence signed-in signal.
+ */
+function decryptDroidCredential(
+  base: string
+): { email: string | null; orgId: string | null; role: string | null } | null {
+  const cred = decryptDroidAuthPayload(base);
+  const claims = typeof cred?.access_token === 'string' ? decodeJwtPayload(cred.access_token) : null;
+  if (!claims) return null;
+  return {
+    email: typeof claims.email === 'string' ? claims.email : null,
+    orgId: normalizeIdentityPart(claims.org_id ?? cred?.active_organization_id),
+    role: typeof claims.role === 'string' ? claims.role : null,
+  };
+}
+
 let cachedAgyKeychainSignedIn: boolean | undefined;
 
 /**
- * Antigravity (`agy`, a Codeium/Windsurf-based CLI) stores its OAuth token in
- * the macOS keychain — service `gemini`, account `antigravity` — NOT a file.
- * The file path (`antigravity-oauth-token`) only exists on Linux, where the Go
- * keyring falls back to disk. Probe the keychain for existence (metadata only;
- * `-w` omitted so it never prompts). Cached per process — the keychain is
- * account-global, so one probe covers every installed version. Returns false on
- * non-macOS (the file path handles those).
+ * Antigravity (`agy`) stores its OAuth token via the Go keyring library
+ * (zalando/go-keyring), which is platform-split:
+ *
+ *   - macOS: login keychain, service `gemini`, account `antigravity` — no file.
+ *   - Linux with Secret Service (libsecret / gnome-keyring): attributes
+ *     service=`gemini`, username=`antigravity` (go-keyring's Secret Service
+ *     mapping of service+user). Prefer this over the file when a keyring
+ *     daemon is running.
+ *   - Linux without Secret Service: file fallback at
+ *     `~/.gemini/antigravity-cli/antigravity-oauth-token`.
+ *
+ * Probe the OS keyring for existence after the file check. On macOS,
+ * `security find-generic-password` without `-w` is metadata-only (never
+ * prompts). On Linux, `secret-tool lookup` exit 0 means the item exists
+ * (stdout is the secret — discarded, never logged). Cached per process —
+ * the keyring is account-global, so one probe covers every installed version.
+ * Returns false when the platform has no probe (Windows) or the tool is
+ * missing. Guard with `AGENTS_NO_KEYCHAIN_PROBE=1` for hermetic tests.
  */
+export function antigravityOsKeyringProbe(
+  platform: NodeJS.Platform = process.platform,
+): { cmd: string; args: string[] } | null {
+  if (platform === 'darwin') {
+    return {
+      cmd: 'security',
+      args: ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'],
+    };
+  }
+  if (platform === 'linux') {
+    // go-keyring secret_service attributes: "service" + "username" (not
+    // "account" — that flag is the macOS security(1) spelling of the same user).
+    return {
+      cmd: 'secret-tool',
+      args: ['lookup', 'service', 'gemini', 'username', 'antigravity'],
+    };
+  }
+  return null;
+}
+
+/** @internal test hook — clear the per-process keyring probe cache. */
+export function __resetAntigravityKeychainCacheForTest(): void {
+  cachedAgyKeychainSignedIn = undefined;
+}
+
 async function antigravityKeychainSignedIn(): Promise<boolean> {
-  if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
-  // Test isolation: the real macOS keychain can't be sandboxed per-test, so
-  // allow suites asserting "signed out" to opt out of the probe (same spirit as
-  // AGENTS_REAL_HOME). Not cached, so tests can toggle it.
+  // Test isolation first (before cache): real OS keyrings can't be sandboxed
+  // per-test. Same spirit as AGENTS_REAL_HOME. Not cached, so tests can toggle.
   if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return false;
-  if (process.platform !== 'darwin') {
+  if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
+
+  const probe = antigravityOsKeyringProbe();
+  if (!probe) {
     cachedAgyKeychainSignedIn = false;
     return false;
   }
   try {
-    await execFileAsync('security', ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'], { timeout: 3000 });
+    // Discard stdout: Linux secret-tool lookup prints the secret value.
+    await execFileAsync(probe.cmd, probe.args, {
+      timeout: 3000,
+      // encoding so stdout is a string we can drop without ever logging it
+      encoding: 'utf8',
+    });
     cachedAgyKeychainSignedIn = true;
   } catch {
+    // Missing tool (ENOENT), missing item, locked collection, timeout → signed out.
     cachedAgyKeychainSignedIn = false;
   }
   return cachedAgyKeychainSignedIn;
+}
+
+/**
+ * OpenCode (sst/opencode) stores provider credentials in a single JSON file at
+ * `$XDG_DATA_HOME/opencode/auth.json`, defaulting to
+ * `~/.local/share/opencode/auth.json` on EVERY platform — its `xdg-basedir`
+ * dependency does not special-case macOS, so there is no
+ * `~/Library/Application Support` variant. The path is account-global (not
+ * per-version), matching how `session/discover.ts` already resolves
+ * `~/.local/share/opencode/opencode.db`.
+ *
+ * Resolution order, first existing wins:
+ *   1. `<base>/.local/share/opencode/auth.json` — the passed per-version home.
+ *      This is primarily a test hook (suites write a hermetic auth file under a
+ *      temp home) but also covers any relocated install.
+ *   2. `$XDG_DATA_HOME/opencode/auth.json` — an explicit XDG override, exactly
+ *      what OpenCode itself honours.
+ *   3. `<realHome>/.local/share/opencode/auth.json` — the active default, under
+ *      `AGENTS_REAL_HOME` or `os.homedir()`, so every installed version reflects
+ *      the one account-global login (same fallback shape as
+ *      resolveAccountCredentialPath).
+ * Returns the first existing path, or null. Never throws.
+ */
+function resolveOpenCodeAuthPath(base: string): string | null {
+  const candidates = [path.join(base, '.local', 'share', 'opencode', 'auth.json')];
+  const xdgData = process.env.XDG_DATA_HOME;
+  if (xdgData) candidates.push(path.join(xdgData, 'opencode', 'auth.json'));
+  const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
+  candidates.push(path.join(realHome, '.local', 'share', 'opencode', 'auth.json'));
+  for (const candidate of candidates) {
+    try { if (fs.existsSync(candidate)) return candidate; } catch { /* unreadable */ }
+  }
+  return null;
+}
+
+/**
+ * Validate one OpenCode auth.json entry against its discriminated union
+ * (`type: 'oauth' | 'api' | 'wellknown'`) and confirm the credential actually
+ * carries its required secret field(s) non-empty. This guards against a
+ * corrupt/half-written entry reading as signed-in — the same "must have a real
+ * credential" floor grok/antigravity apply. We only INSPECT the shape here; the
+ * secret values (`access`/`refresh`/`key`/`token`) are never read out or
+ * surfaced anywhere.
+ */
+function isValidOpenCodeCredential(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const cred = value as Record<string, unknown>;
+  const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+  switch (cred.type) {
+    case 'oauth': return nonEmpty(cred.access) || nonEmpty(cred.refresh);
+    case 'api': return nonEmpty(cred.key);
+    case 'wellknown': return nonEmpty(cred.key) && nonEmpty(cred.token);
+    default: return false;
+  }
 }
 
 export async function getAccountInfo(
@@ -1261,10 +1409,12 @@ export async function getAccountInfo(
         // Antigravity (`agy`) stores a consumer Google OAuth grant (access +
         // refresh token, no id_token) — presence of a refresh token is the only
         // signed-in signal we can derive without a network call. Storage is
-        // platform-split: on Linux it's a file at
-        // ~/.gemini/antigravity-cli/antigravity-oauth-token; on macOS the Go
-        // keyring puts it in the keychain (service 'gemini', account
-        // 'antigravity'), so no file exists — check both.
+        // platform-split via go-keyring:
+        //   - file ~/.gemini/antigravity-cli/antigravity-oauth-token (Linux
+        //     fallback when no Secret Service is available)
+        //   - macOS keychain / Linux libsecret (service gemini + user
+        //     antigravity) when a keyring daemon is present
+        // Check the file first, then the OS keyring probe.
         const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
@@ -1317,6 +1467,31 @@ export async function getAccountInfo(
         const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
         if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
+      }
+      case 'opencode': {
+        // OpenCode's auth.json is a record keyed by provider id ->
+        // { type: 'oauth'|'api'|'wellknown', ...secret fields }. There is no
+        // email/identity claim to surface, so — like antigravity/kimi — we
+        // report signed-in state plus the NON-SECRET provider metadata (which
+        // provider ids hold a valid credential) and never read the tokens/keys
+        // themselves. The user's complaint was the row read "not signed in"
+        // despite a live login; a valid provider entry now shows e.g.
+        // "id:muse-spark" so they can see exactly which provider is configured.
+        const authPath = resolveOpenCodeAuthPath(base);
+        if (!authPath) return { ...empty, lastActive };
+        const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
+        if (!data || typeof data !== 'object') return { ...empty, lastActive };
+        const providers = Object.entries(data as Record<string, unknown>)
+          .filter(([, cred]) => isValidOpenCodeCredential(cred))
+          .map(([id]) => id)
+          .sort();
+        if (providers.length === 0) return { ...empty, lastActive };
+        // Provider ids are config keys (e.g. "anthropic", "muse-spark"), not
+        // secrets. Join them into a stable, human-readable account label +
+        // identity key for usage dedup.
+        const accountId = providers.join('+');
+        const accountKey = buildIdentityKey(agentId, [['providers', accountId]]);
+        return { ...empty, signedIn: true, accountId, accountKey, lastActive };
       }
       default:
         return { ...empty, lastActive };
@@ -1485,7 +1660,7 @@ export function countSessionFiles(agentId: AgentId): number {
 }
 
 /** Decode the payload section of a JWT token without verifying its signature. */
-function decodeJwtPayload(token: string): Record<string, any> | null {
+export function decodeJwtPayload(token: string): Record<string, any> | null {
   const payload = token.split('.')[1];
   if (!payload) return null;
   try {

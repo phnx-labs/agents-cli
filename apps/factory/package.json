@@ -3,7 +3,7 @@
   "displayName": "Agents",
   "publisher": "swarmify",
   "description": "Run Claude, Codex, Gemini, Cursor, and other coding agents from one IDE workspace.",
-  "version": "0.9.292",
+  "version": "0.9.294",
   "license": "MIT",
   "author": "Muqsit Nawaz <dev@muqsitnawaz.com>",
   "icon": "assets/agents.png",
@@ -580,7 +580,7 @@
             "Never use tmux; always use a native VS Code editor terminal."
           ],
           "default": "auto",
-          "description": "How agent terminals are launched. 'auto' (default) runs agents inside a tmux session on macOS/Linux for uniform addressing, resume, and tracking \u2014 falling back to a native terminal on Windows or when tmux is missing. Cmd+Shift+H/V create tmux panes instead of VS Code editor splits when tmux is active."
+          "description": "How agent terminals are launched. 'auto' (default) runs agents inside a tmux session on macOS/Linux for uniform addressing, resume, and tracking — falling back to a native terminal on Windows or when tmux is missing. Cmd+Shift+H/V create tmux panes instead of VS Code editor splits when tmux is active."
         },
         "agents.worktreePerTerminal": {
           "type": "boolean",
@@ -600,7 +600,7 @@
         "agents.openaiApiKey": {
           "type": "string",
           "default": "",
-          "description": "OpenAI API key. Used by the Foreman voice coordinator (gpt-realtime-2). Autogit no longer uses this \u2014 commit messages are generated via `agents run claude --model haiku`."
+          "description": "OpenAI API key. Used by the Foreman voice coordinator (gpt-realtime-2). Autogit no longer uses this — commit messages are generated via `agents run claude --model haiku`."
         },
         "agents.commitGenTimeoutMs": {
           "type": "number",

@@ -13,7 +13,7 @@ import {
   mailboxDir,
   isValidMailboxId,
   readMessage,
-  type MailboxMessage,
+  sweepExpired,
 } from './mailbox.js';
 import { listBlocks, removeBlock } from './feed.js';
 
@@ -162,21 +162,9 @@ export function gcMailbox(
         // ignore
       }
     } else {
-      // Live box: lazy expiry is handled by drain/peek, but sweep here for GC metrics.
-      // We still need to read expired messages; reuse readMessage directly to avoid
-      // importing sweepExpired and duplicating logic.
-      for (const sub of ['inbox', 'processing']) {
-        const dir = path.join(boxDir, sub);
-        for (const file of jsonFiles(dir)) {
-          const msg = readMessage(path.join(dir, file));
-          if (msg && msg.expiresAt) {
-            const ts = Date.parse(msg.expiresAt);
-            if (!Number.isNaN(ts) && ts <= now.getTime()) {
-              result.messagesDroppedExpired++;
-            }
-          }
-        }
-      }
+      // Live box: archive expired messages (same path as drain/peek) so GC does
+      // not leave expired files in inbox/processing while only bumping metrics.
+      result.messagesDroppedExpired += sweepExpired(boxDir, name, now);
       result.consumedPruned += pruneConsumed(boxDir, maxConsumedAgeMinutes, now);
     }
   }

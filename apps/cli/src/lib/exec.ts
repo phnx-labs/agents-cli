@@ -191,6 +191,15 @@ export interface ExecOptions {
   /** Raw args captured after `--` on the command line, forwarded verbatim to the underlying agent CLI. */
   passthroughArgs?: string[];
   /**
+   * Tee-and-tail the child's stdout even when no budget cap is active, so the
+   * caller can scan it for rate/usage-limit messages. Claude prints billing
+   * refusals ("monthly spend limit", "out of usage credits") to STDOUT, not
+   * stderr — a fallback chain that only inspects stderr never cascades on
+   * them. Set by runWithFallback for every chain entry; harmless elsewhere
+   * (output is mirrored to the parent's stdout exactly like stdio:'inherit').
+   */
+  captureStdoutTail?: boolean;
+  /**
    * Escape hatch for the interactive tmux spawn-wrap (see shouldWrapInTmux):
    * when true, spawn the agent directly instead of inside a shared-socket tmux
    * session. Also forced off by AGENTS_NO_TMUX=1. No effect on headless runs.
@@ -228,11 +237,12 @@ export function resolveInteractive(
  * @param piped        true when the parent's stdout is NOT a TTY (output piped)
  * @param capsActive   true when a budget watcher is attached (caps configured)
  */
-export function shouldTapStdout(interactive: boolean, piped: boolean, capsActive: boolean): boolean {
+export function shouldTapStdout(interactive: boolean, piped: boolean, capsActive: boolean, captureTail = false): boolean {
   if (interactive) return false;
   // Always pipe when the caller pipes us downstream (preserve composability),
-  // OR when caps are active so the watcher can read the stream at a TTY.
-  return piped || capsActive;
+  // when caps are active so the watcher can read the stream at a TTY, or when
+  // a fallback chain needs a stdout tail for rate-limit detection.
+  return piped || capsActive || captureTail;
 }
 
 /** Pattern for valid environment variable names (C identifier rules). */
@@ -964,10 +974,17 @@ export async function execShimPassthrough(
   });
 }
 
-/** Exit code and captured stderr from a spawned agent process. */
+/** Exit code and captured output from a spawned agent process. */
 interface SpawnResult {
   exitCode: number;
   stderr: string;
+  /**
+   * Rolling tail of the child's stdout, captured only when the stream was
+   * tapped (budget watcher, piped caller, or captureStdoutTail). Empty when
+   * stdout was inherited. Used by runWithFallback to detect billing refusals
+   * Claude prints to stdout rather than stderr.
+   */
+  stdout: string;
 }
 
 /** Inputs that decide whether an interactive spawn is wrapped in a shared-socket tmux session. */
@@ -1151,7 +1168,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       await surfacePaneFailure(before.status, `${options.agent} exited before it could start`);
     }
     await killSession(name, socket).catch(() => {});
-    return { exitCode: before.status ?? 0, stderr: '' };
+    return { exitCode: before.status ?? 0, stderr: '', stdout: '' };
   }
 
   await attachTmux({ socket, args: ['attach-session', '-t', name] });
@@ -1166,10 +1183,10 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       await surfacePaneFailure(after.status, `${options.agent} exited`);
     }
     await killSession(name, socket).catch(() => {});
-    return { exitCode: after.status ?? 0, stderr: '' };
+    return { exitCode: after.status ?? 0, stderr: '', stdout: '' };
   }
   // Pane still alive → the user detached; keep the session for `agents focus`.
-  return { exitCode: 0, stderr: '' };
+  return { exitCode: 0, stderr: '', stdout: '' };
 }
 
 /**
@@ -1260,7 +1277,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     // PIPE (and later tee) stdout whenever the live budget watcher must read it
     // — for ALL non-interactive runs when caps are active, regardless of TTY.
     // See shouldTapStdout() for the rationale (FIX 3, issue #346).
-    const tapStdout = shouldTapStdout(interactive, piped, watcherState !== null);
+    const tapStdout = shouldTapStdout(interactive, piped, watcherState !== null, options.captureStdoutTail);
     const stdio: ('inherit' | 'pipe')[] = interactive
       ? ['inherit', 'inherit', 'inherit']
       : ['inherit', tapStdout ? 'pipe' : 'inherit', 'pipe'];
@@ -1301,10 +1318,17 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
 
     let budgetKilled = false;
     let budgetKillTimer: ReturnType<typeof setTimeout> | undefined;
+    let stdoutTail = '';
+    const STDOUT_TAIL_CAP = 16 * 1024;
     if (!interactive && tapStdout && child.stdout) {
       // TEE the child's stdout back to the parent's so the user still sees
       // output (mirrors stdio:'inherit') while we tap the same stream for usage.
       child.stdout.pipe(process.stdout);
+      // Keep a rolling TAIL (billing refusals arrive at the very end of a run)
+      // for the fallback chain's rate-limit scan.
+      child.stdout.on('data', (chunk: Buffer) => {
+        stdoutTail = (stdoutTail + chunk.toString('utf-8')).slice(-STDOUT_TAIL_CAP);
+      });
       // Tap the same stream for budget usage events without consuming the pipe
       // (a 'data' listener and .pipe() both receive every chunk). Kill on breach.
       if (watcherState) {
@@ -1367,7 +1391,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       // teams/cloud can tell a budget termination apart from a normal failure.
       const exitCode = budgetKilled ? BUDGET_KILL_EXIT_CODE : (code ?? 0);
       timer.end({ exitCode, status: budgetKilled ? 'budget_killed' : code === 0 ? 'success' : 'failed' });
-      resolve({ exitCode, stderr: stderrBuffer });
+      resolve({ exitCode, stderr: stderrBuffer, stdout: stdoutTail });
     });
   });
 }
@@ -1462,6 +1486,12 @@ export const RATE_LIMIT_PATTERNS: RegExp[] = [
   /too many requests/i,
   /api[\s_-]?overloaded/i,
   /\boverloaded\b/i,
+  // Claude billing refusals — "You've hit your org's monthly spend limit" and
+  // "You're out of usage credits". Both end the run with exit 1 and are exactly
+  // the condition a fallback chain exists to recover from. Printed to STDOUT,
+  // hence the stdout tail in SpawnResult.
+  /spend[\s-]?limit/i,
+  /out of (?:usage )?credits/i,
 ];
 
 /** Return true if the text contains any known rate-limit or overload indicator. */
@@ -1599,6 +1629,9 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
       prompt,
       env: envOverride ? { ...(options.env ?? {}), ...envOverride } : options.env,
       sessionId: pinnedSessionId ?? (i === 0 ? options.sessionId : undefined),
+      // Claude prints billing refusals (spend limit / out of credits) to
+      // stdout; tail it so the cascade check below can see them.
+      captureStdoutTail: true,
     };
 
     const label = version ? `${agent}@${version}` : agent;
@@ -1628,7 +1661,7 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     const isLast = i === chain.length - 1;
     if (isLast) return result.exitCode;
 
-    if (!detectRateLimit(result.stderr)) {
+    if (!detectRateLimit(result.stderr) && !detectRateLimit(result.stdout)) {
       return result.exitCode;
     }
 

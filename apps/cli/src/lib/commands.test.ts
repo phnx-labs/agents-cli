@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as yaml from 'yaml';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -194,6 +195,64 @@ describe('version command management', () => {
       ? fs.readdirSync(path.join(trashCommandsDir(home), 'codex', '0.117.0'))
       : [];
     expect(trashEntries).toHaveLength(0);
+  });
+});
+
+describe('ForgeCode native command install', () => {
+  it('installs a native .md command to ~/.forge/commands/ (not command-as-skill)', () => {
+    const home = makeTempHome();
+    // forge: format=markdown, commands: true, commandsSubdir='commands' => native .md,
+    // NOT the command-as-skill path (which fires only when commands is unsupported).
+    writeSystemCommand(home, 'my-cmd', '---\ndescription: Test command\n---\nDo something.');
+    scaffoldInstalledVersion(home, 'forge', '1.0.0');
+
+    const installed = runCommandsExpression(home, "installCommandToVersion('forge', '1.0.0', 'my-cmd', 'copy')") as { success: boolean };
+    expect(installed.success).toBe(true);
+
+    // Native command file lands under the forge version home's .forge/commands/.
+    const commandsDir = path.join(versionHomePath(home, 'forge', '1.0.0'), '.forge', 'commands');
+    expect(fs.existsSync(path.join(commandsDir, 'my-cmd.md'))).toBe(true);
+    // It must be a plain command file, not a SKILL.md wrapper.
+    expect(fs.existsSync(path.join(versionHomePath(home, 'forge', '1.0.0'), '.forge', 'skills', 'my-cmd', 'SKILL.md'))).toBe(false);
+
+    const listed = runCommandsExpression(home, "listCommandsInVersionHome('forge', '1.0.0')") as string[];
+    expect(listed).toEqual(['my-cmd']);
+  });
+});
+
+describe('Goose recipe command install (end-to-end via installCommandToVersion)', () => {
+  it('installs a command as a Goose recipe YAML + config.yaml slash_commands entry', () => {
+    const home = makeTempHome();
+    // goose: commands: true, format markdown, skills >= 1.25.0. Native path routes
+    // through the goose recipe branch, NOT command-as-skill and NOT a .md copy.
+    writeSystemCommand(home, 'deploy', '---\ndescription: Deploy the app\n---\nRun the deploy.');
+    scaffoldInstalledVersion(home, 'goose', '1.34.0');
+
+    const installed = runCommandsExpression(home, "installCommandToVersion('goose', '1.34.0', 'deploy', 'copy')") as { success: boolean };
+    expect(installed.success).toBe(true);
+
+    const versionHome = versionHomePath(home, 'goose', '1.34.0');
+    // Recipe YAML under .config/goose/commands/ (NOT the workflow recipes dir).
+    const recipePath = path.join(versionHome, '.config', 'goose', 'commands', 'deploy.yaml');
+    expect(fs.existsSync(recipePath)).toBe(true);
+    expect(fs.existsSync(path.join(versionHome, '.config', 'goose', 'recipes', 'deploy.yaml'))).toBe(false);
+
+    // config.yaml registers the slash command pointing at the recipe.
+    const config = yaml.parse(fs.readFileSync(path.join(versionHome, '.config', 'goose', 'config.yaml'), 'utf-8')) as { slash_commands?: Array<{ command: string; recipe_path: string }> };
+    expect(config.slash_commands).toEqual([{ command: 'deploy', recipe_path: recipePath }]);
+
+    // listCommandsInVersionHome reports it; diff is clean.
+    const listed = runCommandsExpression(home, "listCommandsInVersionHome('goose', '1.34.0')") as string[];
+    expect(listed).toEqual(['deploy']);
+    const diff = runCommandsExpression(home, "diffVersionCommands('goose', '1.34.0')") as { matched: string[]; toAdd: string[]; toUpdate: string[]; orphans: string[] };
+    expect(diff).toMatchObject({ matched: ['deploy'], toAdd: [], toUpdate: [], orphans: [] });
+
+    // Removal deletes the recipe and unregisters the slash command.
+    const removed = runCommandsExpression(home, "removeCommandFromVersion('goose', '1.34.0', 'deploy')") as { success: boolean };
+    expect(removed.success).toBe(true);
+    expect(fs.existsSync(recipePath)).toBe(false);
+    const after = yaml.parse(fs.readFileSync(path.join(versionHome, '.config', 'goose', 'config.yaml'), 'utf-8')) as { slash_commands?: unknown };
+    expect(after.slash_commands).toBeUndefined();
   });
 });
 

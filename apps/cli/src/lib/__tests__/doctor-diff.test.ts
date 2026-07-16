@@ -190,12 +190,16 @@ describe('diffVersionResources — command-as-skill agents', () => {
     expect(report.kinds.commands.find((c) => c.name === 'foo')?.status).toBe('diff');
   });
 
-  it('does not report commands as missing for an agent that holds neither commands nor skills (goose)', () => {
+  it('reports a source command as missing for goose (now a recipe-backed command agent)', () => {
+    // Goose gained commands support (RUSH-1572): a slash command is a recipe YAML
+    // registered in config.yaml. With commands:true a source command that is not
+    // yet installed reports as missing (previously goose held commands neither
+    // natively nor as skills, so nothing was reported).
     fs.mkdirSync(path.join(userDir, 'commands'), { recursive: true });
     fs.writeFileSync(path.join(userDir, 'commands', 'foo.md'), '# Foo\n');
     fs.mkdirSync(path.join(userDir, '.history', 'versions', 'goose', '1.0.0', 'home'), { recursive: true });
 
     const report = runDiff(projectDir, 'goose', '1.0.0', ['commands']);
-    expect(report.kinds.commands).toEqual([]);
+    expect(report.kinds.commands.find((c) => c.name === 'foo')?.status).toBe('missing');
   });
 });

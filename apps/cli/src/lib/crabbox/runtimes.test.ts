@@ -2,7 +2,52 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { buildCredentialScript, pickRuntimes, resolveClaudeCredentialsBlob, type DetectedRuntime } from './runtimes.js';
+import { buildCredentialScript, pickRuntimes, resolveClaudeCredentialsBlob, inferLeaseRuntime, type DetectedRuntime } from './runtimes.js';
+
+describe('inferLeaseRuntime', () => {
+  const signedIn = (id: DetectedRuntime['id'], email: string | null): DetectedRuntime => ({
+    id, label: id, email, signedIn: true, credPath: `/tmp/${id}.json`,
+  });
+
+  it('uses the agent itself when it is a lease-capable runtime', () => {
+    const detected = [signedIn('claude', 'a@b.com'), signedIn('grok', 'g@x.ai')];
+    expect(inferLeaseRuntime('grok', detected)).toBe('grok');
+    expect(inferLeaseRuntime('codex', [signedIn('codex', null)])).toBe('codex');
+  });
+
+  it('returns null when the named runtime is not signed in — never substitutes another', () => {
+    // `run codex --lease` while only claude is signed in must NOT provision claude.
+    expect(inferLeaseRuntime('codex', [signedIn('claude', 'a@b.com')])).toBeNull();
+    expect(inferLeaseRuntime('grok', [
+      { id: 'grok', label: 'Grok CLI', email: null, signedIn: false, credPath: null },
+      signedIn('claude', 'a@b.com'),
+    ])).toBeNull();
+  });
+
+  it('falls back to the signed-in runtime (preferring claude) for a custom agent', () => {
+    const detected = [signedIn('claude', 'a@b.com'), signedIn('grok', 'g@x.ai')];
+    expect(inferLeaseRuntime('my-workflow', detected)).toBe('claude');
+  });
+
+  it('falls back to the only signed-in runtime when claude is absent', () => {
+    expect(inferLeaseRuntime('my-workflow', [signedIn('grok', 'g@x.ai')])).toBe('grok');
+  });
+
+  it('ignores runtimes with no local credential', () => {
+    const detected: DetectedRuntime[] = [
+      { id: 'claude', label: 'Claude Code', email: null, signedIn: true, credPath: null },
+      signedIn('grok', 'g@x.ai'),
+    ];
+    expect(inferLeaseRuntime('my-workflow', detected)).toBe('grok');
+  });
+
+  it('returns null when nothing is signed in', () => {
+    expect(inferLeaseRuntime('my-workflow', [])).toBeNull();
+    expect(inferLeaseRuntime('my-workflow', [
+      { id: 'claude', label: 'Claude Code', email: null, signedIn: false, credPath: null },
+    ])).toBeNull();
+  });
+});
 
 describe('buildCredentialScript', () => {
   let tmpDir: string;
@@ -114,6 +159,30 @@ describe('resolveClaudeCredentialsBlob', () => {
     expect(blob).toBe(WRAPPED);
     // After the bare miss, the matching home is tried before the non-matching one.
     expect(reads.filter((r) => r !== 'bare')[0]).toBe('svc:/home/match');
+  });
+
+  itDarwin('returns the bare-service blob when preferEmail matches the bare service account', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      preferEmail: 'want@b.com',
+      service: (home) => (home ? `svc:${home}` : 'bare'),
+      readItem: (svc) => (svc === 'bare' ? WRAPPED : (() => { throw new Error('miss'); })()),
+      listVersions: () => [],
+      versionHome: (v) => v,
+      accountEmail: async (_home) => 'want@b.com',
+    });
+    expect(blob).toBe(WRAPPED);
+  });
+
+  itDarwin('falls through bare service and returns null when preferEmail does not match', async () => {
+    const blob = await resolveClaudeCredentialsBlob({
+      preferEmail: 'want@b.com',
+      service: (home) => (home ? `svc:${home}` : 'bare'),
+      readItem: (svc) => (svc === 'bare' ? WRAPPED : (() => { throw new Error('miss'); })()),
+      listVersions: () => [],
+      versionHome: (v) => v,
+      accountEmail: async (_home) => 'other@b.com',
+    });
+    expect(blob).toBeNull();
   });
 
   itDarwin('rejects a payload without a claudeAiOauth.accessToken', async () => {
