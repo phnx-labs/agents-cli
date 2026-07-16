@@ -9,6 +9,10 @@
 import { spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 
 const args = process.argv.slice(2);
 const exe = argVal('--exe');
@@ -113,8 +117,16 @@ async function connectWithRetry(p, tries = 50) {
 const TYPED = `hello-smoke-${process.pid}`;
 
 async function main() {
-  console.log(`spawning daemon: ${exe} --port ${port}`);
-  const daemon = spawn(exe, ['--port', String(port)], { stdio: ['ignore', 'inherit', 'inherit'] });
+  // The daemon requires authentication: provision a token file and pass
+  // --token-file, then send the `auth` frame before any other RPC. (A token-less
+  // daemon refuses to start — that's the security posture this test must honor.)
+  const tokDir = mkdtempSync(join(tmpdir(), 'smoke-tok-'));
+  const tokenFile = join(tokDir, 'token');
+  const token = randomBytes(32).toString('hex');
+  writeFileSync(tokenFile, token, 'utf8');
+
+  console.log(`spawning daemon: ${exe} --port ${port} --token-file <token>`);
+  const daemon = spawn(exe, ['--port', String(port), '--token-file', tokenFile], { stdio: ['ignore', 'inherit', 'inherit'] });
   daemon.on('exit', (code) => {
     if (code !== null && code !== 0) console.error(`daemon exited early: ${code}`);
   });
@@ -123,6 +135,12 @@ async function main() {
   try {
     sock = await connectWithRetry(port);
     const c = new Client(sock);
+
+    // 0. authenticate — mandatory first frame; the daemon drops the connection
+    // for any other method until authed.
+    const authed = await c.call('auth', { token });
+    if (!authed?.ok) fail(`auth did not succeed: ${JSON.stringify(authed)}`);
+    ok('auth');
 
     // 1. ping
     const pong = await c.call('ping');
@@ -361,6 +379,7 @@ async function main() {
   } finally {
     try { sock?.destroy(); } catch {}
     try { daemon.kill(); } catch {}
+    try { rmSync(tokDir, { recursive: true, force: true }); } catch {}
     // best-effort: close notepad so the runner session is clean
     try { spawn('taskkill', ['/IM', 'notepad.exe', '/F'], { stdio: 'ignore' }); } catch {}
   }
