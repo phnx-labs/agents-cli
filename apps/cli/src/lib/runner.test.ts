@@ -148,10 +148,13 @@ describe('command-mode routines (executeJobDetached — daemon/cron path)', () =
     expect(final.status).toBe('completed');
     expect(final.exitCode).toBe(0);
     expect(final.command).toBe('exit 0');
-    // exit-code file written (restart-recovery source of truth)
-    expect(
-      fs.readFileSync(path.join(getRunDir('cmd-det-ok', meta.runId), 'exit-code'), 'utf-8').trim(),
-    ).toBe('0');
+    // exit-code file is the posix restart-recovery source of truth (the sh subshell
+    // wrapper writes it). Windows records status via child.on('exit') only — no file.
+    if (process.platform !== 'win32') {
+      expect(
+        fs.readFileSync(path.join(getRunDir('cmd-det-ok', meta.runId), 'exit-code'), 'utf-8').trim(),
+      ).toBe('0');
+    }
   });
 
   it('records failed / exitCode 3 on a non-zero detached run', async () => {

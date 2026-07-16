@@ -982,7 +982,7 @@ export function registerRunCommand(program: Command): void {
         { buildExecCommand, parseExecEnv, execAgent, runWithFallback, normalizeMode, resolveMode, headlessPlanStallCommand, nativeResume, resolveInteractive },
         { ALL_AGENT_IDS },
         { profileExists, resolveProfileForRun },
-        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
+        { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported, isHeadlessSecretsContext },
         { splitBundleRef, resolveSshTarget, remoteResolveEnv },
         { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
@@ -1387,15 +1387,17 @@ export function registerRunCommand(program: Command): void {
       }
       const strategy = options.balanced ? 'balanced' : explicitStrategy ?? configuredStrategy;
 
-      // Strategy only applies to bare agent invocations. Explicit @version,
-      // profiles, and fallback chains already define their execution target.
+      // Strategy only applies to bare agent invocations. Explicit @version and
+      // profiles already define their execution target. A --fallback chain does
+      // NOT pin the primary: it only names where to cascade on a rate limit, so
+      // the bare primary still resolves through the strategy — otherwise every
+      // `agents run claude --fallback codex` run lands on the pinned default
+      // account and account rotation silently stops (the gh-monitor heal bug).
       if (strategy !== 'pinned' || options.balanced || explicitStrategy) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: profile pins its own version/auth\n`));
-        } else if (options.fallback) {
-          process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: --fallback pins versions directly\n`));
         } else {
           try {
             const resolved = await resolveRunVersion(agent, strategy, cwd);
@@ -1570,6 +1572,10 @@ export function registerRunCommand(program: Command): void {
               caller: `agent ${agent}`,
               keys: secretsKeysSubset,
               allowExpired: options.allowExpired,
+              // A headless/background run (routine, teammate, detached) must not
+              // pop a Touch ID sheet nobody can answer — resolve broker-only and
+              // fail fast with an actionable error. Interactive runs still prompt.
+              agentOnly: isHeadlessSecretsContext(),
             });
             const entries = describeBundle(bundle);
             const counts: Record<string, number> = {};
@@ -1695,18 +1701,24 @@ export function registerRunCommand(program: Command): void {
       // path (continuing the session via /continue). Because this injects into
       // the same `fallback` array `--fallback` uses, it must only arm for run
       // shapes that accept a fallback chain — shouldArmRotationFailover excludes
-      // acp/loop/resume-checkpoint (which reject a non-empty fallback below),
-      // interactive/no-prompt runs, and runs that already have an explicit or
-      // profile fallback. Pinned/single-account runs stay unchanged because
-      // rotationResult is null or rotationFailoverChain returns []. version is
-      // set here because rotationResult is only populated when resolveRunVersion
-      // picked one.
+      // acp/loop/resume-checkpoint (which reject a non-empty fallback below)
+      // and interactive/no-prompt runs. Pinned/single-account runs stay
+      // unchanged because rotationResult is null or rotationFailoverChain
+      // returns []. version is set here because rotationResult is only
+      // populated when resolveRunVersion picked one.
+      //
+      // Composes with an explicit --fallback chain: the same-agent accounts are
+      // UNSHIFTED ahead of the user's cross-agent entries, so a rate limit
+      // first tries the other accounts of the same agent (cheapest recovery —
+      // same CLI, session continues) and only then cascades to codex/gemini/etc.
+      // Profiles never compose: strategy is skipped for them, rotationResult
+      // stays null. (fromProfile's model-swap unshift above is therefore never
+      // displaced by this one.)
       if (
         shouldArmRotationFailover({
           hasRotation: !!rotationResult,
           hasVersion: !!version,
           hasPrompt: prompt !== undefined,
-          explicitFallback: fallback.length > 0,
           interactive: !!options.interactive,
           acp: !!options.acp,
           loop: !!options.loop,
@@ -1715,7 +1727,7 @@ export function registerRunCommand(program: Command): void {
       ) {
         const failover = rotationFailoverChain(rotationResult!, version!);
         if (failover.length > 0) {
-          fallback.push(...failover);
+          fallback.unshift(...failover);
           if (!options.quiet) {
             const accounts = failover.map(f => `${f.agent}@${f.version}`).join(', ');
             process.stderr.write(chalk.gray(`[agents] rate-limit failover armed: ${accounts}\n`));

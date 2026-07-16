@@ -4,6 +4,34 @@
 
 ### Security
 
+- **The Windows `computer` daemon now requires authentication.** `computer-helper-win`
+  previously started with `authed = expectedToken == null` and the CLI never provisioned a
+  token, so it ran open on `127.0.0.1` — and loopback TCP on Windows is not user/session
+  scoped, letting **any** local process drive full screen capture, input injection, and
+  program launch. The daemon now **refuses to start without a `--token-file`**
+  (`native/computer-win/Program.cs`), and `agents computer setup --host` generates a
+  shared-secret token, writes it on the remote with an owner-only ACL, registers the task
+  with `--token-file`, and persists it locally so `start --host` authenticates
+  (`apps/cli/src/lib/ssh-tunnel.ts`). Existing token-less setups must re-run
+  `agents computer setup --host <device>` (the daemon will otherwise refuse to start).
+- **Plugin exec-surface detection now sees inline manifest `hooks`/`mcpServers`.**
+  `inspectPluginCapabilities` classified a plugin as having an execution surface only
+  from filesystem artifacts (a `hooks/` dir, a `.mcp.json` file), but the official plugin
+  format also allows `hooks`/`mcpServers` declared **inline** in `.claude-plugin/plugin.json`.
+  A cloned repo's project plugin declaring exec config inline was therefore not detected,
+  so `project-launch` auto-enabled it — clone-to-code-execution on the next agent launch
+  without `--allow-exec-surfaces`. Detection now also treats a non-empty inline
+  `hooks`/`mcpServers` (event map or path string) as an execution surface
+  (`apps/cli/src/lib/plugins.ts`). (`apps/cli/src/lib/types.ts` gains the manifest fields.)
+- **SSH option-injection containment for `browser` over `ssh://`.** The `user`/`host`
+  from an `ssh://` browser profile endpoint (git-tracked user config) are now validated
+  with `assertValidSshTarget` before every raw `ssh` spawn — the remote-launch
+  (`ensureRemoteBrowser`), remote-kill (`runSSHCommand`), and `-L` tunnel
+  (`startSSHTunnel`) sinks in `apps/cli/src/lib/browser/drivers/ssh.ts` and
+  `apps/cli/src/lib/ssh-tunnel.ts`. A crafted endpoint like `ssh://-Fattacker@victim`
+  can no longer place `-Fattacker` at the ssh target position (parsed as `-F <file>`),
+  which an attacker-supplied ssh config's `ProxyCommand` would have turned into local
+  code execution.
 - **Path-traversal containment for untrusted-input filesystem sinks.**
   - Routine job names (from routine YAML `name:` / file basename, which can arrive via a
     synced user/system config repo) are now contained to a single path segment beneath
@@ -55,6 +83,28 @@
   `apps/cli/src/lib/crabbox/lease.ts`, `apps/cli/src/lib/types.ts`.
 
 ### Fixed
+
+- **`agents run <agent> --fallback …` no longer disables account rotation.**
+  A `--fallback` chain skipped strategy resolution entirely ("strategy balanced
+  ignored: --fallback pins versions directly"), so the bare primary always ran on
+  the pinned default version — one fixed account, every run. On a multi-account
+  host this silently stopped rotation for exactly the runs that most need it
+  (unattended monitors dispatching with a cross-agent fallback chain). The
+  fallback chain only names where to cascade; it never pinned the primary, so
+  the strategy now resolves the primary's version/account as usual. The
+  same-agent rotation failover (#348) also now composes with an explicit chain:
+  the other healthy accounts are unshifted ahead of the cross-agent entries, so
+  a rate limit exhausts same-agent accounts before switching CLIs. Explicit
+  `@version` pins and profiles keep their pinning behavior.
+
+- **Fallback now cascades on Claude billing refusals ("monthly spend limit",
+  "out of usage credits").** Two gaps: the messages matched no
+  `RATE_LIMIT_PATTERNS` entry, and Claude prints them to **stdout** while the
+  cascade only scanned stderr — so a capped account failed the whole run
+  (exit 1) with codex/droid sitting unused in the chain. Added both patterns,
+  and `runWithFallback` now tees a bounded stdout tail per attempt
+  (`captureStdoutTail`) and scans it alongside stderr. Output remains mirrored
+  to the parent's stdout exactly as before.
 
 - **`agents run --resume <id>` now spawns from the session's origin directory.**
   Native resume (claude/codex) resolves the transcript relative to the working

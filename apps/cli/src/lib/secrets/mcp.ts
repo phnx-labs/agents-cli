@@ -28,6 +28,7 @@ import * as readline from 'readline';
 import {
   listBundles,
   readAndResolveBundleEnv,
+  isHeadlessSecretsContext,
   readBundle,
   validateBundleName,
 } from './bundles.js';
@@ -108,7 +109,9 @@ export function resolveSecret(bundle: string, key: string): string {
         (available.length ? ` Available keys: ${available.join(', ')}.` : ' Bundle has no keys.'),
     );
   }
-  const { env } = readAndResolveBundleEnv(bundle, { caller: 'secrets-mcp' });
+  // The MCP get_secret tool is typically served by a background/headless agent
+  // process; resolve broker-only there so it never raises an unwatched prompt.
+  const { env } = readAndResolveBundleEnv(bundle, { caller: 'secrets-mcp', agentOnly: isHeadlessSecretsContext() });
   const value = env[key];
   if (value === undefined) {
     throw new Error(`Key '${key}' in bundle '${bundle}' could not be resolved.`);

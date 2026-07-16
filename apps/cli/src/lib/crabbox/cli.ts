@@ -13,7 +13,7 @@
  */
 
 import { spawn, spawnSync } from 'child_process';
-import { readAndResolveBundleEnv, listBundles, bundleExists, type SecretsBundle } from '../secrets/bundles.js';
+import { readAndResolveBundleEnv, isHeadlessSecretsContext, listBundles, bundleExists, type SecretsBundle } from '../secrets/bundles.js';
 import { readMeta, writeMeta } from '../state.js';
 
 /** A crabbox machine as reported by `crabbox list --json`. */
@@ -155,6 +155,10 @@ export function crabboxEnv(opts: CrabboxOptions): NodeJS.ProcessEnv {
     const { env } = readAndResolveBundleEnv(resolved.name, {
       caller: 'agents run --lease (crabbox)',
       keys: resolved.keys,
+      // --lease is headless by contract and crabboxEnv is called several times
+      // per run (list/wait/spawn/stop) — resolve broker-only so a keychain bundle
+      // can't pop repeated unwatched Touch ID sheets mid-lease.
+      agentOnly: isHeadlessSecretsContext(),
     });
     return { ...process.env, ...env };
   } catch (e) {

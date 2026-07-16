@@ -576,6 +576,20 @@ export interface PluginManifest {
   userConfig?: PluginUserConfigField[];
   /** Other plugin names this plugin depends on. Missing deps produce a warning. */
   dependencies?: string[];
+  /**
+   * Inline hook configuration (or a path to a hooks JSON file) declared directly
+   * in the manifest, per the official plugin format — an execution surface even
+   * when the plugin ships no `hooks/` directory. Untyped because the shape is a
+   * path string or an inline event map; capability detection only needs to know
+   * whether it is present and non-empty.
+   */
+  hooks?: unknown;
+  /**
+   * Inline MCP-server configuration (or a path to an MCP JSON file) declared
+   * directly in the manifest — an execution surface even when the plugin ships
+   * no `.mcp.json`. Untyped for the same reason as `hooks`.
+   */
+  mcpServers?: unknown;
 }
 
 /** A plugin found on disk with its parsed manifest and resource inventory. */
@@ -761,6 +775,13 @@ export interface Meta {
    * are never copied. `inline` hosts carry their own address/user.
    */
   hosts?: Record<string, HostEntry>;
+  /**
+   * Declarative fleet profile (`agents apply` / `ag apply`). Additive to the
+   * schema — project `agents:` version-pins are untouched. Declares which agents
+   * every device should have, which config to sync, and how login propagates.
+   * Full shape in `lib/fleet/types.ts` (FleetManifest).
+   */
+  fleet?: import('./fleet/types.js').FleetManifest;
 }
 
 /** Persisted agent-host entry in agents.yaml (overlay or inline). */

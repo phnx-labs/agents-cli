@@ -17,7 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
+import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
 import {
   addIgnored,
@@ -610,7 +610,7 @@ async function runAskpass(): Promise<void> {
     process.exit(1);
   }
   try {
-    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh' });
+    const { env } = readAndResolveBundleEnv(bundle, { caller: 'agents ssh', agentOnly: isHeadlessSecretsContext() });
     const value = env[key];
     if (value === undefined) {
       console.error(`askpass: key '${key}' not found in bundle '${bundle}'`);

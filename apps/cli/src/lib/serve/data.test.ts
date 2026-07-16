@@ -36,7 +36,7 @@ describe('gitDiff', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(repo, { recursive: true, force: true });
+    await fs.rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('returns the uncommitted diff for a modified tracked file', async () => {
@@ -57,7 +57,7 @@ describe('gitDiff', () => {
     try {
       expect(await gitDiff(notGit)).toBe('');
     } finally {
-      await fs.rm(notGit, { recursive: true, force: true });
+      await fs.rm(notGit, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
@@ -84,7 +84,7 @@ describe('buildWorktreeDiffs', () => {
   });
 
   afterEach(async () => {
-    await fs.rm(repo, { recursive: true, force: true });
+    await fs.rm(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
   it('attaches a real diff to a teammate that has a worktree with changes', async () => {

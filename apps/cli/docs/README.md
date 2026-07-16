@@ -34,6 +34,7 @@ How agents-cli is laid out on disk and how it decides what to load.
 
 | Doc | What it covers |
 |---|---|
+| [Fleet profile sync](fleet.md) | `agents apply` — reconcile every device to a declared `fleet:` profile: install agents, sync config, propagate logins so one signed-in host seeds the fleet. |
 | [Teams](teams.md) | Multi-agent DAG teams, boundary contracts, `--watch` supervisor, `--worktree` isolation, `--cloud` dispatch. |
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
 | [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--host`); track with `agents hosts ps` and view/follow with `agents logs`. |
