@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ComputerHelperWin;
@@ -107,7 +108,8 @@ byte[]? HandleLine(byte[] lineBytes, ref bool authed)
         if (method != "auth")
             return null; // silently drop unauthenticated callers
         string? tok = @params.ValueKind == JsonValueKind.Object ? P.StringOpt(@params, "token") : null;
-        if (tok != null && tok == expectedToken)
+        if (tok != null && CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(tok), Encoding.UTF8.GetBytes(expectedToken)))
         {
             authed = true;
             return Encode(idEl, new Dictionary<string, object?> { ["ok"] = true });
