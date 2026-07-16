@@ -754,6 +754,9 @@ async function executeJobOnHost(config: JobConfig, opts: { detached: boolean }):
   if (config.loop) {
     throw new Error(`Routine '${config.name}' uses 'loop:', which can't execute on a host yet — remove 'host:' or 'loop:'.`);
   }
+  if (config.command) {
+    throw new Error(`Routine '${config.name}' uses 'command:', which can't execute on a host yet — remove 'host:' or 'command:'.`);
+  }
   const { resolveHostRunTarget, dispatchPromptToHost } = await import('./hosts/run-target.js');
   const host = await resolveHostRunTarget(config.host!);
 

@@ -530,6 +530,9 @@ export function validateJob(config: Partial<JobConfig>): string[] {
     if (config.loop) {
       errors.push("host: can't be combined with loop: yet (the loop driver and its signal files live on the firing machine)");
     }
+    if (config.command) {
+      errors.push("host: can't be combined with command: yet (a plain shell command has no agent to place remotely) — run it locally, or convert it to a prompt");
+    }
   }
   if (config.remoteCwd !== undefined && config.host === undefined) {
     errors.push('remoteCwd only applies to host:-placed routines — set host: too, or drop it');

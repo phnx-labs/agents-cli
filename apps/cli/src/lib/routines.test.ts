@@ -464,6 +464,11 @@ describe('validateJob — host placement', () => {
     expect(errors).toContainEqual(expect.stringContaining("host: can't be combined with loop:"));
   });
 
+  it('rejects host + command (shell command has no agent to place remotely)', () => {
+    const errors = validateJob({ name: 'cmd-on-host', schedule: '0 3 * * *', command: 'echo hi', host: 'gpu-box', mode: 'auto', effort: 'auto', timeout: '10m', enabled: true, prompt: '' } as JobConfig);
+    expect(errors).toContainEqual(expect.stringContaining("host: can't be combined with command:"));
+  });
+
   it('rejects remoteCwd without host', () => {
     expect(validateJob(baseJob({ remoteCwd: '~/proj' }))).toContainEqual(expect.stringContaining('remoteCwd only applies'));
   });
