@@ -158,9 +158,10 @@ describe('helper token persistence (C2)', () => {
     expect(readHelperToken(DEV)).toBeNull();
     writeHelperToken(DEV, 'sekret-token');
     expect(readHelperToken(DEV)).toBe('sekret-token');
-    // written owner-only
-    const mode = fs.statSync(helperTokenPath(DEV)).mode & 0o777;
-    expect(mode).toBe(0o600);
+    // written owner-only (POSIX only — Windows has no 0600 bit; statSync reports 0666)
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(helperTokenPath(DEV)).mode & 0o777).toBe(0o600);
+    }
     clearHelperToken(DEV);
     expect(readHelperToken(DEV)).toBeNull();
   });

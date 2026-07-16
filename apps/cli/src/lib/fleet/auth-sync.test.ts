@@ -39,8 +39,10 @@ describe('snapshotAuth + materializeAuth round-trip', () => {
 
     expect(fs.readFileSync(path.join(dst, '.codex/auth.json'), 'utf-8')).toBe('{"tokens":"codex-abc"}');
     expect(fs.readFileSync(path.join(dst, '.factory/auth.v2.key'), 'utf-8')).toBe('droid-key');
-    // credential mode preserved at 0600
-    expect(fs.statSync(path.join(dst, '.codex/auth.json')).mode & 0o777).toBe(0o600);
+    // credential mode preserved at 0600 (POSIX only — Windows has no 0600 bit)
+    if (process.platform !== 'win32') {
+      expect(fs.statSync(path.join(dst, '.codex/auth.json')).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('silently skips agents that are not signed in (no file on disk)', () => {
