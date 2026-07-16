@@ -243,6 +243,23 @@ describe('control server — GET /api/session/:id/stream (SSE event bridge)', ()
     await res.body?.cancel();
   });
 
+  it('closes (does not hang) when reconnecting at the end-of-file terminal offset', async () => {
+    // Regression for the prix-cloud re-review: a client that drops right as the
+    // terminal frame arrives reconnects with Last-Event-ID = end-of-file; the
+    // stream must send `event: end` and close, not spin forever.
+    tmpStreamDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ctl-stream-'));
+    const file = path.join(tmpStreamDir, 'run.ndjson');
+    const content = '{"type":"assistant","t":"x"}\n{"type":"result"}\n';
+    fs.writeFileSync(file, content);
+    const base = await bootStream(file);
+    const res = await fetch(base + `/api/session/sid-x/stream?offset=${Buffer.byteLength(content)}`, {
+      headers: auth,
+    });
+    const buf = await readFrames(res, (b) => b.includes('event: end'));
+    expect(buf).toContain('event: end'); // reaching here at all proves no hang
+    expect(buf).not.toContain('event: assistant'); // nothing replayed
+  });
+
   it('does not hang on a negative/garbage offset — clamps to 0 and replays', async () => {
     // Regression for the prix-cloud finding: Buffer.subarray(negative) indexes
     // from the end, so an unclamped negative offset read nothing forever. The

@@ -85,6 +85,25 @@ describe('readNewEvents', () => {
     expect(r.done).toBe(true);
   });
 
+  it('reports done even when resuming AT/PAST the terminal offset (no hang)', () => {
+    // Regression: a client that reconnects at the end-of-file offset (the exact
+    // resume case) must still learn the run ended, or the SSE never closes.
+    const content = '{"type":"assistant"}\n{"type":"result"}\n';
+    const f = tmpFile(content);
+    const endOffset = Buffer.byteLength(content);
+    const r = readNewEvents(f, endOffset);
+    expect(r.events).toEqual([]); // nothing new to replay
+    expect(r.done).toBe(true); // but the stream must close
+  });
+
+  it('is not done while the run is ongoing (last complete line non-terminal)', () => {
+    const f = tmpFile('{"type":"assistant"}\n{"type":"tool_use"}\n');
+    expect(readNewEvents(f, 0).done).toBe(false);
+    // A trailing partial terminal line does not count until its newline lands.
+    const f2 = tmpFile('{"type":"assistant"}\n{"type":"resu');
+    expect(readNewEvents(f2, 0).done).toBe(false);
+  });
+
   it('computes byte offsets correctly across multi-byte UTF-8', () => {
     const l1 = '{"type":"assistant","t":"café ☕"}\n'; // multi-byte chars
     const l2 = '{"type":"result"}\n';

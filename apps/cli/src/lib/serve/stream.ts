@@ -39,6 +39,29 @@ export interface StreamEvent {
 const TERMINAL = new Set(['result', 'error']);
 
 /**
+ * Whether the run has ended — i.e. the file's LAST complete (newline-terminated)
+ * line is a terminal event. This is independent of any read offset, so a client
+ * that resumes from an offset already at/past the terminal event still learns
+ * the run is done and the SSE closes (instead of hanging on a `done:false` read
+ * that finds no new lines). Cheap: `readNewEvents` already has the full buffer.
+ */
+function fileIsDone(buf: Buffer): boolean {
+  const lastNl = buf.lastIndexOf(0x0a);
+  if (lastNl < 0) return false;
+  const lines = buf.subarray(0, lastNl + 1).toString('utf-8').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const s = lines[i].trim();
+    if (!s) continue; // skip trailing blank lines
+    try {
+      return TERMINAL.has(normalizeEvent(JSON.parse(s)).type);
+    } catch {
+      return false; // last complete line is a partial/non-JSON write — not done
+    }
+  }
+  return false;
+}
+
+/**
  * Normalize one harness JSON line to a {@link StreamEvent}. Schemas differ per
  * agent (there is no unified enum in the CLI), so we key off the common `type`
  * field (Claude stream-json: `assistant` | `user` | `result` | `system`; a
@@ -85,14 +108,16 @@ export function readNewEvents(file: string, fromOffset: number): ReadResult {
     // File not created yet (run still starting) — nothing to read, hold offset.
     return { events: [], newOffset: fromOffset, done: false };
   }
-  if (fromOffset >= buf.length) return { events: [], newOffset: fromOffset, done: false };
+  // `done` reflects the whole file's terminal state, so a resume at/past the
+  // terminal event still closes the stream rather than hanging forever.
+  const done = fileIsDone(buf);
+  if (fromOffset >= buf.length) return { events: [], newOffset: fromOffset, done };
 
   const slice = buf.subarray(fromOffset);
   const lastNl = slice.lastIndexOf(0x0a);
-  if (lastNl < 0) return { events: [], newOffset: fromOffset, done: false }; // no complete line yet
+  if (lastNl < 0) return { events: [], newOffset: fromOffset, done }; // no complete line yet
 
   const events: OffsetEvent[] = [];
-  let done = false;
   let lineStart = 0; // byte index within slice
   for (let i = 0; i <= lastNl; i++) {
     if (slice[i] !== 0x0a) continue;
@@ -107,9 +132,7 @@ export function readNewEvents(file: string, fromOffset: number): ReadResult {
     } catch {
       continue; // skip non-JSON (banner/preamble) lines
     }
-    const ev = normalizeEvent(obj);
-    events.push({ event: ev, offset: endOffset });
-    if (TERMINAL.has(ev.type)) done = true;
+    events.push({ event: normalizeEvent(obj), offset: endOffset });
   }
   return { events, newOffset: fromOffset + lastNl + 1, done };
 }
