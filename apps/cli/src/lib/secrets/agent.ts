@@ -729,6 +729,46 @@ export function agentGetSync(name: string): { bundle: SecretsBundle; env: Record
   }
 }
 
+/** Inline node program for a synchronous liveness ping. Connects, sends one
+ * `{cmd:'ping'}`, exits 0 iff a valid ping response comes back, else 3. A stale
+ * socket file with no listener refuses the connection immediately, so this
+ * fast-fails without riding any cold-start logic. argv after -e: [execPath, <socket>]. */
+const SYNC_PING_PROGRAM = `
+const net = require('net');
+const sock = process.argv[1];
+const c = net.createConnection(sock);
+let buf = '';
+const dead = () => { try { c.destroy(); } catch (e) {} process.exit(3); };
+const timer = setTimeout(dead, 700);
+c.on('error', dead);
+c.on('connect', () => c.write(JSON.stringify({ cmd: 'ping' }) + '\\n'));
+c.setEncoding('utf-8');
+c.on('data', (d) => {
+  buf += d;
+  const nl = buf.indexOf('\\n');
+  if (nl < 0) return;
+  clearTimeout(timer);
+  let r; try { r = JSON.parse(buf.slice(0, nl)); } catch (e) { return dead(); }
+  try { c.destroy(); } catch (e) {}
+  process.exit(r && r.ok && r.cmd === 'ping' ? 0 : 3);
+});
+`;
+
+/**
+ * Synchronous liveness check: is a broker actually LISTENING and answering (not
+ * just a lingering socket file)? Used to decide whether the auto-cache may take
+ * the synchronous warm path — a dead broker whose socket outlived it (crash,
+ * OOM, version-skew teardown) must NOT drag a foreground read through the
+ * worker's 20s cold-start budget. A stale socket refuses instantly, so this is
+ * fast in both the alive and dead cases. macOS only.
+ */
+export function agentReachableSync(): boolean {
+  if (!onDarwin()) return false;
+  if (!agentSocketExists()) return false;
+  const r = spawnSync(process.execPath, ['-e', SYNC_PING_PROGRAM, socketPath()], { timeout: 1500 });
+  return r.status === 0 && !r.error;
+}
+
 /**
  * Inline node program for the synchronous evict path. Mirrors SYNC_GET_PROGRAM:
  * writeBundle is synchronous and called synchronously everywhere, so a stale
@@ -879,11 +919,15 @@ export function agentAutoLoadSync(
 ): void {
   if (!onDarwin()) return;
   const payload = JSON.stringify({ name, bundle, env, ttlMs });
-  // Broker already up → deterministic synchronous warm (bounded so a slow/stale
-  // broker can't hang the read; the read already paid a Touch ID, so <1s here is
-  // invisible). A clean exit means the worker connected and attempted the load
-  // before we returned.
-  if (agentSocketExists()) {
+  // Broker actually LISTENING → deterministic synchronous warm (bounded; the read
+  // already paid a Touch ID, so <1s here is invisible). We gate on a real liveness
+  // ping, NOT mere socket-file existence: a broker that died leaving its socket
+  // behind (crash, OOM, or the version-skew teardown in this file) would otherwise
+  // drag this FOREGROUND read through the worker's 20s cold-start budget on every
+  // read. A dead/stale socket fails the ping fast, so we drop straight to the
+  // detached path (which does the cold-start + stale-socket cleanup off the hot
+  // path) — restoring "a dead broker costs the foreground read nothing".
+  if (agentReachableSync()) {
     try {
       const { cmd, args } = cliSpawn(['secrets', '_agent-load']);
       const r = spawnSync(cmd, args, { input: payload, timeout: 3000, stdio: ['pipe', 'ignore', 'ignore'] });
