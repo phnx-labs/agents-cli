@@ -437,6 +437,19 @@ SHIM_SRC="$ROOT/scripts/companion-shim"
 SHIM_TMP="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-shim.XXXXXX")"
 # Cleanup of SHIM_TMP layered onto the existing EXIT trap (which restores
 # package.json on abort). bash only keeps the most recent EXIT trap, so we
+# Reset the changelog working-tree edits (bump + folded queue + regenerated
+# aggregate) back to HEAD so an abort or dry-run always leaves a clean,
+# re-runnable checkout. release-changelog.ts creates .changelog/$TARGET.md (new),
+# drains .changelog/next/* (deletes), and rewrites CHANGELOG.md — `git checkout`
+# alone won't drop the newly-added version file, so remove it explicitly first.
+restore_release_tree() {
+  if [[ -n "${TARGET:-}" ]]; then
+    rm -f ".changelog/$TARGET.md"
+    git reset -q -- ".changelog/$TARGET.md" >/dev/null 2>&1 || true
+  fi
+  git checkout -q HEAD -- package.json CHANGELOG.md .changelog 2>/dev/null || restore_package_json
+}
+
 # define a combined cleanup function.
 cleanup_all() {
   # Revert any working-tree edits to package.json / CHANGELOG.md back to HEAD so
@@ -445,7 +458,7 @@ cleanup_all() {
   # commit-tree, and the merge lands on origin only), so HEAD is the pre-release
   # state. The success path already restores these before exiting, making this a
   # no-op there. Falls back to the jq revert if git checkout is unavailable.
-  git checkout -q HEAD -- package.json CHANGELOG.md 2>/dev/null || restore_package_json
+  restore_release_tree
   rm -rf "${SHIM_TMP:-}"
   rm -f "${NPMRC_TMP:-}"
   remove_historical_worktree
@@ -499,7 +512,7 @@ if ! $APPLY; then
   gray "  merged release PR         ${MERGED_RELEASE_PR:-none} ($RELEASE_BRANCH)"
   echo
   yellow "Will run on --apply (NPM_TOKEN from npmjs.com bundle, no 2FA prompts):"
-  yellow "  1. roll CHANGELOG '## Unreleased' -> '## $TARGET'"
+  yellow "  1. fold .changelog/next/* -> .changelog/$TARGET.md + regenerate CHANGELOG.md"
   yellow "  2. push branch $RELEASE_BRANCH (chore(release): $TARGET) -> fires the full CI matrix"
   yellow "  3. open a PR into $DEFAULT_BRANCH"
   yellow "  4. wait for CI green (matrix + test + gitleaks), fail-closed"
@@ -603,41 +616,26 @@ fi
 
 # ----- Open (or reuse) the release PR + merge, unless already merged -----
 if ! $MAIN_AT_TARGET; then
-  # Roll the changelog: promote "## Unreleased" -> "## $TARGET". Only fires when
-  # the Unreleased section has content, so a notes-less release can't create an
-  # empty version header. The rolled notes become the PR body.
+  # Collapse the release queue: fold every .changelog/next/<slug>.md fragment into
+  # .changelog/$TARGET.md, then regenerate the released-only aggregate CHANGELOG.md.
+  # Fails closed if the queue is empty (a release must document itself). The folded
+  # notes become the PR body. Uses `if ! NOTES=$(...)` — not a bare `NOTES=$(...)`
+  # assignment, which would swallow a non-zero exit under `set -e`.
   PR_BODY="Release $TARGET."
-  if [[ -f CHANGELOG.md ]]; then
-    unrel_content="$(awk '/^## Unreleased[[:space:]]*$/{f=1;next} f&&/^## /{exit} f&&/[^[:space:]]/{print}' CHANGELOG.md)"
-    if [[ -n "$unrel_content" ]]; then
-      tmp_cl="$(mktemp)"
-      awk -v ver="$TARGET" '
-        ins { print; next }
-        seen && /^## / { print; ins=1; seen=0; next }
-        seen && /[^[:space:]]/ { print "## " ver; print ""; print; ins=1; seen=0; next }
-        seen { print; next }
-        /^## Unreleased[[:space:]]*$/ { print; seen=1; next }
-        { print }
-      ' CHANGELOG.md > "$tmp_cl"
-      mv "$tmp_cl" CHANGELOG.md
-      green "Rolled CHANGELOG: ## Unreleased -> ## $TARGET"
-      PR_BODY="$(printf '## %s\n\n%s' "$TARGET" "$unrel_content")"
-    else
-      red "CHANGELOG: '## Unreleased' is empty — a release must document itself." >&2
-      red "  Add release notes under '## Unreleased' in CHANGELOG.md before releasing $TARGET." >&2
-      exit 1
-    fi
-  else
-    red "CHANGELOG.md not found — a release must document itself." >&2
+  if ! NOTES="$(bun scripts/release-changelog.ts "$TARGET")"; then
+    red "CHANGELOG queue empty (or fold failed) — a release must document itself." >&2
+    red "  Add a note at .changelog/next/<ticket>.md before releasing $TARGET." >&2
     exit 1
   fi
+  PR_BODY="$(printf '## %s\n\n%s' "$TARGET" "$NOTES")"
+  green "Folded .changelog/next/* -> .changelog/$TARGET.md; regenerated CHANGELOG.md"
 
   # Build the release commit from the index WITHOUT moving HEAD. The signed +
   # notarized macOS apps under bin/ are untracked, so we must build + publish
   # from THIS checkout; a worktree off origin/main would fail prepack. write-tree
   # is safe because the working tree is clean apart from our package.json +
   # CHANGELOG edits (enforced by the clean-tree preflight).
-  git add package.json CHANGELOG.md
+  git add -A package.json CHANGELOG.md .changelog
   BRANCH_TREE="$(git write-tree)"
   RELEASE_COMMIT="$(git commit-tree "$BRANCH_TREE" -p "$BASE_SHA" -m "chore(release): $TARGET")"
 
@@ -663,7 +661,7 @@ if ! $MAIN_AT_TARGET; then
 
   # The branch commit now durably holds the bump + changelog; restore the working
   # tree to clean so a CI-red abort leaves a re-runnable checkout.
-  git checkout -q HEAD -- package.json CHANGELOG.md
+  restore_release_tree
 
   if [[ -z "$PR_NUMBER" ]]; then
     gh pr create --base "$DEFAULT_BRANCH" --head "$RELEASE_BRANCH" \
@@ -737,7 +735,7 @@ echo
 
 # ----- Push the tag; restore the working tree to a clean state -----
 git push origin "v$TARGET"
-git checkout -q HEAD -- package.json CHANGELOG.md 2>/dev/null || true
+restore_release_tree
 
 green "Released $TARGET"
 gray "Local $DEFAULT_BRANCH is behind origin by the release commit -- run: git pull --ff-only"
