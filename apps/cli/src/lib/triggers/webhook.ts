@@ -13,7 +13,9 @@
  */
 
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as http from 'http';
+import * as path from 'path';
 import type { IncomingHttpHeaders } from 'http';
 import type {
   GithubJobTrigger,
@@ -305,6 +307,98 @@ export function createMemoryDeliveryStore(maxEntries = 1000): DeliveryStore {
   };
 }
 
+/** Serialized shape of one durable delivery record on disk. */
+interface PersistedDelivery {
+  complete: boolean;
+  jobs: string[];
+  updatedAt: number;
+}
+
+/**
+ * A durable, disk-backed delivery store. Unlike `createMemoryDeliveryStore`,
+ * seen delivery ids survive a process restart and are bounded by AGE, not by a
+ * fixed entry count — so a captured valid delivery cannot re-fire after a
+ * restart or after count-based LRU eviction would have dropped it.
+ *
+ * `retentionMs` doubles as the replay-acceptance window: a delivery whose id is
+ * still on record (younger than the window) is rejected as a duplicate; entries
+ * older than the window are pruned (keeping the file bounded) since a webhook
+ * source will not legitimately retry a delivery that old.
+ */
+export function createFileDeliveryStore(
+  filePath: string,
+  retentionMs = 14 * 24 * 60 * 60 * 1000,
+): DeliveryStore {
+  const seen = new Map<string, { complete: boolean; jobs: Set<string>; updatedAt: number }>();
+
+  // Load persisted state (best-effort: a corrupt/missing file starts empty).
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, PersistedDelivery>;
+    const loadedAt = Date.now();
+    for (const [id, entry] of Object.entries(raw)) {
+      if (typeof entry?.updatedAt !== 'number' || loadedAt - entry.updatedAt > retentionMs) continue;
+      seen.set(id, {
+        complete: entry.complete === true,
+        jobs: new Set(Array.isArray(entry.jobs) ? entry.jobs : []),
+        updatedAt: entry.updatedAt,
+      });
+    }
+  } catch {
+    // no prior file / unreadable — start empty
+  }
+
+  const persist = () => {
+    const snapshot: Record<string, PersistedDelivery> = {};
+    for (const [id, entry] of seen) {
+      snapshot[id] = { complete: entry.complete, jobs: [...entry.jobs], updatedAt: entry.updatedAt };
+    }
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      const tmp = `${filePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(snapshot), 'utf-8');
+      fs.renameSync(tmp, filePath);
+    } catch {
+      // best-effort durability; an unwritable dir must not crash ingress
+    }
+  };
+
+  const prune = (now: number) => {
+    for (const [id, entry] of seen) {
+      if (now - entry.updatedAt > retentionMs) seen.delete(id);
+    }
+  };
+
+  const touch = (id: string) => {
+    const now = Date.now();
+    prune(now);
+    let current = seen.get(id);
+    if (!current) {
+      current = { complete: false, jobs: new Set<string>(), updatedAt: now };
+      seen.set(id, current);
+    }
+    current.updatedAt = now;
+    return current;
+  };
+
+  return {
+    seen: (id) => {
+      const entry = seen.get(id);
+      if (!entry) return false;
+      if (Date.now() - entry.updatedAt > retentionMs) return false;
+      return entry.complete === true;
+    },
+    mark: (id) => {
+      touch(id).complete = true;
+      persist();
+    },
+    completedJobs: (id) => new Set(seen.get(id)?.jobs ?? []),
+    markJob: (id, jobName) => {
+      touch(id).jobs.add(jobName);
+      persist();
+    },
+  };
+}
+
 export interface RateLimiter {
   take(key: string): boolean;
 }
@@ -364,6 +458,12 @@ export interface WebhookServerOptions {
   rateLimiter?: RateLimiter;
   rateLimitPerMinute?: number;
   maxBodyBytes?: number;
+  /** Per-IP ingress throttle applied BEFORE the body read (bad-sig flood guard). */
+  ipRateLimiter?: RateLimiter;
+  /** Per-source-IP requests/minute allowed through to the body read. Default 120. */
+  ipRateLimitPerMinute?: number;
+  /** Max concurrent TCP connections the receiver accepts. Default 256. */
+  maxConnections?: number;
 }
 
 /**
@@ -376,6 +476,7 @@ export interface WebhookServerOptions {
 export function startWebhookServer(options: WebhookServerOptions): http.Server {
   const deliveryStore = options.deliveryStore ?? createMemoryDeliveryStore();
   const rateLimiter = options.rateLimiter ?? createMemoryRateLimiter(options.rateLimitPerMinute ?? 60, 60_000);
+  const ipRateLimiter = options.ipRateLimiter ?? createMemoryRateLimiter(options.ipRateLimitPerMinute ?? 120, 60_000);
   const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
 
   const server = http.createServer((req, res) => {
@@ -397,6 +498,24 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
       if (!secret) {
         res.writeHead(503, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: `missing ${source} webhook secret` }));
+        return;
+      }
+
+      // Per-IP throttle + declared-size cap BEFORE the (expensive) body read +
+      // HMAC. A bad-signature flood of 1 MiB POSTs must be rejected without
+      // forcing a full body read and an HMAC per request — the signed-delivery
+      // rate limit further down runs only after a signature passes, so it can't
+      // shed this load on its own.
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      if (!ipRateLimiter.take(ip)) {
+        res.writeHead(429, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'rate limit exceeded' }));
+        return;
+      }
+      const declaredLength = Number.parseInt(header(req.headers, 'content-length') ?? '', 10);
+      if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
+        res.writeHead(413, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: `payload exceeds ${maxBodyBytes} bytes` }));
         return;
       }
 
@@ -455,6 +574,10 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
       }
     })();
   });
+
+  // Connection cap: bound how many concurrent TCP connections the receiver
+  // will hold open, so a flood cannot exhaust file descriptors / memory.
+  server.maxConnections = options.maxConnections ?? 256;
 
   server.listen(options.port ?? 0, options.host ?? '127.0.0.1');
   return server;

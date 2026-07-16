@@ -7,9 +7,11 @@
  */
 import type { Command } from 'commander';
 import type { Server } from 'http';
+import * as path from 'path';
 import chalk from 'chalk';
 import { readAndResolveBundleEnv, isHeadlessSecretsContext } from '../lib/secrets/bundles.js';
-import { startWebhookServer, type WebhookSecrets } from '../lib/triggers/webhook.js';
+import { createFileDeliveryStore, startWebhookServer, type WebhookSecrets } from '../lib/triggers/webhook.js';
+import { getRuntimeStateDir } from '../lib/state.js';
 
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 8787;
@@ -87,6 +89,11 @@ export function registerWebhookCommand(program: Command): void {
           port,
           secrets,
           rateLimitPerMinute: rateLimit,
+          // Durable delivery dedup: replays survive a receiver restart (an
+          // in-memory store would forget every seen delivery on restart).
+          deliveryStore: createFileDeliveryStore(
+            path.join(getRuntimeStateDir(), 'webhook', 'deliveries.json'),
+          ),
           onDelivery: (webhook, fired) => {
             console.log(
               `${new Date().toISOString()} ${webhook.source}:${webhook.event} ` +

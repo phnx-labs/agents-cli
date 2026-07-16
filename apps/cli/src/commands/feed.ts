@@ -32,6 +32,7 @@ import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { loadPolicy, applyPolicyToBlock, isPhoneUrgent } from '../lib/feed-policy.js';
 import { notifyUrgentBlock } from '../lib/notify.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
+import { isValidMailboxId } from '../lib/mailbox.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import { GLYPH, masthead } from '../lib/comms-render.js';
@@ -62,6 +63,10 @@ export function parseRemoteFeed(stdout: string, machine: string): OpenBlock[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const block = item as Partial<OpenBlock>;
     if (!block.blockId || !block.sessionId || !block.mailboxId || !block.questions?.length) continue;
+    // A crafted mailboxId (path separators, `.`/`..`) would throw inside
+    // mailboxDir() when policy runs against the block, aborting the whole
+    // dispatch loop — drop it here so a malicious peer can't smuggle one in.
+    if (!isValidMailboxId(block.mailboxId)) continue;
     blocks.push({ ...block, host: machine } as OpenBlock);
   }
   return blocks;
@@ -295,18 +300,25 @@ export function registerFeedCommand(program: Command): void {
         const policy = loadPolicy();
         const now = new Date();
         for (const b of blocks) {
-          const result = applyPolicyToBlock(b, policy, now);
-          if (result.action !== 'none') {
-            console.log(`${chalk.yellow('policy')} ${b.blockId}: ${result.action}`);
-          }
-          if (isPhoneUrgent(b, policy)) {
-            const notifyResult = await notifyUrgentBlock(b, { dryRun: opts.json });
-            if (notifyResult.ok && !notifyResult.skipped) {
-              recordNotified(b.blockId);
-              console.log(`${chalk.green('notified')} ${b.blockId}`);
-            } else if (notifyResult.error) {
-              console.error(chalk.yellow(`Notification failed for ${b.blockId}: ${notifyResult.error}`));
+          // Wrap per-block policy so one malformed block (e.g. a crafted
+          // mailboxId that throws in mailboxDir) can't abort the whole loop and
+          // strand every remaining block's dispatch.
+          try {
+            const result = applyPolicyToBlock(b, policy, now);
+            if (result.action !== 'none') {
+              console.log(`${chalk.yellow('policy')} ${b.blockId}: ${result.action}`);
             }
+            if (isPhoneUrgent(b, policy)) {
+              const notifyResult = await notifyUrgentBlock(b, { dryRun: opts.json });
+              if (notifyResult.ok && !notifyResult.skipped) {
+                recordNotified(b.blockId);
+                console.log(`${chalk.green('notified')} ${b.blockId}`);
+              } else if (notifyResult.error) {
+                console.error(chalk.yellow(`Notification failed for ${b.blockId}: ${notifyResult.error}`));
+              }
+            }
+          } catch (err) {
+            console.error(chalk.yellow(`Skipped block ${b.blockId}: ${(err as Error).message}`));
           }
         }
       }

@@ -42,6 +42,14 @@ describe('parseRemoteFeed', () => {
     expect(parseRemoteFeed('login banner\n[]', 'mac-mini')).toEqual([]);
     expect(parseRemoteFeed('{}', 'mac-mini')).toEqual([]);
   });
+
+  it('drops blocks whose mailboxId is not a safe path segment', () => {
+    const valid = block('ok', 'peer', '2026-07-13T00:00:00Z');
+    const crafted = { ...block('evil', 'peer', '2026-07-13T00:00:00Z'), mailboxId: '../../etc/passwd' };
+    const dotdot = { ...block('dots', 'peer', '2026-07-13T00:00:00Z'), mailboxId: '..' };
+    const parsed = parseRemoteFeed(JSON.stringify([valid, crafted, dotdot]), 'mac-mini');
+    expect(parsed.map((b) => b.sessionId)).toEqual(['ok']);
+  });
 });
 
 describe('mergeFeedBlocks', () => {

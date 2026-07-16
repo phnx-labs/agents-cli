@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import * as http from 'http';
+import * as os from 'os';
+import * as path from 'path';
 import type { JobConfig, RunMeta } from '../routines.js';
 import {
   matchJobsToWebhook,
@@ -11,6 +14,7 @@ import {
   verifyGithubSignature,
   verifyLinearSignature,
   startWebhookServer,
+  createFileDeliveryStore,
   type IncomingWebhook,
 } from './webhook.js';
 
@@ -485,6 +489,105 @@ describe('startWebhookServer', () => {
       expect(dispatched).toEqual(['linear-agent', 'linear-followup', 'linear-followup']);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('throttles a per-IP flood before the body read, even with invalid signatures', async () => {
+    const server = startWebhookServer({
+      secrets: { linear: 'linear-secret' },
+      ipRateLimitPerMinute: 2,
+      fire: { jobs: [], dispatch: async (): Promise<RunMeta> => { throw new Error('should not dispatch'); } },
+    });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    try {
+      const payload = Buffer.from(JSON.stringify({ type: 'Issue' }));
+      const send = () => new Promise<number>((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1', port: address.port, path: '/hooks/linear', method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(payload.length),
+            'linear-signature': 'deadbeef',
+          },
+        }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); });
+        req.on('error', reject);
+        req.end(payload);
+      });
+      // Bad signatures: first two clear the per-IP gate then fail HMAC (401);
+      // the third is shed by the per-IP limiter BEFORE the body read (429).
+      expect(await send()).toBe(401);
+      expect(await send()).toBe(401);
+      expect(await send()).toBe(429);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('rejects an over-cap declared body before reading it', async () => {
+    const server = startWebhookServer({
+      secrets: { linear: 'linear-secret' },
+      maxBodyBytes: 64,
+      fire: { jobs: [], dispatch: async (): Promise<RunMeta> => { throw new Error('should not dispatch'); } },
+    });
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const address = server.address();
+    if (!address || typeof address !== 'object') throw new Error('server did not bind');
+    try {
+      const big = Buffer.alloc(1024, 0x61);
+      const status = await new Promise<number>((resolve, reject) => {
+        const req = http.request({
+          host: '127.0.0.1', port: address.port, path: '/hooks/linear', method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(big.length),
+            'linear-signature': 'deadbeef',
+          },
+        }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode ?? 0)); });
+        req.on('error', reject);
+        req.end(big);
+      });
+      expect(status).toBe(413);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('createFileDeliveryStore', () => {
+  it('remembers a completed delivery across a restart (new store, same file)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webhook-deliveries-'));
+    const file = path.join(dir, 'deliveries.json');
+    try {
+      const first = createFileDeliveryStore(file);
+      expect(first.seen('github:delivery-1')).toBe(false);
+      first.markJob('github:delivery-1', 'job-a');
+      first.mark('github:delivery-1');
+      expect(first.seen('github:delivery-1')).toBe(true);
+
+      // Simulate a receiver restart: a brand-new store loads the persisted file.
+      const restarted = createFileDeliveryStore(file);
+      expect(restarted.seen('github:delivery-1')).toBe(true);
+      expect([...restarted.completedJobs('github:delivery-1')]).toEqual(['job-a']);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not resurrect a delivery older than the retention window', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webhook-deliveries-'));
+    const file = path.join(dir, 'deliveries.json');
+    try {
+      // A persisted entry stamped well beyond the retention window is pruned on
+      // load — an ancient captured delivery cannot be replayed as a duplicate.
+      fs.writeFileSync(file, JSON.stringify({
+        'github:ancient': { complete: true, jobs: [], updatedAt: Date.now() - 10 * 60_000 },
+      }));
+      const store = createFileDeliveryStore(file, 60_000); // 1-minute retention
+      expect(store.seen('github:ancient')).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });
