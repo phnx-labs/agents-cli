@@ -52,6 +52,7 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [Run any agent](#run-any-agent)
 - [Sessions across agents](#sessions-across-agents)
 - [Control the fleet](#control-the-fleet)
+- [Sync the fleet](#sync-the-fleet)
 - [Run open models through Claude Code](#run-open-models-through-claude-code)
 - [Teams](#teams)
 - [Cloud](#cloud)
@@ -292,6 +293,34 @@ agents watchdog --watch    # daemon loop: a tick every --interval
 ```
 
 `agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. It's dry by default; `--nudge` acts on a single tick, and `agents watchdog enable` flips global auto-nudge on so `--watch` injects on its own. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
+
+---
+
+## Sync the fleet
+
+One machine is set up the way you like it. Make every other machine match -- same agents installed, same config, logins seeded -- in one command.
+
+```yaml
+# agents.yaml -- add a fleet: block
+fleet:
+  devices: all              # every online registered device (minus this one)
+  defaults:
+    agents: [claude@latest, codex@latest, gemini@latest]
+    sync: [user]            # config scopes to reconcile
+    login: sync             # propagate logins where the token is portable
+```
+
+```bash
+agents apply --plan                 # device x dimension matrix; changes nothing
+agents apply                        # reconcile the fleet (confirms first; -y to skip)
+agents apply --device yosemite-s0   # scope to one device
+agents apply --only agents,config   # limit dimensions (agents, config, login)
+agents apply --no-login             # skip login propagation
+```
+
+`agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agents-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, gemini, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
+
+See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcile semantics.
 
 ---
 
